@@ -3,7 +3,7 @@
 [![Build](https://github.com/jazzyalex/agent-sessions/actions/workflows/ci.yml/badge.svg)](https://github.com/jazzyalex/agent-sessions/actions/workflows/ci.yml)
 
 > Fast, native macOS viewer/indexer for **Codex CLI** session logs.  
-> Three-pane browser with full-text search, filters, and a clean SwiftUI UI.
+> Dual-pane browser with full-text search, filters, and a clean SwiftUI UI.
 
 <div align="center">
   <img src="docs/assets/app-icon-512.png" alt="App Icon" width="128" height="128"/>
