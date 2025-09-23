@@ -33,7 +33,13 @@ and builds a searchable timeline of your AI coding/chat sessions.
 1. Grab the latest build from [Releases](https://github.com/jazzyalex/agent-sessions/releases).  
 2. Drag **Agent Sessions.app** to your Applications folder.  
 
-### Option B — Build from source
+### Option B — Homebrew Tap
+```bash
+brew tap jazzyalex/agent-sessions
+brew install --cask agent-sessions
+```
+
+### Option C — Build from source
 ```bash
 git clone https://github.com/jazzyalex/agent-sessions.git
 cd agent-sessions
