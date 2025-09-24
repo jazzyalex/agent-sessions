@@ -51,6 +51,9 @@ private struct ContentView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @State private var selection: String?
     @State private var selectedEvent: String?
+    @State private var showingResumeSheet: Bool = false
+    @State private var resumeInitialSelection: String? = nil
+    @State private var resumeAlert: ResumeAlert?
     let layoutMode: LayoutMode
     let onToggleLayout: () -> Void
 
@@ -58,14 +61,18 @@ private struct ContentView: View {
         Group {
             if layoutMode == .vertical {
                 HSplitView {
-                    SessionsListView(selection: $selection)
+                    SessionsListView(selection: $selection,
+                                     onLaunchTerminal: handleQuickLaunch,
+                                     onOpenWorkingDirectory: handleOpenWorkingDirectory)
                         .frame(minWidth: 320, idealWidth: 600, maxWidth: 1200)
                     TranscriptPlainView(sessionID: selection)
                         .frame(minWidth: 450)
                 }
             } else {
                 VSplitView {
-                    SessionsListView(selection: $selection)
+                    SessionsListView(selection: $selection,
+                                     onLaunchTerminal: handleQuickLaunch,
+                                     onOpenWorkingDirectory: handleOpenWorkingDirectory)
                         .frame(minHeight: 180)
                     TranscriptPlainView(sessionID: selection)
                         .frame(minHeight: 240)
@@ -76,6 +83,41 @@ private struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 SearchFiltersView()
+            }
+            ToolbarItem(placement: .automatic) {
+                Button(action: {
+                    guard let session = selectedSession else {
+                        resumeAlert = ResumeAlert(title: "No Session Selected",
+                                                  message: "Select a session first to launch in Codex.",
+                                                  kind: .failure)
+                        return
+                    }
+                    handleQuickLaunch(session)
+                }) {
+                    Label("Launch in Terminal", systemImage: "terminal")
+                }
+                .help("Launch Codex in Terminal for the selected session")
+                .disabled(selectedSession == nil)
+            }
+            ToolbarItem(placement: .automatic) {
+                Button(action: {
+                    if let session = selectedSession {
+                        handleOpenWorkingDirectory(session)
+                    }
+                }) {
+                    Label("Open Working Directory", systemImage: "folder")
+                }
+                .help("Reveal the session's working directory in Finder")
+                .disabled(selectedSession == nil)
+            }
+            ToolbarItem(placement: .automatic) {
+                Button(action: {
+                    resumeInitialSelection = selection
+                    showingResumeSheet = true
+                }) {
+                    Label("Resume Options", systemImage: "list.bullet.rectangle")
+                }
+                .help("Open resume options and embedded console")
             }
             // Match Codex toggle temporarily removed while we align title logic
             ToolbarItem(placement: .automatic) {
@@ -118,10 +160,91 @@ private struct ContentView: View {
             // Reset per-session context when switching selections
             selectedEvent = nil
         }
+        .sheet(isPresented: $showingResumeSheet) {
+            CodexResumeSheet(initialSelection: resumeInitialSelection)
+                .environmentObject(indexer)
+        }
+        .alert(item: $resumeAlert) { alert in
+            switch alert.kind {
+            case .failure:
+                return Alert(title: Text(alert.title),
+                             message: Text(alert.message),
+                             dismissButton: .default(Text("OK")))
+            case let .needsConfiguration(sessionID):
+                return Alert(title: Text(alert.title),
+                             message: Text(alert.message),
+                             primaryButton: .default(Text("Open Resume Dialog")) {
+                                 resumeInitialSelection = sessionID
+                                 showingResumeSheet = true
+                             },
+                             secondaryButton: .cancel())
+            }
+        }
         // recomputeNow() is called inline in the toggle's setter
     }
 
     // Rely on system-provided sidebar toggle in the titlebar.
+    private func handleQuickLaunch(_ session: Session) {
+        Task { @MainActor in
+            let result = await CodexResumeCoordinator.shared.quickLaunchInTerminal(session: session)
+            switch result {
+            case .launched:
+                break
+            case .needsConfiguration(let message):
+                resumeAlert = ResumeAlert(title: "Resume Requires Configuration",
+                                          message: message,
+                                          kind: .needsConfiguration(sessionID: session.id))
+            case .failure(let message):
+                resumeAlert = ResumeAlert(title: "Unable to Launch Codex",
+                                          message: message,
+                                          kind: .failure)
+            }
+        }
+    }
+
+    private func handleOpenWorkingDirectory(_ session: Session) {
+        guard let path = codexWorkingDirectory(for: session) else {
+            resumeAlert = ResumeAlert(title: "Working Directory Unavailable",
+                                      message: "No working directory is associated with this session.",
+                                      kind: .failure)
+            return
+        }
+
+        let url = URL(fileURLWithPath: path)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
+            resumeAlert = ResumeAlert(title: "Directory Not Found",
+                                      message: "The working directory \(path) does not exist.",
+                                      kind: .failure)
+            return
+        }
+
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func codexWorkingDirectory(for session: Session) -> String? {
+        if let override = CodexResumeSettings.shared.workingDirectory(for: session.id), !override.isEmpty {
+            return override
+        }
+        if let sessionCwd = session.cwd, !sessionCwd.isEmpty {
+            return sessionCwd
+        }
+        let defaultDir = CodexResumeSettings.shared.defaultWorkingDirectory
+        return defaultDir.isEmpty ? nil : defaultDir
+    }
+
+    private var selectedSession: Session? {
+        guard let selection else { return nil }
+        return indexer.sessions.first(where: { $0.id == selection }) ?? indexer.allSessions.first(where: { $0.id == selection })
+    }
+
+    private struct ResumeAlert: Identifiable {
+        enum Kind { case failure, needsConfiguration(sessionID: String) }
+        let id = UUID()
+        let title: String
+        let message: String
+        let kind: Kind
+    }
 }
 
 private struct FirstRunPrompt: View {

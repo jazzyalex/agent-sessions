@@ -6,6 +6,7 @@ private let labelColumnWidth: CGFloat = 170
 struct PreferencesView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @State private var selectedTab: PreferencesTab? = .general
+    @ObservedObject private var resumeSettings = CodexResumeSettings.shared
 
     // General tab state
     @State private var appearance: AppAppearance = .system
@@ -14,6 +15,11 @@ struct PreferencesView: View {
     // Codex CLI tab state
     @State private var codexPath: String = ""
     @State private var codexPathValid: Bool = true
+    @State private var codexBinaryOverride: String = ""
+    @State private var codexBinaryValid: Bool = true
+    @State private var defaultResumeDirectory: String = ""
+    @State private var defaultResumeDirectoryValid: Bool = true
+    @State private var preferredLaunchMode: CodexLaunchMode = .terminal
 
     var body: some View {
         VStack(spacing: 0) {
@@ -144,6 +150,71 @@ struct PreferencesView: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
+
+            sectionHeader("Codex Executable")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    TextField("Binary override (optional)", text: $codexBinaryOverride)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 360)
+                        .onChange(of: codexBinaryOverride) { _, _ in validateBinaryOverride() }
+                    Button(action: pickCodexBinary) {
+                        Label("Choose…", systemImage: "square.and.arrow.down.on.square")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.bordered)
+                    Button("Clear") {
+                        codexBinaryOverride = ""
+                        validateBinaryOverride()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                if !codexBinaryValid {
+                    Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            sectionHeader("Resume Defaults")
+            VStack(alignment: .leading, spacing: 12) {
+                labeledRow("Default working directory") {
+                    HStack(spacing: 12) {
+                        TextField("Optional", text: $defaultResumeDirectory)
+                            .textFieldStyle(.roundedBorder)
+                            .onChange(of: defaultResumeDirectory) { _, _ in validateDefaultDirectory() }
+                        Button(action: pickDefaultDirectory) {
+                            Label("Choose…", systemImage: "folder")
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Clear") {
+                            defaultResumeDirectory = ""
+                            validateDefaultDirectory()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                if !defaultResumeDirectoryValid {
+                    Label("Directory must exist and be accessible", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                labeledRow("Preferred launch mode") {
+                    Picker("Launch Mode", selection: $preferredLaunchMode) {
+                        ForEach(CodexLaunchMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                Text("Controls the default mode when resuming a session. You can still change it in the resume sheet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -154,6 +225,11 @@ struct PreferencesView: View {
         validateCodexPath()
         appearance = indexer.appAppearance
         modifiedDisplay = indexer.modifiedDisplay
+        codexBinaryOverride = resumeSettings.binaryOverride
+        validateBinaryOverride()
+        defaultResumeDirectory = resumeSettings.defaultWorkingDirectory
+        validateDefaultDirectory()
+        preferredLaunchMode = resumeSettings.launchMode
     }
 
     private func validateCodexPath() {
@@ -178,6 +254,50 @@ struct PreferencesView: View {
         }
     }
 
+    private func validateBinaryOverride() {
+        guard !codexBinaryOverride.isEmpty else {
+            codexBinaryValid = true
+            return
+        }
+        let expanded = (codexBinaryOverride as NSString).expandingTildeInPath
+        codexBinaryValid = FileManager.default.isExecutableFile(atPath: expanded)
+    }
+
+    private func pickCodexBinary() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                codexBinaryOverride = url.path
+                validateBinaryOverride()
+            }
+        }
+    }
+
+    private func validateDefaultDirectory() {
+        guard !defaultResumeDirectory.isEmpty else {
+            defaultResumeDirectoryValid = true
+            return
+        }
+        var isDir: ObjCBool = false
+        defaultResumeDirectoryValid = FileManager.default.fileExists(atPath: defaultResumeDirectory, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    private func pickDefaultDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                defaultResumeDirectory = url.path
+                validateDefaultDirectory()
+            }
+        }
+    }
+
     private func resetToDefaults() {
         codexPath = ""
         indexer.sessionsRootOverride = ""
@@ -193,6 +313,17 @@ struct PreferencesView: View {
         indexer.showProjectColumn = true
         indexer.showMsgsColumn = true
         indexer.showModifiedColumn = true
+
+        codexBinaryOverride = ""
+        resumeSettings.setBinaryOverride("")
+        validateBinaryOverride()
+
+        defaultResumeDirectory = ""
+        resumeSettings.setDefaultWorkingDirectory("")
+        validateDefaultDirectory()
+
+        preferredLaunchMode = .terminal
+        resumeSettings.setLaunchMode(.terminal)
     }
 
     private func applySettings() {
@@ -200,6 +331,14 @@ struct PreferencesView: View {
         indexer.setAppearance(appearance)
         indexer.setModifiedDisplay(modifiedDisplay)
         indexer.refresh()
+
+        if codexBinaryValid {
+            resumeSettings.setBinaryOverride(codexBinaryOverride)
+        }
+        if defaultResumeDirectoryValid {
+            resumeSettings.setDefaultWorkingDirectory(defaultResumeDirectory)
+        }
+        resumeSettings.setLaunchMode(preferredLaunchMode)
     }
 
     // MARK: Helpers

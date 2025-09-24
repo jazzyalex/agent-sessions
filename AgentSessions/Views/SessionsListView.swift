@@ -3,6 +3,8 @@ import SwiftUI
 struct SessionsListView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @Binding var selection: String?
+    let onLaunchTerminal: (Session) -> Void
+    let onOpenWorkingDirectory: (Session) -> Void
     // Table selection uses Set; keep a single-selection bridge
     @State private var tableSelection: Set<String> = []
     // Table sort order uses comparators
@@ -79,6 +81,9 @@ struct SessionsListView: View {
         .environment(\.defaultMinListRowHeight, 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
+        .contextMenu(forSelectionType: String.self) { ids in
+            contextMenuContent(for: ids)
+        }
         .navigationTitle("Codex CLI Sessions")
         .overlay {
             // Error states as overlay to preserve layout structure for split views
@@ -140,7 +145,13 @@ struct SessionsListView: View {
             updateCachedRows()
         }
         .onChange(of: tableSelection) { _, newSel in
-            // Bridge to single selection binding
+            if newSel.count > 1, let first = newSel.first {
+                let trimmed: Set<String> = [first]
+                if newSel != trimmed {
+                    tableSelection = trimmed
+                    return
+                }
+            }
             selection = newSel.first
         }
         .onChange(of: indexer.sessions) { _, _ in
@@ -172,12 +183,29 @@ struct SessionsListView: View {
         cachedRows = indexer.sessions.sorted(using: sortOrder)
     }
 
-    private func reveal(_ session: Session) {
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: session.filePath)])
+    private func session(for id: String) -> Session? {
+        rows.first(where: { $0.id == id }) ?? indexer.sessions.first(where: { $0.id == id })
     }
-    private func copy(_ str: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(str, forType: .string)
+
+    @ViewBuilder
+    private func contextMenuContent(for selectedIDs: Set<String>) -> some View {
+        if selectedIDs.count == 1,
+           let id = selectedIDs.first,
+           let session = session(for: id) {
+            Button("Launch in Terminal") {
+                tableSelection = [id]
+                selection = id
+                onLaunchTerminal(session)
+            }
+            Button("Open Working Directory") {
+                tableSelection = [id]
+                selection = id
+                onOpenWorkingDirectory(session)
+            }
+        } else {
+            Button("Launch in Terminal") {}.disabled(true)
+            Button("Open Working Directory") {}.disabled(true)
+        }
     }
 }
 

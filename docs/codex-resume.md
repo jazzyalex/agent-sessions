@@ -40,8 +40,9 @@ This document records how `codex --resume` and `--continue` work in Codex CLI 0.
 - Repo column and filter: allowed as an app-level convenience using `SessionMeta.cwd`, but not part of Codex’s picker semantics.
 - Pagination: optional “Load more” in the UI; cursor-based paging is compatible.
 - Resume in Codex: provide an action that launches Codex with the override, e.g.:
-  - `codex --config experimental_resume=/absolute/path/to/rollout-2025-09-12T16-41-03-<uuid>.jsonl`
+  - Primary flow: `codex resume <session-id>` (requires CLI ≥0.39).
+  - Fallback for older sessions or CLI failures: `codex -c experimental_resume=/absolute/path/to/rollout-2025-09-12T16-41-03-<uuid>.jsonl`.
+  - Agent Sessions first issues the `resume <id>` command and, if it exits non-zero, retries automatically with the experimental override.
 
 ## Notes
 - Behavior documented here reflects 0.34; future releases may change flags, help text, or pagination details.
-

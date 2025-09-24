@@ -2,16 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDisplayName</key>
-    <string>Agent Sessions</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.triada.AgentSessions</string>
-    <key>CFBundleName</key>
-    <string>Agent Sessions</string>
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.developer-tools</string>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
+	<key>CFBundleDisplayName</key>
+	<string>Agent Sessions</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.triada.AgentSessions</string>
+	<key>CFBundleName</key>
+	<string>Agent Sessions</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Agent Sessions controls Terminal to resume Codex sessions on your behalf.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
 </dict>
 </plist>
-
