@@ -85,6 +85,24 @@ private struct ContentView: View {
                 SearchFiltersView()
             }
             ToolbarItem(placement: .automatic) {
+                HStack(spacing: 6) {
+                    Text("Session ID:")
+                    if let sid = selectedSession?.codexFilenameUUID {
+                        Text(sid)
+                            .font(.caption)
+                            .textSelection(.enabled)
+                            .monospaced()
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else {
+                        Text("—")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help("Codex session identifier used for resume")
+            }
+            ToolbarItem(placement: .automatic) {
                 Button(action: {
                     guard let session = selectedSession else {
                         resumeAlert = ResumeAlert(title: "No Session Selected",
