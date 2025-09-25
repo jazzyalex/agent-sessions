@@ -85,16 +85,6 @@ private struct ContentView: View {
                 SearchFiltersView()
             }
             ToolbarItem(placement: .automatic) {
-                Button("Copy Session ID") {
-                    if let sid = selectedSession?.codexFilenameUUID {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(sid, forType: .string)
-                    }
-                }
-                .disabled(selectedSession?.codexFilenameUUID == nil)
-                .help("Copy Codex session ID to clipboard")
-            }
-            ToolbarItem(placement: .automatic) {
                 Button(action: {
                     guard let session = selectedSession else {
                         resumeAlert = ResumeAlert(title: "No Session Selected",

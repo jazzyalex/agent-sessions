@@ -34,6 +34,8 @@ struct TranscriptPlainView: View {
     @State private var showRawSheet: Bool = false
     // Selection for auto-scroll to find matches
     @State private var selectedNSRange: NSRange? = nil
+    // Ephemeral copy confirmation
+    @State private var showIDCopiedToast: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -153,6 +155,28 @@ struct TranscriptPlainView: View {
                 Button("Copy") { copyAll() }
                     .buttonStyle(.borderless)
                     .help("Copy entire transcript")
+
+                Divider().frame(height: 20)
+
+                if let short = codexShortID {
+                    Button("ID \(short)") {
+                        copyCodexSessionID()
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy Codex session ID to clipboard")
+                } else {
+                    Button("ID —") {}
+                        .buttonStyle(.borderless)
+                        .disabled(true)
+                        .help("No Codex session ID available")
+                }
+
+                if showIDCopiedToast {
+                    Text("Session ID copied")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .transition(.opacity)
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -294,6 +318,21 @@ struct TranscriptPlainView: View {
     private func copyAll() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(transcript, forType: .string)
+    }
+
+    private var codexShortID: String? {
+        guard let sid = currentSession?.codexFilenameUUID, !sid.isEmpty else { return nil }
+        return String(sid.prefix(6))
+    }
+
+    private func copyCodexSessionID() {
+        guard let sid = currentSession?.codexFilenameUUID, !sid.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(sid, forType: .string)
+        withAnimation { showIDCopiedToast = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation { showIDCopiedToast = false }
+        }
     }
 
     private func findAdditionalRanges() {
