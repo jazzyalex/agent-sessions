@@ -34,8 +34,8 @@ struct TranscriptPlainView: View {
     @State private var showRawSheet: Bool = false
     // Selection for auto-scroll to find matches
     @State private var selectedNSRange: NSRange? = nil
-    // Ephemeral copy confirmation
-    @State private var showIDCopiedToast: Bool = false
+    // Ephemeral copy confirmation (popover)
+    @State private var showIDCopiedPopover: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -125,6 +125,25 @@ struct TranscriptPlainView: View {
 
             // View controls group
             HStack(spacing: 6) {
+                // ID button (copy full Codex UUID), placed before Transcript mode picker
+                if let short = codexShortID {
+                    Button("ID \(short)") {
+                        copyCodexSessionID()
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy Codex session ID to clipboard")
+                    .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
+                        Text("Session ID copied")
+                            .font(.caption)
+                            .padding(8)
+                    }
+                } else {
+                    Button("ID —") {}
+                        .buttonStyle(.borderless)
+                        .disabled(true)
+                        .help("No Codex session ID available")
+                }
+
                 Picker("View Style", selection: $renderModeRaw) {
                     Text("Transcript").tag(TranscriptRenderMode.normal.rawValue)
                     Text("Terminal").tag(TranscriptRenderMode.terminal.rawValue)
@@ -155,28 +174,6 @@ struct TranscriptPlainView: View {
                 Button("Copy") { copyAll() }
                     .buttonStyle(.borderless)
                     .help("Copy entire transcript")
-
-                Divider().frame(height: 20)
-
-                if let short = codexShortID {
-                    Button("ID \(short)") {
-                        copyCodexSessionID()
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Copy Codex session ID to clipboard")
-                } else {
-                    Button("ID —") {}
-                        .buttonStyle(.borderless)
-                        .disabled(true)
-                        .help("No Codex session ID available")
-                }
-
-                if showIDCopiedToast {
-                    Text("Session ID copied")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .transition(.opacity)
-                }
             }
         }
         .padding(.horizontal, 10)
@@ -329,9 +326,9 @@ struct TranscriptPlainView: View {
         guard let sid = currentSession?.codexFilenameUUID, !sid.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(sid, forType: .string)
-        withAnimation { showIDCopiedToast = true }
+        showIDCopiedPopover = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            withAnimation { showIDCopiedToast = false }
+            showIDCopiedPopover = false
         }
     }
 

@@ -5,8 +5,15 @@ private let labelColumnWidth: CGFloat = 170
 
 struct PreferencesView: View {
     @EnvironmentObject var indexer: SessionIndexer
-    @State private var selectedTab: PreferencesTab? = .general
+    @State private var selectedTab: PreferencesTab?
     @ObservedObject private var resumeSettings = CodexResumeSettings.shared
+
+    private let initialResumeSelection: String?
+
+    init(initialTab: PreferencesTab = .general, initialResumeSelection: String? = nil) {
+        self.initialResumeSelection = initialResumeSelection
+        _selectedTab = State(initialValue: initialTab)
+    }
 
     // General tab state
     @State private var appearance: AppAppearance = .system
@@ -55,6 +62,8 @@ struct PreferencesView: View {
                     generalTab
                 case .codexCLI:
                     codexCLITab
+                case .codexCLIResume:
+                    codexCLIResumeTab
                 }
             }
             .padding(.horizontal, 24)
@@ -218,6 +227,22 @@ struct PreferencesView: View {
         }
     }
 
+    private var codexCLIResumeTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Codex CLI Resume")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Configure how Agent Sessions resumes saved Codex sessions and run diagnostics.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            CodexResumeSheet(initialSelection: initialResumeSelection, context: .preferences)
+                .environmentObject(indexer)
+                .padding(.top, 4)
+        }
+    }
+
     // MARK: Actions
 
     private func loadCurrentSettings() {
@@ -375,9 +400,10 @@ struct PreferencesView: View {
 
 // MARK: - Tabs
 
-private enum PreferencesTab: String, CaseIterable, Identifiable {
+enum PreferencesTab: String, CaseIterable, Identifiable {
     case general
     case codexCLI
+    case codexCLIResume
 
     var id: String { rawValue }
 
@@ -385,6 +411,7 @@ private enum PreferencesTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "General"
         case .codexCLI: return "Codex CLI"
+        case .codexCLIResume: return "Codex CLI Resume"
         }
     }
 
@@ -392,12 +419,13 @@ private enum PreferencesTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .codexCLI: return "terminal"
+        case .codexCLIResume: return "terminal.fill"
         }
     }
 }
 
 private extension PreferencesView {
-    var visibleTabs: [PreferencesTab] { [.general, .codexCLI] }
+    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .codexCLIResume] }
 }
 
 // MARK: - Supporting Views

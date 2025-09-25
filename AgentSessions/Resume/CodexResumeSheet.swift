@@ -8,6 +8,7 @@ struct CodexResumeSheet: View {
     @StateObject private var launcher = CodexResumeLauncher()
 
     let initialSelection: String?
+    let context: Context
 
     @State private var searchText: String = ""
     @State private var selectedSessionID: String? = nil
@@ -24,18 +25,36 @@ struct CodexResumeSheet: View {
 
     private let commandBuilder = CodexResumeCommandBuilder()
 
+    init(initialSelection: String?, context: Context = .sheet) {
+        self.initialSelection = initialSelection
+        self.context = context
+    }
+
+    enum Context {
+        case sheet
+        case preferences
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            header
-            Divider()
+            if context == .sheet {
+                header
+                Divider()
+            }
             content
-            Divider()
-            footer
+            if context == .sheet {
+                Divider()
+                footer
+            }
         }
-        .padding(20)
-        .frame(width: 780, height: 520)
+        .padding(context == .sheet ? 20 : 0)
+        .frame(width: context == .sheet ? 780 : nil,
+               height: context == .sheet ? 520 : nil,
+               alignment: .topLeading)
         .onAppear {
-            selectedSessionID = initialSelection ?? indexer.sessions.first?.id
+            if selectedSessionID == nil {
+                selectedSessionID = initialSelection ?? indexer.sessions.first?.id ?? availableSessions.first?.id
+            }
             refreshSelectionState()
             Task { await probeCodexVersion() }
         }
@@ -78,9 +97,15 @@ struct CodexResumeSheet: View {
     }
 
     private var content: some View {
-        HStack(alignment: .top, spacing: 18) {
-            sessionList
-            detailsPanel
+        Group {
+            if context == .sheet {
+                HStack(alignment: .top, spacing: 18) {
+                    sessionList
+                    detailsPanel
+                }
+            } else {
+                detailsPanel
+            }
         }
     }
 
@@ -119,8 +144,35 @@ struct CodexResumeSheet: View {
 
     private var detailsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let session = selectedSession {
+            // Preferences header: show Codex version and Health Check controls
+            if context == .preferences {
+                HStack(spacing: 8) {
+                    Button(action: { Task { await probeCodexVersion(force: true) } }) {
+                        switch probeState {
+                        case .probing:
+                            ProgressView()
+                        case .success:
+                            if let version = probeVersion { Text("Codex \(version.description)") } else { Text("Check Version") }
+                        case .idle, .failure:
+                            Text("Check Version")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Run codex --version to confirm resume support")
+
+                    Button("Health Check") { Task { await runHealthCheck() } }
+                        .buttonStyle(.bordered)
+                        .help("Validate JSONL and try both resume paths")
+                    Spacer()
+                }
+            }
+
+            // In sheet context show summary; in preferences show only options/console
+            if context == .sheet, let session = selectedSession {
                 sessionSummary(for: session)
+            }
+
+            if let session = selectedSession {
                 launchOptions(for: session)
                 embeddedConsole
             } else {
@@ -131,7 +183,10 @@ struct CodexResumeSheet: View {
                 }
             }
         }
-        .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(minWidth: context == .sheet ? 360 : nil,
+               maxWidth: .infinity,
+               maxHeight: .infinity,
+               alignment: .top)
         .sheet(isPresented: $showingHealthOutput) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Resume Health Check")
@@ -184,37 +239,77 @@ struct CodexResumeSheet: View {
         }
     }
 
+    private var sessionSelector: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Session")
+                .fontWeight(.semibold)
+            Menu {
+                ForEach(availableSessions, id: \Session.id) { session in
+                    Button(action: { selectedSessionID = session.id }) {
+                        Text(menuTitle(for: session))
+                    }
+                }
+            } label: {
+                HStack {
+                    if let session = selectedSession {
+                        Text(menuTitle(for: session))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    } else {
+                        Text("Choose a session")
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, minHeight: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .disabled(availableSessions.isEmpty)
+
+            if availableSessions.isEmpty {
+                Text("No Codex sessions available. Refresh the index in the main window.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func launchOptions(for session: Session) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Working Directory")
-                    .fontWeight(.semibold)
-                HStack(spacing: 8) {
-                    TextField("Optional", text: $workingDirectoryField)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 260)
-                        .onChange(of: workingDirectoryField) { _, newValue in
-                            settings.setWorkingDirectory(newValue, for: session.id)
+            // Preferences variant: show Codex path instead of Launch button
+            if context == .preferences {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Path to Codex").fontWeight(.semibold)
+                    HStack(spacing: 8) {
+                        if let binary = codexBinary {
+                            Text(binary.path)
+                                .font(.system(.caption, design: .monospaced))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        } else {
+                            Text("Not found in PATH or override")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
                         }
-                    Button("Choose…") { chooseDirectory(for: session) }
-                        .buttonStyle(.bordered)
-                    Button("Clear") {
-                        workingDirectoryField = ""
-                        settings.setWorkingDirectory(nil, for: session.id)
+                        if codexBinary != nil {
+                            Button("Copy") {
+                                if let path = codexBinary?.path {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(path, forType: .string)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                }
-                if let sessionCwd = session.cwd, sessionCwd != workingDirectoryField {
-                    Button {
-                        workingDirectoryField = sessionCwd
-                        settings.setWorkingDirectory(sessionCwd, for: session.id)
-                    } label: {
-                        Text("Use session directory: \(sessionCwd)")
-                    }
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .buttonStyle(.link)
-                    .help(sessionCwd)
                 }
             }
 
@@ -242,32 +337,6 @@ struct CodexResumeSheet: View {
                 Label("Falling back to experimental resume flag", systemImage: "arrow.triangle.2.circlepath")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Button(action: { launch(session: session) }) {
-                    if launcher.isRunningEmbedded && settings.launchMode == .embedded {
-                        ProgressView()
-                    } else {
-                        Text("Launch")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canLaunch(session: session))
-
-                if settings.launchMode == .embedded && launcher.isRunningEmbedded {
-                    Button("Stop", action: launcher.stopEmbedded)
-                        .buttonStyle(.bordered)
-                }
-
-                Spacer()
-                if let binary = codexBinary {
-                    Text(binary.path)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
             }
         }
     }
@@ -387,8 +456,12 @@ struct CodexResumeSheet: View {
     }
 
     @MainActor
+    private var availableSessions: [Session] {
+        indexer.allSessions.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
     private var filteredSessions: [Session] {
-        let base = indexer.allSessions.sorted { $0.modifiedAt > $1.modifiedAt }
+        let base = availableSessions
         guard !searchText.isEmpty else { return base }
         let lower = searchText.lowercased()
         return base.filter { session in
@@ -400,6 +473,10 @@ struct CodexResumeSheet: View {
 
     @MainActor
     private func refreshSelectionState() {
+        if selectedSessionID == nil, let first = availableSessions.first {
+            selectedSessionID = first.id
+            return
+        }
         guard let session = selectedSession else {
             workingDirectoryField = ""
             sizeWarning = nil
@@ -409,6 +486,12 @@ struct CodexResumeSheet: View {
         workingDirectoryField = settings.workingDirectory(for: session.id) ?? session.cwd ?? settings.defaultWorkingDirectory
         updateFileSizeWarning(for: session)
         fileMissing = !FileManager.default.fileExists(atPath: session.filePath)
+    }
+
+    private func menuTitle(for session: Session) -> String {
+        let title = session.codexDisplayTitle
+        let trimmed = title.count > 60 ? String(title.prefix(57)) + "…" : title
+        return "\(session.shortID) • \(trimmed)"
     }
 
     @MainActor

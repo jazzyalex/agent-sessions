@@ -5,15 +5,23 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
     static let shared = PreferencesWindowController()
 
     private var window: NSWindow?
+    private var hostingController: NSHostingController<AnyView>?
 
-    func show(indexer: SessionIndexer) {
-        if let win = window {
+    func show(indexer: SessionIndexer,
+              initialTab: PreferencesTab = .general,
+              initialResumeSelection: String? = nil) {
+        let root = PreferencesView(initialTab: initialTab, initialResumeSelection: initialResumeSelection)
+            .environmentObject(indexer)
+        let wrapped = AnyView(root)
+
+        if let win = window, let hosting = hostingController {
+            hosting.rootView = wrapped
             win.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let hosting = NSHostingController(rootView: PreferencesView().environmentObject(indexer))
+        let hosting = NSHostingController(rootView: wrapped)
         let win = NSWindow(contentViewController: hosting)
         win.title = "Preferences"
         win.styleMask = [.titled, .closable, .miniaturizable]
@@ -23,6 +31,7 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
         win.setContentSize(NSSize(width: 740, height: 520))
         win.delegate = self
         self.window = win
+        hostingController = hosting
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -31,6 +40,7 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
         // Keep controller but drop the window so it can be rebuilt later
         if let win = notification.object as? NSWindow, win == window {
             window = nil
+            hostingController = nil
         }
     }
 }

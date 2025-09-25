@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
  - Docs/Data: Added session storage format doc (`docs/session-storage-format.md`) and introduced a minimal JSON Schema for normalized `SessionEvent` (`docs/schemas/session_event.schema.json`). See ADR 0001.
  - Docs: Documented Codex CLI `--resume` behavior and integration strategy in `docs/codex-resume.md`; cross‑linked from `docs/session-storage-format.md`.
  - Fixed: Removed app sandbox that was preventing file access; documented benign ViewBridge/Metal debug messages in `docs/viewbridge-errors.md`.
- - UI: Add an “ID <first6>” button in the Transcript toolbar that copies the full Codex session UUID and shows a brief “Session ID copied” confirmation.
+- UI: Add an “ID <first6>” button in the Transcript toolbar that copies the full Codex session UUID and shows a brief “Session ID copied” confirmation.
+- UI: Moved the resume console into Preferences → “Codex CLI Resume”, removing the toolbar button and trimming the layout to the options panel.
  - TODO: Add iTerm launch support alongside Terminal (preference toggle).
  - TODO: Make session search default to transcript (user/assistant text) and add a preference to include raw JSON when desired.

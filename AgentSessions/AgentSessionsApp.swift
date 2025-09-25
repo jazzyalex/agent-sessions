@@ -51,8 +51,6 @@ private struct ContentView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @State private var selection: String?
     @State private var selectedEvent: String?
-    @State private var showingResumeSheet: Bool = false
-    @State private var resumeInitialSelection: String? = nil
     @State private var resumeAlert: ResumeAlert?
     let layoutMode: LayoutMode
     let onToggleLayout: () -> Void
@@ -110,15 +108,6 @@ private struct ContentView: View {
                 .help("Reveal the session's working directory in Finder")
                 .disabled(selectedSession == nil)
             }
-            ToolbarItem(placement: .automatic) {
-                Button(action: {
-                    resumeInitialSelection = selection
-                    showingResumeSheet = true
-                }) {
-                    Label("Resume Options", systemImage: "list.bullet.rectangle")
-                }
-                .help("Open resume options and embedded console")
-            }
             // Match Codex toggle temporarily removed while we align title logic
             ToolbarItem(placement: .automatic) {
                 Button(action: { indexer.refresh() }) {
@@ -160,10 +149,6 @@ private struct ContentView: View {
             // Reset per-session context when switching selections
             selectedEvent = nil
         }
-        .sheet(isPresented: $showingResumeSheet) {
-            CodexResumeSheet(initialSelection: resumeInitialSelection)
-                .environmentObject(indexer)
-        }
         .alert(item: $resumeAlert) { alert in
             switch alert.kind {
             case .failure:
@@ -173,9 +158,10 @@ private struct ContentView: View {
             case let .needsConfiguration(sessionID):
                 return Alert(title: Text(alert.title),
                              message: Text(alert.message),
-                             primaryButton: .default(Text("Open Resume Dialog")) {
-                                 resumeInitialSelection = sessionID
-                                 showingResumeSheet = true
+                             primaryButton: .default(Text("Open Resume Preferences")) {
+                                 PreferencesWindowController.shared.show(indexer: indexer,
+                                                                          initialTab: .codexCLIResume,
+                                                                          initialResumeSelection: sessionID)
                              },
                              secondaryButton: .cancel())
             }

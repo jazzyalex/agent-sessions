@@ -2,6 +2,10 @@
 
 This document records how `codex --resume` and `--continue` work in Codex CLI 0.34, based on source review. It guides how Agent Sessions should mirror and integrate with the official flow.
 
+## Agent Sessions UI (2025-09 update)
+- The detailed resume console now lives in **Preferences → Codex CLI Resume**. The sessions list/search sidebar was removed; pick a session from the inline menu and adjust options (working directory overrides, launch mode, health check, etc.).
+- Quick actions (“Launch in Terminal”, “Open Working Directory”) remain available from the sessions list toolbar/context menu.
+
 ## Flags and UX
 - `--resume`: opens a TUI picker of recorded sessions instead of starting fresh.
 - `--continue`: resumes the most recent recorded session without showing the picker. Implemented but may be hidden from `--help` in some builds.
