@@ -85,22 +85,14 @@ private struct ContentView: View {
                 SearchFiltersView()
             }
             ToolbarItem(placement: .automatic) {
-                HStack(spacing: 6) {
-                    Text("Session ID:")
+                Button("Copy Session ID") {
                     if let sid = selectedSession?.codexFilenameUUID {
-                        Text(sid)
-                            .font(.caption)
-                            .textSelection(.enabled)
-                            .monospaced()
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } else {
-                        Text("—")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(sid, forType: .string)
                     }
                 }
-                .help("Codex session identifier used for resume")
+                .disabled(selectedSession?.codexFilenameUUID == nil)
+                .help("Copy Codex session ID to clipboard")
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: {
