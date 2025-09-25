@@ -84,6 +84,34 @@ final class CodexResumeTests: XCTestCase {
         XCTAssertTrue(package.shellCommand.contains("||"))
     }
 
+    func testCommandBuilderPrefersInternalSessionID() throws {
+        // Build a session whose JSONL contains a different internal session_id
+        let defaults = UserDefaults(suiteName: "CodexResumeTestsInternalID")!
+        defaults.removePersistentDomain(forName: "CodexResumeTestsInternalID")
+        let settings = CodexResumeSettings.makeForTesting(defaults: defaults)
+        let binaryURL = URL(fileURLWithPath: "/usr/bin/codex")
+        let builder = CodexResumeCommandBuilder()
+
+        // Create an event with an internal session_id
+        let raw = "{\"session_id\":\"internal-xyz\"}"
+        let event = SessionEvent(id: "evt-1", timestamp: nil, kind: .meta, role: nil, text: nil, toolName: nil, toolInput: nil, toolOutput: nil, messageID: nil, parentID: nil, isDelta: false, rawJSON: raw)
+        let session = Session(id: "s1",
+                              startTime: nil,
+                              endTime: nil,
+                              model: nil,
+                              filePath: "/tmp/rollout-2025-09-22T10-11-12-ghi789.jsonl",
+                              eventCount: 1,
+                              events: [event])
+
+        let fallback = URL(fileURLWithPath: "/tmp/session.jsonl")
+        let package = try builder.makeCommand(for: session,
+                                              settings: settings,
+                                              binaryURL: binaryURL,
+                                              fallbackPath: fallback,
+                                              attemptResumeFirst: true)
+        XCTAssertTrue(package.displayCommand.contains("resume 'internal-xyz'"))
+    }
+
     // MARK: Helpers
 
     private func sampleSession(id: String, fileName: String, cwd: String?) -> Session {

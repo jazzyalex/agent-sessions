@@ -126,7 +126,9 @@ private struct ContentView: View {
                 .help(layoutMode == .vertical ? "Switch to Horizontal Split" : "Switch to Vertical Split")
             }
             ToolbarItem(placement: .automatic) {
-                Button(action: { PreferencesWindowController.shared.show(indexer: indexer) }) {
+                Button(action: { PreferencesWindowController.shared.show(indexer: indexer,
+                                                                          initialTab: .codexCLIResume,
+                                                                          initialResumeSelection: selection) }) {
                     Image(systemName: "gear")
                 }
                 .help("Preferences")

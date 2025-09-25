@@ -111,6 +111,29 @@ public struct Session: Identifiable, Equatable, Codable {
         return match.uuid
     }
 
+    // Prefer the internal session_id embedded in JSONL (more authoritative than filename UUID for some builds)
+    public var codexInternalSessionID: String? {
+        // Scan a larger head slice to improve hit rate on older logs
+        let limit = min(events.count, 2000)
+        for e in events.prefix(limit) {
+            let raw = e.rawJSON
+            if let data = raw.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let v = obj["session_id"] as? String, !v.isEmpty { return v }
+                if let payload = obj["payload"] as? [String: Any], let v = payload["session_id"] as? String, !v.isEmpty { return v }
+            }
+            // Lightweight regex fallback when JSON parsing fails
+            if let r = raw.range(of: #"\"session_id\"\s*:\s*\"([^"]+)\""#, options: .regularExpression) {
+                let match = String(raw[r])
+                if let idRange = match.range(of: #"\"([^"]+)\""#, options: .regularExpression) {
+                    let quoted = String(match[idRange])
+                    return String(quoted.dropFirst().dropLast())
+                }
+            }
+        }
+        return nil
+    }
+
     // When showing Match Codex view, prefer the preview title, else fall back
     // to our general-purpose title so the table always has text.
     public var codexDisplayTitle: String { codexPreviewTitle ?? title }

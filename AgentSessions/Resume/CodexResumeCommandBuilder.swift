@@ -18,7 +18,8 @@ struct CodexResumeCommandBuilder {
                      binaryURL: URL,
                      fallbackPath: URL?,
                      attemptResumeFirst: Bool) throws -> CommandPackage {
-        guard let sessionID = session.codexFilenameUUID else {
+        // Prefer internal session_id from JSONL when available; fallback to filename UUID
+        guard let sessionID = (session.codexInternalSessionID ?? session.codexFilenameUUID) else {
             throw BuildError.missingSessionID
         }
 
@@ -33,7 +34,9 @@ struct CodexResumeCommandBuilder {
             let explicitCommand = "\(codexPath) -c experimental_resume=\(quotedFallback)"
             if attemptResumeFirst {
                 let resumeCommand = "\(codexPath) resume \(quotedSessionID)"
-                command = "\(resumeCommand) || \(explicitCommand)"
+                // Add belt-and-suspenders third attempt for builds that require both flags
+                let combined = "\(codexPath) -c experimental_resume=\(quotedFallback) resume \(quotedSessionID)"
+                command = "\(resumeCommand) || \(explicitCommand) || \(combined)"
             } else {
                 command = explicitCommand
             }

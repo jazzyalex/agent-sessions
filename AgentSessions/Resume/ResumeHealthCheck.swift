@@ -15,9 +15,9 @@ SESSION_PATH="${1:-}"
 WORKDIR="${2:-}"
 TIMEOUT_SECS="${3:-6}"
 
-err() { printf "\033[31m[ERROR]\033[0m %s\n" "$*" >&2; }
-ok()  { printf "\033[32m[OK]\033[0m %s\n" "$*\n"; }
-info(){ printf "\033[34m[INFO]\033[0m %s\n" "$*\n"; }
+err() { echo "[ERROR] $*" >&2; }
+ok()  { echo "[OK] $*"; }
+info(){ echo "[INFO] $*"; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -57,14 +57,19 @@ else
 fi
 
 CODEX_BIN="${CODEX_BIN:-codex}"
-if ! have "$CODEX_BIN"; then err "Cannot find 'codex' in PATH. Set CODEX_BIN.\nPATH=$PATH"; exit 7; fi
+# Support absolute path or PATH lookup
+if [[ "$CODEX_BIN" == /* ]]; then
+  if [ ! -x "$CODEX_BIN" ]; then err "Provided CODEX_BIN is not executable: $CODEX_BIN"; exit 7; fi
+else
+  if ! have "$CODEX_BIN"; then err "Cannot find 'codex' in PATH. Set CODEX_BIN.\nPATH=$PATH"; exit 7; fi
+fi
 
 info "Detecting Codex CLI version…"
 CODEX_VERSION="$($CODEX_BIN --version 2>&1 | head -n1)" || { err "Failed to run '$CODEX_BIN --version'."; exit 8; }
 ok "Codex version: $CODEX_VERSION"
 
 SESSION_ID=""
-if have jq; then SESSION_ID="$(head -n 500 "$SESSION_PATH" | jq -r 'select(has("session_id")) | .session_id' | head -n1 | tr -d '\r')"; fi
+if have jq; then SESSION_ID="$(head -n 2000 "$SESSION_PATH" | jq -r 'select(has("session_id")) | .session_id' | head -n1 | tr -d '\r')"; fi
 if [ -z "$SESSION_ID" ]; then SESSION_ID="$(grep -m1 -Eo '"session_id"\s*:\s*"[^"]+"' "$SESSION_PATH" | sed -E 's/.*"session_id"\s*:\s*"([^"]+)".*/\1/' | tr -d '\r')"; fi
 if [ -n "$SESSION_ID" ]; then ok "Found session_id in JSONL: $SESSION_ID"; else info "No session_id found (testing explicit path)."; fi
 
@@ -73,7 +78,6 @@ if [ -n "$WORKDIR" ]; then
   if [ -d "$WORKDIR" ]; then CMD_PREFIX="cd \"$WORKDIR\" && "; ok "Using working directory: $WORKDIR"; else err "Provided workdir is not a directory: $WORKDIR"; exit 9; fi
 fi
 
-NATIVE_STATUS=0
 if [ -n "$SESSION_ID" ]; then
   info "Testing native resume by session_id (timeout ${TIMEOUT_SECS}s)…"
   run_with_timeout "$TIMEOUT_SECS" bash -lc "$CMD_PREFIX \"$CODEX_BIN\" resume \"$SESSION_ID\""
@@ -96,11 +100,23 @@ printf "  Working directory  : %s\n" "${WORKDIR:-(none)}"
 printf "  Native resume rc   : %s\n" "${NATIVE_STATUS:-skipped}"
 printf "  Explicit resume rc : %s\n" "$EXP_STATUS"
 
-if [ -n "$SESSION_ID" ]; then [ $NATIVE_STATUS -ne 0 ] && [ $EXP_STATUS -ne 0 ] && exit 10 || exit 0; else [ $EXP_STATUS -ne 0 ] && exit 11 || exit 0; fi
+# Treat 124 (timeout) as a healthy start for exit semantics
+OK_NATIVE=1
+if [ -n "${NATIVE_STATUS:-}" ]; then
+  if [ "${NATIVE_STATUS}" -eq 0 ] || [ "${NATIVE_STATUS}" -eq 124 ]; then OK_NATIVE=0; fi
+fi
+OK_EXPLICIT=1
+if [ "$EXP_STATUS" -eq 0 ] || [ "$EXP_STATUS" -eq 124 ]; then OK_EXPLICIT=0; fi
+
+if [ -n "$SESSION_ID" ]; then
+  if [ $OK_NATIVE -eq 0 ] || [ $OK_EXPLICIT -eq 0 ]; then exit 0; else exit 10; fi
+else
+  if [ $OK_EXPLICIT -eq 0 ]; then exit 0; else exit 11; fi
+fi
 """#
     }
 
-    static func run(sessionPath: String, workingDirectory: String?, codexBinary: URL?) async -> (exitCode: Int32, output: String) {
+    static func run(sessionPath: String, workingDirectory: String?, codexBinary: URL?, timeoutSeconds: Int = 6) async -> (exitCode: Int32, output: String) {
         let scriptURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("resume_health_check.sh")
         do {
             try scriptBody().data(using: .utf8)?.write(to: scriptURL)
@@ -112,8 +128,12 @@ if [ -n "$SESSION_ID" ]; then [ $NATIVE_STATUS -ne 0 ] && [ $EXP_STATUS -ne 0 ] 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         var args = [scriptURL.path, sessionPath]
-        if let workingDirectory, !workingDirectory.isEmpty { args.append(workingDirectory) }
-        args.append("6")
+        if let workingDirectory, !workingDirectory.isEmpty {
+            args.append(workingDirectory)
+        } else {
+            args.append("")
+        }
+        args.append(String(timeoutSeconds))
         process.arguments = args
         var env = ProcessInfo.processInfo.environment
         if let codexBinary { env["CODEX_BIN"] = codexBinary.path }

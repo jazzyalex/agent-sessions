@@ -22,6 +22,7 @@ struct CodexResumeSheet: View {
     @State private var fileMissing: Bool = false
     @State private var showingHealthOutput: Bool = false
     @State private var healthOutput: String = ""
+    @State private var initialSelectionApplied: Bool = false
 
     private let commandBuilder = CodexResumeCommandBuilder()
 
@@ -52,8 +53,9 @@ struct CodexResumeSheet: View {
                height: context == .sheet ? 520 : nil,
                alignment: .topLeading)
         .onAppear {
-            if selectedSessionID == nil {
-                selectedSessionID = initialSelection ?? indexer.sessions.first?.id ?? availableSessions.first?.id
+            if !initialSelectionApplied {
+                selectedSessionID = initialSelection ?? selectedSessionID
+                initialSelectionApplied = true
             }
             refreshSelectionState()
             Task { await probeCodexVersion() }
@@ -63,6 +65,16 @@ struct CodexResumeSheet: View {
         .onChange(of: settings.binaryOverride) { _, _ in Task { await probeCodexVersion() } }
         .onChange(of: settings.launchMode) { _, _ in } // persist via settings already
         .onChange(of: settings.defaultWorkingDirectory) { _, _ in refreshSelectionState() }
+        .onChange(of: indexer.sessions) { _, _ in
+            // Apply the initial selection from the main window once when data is available
+            if initialSelectionApplied, selectedSessionID == nil {
+                if let target = initialSelection, indexer.allSessions.contains(where: { $0.id == target }) {
+                    selectedSessionID = target
+                } else {
+                    selectedSessionID = availableSessions.first?.id
+                }
+            }
+        }
     }
 
     private var header: some View {
@@ -195,8 +207,16 @@ struct CodexResumeSheet: View {
                     Text(healthOutput)
                         .font(.system(.caption, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
                 }
-                HStack { Spacer(); Button("Close") { showingHealthOutput = false } }
+                HStack {
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(healthOutput, forType: .string)
+                    }
+                    Spacer()
+                    Button("Close") { showingHealthOutput = false }
+                }
             }
             .padding(16)
             .frame(width: 720, height: 420)
@@ -473,10 +493,7 @@ struct CodexResumeSheet: View {
 
     @MainActor
     private func refreshSelectionState() {
-        if selectedSessionID == nil, let first = availableSessions.first {
-            selectedSessionID = first.id
-            return
-        }
+        // Do not override selection in preferences; preserve external selection
         guard let session = selectedSession else {
             workingDirectoryField = ""
             sizeWarning = nil
@@ -572,7 +589,8 @@ struct CodexResumeSheet: View {
         let bin = codexBinary
         let (code, output) = await ResumeHealthCheck.run(sessionPath: session.filePath,
                                                          workingDirectory: workingDirectoryField.isEmpty ? nil : workingDirectoryField,
-                                                         codexBinary: bin)
+                                                         codexBinary: bin,
+                                                         timeoutSeconds: 6)
         await MainActor.run {
             healthOutput = output
             showingHealthOutput = true
