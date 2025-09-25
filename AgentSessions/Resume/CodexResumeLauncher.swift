@@ -98,7 +98,16 @@ final class CodexResumeLauncher: ObservableObject {
         let scriptLines = [
             "tell application \"Terminal\"",
             "activate",
-            "do script \"\(escaped)\"",
+            // Run the command and capture the newly created tab
+            "set newTab to do script \"\(escaped)\"",
+            // Give Terminal a brief moment to create/select the UI elements
+            "delay 0.1",
+            // Try to bring the window containing newTab to the front and select the tab
+            "try",
+            "  set newWin to (first window whose tabs contains newTab)",
+            "  set front window to newWin",
+            "  set selected tab of newWin to newTab",
+            "end try",
             "end tell"
         ]
 
