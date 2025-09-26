@@ -27,6 +27,9 @@ struct PreferencesView: View {
     @State private var defaultResumeDirectory: String = ""
     @State private var defaultResumeDirectoryValid: Bool = true
     @State private var preferredLaunchMode: CodexLaunchMode = .terminal
+    @State private var probeState: ProbeState = .idle
+    @State private var probeVersion: CodexVersion? = nil
+    @State private var resolvedCodexPath: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -160,29 +163,62 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
             }
 
-            sectionHeader("Codex Executable")
+            sectionHeader("Codex Binary")
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    TextField("Binary override (optional)", text: $codexBinaryOverride)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 360)
-                        .onChange(of: codexBinaryOverride) { _, _ in validateBinaryOverride() }
-                    Button(action: pickCodexBinary) {
-                        Label("Choose…", systemImage: "square.and.arrow.down.on.square")
-                            .labelStyle(.titleAndIcon)
+                HStack(spacing: 8) {
+                    Button(action: probeCodex) {
+                        switch probeState {
+                        case .probing:
+                            ProgressView()
+                        case .success:
+                            if let version = probeVersion { Text("Codex \(version.description)") } else { Text("Check Version") }
+                        case .idle:
+                            Text("Check Version")
+                        case .failure:
+                            Text("Codex is not found").foregroundStyle(.red)
+                        }
                     }
                     .buttonStyle(.bordered)
-                    Button("Clear") {
-                        codexBinaryOverride = ""
-                        validateBinaryOverride()
+                    .help("Run codex --version and resolve path")
+
+                    if let resolved = resolvedCodexPath {
+                        Text(resolved)
+                            .font(.system(.caption, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else if probeState == .failure {
+                        Text("Codex is not found")
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
-                    .buttonStyle(.bordered)
                 }
 
-                if !codexBinaryValid {
-                    Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Override path (optional)")
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        TextField("/path/to/codex", text: $codexBinaryOverride)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 360)
+                            .onChange(of: codexBinaryOverride) { _, _ in validateBinaryOverride() }
+                        Button(action: pickCodexBinary) {
+                            Label("Browse…", systemImage: "square.and.arrow.down.on.square")
+                                .labelStyle(.titleAndIcon)
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Clear") {
+                            codexBinaryOverride = ""
+                            validateBinaryOverride()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    if !codexBinaryValid {
+                        Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
 
@@ -218,6 +254,11 @@ struct PreferencesView: View {
         defaultResumeDirectory = resumeSettings.defaultWorkingDirectory
         validateDefaultDirectory()
         preferredLaunchMode = resumeSettings.launchMode
+        // kick off a probe so users see current version/path
+        probeState = .idle
+        probeVersion = nil
+        resolvedCodexPath = nil
+        probeCodex()
     }
 
     private func validateCodexPath() {
@@ -327,6 +368,7 @@ struct PreferencesView: View {
             resumeSettings.setDefaultWorkingDirectory(defaultResumeDirectory)
         }
         resumeSettings.setLaunchMode(preferredLaunchMode)
+        probeCodex()
     }
 
     // MARK: Helpers
@@ -389,6 +431,36 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .codexCLIResume] }
+}
+
+// MARK: - Probe helpers
+
+private extension PreferencesView {
+    enum ProbeState { case idle, probing, success, failure }
+
+    func probeCodex() {
+        if probeState == .probing { return }
+        probeState = .probing
+        probeVersion = nil
+        resolvedCodexPath = nil
+        let override = codexBinaryOverride.isEmpty ? (resumeSettings.binaryOverride) : codexBinaryOverride
+        DispatchQueue.global(qos: .userInitiated).async {
+            let env = CodexCLIEnvironment()
+            let result = env.probeVersion(customPath: override)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let data):
+                    self.probeVersion = data.version
+                    self.resolvedCodexPath = data.binaryURL.path
+                    self.probeState = .success
+                case .failure:
+                    self.probeVersion = nil
+                    self.resolvedCodexPath = nil
+                    self.probeState = .failure
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Supporting Views

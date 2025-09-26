@@ -158,24 +158,9 @@ struct CodexResumeSheet: View {
 
     private var detailsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Preferences header: show Codex version and resume diagnostics controls
+            // Preferences header: keep only Resume Log in this tab
             if context == .preferences {
                 HStack(spacing: 8) {
-                    Button(action: { Task { await probeCodexVersion(force: true) } }) {
-                        switch probeState {
-                        case .probing:
-                            ProgressView()
-                        case .success:
-                            if let version = probeVersion { Text("Codex \(version.description)") } else { Text("Check Version") }
-                        case .idle:
-                            Text("Check Version")
-                        case .failure:
-                            Text("Codex is not found").foregroundStyle(.red)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Run codex --version to confirm resume support")
-
                     Button("Resume Log") { Task { await runHealthCheck() } }
                         .buttonStyle(.bordered)
                         .help("Show resume diagnostics for this session")
@@ -310,51 +295,7 @@ struct CodexResumeSheet: View {
     private func launchOptions(for session: Session) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // Preferences variant: show Codex path instead of Launch button
-            if context == .preferences {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Path to Codex").fontWeight(.semibold)
-                    HStack(spacing: 8) {
-                        if let binary = codexBinary {
-                            Text(binary.path)
-                                .font(.system(.caption, design: .monospaced))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        } else {
-                            Text("Codex is not found")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-
-                    // Provide a manual override path input right here for convenience
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Override path (optional)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 8) {
-                            TextField("/path/to/codex", text: Binding(get: { settings.binaryOverride }, set: { settings.setBinaryOverride($0) }))
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.caption, design: .monospaced))
-                                .frame(maxWidth: 360)
-                            Button(action: pickCodexBinaryOverride) {
-                                Label("Browse…", systemImage: "square.and.arrow.down.on.square")
-                                    .labelStyle(.titleAndIcon)
-                            }
-                            .buttonStyle(.bordered)
-                            Button("Clear") {
-                                settings.setBinaryOverride("")
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        if !settings.binaryOverride.isEmpty && !isExecutable(settings.binaryOverride) {
-                            Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                    .padding(.top, 4)
-                }
-            }
+            // Path/override now live under Preferences → Codex CLI
 
             VStack(alignment: .leading, spacing: 6) {
                 Picker("Launch Mode", selection: Binding(get: { settings.launchMode }, set: { settings.setLaunchMode($0) })) {
