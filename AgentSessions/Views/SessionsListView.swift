@@ -52,7 +52,7 @@ struct SessionsListView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(projectTooltip(for: s))
-                    .onTapGesture {
+                    .onTapGesture(count: 2) {
                         if let name = s.repoName {
                             indexer.projectFilter = name
                             indexer.recomputeNow()
@@ -202,9 +202,20 @@ struct SessionsListView: View {
                 selection = id
                 onOpenWorkingDirectory(session)
             }
+            if let name = session.repoName, !name.isEmpty {
+                Divider()
+                Button("Filter by Project: \(name)") {
+                    indexer.projectFilter = name
+                    indexer.recomputeNow()
+                }
+            } else {
+                Divider()
+                Button("Filter by Project") {}.disabled(true)
+            }
         } else {
             Button("Launch in Terminal") {}.disabled(true)
             Button("Open Working Directory") {}.disabled(true)
+            Button("Filter by Project") {}.disabled(true)
         }
     }
 }
