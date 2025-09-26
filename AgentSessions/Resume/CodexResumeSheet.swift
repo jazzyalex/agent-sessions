@@ -156,7 +156,7 @@ struct CodexResumeSheet: View {
 
     private var detailsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Preferences header: show Codex version and Health Check controls
+            // Preferences header: show Codex version and resume diagnostics controls
             if context == .preferences {
                 HStack(spacing: 8) {
                     Button(action: { Task { await probeCodexVersion(force: true) } }) {
@@ -172,9 +172,9 @@ struct CodexResumeSheet: View {
                     .buttonStyle(.bordered)
                     .help("Run codex --version to confirm resume support")
 
-                    Button("Health Check") { Task { await runHealthCheck() } }
-                        .buttonStyle(.bordered)
-                        .help("Validate JSONL and try both resume paths")
+            Button("Resume Log") { Task { await runHealthCheck() } }
+                .buttonStyle(.bordered)
+                .help("Show resume diagnostics for this session")
                     Spacer()
                 }
             }
