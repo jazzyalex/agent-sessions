@@ -137,6 +137,7 @@ fi
         process.arguments = args
         var env = ProcessInfo.processInfo.environment
         if let codexBinary { env["CODEX_BIN"] = codexBinary.path }
+        if let terminalPATH = loginShellPATH() { env["PATH"] = terminalPATH }
         process.environment = env
 
         let pipe = Pipe()
@@ -149,5 +150,21 @@ fi
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let out = String(data: data, encoding: .utf8) ?? ""
         return (process.terminationStatus, out)
+    }
+
+    private static func loginShellPATH() -> String? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: shell)
+        p.arguments = ["-lic", "echo -n \"$PATH\""]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        do { try p.run() } catch { return nil }
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (path?.isEmpty == false) ? path : nil
     }
 }

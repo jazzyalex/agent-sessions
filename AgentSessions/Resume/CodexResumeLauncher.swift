@@ -23,7 +23,9 @@ final class CodexResumeLauncher: ObservableObject {
         lastError = nil
 
         let process = Process()
-        process.environment = environment
+        var env = environment
+        if let terminalPATH = Self.terminalPATH() { env["PATH"] = terminalPATH }
+        process.environment = env
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.currentDirectoryURL = package.workingDirectory
         process.arguments = ["bash", "-lc", package.shellCommand]
@@ -138,5 +140,22 @@ final class CodexResumeLauncher: ObservableObject {
             let rendered = newline ? String(line) + "\n" : String(line)
             consoleLines.append(ConsoleLine(text: rendered, kind: kind))
         }
+    }
+
+    // Derive PATH from the user's login+interactive shell (mirrors Terminal)
+    private static func terminalPATH() -> String? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: shell)
+        p.arguments = ["-lic", "echo -n \"$PATH\""]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        do { try p.run() } catch { return nil }
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (path?.isEmpty == false) ? path : nil
     }
 }
