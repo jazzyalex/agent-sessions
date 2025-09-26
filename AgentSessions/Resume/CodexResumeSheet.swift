@@ -334,8 +334,6 @@ struct CodexResumeSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Launch Mode")
-                    .fontWeight(.semibold)
                 Picker("Launch Mode", selection: Binding(get: { settings.launchMode }, set: { settings.setLaunchMode($0) })) {
                     ForEach(CodexLaunchMode.allCases) { mode in
                         Text(mode.title).tag(mode)

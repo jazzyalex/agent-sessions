@@ -200,46 +200,6 @@ struct PreferencesView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            sectionHeader("Resume Defaults")
-            VStack(alignment: .leading, spacing: 12) {
-                labeledRow("Default working directory") {
-                    HStack(spacing: 12) {
-                        TextField("Optional", text: $defaultResumeDirectory)
-                            .textFieldStyle(.roundedBorder)
-                            .onChange(of: defaultResumeDirectory) { _, _ in validateDefaultDirectory() }
-                        Button(action: pickDefaultDirectory) {
-                            Label("Choose…", systemImage: "folder")
-                                .labelStyle(.titleAndIcon)
-                        }
-                        .buttonStyle(.bordered)
-                        Button("Clear") {
-                            defaultResumeDirectory = ""
-                            validateDefaultDirectory()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-
-                if !defaultResumeDirectoryValid {
-                    Label("Directory must exist and be accessible", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                labeledRow("Preferred launch mode") {
-                    Picker("Launch Mode", selection: $preferredLaunchMode) {
-                        ForEach(CodexLaunchMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-                Text("Controls the default mode when resuming a session. You can still change it below if needed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.top, 4)
-
             CodexResumeSheet(initialSelection: initialResumeSelection, context: .preferences)
                 .environmentObject(indexer)
                 .padding(.top, 4)
