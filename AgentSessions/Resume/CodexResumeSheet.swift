@@ -96,8 +96,10 @@ struct CodexResumeSheet: View {
                     } else {
                         Text("Check Version")
                     }
-                case .idle, .failure:
+                case .idle:
                     Text("Check Version")
+                case .failure:
+                    Text("Codex is not found").foregroundStyle(.red)
                 }
             }
             .buttonStyle(.bordered)
@@ -165,16 +167,18 @@ struct CodexResumeSheet: View {
                             ProgressView()
                         case .success:
                             if let version = probeVersion { Text("Codex \(version.description)") } else { Text("Check Version") }
-                        case .idle, .failure:
+                        case .idle:
                             Text("Check Version")
+                        case .failure:
+                            Text("Codex is not found").foregroundStyle(.red)
                         }
                     }
                     .buttonStyle(.bordered)
                     .help("Run codex --version to confirm resume support")
 
-            Button("Resume Log") { Task { await runHealthCheck() } }
-                .buttonStyle(.bordered)
-                .help("Show resume diagnostics for this session")
+                    Button("Resume Log") { Task { await runHealthCheck() } }
+                        .buttonStyle(.bordered)
+                        .help("Show resume diagnostics for this session")
                     Spacer()
                 }
             }
@@ -316,20 +320,39 @@ struct CodexResumeSheet: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         } else {
-                            Text("Not found in PATH or override")
-                                .foregroundStyle(.secondary)
+                            Text("Codex is not found")
                                 .font(.caption)
+                                .foregroundStyle(.red)
                         }
-                        if codexBinary != nil {
-                            Button("Copy") {
-                                if let path = codexBinary?.path {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(path, forType: .string)
-                                }
+                    }
+
+                    // Provide a manual override path input right here for convenience
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Override path (optional)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            TextField("/path/to/codex", text: Binding(get: { settings.binaryOverride }, set: { settings.setBinaryOverride($0) }))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(maxWidth: 360)
+                            Button(action: pickCodexBinaryOverride) {
+                                Label("Browse…", systemImage: "square.and.arrow.down.on.square")
+                                    .labelStyle(.titleAndIcon)
+                            }
+                            .buttonStyle(.bordered)
+                            Button("Clear") {
+                                settings.setBinaryOverride("")
                             }
                             .buttonStyle(.bordered)
                         }
+                        if !settings.binaryOverride.isEmpty && !isExecutable(settings.binaryOverride) {
+                            Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
                     }
+                    .padding(.top, 4)
                 }
             }
 
@@ -592,6 +615,27 @@ struct CodexResumeSheet: View {
         await MainActor.run {
             healthOutput = output
             showingHealthOutput = true
+        }
+    }
+}
+
+// MARK: - Helpers (Preferences: override picker)
+
+private extension CodexResumeSheet {
+    func isExecutable(_ path: String) -> Bool {
+        let expanded = (path as NSString).expandingTildeInPath
+        return FileManager.default.isExecutableFile(atPath: expanded)
+    }
+
+    func pickCodexBinaryOverride() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                settings.setBinaryOverride(url.path)
+            }
         }
     }
 }
