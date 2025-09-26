@@ -297,12 +297,11 @@ enum FilterEngine {
 
         let q = parsed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { return true }
-        // Full-text across event text/tool fields - optimize by checking most likely fields first
+        // Full-text across rendered transcript fields only (not raw JSON) to reduce noise
         for e in session.events {
             if let t = e.text, !t.isEmpty, t.localizedCaseInsensitiveContains(q) { return true }
             if let ti = e.toolInput, !ti.isEmpty, ti.localizedCaseInsensitiveContains(q) { return true }
             if let to = e.toolOutput, !to.isEmpty, to.localizedCaseInsensitiveContains(q) { return true }
-            if e.rawJSON.localizedCaseInsensitiveContains(q) { return true }
         }
         return false
     }
