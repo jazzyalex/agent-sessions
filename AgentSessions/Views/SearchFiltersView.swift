@@ -7,17 +7,29 @@ struct SearchFiltersView: View {
     var body: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                Button(action: {
-                    // Focus the field and run an immediate recompute
-                    isSearchFocused = true
-                    indexer.recomputeNow()
-                }) { Image(systemName: "magnifyingglass") }
-                .buttonStyle(.borderless)
-                TextField("Search", text: $indexer.query)
+                TextField("Search", text: $indexer.queryDraft)
                     .textFieldStyle(.plain)
                     .frame(minWidth: 160)
                     .focused($isSearchFocused)
-                    .onSubmit { indexer.recomputeNow() }
+                    .onSubmit { indexer.applySearch() }
+
+                Button(action: { indexer.applySearch() }) {
+                    Image(systemName: "magnifyingglass")
+                }
+                .buttonStyle(.borderless)
+                .help("Search transcripts")
+
+                if !indexer.queryDraft.isEmpty {
+                    Button(action: {
+                        indexer.queryDraft = ""
+                        indexer.query = ""
+                        indexer.recomputeNow()
+                    }) {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear search")
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)

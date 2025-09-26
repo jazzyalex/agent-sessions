@@ -20,7 +20,9 @@ final class SessionIndexer: ObservableObject {
     @Published var hasEmptyDirectory: Bool = false
 
     // Filters
+    // Applied query (used for filtering) and draft (typed value)
     @Published var query: String = ""
+    @Published var queryDraft: String = ""
     @Published var dateFrom: Date? = nil
     @Published var dateTo: Date? = nil
     @Published var selectedModel: String? = nil
@@ -82,7 +84,6 @@ final class SessionIndexer: ObservableObject {
         // Debounced computed sessions
         let inputs = Publishers.CombineLatest4(
             $query
-                .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
                 .removeDuplicates(),
             $dateFrom.removeDuplicates(by: Self.dateEq),
             $dateTo.removeDuplicates(by: Self.dateEq),
@@ -130,6 +131,12 @@ final class SessionIndexer: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] raw in self?.projectFilterStored = raw }
             .store(in: &cancellables)
+    }
+
+    func applySearch() {
+        // Apply the user's draft query explicitly (not on each keystroke)
+        query = queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        recomputeNow()
     }
 
     // Trigger immediate recompute of filtered sessions using current filters (no debounce).
