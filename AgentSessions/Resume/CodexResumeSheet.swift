@@ -102,9 +102,9 @@ struct CodexResumeSheet: View {
             }
             .buttonStyle(.bordered)
             .help("Run codex --version to confirm resume support")
-            Button("Health Check") { Task { await runHealthCheck() } }
+            Button("Resume Log") { Task { await runHealthCheck() } }
                 .buttonStyle(.bordered)
-                .help("Validate JSONL and try both resume paths")
+                .help("Show resume diagnostics for this session")
         }
     }
 
