@@ -117,6 +117,30 @@ struct TranscriptPlainView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .frame(minWidth: 35)
                 }
+
+                Divider().frame(height: 20)
+
+                HStack(spacing: 2) {
+                    Button(action: { adjustFont(-1) }) {
+                        Image(systemName: "textformat.size.smaller")
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Make text smaller")
+                    .help("Smaller (Cmd-)")
+
+                    Button(action: { adjustFont(1) }) {
+                        Image(systemName: "textformat.size.larger")
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Make text bigger")
+                    .help("Bigger (Cmd+=)")
+                }
+
+                Button("Copy") { copyAll() }
+                    .buttonStyle(.borderless)
+                    .help("Copy entire transcript")
             }
 
             Divider().frame(height: 20)
@@ -151,29 +175,6 @@ struct TranscriptPlainView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 140)
                 .labelsHidden()
-
-                // Font size controls
-                HStack(spacing: 2) {
-                    Button(action: { adjustFont(-1) }) {
-                        Image(systemName: "textformat.size.smaller")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Make text smaller")
-                    .help("Smaller (Cmd-)")
-
-                    Button(action: { adjustFont(1) }) {
-                        Image(systemName: "textformat.size.larger")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Make text bigger")
-                    .help("Bigger (Cmd+=)")
-                }
-
-                Button("Copy") { copyAll() }
-                    .buttonStyle(.borderless)
-                    .help("Copy entire transcript")
             }
         }
         .padding(.horizontal, 10)

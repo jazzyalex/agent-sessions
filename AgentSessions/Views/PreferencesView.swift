@@ -186,6 +186,20 @@ struct PreferencesView: View {
                 }
             }
 
+            // Resume-specific defaults now live in Codex CLI Resume tab.
+        }
+    }
+
+    private var codexCLIResumeTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Codex CLI Resume")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Configure how Agent Sessions resumes saved Codex sessions and run diagnostics.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             sectionHeader("Resume Defaults")
             VStack(alignment: .leading, spacing: 12) {
                 labeledRow("Default working directory") {
@@ -220,22 +234,11 @@ struct PreferencesView: View {
                     }
                     .pickerStyle(.segmented)
                 }
-                Text("Controls the default mode when resuming a session. You can still change it in the resume sheet.")
+                Text("Controls the default mode when resuming a session. You can still change it below if needed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        }
-    }
-
-    private var codexCLIResumeTab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Codex CLI Resume")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("Configure how Agent Sessions resumes saved Codex sessions and run diagnostics.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            .padding(.top, 4)
 
             CodexResumeSheet(initialSelection: initialResumeSelection, context: .preferences)
                 .environmentObject(indexer)
