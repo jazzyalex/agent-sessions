@@ -16,9 +16,13 @@ fi
 APP_NAME_DEFAULT=$(sed -n 's/.*BuildableName = "\([^"]\+\)\.app".*/\1/p' AgentSessions.xcodeproj/xcshareddata/xcschemes/AgentSessions.xcscheme | head -n1)
 APP_NAME=${APP_NAME:-${APP_NAME_DEFAULT:-AgentSessions}}
 
+# Detect current marketing version to remind the user
+CURR_VERSION=$(sed -n 's/.*MARKETING_VERSION = \([0-9][0-9.]*\).*/\1/p' AgentSessions.xcodeproj/project.pbxproj | head -n1)
+
 VERSION=${VERSION:-}
 if [[ -z "${VERSION}" ]]; then
-  read -r -p "Version to release (e.g., 1.2): " VERSION
+  read -r -p "Version to release [current ${CURR_VERSION:-unknown}]: " VERSION
+  if [[ -z "${VERSION}" && -n "${CURR_VERSION:-}" ]]; then VERSION="$CURR_VERSION"; fi
 fi
 TAG=${TAG:-v$VERSION}
 
@@ -59,13 +63,29 @@ if [[ -z "$DEV_ID_APP" ]]; then
   exit 2
 fi
 
-echo "App     : $APP_NAME"
-echo "Version : $VERSION (tag $TAG)"
-echo "Team ID : ${TEAM_ID:-<not set>}"
-echo "Dev ID  : $DEV_ID_APP"
-echo "Notary  : $NOTARY_PROFILE"
+echo "App       : $APP_NAME"
+echo "Version   : $VERSION (tag $TAG)"
+echo "Team ID   : ${TEAM_ID:-<not set>}"
+echo "Dev ID    : $DEV_ID_APP"
+echo "Notary    : $NOTARY_PROFILE"
 
-read -r -p "Proceed with build/sign/notarize? [y/N] " go
+# Pre-deployment checklist (user confirmation)
+echo
+echo "Pre-deployment checklist:"
+echo "  - Screenshots updated: docs/assets/screenshot-V.png, screenshot-H.png"
+echo "  - CHANGELOG.md has a section for ${VERSION}"
+echo "  - README sections reviewed (links, instructions)"
+echo "  - GitHub CLI authenticated (gh auth status ok)"
+echo "  - Notary profile available in Keychain (${NOTARY_PROFILE})"
+
+# Simple validations
+if [[ -f "docs/CHANGELOG.md" ]]; then
+  if ! grep -E "^##[ ]*\[?${VERSION}\]?" -q docs/CHANGELOG.md; then
+    yellow "Note: docs/CHANGELOG.md has no explicit section for ${VERSION}. Release notes will fall back to git log."
+  fi
+fi
+
+read -r -p "Proceed with build/sign/notarize now? [y/N] " go
 if [[ "${go:-}" != "y" && "${go:-}" != "Y" ]]; then
   yellow "Aborted by user"
   exit 0
@@ -143,4 +163,3 @@ else
 fi
 
 green "Done."
-
