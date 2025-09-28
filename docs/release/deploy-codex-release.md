@@ -39,8 +39,8 @@ DEV_ID_APP="Developer ID Application: Your Name (24NDRU35WD)"
 ## Run the deployment helper
 
 ```bash
-chmod +x ./deploy-agent-sessions.sh
-VERSION=1.2 ./deploy-agent-sessions.sh
+chmod +x tools/release/deploy-agent-sessions.sh
+VERSION=1.2 tools/release/deploy-agent-sessions.sh
 ```
 
 You’ll be prompted to confirm key settings before the build starts. The script:

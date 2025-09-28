@@ -36,8 +36,8 @@ xcrun notarytool store-credentials AgentSessionsNotary \
 ## Automated path (recommended)
 
 ```bash
-chmod +x ./deploy-agent-sessions.sh
-VERSION=1.2 ./deploy-agent-sessions.sh
+chmod +x tools/release/deploy-agent-sessions.sh
+VERSION=1.2 tools/release/deploy-agent-sessions.sh
 ```
 
 Script flow:
@@ -76,4 +76,3 @@ DEV_ID_APP="Developer ID Application: Your Name (24NDRU35WD)"
 - Notary profile errors: re‑run `store-credentials` with correct Apple ID, team id, and app‑specific password
 - Gatekeeper says “Insufficient Context” on stapled DMG: verify notarization shows `Accepted`, and staple again
 - `gh` errors: confirm `gh auth status` and token scopes include `repo` and `workflow`
-
