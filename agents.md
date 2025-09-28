@@ -58,3 +58,10 @@ Exiting Plan Mode happens automatically when a subsequent prompt does not meet t
 - When the user says "commit", commit all uncommitted changes in one or more Conventional Commits as appropriate.
 - Prefer a single cohesive commit when a set of changes is logically related; otherwise, group by feature or subsystem, but still only after the user's explicit "commit".
 - Never assume partial commits are desired. If ambiguity exists, ask.
+
+## Docs Style Policy (Strict)
+
+- No emojis in any documentation. This applies to `README.md`, all files under `docs/`, issue/PR templates, and any other Markdown or text docs in the repo.
+- Use clear headings and plain text. Prefer descriptive words over pictograms.
+- Keep section titles short and consistent (e.g., "Requirements", "Install", "Usage").
+- Avoid decorative characters that may reduce accessibility or searchability.

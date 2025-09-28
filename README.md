@@ -10,24 +10,24 @@
 </div>
 
 
-## ✨ What it is
+## What it is
 Agent Sessions reads **JSON Lines** logs produced by [Codex CLI](https://github.com/your-codex-cli-link)  
 and builds a searchable timeline of your AI coding/chat sessions.
 
-- 🗂 **Sidebar**: sessions grouped by *Today*, *Yesterday*, date, or *Older*  
-- 📝 **Transcript view**: full session content with role-based styling and optional timestamps  
-- 🔍 **Search & filters**: full-text search, date ranges, model filter, message-type toggles  
-- 🎨 **SwiftUI design**: fast, clean, and privacy-friendly (local only)
+- Sidebar: sessions grouped by Today, Yesterday, date, or Older  
+- Transcript view: full session content with role-based styling and optional timestamps  
+- Search & filters: full-text search, date ranges, model filter, message-type toggles  
+- SwiftUI design: fast, clean, and privacy-friendly (local only)
 
 
-## 🧰 Requirements
+## Requirements
 - macOS 14 (Sonoma) or newer
 - Xcode 15+ / Swift 5.9+
 - Codex CLI logs in `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`  
   *(or `~/.codex/sessions/...`)*
 
 
-## 📦 Install
+## Install
 
 ### Option A — Download
 1. Grab the latest build from [Releases](https://github.com/jazzyalex/agent-sessions/releases).  
@@ -44,8 +44,7 @@ brew install --cask agent-sessions
 git clone https://github.com/jazzyalex/agent-sessions.git
 cd agent-sessions
 open AgentSessions.xcodeproj
-
----
+```
 
 ## Disclaimer
 
