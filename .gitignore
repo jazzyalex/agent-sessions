@@ -20,9 +20,14 @@ Package.resolved
 lint-report.json
 lint-xcode.txt
 
+# Local build artifacts
+/dist/
+
+# Local release env (excluded)
+tools/release/.env
+
 # Fastlane (if added later)
 fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots
 fastlane/test_output
-
