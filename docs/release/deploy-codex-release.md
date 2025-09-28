@@ -48,7 +48,7 @@ You’ll be prompted to confirm key settings before the build starts. The script
 1) Pre-checks: `xcodebuild`, `gh`, Notary profile, Developer ID identity
 2) Builds, signs, notarizes, staples the DMG (via `build_sign_notarize_release.sh`)
 3) Updates README and docs site download links to the new version
-4) Creates/updates the GitHub Release and uploads DMG + SHA256
+4) Creates/updates the GitHub Release and uploads DMG + SHA256 (auto-parses notes from docs/CHANGELOG.md section for the version; falls back to git log since last tag)
 5) Optionally updates local Homebrew cask if the tap is present
 
 ## Homebrew cask
@@ -67,4 +67,3 @@ If you maintain the `jazzyalex/homebrew-agent-sessions` tap locally, the script 
 - “codesign valid but does not seem to be an app”: harmless when verifying—continue to DMG notarization.
 - Notary profile errors: re-run `xcrun notarytool store-credentials ...` with correct Apple ID, team, and app-specific password.
 - `gh` errors: run `gh auth login` and ensure repo permissions include `repo` and `workflow` scopes.
-

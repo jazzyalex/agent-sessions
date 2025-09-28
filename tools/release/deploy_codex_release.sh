@@ -113,11 +113,36 @@ if [[ "${UPDATE_CASK}" == "1" ]] && [[ -d "/opt/homebrew/Library/Taps/jazzyalex/
 fi
 
 green "==> Creating or updating GitHub Release"
+# Build release notes if none provided
+TMP_NOTES=""
+if [[ -z "${NOTES_FILE}" ]]; then
+  if [[ -f "$REPO_ROOT/docs/CHANGELOG.md" ]]; then
+    # Extract section for this version: lines after '## [VERSION]' or '## VERSION' up to next '## '
+    TMP_NOTES=$(mktemp)
+    awk -v ver="$VERSION" '
+      BEGIN{insec=0}
+      /^##[ ]*\[?" ver ?"\]?([ )]/ {insec=1; next}
+      /^##[ ]/ && insec==1 {insec=0}
+      insec==1 {print}
+    ' "$REPO_ROOT/docs/CHANGELOG.md" > "$TMP_NOTES" || true
+    if [[ ! -s "$TMP_NOTES" ]]; then rm -f "$TMP_NOTES"; TMP_NOTES=""; fi
+  fi
+  if [[ -z "$TMP_NOTES" ]]; then
+    TMP_NOTES=$(mktemp)
+    prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]+' | grep -v "^$TAG$" | head -n1 || true)
+    if [[ -n "$prev" ]]; then
+      echo "Changes since $prev:" > "$TMP_NOTES"
+      git log --pretty='- %s' "$prev..HEAD" >> "$TMP_NOTES"
+    else
+      echo "Recent changes:" > "$TMP_NOTES"
+      git log -n 50 --pretty='- %s' >> "$TMP_NOTES"
+    fi
+  fi
+  NOTES_FILE="$TMP_NOTES"
+fi
 if gh release view "$TAG" >/dev/null 2>&1; then
   gh release upload "$TAG" "$DMG" "$DMG.sha256" --clobber
-  if [[ -n "${NOTES_FILE}" ]]; then
-    gh release edit "$TAG" --notes-file "$NOTES_FILE"
-  fi
+  if [[ -n "${NOTES_FILE}" ]]; then gh release edit "$TAG" --notes-file "$NOTES_FILE"; fi
 else
   if [[ -n "${NOTES_FILE}" ]]; then
     gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes-file "$NOTES_FILE"
