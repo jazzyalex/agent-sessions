@@ -22,20 +22,29 @@ NOTARY_PROFILE=${NOTARY_PROFILE:-AgentSessionsNotary}
 
 # Try to auto-detect a Developer ID Application identity if not provided
 DEV_ID_APP=${DEV_ID_APP:-}
+TEAM_ID=${TEAM_ID:-}
 if [[ -z "$DEV_ID_APP" ]]; then
-  DETECTED=$(security find-identity -v -p codesigning 2>/dev/null | grep -i "Developer ID Application" | head -n1 | sed -E 's/^[[:space:]]*[0-9]+\) [A-F0-9]+ \"([^\"]+)\".*$/\1/') || true
-  if [[ -n "$DETECTED" ]]; then DEV_ID_APP="$DETECTED"; fi
+  if [[ -n "$TEAM_ID" ]]; then
+    DETECTED=$(security find-identity -v -p codesigning 2>/dev/null | grep -i "Developer ID Application" | grep "(${TEAM_ID})" | head -n1 | sed -E 's/^[[:space:]]*[0-9]+\) [A-F0-9]+ \"([^\"]+)\".*$/\1/') || true
+    if [[ -n "$DETECTED" ]]; then DEV_ID_APP="$DETECTED"; fi
+  fi
+  if [[ -z "$DEV_ID_APP" ]]; then
+    DETECTED=$(security find-identity -v -p codesigning 2>/dev/null | grep -i "Developer ID Application" | head -n1 | sed -E 's/^[[:space:]]*[0-9]+\) [A-F0-9]+ \"([^\"]+)\".*$/\1/') || true
+    if [[ -n "$DETECTED" ]]; then DEV_ID_APP="$DETECTED"; fi
+  fi
 fi
 
 if [[ -z "$DEV_ID_APP" ]]; then
-  echo "ERROR: DEV_ID_APP not set and no Developer ID Application identity auto-detected." >&2
-  echo "Set DEV_ID_APP to something like: DEV_ID_APP=\"Developer ID Application: Your Name (TEAMID)\"" >&2
+  echo "ERROR: Could not locate a Developer ID Application identity in your keychain." >&2
+  echo "Provide DEV_ID_APP (and optionally TEAM_ID to filter), e.g.:" >&2
+  echo "  TEAM_ID=24NDRU35WD DEV_ID_APP=\"Developer ID Application: Your Name (24NDRU35WD)\" $0" >&2
   exit 2
 fi
 
 echo "App      : $APP_NAME"
 echo "Version  : $VERSION"
 echo "Identity : $DEV_ID_APP"
+if [[ -n "$TEAM_ID" ]]; then echo "Team ID  : $TEAM_ID"; fi
 echo "Notary   : $NOTARY_PROFILE"
 echo "Tag      : $TAG"
 
@@ -98,4 +107,3 @@ else
   echo "gh CLI not found. Skipping GitHub release upload."
   echo "Run: gh auth login; then rerun this script or run:\n  gh release create $TAG \"$DMG\" \"$DMG.sha256\" --title \"$APP_NAME $VERSION\" --notes \"Release $VERSION\"" 
 fi
-
