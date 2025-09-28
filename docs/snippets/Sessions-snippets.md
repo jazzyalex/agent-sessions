@@ -1,6 +1,6 @@
-# Codex-History — Session Snippets
+# Agent Sessions — Session Snippets
 
-Curated prompts and commands related to DMG/packaging from sessions that mention Codex-History. Review and prune.
+Curated prompts and commands related to DMG/packaging from sessions that mention Agent Sessions. Review and prune.
 
 ## Excerpts
 - **Verifying DEFINES_MODULE in relea e build**
