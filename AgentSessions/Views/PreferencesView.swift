@@ -7,6 +7,7 @@ struct PreferencesView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @State private var selectedTab: PreferencesTab?
     @ObservedObject private var resumeSettings = CodexResumeSettings.shared
+    @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
 
     private let initialResumeSelection: String?
 
@@ -219,6 +220,21 @@ struct PreferencesView: View {
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
+                }
+            }
+
+            sectionHeader("Usage Strip")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow("Show in-app Codex usage strip", isOn: $showUsageStrip)
+                HStack(spacing: 12) {
+                    Button("Refresh Probe") {
+                        CodexUsageModel.shared.refreshNow()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!showUsageStrip)
+                    Text("Parses recent Codex session logs for rate limits.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 

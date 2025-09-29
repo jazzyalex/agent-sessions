@@ -43,6 +43,8 @@
 		DAC510E5A5804B0C865935FC /* CodexResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46DF05EC4F8049DA9AF9E5CD /* CodexResumeCoordinator.swift */; };
 		580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */; };
 		D1E2F3A4B5C647E8F9A0B1C2 /* ResumeHealthCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */; };
+        C0D3E5A1700A000000000001 /* CodexStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000001 /* CodexStatusService.swift */; };
+        C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000002 /* UsageStripView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -100,6 +102,8 @@
         7E8EFD200FFA4B90BCCF3434 /* CodexResumeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeSheet.swift; path = AgentSessions/Resume/CodexResumeSheet.swift; sourceTree = SOURCE_ROOT; };
         46DF05EC4F8049DA9AF9E5CD /* CodexResumeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCoordinator.swift; path = AgentSessions/Resume/CodexResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
         C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ResumeHealthCheck.swift; path = AgentSessions/Resume/ResumeHealthCheck.swift; sourceTree = SOURCE_ROOT; };
+        C0D3E5A1700F000000000001 /* CodexStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexStatusService.swift; path = AgentSessions/CodexStatus/CodexStatusService.swift; sourceTree = SOURCE_ROOT; };
+        C0D3E5A1700F000000000002 /* UsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStripView.swift; path = AgentSessions/CodexStatus/UsageStripView.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -132,10 +136,20 @@
                 B0000012CA0A000100000001 /* Utilities */,
                 B0000012DA0A000100000001 /* Views */,
                 193183E356AF4718A7B9CB7F /* Resume */,
+                C0D3E5A1700C000000000001 /* CodexStatus */,
                 B00000112A0A000100000001 /* AgentSessionsApp.swift */
             );
             path = AgentSessions;
             sourceTree = SOURCE_ROOT;
+        };
+        C0D3E5A1700C000000000001 /* CodexStatus */ = {
+            isa = PBXGroup;
+            children = (
+                C0D3E5A1700F000000000001 /* CodexStatusService.swift */,
+                C0D3E5A1700F000000000002 /* UsageStripView.swift */
+            );
+            path = CodexStatus;
+            sourceTree = "<group>";
         };
         B00000127A0A000100000001 /* AgentSessionsTests */ = {isa = PBXGroup; children = (B00000120A0A000100000001 /* Info.plist */, B0000011FA0A000100000001 /* SessionParserTests.swift */, B00000173A0A000100000001 /* TranscriptBuilderTests.swift */, B00000179A0A000100000001 /* SessionTitleTests.swift */, A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */, F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */); path = AgentSessionsTests; sourceTree = SOURCE_ROOT; };
         B00000128A0A000100000001 /* Resources */ = {isa = PBXGroup; children = (B0000012EA0A000100000001 /* Fixtures */); path = Resources; sourceTree = SOURCE_ROOT; };
@@ -144,7 +158,6 @@
         B0000012AA0A000100000001 /* Model */ = {isa = PBXGroup; children = (B00000113A0A000100000001 /* Session.swift */, B00000114A0A000100000001 /* SessionEvent.swift */); path = Model; sourceTree = "<group>"; };
         B0000012BA0A000100000001 /* Services */ = {isa = PBXGroup; children = (B00000115A0A000100000001 /* SessionIndexer.swift */, B00000170A0A000100000001 /* TranscriptTheme.swift */, B00000171A0A000100000001 /* SessionTranscriptBuilder.swift */, B00000178A0A000100000001 /* AppAppearance.swift */, B0000017BA0A000100000001 /* LayoutMode.swift */); path = Services; sourceTree = "<group>"; };
         B0000012CA0A000100000001 /* Utilities */ = {isa = PBXGroup; children = (B0000011BA0A000100000001 /* JSONLReader.swift */, B0000011CA0A000100000001 /* PrettyJSON.swift */, B00000176A0A000100000001 /* PreferencesWindowController.swift */, B00000177A0A000100000001 /* FlowLayout.swift */); path = Utilities; sourceTree = "<group>"; };
-		// Insert new file into Utilities group
         B0000012DA0A000100000001 /* Views */ = {isa = PBXGroup; children = (B00000116A0A000100000001 /* SessionsListView.swift */, B00000175A0A000100000001 /* TranscriptPlainView.swift */, B00000117A0A000100000001 /* SessionTimelineView.swift */, B00000118A0A000100000001 /* EventInspectorView.swift */, B00000119A0A000100000001 /* SearchFiltersView.swift */, B0000011AA0A000100000001 /* PreferencesView.swift */); path = Views; sourceTree = "<group>"; };
         193183E356AF4718A7B9CB7F /* Resume */ = {
             isa = PBXGroup;
@@ -257,7 +270,9 @@
                 A8B49E614242407C854A3463 /* CodexResumeLauncher.swift in Sources */,
                 2B31E3D104D74827B0E65D5E /* CodexResumeSheet.swift in Sources */,
                 D1E2F3A4B5C647E8F9A0B1C2 /* ResumeHealthCheck.swift in Sources */,
-                DAC510E5A5804B0C865935FC /* CodexResumeCoordinator.swift in Sources */
+                DAC510E5A5804B0C865935FC /* CodexResumeCoordinator.swift in Sources */,
+                C0D3E5A1700A000000000001 /* CodexStatusService.swift in Sources */,
+                C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */
             ); runOnlyForDeploymentPostprocessing = 0; };
         B00000132A0A000100000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B000001C2A0A00010000000D /* SessionParserTests.swift in Sources */, B000001C2A0A000100000074 /* TranscriptBuilderTests.swift in Sources */, B000001C2A0A000100000078 /* SessionTitleTests.swift in Sources */, F7079DCFE7E6447F920DBF84 /* CodexResumeTests.swift in Sources */, 580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
