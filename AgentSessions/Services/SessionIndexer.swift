@@ -262,10 +262,25 @@ final class SessionIndexer: ObservableObject {
     func parseFile(at url: URL) -> Session? {
         #if DEBUG
         let t0 = Date()
+        #endif
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
+        #if DEBUG
         DBG("[FILE] start path=\(url.path) size=\(size) mtime=\(ISO8601DateFormatter().string(from: mtime)))")
+        #endif
+
+        // Fast path: heavy file → metadata-first, avoid full scan now
+        if size >= 20_000_000 { // 20 MB threshold
+            if let light = Self.lightweightSession(from: url, size: size, mtime: mtime) {
+                #if DEBUG
+                DBG(String(format: "[FILE] light path=%@ size=%d elapsed=%.0f ms (metadata-only)", url.lastPathComponent, size, Date().timeIntervalSince(t0) * 1000))
+                #endif
+                return light
+            }
+        }
+
+        #if DEBUG
         var linesRead = 0
         var dataImageLines = 0
         #endif
@@ -312,6 +327,77 @@ final class SessionIndexer: ObservableObject {
         #endif
         let session = Session(id: id, startTime: start, endTime: end, model: modelSeen, filePath: url.path, eventCount: events.count, events: events)
         return session
+    }
+
+    /// Build a lightweight Session by scanning only head/tail slices for timestamps and model, and estimating event count.
+    private static func lightweightSession(from url: URL, size: Int, mtime: Date) -> Session? {
+        let headBytes = 256 * 1024
+        let tailBytes = 256 * 1024
+        guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? fh.close() }
+
+        // Read head slice
+        let headData = try? fh.read(upToCount: headBytes) ?? Data()
+
+        // Read tail slice
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? size
+        var tailData: Data = Data()
+        if fileSize > tailBytes {
+            let offset = UInt64(fileSize - tailBytes)
+            try? fh.seek(toOffset: offset)
+            tailData = (try? fh.readToEnd()) ?? Data()
+        }
+
+        func lines(from data: Data, keepHead: Bool) -> [String] {
+            guard !data.isEmpty, let s = String(data: data, encoding: .utf8) else { return [] }
+            let parts = s.components(separatedBy: "\n")
+            if keepHead {
+                return Array(parts.prefix(300))
+            } else {
+                return Array(parts.suffix(300))
+            }
+        }
+
+        let headLines = lines(from: headData ?? Data(), keepHead: true)
+        let tailLines = lines(from: tailData, keepHead: false)
+
+        var model: String? = nil
+        var tmin: Date? = nil
+        var tmax: Date? = nil
+        var sampleCount = 0
+
+        func ingest(_ raw: String) {
+            let line = sanitizeImagePayload(raw)
+            let (ev, maybeModel) = parseLine(line, eventID: "light")
+            if let ts = ev.timestamp {
+                if tmin == nil || ts < tmin! { tmin = ts }
+                if tmax == nil || ts > tmax! { tmax = ts }
+            }
+            if model == nil, let m = maybeModel, !m.isEmpty { model = m }
+            sampleCount += 1
+        }
+
+        headLines.forEach(ingest)
+        tailLines.forEach(ingest)
+
+        // Estimate event count using head density
+        let headBytesRead = headData?.count ?? 1
+        let avgLineLen = max(16, headBytesRead / max(headLines.count, 1))
+        let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
+
+        let id = Self.hash(path: url.path)
+        let session = Session(id: id,
+                              startTime: tmin ?? (attrsDate(url, key: .creationDate) ?? mtime),
+                              endTime: tmax ?? mtime,
+                              model: model,
+                              filePath: url.path,
+                              eventCount: estEvents,
+                              events: [])
+        return session
+    }
+
+    private static func attrsDate(_ url: URL, key: FileAttributeKey) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[key] as? Date) ?? nil
     }
 
     // swiftlint:disable:next cyclomatic_complexity function_body_length
