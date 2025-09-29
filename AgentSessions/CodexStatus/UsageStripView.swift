@@ -26,11 +26,13 @@ private struct UsageMeter: View {
     let percent: Int
     let reset: String
     @AppStorage("StripShowResetTime") private var showResetTime: Bool = false
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
             Text(title).font(.footnote).bold()
             ProgressView(value: Double(percent), total: 100)
+                .tint(stripMonochrome ? .secondary : .accentColor)
                 .frame(width: 140)
             Text("\(percent)%").font(.footnote).monospacedDigit()
             if showResetTime, !reset.isEmpty {

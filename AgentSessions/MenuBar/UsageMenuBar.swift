@@ -64,6 +64,7 @@ struct UsageMenuBarLabel: View {
 }
 
 struct UsageMenuBarMenuContent: View {
+    @EnvironmentObject var indexer: SessionIndexer
     @EnvironmentObject var status: CodexUsageModel
     @Environment(\.openWindow) private var openWindow
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
@@ -71,16 +72,37 @@ struct UsageMenuBarMenuContent: View {
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            // Reset times first
+            if !status.fiveHourResetText.isEmpty || !status.weekResetText.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("5h").font(.callout).bold()
+                        Spacer()
+                        Text(status.fiveHourResetText.isEmpty ? "—" : status.fiveHourResetText)
+                            .font(.callout).monospacedDigit()
+                            .foregroundStyle(.primary)
+                    }
+                    HStack {
+                        Text("Wk").font(.callout).bold()
+                        Spacer()
+                        Text(status.weekResetText.isEmpty ? "—" : status.weekResetText)
+                            .font(.callout).monospacedDigit()
+                            .foregroundStyle(.primary)
+                    }
+                }
+                Divider()
+            }
+
             // Quick switches as radio-style rows (menu-friendly)
-            Text("Style").font(.caption).foregroundStyle(.secondary)
+            Text("Style").font(.caption).fontWeight(.semibold).foregroundStyle(.primary)
             radioRow(title: MenuBarStyleKind.bars.title, selected: (menuBarStyleRaw == MenuBarStyleKind.bars.rawValue)) {
                 menuBarStyleRaw = MenuBarStyleKind.bars.rawValue
             }
             radioRow(title: MenuBarStyleKind.numbers.title, selected: (menuBarStyleRaw == MenuBarStyleKind.numbers.rawValue)) {
                 menuBarStyleRaw = MenuBarStyleKind.numbers.rawValue
             }
-            Text("Scope").font(.caption).foregroundStyle(.secondary)
+            Text("Scope").font(.caption).fontWeight(.semibold).foregroundStyle(.primary)
             radioRow(title: MenuBarScope.fiveHour.title, selected: (menuBarScopeRaw == MenuBarScope.fiveHour.rawValue)) {
                 menuBarScopeRaw = MenuBarScope.fiveHour.rawValue
             }
@@ -90,23 +112,6 @@ struct UsageMenuBarMenuContent: View {
             radioRow(title: MenuBarScope.both.title, selected: (menuBarScopeRaw == MenuBarScope.both.rawValue)) {
                 menuBarScopeRaw = MenuBarScope.both.rawValue
             }
-
-            Divider()
-            if let line = status.usageLine, !line.isEmpty {
-                Text(line).font(.caption).foregroundStyle(.primary)
-            }
-            HStack {
-                Text("5h:")
-                Text("\(status.fiveHourPercent)%").monospacedDigit()
-                Spacer()
-                Text(status.fiveHourResetText.isEmpty ? "—" : status.fiveHourResetText)
-            }.foregroundStyle(.primary)
-            HStack {
-                Text("Wk:")
-                Text("\(status.weekPercent)%").monospacedDigit()
-                Spacer()
-                Text(status.weekResetText.isEmpty ? "—" : status.weekResetText)
-            }.foregroundStyle(.primary)
             Divider()
             Button("Open Agent Sessions") {
                 // Bring main window to front
@@ -116,7 +121,7 @@ struct UsageMenuBarMenuContent: View {
             Button("Refresh Limits") { status.refreshNow() }
             Toggle("Show in-app usage strip", isOn: $showUsageStrip)
             Divider()
-            Button("Open Preferences…") { PreferencesWindowController.shared.show(indexer: SessionIndexer()) }
+            Button("Open Preferences…") { PreferencesWindowController.shared.show(indexer: indexer, initialTab: .menuBar) }
         }
         .padding(8)
         .frame(minWidth: 280)

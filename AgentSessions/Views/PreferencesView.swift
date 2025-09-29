@@ -69,6 +69,8 @@ struct PreferencesView: View {
                 switch selectedTab ?? .general {
                 case .general:
                     generalTab
+                case .menuBar:
+                    menuBarTab
                 case .codexCLI:
                     codexCLITab
                 case .codexCLIResume:
@@ -126,13 +128,66 @@ struct PreferencesView: View {
 
             sectionHeader("Sessions Sidebar")
             VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Session titles", isOn: $indexer.showTitleColumn)
-                Divider()
-                toggleRow("Project names", isOn: $indexer.showProjectColumn)
-                Divider()
-                toggleRow("Message counts", isOn: $indexer.showMsgsColumn)
-                Divider()
-                toggleRow("Modified timestamps", isOn: $indexer.showModifiedColumn)
+                HStack(spacing: 24) {
+                    Toggle("Session titles", isOn: $indexer.showTitleColumn)
+                    Toggle("Project names", isOn: $indexer.showProjectColumn)
+                }
+                HStack(spacing: 24) {
+                    Toggle("Message counts", isOn: $indexer.showMsgsColumn)
+                    Toggle("Modified date", isOn: $indexer.showModifiedColumn)
+                }
+            }
+        }
+    }
+
+    private var menuBarTab: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            Text("Menu Bar")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            sectionHeader("Status Item")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow("Show menu bar usage", isOn: $menuBarEnabled)
+                labeledRow("Scope") {
+                    Picker("Scope", selection: $menuBarScopeRaw) {
+                        ForEach(MenuBarScope.allCases) { s in
+                            Text(s.title).tag(s.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!menuBarEnabled)
+                    .frame(maxWidth: 360)
+                }
+                labeledRow("Style") {
+                    Picker("Style", selection: $menuBarStyleRaw) {
+                        ForEach(MenuBarStyleKind.allCases) { k in
+                            Text(k.title).tag(k.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!menuBarEnabled)
+                    .frame(maxWidth: 360)
+                }
+                Text("Bars: 5h ▰▱▱▱▱ 17%  Wk ▰▰▱▱▱ 28%. Numbers only: 5h 17%  Wk 28%.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            sectionHeader("Codex CLI")
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Detected version:").font(.caption)
+                    Text(probeVersion?.description ?? "unknown").font(.caption).monospaced()
+                }
+                if let path = resolvedCodexPath {
+                    Text(path).font(.caption2).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 12) {
+                    Button("Re-probe") { probeCodex() }.buttonStyle(.bordered)
+                    Button("Open Codex CLI Preferences…") { selectedTab = .codexCLI }
+                        .buttonStyle(.bordered)
+                }
             }
         }
     }
@@ -232,6 +287,10 @@ struct PreferencesView: View {
             VStack(alignment: .leading, spacing: 12) {
                 toggleRow("Show in-app Codex usage strip", isOn: $showUsageStrip)
                 toggleRow("Show Reset Time in Usage Strip", isOn: $stripShowResetTime)
+                toggleRow("Always monochrome meters", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
+                    set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
+                ))
                 HStack(spacing: 12) {
                     Button("Refresh Probe") {
                         CodexUsageModel.shared.refreshNow()
@@ -244,33 +303,7 @@ struct PreferencesView: View {
                 }
             }
 
-            sectionHeader("Menu Bar")
-            VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Show menu bar usage", isOn: $menuBarEnabled)
-                labeledRow("Scope") {
-                    Picker("Scope", selection: $menuBarScopeRaw) {
-                        ForEach(MenuBarScope.allCases) { s in
-                            Text(s.title).tag(s.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!menuBarEnabled)
-                    .frame(maxWidth: 360)
-                }
-                labeledRow("Style") {
-                    Picker("Style", selection: $menuBarStyleRaw) {
-                        ForEach(MenuBarStyleKind.allCases) { k in
-                            Text(k.title).tag(k.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!menuBarEnabled)
-                    .frame(maxWidth: 360)
-                }
-                Text("Bars: 5h ▰▱▱▱▱ 17%  Wk ▰▰▱▱▱ 28%. Numbers only: 5h 17%  Wk 28%.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            // Menu Bar settings moved to dedicated tab
 
             // Resume-specific defaults now live in Codex CLI Resume tab.
         }
@@ -457,6 +490,7 @@ struct PreferencesView: View {
 
 enum PreferencesTab: String, CaseIterable, Identifiable {
     case general
+    case menuBar
     case codexCLI
     case codexCLIResume
 
@@ -465,6 +499,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: return "General"
+        case .menuBar: return "Menu Bar"
         case .codexCLI: return "Codex CLI"
         case .codexCLIResume: return "Codex CLI Resume"
         }
@@ -473,6 +508,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     var iconName: String {
         switch self {
         case .general: return "gearshape"
+        case .menuBar: return "menubar.rectangle"
         case .codexCLI: return "terminal"
         case .codexCLIResume: return "terminal.fill"
         }
@@ -480,7 +516,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 }
 
 private extension PreferencesView {
-    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .codexCLIResume] }
+    var visibleTabs: [PreferencesTab] { [.general, .menuBar, .codexCLI, .codexCLIResume] }
 }
 
 // MARK: - Probe helpers

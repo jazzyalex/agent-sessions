@@ -59,9 +59,11 @@ struct AgentSessionsApp: App {
         // Menu bar extra for limits (configurable)
         MenuBarExtra(isInserted: $menuBarEnabled) {
             UsageMenuBarMenuContent()
+                .environmentObject(indexer)
                 .environmentObject(usageModel)
         } label: {
             UsageMenuBarLabel()
+                .environmentObject(indexer)
                 .environmentObject(usageModel)
         }
     }
@@ -154,7 +156,7 @@ private struct ContentView: View {
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: { PreferencesWindowController.shared.show(indexer: indexer,
-                                                                          initialTab: .codexCLIResume,
+                                                                          initialTab: .general,
                                                                           initialResumeSelection: selection) }) {
                     Image(systemName: "gear")
                 }
