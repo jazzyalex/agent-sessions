@@ -13,7 +13,6 @@ struct PreferencesView: View {
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("MenuBarColorize") private var menuBarColorize: Bool = true
-    @AppStorage("MenuBarNumbersShowTinyBars") private var menuBarNumbersShowTinyBars: Bool = false
 
     private let initialResumeSelection: String?
 
@@ -253,8 +252,9 @@ struct PreferencesView: View {
                             Text(s.title).tag(s.rawValue)
                         }
                     }
+                    .pickerStyle(.segmented)
                     .disabled(!menuBarEnabled)
-                    .frame(maxWidth: 260)
+                    .frame(maxWidth: 360)
                 }
                 labeledRow("Style") {
                     Picker("Style", selection: $menuBarStyleRaw) {
@@ -262,16 +262,13 @@ struct PreferencesView: View {
                             Text(k.title).tag(k.rawValue)
                         }
                     }
+                    .pickerStyle(.segmented)
                     .disabled(!menuBarEnabled)
-                    .frame(maxWidth: 260)
+                    .frame(maxWidth: 360)
                 }
                 toggleRow("Colorize at 75/90/100%", isOn: $menuBarColorize)
                     .disabled(!menuBarEnabled)
-                if (MenuBarStyleKind(rawValue: menuBarStyleRaw) ?? .bars) == .numbers {
-                    toggleRow("Show tiny progress bar", isOn: $menuBarNumbersShowTinyBars)
-                        .disabled(!menuBarEnabled)
-                }
-                Text("Styles: Compact bars → e.g. 5h ▰▱▱▱▱ 17% | Wk ▰▰▱▱▱ 28%. Numbers → e.g. ⌛5h 17% | W 28%.")
+                Text("Bars: 5h ▰▱▱▱▱ 17% | Wk ▰▰▱▱▱ 28%. Numbers: 5h 17% | W 28%.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

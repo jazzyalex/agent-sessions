@@ -6,7 +6,6 @@ struct UsageMenuBarLabel: View {
     @AppStorage("MenuBarScope") private var scopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var styleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("MenuBarColorize") private var colorize: Bool = true
-    @AppStorage("MenuBarNumbersShowTinyBars") private var numbersShowTinyBars: Bool = false
 
     var body: some View {
         let scope = MenuBarScope(rawValue: scopeRaw) ?? .both
@@ -37,15 +36,13 @@ struct UsageMenuBarLabel: View {
                 return ("5h \(p5) \(five)% | Wk \(pw) \(week)%", colorFromSeverity(maxColor))
             }
         case .numbers:
-            let tiny5 = numbersShowTinyBars ? " " + segmentBar(for: five) : ""
-            let tinyW = numbersShowTinyBars ? " " + segmentBar(for: week) : ""
             switch scope {
             case .fiveHour:
-                return ("⌛5h \(five)%\(tiny5)", colorFromSeverity(maxColor))
+                return ("5h \(five)%", colorFromSeverity(maxColor))
             case .weekly:
-                return ("W \(week)%\(tinyW)", colorFromSeverity(maxColor))
+                return ("W \(week)%", colorFromSeverity(maxColor))
             case .both:
-                return ("⌛5h \(five)%\(tiny5) | W \(week)%\(tinyW)", colorFromSeverity(maxColor))
+                return ("5h \(five)% | W \(week)%", colorFromSeverity(maxColor))
             }
         }
     }
@@ -83,9 +80,29 @@ struct UsageMenuBarMenuContent: View {
     @EnvironmentObject var status: CodexUsageModel
     @Environment(\.openWindow) private var openWindow
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
+    @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
+    @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
+    @AppStorage("MenuBarColorize") private var menuBarColorize: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // Quick switches
+            Group {
+                Text("Style").font(.caption).foregroundStyle(.secondary)
+                Picker("Style", selection: $menuBarStyleRaw) {
+                    ForEach(MenuBarStyleKind.allCases) { k in
+                        Text(k.title).tag(k.rawValue)
+                    }
+                }.pickerStyle(.segmented)
+                Text("Scope").font(.caption).foregroundStyle(.secondary)
+                Picker("Scope", selection: $menuBarScopeRaw) {
+                    ForEach(MenuBarScope.allCases) { s in
+                        Text(s.title).tag(s.rawValue)
+                    }
+                }.pickerStyle(.segmented)
+                Toggle("Colorize", isOn: $menuBarColorize)
+            }
+            Divider()
             if let line = status.usageLine, !line.isEmpty {
                 Text(line).font(.caption)
             }

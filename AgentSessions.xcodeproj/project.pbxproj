@@ -35,8 +35,9 @@
 		98F981841A99410B940D88EE /* CodexLaunchMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979E7E3D0E14477885B20675 /* CodexLaunchMode.swift */; };
 		09C4E2A7C54B4EA3BF4473C7 /* CodexVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3233D9D6CE429AB0173B04 /* CodexVersion.swift */; };
 		C1273C054B784C768C90331B /* CommandExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37006C856FBE4448A658887B /* CommandExecutor.swift */; };
-		8DC56A2B614B4E77A1030420 /* CodexCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D641BFBD310B4157871F120F /* CodexCLIEnvironment.swift */; };
-		1AB05D2296DC475580CB52EF /* CodexResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */; };
+			8DC56A2B614B4E77A1030420 /* CodexCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D641BFBD310B4157871F120F /* CodexCLIEnvironment.swift */; };
+			1AB05D2296DC475580CB52EF /* CodexResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */; };
+			A1B2C3D4E5F60708AA55BB66 /* MenuBarPrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60708AA55BB65 /* MenuBarPrefs.swift */; };
 		DE0381FB79864EDCA2C58B03 /* CodexResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABCAEC00B184A1F871509E5 /* CodexResumeCommandBuilder.swift */; };
 		A8B49E614242407C854A3463 /* CodexResumeLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD535A048F4C41ECA4435F9A /* CodexResumeLauncher.swift */; };
 		2B31E3D104D74827B0E65D5E /* CodexResumeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E8EFD200FFA4B90BCCF3434 /* CodexResumeSheet.swift */; };
@@ -45,6 +46,7 @@
 		D1E2F3A4B5C647E8F9A0B1C2 /* ResumeHealthCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */; };
         C0D3E5A1700A000000000001 /* CodexStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000001 /* CodexStatusService.swift */; };
         C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000002 /* UsageStripView.swift */; };
+        7E6B9F3E2F8E4C05A0E9B6D1 /* UsageMenuBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
