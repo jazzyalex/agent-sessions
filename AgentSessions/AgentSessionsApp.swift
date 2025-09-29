@@ -8,7 +8,6 @@ struct AgentSessionsApp: App {
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
-    @AppStorage("MenuBarColorize") private var menuBarColorize: Bool = true
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.vertical.rawValue
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false

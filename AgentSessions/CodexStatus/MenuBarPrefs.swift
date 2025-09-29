@@ -18,6 +18,5 @@ enum MenuBarStyleKind: String, CaseIterable, Identifiable {
     case bars
     case numbers
     var id: String { rawValue }
-    var title: String { self == .bars ? "Compact bars" : "Ultra-compact numbers" }
+    var title: String { self == .bars ? "Bars" : "Numbers only" }
 }
-

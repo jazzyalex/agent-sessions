@@ -12,7 +12,7 @@ struct PreferencesView: View {
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
-    @AppStorage("MenuBarColorize") private var menuBarColorize: Bool = true
+    @AppStorage("StripShowResetTime") private var stripShowResetTime: Bool = false
 
     private let initialResumeSelection: String?
 
@@ -231,6 +231,7 @@ struct PreferencesView: View {
             sectionHeader("Usage Strip")
             VStack(alignment: .leading, spacing: 12) {
                 toggleRow("Show in-app Codex usage strip", isOn: $showUsageStrip)
+                toggleRow("Show Reset Time in Usage Strip", isOn: $stripShowResetTime)
                 HStack(spacing: 12) {
                     Button("Refresh Probe") {
                         CodexUsageModel.shared.refreshNow()
@@ -266,9 +267,7 @@ struct PreferencesView: View {
                     .disabled(!menuBarEnabled)
                     .frame(maxWidth: 360)
                 }
-                toggleRow("Colorize at 75/90/100%", isOn: $menuBarColorize)
-                    .disabled(!menuBarEnabled)
-                Text("Bars: 5h ▰▱▱▱▱ 17% | Wk ▰▰▱▱▱ 28%. Numbers: 5h 17% | W 28%.")
+                Text("Bars: 5h ▰▱▱▱▱ 17%  Wk ▰▰▱▱▱ 28%. Numbers only: 5h 17%  Wk 28%.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+#if os(macOS)
+import IOKit.ps
+#endif
 
 // ILLUSTRATIVE: Minimal model + service for Codex /status usage parsing.
 
@@ -30,6 +33,8 @@ final class CodexUsageModel: ObservableObject {
 
     private var service: CodexStatusService?
     private var isEnabled: Bool = false
+    private var stripVisible: Bool = false
+    private var menuVisible: Bool = false
 
     func setEnabled(_ enabled: Bool) {
         guard enabled != isEnabled else { return }
@@ -42,8 +47,24 @@ final class CodexUsageModel: ObservableObject {
     }
 
     func setVisible(_ visible: Bool) {
+        // Back-compat shim: treat as strip visibility
+        setStripVisible(visible)
+    }
+
+    func setStripVisible(_ visible: Bool) {
+        stripVisible = visible
+        propagateVisibility()
+    }
+
+    func setMenuVisible(_ visible: Bool) {
+        menuVisible = visible
+        propagateVisibility()
+    }
+
+    private func propagateVisibility() {
+        let union = stripVisible || menuVisible
         Task.detached { [weak self] in
-            await self?.service?.setVisible(visible)
+            await self?.service?.setVisible(union)
         }
     }
 
@@ -130,6 +151,7 @@ actor CodexStatusService {
     private var bufferOut = Data()
     private var bufferErr = Data()
     private var snapshot = CodexUsageSnapshot()
+    private var lastFiveHourResetDate: Date?
     private var shouldRun: Bool = true
     private var visible: Bool = false
     private var backoffSeconds: UInt64 = 1
@@ -366,8 +388,9 @@ actor CodexStatusService {
             var s = snapshot
             if let p = summary.fiveHour.usedPercent { s.fiveHourPercent = clampPercent(p) }
             if let p = summary.weekly.usedPercent { s.weekPercent = clampPercent(p) }
-            s.fiveHourResetText = formatReset(summary.fiveHour.resetAt, now: Date())
-            s.weekResetText = formatReset(summary.weekly.resetAt, now: Date())
+            s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
+            s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
+            lastFiveHourResetDate = summary.fiveHour.resetAt
             s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
             snapshot = s
             updateHandler(snapshot)
@@ -375,20 +398,40 @@ actor CodexStatusService {
     }
 
     private func nextInterval() -> UInt64 {
-        // Default: 300s when not visible; 60s when visible.
+        // Policy:
+        // - On AC power: 60s when any indicator visible (strip OR menubar), else 300s.
+        // - On battery: always 300s (keep it simple; no urgency override).
+        // - Urgency still pins to 60s on AC power only.
+        if !Self.onACPower() {
+            return 300 * 1_000_000_000
+        }
         var seconds: UInt64 = visible ? 60 : 300
-        let urgent = isUrgent()
-        if urgent { seconds = 60 }
+        if isUrgent() { seconds = 60 }
         return seconds * 1_000_000_000
     }
 
     private func isUrgent() -> Bool {
         if snapshot.fiveHourPercent >= 80 { return true }
-        if let reset = parseResetDate(snapshot.fiveHourResetText) {
-            let now = Date()
-            if reset.timeIntervalSince(now) <= 15 * 60 { return true }
+        if let reset = lastFiveHourResetDate {
+            if reset.timeIntervalSinceNow <= 15 * 60 { return true }
         }
         return false
+    }
+
+    private static func onACPower() -> Bool {
+        // Best-effort detection using IOKit; fall back to assuming AC if unavailable.
+        #if os(macOS)
+        let blob = IOPSCopyPowerSourcesInfo().takeRetainedValue()
+        if let typeCF = IOPSGetProvidingPowerSourceType(blob)?.takeRetainedValue() {
+            let type = typeCF as String
+            return type == (kIOPSACPowerValue as String)
+        }
+        #endif
+        // Fallback: if Low Power Mode is enabled, treat as battery-like
+        if #available(macOS 12.0, *) {
+            if ProcessInfo.processInfo.isLowPowerModeEnabled { return false }
+        }
+        return true
     }
 
     // MARK: - Log probe helpers
@@ -501,49 +544,28 @@ actor CodexStatusService {
         return text.split(separator: "\n", omittingEmptySubsequences: true).map { String($0) }
     }
 
-    private func formatReset(_ date: Date?, now: Date) -> String {
+    private func formatCodexReset(_ date: Date?, windowMinutes: Int?) -> String {
         guard let date else { return "" }
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.timeZone = TimeZone(identifier: "America/Los_Angeles")
-        df.dateFormat = "yyyy-MM-dd HH:mm"
-        let ts = df.string(from: date)
-        let delta = max(0, Int(date.timeIntervalSince(now)))
-        let days = delta / 86_400
-        let hours = (delta % 86_400) / 3600
-        let mins = (delta % 3600) / 60
-        var parts: [String] = []
-        if days > 0 { parts.append("\(days)d") }
-        if hours > 0 || days > 0 { parts.append("\(hours)h") }
-        parts.append("\(mins)m")
-        return "\(ts) (in \(parts.joined(separator: " ")))"
+        let tz = TimeZone(identifier: "America/Los_Angeles")
+        let timeOnly = DateFormatter()
+        timeOnly.locale = Locale(identifier: "en_US_POSIX")
+        timeOnly.timeZone = tz
+        timeOnly.dateFormat = "HH:mm"
+        let t = timeOnly.string(from: date)
+        // 5-hour window → (resets HH:mm). Weekly → resets HH:mm on d MMM
+        if let w = windowMinutes, w <= 360 { // treat <=6h as 5h style
+            return "resets \(t)"
+        } else {
+            let dayFmt = DateFormatter()
+            dayFmt.locale = Locale(identifier: "en_US_POSIX")
+            dayFmt.timeZone = tz
+            dayFmt.dateFormat = "d MMM"
+            let d = dayFmt.string(from: date)
+            return "resets \(t) on \(d)"
+        }
     }
 
     private func clampPercent(_ v: Int) -> Int { max(0, min(100, v)) }
-
-    private func parseResetDate(_ text: String) -> Date? {
-        guard !text.isEmpty else { return nil }
-        let tz = TimeZone(identifier: "America/Los_Angeles")
-
-        // Try a few tolerant formats
-        let fmts = [
-            "HH:mm",
-            "h:mm a",
-            "MMM d, yyyy h:mm a",
-            "MMM d, yyyy HH:mm",
-            "d MMM yyyy HH:mm",
-            "HH:mm 'on' d MMM",
-            "h:mm a 'on' d MMM"
-        ]
-        for f in fmts {
-            let df = DateFormatter()
-            df.locale = Locale(identifier: "en_US_POSIX")
-            df.timeZone = tz
-            df.dateFormat = f
-            if let d = df.date(from: text) { return d }
-        }
-        return nil
-    }
 
     private func stripANSI(_ s: String) -> String {
         var result = s
