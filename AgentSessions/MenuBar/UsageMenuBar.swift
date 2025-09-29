@@ -141,7 +141,7 @@ struct UsageMenuBarMenuContent: View {
             Button("Open Preferences…") { PreferencesWindowController.shared.show(indexer: indexer, initialTab: .menuBar) }
         }
         .padding(8)
-        .frame(minWidth: 280)
+        .frame(minWidth: 360)
     }
 }
 
