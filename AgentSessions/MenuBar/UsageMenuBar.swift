@@ -73,32 +73,38 @@ struct UsageMenuBarMenuContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Reset times at the top: one line per window, bold, standard colors
+            // Reset times at the top: one line per window, with bar + percent and a plain reset time
             VStack(alignment: .leading, spacing: 6) {
                 Text("Reset times")
                     .font(.body)
                     .foregroundStyle(.primary)
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Text("5h:")
+                        .font(.body).fontWeight(.semibold)
+                    Text(inlineBar(status.fiveHourPercent))
                         .font(.body)
-                        .fontWeight(.semibold)
+                    Text("\(status.fiveHourPercent)%")
+                        .font(.body).monospacedDigit()
+                    Spacer(minLength: 12)
                     Text(displayReset(status.fiveHourResetText))
                         .font(.body)
-                        .fontWeight(.bold)
                         .monospacedDigit()
-                        .foregroundColor(colorFor(percent: status.fiveHourPercent))
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Text("Wk:")
+                        .font(.body).fontWeight(.semibold)
+                    Text(inlineBar(status.weekPercent))
                         .font(.body)
-                        .fontWeight(.semibold)
+                    Text("\(status.weekPercent)%")
+                        .font(.body).monospacedDigit()
+                    Spacer(minLength: 12)
                     Text(displayReset(status.weekResetText))
                         .font(.body)
-                        .fontWeight(.bold)
                         .monospacedDigit()
-                        .foregroundColor(colorFor(percent: status.weekPercent))
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -177,4 +183,11 @@ private func displayReset(_ text: String) -> String {
         return String(text.dropFirst("resets ".count))
     }
     return text
+}
+
+private func inlineBar(_ percent: Int, segments: Int = 5) -> String {
+    let p = max(0, min(100, percent))
+    let filled = min(segments, Int(round(Double(p) / 100.0 * Double(segments))))
+    let empty = max(0, segments - filled)
+    return String(repeating: "▰", count: filled) + String(repeating: "▱", count: empty)
 }
