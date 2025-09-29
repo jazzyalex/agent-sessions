@@ -78,36 +78,10 @@ struct UsageMenuBarMenuContent: View {
                 Text("Reset times")
                     .font(.body)
                     .foregroundStyle(.primary)
-                HStack(spacing: 8) {
-                    Text("5h:")
-                        .font(.body).fontWeight(.semibold)
-                    Text(inlineBar(status.fiveHourPercent))
-                        .font(.body)
-                    Text("\(status.fiveHourPercent)%")
-                        .font(.body).monospacedDigit()
-                    Spacer(minLength: 12)
-                    Text(displayReset(status.fiveHourResetText))
-                        .font(.body)
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                HStack(spacing: 8) {
-                    Text("Wk:")
-                        .font(.body).fontWeight(.semibold)
-                    Text(inlineBar(status.weekPercent))
-                        .font(.body)
-                    Text("\(status.weekPercent)%")
-                        .font(.body).monospacedDigit()
-                    Spacer(minLength: 12)
-                    Text(displayReset(status.weekResetText))
-                        .font(.body)
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                Text(resetLine(label: "5h:", percent: status.fiveHourPercent, reset: displayReset(status.fiveHourResetText)))
+                    .foregroundStyle(.primary)
+                Text(resetLine(label: "Wk:", percent: status.weekPercent, reset: displayReset(status.weekResetText)))
+                    .foregroundStyle(.primary)
             }
             Divider()
 
@@ -190,4 +164,25 @@ private func inlineBar(_ percent: Int, segments: Int = 5) -> String {
     let filled = min(segments, Int(round(Double(p) / 100.0 * Double(segments))))
     let empty = max(0, segments - filled)
     return String(repeating: "▰", count: filled) + String(repeating: "▱", count: empty)
+}
+
+private func resetLine(label: String, percent: Int, reset: String) -> AttributedString {
+    var line = AttributedString("")
+    var labelAttr = AttributedString(label + " ")
+    labelAttr.font = .system(size: NSFont.systemFontSize, weight: .semibold)
+    line.append(labelAttr)
+
+    var barAttr = AttributedString(inlineBar(percent) + " ")
+    barAttr.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    line.append(barAttr)
+
+    var percentAttr = AttributedString("\(percent)%  ")
+    percentAttr.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    line.append(percentAttr)
+
+    var resetAttr = AttributedString(reset)
+    resetAttr.font = .systemFont(ofSize: NSFont.systemFontSize)
+    line.append(resetAttr)
+
+    return line
 }
