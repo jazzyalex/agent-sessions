@@ -146,7 +146,7 @@ struct PreferencesView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            sectionHeader("Status Item")
+            // Status item settings (no extra section header per request)
             VStack(alignment: .leading, spacing: 12) {
                 toggleRow("Show menu bar usage", isOn: $menuBarEnabled)
                 labeledRow("Scope") {

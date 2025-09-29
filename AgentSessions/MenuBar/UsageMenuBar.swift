@@ -73,36 +73,47 @@ struct UsageMenuBarMenuContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Reset times first
-            if !status.fiveHourResetText.isEmpty || !status.weekResetText.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("5h").font(.callout).bold()
-                        Spacer()
-                        Text(status.fiveHourResetText.isEmpty ? "—" : status.fiveHourResetText)
-                            .font(.callout).monospacedDigit()
-                            .foregroundStyle(.primary)
-                    }
-                    HStack {
-                        Text("Wk").font(.callout).bold()
-                        Spacer()
-                        Text(status.weekResetText.isEmpty ? "—" : status.weekResetText)
-                            .font(.callout).monospacedDigit()
-                            .foregroundStyle(.primary)
-                    }
+            // Reset times at the top: one line per window, bold, standard colors
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Reset times")
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                HStack(spacing: 6) {
+                    Text("5h:")
+                        .font(.body)
+                        .fontWeight(.semibold)
+                    Text(displayReset(status.fiveHourResetText))
+                        .font(.body)
+                        .fontWeight(.bold)
+                        .monospacedDigit()
+                        .foregroundColor(colorFor(percent: status.fiveHourPercent))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
-                Divider()
+                HStack(spacing: 6) {
+                    Text("Wk:")
+                        .font(.body)
+                        .fontWeight(.semibold)
+                    Text(displayReset(status.weekResetText))
+                        .font(.body)
+                        .fontWeight(.bold)
+                        .monospacedDigit()
+                        .foregroundColor(colorFor(percent: status.weekPercent))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
+            Divider()
 
             // Quick switches as radio-style rows (menu-friendly)
-            Text("Style").font(.caption).fontWeight(.semibold).foregroundStyle(.primary)
+            Text("Style").font(.body).fontWeight(.semibold).foregroundStyle(.primary)
             radioRow(title: MenuBarStyleKind.bars.title, selected: (menuBarStyleRaw == MenuBarStyleKind.bars.rawValue)) {
                 menuBarStyleRaw = MenuBarStyleKind.bars.rawValue
             }
             radioRow(title: MenuBarStyleKind.numbers.title, selected: (menuBarStyleRaw == MenuBarStyleKind.numbers.rawValue)) {
                 menuBarStyleRaw = MenuBarStyleKind.numbers.rawValue
             }
-            Text("Scope").font(.caption).fontWeight(.semibold).foregroundStyle(.primary)
+            Text("Scope").font(.body).fontWeight(.semibold).foregroundStyle(.primary)
             radioRow(title: MenuBarScope.fiveHour.title, selected: (menuBarScopeRaw == MenuBarScope.fiveHour.rawValue)) {
                 menuBarScopeRaw = MenuBarScope.fiveHour.rawValue
             }
@@ -151,4 +162,19 @@ private struct RadioRow: View {
 
 private func radioRow(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
     RadioRow(title: title, selected: selected, action: action)
+}
+
+// MARK: - Coloring helpers (menu content supports colors)
+private func colorFor(percent: Int) -> Color {
+    if percent >= 90 { return .red }
+    if percent >= 76 { return .yellow }
+    return .green
+}
+
+private func displayReset(_ text: String) -> String {
+    guard !text.isEmpty else { return "—" }
+    if text.hasPrefix("resets ") {
+        return String(text.dropFirst("resets ".count))
+    }
+    return text
 }
