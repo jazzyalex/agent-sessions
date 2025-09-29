@@ -8,6 +8,12 @@ struct PreferencesView: View {
     @State private var selectedTab: PreferencesTab?
     @ObservedObject private var resumeSettings = CodexResumeSettings.shared
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
+    // Menu bar prefs
+    @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
+    @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
+    @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
+    @AppStorage("MenuBarColorize") private var menuBarColorize: Bool = true
+    @AppStorage("MenuBarNumbersShowTinyBars") private var menuBarNumbersShowTinyBars: Bool = false
 
     private let initialResumeSelection: String?
 
@@ -236,6 +242,38 @@ struct PreferencesView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            sectionHeader("Menu Bar")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow("Show menu bar usage", isOn: $menuBarEnabled)
+                labeledRow("Scope") {
+                    Picker("Scope", selection: $menuBarScopeRaw) {
+                        ForEach(MenuBarScope.allCases) { s in
+                            Text(s.title).tag(s.rawValue)
+                        }
+                    }
+                    .disabled(!menuBarEnabled)
+                    .frame(maxWidth: 260)
+                }
+                labeledRow("Style") {
+                    Picker("Style", selection: $menuBarStyleRaw) {
+                        ForEach(MenuBarStyleKind.allCases) { k in
+                            Text(k.title).tag(k.rawValue)
+                        }
+                    }
+                    .disabled(!menuBarEnabled)
+                    .frame(maxWidth: 260)
+                }
+                toggleRow("Colorize at 75/90/100%", isOn: $menuBarColorize)
+                    .disabled(!menuBarEnabled)
+                if (MenuBarStyleKind(rawValue: menuBarStyleRaw) ?? .bars) == .numbers {
+                    toggleRow("Show tiny progress bar", isOn: $menuBarNumbersShowTinyBars)
+                        .disabled(!menuBarEnabled)
+                }
+                Text("Styles: Compact bars → e.g. 5h ▰▱▱▱▱ 17% | Wk ▰▰▱▱▱ 28%. Numbers → e.g. ⌛5h 17% | W 28%.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             // Resume-specific defaults now live in Codex CLI Resume tab.

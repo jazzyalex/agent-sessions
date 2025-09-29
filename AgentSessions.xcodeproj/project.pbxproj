@@ -104,6 +104,7 @@
         C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ResumeHealthCheck.swift; path = AgentSessions/Resume/ResumeHealthCheck.swift; sourceTree = SOURCE_ROOT; };
         C0D3E5A1700F000000000001 /* CodexStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexStatusService.swift; path = AgentSessions/CodexStatus/CodexStatusService.swift; sourceTree = SOURCE_ROOT; };
         C0D3E5A1700F000000000002 /* UsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStripView.swift; path = AgentSessions/CodexStatus/UsageStripView.swift; sourceTree = SOURCE_ROOT; };
+        E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageMenuBar.swift; path = AgentSessions/MenuBar/UsageMenuBar.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -146,7 +147,8 @@
             isa = PBXGroup;
             children = (
                 C0D3E5A1700F000000000001 /* CodexStatusService.swift */,
-                C0D3E5A1700F000000000002 /* UsageStripView.swift */
+                C0D3E5A1700F000000000002 /* UsageStripView.swift */,
+                E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */
             );
             path = CodexStatus;
             sourceTree = "<group>";
@@ -272,7 +274,8 @@
                 D1E2F3A4B5C647E8F9A0B1C2 /* ResumeHealthCheck.swift in Sources */,
                 DAC510E5A5804B0C865935FC /* CodexResumeCoordinator.swift in Sources */,
                 C0D3E5A1700A000000000001 /* CodexStatusService.swift in Sources */,
-                C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */
+                C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */,
+                7E6B9F3E2F8E4C05A0E9B6D1 /* UsageMenuBar.swift in Sources */
             ); runOnlyForDeploymentPostprocessing = 0; };
         B00000132A0A000100000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B000001C2A0A00010000000D /* SessionParserTests.swift in Sources */, B000001C2A0A000100000074 /* TranscriptBuilderTests.swift in Sources */, B000001C2A0A000100000078 /* SessionTitleTests.swift in Sources */, F7079DCFE7E6447F920DBF84 /* CodexResumeTests.swift in Sources */, 580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */

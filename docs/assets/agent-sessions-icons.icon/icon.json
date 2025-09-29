@@ -6,7 +6,13 @@
     {
       "layers" : [
         {
+          "blend-mode" : "normal",
           "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.00000,0.58980,1.00000,1.00000"
+              }
+            },
             {
               "appearance" : "dark",
               "value" : {
