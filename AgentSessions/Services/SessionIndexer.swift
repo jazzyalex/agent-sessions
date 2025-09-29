@@ -3,6 +3,14 @@ import Combine
 import CryptoKit
 import SwiftUI
 
+// DEBUG logging helper (no-ops in Release)
+#if DEBUG
+@inline(__always) private func DBG(_ message: @autoclosure () -> String) {
+    print(message())
+}
+#else
+@inline(__always) private func DBG(_ message: @autoclosure () -> String) {}
+#endif
 // swiftlint:disable type_body_length
 final class SessionIndexer: ObservableObject {
     // Source of truth
@@ -168,6 +176,10 @@ final class SessionIndexer: ObservableObject {
 
     func refresh() {
         let root = sessionsRoot()
+        #if DEBUG
+        let t0 = Date()
+        DBG("[IDX] start root=\(root.path)")
+        #endif
         isIndexing = true
         progressText = "Scanning…"
         filesProcessed = 0
@@ -196,8 +208,16 @@ final class SessionIndexer: ObservableObject {
                     }
                 }
             }
+            #if DEBUG
+            let t1 = Date()
+            DBG(String(format: "[IDX] enumerated files count=%d in %.1f ms", found.count, (t1.timeIntervalSince(t0) * 1000)))
+            #endif
 
             let sortedFiles = found.sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
+            #if DEBUG
+            let t2 = Date()
+            DBG(String(format: "[IDX] sorted in %.1f ms", (t2.timeIntervalSince(t1) * 1000)))
+            #endif
             DispatchQueue.main.async {
                 self.totalFiles = sortedFiles.count
                 self.hasEmptyDirectory = sortedFiles.isEmpty
@@ -206,6 +226,8 @@ final class SessionIndexer: ObservableObject {
             var sessions: [Session] = []
             sessions.reserveCapacity(sortedFiles.count)
 
+            var parsedCount = 0
+            let total = sortedFiles.count
             for (i, url) in sortedFiles.enumerated() {
                 if let session = self.parseFile(at: url) {
                     sessions.append(session)
@@ -216,10 +238,21 @@ final class SessionIndexer: ObservableObject {
                     self.allSessions = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
 
                 }
+                #if DEBUG
+                parsedCount += 1
+                if parsedCount % 50 == 0 || parsedCount == total {
+                    let dt = Date().timeIntervalSince(t0) * 1000
+                    let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? -1
+                    DBG(String(format: "[IDX] parsed %d/%d elapsed=%.0f ms last=%@ size=%d", parsedCount, total, dt, url.lastPathComponent, size))
+                }
+                #endif
             }
 
             DispatchQueue.main.async {
                 self.isIndexing = false
+                #if DEBUG
+                DBG(String(format: "[IDX] done total=%d elapsed=%.0f ms", sessions.count, Date().timeIntervalSince(t0) * 1000))
+                #endif
             }
         }
     }
@@ -227,6 +260,15 @@ final class SessionIndexer: ObservableObject {
     // MARK: - Parsing
 
     func parseFile(at url: URL) -> Session? {
+        #if DEBUG
+        let start = Date()
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
+        let mtime = (attrs[.modificationDate] as? Date) ?? Date()
+        DBG("[FILE] start path=\(url.path) size=\(size) mtime=\(ISO8601DateFormatter().string(from: mtime)))")
+        var linesRead = 0
+        var dataImageLines = 0
+        #endif
         let reader = JSONLReader(url: url)
         var events: [SessionEvent] = []
         var modelSeen: String? = nil
@@ -234,6 +276,10 @@ final class SessionIndexer: ObservableObject {
         do {
             try reader.forEachLine { line in
                 idx += 1
+                #if DEBUG
+                linesRead += 1
+                if line.contains("data:image") || line.contains("\"input_image\"") { dataImageLines += 1 }
+                #endif
                 let (event, maybeModel) = Self.parseLine(line, eventID: self.eventID(for: url, index: idx))
                 if let m = maybeModel, modelSeen == nil { modelSeen = m }
                 events.append(event)
@@ -254,6 +300,15 @@ final class SessionIndexer: ObservableObject {
             }
         }
         let id = Self.hash(path: url.path)
+        #if DEBUG
+        let totalMs = Date().timeIntervalSince(start) * 1000
+        if totalMs > 1000 {
+            DBG(String(format: "[FILE][SLOW] path=%@ size=%d lines=%d elapsed=%.0f ms", url.lastPathComponent, size, linesRead, totalMs))
+        } else {
+            DBG(String(format: "[FILE] parsed path=%@ events=%d lines=%d elapsed=%.0f ms", url.lastPathComponent, events.count, linesRead, totalMs))
+        }
+        if dataImageLines > 0 { DBG("[FILE][EMBEDDED] data_image_lines=\(dataImageLines) path=\(url.lastPathComponent)") }
+        #endif
         let session = Session(id: id, startTime: start, endTime: end, model: modelSeen, filePath: url.path, eventCount: events.count, events: events)
         return session
     }
