@@ -105,6 +105,7 @@
         C0D3E5A1700F000000000001 /* CodexStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexStatusService.swift; path = AgentSessions/CodexStatus/CodexStatusService.swift; sourceTree = SOURCE_ROOT; };
         C0D3E5A1700F000000000002 /* UsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStripView.swift; path = AgentSessions/CodexStatus/UsageStripView.swift; sourceTree = SOURCE_ROOT; };
         E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageMenuBar.swift; path = AgentSessions/MenuBar/UsageMenuBar.swift; sourceTree = SOURCE_ROOT; };
+        A1B2C3D4E5F60708AA55BB65 /* MenuBarPrefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MenuBarPrefs.swift; path = AgentSessions/CodexStatus/MenuBarPrefs.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -148,6 +149,7 @@
             children = (
                 C0D3E5A1700F000000000001 /* CodexStatusService.swift */,
                 C0D3E5A1700F000000000002 /* UsageStripView.swift */,
+                A1B2C3D4E5F60708AA55BB65 /* MenuBarPrefs.swift */,
                 E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */
             );
             path = CodexStatus;
@@ -275,7 +277,8 @@
                 DAC510E5A5804B0C865935FC /* CodexResumeCoordinator.swift in Sources */,
                 C0D3E5A1700A000000000001 /* CodexStatusService.swift in Sources */,
                 C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */,
-                7E6B9F3E2F8E4C05A0E9B6D1 /* UsageMenuBar.swift in Sources */
+                7E6B9F3E2F8E4C05A0E9B6D1 /* UsageMenuBar.swift in Sources */,
+                A1B2C3D4E5F60708AA55BB66 /* MenuBarPrefs.swift in Sources */
             ); runOnlyForDeploymentPostprocessing = 0; };
         B00000132A0A000100000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B000001C2A0A00010000000D /* SessionParserTests.swift in Sources */, B000001C2A0A000100000074 /* TranscriptBuilderTests.swift in Sources */, B000001C2A0A000100000078 /* SessionTitleTests.swift in Sources */, F7079DCFE7E6447F920DBF84 /* CodexResumeTests.swift in Sources */, 580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
