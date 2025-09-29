@@ -169,19 +169,19 @@ private func inlineBar(_ percent: Int, segments: Int = 5) -> String {
 private func resetLine(label: String, percent: Int, reset: String) -> AttributedString {
     var line = AttributedString("")
     var labelAttr = AttributedString(label + " ")
-    labelAttr.font = .system(size: NSFont.systemFontSize, weight: .semibold)
+    labelAttr.font = .system(size: 13, weight: .semibold)
     line.append(labelAttr)
 
     var barAttr = AttributedString(inlineBar(percent) + " ")
-    barAttr.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    barAttr.font = .system(size: 13, weight: .regular, design: .monospaced)
     line.append(barAttr)
 
     var percentAttr = AttributedString("\(percent)%  ")
-    percentAttr.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    percentAttr.font = .system(size: 13, weight: .regular, design: .monospaced)
     line.append(percentAttr)
 
     var resetAttr = AttributedString(reset)
-    resetAttr.font = .systemFont(ofSize: NSFont.systemFontSize)
+    resetAttr.font = .system(size: 13)
     line.append(resetAttr)
 
     return line

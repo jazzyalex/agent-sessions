@@ -261,7 +261,7 @@ final class SessionIndexer: ObservableObject {
 
     func parseFile(at url: URL) -> Session? {
         #if DEBUG
-        let start = Date()
+        let t0 = Date()
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
@@ -274,12 +274,13 @@ final class SessionIndexer: ObservableObject {
         var modelSeen: String? = nil
         var idx = 0
         do {
-            try reader.forEachLine { line in
+            try reader.forEachLine { rawLine in
                 idx += 1
                 #if DEBUG
                 linesRead += 1
-                if line.contains("data:image") || line.contains("\"input_image\"") { dataImageLines += 1 }
+                if rawLine.contains("data:image") || rawLine.contains("\"input_image\"") { dataImageLines += 1 }
                 #endif
+                let line = Self.sanitizeImagePayload(rawLine)
                 let (event, maybeModel) = Self.parseLine(line, eventID: self.eventID(for: url, index: idx))
                 if let m = maybeModel, modelSeen == nil { modelSeen = m }
                 events.append(event)
@@ -301,7 +302,7 @@ final class SessionIndexer: ObservableObject {
         }
         let id = Self.hash(path: url.path)
         #if DEBUG
-        let totalMs = Date().timeIntervalSince(start) * 1000
+        let totalMs = Date().timeIntervalSince(t0) * 1000
         if totalMs > 1000 {
             DBG(String(format: "[FILE][SLOW] path=%@ size=%d lines=%d elapsed=%.0f ms", url.lastPathComponent, size, linesRead, totalMs))
         } else {
@@ -433,6 +434,25 @@ final class SessionIndexer: ObservableObject {
             rawJSON: line
         )
         return (event, model)
+    }
+    
+    // MARK: - Sanitizers
+    /// Replace any inline base64 image data URLs with a short placeholder to avoid huge allocations and slow JSON parsing.
+    private static func sanitizeImagePayload(_ line: String) -> String {
+        // Fast path: nothing to do
+        guard line.contains("data:image") || line.contains("\"input_image\"") else { return line }
+        var s = line
+        // Replace data:image..." up to the closing quote with a compact token
+        // This is a simple, robust scan that avoids heavy regex backtracking on very long lines.
+        let needle = "data:image"
+        if let range = s.range(of: needle) {
+            // Find the next quote after the scheme
+            if let q = s[range.upperBound...].firstIndex(of: "\"") {
+                let replaceRange = range.lowerBound..<q
+                s.replaceSubrange(replaceRange, with: "data:image/omitted")
+            }
+        }
+        return s
     }
 
     private func eventID(for url: URL, index: Int) -> String {
