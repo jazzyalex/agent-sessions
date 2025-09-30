@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.2] - 2025-09-30
+
+### Fixed
+- App icon sizing in Dock/menu bar - added proper padding to match macOS standard icon conventions.
+
 ## [1.2.1] - 2025-09-30
 
 ### Changed
