@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.1] - 2025-09-30
+
+### Changed
+- Updated app icon to blue background design for better visibility and brand consistency.
+
 ## [1.2] - 2025-09-29
 
 ### Added
