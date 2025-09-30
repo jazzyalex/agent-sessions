@@ -80,7 +80,7 @@ echo "  - Notary profile available in Keychain (${NOTARY_PROFILE})"
 
 # Simple validations
 if [[ -f "docs/CHANGELOG.md" ]]; then
-  if ! grep -E "^##[ ]*\[?${VERSION}\]?" -q docs/CHANGELOG.md; then
+  if ! grep -q -E "^##[ ]*\[?${VERSION}\]?" docs/CHANGELOG.md; then
     yellow "Note: docs/CHANGELOG.md has no explicit section for ${VERSION}. Release notes will fall back to git log."
   fi
 fi
@@ -132,7 +132,7 @@ if [[ -z "${NOTES_FILE}" ]]; then
     TMP_NOTES=$(mktemp)
     awk -v ver="$VERSION" '
       BEGIN{insec=0}
-      /^##[ ]*\[?" ver ?"\]?([ )]/ {insec=1; next}
+      /^##[ ]*\[?'"$VERSION"'\]?([ )-]|$)/ {insec=1; next}
       /^##[ ]/ && insec==1 {insec=0}
       insec==1 {print}
     ' "$REPO_ROOT/docs/CHANGELOG.md" > "$TMP_NOTES" || true
