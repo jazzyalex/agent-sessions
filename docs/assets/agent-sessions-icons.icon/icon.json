@@ -28,7 +28,14 @@
           ],
           "glass" : false,
           "image-name" : "app-icon-1024.png",
-          "name" : "app-icon-1024"
+          "name" : "app-icon-1024",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              9.104492194300565,
+              22.12574479366792
+            ]
+          }
         }
       ],
       "shadow" : {
