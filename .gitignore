@@ -31,3 +31,6 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots
 fastlane/test_output
+
+# Internal reviews (local git only)
+docs/Sonnet-4.5-review.md

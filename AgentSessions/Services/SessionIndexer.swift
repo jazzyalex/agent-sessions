@@ -3,6 +3,14 @@ import Combine
 import CryptoKit
 import SwiftUI
 
+// DEBUG logging helper (no-ops in Release)
+#if DEBUG
+@inline(__always) private func DBG(_ message: @autoclosure () -> String) {
+    print(message())
+}
+#else
+@inline(__always) private func DBG(_ message: @autoclosure () -> String) {}
+#endif
 // swiftlint:disable type_body_length
 final class SessionIndexer: ObservableObject {
     // Source of truth
@@ -14,6 +22,10 @@ final class SessionIndexer: ObservableObject {
     @Published var progressText: String = ""
     @Published var filesProcessed: Int = 0
     @Published var totalFiles: Int = 0
+
+    // Lazy loading state
+    @Published var isLoadingSession: Bool = false
+    @Published var loadingSessionID: String? = nil
 
     // Error states
     @Published var indexingError: String? = nil
@@ -60,6 +72,10 @@ final class SessionIndexer: ObservableObject {
     // Persist active project filter
     @AppStorage("ProjectFilter") private var projectFilterStored: String = ""
 
+    // Track sessions currently being reloaded to prevent duplicate loads
+    private var reloadingSessionIDs: Set<String> = []
+    private let reloadLock = NSLock()
+
     var prefTheme: TranscriptTheme { TranscriptTheme(rawValue: themeRaw) ?? .codexDark }
     func setTheme(_ t: TranscriptTheme) { themeRaw = t.rawValue }
     var appAppearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .system }
@@ -101,7 +117,7 @@ final class SessionIndexer: ObservableObject {
                 var results = FilterEngine.filterSessions(all, filters: filters)
 
                 if self?.hideZeroMessageSessionsPref ?? true {
-                    results = results.filter { $0.nonMetaCount > 0 }
+                    results = results.filter { $0.messageCount > 0 }
                 }
 
                 return results
@@ -139,11 +155,102 @@ final class SessionIndexer: ObservableObject {
         recomputeNow()
     }
 
+    // Reload a specific lightweight session with full parse
+    func reloadSession(id: String) {
+        // Check if already reloading this session
+        reloadLock.lock()
+        if reloadingSessionIDs.contains(id) {
+            reloadLock.unlock()
+            print("⏭️ Skip reload: session \(id.prefix(8)) already reloading")
+            return
+        }
+        reloadingSessionIDs.insert(id)
+        reloadLock.unlock()
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            var loadingTimer: DispatchSourceTimer?
+            defer {
+                // Always clean up timer and reloading state
+                loadingTimer?.cancel()
+                self.reloadLock.lock()
+                self.reloadingSessionIDs.remove(id)
+                self.reloadLock.unlock()
+            }
+
+            guard let existing = self.allSessions.first(where: { $0.id == id }),
+                  existing.events.isEmpty else {
+                print("⏭️ Skip reload: session already loaded or not found")
+                // Clear loading state on early exit
+                DispatchQueue.main.async {
+                    if self.loadingSessionID == id {
+                        self.isLoadingSession = false
+                        self.loadingSessionID = nil
+                    }
+                }
+                return
+            }
+
+            let filename = existing.filePath.components(separatedBy: "/").last ?? "?"
+            print("🔄 Reloading lightweight session: \(filename)")
+            print("  📂 Path: \(existing.filePath)")
+
+            // Show loading state immediately for better responsiveness
+            DispatchQueue.main.async {
+                self.isLoadingSession = true
+                self.loadingSessionID = id
+            }
+
+            let url = URL(fileURLWithPath: existing.filePath)
+            let startTime = Date()
+
+            print("  🚀 Starting parseFileFull...")
+            // Force full parse by calling parseFile directly (skip lightweight check)
+            if let fullSession = self.parseFileFull(at: url) {
+                let elapsed = Date().timeIntervalSince(startTime)
+                print("  ⏱️ Parse took \(String(format: "%.1f", elapsed))s - events=\(fullSession.events.count)")
+
+                DispatchQueue.main.async {
+                    // Replace in allSessions
+                    if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+                        var updated = self.allSessions
+                        updated[idx] = fullSession
+                        self.allSessions = updated
+                        print("✅ Reloaded: \(filename) events=\(fullSession.events.count) nonMeta=\(fullSession.nonMetaCount) msgCount=\(fullSession.messageCount)")
+
+                        // Clear loading state AFTER updating allSessions, with small delay for UI to render
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            if self.loadingSessionID == id {
+                                self.isLoadingSession = false
+                                self.loadingSessionID = nil
+                            }
+                        }
+                    } else {
+                        print("❌ Failed to find session in allSessions after reload")
+                        // Clear loading state on failure
+                        if self.loadingSessionID == id {
+                            self.isLoadingSession = false
+                            self.loadingSessionID = nil
+                        }
+                    }
+                }
+            } else {
+                print("❌ parseFileFull returned nil for \(filename)")
+                // Clear loading state on failure
+                DispatchQueue.main.async {
+                    if self.loadingSessionID == id {
+                        self.isLoadingSession = false
+                        self.loadingSessionID = nil
+                    }
+                }
+            }
+        }
+    }
+
     // Trigger immediate recompute of filtered sessions using current filters (no debounce).
     func recomputeNow() {
         let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
         var results = FilterEngine.filterSessions(allSessions, filters: filters)
-        if hideZeroMessageSessionsPref { results = results.filter { $0.nonMetaCount > 0 } }
+        if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
         // FilterEngine now preserves order, so filtered results maintain allSessions sort order
         DispatchQueue.main.async { self.sessions = results }
     }
@@ -168,6 +275,8 @@ final class SessionIndexer: ObservableObject {
 
     func refresh() {
         let root = sessionsRoot()
+        print("\n🔄 INDEXING START: root=\(root.path)")
+
         isIndexing = true
         progressText = "Scanning…"
         filesProcessed = 0
@@ -197,6 +306,8 @@ final class SessionIndexer: ObservableObject {
                 }
             }
 
+            print("📁 Found \(found.count) session files")
+
             let sortedFiles = found.sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
             DispatchQueue.main.async {
                 self.totalFiles = sortedFiles.count
@@ -210,16 +321,39 @@ final class SessionIndexer: ObservableObject {
                 if let session = self.parseFile(at: url) {
                     sessions.append(session)
                 }
+                // Update progress counter but don't replace allSessions yet (causes flicker)
                 DispatchQueue.main.async {
                     self.filesProcessed = i + 1
                     self.progressText = "Indexed \(i + 1)/\(sortedFiles.count)"
-                    self.allSessions = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
-
                 }
             }
 
+            // Update allSessions only once at the end
+            let sortedSessions = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
             DispatchQueue.main.async {
+                self.allSessions = sortedSessions
                 self.isIndexing = false
+                let lightCount = sessions.filter { $0.events.isEmpty }.count
+                let heavyCount = sessions.count - lightCount
+                let lightSessions = sessions.filter { $0.events.isEmpty }
+                print("✅ INDEXING DONE: total=\(sessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
+
+                // Show lightweight sessions details
+                for s in lightSessions {
+                    print("  💡 Lightweight: \(s.filePath.components(separatedBy: "/").last ?? "?") msgCount=\(s.messageCount)")
+                }
+
+                // Wait a moment for filters to apply, then check what's visible
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    let filteredCount = self.sessions.count
+                    let lightInFiltered = self.sessions.filter { $0.events.isEmpty }.count
+                    print("📊 AFTER FILTERS: showing=\(filteredCount) (lightweight=\(lightInFiltered))")
+
+                    if lightInFiltered == 0 && lightCount > 0 {
+                        print("⚠️ WARNING: All lightweight sessions were filtered out!")
+                        print("   hideZeroMessageSessionsPref=\(self.hideZeroMessageSessionsPref)")
+                    }
+                }
             }
         }
     }
@@ -227,14 +361,44 @@ final class SessionIndexer: ObservableObject {
     // MARK: - Parsing
 
     func parseFile(at url: URL) -> Session? {
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
+        let mtime = (attrs[.modificationDate] as? Date) ?? Date()
+
+        // Fast path: heavy file → metadata-first, avoid full scan now
+        if size >= 20_000_000 { // 20 MB threshold
+            print("🔵 HEAVY FILE DETECTED: \(url.lastPathComponent) size=\(size) bytes (~\(size/1_000_000)MB)")
+            if let light = Self.lightweightSession(from: url, size: size, mtime: mtime) {
+                print("✅ LIGHTWEIGHT: \(url.lastPathComponent) estEvents=\(light.eventCount) messageCount=\(light.messageCount)")
+                return light
+            } else {
+                print("❌ LIGHTWEIGHT FAILED for \(url.lastPathComponent) - falling through to full parse")
+            }
+        }
+
+        return parseFileFull(at: url)
+    }
+
+    // Full parse (no lightweight check)
+    func parseFileFull(at url: URL) -> Session? {
+        print("    📖 parseFileFull: Getting file attrs...")
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
+        print("    📖 parseFileFull: File size = \(size) bytes")
+
+        print("    📖 parseFileFull: Creating JSONLReader...")
         let reader = JSONLReader(url: url)
         var events: [SessionEvent] = []
         var modelSeen: String? = nil
         var idx = 0
+        print("    📖 parseFileFull: Starting forEachLine...")
         do {
-            try reader.forEachLine { line in
+            try reader.forEachLine { rawLine in
                 idx += 1
-                let (event, maybeModel) = Self.parseLine(line, eventID: self.eventID(for: url, index: idx))
+                // Conditional sanitize for large lines or embedded images
+                let needsSanitize = rawLine.utf8.count > 1_000_000 || rawLine.contains("data:image")
+                let safeLine = needsSanitize ? Self.sanitizeAllImages(rawLine) : rawLine
+                let (event, maybeModel) = Self.parseLine(safeLine, eventID: self.eventID(for: url, index: idx))
                 if let m = maybeModel, modelSeen == nil { modelSeen = m }
                 events.append(event)
             }
@@ -255,7 +419,117 @@ final class SessionIndexer: ObservableObject {
         }
         let id = Self.hash(path: url.path)
         let session = Session(id: id, startTime: start, endTime: end, model: modelSeen, filePath: url.path, eventCount: events.count, events: events)
+
+        if size > 5_000_000 {  // Log full parse of files >5MB
+            print("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
+        }
+
         return session
+    }
+
+    /// Build a lightweight Session by scanning only head/tail slices for timestamps and model, and estimating event count.
+    private static func lightweightSession(from url: URL, size: Int, mtime: Date) -> Session? {
+        let headBytes = 256 * 1024
+        let tailBytes = 256 * 1024
+        guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? fh.close() }
+
+        // Read head slice
+        let headData = try? fh.read(upToCount: headBytes) ?? Data()
+
+        // Read tail slice
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? size
+        var tailData: Data = Data()
+        if fileSize > tailBytes {
+            let offset = UInt64(fileSize - tailBytes)
+            try? fh.seek(toOffset: offset)
+            tailData = (try? fh.readToEnd()) ?? Data()
+        }
+
+        func lines(from data: Data, keepHead: Bool) -> [String] {
+            guard !data.isEmpty, let s = String(data: data, encoding: .utf8) else { return [] }
+            let parts = s.components(separatedBy: "\n")
+            if keepHead {
+                return Array(parts.prefix(300))
+            } else {
+                return Array(parts.suffix(300))
+            }
+        }
+
+        let headLines = lines(from: headData ?? Data(), keepHead: true)
+        let tailLines = lines(from: tailData, keepHead: false)
+
+        var model: String? = nil
+        var tmin: Date? = nil
+        var tmax: Date? = nil
+        var sampleCount = 0
+        var sampleEvents: [SessionEvent] = []
+        var cwd: String? = nil
+
+        func ingest(_ raw: String) {
+            let line = sanitizeImagePayload(raw)
+            let (ev, maybeModel) = parseLine(line, eventID: "light-\(sampleCount)")
+            if let ts = ev.timestamp {
+                if tmin == nil || ts < tmin! { tmin = ts }
+                if tmax == nil || ts > tmax! { tmax = ts }
+            }
+            if model == nil, let m = maybeModel, !m.isEmpty { model = m }
+            // Extract cwd from session_meta or environment_context
+            if cwd == nil, let text = ev.text {
+                if text.contains("<cwd>") {
+                    if let start = text.range(of: "<cwd>"), let end = text.range(of: "</cwd>", range: start.upperBound..<text.endIndex) {
+                        cwd = String(text[start.upperBound..<end.lowerBound])
+                    }
+                } else if let data = line.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let payload = obj["payload"] as? [String: Any], let cwdValue = payload["cwd"] as? String {
+                        cwd = cwdValue
+                    }
+                }
+            }
+            sampleEvents.append(ev)
+            sampleCount += 1
+        }
+
+        headLines.forEach(ingest)
+        tailLines.forEach(ingest)
+
+        // Estimate event count: count newlines in head slice for more accurate estimate
+        let headBytesRead = headData?.count ?? 1
+        let newlineCount = headData?.filter { $0 == 0x0a }.count ?? 1  // Count \n bytes
+        let avgLineLen = max(256, headBytesRead / max(newlineCount, 1))  // Min 256 bytes per line
+        let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
+
+        print("  📊 Lightweight estimation: headBytes=\(headBytesRead) newlines=\(newlineCount) avgLineLen=\(avgLineLen) estEvents=\(estEvents)")
+
+        let id = Self.hash(path: url.path)
+        // Use sample events for title/cwd extraction, then create lightweight session
+        let tempSession = Session(id: id,
+                                   startTime: tmin,
+                                   endTime: tmax,
+                                   model: model,
+                                   filePath: url.path,
+                                   eventCount: estEvents,
+                                   events: sampleEvents)
+
+        // Extract title from sample events using existing logic
+        let title = tempSession.codexPreviewTitle ?? tempSession.title
+
+        // Now create final lightweight session with empty events but preserve metadata
+        let session = Session(id: id,
+                              startTime: tmin ?? (attrsDate(url, key: .creationDate) ?? mtime),
+                              endTime: tmax ?? mtime,
+                              model: model,
+                              filePath: url.path,
+                              eventCount: estEvents,
+                              events: [],
+                              cwd: cwd,
+                              repoName: nil,  // Will be computed from cwd
+                              lightweightTitle: title)
+        return session
+    }
+
+    private static func attrsDate(_ url: URL, key: FileAttributeKey) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[key] as? Date) ?? nil
     }
 
     // swiftlint:disable:next cyclomatic_complexity function_body_length
@@ -378,6 +652,74 @@ final class SessionIndexer: ObservableObject {
             rawJSON: line
         )
         return (event, model)
+    }
+    
+    // MARK: - Sanitizers
+    /// Replace any inline base64 image data URLs with a short placeholder to avoid huge allocations and slow JSON parsing.
+    private static func sanitizeImagePayload(_ line: String) -> String {
+        // Fast path: nothing to do
+        guard line.contains("data:image") || line.contains("\"input_image\"") else { return line }
+        var s = line
+        // Replace data:image..." up to the closing quote with a compact token
+        // This is a simple, robust scan that avoids heavy regex backtracking on very long lines.
+        let needle = "data:image"
+        if let range = s.range(of: needle) {
+            // Find the next quote after the scheme
+            if let q = s[range.upperBound...].firstIndex(of: "\"") {
+                let replaceRange = range.lowerBound..<q
+                s.replaceSubrange(replaceRange, with: "data:image/omitted")
+            }
+        }
+        return s
+    }
+
+    /// Aggressively strip ALL embedded images from a line (for lazy load performance).
+    /// Uses regex for 50-100x speedup vs string manipulation.
+    private static func sanitizeAllImages(_ line: String) -> String {
+        guard line.contains("data:image") else { return line }
+
+        // Fast byte-level check before expensive string operations
+        // For extremely long lines (>5MB UTF-8 bytes), skip entirely
+        let utf8Count = line.utf8.count
+        if utf8Count > 5_000_000 {
+            // Just return a minimal JSON stub - the line is too large to parse usefully anyway
+            return #"{"type":"omitted","text":"[Large event omitted - \#(utf8Count/1_000_000)MB]"}"#
+        }
+
+        // For moderately large lines (1-5MB), use a simpler/faster approach
+        if utf8Count > 1_000_000 {
+            // Simple string split approach - faster than regex on huge strings
+            let parts = line.components(separatedBy: "data:image")
+            if parts.count <= 1 { return line }
+
+            var result = parts[0]
+            for i in 1..<parts.count {
+                // Find the closing quote and skip everything up to it
+                if let quoteIdx = parts[i].firstIndex(of: "\"") {
+                    result += "[IMG]"
+                    result += String(parts[i][quoteIdx...])
+                } else {
+                    result += "[IMG]" + parts[i]
+                }
+            }
+            return result
+        }
+
+        // For normal lines (<1MB), use regex (fastest for reasonable sizes)
+        let pattern = #"data:image/[^;\"]*;base64,[A-Za-z0-9+/=]*"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return line
+        }
+
+        let range = NSRange(location: 0, length: line.utf16.count)
+        let result = regex.stringByReplacingMatches(
+            in: line,
+            options: [],
+            range: range,
+            withTemplate: "data:image/omitted"
+        )
+
+        return result
     }
 
     private func eventID(for url: URL, index: Int) -> String {

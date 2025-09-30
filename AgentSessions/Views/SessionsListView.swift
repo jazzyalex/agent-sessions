@@ -66,8 +66,8 @@ struct SessionsListView: View {
             )
 
             // Msgs
-            TableColumn("Msgs", value: \Session.nonMetaCount) { s in
-                Text(String(format: "%3d", s.nonMetaCount))
+            TableColumn("Msgs", value: \Session.messageCount) { s in
+                Text(messageDisplay(for: s))
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
             }
             .width(
@@ -137,7 +137,7 @@ struct SessionsListView: View {
                 // Map to view model descriptor
                 let key: SessionIndexer.SessionSortDescriptor.Key
                 if first.keyPath == \Session.modifiedAt { key = .modified }
-                else if first.keyPath == \Session.nonMetaCount { key = .msgs }
+                else if first.keyPath == \Session.messageCount { key = .msgs }
                 else if first.keyPath == \Session.repoDisplay { key = .repo }
                 else { key = .title }
                 indexer.sortDescriptor = .init(key: key, ascending: first.order == .forward)
@@ -242,4 +242,15 @@ private func projectTooltip(for s: Session) -> String {
     if s.isSubmodule { badges.append("submodule") }
     if !badges.isEmpty { parts.append("[" + badges.joined(separator: ", ") + "]") }
     return parts.joined(separator: " ")
+}
+
+private func messageDisplay(for s: Session) -> String {
+    let count = s.messageCount
+    if s.events.isEmpty {
+        // Lightweight session: show estimate with ~ prefix or "Many"
+        return count >= 1000 ? "Many" : "~\(count)"
+    } else {
+        // Fully parsed: show exact count
+        return String(format: "%3d", count)
+    }
 }

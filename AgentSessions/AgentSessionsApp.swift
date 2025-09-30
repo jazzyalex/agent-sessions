@@ -4,8 +4,13 @@ import AppKit
 @main
 struct AgentSessionsApp: App {
     @StateObject private var indexer = SessionIndexer()
+    @StateObject private var usageModel = CodexUsageModel.shared
+    @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
+    @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
+    @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.vertical.rawValue
+    @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     @State private var selectedSessionID: String?
     @State private var selectedEventID: String?
     @State private var focusSearchToggle: Bool = false
@@ -19,12 +24,17 @@ struct AgentSessionsApp: App {
                             layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
                         })
                 .environmentObject(indexer)
+                .environmentObject(usageModel)
                 .onAppear {
                     // First run check: if directory is unreadable prompt user
                     if !indexer.canAccessRootDirectory {
                         showingFirstRunPrompt = true
                     }
                     indexer.refresh()
+                    usageModel.setEnabled(showUsageStrip)
+                }
+                .onChange(of: showUsageStrip) { _, newValue in
+                    usageModel.setEnabled(newValue)
                 }
                 .sheet(isPresented: $showingFirstRunPrompt) {
                     FirstRunPrompt(showing: $showingFirstRunPrompt)
@@ -45,10 +55,23 @@ struct AgentSessionsApp: App {
                     .keyboardShortcut(",", modifiers: .command)
             }
         }
+
+        // Menu bar extra for limits (configurable)
+        MenuBarExtra(isInserted: $menuBarEnabled) {
+            UsageMenuBarMenuContent()
+                .environmentObject(indexer)
+                .environmentObject(usageModel)
+        } label: {
+            UsageMenuBarLabel()
+                .environmentObject(indexer)
+                .environmentObject(usageModel)
+        }
     }
 }
 private struct ContentView: View {
     @EnvironmentObject var indexer: SessionIndexer
+    @EnvironmentObject var usageModel: CodexUsageModel
+    @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     @State private var selection: String?
     @State private var selectedEvent: String?
     @State private var resumeAlert: ResumeAlert?
@@ -56,28 +79,41 @@ private struct ContentView: View {
     let onToggleLayout: () -> Void
 
     var body: some View {
-        Group {
-            if layoutMode == .vertical {
-                HSplitView {
-                    SessionsListView(selection: $selection,
-                                     onLaunchTerminal: handleQuickLaunch,
-                                     onOpenWorkingDirectory: handleOpenWorkingDirectory)
-                        .frame(minWidth: 320, idealWidth: 600, maxWidth: 1200)
-                    TranscriptPlainView(sessionID: selection)
-                        .frame(minWidth: 450)
+        VStack(spacing: 0) {
+            Group {
+                if layoutMode == .vertical {
+                    HSplitView {
+                        SessionsListView(selection: $selection,
+                                         onLaunchTerminal: handleQuickLaunch,
+                                         onOpenWorkingDirectory: handleOpenWorkingDirectory)
+                            .frame(minWidth: 320, idealWidth: 600, maxWidth: 1200)
+                        TranscriptPlainView(sessionID: selection)
+                            .frame(minWidth: 450)
+                    }
+                } else {
+                    VSplitView {
+                        SessionsListView(selection: $selection,
+                                         onLaunchTerminal: handleQuickLaunch,
+                                         onOpenWorkingDirectory: handleOpenWorkingDirectory)
+                            .frame(minHeight: 180)
+                        TranscriptPlainView(sessionID: selection)
+                            .frame(minHeight: 240)
+                    }
                 }
-            } else {
-                VSplitView {
-                    SessionsListView(selection: $selection,
-                                     onLaunchTerminal: handleQuickLaunch,
-                                     onOpenWorkingDirectory: handleOpenWorkingDirectory)
-                        .frame(minHeight: 180)
-                    TranscriptPlainView(sessionID: selection)
-                        .frame(minHeight: 240)
-                }
+            }
+            if showUsageStrip {
+                UsageStripView(status: usageModel)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .preferredColorScheme(indexer.appAppearance.colorScheme)
+        .onChange(of: selection) { _, newID in
+            // Lazy load: if user selects a lightweight session, trigger full parse
+            if let id = newID, let session = indexer.allSessions.first(where: { $0.id == id }),
+               session.events.isEmpty {
+                indexer.reloadSession(id: id)
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 SearchFiltersView()
@@ -127,7 +163,7 @@ private struct ContentView: View {
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: { PreferencesWindowController.shared.show(indexer: indexer,
-                                                                          initialTab: .codexCLIResume,
+                                                                          initialTab: .general,
                                                                           initialResumeSelection: selection) }) {
                     Image(systemName: "gear")
                 }

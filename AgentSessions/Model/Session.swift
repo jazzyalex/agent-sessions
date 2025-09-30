@@ -9,6 +9,36 @@ public struct Session: Identifiable, Equatable, Codable {
     public let eventCount: Int
     public let events: [SessionEvent]
 
+    // Lightweight session metadata (when events is empty)
+    public let lightweightCwd: String?
+    public let lightweightTitle: String?
+
+    // Default initializer for full sessions
+    public init(id: String, startTime: Date?, endTime: Date?, model: String?, filePath: String, eventCount: Int, events: [SessionEvent]) {
+        self.id = id
+        self.startTime = startTime
+        self.endTime = endTime
+        self.model = model
+        self.filePath = filePath
+        self.eventCount = eventCount
+        self.events = events
+        self.lightweightCwd = nil
+        self.lightweightTitle = nil
+    }
+
+    // Lightweight session initializer
+    public init(id: String, startTime: Date?, endTime: Date?, model: String?, filePath: String, eventCount: Int, events: [SessionEvent], cwd: String?, repoName: String?, lightweightTitle: String?) {
+        self.id = id
+        self.startTime = startTime
+        self.endTime = endTime
+        self.model = model
+        self.filePath = filePath
+        self.eventCount = eventCount
+        self.events = events
+        self.lightweightCwd = cwd
+        self.lightweightTitle = lightweightTitle
+    }
+
     public var shortID: String { String(id.prefix(6)) }
     public var firstUserPreview: String? {
         events.first(where: { $0.kind == .user })?.text?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -17,6 +47,11 @@ public struct Session: Identifiable, Equatable, Codable {
     // Derived human-friendly title for the session row.
     // Use improved Codex-style filtering with fallbacks for robustness
     public var title: String {
+        // 0) Lightweight session: use extracted title
+        if events.isEmpty, let lightTitle = lightweightTitle, !lightTitle.isEmpty {
+            return lightTitle
+        }
+
         // 1) Use Codex-style filtered title (best quality)
         if let codexTitle = codexPreviewTitle {
             return codexTitle
@@ -140,6 +175,11 @@ public struct Session: Identifiable, Equatable, Codable {
 
     // MARK: - Repo/CWD helpers
     public var cwd: String? {
+        // 0) Lightweight session: use extracted cwd
+        if events.isEmpty, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
+            return lightCwd
+        }
+
         // 1) Look for XML-ish environment_context blocks in text
         let pattern = #"<cwd>(.*?)</cwd>"#
         if let re = try? NSRegularExpression(pattern: pattern) {
@@ -200,6 +240,16 @@ public struct Session: Identifiable, Equatable, Codable {
     public var isSubmodule: Bool { (cwd.flatMap { Self.gitInfo(from: $0)?.isSubmodule }) ?? false }
 
     public var nonMetaCount: Int { events.filter { $0.kind != .meta }.count }
+
+    // Effective message count: use actual nonMetaCount when events loaded, otherwise eventCount estimate
+    // This handles lightweight sessions (empty events array) vs fully parsed sessions
+    public var messageCount: Int {
+        if events.isEmpty {
+            return eventCount  // Lightweight: use estimate
+        } else {
+            return nonMetaCount  // Fully parsed: actual non-meta count
+        }
+    }
 
     public var modifiedRelative: String {
         // Use modifiedAt which correctly uses filename timestamp
@@ -293,10 +343,17 @@ enum FilterEngine {
         }
 
         // Kinds: session must have any event in selected kinds
-        if !session.events.contains(where: { filters.kinds.contains($0.kind) }) { return false }
+        // Skip this check for lightweight sessions (empty events array) since we can't filter by kind
+        if !session.events.isEmpty {
+            if !session.events.contains(where: { filters.kinds.contains($0.kind) }) { return false }
+        }
 
         let q = parsed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { return true }
+
+        // Lightweight sessions: allow through if no text search (can't search without events)
+        if session.events.isEmpty { return q.isEmpty }
+
         // Full-text across rendered transcript fields only (not raw JSON) to reduce noise
         for e in session.events {
             if let t = e.text, !t.isEmpty, t.localizedCaseInsensitiveContains(q) { return true }
