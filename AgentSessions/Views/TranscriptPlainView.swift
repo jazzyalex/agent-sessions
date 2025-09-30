@@ -83,6 +83,8 @@ struct TranscriptPlainView: View {
         .onChange(of: sessionID) { _, _ in rebuild() }
         // Avoid rebuilding on global index or query changes; only rebuild when this view's inputs change
         .onChange(of: renderModeRaw) { _, _ in rebuild() }
+        // Rebuild when current session finishes lazy loading (events.count changes from 0 to N)
+        .onChange(of: currentSession?.events.count) { _, _ in rebuild() }
         .onReceive(indexer.$requestCopyPlain) { _ in copyAll() }
         .onReceive(indexer.$requestTranscriptFindFocus) { _ in findFocused = true }
         .sheet(isPresented: $showRawSheet) { WholeSessionRawPrettySheet(session: currentSession) }
