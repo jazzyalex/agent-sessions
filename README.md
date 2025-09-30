@@ -10,7 +10,7 @@
 </div>
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v1.1/AgentSessions-1.1.dmg"><b>Download Agent Sessions 1.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v1.2/AgentSessions-1.2.dmg"><b>Download Agent Sessions 1.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -23,6 +23,10 @@
   <img src="docs/assets/screenshot-V.png" alt="Agent Sessions vertical layout" style="max-width:960px; width:100%; border:1px solid #d0d7de; border-radius:8px;" />
   <br/>
   <img src="docs/assets/screenshot-H.png" alt="Agent Sessions horizontal layout" style="max-width:960px; width:100%; border:1px solid #d0d7de; border-radius:8px; margin-top:10px;" />
+  <br/>
+  <img src="docs/assets/screenshot-menubar.png" alt="Agent Sessions menu bar usage display" style="max-width:960px; width:100%; border:1px solid #d0d7de; border-radius:8px; margin-top:10px;" />
+  <br/>
+  <img src="docs/assets/screenshot-setings.png" alt="Agent Sessions preferences" style="max-width:960px; width:100%; border:1px solid #d0d7de; border-radius:8px; margin-top:10px;" />
   <br/>
 </div>
 
@@ -47,7 +51,7 @@ and builds a searchable timeline of your AI coding/chat sessions.
 ## Install
 
 ### Option A — Download
-1. Get the latest DMG: [AgentSessions-1.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v1.1/AgentSessions-1.1.dmg)  
+1. Get the latest DMG: [AgentSessions-1.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v1.2/AgentSessions-1.2.dmg)  
 2. Drag **Agent Sessions.app** to your Applications folder.
 
 ### Option B — Homebrew Tap
