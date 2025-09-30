@@ -38,8 +38,8 @@
     <span>macOS • Open Source</span>
   </header>
   <div class="container">
-    <h2>MacOS viewer for Coding CLI agents sessions</h2>
-    <p>Agent Sessions helps developers search, filter, and explore plain-text transcripts of Coding CLI agents sessions (Codex, Claude). It’s local-first, private, and designed with developers in mind.</p>
+    <h2>Manage Your AI Coding Workflows</h2>
+    <p>Stop grepping through JSONL files. Agent Sessions gives you instant search, one-click session resumption, and real-time usage tracking for Codex CLI. Local-first, private, and designed with developers in mind.</p>
 
     <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v1.2/AgentSessions-1.2.dmg" class="btn primary">Download for macOS</a>
     <a href="https://github.com/jazzyalex/agent-sessions" class="btn secondary">View on GitHub</a>
@@ -50,31 +50,40 @@ brew install --cask agent-sessions</code></pre>
 
     <div class="features">
       <div class="card">
-        <h3>Plain Transcript</h3>
-        <p>Readable transcript viewer with no truncation. Copy & paste exactly what you see.</p>
+        <h3>Resume in Codex</h3>
+        <p>One-click launch of saved sessions in Terminal with automatic working directory resolution. Works with Homebrew or npm installs; no PATH configuration needed.</p>
+        <p><a href="https://github.com/jazzyalex/agent-sessions#resume-with-codex">Learn more</a></p>
       </div>
       <div class="card">
-        <h3>Search & Filters</h3>
-        <p>Sort and filter by Modified, Msgs, Title, Repo. Quickly find the session you need.</p>
+        <h3>Usage Tracking</h3>
+        <p>Menu bar widget shows your 5-hour and weekly rate limits with color-coded thresholds. Know when limits reset before you hit them.</p>
+      </div>
+      <div class="card">
+        <h3>Instant Search</h3>
+        <p>Full-text search across all sessions with repo and path operators. Find conversations in seconds vs. grepping through JSONL files manually.</p>
       </div>
       <div class="card">
         <h3>Repo Awareness</h3>
-        <p>Repo column with tooltip showing the full directory path for context.</p>
+        <p>Automatic repository detection with branch tracking. Filter sessions by project with one click.</p>
       </div>
       <div class="card">
-        <h3>Resume in Codex</h3>
-        <p>Open saved Codex sessions directly from Agent Sessions (Terminal or Embedded). Works with Homebrew or npm installs; no PATH tweaks required.</p>
-        <p><a href="https://github.com/jazzyalex/agent-sessions#resume-with-codex">How to use</a></p>
-      </div>
-      <div class="card">
-        <h3>Local-only</h3>
-        <p>Runs on your Mac. Reads <code>~/.codex/sessions</code>. No network or cloud required.</p>
+        <h3>Local & Private</h3>
+        <p>All processing happens on your Mac. Reads <code>~/.codex/sessions</code> locally. No cloud uploads or telemetry.</p>
       </div>
     </div>
 
     <h3 style="margin-top:40px;">Screenshots</h3>
-    <img src="assets/screenshot-V.png" alt="Sessions table screenshot" style="width:100%; max-width:960px; margin:10px 0;" />
-    <img src="assets/screenshot-H.png" alt="Transcript viewer screenshot" style="width:100%; max-width:960px; margin:10px 0;" />
+    <img src="assets/screenshot-V.png" alt="Session browser with search and filters" style="width:100%; max-width:960px; margin:10px 0;" />
+    <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px;"><em>Session browser with grouped timeline and full-text search</em></p>
+
+    <img src="assets/screenshot-H.png" alt="Transcript view with role-based styling" style="width:100%; max-width:960px; margin:10px 0;" />
+    <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px;"><em>Transcript view with timestamps and role-based styling</em></p>
+
+    <img src="assets/screenshot-menubar.png" alt="Menu bar usage tracking" style="width:100%; max-width:960px; margin:10px 0;" />
+    <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px;"><em>Menu bar usage tracking with 5-hour and weekly percentages</em></p>
+
+    <img src="assets/screenshot-setings.png" alt="Preferences window" style="width:100%; max-width:960px; margin:10px 0;" />
+    <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px;"><em>Preferences: Codex CLI configuration and usage display options</em></p>
 
     <footer>
       <section id="disclaimer" style="margin-top:2rem; padding:1rem; border-top:1px solid #ccc;">
