@@ -43,18 +43,35 @@ struct TranscriptPlainView: View {
                 .frame(maxWidth: .infinity)
                 .background(Color(NSColor.controlBackgroundColor))
             Divider()
-            PlainTextScrollView(
-                text: transcript,
-                selection: selectedNSRange,
-                fontSize: CGFloat(transcriptFontSize),
-                highlights: highlightRanges,
-                currentIndex: currentMatchIndex,
-                commandRanges: shouldColorize ? commandRanges : [],
-                userRanges: shouldColorize ? userRanges : [],
-                assistantRanges: shouldColorize ? assistantRanges : [],
-                outputRanges: shouldColorize ? outputRanges : [],
-                errorRanges: shouldColorize ? errorRanges : []
-            )
+            ZStack {
+                PlainTextScrollView(
+                    text: transcript,
+                    selection: selectedNSRange,
+                    fontSize: CGFloat(transcriptFontSize),
+                    highlights: highlightRanges,
+                    currentIndex: currentMatchIndex,
+                    commandRanges: shouldColorize ? commandRanges : [],
+                    userRanges: shouldColorize ? userRanges : [],
+                    assistantRanges: shouldColorize ? assistantRanges : [],
+                    outputRanges: shouldColorize ? outputRanges : [],
+                    errorRanges: shouldColorize ? errorRanges : []
+                )
+
+                // Loading overlay for slow session loads (>1.5s)
+                if indexer.isLoadingSession && indexer.loadingSessionID == sessionID {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("Loading session...")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(24)
+                    .background(Color(NSColor.windowBackgroundColor).opacity(0.95))
+                    .cornerRadius(12)
+                    .shadow(radius: 8)
+                }
+            }
         }
         .onAppear { syncPrefs(); rebuild() }
         .onChange(of: sessionID) { _, _ in rebuild() }

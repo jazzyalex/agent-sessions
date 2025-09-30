@@ -107,6 +107,13 @@ private struct ContentView: View {
             }
         }
         .preferredColorScheme(indexer.appAppearance.colorScheme)
+        .onChange(of: selection) { _, newID in
+            // Lazy load: if user selects a lightweight session, trigger full parse
+            if let id = newID, let session = indexer.allSessions.first(where: { $0.id == id }),
+               session.events.isEmpty {
+                indexer.reloadSession(id: id)
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 SearchFiltersView()
