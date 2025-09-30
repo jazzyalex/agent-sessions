@@ -29,8 +29,8 @@
   <img src="docs/assets/screenshot-menubar.png" alt="Menu bar usage tracking with 5-hour and weekly percentages" style="max-width:960px; width:100%; border:1px solid #d0d7de; border-radius:8px; margin-top:10px;" />
   <p><em>Menu bar usage tracking with configurable thresholds and reset times</em></p>
   <br/>
-  <img src="docs/assets/screenshot-setings.png" alt="Preferences: Codex CLI configuration and usage strip settings" style="max-width:960px; width:100%; border:1px solid #d0d7de; border-radius:8px; margin-top:10px;" />
-  <p><em>Preferences: Codex CLI configuration, binary detection, and usage display options</em></p>
+  <!-- <img src="docs/assets/screenshot-setings.png" alt="Preferences: Codex CLI configuration and usage strip settings" style="max-width:960px; width:100%; border:1px solid #d0d7de; border-radius:8px; margin-top:10px;" />
+  <p><em>Preferences: Codex CLI configuration, binary detection, and usage display options</em></p> -->
   <br/>
 </div>
 
