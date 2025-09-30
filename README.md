@@ -26,8 +26,10 @@
   <img src="docs/assets/screenshot-H.png" alt="Transcript view with role-based styling and timestamps" style="max-width:960px; width:100%; border:1px solid #d0d7de; border-radius:8px; margin-top:10px;" />
   <p><em>Transcript view with role-based styling and timestamps (horizontal layout)</em></p>
   <br/>
-  <img src="docs/assets/screenshot-menubar.png" alt="Menu bar usage tracking with 5-hour and weekly percentages" style="max-width:960px; width:100%; border:1px solid #d0d7de; border-radius:8px; margin-top:10px;" />
-  <p><em>Menu bar usage tracking with configurable thresholds and reset times</em></p>
+  <div align="center">
+    <img src="docs/assets/screenshot-menubar.png" alt="Menu bar usage tracking with 5-hour and weekly percentages" style="max-width:480px; width:50%; border:1px solid #d0d7de; border-radius:8px; margin-top:10px;" />
+    <p><em>Menu bar usage tracking with configurable thresholds and reset times</em></p>
+  </div>
   <br/>
   <!-- <img src="docs/assets/screenshot-setings.png" alt="Preferences: Codex CLI configuration and usage strip settings" style="max-width:960px; width:100%; border:1px solid #d0d7de; border-radius:8px; margin-top:10px;" />
   <p><em>Preferences: Codex CLI configuration, binary detection, and usage display options</em></p> -->
