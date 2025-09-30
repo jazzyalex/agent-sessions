@@ -37,6 +37,12 @@ struct TranscriptPlainView: View {
     // Ephemeral copy confirmation (popover)
     @State private var showIDCopiedPopover: Bool = false
 
+    // Simple memoization to make session switching instant
+    @State private var transcriptCache: [String: String] = [:]
+    @State private var terminalCommandRangesCache: [String: [NSRange]] = [:]
+    @State private var terminalUserRangesCache: [String: [NSRange]] = [:]
+    @State private var lastBuildKey: String? = nil
+
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -75,8 +81,7 @@ struct TranscriptPlainView: View {
         }
         .onAppear { syncPrefs(); rebuild() }
         .onChange(of: sessionID) { _, _ in rebuild() }
-        .onChange(of: indexer.sessions) { _, _ in rebuild() }
-        .onChange(of: indexer.query) { _, _ in rebuild() }
+        // Avoid rebuilding on global index or query changes; only rebuild when this view's inputs change
         .onChange(of: renderModeRaw) { _, _ in rebuild() }
         .onReceive(indexer.$requestCopyPlain) { _ in copyAll() }
         .onReceive(indexer.$requestTranscriptFindFocus) { _ in findFocused = true }
@@ -204,63 +209,62 @@ struct TranscriptPlainView: View {
     }
 
     private func rebuild() {
-        guard let s = currentSession else { transcript = ""; return }
+        guard let s = currentSession else { transcript = ""; lastBuildKey = nil; return }
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
         let mode = TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal
+
+        // Memoization key: session identity, event count, render mode, and timestamp setting
+        let key = "\(s.id)|\(s.events.count)|\(renderModeRaw)|\(showTimestamps ? 1 : 0)"
+        if lastBuildKey == key { return }
+
         if mode == .terminal && shouldColorize {
-            let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: s, filters: filters)
-            transcript = built.0
-            commandRanges = built.1
-            userRanges = built.2
-            // Still need to find assistant, output, and error ranges for terminal mode
-            assistantRanges = []
-            outputRanges = []
-            errorRanges = []
-            findAdditionalRanges()
-        } else {
-            transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: filters, mode: mode)
-            commandRanges = []
-            // Build additional ranges for colorization
-            if shouldColorize {
-                userRanges = []
+            // Try cache first (text + terminal ranges)
+            if let cached = transcriptCache[key] {
+                transcript = cached
+                commandRanges = terminalCommandRangesCache[key] ?? []
+                userRanges = terminalUserRangesCache[key] ?? []
                 assistantRanges = []
                 outputRanges = []
                 errorRanges = []
-
-                // Find user input ranges in normal mode
-                let lines = transcript.split(separator: "\n", omittingEmptySubsequences: false)
-                var cursor = 0
-
-                for line in lines {
-                    let s = String(line)
-                    var lineStr = s
-                    var timestampOffset = 0
-                    if lineStr.count >= 9, lineStr[lineStr.index(lineStr.startIndex, offsetBy: 2)] == ":" {
-                        if let space = lineStr.firstIndex(of: " ") {
-                            timestampOffset = lineStr.distance(from: lineStr.startIndex, to: lineStr.index(after: space))
-                            lineStr = String(lineStr[lineStr.index(after: space)...])
-                        }
-                    }
-
-                    // User input: "> text"
-                    if lineStr.hasPrefix("> ") {
-                        let start = cursor + timestampOffset + 2
-                        let len = (s as NSString).length - timestampOffset - 2
-                        if len > 0 { userRanges.append(NSRange(location: start, length: len)) }
-                    }
-
-                    cursor += (s as NSString).length + 1
-                }
-
-                // Find other content types
                 findAdditionalRanges()
+                lastBuildKey = key
             } else {
+                let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: s, filters: filters)
+                transcript = built.0
+                commandRanges = built.1
+                userRanges = built.2
+                // Still need to find assistant, output, and error ranges for terminal mode
+                assistantRanges = []
+                outputRanges = []
+                errorRanges = []
+                findAdditionalRanges()
+                transcriptCache[key] = transcript
+                terminalCommandRangesCache[key] = commandRanges
+                terminalUserRangesCache[key] = userRanges
+                lastBuildKey = key
+            }
+        } else {
+            // Normal mode – cache text only
+            if let cached = transcriptCache[key] {
+                transcript = cached
+                commandRanges = []
                 userRanges = []
                 assistantRanges = []
                 outputRanges = []
                 errorRanges = []
+                lastBuildKey = key
+            } else {
+                transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: filters, mode: mode)
+                commandRanges = []
+                userRanges = []
+                assistantRanges = []
+                outputRanges = []
+                errorRanges = []
+                transcriptCache[key] = transcript
+                lastBuildKey = key
             }
         }
+
         // Reset find state
         performFind(resetIndex: true)
         selectedNSRange = nil
