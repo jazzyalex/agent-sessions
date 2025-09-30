@@ -41,7 +41,7 @@ command -v xcodebuild >/dev/null || { red "xcodebuild not found"; exit 2; }
 command -v gh >/dev/null || { red "gh CLI not found"; exit 2; }
 gh auth status >/dev/null 2>&1 || { red "gh not authenticated. Run: gh auth login"; exit 2; }
 
-if ! xcrun notarytool whoami --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
   red "Notary profile '$NOTARY_PROFILE' not configured. Run: xcrun notarytool store-credentials $NOTARY_PROFILE --apple-id <id> --team-id <TEAM> --password <app-specific-password>"
   exit 2
 fi
