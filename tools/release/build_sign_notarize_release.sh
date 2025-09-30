@@ -77,7 +77,7 @@ codesign --deep --force --options runtime --timestamp \
   --sign "$DEV_ID_APP" "$APP"
 
 codesign --verify --deep --strict --verbose=2 "$APP"
-spctl --assess --verbose=4 "$APP"
+spctl --assess --verbose=4 "$APP" || echo "Note: spctl assessment fails before notarization (expected)"
 
 echo "==> Creating DMG: $DMG"
 rm -f "$DMG"
