@@ -1,13 +1,6 @@
 import Foundation
 import SwiftUI
 
-// Render mode for transcripts
-public enum TranscriptRenderMode: String, CaseIterable, Identifiable, Codable {
-    case normal
-    case terminal
-    public var id: String { rawValue }
-}
-
 // swiftlint:disable type_body_length
 struct SessionTranscriptBuilder {
     static let outPrefix = "⟪out⟫"

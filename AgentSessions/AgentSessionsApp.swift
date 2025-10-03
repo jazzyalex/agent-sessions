@@ -75,6 +75,10 @@ struct AgentSessionsApp: App {
                 Button("Refresh") { claudeIndexer.refresh() }
                     .keyboardShortcut("r", modifiers: .command)
             }
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer) }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
         }
 
         // Menu bar extra for limits (configurable)
@@ -143,16 +147,17 @@ private struct ContentView: View {
                 Button(action: {
                     guard let session = selectedSession else {
                         resumeAlert = ResumeAlert(title: "No Session Selected",
-                                                  message: "Select a session first to launch in Codex.",
+                                                  message: "Select a session first to resume in Codex.",
                                                   kind: .failure)
                         return
                     }
                     handleQuickLaunch(session)
                 }) {
-                    Label("Launch in Terminal", systemImage: "terminal")
+                    Label("Resume in Codex", systemImage: "play.circle")
                 }
-                .help("Launch Codex in Terminal for the selected session")
+                .help("Resume the selected session in Codex")
                 .disabled(selectedSession == nil)
+                .keyboardShortcut("r", modifiers: [.command, .control])
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: {
@@ -175,6 +180,10 @@ private struct ContentView: View {
                     }
                 }
                 .help("Refresh index")
+            }
+            // Visual separator between refresh and layout controls
+            ToolbarItem(placement: .automatic) {
+                Divider()
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: { onToggleLayout() }) {

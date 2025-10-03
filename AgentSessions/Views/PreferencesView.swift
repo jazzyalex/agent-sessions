@@ -7,6 +7,8 @@ struct PreferencesView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @State private var selectedTab: PreferencesTab?
     @ObservedObject private var resumeSettings = CodexResumeSettings.shared
+    @ObservedObject private var claudeSettings = ClaudeResumeSettings.shared
+    @State private var showingResetConfirm: Bool = false
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     // Menu bar prefs
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
@@ -36,6 +38,14 @@ struct PreferencesView: View {
     @State private var probeState: ProbeState = .idle
     @State private var probeVersion: CodexVersion? = nil
     @State private var resolvedCodexPath: String? = nil
+    @State private var codexPathDebounce: DispatchWorkItem? = nil
+    @State private var codexProbeDebounce: DispatchWorkItem? = nil
+
+    // Claude CLI probe state (for Resume tab)
+    @State private var claudeProbeState: ProbeState = .idle
+    @State private var claudeVersionString: String? = nil
+    @State private var claudeResolvedPath: String? = nil
+    @State private var claudeProbeDebounce: DispatchWorkItem? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -75,6 +85,8 @@ struct PreferencesView: View {
                     codexCLITab
                 case .codexCLIResume:
                     codexCLIResumeTab
+                case .claudeResume:
+                    claudeResumeTab
                 }
             }
             .padding(.horizontal, 24)
@@ -86,13 +98,19 @@ struct PreferencesView: View {
     private var footer: some View {
         HStack(spacing: 12) {
             Spacer()
-            Button("Reset to Defaults", action: resetToDefaults)
+            Button("Reset to Defaults") { showingResetConfirm = true }
                 .buttonStyle(.bordered)
-            Button("Apply", action: applySettings)
+            Button("Close", action: closeWindow)
                 .buttonStyle(.borderedProminent)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .alert("Reset All Preferences?", isPresented: $showingResetConfirm) {
+            Button("Reset", role: .destructive) { resetToDefaults() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will reset General, Sessions, Resume (Codex & Claude), Usage, and Menu Bar settings.")
+        }
     }
 
     // MARK: Tabs
@@ -112,6 +130,9 @@ struct PreferencesView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .onChange(of: appearance) { _, newValue in
+                        indexer.setAppearance(newValue)
+                    }
                 }
 
                 Divider()
@@ -123,6 +144,9 @@ struct PreferencesView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .onChange(of: modifiedDisplay) { _, newValue in
+                        indexer.setModifiedDisplay(newValue)
+                    }
                 }
             }
 
@@ -204,7 +228,18 @@ struct PreferencesView: View {
                     TextField("Custom path (optional)", text: $codexPath)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 360)
-                        .onChange(of: codexPath) { _, _ in validateCodexPath() }
+                        .onSubmit {
+                            validateCodexPath()
+                            commitCodexPathIfValid()
+                        }
+                        .onChange(of: codexPath) { _, _ in
+                            validateCodexPath()
+                            // Debounce commit on typing to avoid thrash
+                            codexPathDebounce?.cancel()
+                            let work = DispatchWorkItem { commitCodexPathIfValid() }
+                            codexPathDebounce = work
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                        }
 
                     Button(action: pickCodexFolder) {
                         Label("Choose…", systemImage: "folder")
@@ -259,21 +294,31 @@ struct PreferencesView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 12) {
-                        TextField("/path/to/codex", text: $codexBinaryOverride)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 360)
-                            .onChange(of: codexBinaryOverride) { _, _ in validateBinaryOverride() }
-                        Button(action: pickCodexBinary) {
-                            Label("Browse…", systemImage: "square.and.arrow.down.on.square")
-                                .labelStyle(.titleAndIcon)
-                        }
-                        .buttonStyle(.bordered)
-                        Button("Clear") {
-                            codexBinaryOverride = ""
+                    TextField("/path/to/codex", text: $codexBinaryOverride)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 360)
+                        .onSubmit {
                             validateBinaryOverride()
+                            commitCodexBinaryIfValid()
                         }
-                        .buttonStyle(.bordered)
+                        .onChange(of: codexBinaryOverride) { _, _ in
+                            validateBinaryOverride()
+                            // Persist and probe if valid
+                            commitCodexBinaryIfValid()
+                        }
+                    Button(action: pickCodexBinary) {
+                        Label("Browse…", systemImage: "square.and.arrow.down.on.square")
+                            .labelStyle(.titleAndIcon)
                     }
+                    .buttonStyle(.bordered)
+                    Button("Clear") {
+                        codexBinaryOverride = ""
+                        validateBinaryOverride()
+                        resumeSettings.setBinaryOverride("")
+                        scheduleCodexProbe()
+                    }
+                    .buttonStyle(.bordered)
+                }
 
                     if !codexBinaryValid {
                         Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill")
@@ -322,6 +367,80 @@ struct PreferencesView: View {
             CodexResumeSheet(initialSelection: initialResumeSelection, context: .preferences)
                 .environmentObject(indexer)
                 .padding(.top, 4)
+            // Status row (mirrors header footer inside sheet, but visible here too)
+            if let v = probeVersion, let path = resolvedCodexPath {
+                Text("Detected Codex \(v.description) — \(path)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if probeState == .failure {
+                Text("Codex is not found")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private var claudeResumeTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Claude Code Resume")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            sectionHeader("Terminal App")
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("Terminal App", selection: Binding(get: { claudeSettings.preferITerm ? 1 : 0 }, set: { claudeSettings.setPreferITerm($0 == 1) })) {
+                    Text("Terminal").tag(0)
+                    Text("iTerm2").tag(1)
+                }
+                .pickerStyle(.segmented)
+                Text("Choose which app to use for Claude CLI resumes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Probe row
+            HStack(spacing: 8) {
+                Button(action: probeClaude) {
+                    switch claudeProbeState {
+                    case .probing:
+                        ProgressView()
+                    case .success:
+                        Text("Check Version")
+                    case .idle:
+                        Text("Check Version")
+                    case .failure:
+                        Text("Claude is not found").foregroundStyle(.red)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .help("Run claude --version to confirm availability")
+                if let path = claudeResolvedPath, let ver = claudeVersionString {
+                    Text("Detected Claude Code \(ver) — \(path)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            sectionHeader("Binary (optional)")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    TextField("/path/to/claude", text: Binding(get: { claudeSettings.binaryPath }, set: { claudeSettings.setBinaryPath($0) }))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 360)
+                        .onSubmit { scheduleClaudeProbe() }
+                        .onChange(of: claudeSettings.binaryPath) { _, _ in scheduleClaudeProbe() }
+                    Button(action: pickClaudeBinary) {
+                        Label("Browse…", systemImage: "square.and.arrow.down.on.square")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.bordered)
+                    Button("Clear") { claudeSettings.setBinaryPath("") }
+                        .buttonStyle(.bordered)
+                }
+                Text("Default: resolve from PATH; override only if needed.")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -353,6 +472,15 @@ struct PreferencesView: View {
         codexPathValid = FileManager.default.fileExists(atPath: codexPath, isDirectory: &isDir) && isDir.boolValue
     }
 
+    private func commitCodexPathIfValid() {
+        guard codexPathValid else { return }
+        // Persist and refresh index once
+        if indexer.sessionsRootOverride != codexPath {
+            indexer.sessionsRootOverride = codexPath
+            indexer.refresh()
+        }
+    }
+
     private func pickCodexFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -362,6 +490,7 @@ struct PreferencesView: View {
             if response == .OK, let url = panel.url {
                 codexPath = url.path
                 validateCodexPath()
+                commitCodexPathIfValid()
             }
         }
     }
@@ -375,6 +504,17 @@ struct PreferencesView: View {
         codexBinaryValid = FileManager.default.isExecutableFile(atPath: expanded)
     }
 
+    private func commitCodexBinaryIfValid() {
+        if codexBinaryOverride.isEmpty {
+            // handled by Clear path
+            return
+        }
+        if codexBinaryValid {
+            resumeSettings.setBinaryOverride(codexBinaryOverride)
+            scheduleCodexProbe()
+        }
+    }
+
     private func pickCodexBinary() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -384,6 +524,19 @@ struct PreferencesView: View {
             if response == .OK, let url = panel.url {
                 codexBinaryOverride = url.path
                 validateBinaryOverride()
+                commitCodexBinaryIfValid()
+            }
+        }
+    }
+
+    private func pickClaudeBinary() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                claudeSettings.setBinaryPath(url.path)
             }
         }
     }
@@ -436,22 +589,13 @@ struct PreferencesView: View {
 
         preferredLaunchMode = .terminal
         resumeSettings.setLaunchMode(.terminal)
+        // Re-probe after reset
+        scheduleCodexProbe()
+        scheduleClaudeProbe()
     }
 
-    private func applySettings() {
-        indexer.sessionsRootOverride = codexPath
-        indexer.setAppearance(appearance)
-        indexer.setModifiedDisplay(modifiedDisplay)
-        indexer.refresh()
-
-        if codexBinaryValid {
-            resumeSettings.setBinaryOverride(codexBinaryOverride)
-        }
-        if defaultResumeDirectoryValid {
-            resumeSettings.setDefaultWorkingDirectory(defaultResumeDirectory)
-        }
-        resumeSettings.setLaunchMode(preferredLaunchMode)
-        probeCodex()
+    private func closeWindow() {
+        NSApp.keyWindow?.performClose(nil)
     }
 
     // MARK: Helpers
@@ -493,6 +637,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case menuBar
     case codexCLI
     case codexCLIResume
+    case claudeResume
 
     var id: String { rawValue }
 
@@ -502,6 +647,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .menuBar: return "Menu Bar"
         case .codexCLI: return "Codex CLI"
         case .codexCLIResume: return "Codex CLI Resume"
+        case .claudeResume: return "Claude Code Resume"
         }
     }
 
@@ -511,12 +657,13 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .menuBar: return "menubar.rectangle"
         case .codexCLI: return "terminal"
         case .codexCLIResume: return "terminal.fill"
+        case .claudeResume: return "chevron.left.slash.chevron.right"
         }
     }
 }
 
 private extension PreferencesView {
-    var visibleTabs: [PreferencesTab] { [.general, .menuBar, .codexCLI, .codexCLIResume] }
+    var visibleTabs: [PreferencesTab] { [.general, .menuBar, .codexCLI, .codexCLIResume, .claudeResume] }
 }
 
 // MARK: - Probe helpers
@@ -546,6 +693,44 @@ private extension PreferencesView {
                 }
             }
         }
+    }
+
+    func probeClaude() {
+        if claudeProbeState == .probing { return }
+        claudeProbeState = .probing
+        claudeVersionString = nil
+        claudeResolvedPath = nil
+        let override = claudeSettings.binaryPath.isEmpty ? nil : claudeSettings.binaryPath
+        DispatchQueue.global(qos: .userInitiated).async {
+            let env = ClaudeCLIEnvironment()
+            let result = env.probe(customPath: override)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let res):
+                    self.claudeVersionString = res.versionString
+                    self.claudeResolvedPath = res.binaryURL.path
+                    self.claudeProbeState = .success
+                case .failure:
+                    self.claudeVersionString = nil
+                    self.claudeResolvedPath = nil
+                    self.claudeProbeState = .failure
+                }
+            }
+        }
+    }
+
+    func scheduleCodexProbe() {
+        codexProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeCodex() }
+        codexProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleClaudeProbe() {
+        claudeProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeClaude() }
+        claudeProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 }
 

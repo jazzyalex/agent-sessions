@@ -8,6 +8,8 @@ struct ClaudeSessionsView: View {
 
     @State private var selection: String?
     @State private var directoryAlert: DirectoryAlert?
+    @State private var resumeAlert: DirectoryAlert?
+    @StateObject private var claudeResumeSettings = ClaudeResumeSettings.shared
 
     private struct DirectoryAlert: Identifiable {
         let id = UUID()
@@ -19,14 +21,18 @@ struct ClaudeSessionsView: View {
         VStack(spacing: 0) {
             if layoutMode == .vertical {
                 HSplitView {
-                    ClaudeSessionsListView(indexer: indexer, selection: $selection)
+                    ClaudeSessionsListView(indexer: indexer, selection: $selection, isResumeEnabled: isClaudeResumeEnabled, onResume: { session in
+                        handleResume(session)
+                    })
                         .frame(minWidth: 320, idealWidth: 600, maxWidth: 1200)
                     ClaudeTranscriptView(indexer: indexer, sessionID: selection)
                         .frame(minWidth: 450)
                 }
             } else {
                 VSplitView {
-                    ClaudeSessionsListView(indexer: indexer, selection: $selection)
+                    ClaudeSessionsListView(indexer: indexer, selection: $selection, isResumeEnabled: isClaudeResumeEnabled, onResume: { session in
+                        handleResume(session)
+                    })
                         .frame(minHeight: 180)
                     ClaudeTranscriptView(indexer: indexer, sessionID: selection)
                         .frame(minHeight: 240)
@@ -44,6 +50,21 @@ struct ClaudeSessionsView: View {
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 ClaudeSearchFiltersView(indexer: indexer)
+            }
+            // Resume in Claude (feature-flagged)
+            ToolbarItem(placement: .automatic) {
+                if isClaudeResumeEnabled {
+                    Button(action: {
+                        if let session = selectedSession {
+                            handleResume(session)
+                        }
+                    }) {
+                        Label("Resume in Claude", systemImage: "play.circle")
+                    }
+                    .help("Open Terminal and resume this Claude session")
+                    .disabled(selectedSession == nil)
+                    .keyboardShortcut("r", modifiers: [.command, .control])
+                }
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: {
@@ -66,11 +87,25 @@ struct ClaudeSessionsView: View {
                 }
                 .help("Refresh index")
             }
+            // Visual separator between refresh and layout controls
+            ToolbarItem(placement: .automatic) {
+                Divider()
+            }
             ToolbarItem(placement: .automatic) {
                 Button(action: { onToggleLayout() }) {
                     Image(systemName: layoutMode == .vertical ? "rectangle.split.1x2" : "rectangle.split.2x1")
                 }
                 .help(layoutMode == .vertical ? "Switch to Horizontal Split" : "Switch to Vertical Split")
+            }
+            ToolbarItem(placement: .automatic) {
+                Button(action: {
+                    PreferencesWindowController.shared.show(indexer: indexer as? SessionIndexer ?? SessionIndexer(),
+                                                             initialTab: .general,
+                                                             initialResumeSelection: selection)
+                }) {
+                    Image(systemName: "gear")
+                }
+                .help("Preferences")
             }
         }
         .onChange(of: indexer.sessions) { _, sessions in
@@ -86,6 +121,11 @@ struct ClaudeSessionsView: View {
             selection = sessions.first?.id
         }
         .alert(item: $directoryAlert) { alert in
+            Alert(title: Text(alert.title),
+                  message: Text(alert.message),
+                  dismissButton: .default(Text("OK")))
+        }
+        .alert(item: $resumeAlert) { alert in
             Alert(title: Text(alert.title),
                   message: Text(alert.message),
                   dismissButton: .default(Text("OK")))
@@ -114,12 +154,71 @@ struct ClaudeSessionsView: View {
 
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
+
+    private func handleResume(_ session: Session) {
+        Task { @MainActor in
+            let launcher: ClaudeTerminalLaunching = claudeResumeSettings.preferITerm ? ClaudeITermLauncher() : ClaudeTerminalLauncher()
+            let coordinator = ClaudeResumeCoordinator(env: ClaudeCLIEnvironment(),
+                                                      builder: ClaudeResumeCommandBuilder(),
+                                                      launcher: launcher)
+
+            let sid = deriveClaudeSessionID(from: session)
+            let wd = claudeResumeSettings.effectiveWorkingDirectory(for: session)
+            let bin = claudeResumeSettings.binaryPath.isEmpty ? nil : claudeResumeSettings.binaryPath
+            let input = ClaudeResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
+            let policy = claudeResumeSettings.fallbackPolicy
+            let result = await coordinator.resumeInTerminal(input: input, policy: policy, dryRun: false)
+
+            if !result.launched {
+                var msg = result.error ?? "Launch failed."
+                if let cmd = result.command { msg += "\n\nCommand:\n" + cmd }
+                resumeAlert = DirectoryAlert(title: "Resume Failed", message: msg)
+            }
+        }
+    }
+
+    private func deriveClaudeSessionID(from session: Session) -> String? {
+        // Try to recover from filename: ~/.claude/projects/.../<UUID>.jsonl
+        let url = URL(fileURLWithPath: session.filePath)
+        let base = url.deletingPathExtension().lastPathComponent
+        if base.count >= 8 { return base }
+        // As a last resort, scan head events for a sessionId field
+        let limit = min(session.events.count, 2000)
+        for e in session.events.prefix(limit) {
+            let raw = e.rawJSON
+            if let data = Data(base64Encoded: raw),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let sid = json["sessionId"] as? String, !sid.isEmpty {
+                return sid
+            }
+        }
+        return nil
+    }
+
+    private var isClaudeResumeEnabled: Bool {
+        let def = UserDefaults.standard.bool(forKey: ClaudeFeatureFlag.terminalResumeKey)
+        if def { return true }
+        if let env = ProcessInfo.processInfo.environment["AGENTSESSIONS_FEATURES"], env.contains("claudeResumeTerminal") { return true }
+        return false
+    }
 }
 
 // Wrapper for SessionsListView that bridges ClaudeSessionIndexer
 private struct ClaudeSessionsListView: View {
     @ObservedObject var indexer: ClaudeSessionIndexer
     @Binding var selection: String?
+    let isResumeEnabled: Bool
+    let onResume: ((Session) -> Void)?
+
+    init(indexer: ClaudeSessionIndexer,
+         selection: Binding<String?>,
+         isResumeEnabled: Bool = false,
+         onResume: ((Session) -> Void)? = nil) {
+        self.indexer = indexer
+        self._selection = selection
+        self.isResumeEnabled = isResumeEnabled
+        self.onResume = onResume
+    }
     @State private var tableSelection: Set<String> = []
     @State private var sortOrder: [KeyPathComparator<Session>] = []
     @State private var cachedRows: [Session] = []
@@ -223,6 +322,10 @@ private struct ClaudeSessionsListView: View {
         if selectedIDs.count == 1,
            let id = selectedIDs.first,
            let session = session(for: id) {
+            if isResumeEnabled {
+                Button("Resume in Claude") { onResume?(session) }
+                Divider()
+            }
             Button("Open Working Directory") {
                 openWorkingDirectory(session)
             }
@@ -285,6 +388,7 @@ private struct ClaudeTranscriptView: View {
 
     // Selection for auto-scroll to find matches
     @State private var selectedNSRange: NSRange? = nil
+    @State private var showIDCopiedPopover: Bool = false
 
     var body: some View {
         if let id = sessionID, let session = indexer.allSessions.first(where: { $0.id == id }) {
@@ -402,6 +506,25 @@ private struct ClaudeTranscriptView: View {
 
             // View controls group
             HStack(spacing: 6) {
+                // Session ID (copy full Claude sessionId/UUID from filename)
+                if let short = claudeShortID(for: session) {
+                    Button("ID \(short)") {
+                        copyClaudeSessionID(for: session)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy Claude session ID to clipboard")
+                    .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
+                        Text("Session ID copied")
+                            .font(.caption)
+                            .padding(8)
+                    }
+                } else {
+                    Button("ID —") {}
+                        .buttonStyle(.borderless)
+                        .disabled(true)
+                        .help("No Claude session ID available")
+                }
+
                 Picker("View Style", selection: $renderModeRaw) {
                     Text("Transcript").tag(TranscriptRenderMode.normal.rawValue)
                     Text("Terminal").tag(TranscriptRenderMode.terminal.rawValue)
@@ -414,6 +537,38 @@ private struct ClaudeTranscriptView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(height: 44)
+    }
+
+    private func claudeShortID(for session: Session) -> String? {
+        if let full = claudeFullID(for: session) {
+            return String(full.prefix(6))
+        }
+        return nil
+    }
+
+    private func claudeFullID(for session: Session) -> String? {
+        // Prefer filename UUID: ~/.claude/projects/.../<UUID>.jsonl
+        let base = URL(fileURLWithPath: session.filePath).deletingPathExtension().lastPathComponent
+        if base.count >= 8 { return base }
+        // Fallback: scan events for sessionId field
+        let limit = min(session.events.count, 2000)
+        for e in session.events.prefix(limit) {
+            let raw = e.rawJSON
+            if let data = Data(base64Encoded: raw),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let sid = json["sessionId"] as? String, !sid.isEmpty {
+                return sid
+            }
+        }
+        return nil
+    }
+
+    private func copyClaudeSessionID(for session: Session) {
+        guard let id = claudeFullID(for: session) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(id, forType: .string)
+        showIDCopiedPopover = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { showIDCopiedPopover = false }
     }
 
     private func rebuild(session: Session) {
@@ -745,4 +900,3 @@ private struct ClaudeSearchFiltersView: View {
         }
     }
 }
-

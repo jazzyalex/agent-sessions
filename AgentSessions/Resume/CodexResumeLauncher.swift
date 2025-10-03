@@ -133,6 +133,42 @@ final class CodexResumeLauncher: ObservableObject {
         }
     }
 
+    func launchInITerm(_ package: CodexResumeCommandBuilder.CommandPackage) throws {
+        let escaped = package.shellCommand
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+
+        let scriptLines = [
+            "tell application \"iTerm2\"",
+            "activate",
+            // Always create a new window to run the command
+            "set newWin to (create window with default profile)",
+            "tell newWin",
+            "  tell current session",
+            "    write text \"\(escaped)\"",
+            "  end tell",
+            "end tell",
+            "end tell"
+        ]
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = scriptLines.flatMap { ["-e", $0] }
+
+        let stderr = Pipe()
+        process.standardError = stderr
+        process.standardOutput = Pipe()
+
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let data = stderr.fileHandleForReading.readDataToEndOfFile()
+            let err = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let message = err?.isEmpty == false ? err! : "iTerm2 rejected the launch command (status \(process.terminationStatus))."
+            throw NSError(domain: "CodexResumeLauncher", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
     private func appendConsole(text: String, kind: ConsoleLine.Kind) {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         for (index, line) in lines.enumerated() {

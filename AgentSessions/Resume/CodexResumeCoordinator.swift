@@ -68,7 +68,13 @@ final class CodexResumeCoordinator {
                                                               binaryURL: data.binaryURL,
                                                               fallbackPath: fallbackURL,
                                                               attemptResumeFirst: true)
-                try terminalLauncher.launchInTerminal(package)
+                if settings.launchMode == .iterm {
+                    // Use a temporary launcher that targets iTerm2
+                    let iterm = CodexResumeLauncher()
+                    try iterm.launchInITerm(package)
+                } else {
+                    try terminalLauncher.launchInTerminal(package)
+                }
                 return .launched
             } catch {
                 return .failure(error.localizedDescription)

@@ -192,7 +192,7 @@ struct SessionsListView: View {
         if selectedIDs.count == 1,
            let id = selectedIDs.first,
            let session = session(for: id) {
-            Button("Launch in Terminal") {
+            Button("Resume in Codex") {
                 tableSelection = [id]
                 selection = id
                 onLaunchTerminal(session)
@@ -213,7 +213,7 @@ struct SessionsListView: View {
                 Button("Filter by Project") {}.disabled(true)
             }
         } else {
-            Button("Launch in Terminal") {}.disabled(true)
+            Button("Resume in Codex") {}.disabled(true)
             Button("Open Working Directory") {}.disabled(true)
             Button("Filter by Project") {}.disabled(true)
         }

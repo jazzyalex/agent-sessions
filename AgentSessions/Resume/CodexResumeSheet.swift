@@ -299,7 +299,7 @@ struct CodexResumeSheet: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Picker("Launch Mode", selection: Binding(get: { settings.launchMode }, set: { settings.setLaunchMode($0) })) {
-                    ForEach(CodexLaunchMode.allCases) { mode in
+                    ForEach(visibleLaunchModes) { mode in
                         Text(mode.title).tag(mode)
                     }
                 }
@@ -325,7 +325,7 @@ struct CodexResumeSheet: View {
 
     private var embeddedConsole: some View {
         Group {
-            if settings.launchMode == .embedded {
+            if false { // Embedded disabled in UI
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
                         ForEach(launcher.consoleLines) { line in
@@ -362,16 +362,25 @@ struct CodexResumeSheet: View {
         }
     }
 
+    private var visibleLaunchModes: [CodexLaunchMode] {
+        // Embedded mode disabled to simplify UX
+        return [.terminal, .iterm]
+    }
+
     @MainActor
     private func launch(session: Session) {
         guard let package = buildCommand(session: session) else { return }
 
         switch settings.launchMode {
-        case .embedded:
-            launcher.launchEmbedded(package)
-        case .terminal:
+        case .embedded, .terminal:
             do {
                 try launcher.launchInTerminal(package)
+            } catch {
+                launcher.lastError = error.localizedDescription
+            }
+        case .iterm:
+            do {
+                try launcher.launchInITerm(package)
             } catch {
                 launcher.lastError = error.localizedDescription
             }

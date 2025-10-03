@@ -73,15 +73,32 @@ struct UsageMenuBarMenuContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Reset times at the top: one line per window, with bar + percent and a plain reset time
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Reset times")
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                Text(resetLine(label: "5h:", percent: status.fiveHourPercent, reset: displayReset(status.fiveHourResetText)))
-                    .foregroundStyle(.primary)
-                Text(resetLine(label: "Wk:", percent: status.weekPercent, reset: displayReset(status.weekResetText)))
-                    .foregroundStyle(.primary)
+            // Reset times at the top as enabled buttons so they render as normal menu items.
+            // Tapping opens the Usage-related preferences pane.
+            VStack(alignment: .leading, spacing: 2) {
+                Button(action: { openPreferencesUsage() }) {
+                    HStack(spacing: 6) {
+                        Text("Reset times").font(.body)
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button(action: { openPreferencesUsage() }) {
+                    HStack(spacing: 6) {
+                        Text(resetLine(label: "5h:", percent: status.fiveHourPercent, reset: displayReset(status.fiveHourResetText)))
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button(action: { openPreferencesUsage() }) {
+                    HStack(spacing: 6) {
+                        Text(resetLine(label: "Wk:", percent: status.weekPercent, reset: displayReset(status.weekResetText)))
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
             }
             Divider()
 
@@ -116,6 +133,11 @@ struct UsageMenuBarMenuContent: View {
         }
         .padding(8)
         .frame(minWidth: 360)
+    }
+
+    private func openPreferencesUsage() {
+        PreferencesWindowController.shared.show(indexer: indexer, initialTab: .menuBar)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
