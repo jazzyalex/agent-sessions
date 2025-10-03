@@ -3,6 +3,7 @@ import AppKit
 
 struct ClaudeSessionsView: View {
     @ObservedObject var indexer: ClaudeSessionIndexer
+    @ObservedObject var codexIndexer: SessionIndexer
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     let layoutMode: LayoutMode
     let onToggleLayout: () -> Void
@@ -12,6 +13,7 @@ struct ClaudeSessionsView: View {
     @State private var resumeAlert: DirectoryAlert?
     @StateObject private var claudeResumeSettings = ClaudeResumeSettings.shared
     @AppStorage("ShowClaudeUsageStrip") private var showUsageStrip: Bool = false
+    @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
 
     private struct DirectoryAlert: Identifiable {
         let id = UUID()
@@ -105,9 +107,7 @@ struct ClaudeSessionsView: View {
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: {
-                    PreferencesWindowController.shared.show(indexer: indexer as? SessionIndexer ?? SessionIndexer(),
-                                                             initialTab: .general,
-                                                             initialResumeSelection: selection)
+                    PreferencesWindowController.shared.show(indexer: codexIndexer, initialTab: .general)
                 }) {
                     Image(systemName: "gear")
                 }
@@ -215,6 +215,7 @@ private struct ClaudeSessionsListView: View {
     @Binding var selection: String?
     let isResumeEnabled: Bool
     let onResume: ((Session) -> Void)?
+    @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
 
     init(indexer: ClaudeSessionIndexer,
          selection: Binding<String?>,
@@ -242,9 +243,13 @@ private struct ClaudeSessionsListView: View {
             .width(min: 160, ideal: 320, max: 2000)
 
             TableColumn("Date", value: \Session.modifiedAt) { s in
-                Text(s.modifiedRelative)
+                let display = SessionIndexer.ModifiedDisplay(rawValue: modifiedDisplayRaw) ?? .relative
+                let primary = (display == .relative) ? s.modifiedRelative : absoluteTimeClaude(s.modifiedAt)
+                let helpText = (display == .relative) ? absoluteTimeClaude(s.modifiedAt) : s.modifiedRelative
+                Text(primary)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .foregroundStyle(.secondary)
+                    .help(helpText)
             }
             .width(min: 120, ideal: 120, max: 140)
 
@@ -317,6 +322,17 @@ private struct ClaudeSessionsListView: View {
 
     private func updateCachedRows() {
         cachedRows = indexer.sessions.sorted(using: sortOrder)
+    }
+
+    // Match time formatter used elsewhere so absolute-time mode looks consistent
+    private func absoluteTimeClaude(_ date: Date?) -> String {
+        guard let date else { return "" }
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateStyle = .short
+        f.timeStyle = .short
+        f.doesRelativeDateFormatting = false
+        return f.string(from: date)
     }
 
     private func session(for id: String) -> Session? {

@@ -99,6 +99,7 @@ struct AgentSessionsApp: App {
         WindowGroup("Agent Sessions (Claude Code)") {
             ClaudeSessionsView(
                 indexer: claudeIndexer,
+                codexIndexer: indexer,
                 layoutMode: LayoutMode(rawValue: layoutModeRaw) ?? .vertical,
                 onToggleLayout: {
                     let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
@@ -253,9 +254,9 @@ private struct ContentView: View {
                 .help(layoutMode == .vertical ? "Switch to Horizontal Split" : "Switch to Vertical Split")
             }
             ToolbarItem(placement: .automatic) {
-                Button(action: { PreferencesWindowController.shared.show(indexer: indexer,
-                                                                          initialTab: .general,
-                                                                          initialResumeSelection: selection) }) {
+                Button(action: {
+                    PreferencesWindowController.shared.show(indexer: indexer, initialTab: .general)
+                }) {
                     Image(systemName: "gear")
                 }
                 .help("Preferences")
@@ -287,10 +288,9 @@ private struct ContentView: View {
             case let .needsConfiguration(sessionID):
                 return Alert(title: Text(alert.title),
                              message: Text(alert.message),
-                             primaryButton: .default(Text("Open Resume Preferences")) {
+                             primaryButton: .default(Text("Open Preferences")) {
                                  PreferencesWindowController.shared.show(indexer: indexer,
-                                                                          initialTab: .codexCLIResume,
-                                                                          initialResumeSelection: sessionID)
+                                                                          initialTab: .codexCLI)
                              },
                              secondaryButton: .cancel())
             }

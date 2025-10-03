@@ -253,10 +253,15 @@ private func colorFor(percent: Int) -> Color {
 
 private func displayReset(_ text: String) -> String {
     guard !text.isEmpty else { return "—" }
-    if text.hasPrefix("resets ") {
-        return String(text.dropFirst("resets ".count))
+    var result = text
+    if result.hasPrefix("resets ") {
+        result = String(result.dropFirst("resets ".count))
     }
-    return text
+    // Strip timezone like "(America/Los_Angeles)"
+    if let parenIndex = result.firstIndex(of: "(") {
+        result = String(result[..<parenIndex]).trimmingCharacters(in: .whitespaces)
+    }
+    return result
 }
 
 private func inlineBar(_ percent: Int, segments: Int = 5) -> String {

@@ -219,23 +219,32 @@ actor ClaudeStatusService {
 
             if let session = obj["session_5h"] as? [String: Any] {
                 snapshot.sessionPercent = session["pct_used"] as? Int ?? 0
-                snapshot.sessionResetText = session["resets"] as? String ?? ""
+                snapshot.sessionResetText = stripTimezone(session["resets"] as? String ?? "")
             }
 
             if let weekAll = obj["week_all_models"] as? [String: Any] {
                 snapshot.weekAllModelsPercent = weekAll["pct_used"] as? Int ?? 0
-                snapshot.weekAllModelsResetText = weekAll["resets"] as? String ?? ""
+                snapshot.weekAllModelsResetText = stripTimezone(weekAll["resets"] as? String ?? "")
             }
 
             if let weekOpus = obj["week_opus"] as? [String: Any] {
                 snapshot.weekOpusPercent = weekOpus["pct_used"] as? Int
-                snapshot.weekOpusResetText = weekOpus["resets"] as? String
+                snapshot.weekOpusResetText = (weekOpus["resets"] as? String).map(stripTimezone)
             }
 
             return snapshot
         } catch {
             return nil
         }
+    }
+
+    private func stripTimezone(_ text: String) -> String {
+        // Remove timezone like "(America/Los_Angeles)" to match Codex format
+        // "12:59am (America/Los_Angeles)" -> "12:59am"
+        guard let parenIndex = text.firstIndex(of: "(") else {
+            return text
+        }
+        return text[..<parenIndex].trimmingCharacters(in: .whitespaces)
     }
 
     private func nextInterval() -> UInt64 {

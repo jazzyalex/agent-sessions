@@ -6,7 +6,6 @@ struct UsageStripView: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Text("Codex").font(.footnote).bold().foregroundStyle(.accentColor)
             UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText)
             UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText)
             Spacer(minLength: 0)
@@ -17,6 +16,9 @@ struct UsageStripView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(.thickMaterial)
+        .onTapGesture {
+            codexStatus.refreshNow()
+        }
         .onAppear { codexStatus.setStripVisible(true) }
         .onDisappear { codexStatus.setStripVisible(false) }
     }

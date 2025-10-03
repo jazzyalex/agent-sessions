@@ -158,8 +158,8 @@ struct CodexResumeSheet: View {
 
     private var detailsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Preferences header: keep only Resume Log in this tab
-            if context == .preferences {
+            // Preferences header: keep only Resume Log in this tab (only works with selected session)
+            if context == .preferences, selectedSession != nil {
                 HStack(spacing: 8) {
                     Button("Resume Log") { Task { await runHealthCheck() } }
                         .buttonStyle(.bordered)

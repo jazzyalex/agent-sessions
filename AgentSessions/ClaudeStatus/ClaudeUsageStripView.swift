@@ -6,7 +6,6 @@ struct ClaudeUsageStripView: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Text("Claude").font(.footnote).bold().foregroundStyle(.accentColor)
             UsageMeter(title: "5h", percent: status.sessionPercent, reset: status.sessionResetText)
             UsageMeter(title: "Wk", percent: status.weekAllModelsPercent, reset: status.weekAllModelsResetText)
 
@@ -26,6 +25,9 @@ struct ClaudeUsageStripView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(.thickMaterial)
+        .onTapGesture {
+            status.refreshNow()
+        }
         .onAppear { status.setStripVisible(true) }
         .onDisappear { status.setStripVisible(false) }
     }

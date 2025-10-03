@@ -5,6 +5,8 @@ struct UnifiedSessionsView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
+    @EnvironmentObject var codexUsageModel: CodexUsageModel
+    @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
 
     let layoutMode: LayoutMode
     let onToggleLayout: () -> Void
@@ -14,6 +16,10 @@ struct UnifiedSessionsView: View {
     @State private var sortOrder: [KeyPathComparator<Session>] = []
     @AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
     @AppStorage("UnifiedSourceColorStyle") private var sourceColorStyleRaw: String = SourceColorStyle.none.rawValue
+    @AppStorage("UnifiedShowCodexStrip") private var showCodexStrip: Bool = false
+    @AppStorage("UnifiedShowClaudeStrip") private var showClaudeStrip: Bool = false
+    @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
+    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background }
     private var sourceColorStyle: SourceColorStyle { SourceColorStyle(rawValue: sourceColorStyleRaw) ?? .none }
@@ -37,12 +43,32 @@ struct UnifiedSessionsView: View {
                         .frame(minHeight: 240)
                 }
             }
+
+            // Usage strips
+            if showCodexStrip || showClaudeStrip {
+                VStack(spacing: 0) {
+                    if showCodexStrip {
+                        UsageStripView(codexStatus: codexUsageModel)
+                    }
+                    if showClaudeStrip {
+                        ClaudeUsageStripView(status: claudeUsageModel)
+                    }
+                }
+            }
         }
+        // Honor app-wide theme selection from Preferences → General
+        .preferredColorScheme((AppAppearance(rawValue: appAppearanceRaw) ?? .system).colorScheme)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 6) {
-                    Toggle(isOn: $unified.includeCodex) { Text("Codex") }.toggleStyle(.button)
-                    Toggle(isOn: $unified.includeClaude) { Text("Claude") }.toggleStyle(.button)
+                HStack(spacing: 2) {
+                    Toggle(isOn: $unified.includeCodex) {
+                        Text("Codex").foregroundStyle(unified.includeCodex ? Color.blue : .primary)
+                    }
+                    .toggleStyle(.button)
+                    Toggle(isOn: $unified.includeClaude) {
+                        Text("Claude").foregroundStyle(unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary)
+                    }
+                    .toggleStyle(.button)
                 }
             }
             ToolbarItem(placement: .automatic) { UnifiedSearchFiltersView(unified: unified) }
@@ -68,7 +94,7 @@ struct UnifiedSessionsView: View {
                 Button(action: { onToggleLayout() }) { Image(systemName: layoutMode == .vertical ? "rectangle.split.1x2" : "rectangle.split.2x1") }
             }
             ToolbarItem(placement: .automatic) {
-                Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, initialTab: .general, initialResumeSelection: selection) }) { Image(systemName: "gear") }
+                Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, initialTab: .general) }) { Image(systemName: "gear") }
                     .help("Preferences")
             }
         }
@@ -106,9 +132,13 @@ struct UnifiedSessionsView: View {
             .width(min: 160, ideal: 320, max: 2000)
 
             TableColumn("Date", value: \Session.modifiedAt) { s in
-                Text(s.modifiedRelative)
+                let display = SessionIndexer.ModifiedDisplay(rawValue: modifiedDisplayRaw) ?? .relative
+                let primary = (display == .relative) ? s.modifiedRelative : absoluteTimeUnified(s.modifiedAt)
+                let helpText = (display == .relative) ? absoluteTimeUnified(s.modifiedAt) : s.modifiedRelative
+                Text(primary)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .foregroundStyle(.secondary)
+                    .help(helpText)
             }
             .width(min: 120, ideal: 120, max: 140)
 
@@ -175,6 +205,17 @@ struct UnifiedSessionsView: View {
     }
 
     private var selectedSession: Session? { selection.flatMap { id in rows.first(where: { $0.id == id }) } }
+
+    // Local helper mirrors SessionsListView absolute time formatting
+    private func absoluteTimeUnified(_ date: Date?) -> String {
+        guard let date else { return "" }
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateStyle = .short
+        f.timeStyle = .short
+        f.doesRelativeDateFormatting = false
+        return f.string(from: date)
+    }
 
     private func updateSelectionBridge() {
         // Keep single-selection Set in sync with selection id

@@ -6,6 +6,9 @@ private let labelColumnWidth: CGFloat = 170
 struct PreferencesView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @State private var selectedTab: PreferencesTab?
+    // Persist last-selected tab for smoother navigation across launches
+    @AppStorage("PreferencesLastSelectedTab") private var lastSelectedTabRaw: String = PreferencesTab.general.rawValue
+    private let initialTabArg: PreferencesTab
     @ObservedObject private var resumeSettings = CodexResumeSettings.shared
     @ObservedObject private var claudeSettings = ClaudeResumeSettings.shared
     @State private var showingResetConfirm: Bool = false
@@ -16,10 +19,8 @@ struct PreferencesView: View {
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("StripShowResetTime") private var stripShowResetTime: Bool = false
 
-    private let initialResumeSelection: String?
-
-    init(initialTab: PreferencesTab = .general, initialResumeSelection: String? = nil) {
-        self.initialResumeSelection = initialResumeSelection
+    init(initialTab: PreferencesTab = .general) {
+        self.initialTabArg = initialTab
         _selectedTab = State(initialValue: initialTab)
     }
 
@@ -46,32 +47,64 @@ struct PreferencesView: View {
     @State private var claudeVersionString: String? = nil
     @State private var claudeResolvedPath: String? = nil
     @State private var claudeProbeDebounce: DispatchWorkItem? = nil
+    @State private var showClaudeExperimentalWarning: Bool = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                sidebar
-                Divider()
-                tabBody
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            List(visibleTabs, selection: $selectedTab) { tab in
+                Label(tab.title, systemImage: tab.iconName)
+                    .tag(tab)
             }
-            Divider()
-            footer
+            // Fix the sidebar width to avoid horizontal jumps when switching panes
+            .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)
+        } detail: {
+            VStack(spacing: 0) {
+                tabBody
+                Divider()
+                footer
+            }
         }
         .frame(width: 740, height: 520)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear(perform: loadCurrentSettings)
+        .onAppear {
+            loadCurrentSettings()
+            // Respect caller-provided tab, otherwise restore last selection
+            if initialTabArg == .general, let restored = PreferencesTab(rawValue: lastSelectedTabRaw) {
+                selectedTab = restored
+            }
+            // Trigger any probes needed for the initial/visible tab
+            if let tab = selectedTab ?? .some(initialTabArg) { maybeProbe(for: tab) }
+        }
+        // Keep UI feeling responsive when switching between panes
+        .animation(.easeInOut(duration: 0.12), value: selectedTab)
+        .onChange(of: selectedTab) { _, newValue in
+            guard let t = newValue else { return }
+            lastSelectedTabRaw = t.rawValue
+            maybeProbe(for: t)
+        }
+        .alert("Claude Usage Tracking (Experimental)", isPresented: $showClaudeExperimentalWarning) {
+            Button("Cancel", role: .cancel) { }
+            Button("Enable Anyway") {
+                UserDefaults.standard.set(true, forKey: "ShowClaudeUsageStrip")
+                ClaudeUsageModel.shared.setEnabled(true)
+            }
+        } message: {
+            Text("""
+            This feature runs Claude CLI headlessly every 60s via tmux to fetch /usage data.
+
+            Requirements: Claude CLI + tmux installed and authenticated
+
+            ⚠️ Warnings:
+            - Experimental - may fail or cause slowdowns
+            - Disable immediately if you notice performance issues
+            - First use requests file access permission (one-time)
+
+            Privacy: Only reads usage percentages, no conversation data accessed.
+            """)
+        }
     }
 
     // MARK: Layout chrome
-
-    private var sidebar: some View {
-        List(visibleTabs, selection: $selectedTab) { tab in
-            Label(tab.title, systemImage: tab.iconName)
-                .tag(tab)
-        }
-        .listStyle(.sidebar)
-        .frame(minWidth: 200, maxWidth: 220)
-    }
 
     private var tabBody: some View {
         ScrollView {
@@ -81,10 +114,10 @@ struct PreferencesView: View {
                     generalTab
                 case .menuBar:
                     menuBarTab
+                case .unified:
+                    unifiedTab
                 case .codexCLI:
                     codexCLITab
-                case .codexCLIResume:
-                    codexCLIResumeTab
                 case .claudeResume:
                     claudeResumeTab
                 }
@@ -116,7 +149,7 @@ struct PreferencesView: View {
     // MARK: Tabs
 
     private var generalTab: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 24) {
             Text("General")
                 .font(.title2)
                 .fontWeight(.semibold)
@@ -152,17 +185,26 @@ struct PreferencesView: View {
 
             sectionHeader("Sessions Sidebar")
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 24) {
+                HStack(spacing: 16) {
                     Toggle("Session titles", isOn: $indexer.showTitleColumn)
                     Toggle("Project names", isOn: $indexer.showProjectColumn)
                 }
-                HStack(spacing: 24) {
+                HStack(spacing: 16) {
                     Toggle("Message counts", isOn: $indexer.showMsgsColumn)
                     Toggle("Modified date", isOn: $indexer.showModifiedColumn)
                 }
             }
 
-            sectionHeader("Unified Window")
+        }
+    }
+
+    private var unifiedTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Unified Window")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            sectionHeader("Display")
             VStack(alignment: .leading, spacing: 12) {
                 toggleRow("Show source column", isOn: Binding(
                     get: { UserDefaults.standard.bool(forKey: "UnifiedShowSourceColumn") },
@@ -178,9 +220,33 @@ struct PreferencesView: View {
                         Text("Background").tag("background")
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 280)
+                    .frame(maxWidth: 360)
                 }
-                Text("Choose whether to display a source column and optional color coding by source. Colors are subtle and accessibility-friendly.")
+                Text("Choose whether to display a source column and optional color coding by source.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            sectionHeader("Usage Tracking")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 16) {
+                    toggleRow("Codex strip", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "UnifiedShowCodexStrip") },
+                        set: { UserDefaults.standard.set($0, forKey: "UnifiedShowCodexStrip") }
+                    ))
+                    toggleRow("Claude strip", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "UnifiedShowClaudeStrip") },
+                        set: { UserDefaults.standard.set($0, forKey: "UnifiedShowClaudeStrip") }
+                    ))
+                }
+                HStack(spacing: 16) {
+                    toggleRow("Show reset times", isOn: $stripShowResetTime)
+                    toggleRow("Monochrome", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
+                        set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
+                    ))
+                }
+                Text("Strips stack vertically when both are shown.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -188,7 +254,7 @@ struct PreferencesView: View {
     }
 
     private var menuBarTab: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 24) {
             Text("Menu Bar")
                 .font(.title2)
                 .fontWeight(.semibold)
@@ -239,7 +305,7 @@ struct PreferencesView: View {
             }
 
             sectionHeader("Codex CLI")
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("Detected version:").font(.caption)
                     Text(probeVersion?.description ?? "unknown").font(.caption).monospaced()
@@ -257,7 +323,7 @@ struct PreferencesView: View {
     }
 
     private var codexCLITab: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 24) {
             Text("Codex CLI")
                 .font(.title2)
                 .fontWeight(.semibold)
@@ -301,7 +367,7 @@ struct PreferencesView: View {
 
             sectionHeader("Binary")
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
+                HStack(spacing: 12) {
                     Button(action: probeCodex) {
                         switch probeState {
                         case .probing:
@@ -374,51 +440,24 @@ struct PreferencesView: View {
 
             sectionHeader("Usage Tracking")
             VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Show usage strip", isOn: $showUsageStrip)
-                toggleRow("Show reset times", isOn: $stripShowResetTime)
-                toggleRow("Monochrome meters", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
-                    set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
-                ))
-                HStack(spacing: 12) {
-                    Button("Refresh Now") {
-                        CodexUsageModel.shared.refreshNow()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!showUsageStrip)
+                // Keep rows consistent with other panes to avoid widening the detail area
+                HStack(spacing: 16) {
+                    toggleRow("Show usage strip", isOn: $showUsageStrip)
+                    toggleRow("Show reset times", isOn: $stripShowResetTime)
                 }
-                Text("Parses recent Codex session logs for rate limits.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 16) {
+                    toggleRow("Monochrome", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
+                        set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
+                    ))
+                    Spacer(minLength: 0)
+                    Button("Refresh Now") { CodexUsageModel.shared.refreshNow() }
+                        .buttonStyle(.bordered)
+                        .disabled(!showUsageStrip)
+                }
             }
 
             // Resume-specific defaults now live in Codex CLI Resume tab.
-        }
-    }
-
-    private var codexCLIResumeTab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Codex CLI Resume")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("Configure how Agent Sessions resumes saved Codex sessions and run diagnostics.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            CodexResumeSheet(initialSelection: initialResumeSelection, context: .preferences)
-                .environmentObject(indexer)
-                .padding(.top, 4)
-            // Status row (mirrors header footer inside sheet, but visible here too)
-            if let v = probeVersion, let path = resolvedCodexPath {
-                Text("Detected Codex \(v.description) \(path)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if probeState == .failure {
-                Text("Codex is not found")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
         }
     }
 
@@ -436,10 +475,10 @@ struct PreferencesView: View {
                         Text("iTerm2").tag(1)
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 280)
+                    .frame(maxWidth: 360)
                 }
 
-                HStack(spacing: 8) {
+                HStack(spacing: 12) {
                     Button(action: probeClaude) {
                         switch claudeProbeState {
                         case .probing:
@@ -488,32 +527,36 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
             }
 
-            sectionHeader("Usage Tracking")
+            sectionHeader("Usage Tracking (Experimental)")
             VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Show usage strip", isOn: Binding(
+                toggleRow("Activate Claude Usage (Experimental!)", isOn: Binding(
                     get: { UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") },
-                    set: {
-                        UserDefaults.standard.set($0, forKey: "ShowClaudeUsageStrip")
-                        ClaudeUsageModel.shared.setEnabled($0)
+                    set: { newValue in
+                        if newValue {
+                            showClaudeExperimentalWarning = true
+                        } else {
+                            UserDefaults.standard.set(false, forKey: "ShowClaudeUsageStrip")
+                            ClaudeUsageModel.shared.setEnabled(false)
+                        }
                     }
                 ))
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("First use will request file access permission", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                    Text("Requires tmux. Launches Claude CLI headlessly to fetch /usage data. macOS will prompt for file access on first run (one-time only).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                // Break out rows to avoid horizontal overflow that narrows the sidebar
+                HStack(spacing: 16) {
+                    toggleRow("Show reset times", isOn: $stripShowResetTime)
                 }
-
-                HStack(spacing: 12) {
-                    Button("Refresh Now") {
-                        ClaudeUsageModel.shared.refreshNow()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip"))
+                HStack(spacing: 16) {
+                    toggleRow("Monochrome", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
+                        set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
+                    ))
+                    Spacer(minLength: 0)
+                    Button("Refresh Now") { ClaudeUsageModel.shared.refreshNow() }
+                        .buttonStyle(.bordered)
+                        .disabled(!UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip"))
                 }
+                Label("Requires tmux. First use requests file access (one-time).", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -530,11 +573,10 @@ struct PreferencesView: View {
         defaultResumeDirectory = resumeSettings.defaultWorkingDirectory
         validateDefaultDirectory()
         preferredLaunchMode = resumeSettings.launchMode
-        // kick off a probe so users see current version/path
+        // Reset probe state; actual probing is triggered when related tab is shown
         probeState = .idle
         probeVersion = nil
         resolvedCodexPath = nil
-        probeCodex()
     }
 
     private func validateCodexPath() {
@@ -714,8 +756,8 @@ struct PreferencesView: View {
 enum PreferencesTab: String, CaseIterable, Identifiable {
     case general
     case menuBar
+    case unified
     case codexCLI
-    case codexCLIResume
     case claudeResume
 
     var id: String { rawValue }
@@ -724,8 +766,8 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "General"
         case .menuBar: return "Menu Bar"
+        case .unified: return "Unified Window"
         case .codexCLI: return "Codex CLI"
-        case .codexCLIResume: return "Codex CLI Resume"
         case .claudeResume: return "Claude Code"
         }
     }
@@ -734,15 +776,15 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .menuBar: return "menubar.rectangle"
+        case .unified: return "square.grid.2x2"
         case .codexCLI: return "terminal"
-        case .codexCLIResume: return "terminal.fill"
         case .claudeResume: return "chevron.left.slash.chevron.right"
         }
     }
 }
 
 private extension PreferencesView {
-    var visibleTabs: [PreferencesTab] { [.general, .menuBar, .codexCLI, .codexCLIResume, .claudeResume] }
+    var visibleTabs: [PreferencesTab] { [.general, .menuBar, .unified, .codexCLI, .claudeResume] }
 }
 
 // MARK: - Probe helpers
@@ -795,6 +837,18 @@ private extension PreferencesView {
                     self.claudeProbeState = .failure
                 }
             }
+        }
+    }
+
+    // Trigger background probes only when a relevant pane is active
+    func maybeProbe(for tab: PreferencesTab) {
+        switch tab {
+        case .codexCLI, .menuBar:
+            if probeVersion == nil && probeState != .probing { probeCodex() }
+        case .claudeResume:
+            if claudeVersionString == nil && claudeProbeState != .probing { probeClaude() }
+        case .general, .unified:
+            break
         }
     }
 
