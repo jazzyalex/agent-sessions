@@ -6,7 +6,7 @@ struct UsageStripView: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Text("Codex").font(.footnote).bold().foregroundStyle(.blue)
+            Text("Codex").font(.footnote).bold().foregroundStyle(.accentColor)
             UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText)
             UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText)
             Spacer(minLength: 0)

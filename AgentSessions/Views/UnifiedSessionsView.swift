@@ -71,13 +71,6 @@ struct UnifiedSessionsView: View {
                 Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, initialTab: .general, initialResumeSelection: selection) }) { Image(systemName: "gear") }
                     .help("Preferences")
             }
-            // Source toggles aligned to the right side of the title bar
-            ToolbarItem(placement: .status) {
-                HStack(spacing: 6) {
-                    Toggle(isOn: $unified.includeCodex) { Text("Codex") }.toggleStyle(.button)
-                    Toggle(isOn: $unified.includeClaude) { Text("Claude") }.toggleStyle(.button)
-                }
-            }
         }
         .onAppear {
             if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }

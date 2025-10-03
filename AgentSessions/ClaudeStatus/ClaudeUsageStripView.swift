@@ -6,17 +6,17 @@ struct ClaudeUsageStripView: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Text("Claude").font(.footnote).bold().foregroundStyle(.purple)
+            Text("Claude").font(.footnote).bold().foregroundStyle(.accentColor)
             UsageMeter(title: "5h", percent: status.sessionPercent, reset: status.sessionResetText)
             UsageMeter(title: "Wk", percent: status.weekAllModelsPercent, reset: status.weekAllModelsResetText)
 
             Spacer(minLength: 0)
 
-            // Error indicators
+            // Status text (right-aligned, same as Codex)
             if status.loginRequired {
-                Text("Login required - run 'claude' in Terminal").font(.caption).foregroundStyle(.red)
+                Text("Login required").font(.caption).foregroundStyle(.red)
             } else if status.cliUnavailable {
-                Text("Claude CLI not found").font(.caption).foregroundStyle(.red)
+                Text("CLI not found").font(.caption).foregroundStyle(.red)
             } else if status.tmuxUnavailable {
                 Text("tmux not found").font(.caption).foregroundStyle(.red)
             } else if let update = status.lastUpdate {
@@ -49,7 +49,7 @@ private struct UsageMeter: View {
         HStack(spacing: 8) {
             Text(title).font(.footnote).bold()
             ProgressView(value: Double(percent), total: 100)
-                .tint(stripMonochrome ? .secondary : .purple)
+                .tint(stripMonochrome ? .secondary : .accentColor)
                 .frame(width: 140)
             Text("\(percent)%").font(.footnote).monospacedDigit()
             if showResetTime, !reset.isEmpty {

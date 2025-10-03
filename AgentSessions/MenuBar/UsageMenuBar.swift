@@ -23,7 +23,7 @@ struct UsageMenuBarLabel: View {
             case .both:
                 let codex = renderSource(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefix: "CX")
                 let claude = renderSource(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefix: "CL")
-                return codex + Text("  ") + claude
+                return codex + Text(" │ ") + claude
             }
         }()
 
@@ -105,14 +105,9 @@ struct UsageMenuBarMenuContent: View {
                 VStack(alignment: .leading, spacing: 2) {
                     if source == .both {
                         Text("Codex").font(.headline).padding(.bottom, 2)
+                    } else {
+                        Text("Reset times").font(.body).fontWeight(.semibold).foregroundStyle(.primary).padding(.bottom, 2)
                     }
-                    Button(action: { openPreferencesUsage() }) {
-                        HStack(spacing: 6) {
-                            Text("Reset times").font(.body)
-                            Spacer()
-                        }
-                    }
-                    .buttonStyle(.plain)
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
@@ -140,14 +135,9 @@ struct UsageMenuBarMenuContent: View {
                 VStack(alignment: .leading, spacing: 2) {
                     if source == .both {
                         Text("Claude").font(.headline).padding(.bottom, 2)
+                    } else {
+                        Text("Reset times").font(.body).fontWeight(.semibold).foregroundStyle(.primary).padding(.bottom, 2)
                     }
-                    Button(action: { openPreferencesUsage() }) {
-                        HStack(spacing: 6) {
-                            Text("Reset times").font(.body)
-                            Spacer()
-                        }
-                    }
-                    .buttonStyle(.plain)
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
