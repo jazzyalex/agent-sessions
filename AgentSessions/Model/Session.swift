@@ -2,6 +2,7 @@ import Foundation
 
 public struct Session: Identifiable, Equatable, Codable {
     public let id: String
+    public let source: SessionSource
     public let startTime: Date?
     public let endTime: Date?
     public let model: String?
@@ -14,8 +15,9 @@ public struct Session: Identifiable, Equatable, Codable {
     public let lightweightTitle: String?
 
     // Default initializer for full sessions
-    public init(id: String, startTime: Date?, endTime: Date?, model: String?, filePath: String, eventCount: Int, events: [SessionEvent]) {
+    public init(id: String, source: SessionSource = .codex, startTime: Date?, endTime: Date?, model: String?, filePath: String, eventCount: Int, events: [SessionEvent]) {
         self.id = id
+        self.source = source
         self.startTime = startTime
         self.endTime = endTime
         self.model = model
@@ -27,8 +29,9 @@ public struct Session: Identifiable, Equatable, Codable {
     }
 
     // Lightweight session initializer
-    public init(id: String, startTime: Date?, endTime: Date?, model: String?, filePath: String, eventCount: Int, events: [SessionEvent], cwd: String?, repoName: String?, lightweightTitle: String?) {
+    public init(id: String, source: SessionSource = .codex, startTime: Date?, endTime: Date?, model: String?, filePath: String, eventCount: Int, events: [SessionEvent], cwd: String?, repoName: String?, lightweightTitle: String?) {
         self.id = id
+        self.source = source
         self.startTime = startTime
         self.endTime = endTime
         self.model = model
@@ -79,6 +82,7 @@ public struct Session: Identifiable, Equatable, Codable {
     // Title used by Codex's --resume picker: first plain user message found in the
     // head of the file (first 10 records). If none found, the session is not shown.
     public var codexPreviewTitle: String? {
+        guard source == .codex else { return nil }
         let head = events.prefix(10)
 
         // Find first meaningful user message, filtering out IDE scaffolding
@@ -130,6 +134,7 @@ public struct Session: Identifiable, Equatable, Codable {
     // Extract timestamp and UUID from rollout filename for Codex sort order.
     // rollout-YYYY-MM-DDThh-mm-ss-<uuid>.jsonl
     public var codexFilenameTimestamp: Date? {
+        guard source == .codex else { return nil }
         let filename = (filePath as NSString).lastPathComponent
 
         guard let match = Self.rolloutRegex.firstMatch(in: filename) else {
@@ -142,12 +147,14 @@ public struct Session: Identifiable, Equatable, Codable {
     }
 
     public var codexFilenameUUID: String? {
+        guard source == .codex else { return nil }
         guard let match = Self.rolloutRegex.firstMatch(in: (filePath as NSString).lastPathComponent) else { return nil }
         return match.uuid
     }
 
     // Prefer the internal session_id embedded in JSONL (more authoritative than filename UUID for some builds)
     public var codexInternalSessionID: String? {
+        guard source == .codex else { return nil }
         // Scan a larger head slice to improve hit rate on older logs
         let limit = min(events.count, 2000)
         for e in events.prefix(limit) {
@@ -175,12 +182,17 @@ public struct Session: Identifiable, Equatable, Codable {
 
     // MARK: - Repo/CWD helpers
     public var cwd: String? {
-        // 0) Lightweight session: use extracted cwd
+        // 0) Claude sessions: use cwd extracted during parsing
+        if source == .claude, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
+            return lightCwd
+        }
+
+        // 1) Lightweight Codex session: use extracted cwd
         if events.isEmpty, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
             return lightCwd
         }
 
-        // 1) Look for XML-ish environment_context blocks in text
+        // 2) Look for XML-ish environment_context blocks in text (Codex only)
         let pattern = #"<cwd>(.*?)</cwd>"#
         if let re = try? NSRegularExpression(pattern: pattern) {
             for e in events {
@@ -195,7 +207,7 @@ public struct Session: Identifiable, Equatable, Codable {
                 }
             }
         }
-        // 2) Look for JSON field "cwd" in raw JSON
+        // 3) Look for JSON field "cwd" in raw JSON (Codex only)
         for e in events {
             if let data = e.rawJSON.data(using: .utf8),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -260,8 +272,9 @@ public struct Session: Identifiable, Equatable, Codable {
     }
 
     public var modifiedAt: Date {
-        // Use filename timestamp (session creation) like Codex CLI, fallback to session end/start
-        let filenameDate = codexFilenameTimestamp
+        // Codex: Use filename timestamp (session creation), fallback to session end/start
+        // Claude: Use session end/start (no filename timestamp)
+        let filenameDate = source == .codex ? codexFilenameTimestamp : nil
         let endDate = endTime
         let startDate = startTime
 

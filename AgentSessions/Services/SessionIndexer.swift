@@ -366,7 +366,7 @@ final class SessionIndexer: ObservableObject {
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
 
         // Fast path: heavy file → metadata-first, avoid full scan now
-        if size >= 20_000_000 { // 20 MB threshold
+        if size >= 10_000_000 { // 10 MB threshold
             print("🔵 HEAVY FILE DETECTED: \(url.lastPathComponent) size=\(size) bytes (~\(size/1_000_000)MB)")
             if let light = Self.lightweightSession(from: url, size: size, mtime: mtime) {
                 print("✅ LIGHTWEIGHT: \(url.lastPathComponent) estEvents=\(light.eventCount) messageCount=\(light.messageCount)")
@@ -395,9 +395,8 @@ final class SessionIndexer: ObservableObject {
         do {
             try reader.forEachLine { rawLine in
                 idx += 1
-                // Conditional sanitize for large lines or embedded images
-                let needsSanitize = rawLine.utf8.count > 1_000_000 || rawLine.contains("data:image")
-                let safeLine = needsSanitize ? Self.sanitizeAllImages(rawLine) : rawLine
+                // Only sanitize very large lines (>100KB) - sanitizeAllImages has its own guards for smaller lines
+                let safeLine = rawLine.utf8.count > 100_000 ? Self.sanitizeAllImages(rawLine) : rawLine
                 let (event, maybeModel) = Self.parseLine(safeLine, eventID: self.eventID(for: url, index: idx))
                 if let m = maybeModel, modelSeen == nil { modelSeen = m }
                 events.append(event)
@@ -418,7 +417,7 @@ final class SessionIndexer: ObservableObject {
             }
         }
         let id = Self.hash(path: url.path)
-        let session = Session(id: id, startTime: start, endTime: end, model: modelSeen, filePath: url.path, eventCount: events.count, events: events)
+        let session = Session(id: id, source: .codex, startTime: start, endTime: end, model: modelSeen, filePath: url.path, eventCount: events.count, events: events)
 
         if size > 5_000_000 {  // Log full parse of files >5MB
             print("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
@@ -504,6 +503,7 @@ final class SessionIndexer: ObservableObject {
         let id = Self.hash(path: url.path)
         // Use sample events for title/cwd extraction, then create lightweight session
         let tempSession = Session(id: id,
+                                   source: .codex,
                                    startTime: tmin,
                                    endTime: tmax,
                                    model: model,
@@ -516,6 +516,7 @@ final class SessionIndexer: ObservableObject {
 
         // Now create final lightweight session with empty events but preserve metadata
         let session = Session(id: id,
+                              source: .codex,
                               startTime: tmin ?? (attrsDate(url, key: .creationDate) ?? mtime),
                               endTime: tmax ?? mtime,
                               model: model,
@@ -705,19 +706,19 @@ final class SessionIndexer: ObservableObject {
             return result
         }
 
-        // For normal lines (<1MB), use regex (fastest for reasonable sizes)
-        let pattern = #"data:image/[^;\"]*;base64,[A-Za-z0-9+/=]*"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return line
+        // For normal lines (<1MB), use fast string scanning (avoids slow regex backtracking)
+        var result = line
+        while let dataIdx = result.range(of: "data:image") {
+            // Find the closing quote (end of data URL)
+            if let endQuote = result[dataIdx.upperBound...].firstIndex(of: "\"") {
+                // Replace everything from "data:image" to quote with placeholder that doesn't contain "data:image"
+                result.replaceSubrange(dataIdx.lowerBound..<endQuote, with: "[IMG_OMITTED]")
+            } else {
+                // No closing quote found, replace to end and break
+                result.replaceSubrange(dataIdx.lowerBound..., with: "[IMG_OMITTED]")
+                break
+            }
         }
-
-        let range = NSRange(location: 0, length: line.utf16.count)
-        let result = regex.stringByReplacingMatches(
-            in: line,
-            options: [],
-            range: range,
-            withTemplate: "data:image/omitted"
-        )
 
         return result
     }

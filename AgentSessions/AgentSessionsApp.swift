@@ -4,6 +4,7 @@ import AppKit
 @main
 struct AgentSessionsApp: App {
     @StateObject private var indexer = SessionIndexer()
+    @StateObject private var claudeIndexer = ClaudeSessionIndexer()
     @StateObject private var usageModel = CodexUsageModel.shared
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -17,7 +18,7 @@ struct AgentSessionsApp: App {
     @State private var showingFirstRunPrompt: Bool = false
 
     var body: some Scene {
-        WindowGroup("Agent Sessions") {
+        WindowGroup("Agent Sessions (Codex)") {
             ContentView(layoutMode: LayoutMode(rawValue: layoutModeRaw) ?? .vertical,
                         onToggleLayout: {
                             let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
@@ -53,6 +54,26 @@ struct AgentSessionsApp: App {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer) }
                     .keyboardShortcut(",", modifiers: .command)
+            }
+        }
+
+        // Claude Code sessions window
+        WindowGroup("Agent Sessions (Claude Code)") {
+            ClaudeSessionsView(
+                indexer: claudeIndexer,
+                layoutMode: LayoutMode(rawValue: layoutModeRaw) ?? .vertical,
+                onToggleLayout: {
+                    let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
+                    layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
+                })
+                .onAppear {
+                    claudeIndexer.refresh()
+                }
+        }
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("Refresh") { claudeIndexer.refresh() }
+                    .keyboardShortcut("r", modifiers: .command)
             }
         }
 

@@ -19,13 +19,11 @@
 		B000001C2A0A000100000001 /* AgentSessionsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000112A0A000100000001 /* AgentSessionsApp.swift */; };
 		B000001C2A0A000100000002 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000113A0A000100000001 /* Session.swift */; };
 		B000001C2A0A000100000003 /* SessionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000114A0A000100000001 /* SessionEvent.swift */; };
+				B0000SSS2A0A000100000001 /* SessionSource.swift in Sources */,
+				B0000SSS4A0A000100000002 /* SessionSource.swift */,
 		B0000SSS2A0A000100000001 /* SessionSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000SSS4A0A000100000002 /* SessionSource.swift */; };
 		B000001C2A0A000100000004 /* SessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000115A0A000100000001 /* SessionIndexer.swift */; };
-		B0000DIS2A0A000100000001 /* SessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000DIS4A0A000100000002 /* SessionDiscovery.swift */; };
-		B0000CPA2A0A000100000001 /* ClaudeSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000CPA4A0A000100000002 /* ClaudeSessionParser.swift */; };
-		B0000CIN2A0A000100000001 /* ClaudeSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000CIN4A0A000100000002 /* ClaudeSessionIndexer.swift */; };
 		B000001C2A0A000100000005 /* SessionsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000116A0A000100000001 /* SessionsListView.swift */; };
-		B0000CSV2A0A000100000001 /* ClaudeSessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000CSV4A0A000100000002 /* ClaudeSessionsView.swift */; };
 		B000001C2A0A000100000008 /* SearchFiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000119A0A000100000001 /* SearchFiltersView.swift */; };
 		B000001C2A0A000100000009 /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000011AA0A000100000001 /* PreferencesView.swift */; };
 		B000001C2A0A00010000000A /* JSONLReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000011BA0A000100000001 /* JSONLReader.swift */; };
@@ -77,13 +75,10 @@
 		B00000112A0A000100000001 /* AgentSessionsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentSessionsApp.swift; path = AgentSessions/AgentSessionsApp.swift; sourceTree = SOURCE_ROOT; };
 		B00000113A0A000100000001 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Session.swift; path = AgentSessions/Model/Session.swift; sourceTree = SOURCE_ROOT; };
 		B00000114A0A000100000001 /* SessionEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionEvent.swift; path = AgentSessions/Model/SessionEvent.swift; sourceTree = SOURCE_ROOT; };
+				B0000SSS4A0A000100000002 /* SessionSource.swift */,
 		B0000SSS4A0A000100000002 /* SessionSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionSource.swift; path = AgentSessions/Model/SessionSource.swift; sourceTree = SOURCE_ROOT; };
 		B00000115A0A000100000001 /* SessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionIndexer.swift; path = AgentSessions/Services/SessionIndexer.swift; sourceTree = SOURCE_ROOT; };
-		B0000DIS4A0A000100000002 /* SessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionDiscovery.swift; path = AgentSessions/Services/SessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
-		B0000CPA4A0A000100000002 /* ClaudeSessionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClaudeSessionParser.swift; path = AgentSessions/Services/ClaudeSessionParser.swift; sourceTree = SOURCE_ROOT; };
-		B0000CIN4A0A000100000002 /* ClaudeSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClaudeSessionIndexer.swift; path = AgentSessions/Services/ClaudeSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
 		B00000116A0A000100000001 /* SessionsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionsListView.swift; path = AgentSessions/Views/SessionsListView.swift; sourceTree = SOURCE_ROOT; };
-		B0000CSV4A0A000100000002 /* ClaudeSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClaudeSessionsView.swift; path = AgentSessions/Views/ClaudeSessionsView.swift; sourceTree = SOURCE_ROOT; };
 		B00000117A0A000100000001 /* SessionTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionTimelineView.swift; path = AgentSessions/Views/SessionTimelineView.swift; sourceTree = SOURCE_ROOT; };
 		B00000118A0A000100000001 /* EventInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EventInspectorView.swift; path = AgentSessions/Views/EventInspectorView.swift; sourceTree = SOURCE_ROOT; };
 		B00000119A0A000100000001 /* SearchFiltersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SearchFiltersView.swift; path = AgentSessions/Views/SearchFiltersView.swift; sourceTree = SOURCE_ROOT; };
@@ -233,9 +228,6 @@
 			isa = PBXGroup;
 			children = (
 				B00000115A0A000100000001 /* SessionIndexer.swift */,
-				B0000DIS4A0A000100000002 /* SessionDiscovery.swift */,
-				B0000CPA4A0A000100000002 /* ClaudeSessionParser.swift */,
-				B0000CIN4A0A000100000002 /* ClaudeSessionIndexer.swift */,
 				B00000170A0A000100000001 /* TranscriptTheme.swift */,
 				B00000171A0A000100000001 /* SessionTranscriptBuilder.swift */,
 				B00000178A0A000100000001 /* AppAppearance.swift */,
@@ -259,7 +251,6 @@
 			isa = PBXGroup;
 			children = (
 				B00000116A0A000100000001 /* SessionsListView.swift */,
-				B0000CSV4A0A000100000002 /* ClaudeSessionsView.swift */,
 				B00000175A0A000100000001 /* TranscriptPlainView.swift */,
 				B00000117A0A000100000001 /* SessionTimelineView.swift */,
 				B00000118A0A000100000001 /* EventInspectorView.swift */,
@@ -394,15 +385,11 @@
 				B000001C2A0A000100000001 /* AgentSessionsApp.swift in Sources */,
 				B000001C2A0A000100000002 /* Session.swift in Sources */,
 				B000001C2A0A000100000003 /* SessionEvent.swift in Sources */,
-				B000001C2A0A000100000004 /* SessionIndexer.swift in Sources */,
-				B0000DIS2A0A000100000001 /* SessionDiscovery.swift in Sources */,
-				B0000CPA2A0A000100000001 /* ClaudeSessionParser.swift in Sources */,
-				B0000CIN2A0A000100000001 /* ClaudeSessionIndexer.swift in Sources */,
 				B0000SSS2A0A000100000001 /* SessionSource.swift in Sources */,
+				B000001C2A0A000100000004 /* SessionIndexer.swift in Sources */,
 				B000001C2A0A000100000070 /* TranscriptTheme.swift in Sources */,
 				B000001C2A0A000100000071 /* SessionTranscriptBuilder.swift in Sources */,
 				B000001C2A0A000100000005 /* SessionsListView.swift in Sources */,
-				B0000CSV2A0A000100000001 /* ClaudeSessionsView.swift in Sources */,
 				B000001C2A0A000100000072 /* TranscriptPlainView.swift in Sources */,
 				B000001C2A0A000100000008 /* SearchFiltersView.swift in Sources */,
 				B000001C2A0A000100000009 /* PreferencesView.swift in Sources */,
