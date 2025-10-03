@@ -48,10 +48,16 @@ struct UnifiedSessionsView: View {
             if showCodexStrip || showClaudeStrip {
                 VStack(spacing: 0) {
                     if showCodexStrip {
-                        UsageStripView(codexStatus: codexUsageModel)
+                        HStack(spacing: 10) {
+                            Text("Codex").font(.footnote).bold().foregroundStyle(Color.blue)
+                            UsageStripView(codexStatus: codexUsageModel)
+                        }
                     }
                     if showClaudeStrip {
-                        ClaudeUsageStripView(status: claudeUsageModel)
+                        HStack(spacing: 10) {
+                            Text("Claude").font(.footnote).bold().foregroundStyle(Color(red: 204/255, green: 121/255, blue: 90/255))
+                            ClaudeUsageStripView(status: claudeUsageModel)
+                        }
                     }
                 }
             }

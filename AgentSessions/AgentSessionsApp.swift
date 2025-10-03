@@ -15,6 +15,7 @@ struct AgentSessionsApp: App {
     @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.vertical.rawValue
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     @AppStorage("ShowClaudeUsageStrip") private var showClaudeUsageStrip: Bool = false
+    @AppStorage("UnifiedLegacyNoticeShown") private var unifiedNoticeShown: Bool = false
     @State private var selectedSessionID: String?
     @State private var selectedEventID: String?
     @State private var focusSearchToggle: Bool = false
@@ -50,8 +51,15 @@ struct AgentSessionsApp: App {
             }
             CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer) }.keyboardShortcut(",", modifiers: .command) }
             CommandGroup(after: .windowArrangement) {
-                Button("New Codex Window") { openWindowCodex() }.keyboardShortcut("1", modifiers: [.command, .shift])
-                Button("New Claude Window") { openWindowClaude() }.keyboardShortcut("2", modifiers: [.command, .shift])
+                if FeatureFlags.legacyWindows {
+                    Button("New Codex Window") { openWindowCodex() }.keyboardShortcut("1", modifiers: [.command, .shift])
+                    Button("New Claude Window") { openWindowClaude() }.keyboardShortcut("2", modifiers: [.command, .shift])
+                } else {
+                    Button("Codex Only (Unified)") { focusUnified(preset: .codexOnly) }
+                        .keyboardShortcut("1", modifiers: [.command, .shift])
+                    Button("Claude Only (Unified)") { focusUnified(preset: .claudeOnly) }
+                        .keyboardShortcut("2", modifiers: [.command, .shift])
+                }
             }
         }
 
@@ -154,6 +162,35 @@ final class _UnifiedHolder: ObservableObject {
 extension AgentSessionsApp {
     private func openWindowCodex() { NSApp.activate(ignoringOtherApps: true) }
     private func openWindowClaude() { NSApp.activate(ignoringOtherApps: true) }
+
+    enum UnifiedPreset { case codexOnly, claudeOnly, both }
+    private func focusUnified(preset: UnifiedPreset) {
+        // Ensure Unified indexer exists and set source filters
+        let unified = unifiedIndexerHolder.makeUnified(codexIndexer: indexer, claudeIndexer: claudeIndexer)
+        switch preset {
+        case .codexOnly:
+            unified.includeCodex = true; unified.includeClaude = false
+        case .claudeOnly:
+            unified.includeCodex = false; unified.includeClaude = true
+        case .both:
+            unified.includeCodex = true; unified.includeClaude = true
+        }
+        unified.recomputeNow()
+
+        // Bring Unified window to front (create if none by activating the app)
+        NSApp.activate(ignoringOtherApps: true)
+
+        // One-time notice replacing legacy windows
+        if !unifiedNoticeShown && !FeatureFlags.legacyWindows {
+            unifiedNoticeShown = true
+            let alert = NSAlert()
+            alert.messageText = "Unified Window"
+            alert.informativeText = "Legacy Codex/Claude windows have been replaced by the Unified window. Use Shift+Cmd+1 for Codex only, Shift+Cmd+2 for Claude only."
+            alert.addButton(withTitle: "OK")
+            alert.alertStyle = .informational
+            alert.runModal()
+        }
+    }
 }
 private struct ContentView: View {
     @EnvironmentObject var indexer: SessionIndexer
