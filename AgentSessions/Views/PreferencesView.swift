@@ -94,6 +94,9 @@ struct PreferencesView: View {
 
             Requirements: Claude CLI + tmux installed and authenticated
 
+            Install tmux (via Homebrew):
+              brew install tmux
+
             ⚠️ Warnings:
             - Experimental - may fail or cause slowdowns
             - Disable immediately if you notice performance issues

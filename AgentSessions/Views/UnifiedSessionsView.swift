@@ -46,18 +46,12 @@ struct UnifiedSessionsView: View {
 
             // Usage strips
             if showCodexStrip || showClaudeStrip {
-                VStack(spacing: 0) {
+                VStack(spacing: 2) {
                     if showCodexStrip {
-                        HStack(spacing: 10) {
-                            Text("Codex").font(.footnote).bold().foregroundStyle(Color.blue)
-                            UsageStripView(codexStatus: codexUsageModel)
-                        }
+                        UsageStripView(codexStatus: codexUsageModel, label: "Codex", brandColor: .blue, verticalPadding: 3)
                     }
                     if showClaudeStrip {
-                        HStack(spacing: 10) {
-                            Text("Claude").font(.footnote).bold().foregroundStyle(Color(red: 204/255, green: 121/255, blue: 90/255))
-                            ClaudeUsageStripView(status: claudeUsageModel)
-                        }
+                        ClaudeUsageStripView(status: claudeUsageModel, label: "Claude", brandColor: Color(red: 204/255, green: 121/255, blue: 90/255), verticalPadding: 3)
                     }
                 }
             }
@@ -281,7 +275,7 @@ struct UnifiedSessionsView: View {
     }
 
     private func sourceAccent(_ s: Session) -> Color {
-        return s.source == .codex ? Color.blue : Color.purple
+        return s.source == .codex ? Color.blue : Color(red: 204/255, green: 121/255, blue: 90/255)
     }
 }
 

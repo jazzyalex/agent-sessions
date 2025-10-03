@@ -145,7 +145,7 @@
 		CLC000020000000000000001 /* ClaudeUsageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageModel.swift; sourceTree = SOURCE_ROOT; };
 		CLC000020000000000000002 /* ClaudeStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeStatusService.swift; sourceTree = SOURCE_ROOT; };
 		CLC000020000000000000003 /* claude_usage_capture.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = AgentSessions/Resources/claude_usage_capture.sh; sourceTree = SOURCE_ROOT; };
-		CLC000020000000000000004 /* ClaudeUsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift; sourceTree = SOURCE_ROOT; };
+        CLC000020000000000000004 /* ClaudeUsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */

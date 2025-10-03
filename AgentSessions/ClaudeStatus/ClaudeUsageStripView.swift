@@ -3,9 +3,22 @@ import SwiftUI
 // Compact footer usage strip for Claude usage only
 struct ClaudeUsageStripView: View {
     @ObservedObject var status: ClaudeUsageModel
+    // Optional label shown on the left (used in Unified window)
+    var label: String? = nil
+    var brandColor: Color = Color(red: 204/255, green: 121/255, blue: 90/255)
+    var labelWidth: CGFloat? = 56
+    var verticalPadding: CGFloat = 6
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
+    @State private var showTmuxHelp: Bool = false
 
     var body: some View {
         HStack(spacing: 16) {
+            if let label {
+                Text(label)
+                    .font(.footnote).bold()
+                    .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
+                    .frame(width: labelWidth, alignment: .leading)
+            }
             UsageMeter(title: "5h", percent: status.sessionPercent, reset: status.sessionResetText)
             UsageMeter(title: "Wk", percent: status.weekAllModelsPercent, reset: status.weekAllModelsResetText)
 
@@ -23,13 +36,27 @@ struct ClaudeUsageStripView: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, verticalPadding)
         .background(.thickMaterial)
         .onTapGesture {
-            status.refreshNow()
+            if status.tmuxUnavailable {
+                showTmuxHelp = true
+            } else {
+                status.refreshNow()
+            }
         }
         .onAppear { status.setStripVisible(true) }
         .onDisappear { status.setStripVisible(false) }
+        .alert("tmux not found", isPresented: $showTmuxHelp) {
+            Button("Copy brew command") {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString("brew install tmux", forType: .string)
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Claude usage tracking requires tmux to run headlessly. Install via Homebrew:\n\n  brew install tmux\n\nThen enable Usage Tracking again.")
+        }
     }
 
     private func timeAgo(_ date: Date) -> String {

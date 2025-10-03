@@ -3,9 +3,21 @@ import SwiftUI
 // Compact footer usage strip for Codex usage only
 struct UsageStripView: View {
     @ObservedObject var codexStatus: CodexUsageModel
+    // Optional label shown on the left (used in Unified window)
+    var label: String? = nil
+    var brandColor: Color = .accentColor
+    var labelWidth: CGFloat? = 56
+    var verticalPadding: CGFloat = 6
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
         HStack(spacing: 16) {
+            if let label {
+                Text(label)
+                    .font(.footnote).bold()
+                    .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
+                    .frame(width: labelWidth, alignment: .leading)
+            }
             UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText)
             UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText)
             Spacer(minLength: 0)
@@ -14,7 +26,7 @@ struct UsageStripView: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, verticalPadding)
         .background(.thickMaterial)
         .onTapGesture {
             codexStatus.refreshNow()
