@@ -76,7 +76,8 @@ struct AgentSessionsApp: App {
 
 // Helper to hold and lazily build unified indexer once
 final class _UnifiedHolder: ObservableObject {
-    @Published var unified: UnifiedSessionIndexer? = nil
+    // Internal cache only; no need to publish during view updates
+    var unified: UnifiedSessionIndexer? = nil
     func makeUnified(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer) -> UnifiedSessionIndexer {
         if let u = unified { return u }
         let u = UnifiedSessionIndexer(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer)

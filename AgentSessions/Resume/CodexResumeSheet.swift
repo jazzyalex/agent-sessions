@@ -558,7 +558,7 @@ struct CodexResumeSheet: View {
     private func runHealthCheck() async {
         guard let session = selectedSession else { return }
         let bin = codexBinary
-        let (code, output) = await ResumeHealthCheck.run(sessionPath: session.filePath,
+        let (_, output) = await ResumeHealthCheck.run(sessionPath: session.filePath,
                                                          workingDirectory: workingDirectoryField.isEmpty ? nil : workingDirectoryField,
                                                          codexBinary: bin,
                                                          timeoutSeconds: 6)

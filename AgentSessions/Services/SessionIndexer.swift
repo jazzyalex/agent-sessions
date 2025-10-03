@@ -168,7 +168,7 @@ final class SessionIndexer: ObservableObject {
         reloadLock.unlock()
 
         DispatchQueue.global(qos: .userInitiated).async {
-            var loadingTimer: DispatchSourceTimer?
+            let loadingTimer: DispatchSourceTimer? = nil
             defer {
                 // Always clean up timer and reloading state
                 loadingTimer?.cancel()
