@@ -3,6 +3,7 @@ import AppKit
 
 struct ClaudeSessionsView: View {
     @ObservedObject var indexer: ClaudeSessionIndexer
+    @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     let layoutMode: LayoutMode
     let onToggleLayout: () -> Void
 
@@ -10,6 +11,7 @@ struct ClaudeSessionsView: View {
     @State private var directoryAlert: DirectoryAlert?
     @State private var resumeAlert: DirectoryAlert?
     @StateObject private var claudeResumeSettings = ClaudeResumeSettings.shared
+    @AppStorage("ShowClaudeUsageStrip") private var showUsageStrip: Bool = false
 
     private struct DirectoryAlert: Identifiable {
         let id = UUID()
@@ -37,6 +39,10 @@ struct ClaudeSessionsView: View {
                     ClaudeTranscriptView(indexer: indexer, sessionID: selection)
                         .frame(minHeight: 240)
                 }
+            }
+            if showUsageStrip {
+                ClaudeUsageStripView(status: claudeUsageModel)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .preferredColorScheme(indexer.appAppearance.colorScheme)

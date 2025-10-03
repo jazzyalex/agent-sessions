@@ -5,7 +5,8 @@ import AppKit
 struct AgentSessionsApp: App {
     @StateObject private var indexer = SessionIndexer()
     @StateObject private var claudeIndexer = ClaudeSessionIndexer()
-    @StateObject private var usageModel = CodexUsageModel.shared
+    @StateObject private var codexUsageModel = CodexUsageModel.shared
+    @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -13,6 +14,7 @@ struct AgentSessionsApp: App {
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.vertical.rawValue
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
+    @AppStorage("ShowClaudeUsageStrip") private var showClaudeUsageStrip: Bool = false
     @State private var selectedSessionID: String?
     @State private var selectedEventID: String?
     @State private var focusSearchToggle: Bool = false
@@ -29,11 +31,17 @@ struct AgentSessionsApp: App {
                                     let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
                                     layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
                                 })
-                .environmentObject(usageModel)
+                .environmentObject(codexUsageModel)
+                .environmentObject(claudeUsageModel)
                 .onAppear {
-                    indexer.refresh(); claudeIndexer.refresh(); usageModel.setEnabled(showUsageStrip)
+                    indexer.refresh(); claudeIndexer.refresh()
+                    codexUsageModel.setEnabled(showUsageStrip)
+                    claudeUsageModel.setEnabled(showUsageStrip)
                 }
-                .onChange(of: showUsageStrip) { _, newValue in usageModel.setEnabled(newValue) }
+                .onChange(of: showUsageStrip) { _, newValue in
+                    codexUsageModel.setEnabled(newValue)
+                    claudeUsageModel.setEnabled(newValue)
+                }
         }
         .commands {
             CommandGroup(after: .newItem) {
@@ -55,17 +63,17 @@ struct AgentSessionsApp: App {
                             layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
                         })
                 .environmentObject(indexer)
-                .environmentObject(usageModel)
+                .environmentObject(codexUsageModel)
                 .onAppear {
                     // First run check: if directory is unreadable prompt user
                     if !indexer.canAccessRootDirectory {
                         showingFirstRunPrompt = true
                     }
                     indexer.refresh()
-                    usageModel.setEnabled(showUsageStrip)
+                    codexUsageModel.setEnabled(showUsageStrip)
                 }
                 .onChange(of: showUsageStrip) { _, newValue in
-                    usageModel.setEnabled(newValue)
+                    codexUsageModel.setEnabled(newValue)
                 }
                 .sheet(isPresented: $showingFirstRunPrompt) {
                     FirstRunPrompt(showing: $showingFirstRunPrompt)
@@ -96,8 +104,13 @@ struct AgentSessionsApp: App {
                     let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
                     layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
                 })
+                .environmentObject(claudeUsageModel)
                 .onAppear {
                     claudeIndexer.refresh()
+                    claudeUsageModel.setEnabled(showClaudeUsageStrip)
+                }
+                .onChange(of: showClaudeUsageStrip) { _, newValue in
+                    claudeUsageModel.setEnabled(newValue)
                 }
         }
         .commands {
@@ -115,11 +128,11 @@ struct AgentSessionsApp: App {
         MenuBarExtra(isInserted: $menuBarEnabled) {
             UsageMenuBarMenuContent()
                 .environmentObject(indexer)
-                .environmentObject(usageModel)
+                .environmentObject(codexUsageModel)
         } label: {
             UsageMenuBarLabel()
                 .environmentObject(indexer)
-                .environmentObject(usageModel)
+                .environmentObject(codexUsageModel)
         }
     }
 }
@@ -142,7 +155,7 @@ extension AgentSessionsApp {
 }
 private struct ContentView: View {
     @EnvironmentObject var indexer: SessionIndexer
-    @EnvironmentObject var usageModel: CodexUsageModel
+    @EnvironmentObject var codexUsageModel: CodexUsageModel
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     @State private var selection: String?
     @State private var selectedEvent: String?
@@ -174,7 +187,7 @@ private struct ContentView: View {
                 }
             }
             if showUsageStrip {
-                UsageStripView(status: usageModel)
+                UsageStripView(codexStatus: codexUsageModel)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }

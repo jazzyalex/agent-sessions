@@ -1,23 +1,24 @@
 import SwiftUI
 
-// ILLUSTRATIVE: Compact footer usage strip with two meters
+// Compact footer usage strip for Codex usage only
 struct UsageStripView: View {
-    @ObservedObject var status: CodexUsageModel
+    @ObservedObject var codexStatus: CodexUsageModel
 
     var body: some View {
         HStack(spacing: 16) {
-            UsageMeter(title: "5h", percent: status.fiveHourPercent, reset: status.fiveHourResetText)
-            UsageMeter(title: "Wk", percent: status.weekPercent, reset: status.weekResetText)
+            Text("Codex").font(.footnote).bold().foregroundStyle(.blue)
+            UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText)
+            UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText)
             Spacer(minLength: 0)
-            if let line = status.usageLine, !line.isEmpty {
+            if let line = codexStatus.usageLine, !line.isEmpty {
                 Text(line).font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(.thickMaterial)
-        .onAppear { status.setStripVisible(true) }
-        .onDisappear { status.setStripVisible(false) }
+        .onAppear { codexStatus.setStripVisible(true) }
+        .onDisappear { codexStatus.setStripVisible(false) }
     }
 }
 

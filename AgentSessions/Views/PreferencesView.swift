@@ -282,7 +282,7 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
             }
 
-            sectionHeader("Codex Binary")
+            sectionHeader("Binary")
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     Button(action: probeCodex) {
@@ -290,33 +290,35 @@ struct PreferencesView: View {
                         case .probing:
                             ProgressView()
                         case .success:
-                            if let version = probeVersion { Text("Codex \(version.description)") } else { Text("Check Version") }
+                            Text("Check Version")
                         case .idle:
                             Text("Check Version")
                         case .failure:
-                            Text("Codex is not found").foregroundStyle(.red)
+                            Text("Codex not found").foregroundStyle(.red)
                         }
                     }
                     .buttonStyle(.bordered)
-                    .help("Run codex --version and resolve path")
+                    .help("Run codex --version")
 
-                    if let resolved = resolvedCodexPath {
+                    if let version = probeVersion, let resolved = resolvedCodexPath {
+                        Text("Codex \(version.description)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Text(resolved)
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     } else if probeState == .failure {
-                        Text("Codex is not found")
+                        Text("Codex not found")
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Override path (optional)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 12) {
+                Divider()
+
+                HStack(spacing: 12) {
                     TextField("/path/to/codex", text: $codexBinaryOverride)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 360)
@@ -326,7 +328,6 @@ struct PreferencesView: View {
                         }
                         .onChange(of: codexBinaryOverride) { _, _ in
                             validateBinaryOverride()
-                            // Persist and probe if valid
                             commitCodexBinaryIfValid()
                         }
                     Button(action: pickCodexBinary) {
@@ -343,35 +344,36 @@ struct PreferencesView: View {
                     .buttonStyle(.bordered)
                 }
 
-                    if !codexBinaryValid {
-                        Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
-            }
-
-            sectionHeader("Usage Strip")
-            VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Show in-app Codex usage strip", isOn: $showUsageStrip)
-                toggleRow("Show Reset Time in Usage Strip", isOn: $stripShowResetTime)
-                toggleRow("Always monochrome meters", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
-                    set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
-                ))
-                HStack(spacing: 12) {
-                    Button("Refresh Probe") {
-                        CodexUsageModel.shared.refreshNow()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!showUsageStrip)
-                    Text("Parses recent Codex session logs for rate limits.")
+                if !codexBinaryValid {
+                    Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else {
+                    Text("Leave empty to auto-detect from PATH.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            // Menu Bar settings moved to dedicated tab
+            sectionHeader("Usage Tracking")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow("Show usage strip", isOn: $showUsageStrip)
+                toggleRow("Show reset times", isOn: $stripShowResetTime)
+                toggleRow("Monochrome meters", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
+                    set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
+                ))
+                HStack(spacing: 12) {
+                    Button("Refresh Now") {
+                        CodexUsageModel.shared.refreshNow()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!showUsageStrip)
+                }
+                Text("Parses recent Codex session logs for rate limits.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             // Resume-specific defaults now live in Codex CLI Resume tab.
         }
@@ -405,46 +407,50 @@ struct PreferencesView: View {
 
     private var claudeResumeTab: some View {
         VStack(alignment: .leading, spacing: 24) {
-            Text("Claude Code Resume")
+            Text("Claude Code")
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            sectionHeader("Terminal App")
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("Terminal App", selection: Binding(get: { claudeSettings.preferITerm ? 1 : 0 }, set: { claudeSettings.setPreferITerm($0 == 1) })) {
-                    Text("Terminal").tag(0)
-                    Text("iTerm2").tag(1)
+            sectionHeader("Resume")
+            VStack(alignment: .leading, spacing: 12) {
+                labeledRow("Terminal App") {
+                    Picker("Terminal App", selection: Binding(get: { claudeSettings.preferITerm ? 1 : 0 }, set: { claudeSettings.setPreferITerm($0 == 1) })) {
+                        Text("Terminal").tag(0)
+                        Text("iTerm2").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 280)
                 }
-                .pickerStyle(.segmented)
-                Text("Choose which app to use for Claude CLI resumes.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
 
-            // Probe row
-            HStack(spacing: 8) {
-                Button(action: probeClaude) {
-                    switch claudeProbeState {
-                    case .probing:
-                        ProgressView()
-                    case .success:
-                        Text("Check Version")
-                    case .idle:
-                        Text("Check Version")
-                    case .failure:
-                        Text("Claude is not found").foregroundStyle(.red)
+                HStack(spacing: 8) {
+                    Button(action: probeClaude) {
+                        switch claudeProbeState {
+                        case .probing:
+                            ProgressView()
+                        case .success:
+                            Text("Check Version")
+                        case .idle:
+                            Text("Check Version")
+                        case .failure:
+                            Text("Claude is not found").foregroundStyle(.red)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Run claude --version to confirm availability")
+                    if let path = claudeResolvedPath, let ver = claudeVersionString {
+                        Text("Claude Code \(ver)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(path)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                 }
-                .buttonStyle(.bordered)
-                .help("Run claude --version to confirm availability")
-                if let path = claudeResolvedPath, let ver = claudeVersionString {
-                    Text("Detected Claude Code \(ver) \(path)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
 
-            sectionHeader("Binary (optional)")
+            sectionHeader("Binary Override")
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
                     TextField("/path/to/claude", text: Binding(get: { claudeSettings.binaryPath }, set: { claudeSettings.setBinaryPath($0) }))
@@ -460,9 +466,37 @@ struct PreferencesView: View {
                     Button("Clear") { claudeSettings.setBinaryPath("") }
                         .buttonStyle(.bordered)
                 }
-                Text("Default: resolve from PATH; override only if needed.")
-                    .font(.system(.caption, design: .monospaced))
+                Text("Leave empty to auto-detect from PATH.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            sectionHeader("Usage Tracking")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow("Show usage strip", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") },
+                    set: {
+                        UserDefaults.standard.set($0, forKey: "ShowClaudeUsageStrip")
+                        ClaudeUsageModel.shared.setEnabled($0)
+                    }
+                ))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("First use will request file access permission", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Text("Requires tmux. Launches Claude CLI headlessly to fetch /usage data. macOS will prompt for file access on first run (one-time only).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 12) {
+                    Button("Refresh Now") {
+                        ClaudeUsageModel.shared.refreshNow()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip"))
+                }
             }
         }
     }
@@ -612,6 +646,11 @@ struct PreferencesView: View {
 
         preferredLaunchMode = .terminal
         resumeSettings.setLaunchMode(.terminal)
+
+        // Reset usage strip preferences
+        UserDefaults.standard.set(false, forKey: "ShowClaudeUsageStrip")
+        ClaudeUsageModel.shared.setEnabled(false)
+
         // Re-probe after reset
         scheduleCodexProbe()
         scheduleClaudeProbe()
@@ -670,7 +709,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .menuBar: return "Menu Bar"
         case .codexCLI: return "Codex CLI"
         case .codexCLIResume: return "Codex CLI Resume"
-        case .claudeResume: return "Claude Code Resume"
+        case .claudeResume: return "Claude Code"
         }
     }
 

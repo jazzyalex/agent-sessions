@@ -62,6 +62,10 @@
         CFB900010000000000000017 /* ClaudeITermLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000017 /* ClaudeITermLauncher.swift */; };
         CFU000020000000000000001 /* UnifiedSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFU000010000000000000001 /* UnifiedSessionIndexer.swift */; };
         CFU000020000000000000002 /* UnifiedSessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFU000010000000000000002 /* UnifiedSessionsView.swift */; };
+        CLC000010000000000000001 /* ClaudeUsageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000001 /* ClaudeUsageModel.swift */; };
+        CLC000010000000000000002 /* ClaudeStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000002 /* ClaudeStatusService.swift */; };
+        CLC000010000000000000003 /* claude_usage_capture.sh in Resources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000003 /* claude_usage_capture.sh */; };
+        CLC000010000000000000004 /* ClaudeUsageStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000004 /* ClaudeUsageStripView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -138,6 +142,10 @@
 		CFA900010000000000000017 /* ClaudeITermLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeITermLauncher.swift; sourceTree = SOURCE_ROOT; };
 		CFU000010000000000000001 /* UnifiedSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/UnifiedSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
 		CFU000010000000000000002 /* UnifiedSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/UnifiedSessionsView.swift; sourceTree = SOURCE_ROOT; };
+		CLC000020000000000000001 /* ClaudeUsageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageModel.swift; sourceTree = SOURCE_ROOT; };
+		CLC000020000000000000002 /* ClaudeStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeStatusService.swift; sourceTree = SOURCE_ROOT; };
+		CLC000020000000000000003 /* claude_usage_capture.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = AgentSessions/Resources/claude_usage_capture.sh; sourceTree = SOURCE_ROOT; };
+		CLC000020000000000000004 /* ClaudeUsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -209,6 +217,8 @@
 				193183E356AF4718A7B9CB7F /* Resume */,
 				CFA90001000000000000000A /* ClaudeResume */,
 				C0D3E5A1700C000000000001 /* CodexStatus */,
+				CLC000030000000000000001 /* ClaudeStatus */,
+				CLC000040000000000000001 /* Resources */,
 				B00000112A0A000100000001 /* AgentSessionsApp.swift */,
 			);
 			path = AgentSessions;
@@ -326,6 +336,24 @@
 			path = CodexStatus;
 			sourceTree = "<group>";
 		};
+		CLC000030000000000000001 /* ClaudeStatus */ = {
+			isa = PBXGroup;
+			children = (
+				CLC000020000000000000001 /* ClaudeUsageModel.swift */,
+				CLC000020000000000000002 /* ClaudeStatusService.swift */,
+				CLC000020000000000000004 /* ClaudeUsageStripView.swift */,
+			);
+			path = ClaudeStatus;
+			sourceTree = "<group>";
+		};
+		CLC000040000000000000001 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				CLC000020000000000000003 /* claude_usage_capture.sh */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -407,6 +435,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B000001C2A0A00010000000C /* Assets.xcassets in Resources */,
+				CLC000010000000000000003 /* claude_usage_capture.sh in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -473,6 +502,9 @@
 				CFB900010000000000000017 /* ClaudeITermLauncher.swift in Sources */,
 				CFU000020000000000000001 /* UnifiedSessionIndexer.swift in Sources */,
 				CFU000020000000000000002 /* UnifiedSessionsView.swift in Sources */,
+				CLC000010000000000000001 /* ClaudeUsageModel.swift in Sources */,
+				CLC000010000000000000002 /* ClaudeStatusService.swift in Sources */,
+				CLC000010000000000000004 /* ClaudeUsageStripView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -507,8 +539,7 @@
 				CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGNING_REQUIRED = YES;
 				CODE_SIGN_ENTITLEMENTS = AgentSessions/AgentSessions.entitlements;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
 				DEVELOPMENT_TEAM = "";

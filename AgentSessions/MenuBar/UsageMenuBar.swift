@@ -12,6 +12,7 @@ struct UsageMenuBarLabel: View {
         let style = MenuBarStyleKind(rawValue: styleRaw) ?? .bars
         let five = status.fiveHourPercent
         let week = status.weekPercent
+
         // Colorization disabled: render with default color
         let fiveColor: Color = .primary
         let weekColor: Color = .primary
@@ -72,6 +73,7 @@ struct UsageMenuBarMenuContent: View {
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
 
     var body: some View {
+
         VStack(alignment: .leading, spacing: 10) {
             // Reset times at the top as enabled buttons so they render as normal menu items.
             // Tapping opens the Usage-related preferences pane.
