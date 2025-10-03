@@ -110,25 +110,24 @@ struct PreferencesView: View {
     // MARK: Layout chrome
 
     private var tabBody: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                switch selectedTab ?? .general {
-                case .general:
-                    generalTab
-                case .menuBar:
-                    menuBarTab
-                case .unified:
-                    unifiedTab
-                case .codexCLI:
-                    codexCLITab
-                case .claudeResume:
-                    claudeResumeTab
-                }
+        VStack(alignment: .leading, spacing: 24) {
+            switch selectedTab ?? .general {
+            case .general:
+                generalTab
+            case .menuBar:
+                menuBarTab
+            case .unified:
+                unifiedTab
+            case .codexCLI:
+                codexCLITab
+            case .claudeResume:
+                claudeResumeTab
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .controlSize(.small)
     }
 
     private var footer: some View {
@@ -367,95 +366,60 @@ struct PreferencesView: View {
             }
 
             sectionHeader("Binary")
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    Button(action: probeCodex) {
-                        switch probeState {
-                        case .probing:
-                            ProgressView()
-                        case .success:
-                            Text("Check Version")
-                        case .idle:
-                            Text("Check Version")
-                        case .failure:
-                            Text("Codex not found").foregroundStyle(.red)
-                        }
+            VStack(alignment: .leading, spacing: 10) {
+                labeledRow("Binary Source") {
+                    Picker("Binary Source", selection: Binding(
+                        get: { codexBinaryOverride.isEmpty ? 0 : 1 },
+                        set: { idx in if idx == 0 { codexBinaryOverride = ""; validateBinaryOverride(); resumeSettings.setBinaryOverride(""); scheduleCodexProbe() } }
+                    )) {
+                        Text("Auto").tag(0)
+                        Text("Custom").tag(1)
                     }
-                    .buttonStyle(.bordered)
-                    .help("Run codex --version")
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 220)
+                }
 
-                    if let version = probeVersion, let resolved = resolvedCodexPath {
-                        Text("Codex \(version.description)")
-                            .font(.caption)
+                if codexBinaryOverride.isEmpty {
+                    HStack(spacing: 10) {
+                        Text(resolvedCodexPath ?? "")
+                            .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
-                        Text(resolved)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                    } else if probeState == .failure {
-                        Text("Codex not found")
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if let version = probeVersion { Text("• v\(version.description)").font(.caption).foregroundStyle(.secondary) }
+                        Button("Check Version", action: probeCodex).buttonStyle(.link)
+                        Button("Copy") { if let p = resolvedCodexPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p, forType: .string) } }.buttonStyle(.link)
+                        Button("Reveal") { if let p = resolvedCodexPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } }.buttonStyle(.link)
                     }
-                }
-
-                Divider()
-
-                HStack(spacing: 12) {
-                    TextField("/path/to/codex", text: $codexBinaryOverride)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 360)
-                        .onSubmit {
-                            validateBinaryOverride()
-                            commitCodexBinaryIfValid()
-                        }
-                        .onChange(of: codexBinaryOverride) { _, _ in
-                            validateBinaryOverride()
-                            commitCodexBinaryIfValid()
-                        }
-                    Button(action: pickCodexBinary) {
-                        Label("Browse…", systemImage: "square.and.arrow.down.on.square")
-                            .labelStyle(.titleAndIcon)
-                    }
-                    .buttonStyle(.bordered)
-                    Button("Clear") {
-                        codexBinaryOverride = ""
-                        validateBinaryOverride()
-                        resumeSettings.setBinaryOverride("")
-                        scheduleCodexProbe()
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                if !codexBinaryValid {
-                    Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
                 } else {
-                    Text("Leave empty to auto-detect from PATH.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        TextField("/path/to/codex", text: $codexBinaryOverride)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { validateBinaryOverride(); commitCodexBinaryIfValid() }
+                            .onChange(of: codexBinaryOverride) { _, _ in validateBinaryOverride(); commitCodexBinaryIfValid() }
+                        Button("Choose…", action: pickCodexBinary).buttonStyle(.bordered)
+                        Button("Clear") { codexBinaryOverride = ""; validateBinaryOverride(); resumeSettings.setBinaryOverride(""); scheduleCodexProbe() }.buttonStyle(.bordered)
+                    }
+                    if !codexBinaryValid {
+                        Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red)
+                    }
                 }
             }
 
             sectionHeader("Usage Tracking")
-            VStack(alignment: .leading, spacing: 12) {
-                // Keep rows consistent with other panes to avoid widening the detail area
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 16) {
                     toggleRow("Show usage strip", isOn: $showUsageStrip)
-                    toggleRow("Show reset times", isOn: $stripShowResetTime)
-                }
-                HStack(spacing: 16) {
-                    toggleRow("Monochrome", isOn: Binding(
+                    Toggle("Show reset times", isOn: $stripShowResetTime).toggleStyle(.checkbox)
+                    Toggle("Monochrome", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
                         set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
-                    ))
-                    Spacer(minLength: 0)
-                    Button("Refresh Now") { CodexUsageModel.shared.refreshNow() }
-                        .buttonStyle(.bordered)
-                        .disabled(!showUsageStrip)
+                    )).toggleStyle(.checkbox)
                 }
+                Button("Refresh Now") { CodexUsageModel.shared.refreshNow() }
+                    .buttonStyle(.link)
+                    .disabled(!showUsageStrip)
             }
 
             // Resume-specific defaults now live in Codex CLI Resume tab.
@@ -463,13 +427,11 @@ struct PreferencesView: View {
     }
 
     private var claudeResumeTab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Claude Code")
-                .font(.title2)
-                .fontWeight(.semibold)
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Claude Code").font(.title2).fontWeight(.semibold)
 
             sectionHeader("Resume")
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 labeledRow("Terminal App") {
                     Picker("Terminal App", selection: Binding(get: { claudeSettings.preferITerm ? 1 : 0 }, set: { claudeSettings.setPreferITerm($0 == 1) })) {
                         Text("Terminal").tag(0)
@@ -479,85 +441,75 @@ struct PreferencesView: View {
                     .frame(maxWidth: 360)
                 }
 
-                HStack(spacing: 12) {
-                    Button(action: probeClaude) {
-                        switch claudeProbeState {
-                        case .probing:
-                            ProgressView()
-                        case .success:
-                            Text("Check Version")
-                        case .idle:
-                            Text("Check Version")
-                        case .failure:
-                            Text("Claude is not found").foregroundStyle(.red)
-                        }
+                // Binary source segmented: Auto | Custom
+                labeledRow("Binary Source") {
+                    Picker("Binary Source", selection: Binding(
+                        get: { claudeSettings.binaryPath.isEmpty ? 0 : 1 },
+                        set: { idx in if idx == 0 { claudeSettings.setBinaryPath(""); scheduleClaudeProbe() } }
+                    )) {
+                        Text("Auto").tag(0)
+                        Text("Custom").tag(1)
                     }
-                    .buttonStyle(.bordered)
-                    .help("Run claude --version to confirm availability")
-                    if let path = claudeResolvedPath, let ver = claudeVersionString {
-                        Text("Claude Code \(ver)")
-                            .font(.caption)
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 220)
+                }
+
+                // Auto row (detected path + version + actions)
+                if claudeSettings.binaryPath.isEmpty {
+                    HStack(spacing: 10) {
+                        // Path and version
+                        Text(claudeResolvedPath ?? "")
+                            .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
-                        Text(path)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if let ver = claudeVersionString { Text("• v\(ver)").font(.caption).foregroundStyle(.secondary) }
+                        Button("Check Version", action: probeClaude).buttonStyle(.link)
+                        Button("Copy") { if let p = claudeResolvedPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p, forType: .string) } }
+                            .buttonStyle(.link)
+                        Button("Reveal") { if let p = claudeResolvedPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } }
+                            .buttonStyle(.link)
+                    }
+                } else {
+                    // Custom row
+                    HStack(spacing: 10) {
+                        TextField("/path/to/claude", text: Binding(get: { claudeSettings.binaryPath }, set: { claudeSettings.setBinaryPath($0) }))
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { scheduleClaudeProbe() }
+                            .onChange(of: claudeSettings.binaryPath) { _, _ in scheduleClaudeProbe() }
+                        Button("Choose…", action: pickClaudeBinary).buttonStyle(.bordered)
+                        Button("Clear") { claudeSettings.setBinaryPath("") }.buttonStyle(.bordered)
                     }
                 }
             }
 
-            sectionHeader("Binary Override")
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    TextField("/path/to/claude", text: Binding(get: { claudeSettings.binaryPath }, set: { claudeSettings.setBinaryPath($0) }))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 360)
-                        .onSubmit { scheduleClaudeProbe() }
-                        .onChange(of: claudeSettings.binaryPath) { _, _ in scheduleClaudeProbe() }
-                    Button(action: pickClaudeBinary) {
-                        Label("Browse…", systemImage: "square.and.arrow.down.on.square")
-                            .labelStyle(.titleAndIcon)
-                    }
-                    .buttonStyle(.bordered)
-                    Button("Clear") { claudeSettings.setBinaryPath("") }
-                        .buttonStyle(.bordered)
-                }
-                Text("Leave empty to auto-detect from PATH.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            sectionHeader("Usage Tracking (Experimental)")
-            VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Activate Claude Usage (Experimental!)", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") },
-                    set: { newValue in
-                        if newValue {
-                            showClaudeExperimentalWarning = true
-                        } else {
-                            UserDefaults.standard.set(false, forKey: "ShowClaudeUsageStrip")
-                            ClaudeUsageModel.shared.setEnabled(false)
+            sectionHeader("Usage Tracking")
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Toggle("Activate Claude usage", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") },
+                        set: { newValue in
+                            if newValue { showClaudeExperimentalWarning = true } else { UserDefaults.standard.set(false, forKey: "ShowClaudeUsageStrip"); ClaudeUsageModel.shared.setEnabled(false) }
                         }
-                    }
-                ))
-                // Break out rows to avoid horizontal overflow that narrows the sidebar
-                HStack(spacing: 16) {
-                    toggleRow("Show reset times", isOn: $stripShowResetTime)
-                }
-                HStack(spacing: 16) {
-                    toggleRow("Monochrome", isOn: Binding(
-                        get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
-                        set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
                     ))
+                    .toggleStyle(.checkbox)
                     Spacer(minLength: 0)
                     Button("Refresh Now") { ClaudeUsageModel.shared.refreshNow() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.link)
                         .disabled(!UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip"))
                 }
-                Label("Requires tmux. First use requests file access (one-time).", systemImage: "info.circle")
+                let upd = ClaudeUsageModel.shared.lastUpdate
+                Text(upd.map { "Last updated \(RelativeDateTimeFormatter().localizedString(for: $0, relativeTo: Date()))" } ?? "Last updated —")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                HStack(spacing: 16) {
+                    Toggle("Show reset times", isOn: $stripShowResetTime).toggleStyle(.checkbox)
+                    Toggle("Monochrome", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
+                        set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
+                    )).toggleStyle(.checkbox)
+                }
             }
         }
     }
@@ -785,7 +737,8 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 }
 
 private extension PreferencesView {
-    var visibleTabs: [PreferencesTab] { [.general, .menuBar, .unified, .codexCLI, .claudeResume] }
+    // Sidebar order: General → Codex CLI → Claude Code → Unified Window → Menu Bar
+    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, .unified, .menuBar] }
 }
 
 // MARK: - Probe helpers
