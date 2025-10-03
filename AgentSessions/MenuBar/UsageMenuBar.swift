@@ -2,53 +2,74 @@ import SwiftUI
 import AppKit
 
 struct UsageMenuBarLabel: View {
-    @EnvironmentObject var status: CodexUsageModel
+    @EnvironmentObject var codexStatus: CodexUsageModel
+    @EnvironmentObject var claudeStatus: ClaudeUsageModel
     @AppStorage("MenuBarScope") private var scopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var styleRaw: String = MenuBarStyleKind.bars.rawValue
+    @AppStorage("MenuBarSource") private var sourceRaw: String = MenuBarSource.codex.rawValue
     // Colorization is currently disabled (see TODO below)
 
     var body: some View {
         let scope = MenuBarScope(rawValue: scopeRaw) ?? .both
         let style = MenuBarStyleKind(rawValue: styleRaw) ?? .bars
-        let five = status.fiveHourPercent
-        let week = status.weekPercent
-
-        // Colorization disabled: render with default color
-        let fiveColor: Color = .primary
-        let weekColor: Color = .primary
+        let source = MenuBarSource(rawValue: sourceRaw) ?? .codex
 
         let text: Text = {
-            switch style {
-            case .bars:
-                let p5 = segmentBar(for: five)
-                let pw = segmentBar(for: week)
-                let left = Text("5h ").foregroundColor(fiveColor)
-                    + Text(p5).foregroundColor(fiveColor)
-                    + Text(" \(five)%").foregroundColor(fiveColor)
-                let right = Text("Wk ").foregroundColor(weekColor)
-                    + Text(pw).foregroundColor(weekColor)
-                    + Text(" \(week)%").foregroundColor(weekColor)
-                switch scope {
-                case .fiveHour: return left
-                case .weekly: return right
-                case .both: return left + Text("  ") + right
-                }
-            case .numbers:
-                let left = Text("5h \(five)%").foregroundColor(fiveColor)
-                let right = Text("Wk \(week)%").foregroundColor(weekColor)
-                switch scope {
-                case .fiveHour: return left
-                case .weekly: return right
-                case .both: return left + Text("  ") + right
-                }
+            switch source {
+            case .codex:
+                return renderSource(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefix: nil)
+            case .claude:
+                return renderSource(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefix: nil)
+            case .both:
+                let codex = renderSource(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefix: "CX")
+                let claude = renderSource(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefix: "CL")
+                return codex + Text("  ") + claude
             }
         }()
 
         return text
             .font(.system(size: 12, weight: .regular, design: .monospaced))
             .padding(.horizontal, 4)
-            .onAppear { status.setMenuVisible(true) }
-            .onDisappear { status.setMenuVisible(false) }
+            .onAppear {
+                codexStatus.setMenuVisible(true)
+                claudeStatus.setMenuVisible(true)
+            }
+            .onDisappear {
+                codexStatus.setMenuVisible(false)
+                claudeStatus.setMenuVisible(false)
+            }
+    }
+
+    private func renderSource(five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, prefix: String?) -> Text {
+        let fiveColor: Color = .primary
+        let weekColor: Color = .primary
+
+        let prefixText = prefix.map { Text("\($0) ") } ?? Text("")
+
+        switch style {
+        case .bars:
+            let p5 = segmentBar(for: five)
+            let pw = segmentBar(for: week)
+            let left = Text("5h ").foregroundColor(fiveColor)
+                + Text(p5).foregroundColor(fiveColor)
+                + Text(" \(five)%").foregroundColor(fiveColor)
+            let right = Text("Wk ").foregroundColor(weekColor)
+                + Text(pw).foregroundColor(weekColor)
+                + Text(" \(week)%").foregroundColor(weekColor)
+            switch scope {
+            case .fiveHour: return prefixText + left
+            case .weekly: return prefixText + right
+            case .both: return prefixText + left + Text("  ") + right
+            }
+        case .numbers:
+            let left = Text("5h \(five)%").foregroundColor(fiveColor)
+            let right = Text("Wk \(week)%").foregroundColor(weekColor)
+            switch scope {
+            case .fiveHour: return prefixText + left
+            case .weekly: return prefixText + right
+            case .both: return prefixText + left + Text("  ") + right
+            }
+        }
     }
 
     private func segmentBar(for percent: Int, segments: Int = 5) -> String {
@@ -66,45 +87,100 @@ struct UsageMenuBarLabel: View {
 
 struct UsageMenuBarMenuContent: View {
     @EnvironmentObject var indexer: SessionIndexer
-    @EnvironmentObject var status: CodexUsageModel
+    @EnvironmentObject var codexStatus: CodexUsageModel
+    @EnvironmentObject var claudeStatus: ClaudeUsageModel
     @Environment(\.openWindow) private var openWindow
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
+    @AppStorage("MenuBarSource") private var menuBarSourceRaw: String = MenuBarSource.codex.rawValue
 
     var body: some View {
+        let source = MenuBarSource(rawValue: menuBarSourceRaw) ?? .codex
 
         VStack(alignment: .leading, spacing: 10) {
             // Reset times at the top as enabled buttons so they render as normal menu items.
             // Tapping opens the Usage-related preferences pane.
-            VStack(alignment: .leading, spacing: 2) {
-                Button(action: { openPreferencesUsage() }) {
-                    HStack(spacing: 6) {
-                        Text("Reset times").font(.body)
-                        Spacer()
+            if source == .codex || source == .both {
+                VStack(alignment: .leading, spacing: 2) {
+                    if source == .both {
+                        Text("Codex").font(.headline).padding(.bottom, 2)
                     }
-                }
-                .buttonStyle(.plain)
+                    Button(action: { openPreferencesUsage() }) {
+                        HStack(spacing: 6) {
+                            Text("Reset times").font(.body)
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
 
-                Button(action: { openPreferencesUsage() }) {
-                    HStack(spacing: 6) {
-                        Text(resetLine(label: "5h:", percent: status.fiveHourPercent, reset: displayReset(status.fiveHourResetText)))
-                        Spacer()
+                    Button(action: { openPreferencesUsage() }) {
+                        HStack(spacing: 6) {
+                            Text(resetLine(label: "5h:", percent: codexStatus.fiveHourPercent, reset: displayReset(codexStatus.fiveHourResetText)))
+                            Spacer()
+                        }
                     }
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(.plain)
 
-                Button(action: { openPreferencesUsage() }) {
-                    HStack(spacing: 6) {
-                        Text(resetLine(label: "Wk:", percent: status.weekPercent, reset: displayReset(status.weekResetText)))
-                        Spacer()
+                    Button(action: { openPreferencesUsage() }) {
+                        HStack(spacing: 6) {
+                            Text(resetLine(label: "Wk:", percent: codexStatus.weekPercent, reset: displayReset(codexStatus.weekResetText)))
+                            Spacer()
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+
+            if source == .both {
+                Divider()
+            }
+
+            if source == .claude || source == .both {
+                VStack(alignment: .leading, spacing: 2) {
+                    if source == .both {
+                        Text("Claude").font(.headline).padding(.bottom, 2)
+                    }
+                    Button(action: { openPreferencesUsage() }) {
+                        HStack(spacing: 6) {
+                            Text("Reset times").font(.body)
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { openPreferencesUsage() }) {
+                        HStack(spacing: 6) {
+                            Text(resetLine(label: "5h:", percent: claudeStatus.sessionPercent, reset: displayReset(claudeStatus.sessionResetText)))
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { openPreferencesUsage() }) {
+                        HStack(spacing: 6) {
+                            Text(resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsPercent, reset: displayReset(claudeStatus.weekAllModelsResetText)))
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
             Divider()
 
             // Quick switches as radio-style rows (menu-friendly)
+            Text("Source").font(.body).fontWeight(.semibold).foregroundStyle(.primary)
+            radioRow(title: MenuBarSource.codex.title, selected: (menuBarSourceRaw == MenuBarSource.codex.rawValue)) {
+                menuBarSourceRaw = MenuBarSource.codex.rawValue
+            }
+            radioRow(title: MenuBarSource.claude.title, selected: (menuBarSourceRaw == MenuBarSource.claude.rawValue)) {
+                menuBarSourceRaw = MenuBarSource.claude.rawValue
+            }
+            radioRow(title: MenuBarSource.both.title, selected: (menuBarSourceRaw == MenuBarSource.both.rawValue)) {
+                menuBarSourceRaw = MenuBarSource.both.rawValue
+            }
+
             Text("Style").font(.body).fontWeight(.semibold).foregroundStyle(.primary)
             radioRow(title: MenuBarStyleKind.bars.title, selected: (menuBarStyleRaw == MenuBarStyleKind.bars.rawValue)) {
                 menuBarStyleRaw = MenuBarStyleKind.bars.rawValue
@@ -128,7 +204,17 @@ struct UsageMenuBarMenuContent: View {
                 NSApp.activate(ignoringOtherApps: true)
                 openWindow(id: "Agent Sessions")
             }
-            Button("Refresh Limits") { status.refreshNow() }
+            Button("Refresh Limits") {
+                switch source {
+                case .codex:
+                    codexStatus.refreshNow()
+                case .claude:
+                    claudeStatus.refreshNow()
+                case .both:
+                    codexStatus.refreshNow()
+                    claudeStatus.refreshNow()
+                }
+            }
             Toggle("Show in-app usage strip", isOn: $showUsageStrip)
             Divider()
             Button("Open Preferences…") { PreferencesWindowController.shared.show(indexer: indexer, initialTab: .menuBar) }

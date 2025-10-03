@@ -129,10 +129,11 @@ struct AgentSessionsApp: App {
             UsageMenuBarMenuContent()
                 .environmentObject(indexer)
                 .environmentObject(codexUsageModel)
+                .environmentObject(claudeUsageModel)
         } label: {
             UsageMenuBarLabel()
-                .environmentObject(indexer)
                 .environmentObject(codexUsageModel)
+                .environmentObject(claudeUsageModel)
         }
     }
 }

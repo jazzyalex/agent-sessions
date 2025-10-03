@@ -196,6 +196,21 @@ struct PreferencesView: View {
             // Status item settings (no extra section header per request)
             VStack(alignment: .leading, spacing: 12) {
                 toggleRow("Show menu bar usage", isOn: $menuBarEnabled)
+
+                labeledRow("Source") {
+                    Picker("Source", selection: Binding(
+                        get: { UserDefaults.standard.string(forKey: "MenuBarSource") ?? MenuBarSource.codex.rawValue },
+                        set: { UserDefaults.standard.set($0, forKey: "MenuBarSource") }
+                    )) {
+                        ForEach(MenuBarSource.allCases) { s in
+                            Text(s.title).tag(s.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!menuBarEnabled)
+                    .frame(maxWidth: 360)
+                }
+
                 labeledRow("Scope") {
                     Picker("Scope", selection: $menuBarScopeRaw) {
                         ForEach(MenuBarScope.allCases) { s in
@@ -206,6 +221,7 @@ struct PreferencesView: View {
                     .disabled(!menuBarEnabled)
                     .frame(maxWidth: 360)
                 }
+
                 labeledRow("Style") {
                     Picker("Style", selection: $menuBarStyleRaw) {
                         ForEach(MenuBarStyleKind.allCases) { k in
@@ -216,7 +232,8 @@ struct PreferencesView: View {
                     .disabled(!menuBarEnabled)
                     .frame(maxWidth: 360)
                 }
-                Text("Bars: 5h ▰▱▱▱▱ 17%  Wk ▰▰▱▱▱ 28%. Numbers only: 5h 17%  Wk 28%.")
+
+                Text("Source: Codex, Claude, or Both. Style: Bars or numbers. Scope: 5h, weekly, or both.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

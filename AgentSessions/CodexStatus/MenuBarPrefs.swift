@@ -24,11 +24,13 @@ enum MenuBarStyleKind: String, CaseIterable, Identifiable {
 enum MenuBarSource: String, CaseIterable, Identifiable {
     case codex
     case claude
+    case both
     var id: String { rawValue }
     var title: String {
         switch self {
         case .codex: return "Codex"
         case .claude: return "Claude"
+        case .both: return "Both"
         }
     }
 }
