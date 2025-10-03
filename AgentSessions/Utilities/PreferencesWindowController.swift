@@ -8,9 +8,8 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
     private var hostingController: NSHostingController<AnyView>?
 
     func show(indexer: SessionIndexer,
-              initialTab: PreferencesTab = .general,
-              initialResumeSelection: String? = nil) {
-        let root = PreferencesView(initialTab: initialTab, initialResumeSelection: initialResumeSelection)
+              initialTab: PreferencesTab = .general) {
+        let root = PreferencesView(initialTab: initialTab)
             .environmentObject(indexer)
         let wrapped = AnyView(root)
 
@@ -28,7 +27,9 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
         win.isReleasedWhenClosed = false
         win.center()
         win.setFrameAutosaveName("PreferencesWindow")
-        win.setContentSize(NSSize(width: 740, height: 520))
+        let size = NSSize(width: 740, height: 520)
+        win.setContentSize(size)
+        win.contentMinSize = size
         win.delegate = self
         self.window = win
         hostingController = hosting
