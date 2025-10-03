@@ -60,6 +60,8 @@
         CFB900010000000000000015 /* ClaudeResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000015 /* ClaudeResumeCoordinator.swift */; };
         CFB900010000000000000016 /* ClaudeResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000016 /* ClaudeResumeSettings.swift */; };
         CFB900010000000000000017 /* ClaudeITermLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000017 /* ClaudeITermLauncher.swift */; };
+        CFU000020000000000000001 /* UnifiedSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFU000010000000000000001 /* UnifiedSessionIndexer.swift */; };
+        CFU000020000000000000002 /* UnifiedSessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFU000010000000000000002 /* UnifiedSessionsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -121,6 +123,21 @@
 		DE3233D9D6CE429AB0173B04 /* CodexVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexVersion.swift; path = AgentSessions/Resume/CodexVersion.swift; sourceTree = SOURCE_ROOT; };
 		E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageMenuBar.swift; path = AgentSessions/MenuBar/UsageMenuBar.swift; sourceTree = SOURCE_ROOT; };
 		F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCoordinatorTests.swift; path = AgentSessionsTests/CodexResumeCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000001 /* SessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000002 /* TranscriptRenderMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/TranscriptRenderMode.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000003 /* ClaudeSessionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ClaudeSessionParser.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000004 /* ClaudeSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ClaudeSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000005 /* ClaudeSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/ClaudeSessionsView.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000010 /* ClaudeFeatureFlag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeFeatureFlag.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000011 /* ClaudeCLIEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000012 /* ClaudeResumeCommandBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000013 /* ClaudeTerminalLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000014 /* ClaudeResumeTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeTypes.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000015 /* ClaudeResumeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000016 /* ClaudeResumeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeSettings.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000017 /* ClaudeITermLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeITermLauncher.swift; sourceTree = SOURCE_ROOT; };
+		CFU000010000000000000001 /* UnifiedSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/UnifiedSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		CFU000010000000000000002 /* UnifiedSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/UnifiedSessionsView.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -247,6 +264,7 @@
 				CFA900010000000000000002 /* TranscriptRenderMode.swift */,
 				CFA900010000000000000003 /* ClaudeSessionParser.swift */,
 				CFA900010000000000000004 /* ClaudeSessionIndexer.swift */,
+				CFU000010000000000000001 /* UnifiedSessionIndexer.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -272,6 +290,7 @@
 				B00000119A0A000100000001 /* SearchFiltersView.swift */,
 				B0000011AA0A000100000001 /* PreferencesView.swift */,
 				CFA900010000000000000005 /* ClaudeSessionsView.swift */,
+				CFU000010000000000000002 /* UnifiedSessionsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -307,34 +326,6 @@
 			path = CodexStatus;
 			sourceTree = "<group>";
 		};
-
-        /* Added file references for Claude + ClaudeResume */
-        CFA900010000000000000001 /* SessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000002 /* TranscriptRenderMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/TranscriptRenderMode.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000003 /* ClaudeSessionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ClaudeSessionParser.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000004 /* ClaudeSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ClaudeSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000005 /* ClaudeSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/ClaudeSessionsView.swift; sourceTree = SOURCE_ROOT; };
-
-        CFA90001000000000000000A /* ClaudeResume */ = {isa = PBXGroup; children = (
-                CFA900010000000000000010 /* ClaudeFeatureFlag.swift */,
-                CFA900010000000000000011 /* ClaudeCLIEnvironment.swift */,
-                CFA900010000000000000012 /* ClaudeResumeCommandBuilder.swift */,
-                CFA900010000000000000013 /* ClaudeTerminalLauncher.swift */,
-                CFA900010000000000000014 /* ClaudeResumeTypes.swift */,
-                CFA900010000000000000015 /* ClaudeResumeCoordinator.swift */,
-                CFA900010000000000000016 /* ClaudeResumeSettings.swift */,
-                CFA900010000000000000017 /* ClaudeITermLauncher.swift */,
-            );
-            path = ClaudeResume; sourceTree = "<group>"; };
-
-        CFA900010000000000000010 /* ClaudeFeatureFlag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeFeatureFlag.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000011 /* ClaudeCLIEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000012 /* ClaudeResumeCommandBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000013 /* ClaudeTerminalLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000014 /* ClaudeResumeTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeTypes.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000015 /* ClaudeResumeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000016 /* ClaudeResumeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeSettings.swift; sourceTree = SOURCE_ROOT; };
-        CFA900010000000000000017 /* ClaudeITermLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeITermLauncher.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -480,6 +471,8 @@
 				CFB900010000000000000015 /* ClaudeResumeCoordinator.swift in Sources */,
 				CFB900010000000000000016 /* ClaudeResumeSettings.swift in Sources */,
 				CFB900010000000000000017 /* ClaudeITermLauncher.swift in Sources */,
+				CFU000020000000000000001 /* UnifiedSessionIndexer.swift in Sources */,
+				CFU000020000000000000002 /* UnifiedSessionsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

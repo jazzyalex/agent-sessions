@@ -6,6 +6,7 @@ struct AgentSessionsApp: App {
     @StateObject private var indexer = SessionIndexer()
     @StateObject private var claudeIndexer = ClaudeSessionIndexer()
     @StateObject private var usageModel = CodexUsageModel.shared
+    @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
@@ -18,6 +19,35 @@ struct AgentSessionsApp: App {
     @State private var showingFirstRunPrompt: Bool = false
 
     var body: some Scene {
+        // Default unified window
+        WindowGroup("Agent Sessions") {
+            UnifiedSessionsView(unified: unifiedIndexerHolder.makeUnified(codexIndexer: indexer, claudeIndexer: claudeIndexer),
+                                codexIndexer: indexer,
+                                claudeIndexer: claudeIndexer,
+                                layoutMode: LayoutMode(rawValue: layoutModeRaw) ?? .vertical,
+                                onToggleLayout: {
+                                    let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
+                                    layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
+                                })
+                .environmentObject(usageModel)
+                .onAppear {
+                    indexer.refresh(); claudeIndexer.refresh(); usageModel.setEnabled(showUsageStrip)
+                }
+                .onChange(of: showUsageStrip) { _, newValue in usageModel.setEnabled(newValue) }
+        }
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("Refresh") { unifiedIndexerHolder.unified?.refresh() }.keyboardShortcut("r", modifiers: .command)
+                Button("Find in Transcript") { /* unified find focuses handled in view */ }.keyboardShortcut("f", modifiers: .command).disabled(true)
+            }
+            CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer) }.keyboardShortcut(",", modifiers: .command) }
+            CommandGroup(after: .windowArrangement) {
+                Button("New Codex Window") { openWindowCodex() }.keyboardShortcut("1", modifiers: [.command, .shift])
+                Button("New Claude Window") { openWindowClaude() }.keyboardShortcut("2", modifiers: [.command, .shift])
+            }
+        }
+
+        // Codex-only window (legacy)
         WindowGroup("Agent Sessions (Codex)") {
             ContentView(layoutMode: LayoutMode(rawValue: layoutModeRaw) ?? .vertical,
                         onToggleLayout: {
@@ -57,7 +87,7 @@ struct AgentSessionsApp: App {
             }
         }
 
-        // Claude Code sessions window
+        // Claude-only window (legacy)
         WindowGroup("Agent Sessions (Claude Code)") {
             ClaudeSessionsView(
                 indexer: claudeIndexer,
@@ -92,6 +122,23 @@ struct AgentSessionsApp: App {
                 .environmentObject(usageModel)
         }
     }
+}
+
+// Helper to hold and lazily build unified indexer once
+final class _UnifiedHolder: ObservableObject {
+    @Published var unified: UnifiedSessionIndexer? = nil
+    func makeUnified(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer) -> UnifiedSessionIndexer {
+        if let u = unified { return u }
+        let u = UnifiedSessionIndexer(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer)
+        unified = u
+        return u
+    }
+}
+
+// Window helpers
+extension AgentSessionsApp {
+    private func openWindowCodex() { NSApp.activate(ignoringOtherApps: true) }
+    private func openWindowClaude() { NSApp.activate(ignoringOtherApps: true) }
 }
 private struct ContentView: View {
     @EnvironmentObject var indexer: SessionIndexer

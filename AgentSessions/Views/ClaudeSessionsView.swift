@@ -357,7 +357,7 @@ private struct ClaudeSessionsListView: View {
 }
 
 // Wrapper for transcript view using SessionTranscriptBuilder for consistent formatting
-private struct ClaudeTranscriptView: View {
+struct ClaudeTranscriptView: View {
     @ObservedObject var indexer: ClaudeSessionIndexer
     let sessionID: String?
 

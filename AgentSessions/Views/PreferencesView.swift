@@ -161,6 +161,29 @@ struct PreferencesView: View {
                     Toggle("Modified date", isOn: $indexer.showModifiedColumn)
                 }
             }
+
+            sectionHeader("Unified Window")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow("Show source column", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "UnifiedShowSourceColumn") },
+                    set: { UserDefaults.standard.set($0, forKey: "UnifiedShowSourceColumn") }
+                ))
+                labeledRow("Source color") {
+                    Picker("Source color", selection: Binding(
+                        get: { UserDefaults.standard.string(forKey: "UnifiedSourceColorStyle") ?? "none" },
+                        set: { UserDefaults.standard.set($0, forKey: "UnifiedSourceColorStyle") }
+                    )) {
+                        Text("None").tag("none")
+                        Text("Text").tag("text")
+                        Text("Background").tag("background")
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 280)
+                }
+                Text("Choose whether to display a source column and optional color coding by source. Colors are subtle and accessibility-friendly.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -369,7 +392,7 @@ struct PreferencesView: View {
                 .padding(.top, 4)
             // Status row (mirrors header footer inside sheet, but visible here too)
             if let v = probeVersion, let path = resolvedCodexPath {
-                Text("Detected Codex \(v.description) — \(path)")
+                Text("Detected Codex \(v.description) \(path)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if probeState == .failure {
@@ -415,7 +438,7 @@ struct PreferencesView: View {
                 .buttonStyle(.bordered)
                 .help("Run claude --version to confirm availability")
                 if let path = claudeResolvedPath, let ver = claudeVersionString {
-                    Text("Detected Claude Code \(ver) — \(path)")
+                    Text("Detected Claude Code \(ver) \(path)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

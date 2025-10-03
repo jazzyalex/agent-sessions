@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 protocol ClaudeTerminalLaunching {
     func launchInTerminal(_ package: ClaudeResumeCommandBuilder.CommandPackage) throws
 }
@@ -12,9 +13,9 @@ final class ClaudeResumeCoordinator {
 
     struct NoopLauncher: ClaudeTerminalLaunching { func launchInTerminal(_ package: ClaudeResumeCommandBuilder.CommandPackage) throws {} }
 
-    init(env: ClaudeCLIEnvironment = ClaudeCLIEnvironment(),
-         builder: ClaudeResumeCommandBuilder = ClaudeResumeCommandBuilder(),
-         launcher: ClaudeTerminalLaunching = NoopLauncher()) {
+    init(env: ClaudeCLIEnvironment,
+         builder: ClaudeResumeCommandBuilder,
+         launcher: ClaudeTerminalLaunching) {
         self.env = env
         self.builder = builder
         self.launcher = launcher
