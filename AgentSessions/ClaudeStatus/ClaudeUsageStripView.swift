@@ -8,6 +8,7 @@ struct ClaudeUsageStripView: View {
     var brandColor: Color = Color(red: 204/255, green: 121/255, blue: 90/255)
     var labelWidth: CGFloat? = 56
     var verticalPadding: CGFloat = 6
+    var drawBackground: Bool = true
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @State private var showTmuxHelp: Bool = false
 
@@ -19,8 +20,8 @@ struct ClaudeUsageStripView: View {
                     .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
                     .frame(width: labelWidth, alignment: .leading)
             }
-            UsageMeter(title: "5h", percent: status.sessionPercent, reset: status.sessionResetText)
-            UsageMeter(title: "Wk", percent: status.weekAllModelsPercent, reset: status.weekAllModelsResetText)
+            UsageMeter(title: "5h", percent: status.sessionPercent, reset: status.sessionResetText, tintColor: brandColor)
+            UsageMeter(title: "Wk", percent: status.weekAllModelsPercent, reset: status.weekAllModelsResetText, tintColor: brandColor)
 
             Spacer(minLength: 0)
 
@@ -37,7 +38,7 @@ struct ClaudeUsageStripView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, verticalPadding)
-        .background(.thickMaterial)
+        .background(drawBackground ? AnyShapeStyle(.thickMaterial) : AnyShapeStyle(.clear))
         .onTapGesture {
             if status.tmuxUnavailable {
                 showTmuxHelp = true
@@ -71,6 +72,7 @@ private struct UsageMeter: View {
     let title: String
     let percent: Int
     let reset: String
+    let tintColor: Color
     @AppStorage("StripShowResetTime") private var showResetTime: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
@@ -78,7 +80,7 @@ private struct UsageMeter: View {
         HStack(spacing: 8) {
             Text(title).font(.footnote).bold()
             ProgressView(value: Double(percent), total: 100)
-                .tint(stripMonochrome ? .secondary : .accentColor)
+                .tint(stripMonochrome ? .secondary : tintColor)
                 .frame(width: 140)
             Text("\(percent)%").font(.footnote).monospacedDigit()
             if showResetTime, !reset.isEmpty {

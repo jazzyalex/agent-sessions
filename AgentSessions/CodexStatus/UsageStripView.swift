@@ -8,6 +8,7 @@ struct UsageStripView: View {
     var brandColor: Color = .accentColor
     var labelWidth: CGFloat? = 56
     var verticalPadding: CGFloat = 6
+    var drawBackground: Bool = true
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
@@ -27,7 +28,7 @@ struct UsageStripView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, verticalPadding)
-        .background(.thickMaterial)
+        .background(drawBackground ? AnyShapeStyle(.thickMaterial) : AnyShapeStyle(.clear))
         .onTapGesture {
             codexStatus.refreshNow()
         }

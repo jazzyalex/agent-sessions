@@ -18,6 +18,7 @@ struct UnifiedSessionsView: View {
     @AppStorage("UnifiedSourceColorStyle") private var sourceColorStyleRaw: String = SourceColorStyle.none.rawValue
     @AppStorage("UnifiedShowCodexStrip") private var showCodexStrip: Bool = false
     @AppStorage("UnifiedShowClaudeStrip") private var showClaudeStrip: Bool = false
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
@@ -48,12 +49,13 @@ struct UnifiedSessionsView: View {
             if showCodexStrip || showClaudeStrip {
                 VStack(spacing: 2) {
                     if showCodexStrip {
-                        UsageStripView(codexStatus: codexUsageModel, label: "Codex", brandColor: .blue, verticalPadding: 3)
+                        UsageStripView(codexStatus: codexUsageModel, label: "Codex", brandColor: .blue, verticalPadding: 3, drawBackground: false)
                     }
                     if showClaudeStrip {
-                        ClaudeUsageStripView(status: claudeUsageModel, label: "Claude", brandColor: Color(red: 204/255, green: 121/255, blue: 90/255), verticalPadding: 3)
+                        ClaudeUsageStripView(status: claudeUsageModel, label: "Claude", brandColor: Color(red: 204/255, green: 121/255, blue: 90/255), verticalPadding: 3, drawBackground: false)
                     }
                 }
+                .background(.thickMaterial)
             }
         }
         // Honor app-wide theme selection from Preferences → General
@@ -62,11 +64,11 @@ struct UnifiedSessionsView: View {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 2) {
                     Toggle(isOn: $unified.includeCodex) {
-                        Text("Codex").foregroundStyle(unified.includeCodex ? Color.blue : .primary)
+                        Text("Codex").foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.blue : .primary))
                     }
                     .toggleStyle(.button)
                     Toggle(isOn: $unified.includeClaude) {
-                        Text("Claude").foregroundStyle(unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary)
+                        Text("Claude").foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary))
                     }
                     .toggleStyle(.button)
                 }

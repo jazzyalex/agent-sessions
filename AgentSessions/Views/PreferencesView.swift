@@ -225,6 +225,10 @@ struct PreferencesView: View {
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 360)
                 }
+                toggleRow("Monochrome", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
+                    set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
+                ))
                 Text("Choose whether to display a source column and optional color coding by source.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -242,13 +246,7 @@ struct PreferencesView: View {
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowClaudeStrip") }
                     ))
                 }
-                HStack(spacing: 16) {
-                    toggleRow("Show reset times", isOn: $stripShowResetTime)
-                    toggleRow("Monochrome", isOn: Binding(
-                        get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
-                        set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
-                    ))
-                }
+                HStack(spacing: 16) { toggleRow("Show reset times", isOn: $stripShowResetTime) }
                 Text("Strips stack vertically when both are shown.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
