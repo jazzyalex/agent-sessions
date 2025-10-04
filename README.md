@@ -10,7 +10,7 @@
 </div>
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2/AgentSessions-2.dmg"><b>Download Agent Sessions 1.2.2 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.0/AgentSessions-2.0.dmg"><b>Download Agent Sessions 1.2.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -82,7 +82,7 @@ and builds a searchable timeline of your AI coding/chat sessions.
 ## Install
 
 ### Option A — Download
-1. Get the latest DMG: [AgentSessions-1.2.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2/AgentSessions-2.dmg)  
+1. Get the latest DMG: [AgentSessions-1.2.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.0/AgentSessions-2.0.dmg)  
 2. Drag **Agent Sessions.app** to your Applications folder.
 
 ### Option B — Homebrew Tap
