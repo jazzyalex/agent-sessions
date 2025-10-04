@@ -19,6 +19,8 @@ struct PreferencesView: View {
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("StripShowResetTime") private var stripShowResetTime: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochromeGlobal: Bool = false
+    @AppStorage("HideZeroMessageSessions") private var hideZeroMessageSessionsPref: Bool = true
+    @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = false
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
@@ -85,10 +87,12 @@ struct PreferencesView: View {
         }
         .alert("Claude Usage Tracking (Experimental)", isPresented: $showClaudeExperimentalWarning) {
             Button("Cancel", role: .cancel) { }
+                .help("Keep Claude usage tracking disabled")
             Button("Enable Anyway") {
                 UserDefaults.standard.set(true, forKey: "ShowClaudeUsageStrip")
                 ClaudeUsageModel.shared.setEnabled(true)
             }
+            .help("Enable the experimental Claude usage tracker despite the warning")
         } message: {
             Text("""
             This feature runs Claude CLI headlessly every 60s via tmux to fetch /usage data.
@@ -136,14 +140,18 @@ struct PreferencesView: View {
             Spacer()
             Button("Reset to Defaults") { showingResetConfirm = true }
                 .buttonStyle(.bordered)
+                .help("Revert all preferences to their original values")
             Button("Close", action: closeWindow)
                 .buttonStyle(.borderedProminent)
+                .help("Dismiss preferences without additional changes")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .alert("Reset All Preferences?", isPresented: $showingResetConfirm) {
             Button("Reset", role: .destructive) { resetToDefaults() }
+                .help("Confirm and restore default settings across all tabs")
             Button("Cancel", role: .cancel) {}
+                .help("Abort resetting preferences")
         } message: {
             Text("This will reset General, Sessions, Resume (Codex & Claude), Usage, and Menu Bar settings.")
         }
@@ -169,6 +177,7 @@ struct PreferencesView: View {
                     .onChange(of: appearance) { _, newValue in
                         indexer.setAppearance(newValue)
                     }
+                    .help("Choose the overall app appearance")
                 }
 
                 Divider()
@@ -183,6 +192,7 @@ struct PreferencesView: View {
                     .onChange(of: modifiedDisplay) { _, newValue in
                         indexer.setModifiedDisplay(newValue)
                     }
+                    .help("Switch between relative and absolute modified timestamps")
                 }
 
                 // Agent color is controlled by UI Elements (Monochrome/Color)
@@ -196,6 +206,7 @@ struct PreferencesView: View {
                         Text("Monochrome").tag(1)
                     }
                     .pickerStyle(.segmented)
+                    .help("Choose colored or monochrome styling for agent accents")
                 }
                 Text("Affects usage strips, Unified toolbar source labels, and CLI Agent column coloring in Sessions.")
                     .font(.caption)
@@ -206,31 +217,34 @@ struct PreferencesView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 16) {
                     Toggle("Session titles", isOn: $indexer.showTitleColumn)
+                        .help("Show or hide the Session title column in the Sessions list")
                     Toggle("Project names", isOn: $indexer.showProjectColumn)
+                        .help("Show or hide the Project column in the Sessions list")
                 }
                 HStack(spacing: 16) {
                     Toggle("Message counts", isOn: $indexer.showMsgsColumn)
+                        .help("Show or hide message counts in the Sessions list")
                     Toggle("Modified date", isOn: $indexer.showModifiedColumn)
+                        .help("Show or hide the modified date column")
                 }
                 HStack(spacing: 16) {
                     Toggle("Source column", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: "UnifiedShowSourceColumn") },
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowSourceColumn") }
                     ))
+                    .help("Show or hide the CLI Agent source column in the Unified list")
                 }
                 Divider()
                 Text("Exclude Sessions with:")
                     .font(.subheadline)
                     .fontWeight(.semibold)
                 HStack(spacing: 16) {
-                    Toggle("Zero msgs", isOn: Binding(
-                        get: { UserDefaults.standard.bool(forKey: "HideZeroMessageSessions") },
-                        set: { UserDefaults.standard.set($0, forKey: "HideZeroMessageSessions"); indexer.recomputeNow() }
-                    ))
-                    Toggle("1–2 messages", isOn: Binding(
-                        get: { UserDefaults.standard.bool(forKey: "HideLowMessageSessions") },
-                        set: { UserDefaults.standard.set($0, forKey: "HideLowMessageSessions"); indexer.recomputeNow() }
-                    ))
+                    Toggle("Zero msgs", isOn: $hideZeroMessageSessionsPref)
+                        .onChange(of: hideZeroMessageSessionsPref) { _, _ in indexer.recomputeNow() }
+                        .help("Hide sessions that contain no user or assistant messages")
+                    Toggle("1–2 messages", isOn: $hideLowMessageSessionsPref)
+                        .onChange(of: hideLowMessageSessionsPref) { _, _ in indexer.recomputeNow() }
+                        .help("Hide sessions with only one or two messages")
                 }
             }
 
@@ -257,11 +271,11 @@ struct PreferencesView: View {
                     toggleRow("Codex strip", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: "UnifiedShowCodexStrip") },
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowCodexStrip") }
-                    ))
+                    ), help: "Show the Codex usage strip at the bottom of the Unified window")
                     toggleRow("Claude strip", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: "UnifiedShowClaudeStrip") },
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowClaudeStrip") }
-                    ))
+                    ), help: "Show the Claude usage strip at the bottom of the Unified window")
                 }
                 HStack(spacing: 12) {
                     Toggle("Activate Claude usage", isOn: Binding(
@@ -276,11 +290,13 @@ struct PreferencesView: View {
                         }
                     ))
                     .toggleStyle(.checkbox)
+                    .help("Enable periodic Claude CLI checks to show usage data (requires tmux)")
                     Button(action: { ClaudeUsageModel.shared.refreshNow() }) { Text("Refresh Now").underline() }
                         .buttonStyle(.plain)
                         .disabled(!UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip"))
+                        .help("Force a usage refresh immediately when Claude tracking is enabled")
                 }
-                HStack(spacing: 16) { toggleRow("Show reset times", isOn: $stripShowResetTime) }
+                HStack(spacing: 16) { toggleRow("Show reset times", isOn: $stripShowResetTime, help: "Display the usage reset timestamp next to each meter") }
                 Text("Strips stack vertically when both are shown.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -296,7 +312,7 @@ struct PreferencesView: View {
 
             // Status item settings (no extra section header per request)
             VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Show menu bar usage", isOn: $menuBarEnabled)
+                toggleRow("Show menu bar usage", isOn: $menuBarEnabled, help: "Add a menu bar item that displays usage meters")
 
                 labeledRow("Source") {
                     Picker("Source", selection: Binding(
@@ -310,6 +326,7 @@ struct PreferencesView: View {
                     .pickerStyle(.segmented)
                     .disabled(!menuBarEnabled)
                     .frame(maxWidth: 360)
+                    .help("Choose which agent usage the menu bar item displays")
                 }
 
                 labeledRow("Scope") {
@@ -321,6 +338,7 @@ struct PreferencesView: View {
                     .pickerStyle(.segmented)
                     .disabled(!menuBarEnabled)
                     .frame(maxWidth: 360)
+                    .help("Select whether the menu bar shows 5-hour, weekly, or both usage windows")
                 }
 
                 labeledRow("Style") {
@@ -332,6 +350,7 @@ struct PreferencesView: View {
                     .pickerStyle(.segmented)
                     .disabled(!menuBarEnabled)
                     .frame(maxWidth: 360)
+                    .help("Switch between bar graphs and numeric usage in the menu bar")
                 }
 
                 Text("Source: Codex, Claude, or Both. Style: Bars or numbers. Scope: 5h, weekly, or both.")
@@ -349,9 +368,12 @@ struct PreferencesView: View {
                     Text(path).font(.caption2).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 12) {
-                    Button("Re-probe") { probeCodex() }.buttonStyle(.bordered)
+                    Button("Re-probe") { probeCodex() }
+                        .buttonStyle(.bordered)
+                        .help("Check again for the Codex CLI version and path")
                     Button("Open Codex CLI Preferences…") { selectedTab = .codexCLI }
                         .buttonStyle(.bordered)
+                        .help("Jump to the Codex CLI tab for detailed configuration")
                 }
             }
         }
@@ -381,12 +403,14 @@ struct PreferencesView: View {
                             codexPathDebounce = work
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
                         }
+                        .help("Override the Codex sessions directory. Leave blank to use the default location")
 
                     Button(action: pickCodexFolder) {
                         Label("Choose…", systemImage: "folder")
                             .labelStyle(.titleAndIcon)
                     }
                     .buttonStyle(.bordered)
+                    .help("Browse for a directory to store Codex session logs")
                 }
 
                 if !codexPathValid {
@@ -412,6 +436,7 @@ struct PreferencesView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 220)
+                    .help("Choose the Codex binary automatically or specify a custom executable")
                 }
 
                 if codexBinaryOverride.isEmpty {
@@ -425,10 +450,13 @@ struct PreferencesView: View {
                         if let version = probeVersion { Text("• v\(version.description)").font(.caption).foregroundStyle(.secondary) }
                         Button(action: probeCodex) { Text("Check Version").underline() }
                             .buttonStyle(.plain).foregroundColor(.accentColor)
+                            .help("Query the currently detected Codex binary for its version")
                         Button(action: { if let p = resolvedCodexPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p, forType: .string) } }) { Text("Copy").underline() }
                             .buttonStyle(.plain).foregroundColor(.accentColor)
+                            .help("Copy the detected Codex binary path")
                         Button(action: { if let p = resolvedCodexPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } }) { Text("Reveal").underline() }
                             .buttonStyle(.plain).foregroundColor(.accentColor)
+                            .help("Reveal the detected Codex binary in Finder")
                     }
                 } else {
                     HStack(spacing: 10) {
@@ -436,8 +464,11 @@ struct PreferencesView: View {
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { validateBinaryOverride(); commitCodexBinaryIfValid() }
                             .onChange(of: codexBinaryOverride) { _, _ in validateBinaryOverride(); commitCodexBinaryIfValid() }
+                            .help("Enter the full path to a custom Codex binary")
                         Button("Choose…", action: pickCodexBinary).buttonStyle(.bordered)
+                            .help("Select the Codex binary from the filesystem")
                         Button("Clear") { codexBinaryOverride = ""; validateBinaryOverride(); resumeSettings.setBinaryOverride(""); scheduleCodexProbe() }.buttonStyle(.bordered)
+                            .help("Remove the custom binary override")
                     }
                     if !codexBinaryValid {
                         Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red)
@@ -462,6 +493,7 @@ struct PreferencesView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 360)
+                    .help("Choose which terminal application handles Claude resume commands")
                 }
 
                 // Binary source segmented: Auto | Custom
@@ -475,6 +507,7 @@ struct PreferencesView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 220)
+                    .help("Use the auto-detected Claude CLI or supply a custom path")
                 }
 
                 // Auto row (detected path + version + actions)
@@ -490,10 +523,13 @@ struct PreferencesView: View {
                         if let ver = claudeVersionString { Text("• v\(ver)").font(.caption).foregroundStyle(.secondary) }
                         Button(action: probeClaude) { Text("Check Version").underline() }
                             .buttonStyle(.plain).foregroundColor(.accentColor)
+                            .help("Query the detected Claude CLI for its version")
                         Button(action: { if let p = claudeResolvedPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p, forType: .string) } }) { Text("Copy").underline() }
                             .buttonStyle(.plain).foregroundColor(.accentColor)
+                            .help("Copy the detected Claude CLI path")
                         Button(action: { if let p = claudeResolvedPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } }) { Text("Reveal").underline() }
                             .buttonStyle(.plain).foregroundColor(.accentColor)
+                            .help("Reveal the detected Claude CLI binary in Finder")
                     }
                 } else {
                     // Custom row
@@ -502,8 +538,11 @@ struct PreferencesView: View {
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { scheduleClaudeProbe() }
                             .onChange(of: claudeSettings.binaryPath) { _, _ in scheduleClaudeProbe() }
+                            .help("Specify a custom Claude CLI executable path")
                         Button("Choose…", action: pickClaudeBinary).buttonStyle(.bordered)
+                            .help("Select the Claude CLI executable")
                         Button("Clear") { claudeSettings.setBinaryPath("") }.buttonStyle(.bordered)
+                            .help("Remove the custom Claude CLI path")
                     }
                 }
             }
@@ -672,7 +711,7 @@ struct PreferencesView: View {
 
     // MARK: Helpers
 
-    private func toggleRow(_ label: String, isOn: Binding<Bool>) -> some View {
+    private func toggleRow(_ label: String, isOn: Binding<Bool>, help: String) -> some View {
         HStack(spacing: 16) {
             Text(label)
                 .frame(width: labelColumnWidth, alignment: .leading)
@@ -680,6 +719,7 @@ struct PreferencesView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .accessibilityLabel(Text(label))
+                .help(help)
         }
     }
 

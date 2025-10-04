@@ -12,12 +12,13 @@ struct SearchFiltersView: View {
                     .frame(minWidth: 160)
                     .focused($isSearchFocused)
                     .onSubmit { indexer.applySearch() }
+                    .help("Type a query then press Return to filter sessions. Supports repo: and path: operators.")
 
                 Button(action: { indexer.applySearch() }) {
                     Image(systemName: "magnifyingglass")
                 }
                 .buttonStyle(.borderless)
-                .help("Search transcripts")
+                .help("Run search using the current text")
 
                 if !indexer.queryDraft.isEmpty {
                     Button(action: {
@@ -28,7 +29,7 @@ struct SearchFiltersView: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("Clear search")
+                    .help("Clear the search field and show all sessions")
                 }
             }
             .padding(.horizontal, 8)
@@ -56,7 +57,7 @@ struct SearchFiltersView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("Clear project filter")
+                    .help("Remove the project filter and show all sessions")
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)

@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 /// Aggregates Codex and Claude sessions into a single list with unified filters and search.
 final class UnifiedSessionIndexer: ObservableObject {
@@ -24,6 +25,13 @@ final class UnifiedSessionIndexer: ObservableObject {
     // Indexing state aggregation
     @Published private(set) var isIndexing: Bool = false
     @Published private(set) var indexingError: String? = nil
+
+    @AppStorage("HideZeroMessageSessions") private var hideZeroMessageSessionsPref: Bool = true {
+        didSet { recomputeNow() }
+    }
+    @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = false {
+        didSet { recomputeNow() }
+    }
 
     private let codex: SessionIndexer
     private let claude: ClaudeSessionIndexer
@@ -73,15 +81,19 @@ final class UnifiedSessionIndexer: ObservableObject {
                     base = base.filter { s in (s.source == .codex && incCodex) || (s.source == .claude && incClaude) }
                 }
                 var results = FilterEngine.filterSessions(base, filters: filters)
-                let d = UserDefaults.standard
-                if d.bool(forKey: "HideZeroMessageSessions") { results = results.filter { $0.messageCount > 0 } }
-                if d.bool(forKey: "HideLowMessageSessions") { results = results.filter { $0.messageCount > 2 } }
+                if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
+                if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
                 // Apply sort descriptor
                 results = self?.applySort(results) ?? results
                 return results
             }
             .receive(on: DispatchQueue.main)
             .assign(to: &$sessions)
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.recomputeNow() }
+            .store(in: &cancellables)
     }
 
     func refresh() {
@@ -98,9 +110,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             base = base.filter { s in (s.source == .codex && includeCodex) || (s.source == .claude && includeClaude) }
         }
         var results = FilterEngine.filterSessions(base, filters: filters)
-        let d = UserDefaults.standard
-        if d.bool(forKey: "HideZeroMessageSessions") { results = results.filter { $0.messageCount > 0 } }
-        if d.bool(forKey: "HideLowMessageSessions") { results = results.filter { $0.messageCount > 2 } }
+        if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
+        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
         results = applySort(results)
         sessions = results
     }

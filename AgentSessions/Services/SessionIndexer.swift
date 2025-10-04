@@ -59,8 +59,12 @@ final class SessionIndexer: ObservableObject {
     // Preferences
     @AppStorage("SessionsRootOverride") var sessionsRootOverride: String = ""
     @AppStorage("TranscriptTheme") private var themeRaw: String = TranscriptTheme.codexDark.rawValue
-    @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true
-    @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = true
+    @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true {
+        didSet { recomputeNow() }
+    }
+    @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = false {
+        didSet { recomputeNow() }
+    }
     @AppStorage("SelectedKindsRaw") private var selectedKindsRaw: String = ""
     @AppStorage("AppAppearance") private var appearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = ModifiedDisplay.relative.rawValue
@@ -146,6 +150,11 @@ final class SessionIndexer: ObservableObject {
             .map { $0 ?? "" }
             .removeDuplicates()
             .sink { [weak self] raw in self?.projectFilterStored = raw }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.recomputeNow() }
             .store(in: &cancellables)
     }
 
@@ -418,7 +427,15 @@ final class SessionIndexer: ObservableObject {
             }
         }
         let id = Self.hash(path: url.path)
-        let session = Session(id: id, source: .codex, startTime: start, endTime: end, model: modelSeen, filePath: url.path, eventCount: events.count, events: events)
+        let session = Session(id: id,
+                              source: .codex,
+                              startTime: start,
+                              endTime: end,
+                              model: modelSeen,
+                              filePath: url.path,
+                              fileSizeBytes: size >= 0 ? size : nil,
+                              eventCount: events.count,
+                              events: events)
 
         if size > 5_000_000 {  // Log full parse of files >5MB
             print("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
@@ -509,6 +526,7 @@ final class SessionIndexer: ObservableObject {
                                    endTime: tmax,
                                    model: model,
                                    filePath: url.path,
+                                   fileSizeBytes: fileSize,
                                    eventCount: estEvents,
                                    events: sampleEvents)
 
@@ -522,6 +540,7 @@ final class SessionIndexer: ObservableObject {
                               endTime: tmax ?? mtime,
                               model: model,
                               filePath: url.path,
+                              fileSizeBytes: fileSize,
                               eventCount: estEvents,
                               events: [],
                               cwd: cwd,

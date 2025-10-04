@@ -25,8 +25,12 @@ final class ClaudeSessionIndexer: ObservableObject {
     @Published var loadingSessionID: String? = nil
 
     @AppStorage("ClaudeSessionsRootOverride") var sessionsRootOverride: String = ""
-    @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true
-    @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = true
+    @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true {
+        didSet { recomputeNow() }
+    }
+    @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = false {
+        didSet { recomputeNow() }
+    }
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     var appAppearance: AppAppearance {
@@ -64,6 +68,11 @@ final class ClaudeSessionIndexer: ObservableObject {
         }
         .receive(on: DispatchQueue.main)
         .assign(to: &$sessions)
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.recomputeNow() }
+            .store(in: &cancellables)
     }
 
     var canAccessRootDirectory: Bool {

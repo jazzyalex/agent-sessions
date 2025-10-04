@@ -14,7 +14,7 @@ struct UsageStripView: View {
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             if let label {
                 Text(label)
                     .font(.footnote).bold()
@@ -48,19 +48,28 @@ private struct UsageMeter: View {
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(title).font(.footnote).bold()
+        let includeReset = showResetTime && !reset.isEmpty
+        HStack(spacing: UsageMeterLayout.itemSpacing) {
+            Text(title)
+                .font(.footnote).bold()
+                .frame(width: UsageMeterLayout.titleWidth, alignment: .leading)
             ProgressView(value: Double(percent), total: 100)
                 .tint(stripMonochrome ? .secondary : .accentColor)
-                .frame(width: 140)
-            Text("\(percent)%").font(.footnote).monospacedDigit()
-            if showResetTime, !reset.isEmpty {
+                .frame(width: UsageMeterLayout.progressWidth)
+            Text("\(percent)%")
+                .font(.footnote)
+                .monospacedDigit()
+                .frame(width: UsageMeterLayout.percentWidth, alignment: .trailing)
+            if includeReset {
                 let text = formattedReset(reset)
                 Text(text)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .frame(width: UsageMeterLayout.resetWidth, alignment: .leading)
+                    .lineLimit(1)
             }
         }
+        .frame(width: UsageMeterLayout.totalWidth(includeReset: includeReset), alignment: .leading)
         .help(reset.isEmpty ? "" : reset)
     }
 
@@ -78,3 +87,18 @@ private struct UsageMeter: View {
 }
 
 // Detail popover removed; tooltips provide reset info.
+
+private enum UsageMeterLayout {
+    static let itemSpacing: CGFloat = 6
+    static let titleWidth: CGFloat = 28
+    static let progressWidth: CGFloat = 140
+    static let percentWidth: CGFloat = 36
+    static let resetWidth: CGFloat = 160
+
+    static func totalWidth(includeReset: Bool) -> CGFloat {
+        let base = titleWidth + progressWidth + percentWidth
+        let spacingCount: CGFloat = includeReset ? 3 : 2
+        let resetComponent: CGFloat = includeReset ? resetWidth : 0
+        return base + resetComponent + itemSpacing * spacingCount
+    }
+}

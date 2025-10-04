@@ -7,6 +7,7 @@ public struct Session: Identifiable, Equatable, Codable {
     public let endTime: Date?
     public let model: String?
     public let filePath: String
+    public let fileSizeBytes: Int?
     public let eventCount: Int
     public let events: [SessionEvent]
 
@@ -15,13 +16,22 @@ public struct Session: Identifiable, Equatable, Codable {
     public let lightweightTitle: String?
 
     // Default initializer for full sessions
-    public init(id: String, source: SessionSource = .codex, startTime: Date?, endTime: Date?, model: String?, filePath: String, eventCount: Int, events: [SessionEvent]) {
+    public init(id: String,
+                source: SessionSource = .codex,
+                startTime: Date?,
+                endTime: Date?,
+                model: String?,
+                filePath: String,
+                fileSizeBytes: Int? = nil,
+                eventCount: Int,
+                events: [SessionEvent]) {
         self.id = id
         self.source = source
         self.startTime = startTime
         self.endTime = endTime
         self.model = model
         self.filePath = filePath
+        self.fileSizeBytes = fileSizeBytes
         self.eventCount = eventCount
         self.events = events
         self.lightweightCwd = nil
@@ -29,13 +39,25 @@ public struct Session: Identifiable, Equatable, Codable {
     }
 
     // Lightweight session initializer
-    public init(id: String, source: SessionSource = .codex, startTime: Date?, endTime: Date?, model: String?, filePath: String, eventCount: Int, events: [SessionEvent], cwd: String?, repoName: String?, lightweightTitle: String?) {
+    public init(id: String,
+                source: SessionSource = .codex,
+                startTime: Date?,
+                endTime: Date?,
+                model: String?,
+                filePath: String,
+                fileSizeBytes: Int? = nil,
+                eventCount: Int,
+                events: [SessionEvent],
+                cwd: String?,
+                repoName: String?,
+                lightweightTitle: String?) {
         self.id = id
         self.source = source
         self.startTime = startTime
         self.endTime = endTime
         self.model = model
         self.filePath = filePath
+        self.fileSizeBytes = fileSizeBytes
         self.eventCount = eventCount
         self.events = events
         self.lightweightCwd = cwd

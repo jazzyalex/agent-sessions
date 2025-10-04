@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SessionsListView: View {
     @EnvironmentObject var indexer: SessionIndexer
@@ -198,25 +199,45 @@ struct SessionsListView: View {
                 selection = id
                 onLaunchTerminal(session)
             }
+            .help("Open this session in the Codex terminal if it supports resume. Some sessions lack enough data to relaunch.")
             Button("Open Working Directory") {
                 tableSelection = [id]
                 selection = id
                 onOpenWorkingDirectory(session)
             }
+            .help("Reveal the session's working directory in Finder")
+            Button("Open Session in Folder") {
+                tableSelection = [id]
+                selection = id
+                revealSession(session)
+            }
+            .help("Show the raw session log file in Finder")
             if let name = session.repoName, !name.isEmpty {
                 Divider()
                 Button("Filter by Project: \(name)") {
                     indexer.projectFilter = name
                     indexer.recomputeNow()
                 }
+                .help("Apply a project filter using the session's repository name")
             } else {
                 Divider()
-                Button("Filter by Project") {}.disabled(true)
+                Button("Filter by Project") {}
+                    .disabled(true)
+                    .help("Project information is unavailable for this session")
             }
         } else {
-            Button("Resume in Codex") {}.disabled(true)
-            Button("Open Working Directory") {}.disabled(true)
-            Button("Filter by Project") {}.disabled(true)
+            Button("Resume in Codex") {}
+                .disabled(true)
+                .help("Select exactly one session to attempt a Codex resume")
+            Button("Open Working Directory") {}
+                .disabled(true)
+                .help("Select a single session with a known working directory")
+            Button("Open Session in Folder") {}
+                .disabled(true)
+                .help("Select one session to reveal its JSONL log in Finder")
+            Button("Filter by Project") {}
+                .disabled(true)
+                .help("Select a session that has project metadata to filter by")
         }
     }
 }
@@ -248,10 +269,40 @@ private func projectTooltip(for s: Session) -> String {
 private func messageDisplay(for s: Session) -> String {
     let count = s.messageCount
     if s.events.isEmpty {
-        // Lightweight session: show estimate with ~ prefix or "Many"
-        return count >= 1000 ? "Many" : "~\(count)"
+        if let bytes = s.fileSizeBytes {
+            return formattedSize(bytes)
+        }
+        return count >= 1000 ? formattedSizeEstimate(count) : "~\(count)"
     } else {
         // Fully parsed: show exact count
         return String(format: "%3d", count)
     }
+}
+
+private func revealSession(_ session: Session) {
+    let path = session.filePath
+    let url = URL(fileURLWithPath: path)
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return }
+    let target = isDir.boolValue ? url : url
+    NSWorkspace.shared.activateFileViewerSelecting([target])
+}
+
+private func formattedSize(_ bytes: Int) -> String {
+    let mb = Double(bytes) / 1_048_576.0
+    if mb >= 10 {
+        return "\(Int(round(mb)))MB"
+    } else if mb >= 1 {
+        return String(format: "%.1fMB", mb)
+    }
+    let kb = max(1, Int(round(Double(bytes) / 1024.0)))
+    return "\(kb)KB"
+}
+
+private func formattedSizeEstimate(_ count: Int) -> String {
+    // Fallback when file size is unavailable; keep legacy behavior for huge estimates
+    if count >= 1000 {
+        return "1000+"
+    }
+    return "~\(count)"
 }

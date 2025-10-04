@@ -77,10 +77,12 @@ struct UnifiedSessionsView: View {
                         Text("Codex").foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.blue : .primary))
                     }
                     .toggleStyle(.button)
+                    .help("Show or hide Codex sessions in the list")
                     Toggle(isOn: $unified.includeClaude) {
                         Text("Claude").foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary))
                     }
                     .toggleStyle(.button)
+                    .help("Show or hide Claude sessions in the list")
                 }
             }
             ToolbarItem(placement: .automatic) { UnifiedSearchFiltersView(unified: unified) }
@@ -90,24 +92,27 @@ struct UnifiedSessionsView: View {
                 }
                 .keyboardShortcut("r", modifiers: [.command, .control])
                 .disabled(selectedSession == nil)
+                .help("Attempt to resume the selected session in its original CLI. Some sessions cannot be relaunched.")
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: { if let s = selectedSession { openDir(s) } }) { Label("Open Working Directory", systemImage: "folder") }
                     .disabled(selectedSession == nil)
+                    .help("Reveal the selected session's working directory in Finder")
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: { unified.refresh() }) {
                     if unified.isIndexing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
                 }
-                    .help("Refresh index")
+                    .help("Re-run the session indexer to discover new logs")
             }
             ToolbarItem(placement: .automatic) { Divider() }
             ToolbarItem(placement: .automatic) {
                 Button(action: { onToggleLayout() }) { Image(systemName: layoutMode == .vertical ? "rectangle.split.1x2" : "rectangle.split.2x1") }
+                    .help("Toggle between vertical and horizontal layout modes")
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, initialTab: .general) }) { Image(systemName: "gear") }
-                    .help("Preferences")
+                    .help("Open preferences for appearance, indexing, and agents")
             }
         }
         .onAppear {
@@ -176,12 +181,24 @@ struct UnifiedSessionsView: View {
         .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let id = ids.first, let s = rows.first(where: { $0.id == id }) {
                 Button("Open Working Directory") { openDir(s) }
+                    .help("Reveal the working directory for \(s.title) in Finder")
+                Button("Open Session in Folder") { revealSessionFile(s) }
+                    .help("Show the raw session log in Finder")
                 if let name = s.repoName, !name.isEmpty {
-                    Divider(); Button("Filter by Project: \(name)") { unified.projectFilter = name; unified.recomputeNow() }
+                    Divider()
+                    Button("Filter by Project: \(name)") { unified.projectFilter = name; unified.recomputeNow() }
+                        .help("Filter to sessions from \(name)")
                 }
             } else {
-                Button("Open Working Directory") {}.disabled(true)
-                Button("Filter by Project") {}.disabled(true)
+                Button("Open Working Directory") {}
+                    .disabled(true)
+                    .help("Select a single session with a known working directory")
+                Button("Open Session in Folder") {}
+                    .disabled(true)
+                    .help("Select one session to reveal its log in Finder")
+                Button("Filter by Project") {}
+                    .disabled(true)
+                    .help("Select one session that has project metadata to filter by")
             }
         }
         .onChange(of: sortOrder) { _, newValue in
@@ -245,6 +262,12 @@ struct UnifiedSessionsView: View {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    private func revealSessionFile(_ s: Session) {
+        let url = URL(fileURLWithPath: s.filePath)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
     private func resume(_ s: Session) {
         if s.source == .codex {
             Task { @MainActor in
@@ -281,11 +304,29 @@ struct UnifiedSessionsView: View {
     private func unifiedMessageDisplay(for s: Session) -> String {
         let count = s.messageCount
         if s.events.isEmpty {
-            // Lightweight session: show estimate
-            return count >= 1000 ? "Many" : "~\(count)"
+            if let bytes = s.fileSizeBytes {
+                return formattedSize(bytes)
+            }
+            return fallbackEstimate(count)
         } else {
             return String(format: "%3d", count)
         }
+    }
+
+    private func formattedSize(_ bytes: Int) -> String {
+        let mb = Double(bytes) / 1_048_576.0
+        if mb >= 10 {
+            return "\(Int(round(mb)))MB"
+        } else if mb >= 1 {
+            return String(format: "%.1fMB", mb)
+        }
+        let kb = max(1, Int(round(Double(bytes) / 1024.0)))
+        return "\(kb)KB"
+    }
+
+    private func fallbackEstimate(_ count: Int) -> String {
+        if count >= 1000 { return "1000+" }
+        return "~\(count)"
     }
 
     private func sourceAccent(_ s: Session) -> Color {
@@ -304,13 +345,14 @@ private struct UnifiedSearchFiltersView: View {
                     .frame(minWidth: 160)
                     .focused($focused)
                     .onSubmit { unified.applySearch() }
+                    .help("Type a query then press Return to filter sessions. Supports repo: and path: operators.")
                 Button(action: { unified.applySearch() }) { Image(systemName: "magnifyingglass") }
                     .buttonStyle(.borderless)
-                    .help("Search transcripts")
+                    .help("Run search using the current text")
                 if !unified.queryDraft.isEmpty {
                     Button(action: { unified.queryDraft = ""; unified.query = ""; unified.recomputeNow() }) {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }.buttonStyle(.plain).help("Clear search")
+                    }.buttonStyle(.plain).help("Clear the search field and show all sessions")
                 }
             }
             .padding(.horizontal, 8)
@@ -328,7 +370,7 @@ private struct UnifiedSearchFiltersView: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("Clear project filter")
+                    .help("Remove the project filter and show all sessions")
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)

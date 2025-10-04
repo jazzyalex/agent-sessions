@@ -25,6 +25,8 @@ final class ClaudeSessionParser {
 
     /// Full parse of Claude Code session file
     static func parseFileFull(at url: URL) -> Session? {
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let reader = JSONLReader(url: url)
         var events: [SessionEvent] = []
         var sessionID: String?
@@ -89,6 +91,7 @@ final class ClaudeSessionParser {
             endTime: tmax,
             model: model,
             filePath: url.path,
+            fileSizeBytes: size >= 0 ? size : nil,
             eventCount: events.count,
             events: events,
             cwd: cwd,
@@ -276,6 +279,7 @@ final class ClaudeSessionParser {
                                    endTime: tmax,
                                    model: model,
                                    filePath: url.path,
+                                   fileSizeBytes: size,
                                    eventCount: estEvents,
                                    events: sampleEvents,
                                    cwd: cwd,
@@ -286,16 +290,17 @@ final class ClaudeSessionParser {
         // Create final lightweight session with empty events
         let id = hash(path: url.path)
         return Session(id: id,
-                      source: .claude,
-                      startTime: tmin ?? mtime,
-                      endTime: tmax ?? mtime,
-                      model: model,
-                      filePath: url.path,
-                      eventCount: estEvents,
-                      events: [],
-                      cwd: cwd,
-                      repoName: nil,
-                      lightweightTitle: title)
+                       source: .claude,
+                       startTime: tmin ?? mtime,
+                       endTime: tmax ?? mtime,
+                       model: model,
+                       filePath: url.path,
+                       fileSizeBytes: size,
+                       eventCount: estEvents,
+                       events: [],
+                       cwd: cwd,
+                       repoName: nil,
+                       lightweightTitle: title)
     }
 
     // MARK: - Helper Methods
