@@ -18,6 +18,7 @@ struct PreferencesView: View {
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("StripShowResetTime") private var stripShowResetTime: Bool = false
+    @AppStorage("StripMonochromeMeters") private var stripMonochromeGlobal: Bool = false
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
@@ -159,7 +160,7 @@ struct PreferencesView: View {
             sectionHeader("Appearance")
             VStack(alignment: .leading, spacing: 12) {
                 labeledRow("Theme") {
-                    Picker("Theme", selection: $appearance) {
+                    Picker("", selection: $appearance) {
                         ForEach(AppAppearance.allCases) { option in
                             Text(option.title).tag(option)
                         }
@@ -173,7 +174,7 @@ struct PreferencesView: View {
                 Divider()
 
                 labeledRow("Modified Date") {
-                    Picker("Modified Display", selection: $modifiedDisplay) {
+                    Picker("", selection: $modifiedDisplay) {
                         ForEach(SessionIndexer.ModifiedDisplay.allCases) { mode in
                             Text(mode.title).tag(mode)
                         }
@@ -183,9 +184,25 @@ struct PreferencesView: View {
                         indexer.setModifiedDisplay(newValue)
                     }
                 }
+
+                // Agent color is controlled by UI Elements (Monochrome/Color)
+
+                labeledRow("UI Elements") {
+                    Picker("", selection: Binding(
+                        get: { stripMonochromeGlobal ? 1 : 0 },
+                        set: { stripMonochromeGlobal = ($0 == 1) }
+                    )) {
+                        Text("Color").tag(0)
+                        Text("Monochrome").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                Text("Affects usage strips, Unified toolbar source labels, and CLI Agent column coloring in Sessions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            sectionHeader("Sessions Sidebar")
+            sectionHeader("Sessions List")
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 16) {
                     Toggle("Session titles", isOn: $indexer.showTitleColumn)
@@ -194,6 +211,26 @@ struct PreferencesView: View {
                 HStack(spacing: 16) {
                     Toggle("Message counts", isOn: $indexer.showMsgsColumn)
                     Toggle("Modified date", isOn: $indexer.showModifiedColumn)
+                }
+                HStack(spacing: 16) {
+                    Toggle("Source column", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "UnifiedShowSourceColumn") },
+                        set: { UserDefaults.standard.set($0, forKey: "UnifiedShowSourceColumn") }
+                    ))
+                }
+                Divider()
+                Text("Exclude Sessions with:")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                HStack(spacing: 16) {
+                    Toggle("Zero msgs", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "HideZeroMessageSessions") },
+                        set: { UserDefaults.standard.set($0, forKey: "HideZeroMessageSessions"); indexer.recomputeNow() }
+                    ))
+                    Toggle("1–2 messages", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "HideLowMessageSessions") },
+                        set: { UserDefaults.standard.set($0, forKey: "HideLowMessageSessions"); indexer.recomputeNow() }
+                    ))
                 }
             }
 
@@ -208,27 +245,8 @@ struct PreferencesView: View {
 
             sectionHeader("Display")
             VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Show source column", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: "UnifiedShowSourceColumn") },
-                    set: { UserDefaults.standard.set($0, forKey: "UnifiedShowSourceColumn") }
-                ))
-                labeledRow("Source color") {
-                    Picker("Source color", selection: Binding(
-                        get: { UserDefaults.standard.string(forKey: "UnifiedSourceColorStyle") ?? "none" },
-                        set: { UserDefaults.standard.set($0, forKey: "UnifiedSourceColorStyle") }
-                    )) {
-                        Text("None").tag("none")
-                        Text("Text").tag("text")
-                        Text("Background").tag("background")
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 360)
-                }
-                toggleRow("Monochrome", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
-                    set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
-                ))
-                Text("Choose whether to display a source column and optional color coding by source.")
+                // Controls for columns are available in General → Sessions List
+                Text("Configure list columns in General.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -244,6 +262,23 @@ struct PreferencesView: View {
                         get: { UserDefaults.standard.bool(forKey: "UnifiedShowClaudeStrip") },
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowClaudeStrip") }
                     ))
+                }
+                HStack(spacing: 12) {
+                    Toggle("Activate Claude usage", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") },
+                        set: { newValue in
+                            if newValue {
+                                showClaudeExperimentalWarning = true
+                            } else {
+                                UserDefaults.standard.set(false, forKey: "ShowClaudeUsageStrip")
+                                ClaudeUsageModel.shared.setEnabled(false)
+                            }
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                    Button(action: { ClaudeUsageModel.shared.refreshNow() }) { Text("Refresh Now").underline() }
+                        .buttonStyle(.plain)
+                        .disabled(!UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip"))
                 }
                 HStack(spacing: 16) { toggleRow("Show reset times", isOn: $stripShowResetTime) }
                 Text("Strips stack vertically when both are shown.")
@@ -388,9 +423,12 @@ struct PreferencesView: View {
                             .truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if let version = probeVersion { Text("• v\(version.description)").font(.caption).foregroundStyle(.secondary) }
-                        Button("Check Version", action: probeCodex).buttonStyle(.link)
-                        Button("Copy") { if let p = resolvedCodexPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p, forType: .string) } }.buttonStyle(.link)
-                        Button("Reveal") { if let p = resolvedCodexPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } }.buttonStyle(.link)
+                        Button(action: probeCodex) { Text("Check Version").underline() }
+                            .buttonStyle(.plain).foregroundColor(.accentColor)
+                        Button(action: { if let p = resolvedCodexPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p, forType: .string) } }) { Text("Copy").underline() }
+                            .buttonStyle(.plain).foregroundColor(.accentColor)
+                        Button(action: { if let p = resolvedCodexPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } }) { Text("Reveal").underline() }
+                            .buttonStyle(.plain).foregroundColor(.accentColor)
                     }
                 } else {
                     HStack(spacing: 10) {
@@ -407,22 +445,7 @@ struct PreferencesView: View {
                 }
             }
 
-            sectionHeader("Usage Tracking")
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 16) {
-                    toggleRow("Show usage strip", isOn: $showUsageStrip)
-                    Toggle("Show reset times", isOn: $stripShowResetTime).toggleStyle(.checkbox)
-                    Toggle("Monochrome", isOn: Binding(
-                        get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
-                        set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
-                    )).toggleStyle(.checkbox)
-                }
-                Button("Refresh Now") { CodexUsageModel.shared.refreshNow() }
-                    .buttonStyle(.link)
-                    .disabled(!showUsageStrip)
-            }
-
-            // Resume-specific defaults now live in Codex CLI Resume tab.
+            // Usage Tracking controls live in the Unified Window tab.
         }
     }
 
@@ -465,11 +488,12 @@ struct PreferencesView: View {
                             .truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if let ver = claudeVersionString { Text("• v\(ver)").font(.caption).foregroundStyle(.secondary) }
-                        Button("Check Version", action: probeClaude).buttonStyle(.link)
-                        Button("Copy") { if let p = claudeResolvedPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p, forType: .string) } }
-                            .buttonStyle(.link)
-                        Button("Reveal") { if let p = claudeResolvedPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } }
-                            .buttonStyle(.link)
+                        Button(action: probeClaude) { Text("Check Version").underline() }
+                            .buttonStyle(.plain).foregroundColor(.accentColor)
+                        Button(action: { if let p = claudeResolvedPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p, forType: .string) } }) { Text("Copy").underline() }
+                            .buttonStyle(.plain).foregroundColor(.accentColor)
+                        Button(action: { if let p = claudeResolvedPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } }) { Text("Reveal").underline() }
+                            .buttonStyle(.plain).foregroundColor(.accentColor)
                     }
                 } else {
                     // Custom row
@@ -484,33 +508,7 @@ struct PreferencesView: View {
                 }
             }
 
-            sectionHeader("Usage Tracking")
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    Toggle("Activate Claude usage", isOn: Binding(
-                        get: { UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") },
-                        set: { newValue in
-                            if newValue { showClaudeExperimentalWarning = true } else { UserDefaults.standard.set(false, forKey: "ShowClaudeUsageStrip"); ClaudeUsageModel.shared.setEnabled(false) }
-                        }
-                    ))
-                    .toggleStyle(.checkbox)
-                    Spacer(minLength: 0)
-                    Button("Refresh Now") { ClaudeUsageModel.shared.refreshNow() }
-                        .buttonStyle(.link)
-                        .disabled(!UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip"))
-                }
-                let upd = ClaudeUsageModel.shared.lastUpdate
-                Text(upd.map { "Last updated \(RelativeDateTimeFormatter().localizedString(for: $0, relativeTo: Date()))" } ?? "Last updated —")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 16) {
-                    Toggle("Show reset times", isOn: $stripShowResetTime).toggleStyle(.checkbox)
-                    Toggle("Monochrome", isOn: Binding(
-                        get: { UserDefaults.standard.bool(forKey: "StripMonochromeMeters") },
-                        set: { UserDefaults.standard.set($0, forKey: "StripMonochromeMeters") }
-                    )).toggleStyle(.checkbox)
-                }
-            }
+            // Usage Tracking moved to Unified Window tab.
         }
     }
 

@@ -9,6 +9,8 @@ struct UsageStripView: View {
     var labelWidth: CGFloat? = 56
     var verticalPadding: CGFloat = 6
     var drawBackground: Bool = true
+    var collapseTop: Bool = false
+    var collapseBottom: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
@@ -27,7 +29,8 @@ struct UsageStripView: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, verticalPadding)
+        .padding(.top, collapseTop ? 0 : verticalPadding)
+        .padding(.bottom, collapseBottom ? 0 : verticalPadding)
         .background(drawBackground ? AnyShapeStyle(.thickMaterial) : AnyShapeStyle(.clear))
         .onTapGesture {
             codexStatus.refreshNow()
@@ -52,12 +55,25 @@ private struct UsageMeter: View {
                 .frame(width: 140)
             Text("\(percent)%").font(.footnote).monospacedDigit()
             if showResetTime, !reset.isEmpty {
-                Text(reset)
+                let text = formattedReset(reset)
+                Text(text)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         }
         .help(reset.isEmpty ? "" : reset)
+    }
+
+    private func formattedReset(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        // Strip timezone like "(America/Los_Angeles)"
+        if let idx = s.firstIndex(of: "(") { s = String(s[..<idx]).trimmingCharacters(in: .whitespaces) }
+        // Ensure prefix
+        let lower = s.lowercased()
+        if lower.hasPrefix("reset") || lower.hasPrefix("resets") {
+            return s
+        }
+        return "resets " + s
     }
 }
 

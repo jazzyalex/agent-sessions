@@ -13,23 +13,27 @@ struct UsageMenuBarLabel: View {
         let scope = MenuBarScope(rawValue: scopeRaw) ?? .both
         let style = MenuBarStyleKind(rawValue: styleRaw) ?? .bars
         let source = MenuBarSource(rawValue: sourceRaw) ?? .codex
+        let claudeEnabled = UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip")
 
-        let text: Text = {
+        return HStack(spacing: 8) {
             switch source {
             case .codex:
-                return renderSource(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefix: nil)
+                renderSourceView(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefixIconName: "MenuIconCodex", fallbackPrefix: nil)
             case .claude:
-                return renderSource(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefix: nil)
+                if claudeEnabled {
+                    renderSourceView(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefixIconName: "MenuIconClaude", fallbackPrefix: nil)
+                }
             case .both:
-                let codex = renderSource(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefix: "CX")
-                let claude = renderSource(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefix: "CL")
-                return codex + Text(" │ ") + claude
+                renderSourceView(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefixIconName: "MenuIconCodex", fallbackPrefix: nil)
+                if claudeEnabled {
+                    Text("│").foregroundStyle(.secondary)
+                    renderSourceView(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefixIconName: "MenuIconClaude", fallbackPrefix: nil)
+                }
             }
-        }()
-
-        return text
+        }
             .font(.system(size: 12, weight: .regular, design: .monospaced))
             .padding(.horizontal, 4)
+            .fixedSize(horizontal: true, vertical: false)
             .onAppear {
                 codexStatus.setMenuVisible(true)
                 claudeStatus.setMenuVisible(true)
@@ -38,6 +42,21 @@ struct UsageMenuBarLabel: View {
                 codexStatus.setMenuVisible(false)
                 claudeStatus.setMenuVisible(false)
             }
+    }
+
+    // Create a single template image containing both icons side-by-side (12pt each, 2pt gap)
+    private func compositeIcon() -> NSImage? {
+        guard let a = NSImage(named: "MenuIconCodex"), let b = NSImage(named: "MenuIconClaude") else { return nil }
+        let gap: CGFloat = 2
+        let side: CGFloat = 12
+        let size = NSSize(width: side * 2 + gap, height: side)
+        let img = NSImage(size: size)
+        img.lockFocus()
+        a.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+        b.draw(in: NSRect(x: side + gap, y: 0, width: side, height: side))
+        img.unlockFocus()
+        img.isTemplate = true
+        return img
     }
 
     private func renderSource(five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, prefix: String?) -> Text {
@@ -69,6 +88,24 @@ struct UsageMenuBarLabel: View {
             case .weekly: return prefixText + right
             case .both: return prefixText + left + Text("  ") + right
             }
+        }
+    }
+
+    // Same as renderSource but returns a View with optional image prefix.
+    @ViewBuilder
+    private func renderSourceView(five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, prefixIconName: String, fallbackPrefix: String?) -> some View {
+        HStack(spacing: 6) {
+            if let img = NSImage(named: prefixIconName) {
+                Image(nsImage: img)
+                    .renderingMode(.template)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 16, height: 16)
+                    .padding(.trailing, 4)
+            } else if let fallback = fallbackPrefix {
+                Text("\(fallback) ")
+            }
+            renderSource(five: five, week: week, scope: scope, style: style, prefix: nil)
         }
     }
 

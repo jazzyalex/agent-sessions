@@ -263,6 +263,9 @@ public struct Session: Identifiable, Equatable, Codable {
         }
     }
 
+    // Sort helper for agent/source column
+    public var sourceKey: String { source.rawValue }
+
     public var modifiedRelative: String {
         // Use modifiedAt which correctly uses filename timestamp
         let ref = modifiedAt

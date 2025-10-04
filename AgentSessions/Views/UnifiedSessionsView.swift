@@ -15,15 +15,13 @@ struct UnifiedSessionsView: View {
     @State private var tableSelection: Set<String> = []
     @State private var sortOrder: [KeyPathComparator<Session>] = []
     @AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
-    @AppStorage("UnifiedSourceColorStyle") private var sourceColorStyleRaw: String = SourceColorStyle.none.rawValue
     @AppStorage("UnifiedShowCodexStrip") private var showCodexStrip: Bool = false
     @AppStorage("UnifiedShowClaudeStrip") private var showClaudeStrip: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
-    private enum SourceColorStyle: String, CaseIterable { case none, text, background }
-    private var sourceColorStyle: SourceColorStyle { SourceColorStyle(rawValue: sourceColorStyleRaw) ?? .none }
+    private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
 
     private var rows: [Session] { unified.sessions }
 
@@ -47,12 +45,24 @@ struct UnifiedSessionsView: View {
 
             // Usage strips
             if showCodexStrip || showClaudeStrip {
-                VStack(spacing: 2) {
+                VStack(spacing: 0) {
                     if showCodexStrip {
-                        UsageStripView(codexStatus: codexUsageModel, label: "Codex", brandColor: .blue, verticalPadding: 3, drawBackground: false)
+                        UsageStripView(codexStatus: codexUsageModel,
+                                       label: "Codex",
+                                       brandColor: .blue,
+                                       verticalPadding: 4,
+                                       drawBackground: false,
+                                       collapseTop: false,
+                                       collapseBottom: showClaudeStrip)
                     }
-                    if showClaudeStrip {
-                        ClaudeUsageStripView(status: claudeUsageModel, label: "Claude", brandColor: Color(red: 204/255, green: 121/255, blue: 90/255), verticalPadding: 3, drawBackground: false)
+                    if showClaudeStrip && UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") {
+                        ClaudeUsageStripView(status: claudeUsageModel,
+                                             label: "Claude",
+                                             brandColor: Color(red: 204/255, green: 121/255, blue: 90/255),
+                                             verticalPadding: 4,
+                                             drawBackground: false,
+                                             collapseTop: showCodexStrip,
+                                             collapseBottom: false)
                     }
                 }
                 .background(.thickMaterial)
@@ -116,11 +126,11 @@ struct UnifiedSessionsView: View {
 
     private var listPane: some View {
         Table(rows, selection: $tableSelection, sortOrder: $sortOrder) {
-            // Always include Source column; collapse width when hidden to avoid type-check complexity
-            TableColumn("Source") { s in
+            // Always include CLI Agent column; collapse width when hidden to avoid type-check complexity
+            TableColumn("CLI Agent", value: \Session.sourceKey) { s in
                 Text(s.source == .codex ? "Codex" : "Claude")
                     .font(.system(size: 12))
-                    .foregroundStyle(sourceColorStyle == .text ? sourceAccent(s) : .secondary)
+                    .foregroundStyle(!stripMonochrome ? sourceAccent(s) : .secondary)
             }
             .width(min: showSourceColumn ? 90 : 0, ideal: showSourceColumn ? 100 : 0, max: showSourceColumn ? 120 : 0)
 
@@ -129,7 +139,7 @@ struct UnifiedSessionsView: View {
                     .font(.system(size: 13))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .background(sourceColorStyle == .background ? sourceAccent(s).opacity(0.08) : Color.clear)
+                    .background(Color.clear)
             }
             .width(min: 160, ideal: 320, max: 2000)
 
@@ -180,6 +190,8 @@ struct UnifiedSessionsView: View {
                 if first.keyPath == \Session.modifiedAt { key = .modified }
                 else if first.keyPath == \Session.messageCount { key = .msgs }
                 else if first.keyPath == \Session.repoDisplay { key = .repo }
+                else if first.keyPath == \Session.source { key = .agent }
+                else if first.keyPath == \Session.title { key = .title }
                 else { key = .title }
                 unified.sortDescriptor = .init(key: key, ascending: first.order == .forward)
                 unified.recomputeNow()

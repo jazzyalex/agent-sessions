@@ -8,6 +8,7 @@ struct AgentSessionsApp: App {
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
+    @State private var statusItemController: StatusItemController? = nil
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
@@ -36,12 +37,22 @@ struct AgentSessionsApp: App {
                 .environmentObject(claudeUsageModel)
                 .onAppear {
                     indexer.refresh(); claudeIndexer.refresh()
-                    codexUsageModel.setEnabled(showUsageStrip)
-                    claudeUsageModel.setEnabled(showUsageStrip)
+                    updateUsageModels()
                 }
-                .onChange(of: showUsageStrip) { _, newValue in
-                    codexUsageModel.setEnabled(newValue)
-                    claudeUsageModel.setEnabled(newValue)
+                .onChange(of: showUsageStrip) { _, _ in
+                    updateUsageModels()
+                }
+                .onChange(of: menuBarEnabled) { _, newValue in
+                    statusItemController?.setEnabled(newValue)
+                    updateUsageModels()
+                }
+                .onAppear {
+                    if statusItemController == nil {
+                        statusItemController = StatusItemController(indexer: indexer,
+                                                                     codexStatus: codexUsageModel,
+                                                                     claudeStatus: claudeUsageModel)
+                    }
+                    statusItemController?.setEnabled(menuBarEnabled)
                 }
         }
         .commands {
@@ -60,17 +71,7 @@ struct AgentSessionsApp: App {
 
         // Legacy windows removed; Unified is the single window.
         
-        // Menu bar extra for limits (configurable)
-        MenuBarExtra(isInserted: $menuBarEnabled) {
-            UsageMenuBarMenuContent()
-                .environmentObject(indexer)
-                .environmentObject(codexUsageModel)
-                .environmentObject(claudeUsageModel)
-        } label: {
-            UsageMenuBarLabel()
-                .environmentObject(codexUsageModel)
-                .environmentObject(claudeUsageModel)
-        }
+        // No additional scenes
     }
 }
 
@@ -115,6 +116,17 @@ extension AgentSessionsApp {
             alert.alertStyle = .informational
             alert.runModal()
         }
+    }
+
+    private func updateUsageModels() {
+        let d = UserDefaults.standard
+        // Codex usage model is independent of Claude experimental flag
+        let codexOn = menuBarEnabled || showUsageStrip
+        codexUsageModel.setEnabled(codexOn)
+
+        // Claude usage must be explicitly allowed via "Activate Claude usage"
+        let claudeExperimental = d.bool(forKey: "ShowClaudeUsageStrip")
+        claudeUsageModel.setEnabled(claudeExperimental)
     }
 }
 // (Legacy ContentView and FirstRunPrompt removed)

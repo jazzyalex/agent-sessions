@@ -9,6 +9,8 @@ struct ClaudeUsageStripView: View {
     var labelWidth: CGFloat? = 56
     var verticalPadding: CGFloat = 6
     var drawBackground: Bool = true
+    var collapseTop: Bool = false
+    var collapseBottom: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @State private var showTmuxHelp: Bool = false
 
@@ -25,7 +27,7 @@ struct ClaudeUsageStripView: View {
 
             Spacer(minLength: 0)
 
-            // Status text (right-aligned, same as Codex)
+            // Status text (right-aligned): only show problems/warnings
             if status.loginRequired {
                 Text("Login required").font(.caption).foregroundStyle(.red)
             } else if status.cliUnavailable {
@@ -33,11 +35,17 @@ struct ClaudeUsageStripView: View {
             } else if status.tmuxUnavailable {
                 Text("tmux not found").font(.caption).foregroundStyle(.red)
             } else if let update = status.lastUpdate {
-                Text("Updated \(timeAgo(update))").font(.caption).foregroundStyle(.secondary)
+                // Consider data stale if no update for 15 minutes
+                if Date().timeIntervalSince(update) > 15 * 60 {
+                    Text("No recent data — \(timeAgo(update))")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, verticalPadding)
+        .padding(.top, collapseTop ? 0 : verticalPadding)
+        .padding(.bottom, collapseBottom ? 0 : verticalPadding)
         .background(drawBackground ? AnyShapeStyle(.thickMaterial) : AnyShapeStyle(.clear))
         .onTapGesture {
             if status.tmuxUnavailable {
@@ -84,11 +92,24 @@ private struct UsageMeter: View {
                 .frame(width: 140)
             Text("\(percent)%").font(.footnote).monospacedDigit()
             if showResetTime, !reset.isEmpty {
-                Text(reset)
+                let text = formattedReset(reset)
+                Text(text)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         }
         .help(reset.isEmpty ? "" : reset)
+    }
+
+    private func formattedReset(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        // Strip timezone like "(America/Los_Angeles)"
+        if let idx = s.firstIndex(of: "(") { s = String(s[..<idx]).trimmingCharacters(in: .whitespaces) }
+        // Ensure prefix
+        let lower = s.lowercased()
+        if lower.hasPrefix("reset") || lower.hasPrefix("resets") {
+            return s
+        }
+        return "resets " + s
     }
 }

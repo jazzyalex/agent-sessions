@@ -60,6 +60,7 @@ final class SessionIndexer: ObservableObject {
     @AppStorage("SessionsRootOverride") var sessionsRootOverride: String = ""
     @AppStorage("TranscriptTheme") private var themeRaw: String = TranscriptTheme.codexDark.rawValue
     @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true
+    @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = true
     @AppStorage("SelectedKindsRaw") private var selectedKindsRaw: String = ""
     @AppStorage("AppAppearance") private var appearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = ModifiedDisplay.relative.rawValue
@@ -116,9 +117,8 @@ final class SessionIndexer: ObservableObject {
                 let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
                 var results = FilterEngine.filterSessions(all, filters: filters)
 
-                if self?.hideZeroMessageSessionsPref ?? true {
-                    results = results.filter { $0.messageCount > 0 }
-                }
+                if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
+                if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
 
                 return results
             }
@@ -251,6 +251,7 @@ final class SessionIndexer: ObservableObject {
         let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
         var results = FilterEngine.filterSessions(allSessions, filters: filters)
         if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
+        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
         // FilterEngine now preserves order, so filtered results maintain allSessions sort order
         DispatchQueue.main.async { self.sessions = results }
     }

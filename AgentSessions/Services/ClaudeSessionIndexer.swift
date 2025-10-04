@@ -26,6 +26,7 @@ final class ClaudeSessionIndexer: ObservableObject {
 
     @AppStorage("ClaudeSessionsRootOverride") var sessionsRootOverride: String = ""
     @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true
+    @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = true
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     var appAppearance: AppAppearance {
@@ -56,9 +57,8 @@ final class ClaudeSessionIndexer: ObservableObject {
             let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
             var results = FilterEngine.filterSessions(all, filters: filters)
 
-            if self?.hideZeroMessageSessionsPref ?? true {
-                results = results.filter { $0.messageCount > 0 }
-            }
+            if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
+            if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
 
             return results
         }
@@ -127,6 +127,7 @@ final class ClaudeSessionIndexer: ObservableObject {
         let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
         var results = FilterEngine.filterSessions(allSessions, filters: filters)
         if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
+        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
         DispatchQueue.main.async { self.sessions = results }
     }
 

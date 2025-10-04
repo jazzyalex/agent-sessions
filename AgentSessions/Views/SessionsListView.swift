@@ -139,6 +139,7 @@ struct SessionsListView: View {
                 if first.keyPath == \Session.modifiedAt { key = .modified }
                 else if first.keyPath == \Session.messageCount { key = .msgs }
                 else if first.keyPath == \Session.repoDisplay { key = .repo }
+                else if first.keyPath == \Session.title { key = .title }
                 else { key = .title }
                 indexer.sortDescriptor = .init(key: key, ascending: first.order == .forward)
             }

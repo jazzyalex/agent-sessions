@@ -18,7 +18,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var includeClaude: Bool = true
 
     // Sorting
-    struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title } }
+    struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title, agent } }
     @Published var sortDescriptor: SessionSortDescriptor = .init(key: .modified, ascending: false)
 
     // Indexing state aggregation
@@ -73,6 +73,9 @@ final class UnifiedSessionIndexer: ObservableObject {
                     base = base.filter { s in (s.source == .codex && incCodex) || (s.source == .claude && incClaude) }
                 }
                 var results = FilterEngine.filterSessions(base, filters: filters)
+                let d = UserDefaults.standard
+                if d.bool(forKey: "HideZeroMessageSessions") { results = results.filter { $0.messageCount > 0 } }
+                if d.bool(forKey: "HideLowMessageSessions") { results = results.filter { $0.messageCount > 2 } }
                 // Apply sort descriptor
                 results = self?.applySort(results) ?? results
                 return results
@@ -95,6 +98,9 @@ final class UnifiedSessionIndexer: ObservableObject {
             base = base.filter { s in (s.source == .codex && includeCodex) || (s.source == .claude && includeClaude) }
         }
         var results = FilterEngine.filterSessions(base, filters: filters)
+        let d = UserDefaults.standard
+        if d.bool(forKey: "HideZeroMessageSessions") { results = results.filter { $0.messageCount > 0 } }
+        if d.bool(forKey: "HideLowMessageSessions") { results = results.filter { $0.messageCount > 2 } }
         results = applySort(results)
         sessions = results
     }
@@ -117,6 +123,12 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .title:
             return list.sorted { lhs, rhs in
                 let l = lhs.title.lowercased(); let r = rhs.title.lowercased()
+                return sortDescriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
+            }
+        case .agent:
+            return list.sorted { lhs, rhs in
+                let l = lhs.source.rawValue
+                let r = rhs.source.rawValue
                 return sortDescriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
             }
         }
