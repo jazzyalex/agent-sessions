@@ -111,20 +111,21 @@ struct TranscriptPlainView: View {
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
-                .help("Find")
+                .help("Search within this session")
 
                 TextField("Find", text: $findText)
                     .textFieldStyle(.roundedBorder)
                     .frame(minWidth: 120, maxWidth: 180)
                     .focused($findFocused)
                     .onSubmit { performFind(resetIndex: true) }
+                    .help("Enter text to highlight matches in the session")
 
                 Button(action: { performFind(resetIndex: false, direction: -1) }) {
                     Image(systemName: "chevron.up")
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
-                .help("Previous match")
+                .help("Jump to the previous match")
                 .disabled(findMatches.isEmpty)
 
                 Button(action: { performFind(resetIndex: false, direction: 1) }) {
@@ -132,7 +133,7 @@ struct TranscriptPlainView: View {
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
-                .help("Next match")
+                .help("Jump to the next match")
                 .disabled(findMatches.isEmpty)
 
                 if !findText.isEmpty {
@@ -140,31 +141,32 @@ struct TranscriptPlainView: View {
                         .foregroundStyle(.secondary)
                         .font(.system(size: 11, design: .monospaced))
                         .frame(minWidth: 35)
+                        .help("Current match position")
                 }
 
                 Divider().frame(height: 20)
 
                 HStack(spacing: 2) {
-                    Button(action: { adjustFont(-1) }) {
-                        Image(systemName: "textformat.size.smaller")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Make text smaller")
-                    .help("Smaller (Cmd-)")
+                Button(action: { adjustFont(-1) }) {
+                    Image(systemName: "textformat.size.smaller")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Make text smaller")
+                .help("Decrease font size")
 
-                    Button(action: { adjustFont(1) }) {
-                        Image(systemName: "textformat.size.larger")
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Make text bigger")
-                    .help("Bigger (Cmd+=)")
+                Button(action: { adjustFont(1) }) {
+                    Image(systemName: "textformat.size.larger")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Make text bigger")
+                .help("Increase font size")
                 }
 
                 Button("Copy") { copyAll() }
                     .buttonStyle(.borderless)
-                    .help("Copy entire transcript")
+                    .help("Copy the entire session text to the clipboard")
             }
 
             Divider().frame(height: 20)
@@ -179,7 +181,7 @@ struct TranscriptPlainView: View {
                         copyCodexSessionID()
                     }
                     .buttonStyle(.borderless)
-                    .help("Copy Codex session ID to clipboard")
+                    .help("Copy the full session ID to the clipboard")
                     .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
                         Text("Session ID copied")
                             .font(.caption)
@@ -193,8 +195,12 @@ struct TranscriptPlainView: View {
                 }
 
                 Picker("View Style", selection: $renderModeRaw) {
-                    Text("Transcript").tag(TranscriptRenderMode.normal.rawValue)
-                    Text("Terminal").tag(TranscriptRenderMode.terminal.rawValue)
+                    Text("Transcript")
+                        .tag(TranscriptRenderMode.normal.rawValue)
+                        .help("Plain text view with roles and tool labels; no semantic colorization")
+                    Text("Terminal")
+                        .tag(TranscriptRenderMode.terminal.rawValue)
+                        .help("Terminal view that expands shell calls into commands and color‑highlights commands (green), user input (blue), outputs (dim green), and errors (red)")
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 140)
