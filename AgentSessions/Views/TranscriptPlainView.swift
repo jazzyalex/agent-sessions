@@ -13,6 +13,7 @@ struct TranscriptPlainView: View {
     @State private var findMatches: [Range<String.Index>] = []
     @State private var currentMatchIndex: Int = 0
     @FocusState private var findFocused: Bool
+    @State private var allowFindFocus: Bool = false
     @State private var highlightRanges: [NSRange] = []
     @State private var commandRanges: [NSRange] = []
     @State private var userRanges: [NSRange] = []
@@ -86,7 +87,7 @@ struct TranscriptPlainView: View {
         // Rebuild when current session finishes lazy loading (events.count changes from 0 to N)
         .onChange(of: currentSession?.events.count) { _, _ in rebuild() }
         .onReceive(indexer.$requestCopyPlain) { _ in copyAll() }
-        .onReceive(indexer.$requestTranscriptFindFocus) { _ in findFocused = true }
+        .onReceive(indexer.$requestTranscriptFindFocus) { _ in if allowFindFocus { findFocused = true } }
         .sheet(isPresented: $showRawSheet) { WholeSessionRawPrettySheet(session: currentSession) }
         .onChange(of: indexer.requestOpenRawSheet) { _, newVal in
             if newVal {
@@ -106,17 +107,19 @@ struct TranscriptPlainView: View {
         HStack(spacing: 6) {
             // Find controls group
             HStack(spacing: 4) {
-                Button(action: { performFind(resetIndex: true) }) {
+                Button(action: { allowFindFocus = true; performFind(resetIndex: true); findFocused = true }) {
                     Image(systemName: "magnifyingglass")
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
+                .focusable(false)
                 .help("Search within this session")
 
                 TextField("Find", text: $findText)
                     .textFieldStyle(.roundedBorder)
                     .frame(minWidth: 120, maxWidth: 180)
                     .focused($findFocused)
+                    .focusable(allowFindFocus)
                     .onSubmit { performFind(resetIndex: true) }
                     .help("Enter text to highlight matches in the session")
 
@@ -125,6 +128,7 @@ struct TranscriptPlainView: View {
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
+                .focusable(false)
                 .help("Jump to the previous match")
                 .disabled(findMatches.isEmpty)
 
@@ -133,6 +137,7 @@ struct TranscriptPlainView: View {
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
+                .focusable(false)
                 .help("Jump to the next match")
                 .disabled(findMatches.isEmpty)
 
@@ -154,6 +159,7 @@ struct TranscriptPlainView: View {
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Make text smaller")
                 .help("Decrease font size")
+                .focusable(false)
 
                 Button(action: { adjustFont(1) }) {
                     Image(systemName: "textformat.size.larger")
@@ -162,10 +168,12 @@ struct TranscriptPlainView: View {
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Make text bigger")
                 .help("Increase font size")
+                .focusable(false)
                 }
 
                 Button("Copy") { copyAll() }
                     .buttonStyle(.borderless)
+                    .focusable(false)
                     .help("Copy the entire session text to the clipboard")
             }
 
@@ -181,6 +189,7 @@ struct TranscriptPlainView: View {
                         copyCodexSessionID()
                     }
                     .buttonStyle(.borderless)
+                    .focusable(false)
                     .help("Copy the full session ID to the clipboard")
                     .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
                         Text("Session ID copied")
@@ -205,6 +214,7 @@ struct TranscriptPlainView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 140)
                 .labelsHidden()
+                .focusable(false)
             }
         }
         .padding(.horizontal, 10)
@@ -277,6 +287,17 @@ struct TranscriptPlainView: View {
         performFind(resetIndex: true)
         selectedNSRange = nil
         updateSelectionToCurrentMatch()
+
+        // Auto-scroll to first conversational message when skipping preamble is enabled
+        let d = UserDefaults.standard
+        let skip = (d.object(forKey: "SkipAgentsPreamble") == nil) ? true : d.bool(forKey: "SkipAgentsPreamble")
+        if skip, selectedNSRange == nil {
+            if let r = tpv_firstConversationRangeInTranscript(text: transcript) {
+                selectedNSRange = r
+            } else if let s = currentSession, let anchor = tpv_firstConversationAnchor(in: s), let rr = transcript.range(of: anchor) {
+                selectedNSRange = NSRange(rr, in: transcript)
+            }
+        }
     }
 
     private func performFind(resetIndex: Bool, direction: Int = 1) {
@@ -360,6 +381,30 @@ struct TranscriptPlainView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             showIDCopiedPopover = false
         }
+    }
+
+    // Parse the rendered transcript to find the first user line that is not a preamble.
+    private func tpv_firstConversationRangeInTranscript(text: String) -> NSRange? {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var cursor = 0
+        for lineSub in lines {
+            let line = String(lineSub)
+            var work = line
+            // Strip optional timestamp prefix "HH:MM:SS "
+            if work.count >= 9, work[work.index(work.startIndex, offsetBy: 2)] == ":",
+               let space = work.firstIndex(of: " ") {
+                work = String(work[work.index(after: space)...])
+            }
+            if work.hasPrefix("> ") {
+                let content = String(work.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                if !content.isEmpty && !tpv_looksLikePreamble(content) {
+                    let len = (line as NSString).length
+                    return NSRange(location: cursor, length: min(len, 120))
+                }
+            }
+            cursor += (line as NSString).length + 1
+        }
+        return nil
     }
 
     private func findAdditionalRanges() {
@@ -570,6 +615,38 @@ private extension TranscriptPlainView {
     }
     func adjustFont(_ delta: Double) {
         transcriptFontSize = max(9, min(30, transcriptFontSize + delta))
+    }
+
+    // Heuristics to find the first real conversational message for auto-scroll
+    func tpv_firstConversationAnchor(in session: Session) -> String? {
+        let head = session.events.prefix(50)
+        for e in head where e.kind == .user {
+            guard let t = e.text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { continue }
+            if tpv_looksLikePreamble(t) { continue }
+            return String(t.prefix(120))
+        }
+        for e in head where e.kind == .assistant {
+            if let t = e.text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return String(t.prefix(120)) }
+        }
+        return nil
+    }
+
+    func tpv_looksLikePreamble(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        if lower.contains("<user_instructions>") || lower.contains("</user_instructions>") { return true }
+        if lower.contains("caveat: the messages below were generated by the user while running local commands") { return true }
+        if lower.contains("<command-name>/clear</command-name>") { return true }
+        let anchors = [
+            "# agent sessions agents playbook",
+            "## required workflow",
+            "## plan mode",
+            "commit policy (project‑wide)",
+            "docs style policy (strict)",
+            "# instructions",
+            "## instructions"
+        ]
+        if anchors.contains(where: { lower.contains($0) }) { return true }
+        return false
     }
 }
 

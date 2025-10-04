@@ -82,13 +82,25 @@ public struct Session: Identifiable, Equatable, Codable {
             return codexTitle
         }
 
-        // 2) Fallback: first non-empty user line (less filtering)
-        if let t = events.first(where: { $0.kind == .user })?.text?.collapsedWhitespace(), !t.isEmpty {
+        // 2) Fallback: first non-empty user line, skipping preamble if pref enabled (default ON)
+        let defaults = UserDefaults.standard
+        let skipPreamble = (defaults.object(forKey: "SkipAgentsPreamble") == nil)
+            ? true
+            : defaults.bool(forKey: "SkipAgentsPreamble")
+        if let t = events.first(where: { e in
+            guard e.kind == .user, let txt = e.text?.collapsedWhitespace(), !txt.isEmpty else { return false }
+            if skipPreamble && Self.looksLikeAgentsPreamble(txt) { return false }
+            return true
+        })?.text?.collapsedWhitespace() {
             return t
         }
 
-        // 3) Fallback: first non-empty assistant line
-        if let t = events.first(where: { $0.kind == .assistant })?.text?.collapsedWhitespace(), !t.isEmpty {
+        // 3) Fallback: first non-empty assistant line (also skip preamble when enabled)
+        if let t = events.first(where: { e in
+            guard e.kind == .assistant, let txt = e.text?.collapsedWhitespace(), !txt.isEmpty else { return false }
+            if skipPreamble && Self.looksLikeAgentsPreamble(txt) { return false }
+            return true
+        })?.text?.collapsedWhitespace() {
             return t
         }
 
@@ -106,38 +118,17 @@ public struct Session: Identifiable, Equatable, Codable {
     public var codexPreviewTitle: String? {
         guard source == .codex else { return nil }
         let head = events.prefix(10)
+        // Optional preference to skip agents.md style preambles when deriving a title (default ON)
+        let d = UserDefaults.standard
+        let skipPreamble = (d.object(forKey: "SkipAgentsPreamble") == nil) ? true : d.bool(forKey: "SkipAgentsPreamble")
 
         // Find first meaningful user message, filtering out IDE scaffolding
         for event in head where event.kind == .user {
-            guard let text = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
-
-            // Filter out common IDE scaffolding patterns
-            let lowerText = text.lowercased()
-            let scaffoldingPatterns = [
-                "you are an expert",
-                "you are a helpful",
-                "act as a",
-                "your role is",
-                "system:",
-                "assistant:",
-                "<instructions>",
-                "# instructions",
-                "## instructions",
-                "please follow",
-                "make sure to"
-            ]
-
-            // Skip if it looks like scaffolding
-            if scaffoldingPatterns.contains(where: { lowerText.hasPrefix($0) }) {
-                continue
-            }
-
-            // Skip if it's very long (likely instructions)
-            if text.count > 200 {
-                continue
-            }
-
-            return text.collapsedWhitespace()
+            guard let raw = event.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
+            if skipPreamble && Self.looksLikeAgentsPreamble(raw) { continue }
+            // Skip if it's very long (likely instructions dump)
+            if raw.count > 400 { continue }
+            return raw.collapsedWhitespace()
         }
 
         // Fallback: first shell/tool command in head as a one-liner
@@ -151,6 +142,54 @@ public struct Session: Identifiable, Equatable, Codable {
             }
         }
         return nil
+    }
+
+    /// Heuristics for detecting an agents.md-style preamble or CLI caveat blocks at the start of a session.
+    private static func looksLikeAgentsPreamble(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        // Strong anchors commonly seen in agents.md-driven openings
+        let anchors = [
+            "<user_instructions>",
+            "</user_instructions>",
+            "# agent sessions agents playbook",
+            "## required workflow",
+            "## plan mode",
+            "commit policy (project‑wide)",
+            "docs style policy (strict)",
+            "- how to enter plan mode",
+            "what's prohibited in plan mode",
+            "how to behave in plan mode",
+            "recommended output structure"
+        ]
+        if anchors.contains(where: { lower.contains($0) }) { return true }
+        // Generic scaffolding heads
+        let heads = [
+            "you are an expert",
+            "you are a helpful",
+            "act as a",
+            "your role is",
+            "system:",
+            "assistant:",
+            "# instructions",
+            "## instructions",
+            "please follow",
+            "make sure to"
+        ]
+        if heads.contains(where: { lower.hasPrefix($0) }) { return true }
+
+        // Claude CLI caveat block frequently repeated at the top of sessions
+        if lower.contains("caveat: the messages below were generated by the user while running local commands") {
+            return true
+        }
+        if lower.contains("<command-name>/clear</command-name>") { return true }
+
+        // A long markdown-heavy block with many headings/bullets is likely preamble
+        let lines = lower.split(separator: "\n", omittingEmptySubsequences: false)
+        if lines.count >= 6 {
+            let bulletOrHeading = lines.prefix(20).filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("-") || $0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
+            if bulletOrHeading.count >= 4 { return true }
+        }
+        return false
     }
 
     // Extract timestamp and UUID from rollout filename for Codex sort order.

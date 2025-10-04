@@ -3,42 +3,47 @@ import SwiftUI
 struct SearchFiltersView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @FocusState private var isSearchFocused: Bool
+    @State private var showSearchPopover: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                TextField("Search", text: $indexer.queryDraft)
-                    .textFieldStyle(.plain)
-                    .frame(minWidth: 160)
-                    .focused($isSearchFocused)
-                    .onSubmit { indexer.applySearch() }
-                    .help("Type a query then press Return to filter sessions. Supports repo: and path: operators.")
-
-                Button(action: { indexer.applySearch() }) {
+                Button(action: { showSearchPopover = true; DispatchQueue.main.async { isSearchFocused = true } }) {
                     Image(systemName: "magnifyingglass")
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(.secondary)
+                        .imageScale(.large)
+                        .font(.system(size: 14, weight: .regular))
                 }
-                .buttonStyle(.borderless)
-                .help("Run search using the current text")
+                .buttonStyle(.plain)
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .focusable(false)
+                .help("Search sessions")
 
-                if !indexer.queryDraft.isEmpty {
-                    Button(action: {
-                        indexer.queryDraft = ""
-                        indexer.query = ""
-                        indexer.recomputeNow()
-                    }) {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                .popover(isPresented: $showSearchPopover, arrowEdge: .bottom) {
+                    HStack(spacing: 8) {
+                        TextField("Search", text: $indexer.queryDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(minWidth: 220)
+                            .focused($isSearchFocused)
+                            .onSubmit { indexer.applySearch(); showSearchPopover = false }
+                        Button("Find") { indexer.applySearch(); showSearchPopover = false }
+                            .buttonStyle(.borderedProminent)
+                        if !indexer.queryDraft.isEmpty {
+                            Button(action: { indexer.queryDraft = ""; indexer.query = ""; indexer.recomputeNow() }) { Image(systemName: "xmark.circle.fill") }
+                                .buttonStyle(.plain)
+                                .help("Clear search")
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .help("Clear the search field and show all sessions")
+                    .padding(10)
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.25)))
             .onReceive(indexer.$requestFocusSearch) { _ in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    isSearchFocused = true
-                }
+                showSearchPopover = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { isSearchFocused = true }
             }
 
             // Show active project filter with clear button

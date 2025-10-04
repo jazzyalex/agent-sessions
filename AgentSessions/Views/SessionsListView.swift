@@ -183,6 +183,11 @@ struct SessionsListView: View {
 
     private func updateCachedRows() {
         cachedRows = indexer.sessions.sorted(using: sortOrder)
+        // Select the most recent session as soon as we have rows
+        if selection == nil, let first = cachedRows.first {
+            selection = first.id
+            tableSelection = [first.id]
+        }
     }
 
     private func session(for id: String) -> Session? {

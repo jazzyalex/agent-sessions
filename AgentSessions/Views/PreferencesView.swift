@@ -246,6 +246,13 @@ struct PreferencesView: View {
                         .onChange(of: hideLowMessageSessionsPref) { _, _ in indexer.recomputeNow() }
                         .help("Hide sessions with only one or two messages")
                 }
+
+                Divider()
+                Toggle("Skip Agents.md lines when parsing", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "SkipAgentsPreamble") },
+                    set: { UserDefaults.standard.set($0, forKey: "SkipAgentsPreamble"); indexer.recomputeNow() }
+                ))
+                .help("Ignore agents.md-style preambles for titles and previews (content remains visible in transcripts)")
             }
 
         }

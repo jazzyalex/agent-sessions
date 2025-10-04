@@ -20,6 +20,8 @@ struct UnifiedSessionsView: View {
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+    @State private var autoSelectEnabled: Bool = true
+    @State private var programmaticSelectionUpdate: Bool = false
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
 
@@ -215,7 +217,13 @@ struct UnifiedSessionsView: View {
             }
             updateSelectionBridge()
         }
-        .onChange(of: tableSelection) { _, newSel in selection = newSel.first }
+        .onChange(of: tableSelection) { _, newSel in
+            selection = newSel.first
+            if !programmaticSelectionUpdate {
+                // User interacted with the table; stop auto-selection
+                autoSelectEnabled = false
+            }
+        }
         .onChange(of: unified.sessions) { _, _ in updateSelectionBridge() }
     }
 
@@ -249,9 +257,15 @@ struct UnifiedSessionsView: View {
     }
 
     private func updateSelectionBridge() {
+        // If auto-selection is enabled, keep the selection pinned to the first row
+        if autoSelectEnabled, let first = rows.first { selection = first.id }
         // Keep single-selection Set in sync with selection id
         let desired: Set<String> = selection.map { [$0] } ?? []
-        if tableSelection != desired { tableSelection = desired }
+        if tableSelection != desired {
+            programmaticSelectionUpdate = true
+            tableSelection = desired
+            DispatchQueue.main.async { programmaticSelectionUpdate = false }
+        }
     }
 
     private func openDir(_ s: Session) {
@@ -337,23 +351,39 @@ struct UnifiedSessionsView: View {
 private struct UnifiedSearchFiltersView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @FocusState private var focused: Bool
+    @State private var showSearchPopover: Bool = false
     var body: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                TextField("Search", text: $unified.queryDraft)
-                    .textFieldStyle(.plain)
-                    .frame(minWidth: 160)
-                    .focused($focused)
-                    .onSubmit { unified.applySearch() }
-                    .help("Type a query then press Return to filter sessions. Supports repo: and path: operators.")
-                Button(action: { unified.applySearch() }) { Image(systemName: "magnifyingglass") }
-                    .buttonStyle(.borderless)
-                    .help("Run search using the current text")
-                if !unified.queryDraft.isEmpty {
-                    Button(action: { unified.queryDraft = ""; unified.query = ""; unified.recomputeNow() }) {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }.buttonStyle(.plain).help("Clear the search field and show all sessions")
+                Button(action: { showSearchPopover = true; DispatchQueue.main.async { focused = true } }) {
+                    Image(systemName: "magnifyingglass")
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(.secondary)
+                        .imageScale(.large)
+                        .font(.system(size: 14, weight: .regular))
                 }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut("f", modifiers: [.command, .option])
+                    .focusable(false)
+                    .help("Search sessions")
+
+                    .popover(isPresented: $showSearchPopover, arrowEdge: .bottom) {
+                        HStack(spacing: 8) {
+                            TextField("Search", text: $unified.queryDraft)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(minWidth: 220)
+                                .focused($focused)
+                                .onSubmit { unified.applySearch(); showSearchPopover = false }
+                            Button("Find") { unified.applySearch(); showSearchPopover = false }
+                                .buttonStyle(.borderedProminent)
+                            if !unified.queryDraft.isEmpty {
+                                Button(action: { unified.queryDraft = ""; unified.query = ""; unified.recomputeNow() }) { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                                    .buttonStyle(.plain)
+                                    .help("Clear search")
+                            }
+                        }
+                        .padding(10)
+                    }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
