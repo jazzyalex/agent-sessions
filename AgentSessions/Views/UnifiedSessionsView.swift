@@ -1,6 +1,10 @@
 import SwiftUI
 import AppKit
 
+private extension Notification.Name {
+    static let collapseInlineSearchIfEmpty = Notification.Name("UnifiedSessionsCollapseInlineSearchIfEmpty")
+}
+
 struct UnifiedSessionsView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var codexIndexer: SessionIndexer
@@ -25,7 +29,17 @@ struct UnifiedSessionsView: View {
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
 
-    private var rows: [Session] { unified.sessions }
+    @StateObject private var searchCoordinator: SearchCoordinator
+    private var rows: [Session] { (searchCoordinator.isRunning || !searchCoordinator.results.isEmpty) ? searchCoordinator.results : unified.sessions }
+
+    init(unified: UnifiedSessionIndexer, codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, layoutMode: LayoutMode, onToggleLayout: @escaping () -> Void) {
+        self.unified = unified
+        self.codexIndexer = codexIndexer
+        self.claudeIndexer = claudeIndexer
+        self.layoutMode = layoutMode
+        self.onToggleLayout = onToggleLayout
+        _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(codexIndexer: codexIndexer))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -87,7 +101,7 @@ struct UnifiedSessionsView: View {
                     .help("Show or hide Claude sessions in the list")
                 }
             }
-            ToolbarItem(placement: .automatic) { UnifiedSearchFiltersView(unified: unified) }
+            ToolbarItem(placement: .automatic) { UnifiedSearchFiltersView(unified: unified, search: searchCoordinator) }
             ToolbarItem(placement: .automatic) {
                 Button(action: { if let s = selectedSession { resume(s) } }) {
                     Label("Resume", systemImage: "play.circle")
@@ -122,6 +136,12 @@ struct UnifiedSessionsView: View {
         }
         .onChange(of: selection) { _, id in
             guard let id, let s = rows.first(where: { $0.id == id }) else { return }
+            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+            // If a large, unparsed session is clicked during an active search, promote it in the coordinator.
+            let sizeBytes = s.fileSizeBytes ?? 0
+            if searchCoordinator.isRunning, s.events.isEmpty, sizeBytes >= 10 * 1024 * 1024 {
+                searchCoordinator.promote(id: s.id)
+            }
             // Lazy load full session per source
             if s.source == .codex, let exist = codexIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
                 codexIndexer.reloadSession(id: id)
@@ -132,6 +152,7 @@ struct UnifiedSessionsView: View {
     }
 
     private var listPane: some View {
+        VStack(spacing: 0) {
         Table(rows, selection: $tableSelection, sortOrder: $sortOrder) {
             // Always include CLI Agent column; collapse width when hidden to avoid type-check complexity
             TableColumn("CLI Agent", value: \Session.sourceKey) { s in
@@ -180,6 +201,24 @@ struct UnifiedSessionsView: View {
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .environment(\.defaultMinListRowHeight, 22)
+        .simultaneousGesture(TapGesture().onEnded {
+            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+        })
+        if searchCoordinator.isRunning {
+            let p = searchCoordinator.progress
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(progressLineText(p))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .underPageBackgroundColor))
+            .overlay(Divider(), alignment: .top)
+        }
+        }
         .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let id = ids.first, let s = rows.first(where: { $0.id == id }) {
                 Button("Open Working Directory") { openDir(s) }
@@ -223,6 +262,7 @@ struct UnifiedSessionsView: View {
                 // User interacted with the table; stop auto-selection
                 autoSelectEnabled = false
             }
+            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         }
         .onChange(of: unified.sessions) { _, _ in updateSelectionBridge() }
     }
@@ -241,6 +281,9 @@ struct UnifiedSessionsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .simultaneousGesture(TapGesture().onEnded {
+            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+        })
     }
 
     private var selectedSession: Session? { selection.flatMap { id in rows.first(where: { $0.id == id }) } }
@@ -346,48 +389,109 @@ struct UnifiedSessionsView: View {
     private func sourceAccent(_ s: Session) -> Color {
         return s.source == .codex ? Color.blue : Color(red: 204/255, green: 121/255, blue: 90/255)
     }
+
+    private func progressLineText(_ p: SearchCoordinator.Progress) -> String {
+        switch p.phase {
+        case .idle:
+            return ""
+        case .small:
+            return "Scanning small… \(p.scannedSmall)/\(p.totalSmall)"
+        case .large:
+            return "Scanning large… \(p.scannedLarge)/\(p.totalLarge)"
+        }
+    }
 }
 
 private struct UnifiedSearchFiltersView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
+    @ObservedObject var search: SearchCoordinator
     @FocusState private var focused: Bool
-    @State private var showSearchPopover: Bool = false
+    @FocusState private var searchFocus: SearchFocusTarget?
+    @State private var showInlineSearch: Bool = false
+    private enum SearchFocusTarget: Hashable { case field, clear }
+    @State private var eventMonitor: Any?
     var body: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Button(action: { showSearchPopover = true; DispatchQueue.main.async { focused = true } }) {
+            if showInlineSearch || !unified.queryDraft.isEmpty || search.isRunning {
+                // Inline search field within the toolbar
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                        .imageScale(.medium)
+                    TextField("Search", text: $unified.queryDraft)
+                        .textFieldStyle(.plain)
+                        .focused($focused)
+                        .focused($searchFocus, equals: .field)
+                        .onSubmit { startSearch() }
+                        .frame(minWidth: 220)
+                    if !unified.queryDraft.isEmpty {
+                        Button(action: { unified.queryDraft = ""; unified.query = ""; unified.recomputeNow(); search.cancel(); showInlineSearch = false; focused = false; searchFocus = nil }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .imageScale(.medium)
+                                .foregroundStyle(.secondary)
+                        }
+                        .focused($searchFocus, equals: .clear)
+                        .buttonStyle(.plain)
+                        .help("Clear search")
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(focused ? Color.yellow : Color.gray.opacity(0.28), lineWidth: focused ? 2 : 1)
+                )
+                .onAppear { DispatchQueue.main.async { focused = true; searchFocus = .field } }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                // If focus leaves the search controls and query is empty, collapse
+                .onChange(of: searchFocus) { _, target in
+                    if target == nil && unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !search.isRunning {
+                        showInlineSearch = false
+                        focused = false
+                    }
+                }
+                .onChange(of: unified.queryDraft) { _, newValue in
+                    let q = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if q.isEmpty {
+                        search.cancel()
+                    } else {
+                        startSearch()
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .collapseInlineSearchIfEmpty)) { _ in
+                    if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !search.isRunning {
+                        showInlineSearch = false
+                        focused = false
+                        searchFocus = nil
+                    }
+                }
+                .onChange(of: showInlineSearch) { _, shown in
+                    if shown {
+                        // Ensure programmatic focus after the field becomes visible
+                        DispatchQueue.main.async {
+                            focused = true
+                            searchFocus = .field
+                        }
+                    }
+                }
+            } else {
+                // Compact loop button without border; inline search replaces it when active
+                Button(action: { showInlineSearch = true; DispatchQueue.main.async { focused = true; searchFocus = .field } }) {
                     Image(systemName: "magnifyingglass")
                         .symbolRenderingMode(.monochrome)
                         .foregroundStyle(.secondary)
                         .imageScale(.large)
                         .font(.system(size: 14, weight: .regular))
                 }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut("f", modifiers: [.command, .option])
-                    .focusable(false)
-                    .help("Search sessions")
-
-                    .popover(isPresented: $showSearchPopover, arrowEdge: .bottom) {
-                        HStack(spacing: 8) {
-                            TextField("Search", text: $unified.queryDraft)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(minWidth: 220)
-                                .focused($focused)
-                                .onSubmit { unified.applySearch(); showSearchPopover = false }
-                            Button("Find") { unified.applySearch(); showSearchPopover = false }
-                                .buttonStyle(.borderedProminent)
-                            if !unified.queryDraft.isEmpty {
-                                Button(action: { unified.queryDraft = ""; unified.query = ""; unified.recomputeNow() }) { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                                    .buttonStyle(.plain)
-                                    .help("Clear search")
-                            }
-                        }
-                        .padding(10)
-                    }
+                .buttonStyle(.plain)
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .focusable(false)
+                .help("Search sessions (⌥⌘F)")
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.25)))
 
             // Active project filter badge (Codex parity)
             if let projectFilter = unified.projectFilter, !projectFilter.isEmpty {
@@ -408,5 +512,39 @@ private struct UnifiedSearchFiltersView: View {
                 .background(RoundedRectangle(cornerRadius: 6).stroke(Color.blue.opacity(0.3)))
             }
         }
+        .onAppear {
+            // Global event monitor to collapse empty inline search on click/tab outside
+            eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { ev in
+                if (ev.type == .keyDown && ev.keyCode == 48) || ev.type == .leftMouseDown || ev.type == .rightMouseDown { // Tab or click
+                    if showInlineSearch,
+                       unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       !search.isRunning,
+                       !focused && searchFocus == nil {
+                        showInlineSearch = false
+                    }
+                }
+                return ev
+            }
+        }
+        .onDisappear {
+            if let m = eventMonitor { NSEvent.removeMonitor(m); eventMonitor = nil }
+        }
+    }
+
+    private func startSearch() {
+        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { search.cancel(); return }
+        let filters = Filters(query: q,
+                              dateFrom: unified.dateFrom,
+                              dateTo: unified.dateTo,
+                              model: unified.selectedModel,
+                              kinds: unified.selectedKinds,
+                              repoName: unified.projectFilter,
+                              pathContains: nil)
+        search.start(query: q,
+                     filters: filters,
+                     includeCodex: unified.includeCodex,
+                     includeClaude: unified.includeClaude,
+                     all: unified.allSessions)
     }
 }

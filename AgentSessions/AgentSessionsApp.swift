@@ -7,6 +7,7 @@ struct AgentSessionsApp: App {
     @StateObject private var claudeIndexer = ClaudeSessionIndexer()
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
+    @StateObject private var updateModel = UpdateCheckModel.shared
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @State private var statusItemController: StatusItemController? = nil
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
@@ -20,6 +21,8 @@ struct AgentSessionsApp: App {
     @State private var selectedSessionID: String?
     @State private var selectedEventID: String?
     @State private var focusSearchToggle: Bool = false
+    @State private var showUpdateAlert: Bool = false
+    @State private var updateAlertData: (version: String, releaseURL: String, assetURL: String)? = nil
     // Legacy first-run prompt removed
 
     var body: some Scene {
@@ -38,6 +41,7 @@ struct AgentSessionsApp: App {
                 .onAppear {
                     indexer.refresh(); claudeIndexer.refresh()
                     updateUsageModels()
+                    updateModel.checkOnLaunch()
                 }
                 .onChange(of: showUsageStrip) { _, _ in
                     updateUsageModels()
@@ -45,6 +49,12 @@ struct AgentSessionsApp: App {
                 .onChange(of: menuBarEnabled) { _, newValue in
                     statusItemController?.setEnabled(newValue)
                     updateUsageModels()
+                }
+                .onChange(of: updateModel.state) { _, newState in
+                    if case .available(let version, let releaseURL, let assetURL) = newState {
+                        updateAlertData = (version, releaseURL, assetURL)
+                        showUpdateAlert = true
+                    }
                 }
                 .onAppear {
                     if statusItemController == nil {
@@ -54,11 +64,37 @@ struct AgentSessionsApp: App {
                     }
                     statusItemController?.setEnabled(menuBarEnabled)
                 }
+                .alert("Update Available", isPresented: $showUpdateAlert) {
+                    if let data = updateAlertData {
+                        Button("Release Notes") {
+                            updateModel.openURL(data.releaseURL)
+                        }
+                        Button("Download") {
+                            updateModel.openURL(data.assetURL)
+                        }
+                        Button("Skip This Version") {
+                            updateModel.skipVersionForLaunchOnly(data.version)
+                        }
+                        Button("Later", role: .cancel) {}
+                    }
+                } message: {
+                    if let data = updateAlertData {
+                        Text("Version \(data.version) is available for download.")
+                    }
+                }
         }
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Agent Sessions") {
+                    PreferencesWindowController.shared.show(indexer: indexer, initialTab: .about)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
             CommandGroup(after: .newItem) {
                 Button("Refresh") { unifiedIndexerHolder.unified?.refresh() }.keyboardShortcut("r", modifiers: .command)
                 Button("Find in Transcript") { /* unified find focuses handled in view */ }.keyboardShortcut("f", modifiers: .command).disabled(true)
+                Divider()
+                Button("Check for Updates…") { updateModel.checkManually() }
             }
             CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer) }.keyboardShortcut(",", modifiers: .command) }
             CommandGroup(after: .windowArrangement) {

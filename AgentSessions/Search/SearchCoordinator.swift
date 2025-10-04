@@ -1,0 +1,199 @@
+import Foundation
+import Combine
+
+final class SearchCoordinator: ObservableObject {
+    struct Progress: Equatable {
+        enum Phase { case idle, small, large }
+        var phase: Phase = .idle
+        var scannedSmall: Int = 0
+        var totalSmall: Int = 0
+        var scannedLarge: Int = 0
+        var totalLarge: Int = 0
+    }
+
+    @Published private(set) var isRunning: Bool = false
+    @Published private(set) var wasCanceled: Bool = false
+    @Published private(set) var results: [Session] = []
+    @Published private(set) var progress: Progress = .init()
+
+    private var currentTask: Task<Void, Never>? = nil
+    private let codexIndexer: SessionIndexer
+    // Promotion support for large-queue preemption
+    private let promoLock = NSLock()
+    private var promotedID: String? = nil
+    // Generation token to ignore stale appends after cancel/restart
+    private var runID = UUID()
+
+    init(codexIndexer: SessionIndexer) {
+        self.codexIndexer = codexIndexer
+    }
+
+    func cancel() {
+        currentTask?.cancel()
+        currentTask = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.runID = UUID()
+            self.isRunning = false
+            self.wasCanceled = true
+            self.progress = .init()
+            self.results = []
+        }
+    }
+
+    // Promote a large session to be processed next in the large queue if present.
+    func promote(id: String) {
+        promoLock.lock(); promotedID = id; promoLock.unlock()
+    }
+
+    func start(query: String, filters: Filters, includeCodex: Bool, includeClaude: Bool, all: [Session]) {
+        // Cancel any in-flight search
+        currentTask?.cancel()
+        wasCanceled = false
+        let newRunID = UUID()
+        runID = newRunID
+
+        let allowed: Set<SessionSource> = {
+            switch (includeCodex, includeClaude) {
+            case (true, true): return [.codex, .claude]
+            case (true, false): return [.codex]
+            case (false, true): return [.claude]
+            default: return []
+            }
+        }()
+        let candidates = all.filter { allowed.contains($0.source) }
+
+        // Partition
+        let threshold = 10 * 1024 * 1024
+        var nonLarge: [Session] = []
+        var large: [Session] = []
+        nonLarge.reserveCapacity(candidates.count)
+        large.reserveCapacity(candidates.count / 2)
+        for s in candidates {
+            let size = Self.sizeBytes(for: s)
+            if size >= threshold { large.append(s) } else { nonLarge.append(s) }
+        }
+        nonLarge.sort { $0.modifiedAt > $1.modifiedAt }
+        large.sort { $0.modifiedAt > $1.modifiedAt }
+
+        // Launch orchestration
+        currentTask = Task.detached { [weak self, newRunID] in
+            guard let self else { return }
+            await MainActor.run {
+                guard self.runID == newRunID else { return }
+                self.isRunning = true
+                self.results = []
+                self.progress = .init(phase: .small, scannedSmall: 0, totalSmall: nonLarge.count, scannedLarge: 0, totalLarge: large.count)
+            }
+
+            // Phase 1: nonLarge batched
+            let batchSize = 64
+            var seen = Set<String>()
+            for start in stride(from: 0, to: nonLarge.count, by: batchSize) {
+                if Task.isCancelled { await self.finishCanceled(); return }
+                let end = min(start + batchSize, nonLarge.count)
+                let batch = Array(nonLarge[start..<end])
+                let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold)
+                if Task.isCancelled { await self.finishCanceled(); return }
+                await MainActor.run {
+                    guard self.runID == newRunID else { return }
+                    for s in hits where !seen.contains(s.id) { self.results.append(s); seen.insert(s.id) }
+                    self.progress.scannedSmall += batch.count
+                }
+            }
+
+            if Task.isCancelled { await self.finishCanceled(); return }
+
+            // Phase 2: large sequential
+            await MainActor.run { if self.runID == newRunID { self.progress.phase = .large } }
+            var idx = 0
+            while idx < large.count {
+                // Check for promotion request and reorder so promoted item is next.
+                self.promoLock.lock()
+                let want = self.promotedID
+                self.promotedID = nil
+                self.promoLock.unlock()
+
+                if let want, let pos = large[idx...].firstIndex(where: { $0.id == want }) {
+                    if pos != idx { large.swapAt(idx, pos) }
+                }
+
+                let s = large[idx]
+                if Task.isCancelled { await self.finishCanceled(); return }
+                if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
+                    if Task.isCancelled { await self.finishCanceled(); return }
+                    if FilterEngine.sessionMatches(parsed, filters: filters) {
+                        await MainActor.run {
+                            guard self.runID == newRunID else { return }
+                            if !seen.contains(parsed.id) { self.results.append(parsed); seen.insert(parsed.id) }
+                        }
+                    }
+                }
+                await MainActor.run { if self.runID == newRunID { self.progress.scannedLarge += 1 } }
+                idx += 1
+            }
+
+            if Task.isCancelled { await self.finishCanceled(); return }
+            await MainActor.run {
+                guard self.runID == newRunID else { return }
+                self.isRunning = false
+                self.progress.phase = .idle
+            }
+        }
+    }
+
+    private func finishCanceled() async {
+        await MainActor.run {
+            self.isRunning = false
+            self.wasCanceled = true
+            self.progress.phase = .idle
+        }
+    }
+
+    private func searchBatch(batch: [Session], query: String, filters: Filters, threshold: Int) async -> [Session] {
+        var out: [Session] = []
+        out.reserveCapacity(batch.count / 4)
+        for var s in batch {
+            if Task.isCancelled { return out }
+            if s.events.isEmpty {
+                // For non-large sessions only, parse quickly if needed
+                let size = Self.sizeBytes(for: s)
+                if size < threshold, let parsed = await parseFullIfNeeded(session: s, threshold: threshold) {
+                    s = parsed
+                }
+            }
+            if FilterEngine.sessionMatches(s, filters: filters) { out.append(s) }
+        }
+        return out
+    }
+
+    private func parseFullIfNeeded(session s: Session, threshold: Int) async -> Session? {
+        if !s.events.isEmpty { return s }
+        let url = URL(fileURLWithPath: s.filePath)
+        return await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                if s.source == .codex {
+                    let parsed = self.codexIndexer.parseFileFull(at: url)
+                    cont.resume(returning: parsed)
+                } else {
+                    let parsed = ClaudeSessionParser.parseFileFull(at: url)
+                    cont.resume(returning: parsed)
+                }
+            }
+        }
+    }
+
+    private static func sizeBytes(for s: Session) -> Int {
+        if let b = s.fileSizeBytes { return b }
+        let p = s.filePath
+        if let num = (try? FileManager.default.attributesOfItem(atPath: p)[.size] as? NSNumber)?.intValue { return num }
+        return 0
+    }
+}
+
+extension Array {
+    func chunks(of n: Int) -> [ArraySlice<Element>] {
+        guard n > 0 else { return [self[...]] }
+        return stride(from: 0, to: count, by: n).map { self[$0..<Swift.min($0 + n, count)] }
+    }
+}

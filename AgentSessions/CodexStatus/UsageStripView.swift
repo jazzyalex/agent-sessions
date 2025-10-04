@@ -21,8 +21,8 @@ struct UsageStripView: View {
                     .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
                     .frame(width: labelWidth, alignment: .leading)
             }
-            UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText)
-            UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText)
+            UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate)
+            UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate)
             Spacer(minLength: 0)
             if let line = codexStatus.usageLine, !line.isEmpty {
                 Text(line).font(.caption).foregroundStyle(.secondary)
@@ -32,11 +32,29 @@ struct UsageStripView: View {
         .padding(.top, collapseTop ? 0 : verticalPadding)
         .padding(.bottom, collapseBottom ? 0 : verticalPadding)
         .background(drawBackground ? AnyShapeStyle(.thickMaterial) : AnyShapeStyle(.clear))
-        .onTapGesture {
+        .onTapGesture(count: 2) {
             codexStatus.refreshNow()
         }
+        .help(makeTooltip())
         .onAppear { codexStatus.setStripVisible(true) }
         .onDisappear { codexStatus.setStripVisible(false) }
+    }
+
+    private func makeTooltip() -> String {
+        var parts: [String] = []
+
+        if let lastUpdate = codexStatus.lastUpdate {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            let relativeTime = formatter.localizedString(for: lastUpdate, relativeTo: Date())
+            parts.append("Codex: Updated \(relativeTime)")
+        } else {
+            parts.append("Codex: Not yet updated")
+        }
+
+        parts.append("Double-click to refresh now")
+
+        return parts.joined(separator: "\n")
     }
 }
 
@@ -44,11 +62,15 @@ private struct UsageMeter: View {
     let title: String
     let percent: Int
     let reset: String
+    let lastUpdate: Date?
     @AppStorage("StripShowResetTime") private var showResetTime: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
         let includeReset = showResetTime && !reset.isEmpty
+        let stale = isResetInfoStale(kind: title, lastUpdate: lastUpdate)
+        let displayText = stale ? UsageStaleThresholds.outdatedCopy : formattedReset(reset)
+
         HStack(spacing: UsageMeterLayout.itemSpacing) {
             Text(title)
                 .font(.footnote).bold()
@@ -61,8 +83,7 @@ private struct UsageMeter: View {
                 .monospacedDigit()
                 .frame(width: UsageMeterLayout.percentWidth, alignment: .trailing)
             if includeReset {
-                let text = formattedReset(reset)
-                Text(text)
+                Text(displayText)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(width: UsageMeterLayout.resetWidth, alignment: .leading)

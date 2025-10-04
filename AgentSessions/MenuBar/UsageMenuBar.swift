@@ -161,6 +161,14 @@ struct UsageMenuBarMenuContent: View {
                         }
                     }
                     .buttonStyle(.plain)
+
+                    // Last updated time
+                    if let lastUpdate = codexStatus.lastUpdate {
+                        Text("Updated \(timeAgo(lastUpdate))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                    }
                 }
             }
 
@@ -191,6 +199,14 @@ struct UsageMenuBarMenuContent: View {
                         }
                     }
                     .buttonStyle(.plain)
+
+                    // Last updated time
+                    if let lastUpdate = claudeStatus.lastUpdate {
+                        Text("Updated \(timeAgo(lastUpdate))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                    }
                 }
             }
 
@@ -253,6 +269,12 @@ struct UsageMenuBarMenuContent: View {
     private func openPreferencesUsage() {
         PreferencesWindowController.shared.show(indexer: indexer, initialTab: .menuBar)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func timeAgo(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 

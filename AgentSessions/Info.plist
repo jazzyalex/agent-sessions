@@ -8,6 +8,8 @@
 	<string>com.triada.AgentSessions</string>
 	<key>CFBundleName</key>
 	<string>Agent Sessions</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 	<key>NSAppleEventsUsageDescription</key>

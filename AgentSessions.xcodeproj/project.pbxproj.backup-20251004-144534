@@ -69,14 +69,6 @@
 		DE0381FB79864EDCA2C58B03 /* CodexResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABCAEC00B184A1F871509E5 /* CodexResumeCommandBuilder.swift */; };
 		F7079DCFE7E6447F920DBF84 /* CodexResumeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */; };
     SRCH000020000000000000001 /* SearchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRCH000010000000000000001 /* AgentSessions/Search/SearchCoordinator.swift */; };
-		C38DF9D24E03404EAF70BAF2 /* GitHubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD4071F08354BC681A6E5D9 /* GitHubClient.swift */; };
-		8302EEE664744FA8A3606F34 /* SemanticVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16EEA49AD2C64DCF8BDC1241 /* SemanticVersion.swift */; };
-		1D0AD620E3E044DB875B125B /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B86A8EFF02D440EADEB98F0 /* UpdateChecker.swift */; };
-		7DEC6F1AF64D4A61B0B11AFD /* UpdateCheckModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B29B924375946728A9EC1BF /* UpdateCheckModel.swift */; };
-		5731AD7A25CF4B4DAA9BDF27 /* UpdateDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = B903187D9D8D4EDF9FAB0BBA /* UpdateDefaults.swift */; };
-		7D3211A8042C4D30AE226E0C /* UpdateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43F39BE67C6349D1B76115C9 /* UpdateModels.swift */; };
-		AA522C190292439CA3A83AD8 /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */; };
-		STALE000020000000000000001 /* UsageStaleCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = STALE000010000000000000001 /* UsageStaleCheck.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -160,14 +152,6 @@
 		E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageMenuBar.swift; path = AgentSessions/MenuBar/UsageMenuBar.swift; sourceTree = SOURCE_ROOT; };
 		F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCoordinatorTests.swift; path = AgentSessionsTests/CodexResumeCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
     SRCH000010000000000000001 /* AgentSessions/Search/SearchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Search/SearchCoordinator.swift; sourceTree = SOURCE_ROOT; };
-		EAD4071F08354BC681A6E5D9 /* GitHubClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GitHubClient.swift; path = AgentSessions/Update/GitHubClient.swift; sourceTree = SOURCE_ROOT; };
-		16EEA49AD2C64DCF8BDC1241 /* SemanticVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SemanticVersion.swift; path = AgentSessions/Update/SemanticVersion.swift; sourceTree = SOURCE_ROOT; };
-		9B86A8EFF02D440EADEB98F0 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateChecker.swift; path = AgentSessions/Update/UpdateChecker.swift; sourceTree = SOURCE_ROOT; };
-		6B29B924375946728A9EC1BF /* UpdateCheckModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateCheckModel.swift; path = AgentSessions/Update/UpdateCheckModel.swift; sourceTree = SOURCE_ROOT; };
-		B903187D9D8D4EDF9FAB0BBA /* UpdateDefaults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateDefaults.swift; path = AgentSessions/Update/UpdateDefaults.swift; sourceTree = SOURCE_ROOT; };
-		43F39BE67C6349D1B76115C9 /* UpdateModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateModels.swift; path = AgentSessions/Update/UpdateModels.swift; sourceTree = SOURCE_ROOT; };
-		8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateCheckerTests.swift; path = AgentSessionsTests/UpdateCheckerTests.swift; sourceTree = SOURCE_ROOT; };
-		STALE000010000000000000001 /* UsageStaleCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStaleCheck.swift; path = AgentSessions/CodexStatus/UsageStaleCheck.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -255,8 +239,7 @@
 				B00000179A0A000100000001 /* SessionTitleTests.swift */,
 				A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */,
 				F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */,
-			
-				8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */,);
+			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
 		};
@@ -539,14 +522,7 @@
 				MB000020000000000000001 /* StatusItemController.swift in Sources */,
 				MB000020000000000000002 /* SettingsUpdateProxy.swift in Sources */,
 				SRCH000020000000000000001 /* SearchCoordinator.swift in Sources */,
-			
-				C38DF9D24E03404EAF70BAF2 /* GitHubClient.swift in Sources */,
-				8302EEE664744FA8A3606F34 /* SemanticVersion.swift in Sources */,
-				1D0AD620E3E044DB875B125B /* UpdateChecker.swift in Sources */,
-				7DEC6F1AF64D4A61B0B11AFD /* UpdateCheckModel.swift in Sources */,
-				5731AD7A25CF4B4DAA9BDF27 /* UpdateDefaults.swift in Sources */,
-				7D3211A8042C4D30AE226E0C /* UpdateModels.swift in Sources */,
-				STALE000020000000000000001 /* UsageStaleCheck.swift in Sources */,);
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B00000132A0A000100000001 /* Sources */ = {
@@ -625,7 +601,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2;
+				MARKETING_VERSION = 1.2.2;
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++14";
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_SWIFT_FLAGS = "-DDEBUG";
@@ -694,7 +670,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2;
+				MARKETING_VERSION = 1.2.2;
 				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++14";
 				OTHER_SWIFT_FLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.triada.AgentSessions;

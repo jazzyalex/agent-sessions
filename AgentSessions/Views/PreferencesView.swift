@@ -127,6 +127,8 @@ struct PreferencesView: View {
                 codexCLITab
             case .claudeResume:
                 claudeResumeTab
+            case .about:
+                aboutTab
             }
         }
         .padding(.horizontal, 24)
@@ -558,6 +560,144 @@ struct PreferencesView: View {
         }
     }
 
+    private var aboutTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("About")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            // App Icon
+            HStack {
+                Spacer()
+                if let appIcon = NSImage(named: NSImage.applicationIconName) {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .frame(width: 128, height: 128)
+                        .cornerRadius(16)
+                        .shadow(radius: 4)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 8)
+
+            sectionHeader("Agent Sessions")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Version:")
+                        .frame(width: labelColumnWidth, alignment: .leading)
+                    if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+                        Text(version)
+                            .font(.system(.body, design: .monospaced))
+                    } else {
+                        Text("Unknown")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack {
+                    Text("Website:")
+                        .frame(width: labelColumnWidth, alignment: .leading)
+                    Button("jazzyalex.github.io/agent-sessions") {
+                        UpdateCheckModel.shared.openURL("https://jazzyalex.github.io/agent-sessions/")
+                    }
+                    .buttonStyle(.link)
+                }
+
+                HStack {
+                    Text("GitHub:")
+                        .frame(width: labelColumnWidth, alignment: .leading)
+                    Button("github.com/jazzyalex/agent-sessions") {
+                        UpdateCheckModel.shared.openURL("https://github.com/jazzyalex/agent-sessions")
+                    }
+                    .buttonStyle(.link)
+                }
+
+                HStack {
+                    Text("X (Twitter):")
+                        .frame(width: labelColumnWidth, alignment: .leading)
+                    Button("@jazzyalex") {
+                        UpdateCheckModel.shared.openURL("https://x.com/jazzyalex")
+                    }
+                    .buttonStyle(.link)
+                }
+            }
+
+            sectionHeader("Updates")
+            VStack(alignment: .leading, spacing: 12) {
+                // Update status
+                switch UpdateCheckModel.shared.state {
+                case .idle:
+                    Text("Updates have not been checked yet")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                case .checking:
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Checking for updates...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                case .available(let version, let releaseURL, let assetURL):
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Version \(version) is available")
+                            .font(.headline)
+                            .foregroundStyle(.green)
+
+                        HStack(spacing: 8) {
+                            Button("Release Notes") {
+                                UpdateCheckModel.shared.openURL(releaseURL)
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Open release notes in your browser")
+
+                            Button("Download") {
+                                UpdateCheckModel.shared.openURL(assetURL)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .help("Download the latest version")
+
+                            Button("Skip Launch Dialog") {
+                                UpdateCheckModel.shared.skipVersionForLaunchOnly(version)
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Don't show update dialog on launch for this version")
+                        }
+                    }
+
+                case .upToDate:
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("You're up to date")
+                            .font(.subheadline)
+                    }
+
+                case .error(let message):
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("Error: \(message)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                Button("Check for Updates") {
+                    UpdateCheckModel.shared.checkManually()
+                }
+                .buttonStyle(.bordered)
+                .help("Manually check for new versions")
+            }
+
+            Spacer()
+        }
+    }
+
     // MARK: Actions
 
     private func loadCurrentSettings() {
@@ -757,6 +897,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case unified
     case codexCLI
     case claudeResume
+    case about
 
     var id: String { rawValue }
 
@@ -767,6 +908,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .unified: return "Unified Window"
         case .codexCLI: return "Codex CLI"
         case .claudeResume: return "Claude Code"
+        case .about: return "About"
         }
     }
 
@@ -777,13 +919,14 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .unified: return "square.grid.2x2"
         case .codexCLI: return "terminal"
         case .claudeResume: return "chevron.left.slash.chevron.right"
+        case .about: return "info.circle"
         }
     }
 }
 
 private extension PreferencesView {
-    // Sidebar order: General → Codex CLI → Claude Code → Unified Window → Menu Bar
-    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, .unified, .menuBar] }
+    // Sidebar order: General → Codex CLI → Claude Code → Unified Window → Menu Bar → About
+    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, .unified, .menuBar, .about] }
 }
 
 // MARK: - Probe helpers
@@ -846,7 +989,7 @@ private extension PreferencesView {
             if probeVersion == nil && probeState != .probing { probeCodex() }
         case .claudeResume:
             if claudeVersionString == nil && claudeProbeState != .probing { probeClaude() }
-        case .general, .unified:
+        case .general, .unified, .about:
             break
         }
     }
