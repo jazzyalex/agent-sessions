@@ -8,7 +8,9 @@ final class UpdateCheckerTests: XCTestCase {
     func testSemanticVersionParsing() {
         XCTAssertEqual(SemanticVersion(string: "1.2.3"), SemanticVersion(major: 1, minor: 2, patch: 3))
         XCTAssertEqual(SemanticVersion(string: "v1.2.3"), SemanticVersion(major: 1, minor: 2, patch: 3))
-        XCTAssertNil(SemanticVersion(string: "1.2"))
+        XCTAssertEqual(SemanticVersion(string: "1.2"), SemanticVersion(major: 1, minor: 2, patch: 0))
+        XCTAssertEqual(SemanticVersion(string: "v2.0"), SemanticVersion(major: 2, minor: 0, patch: 0))
+        XCTAssertNil(SemanticVersion(string: "1"))
         XCTAssertNil(SemanticVersion(string: "invalid"))
     }
 

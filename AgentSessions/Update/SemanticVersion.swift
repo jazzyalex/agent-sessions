@@ -6,14 +6,14 @@ struct SemanticVersion: Comparable, Equatable, CustomStringConvertible {
     let minor: Int
     let patch: Int
 
-    /// Parse from "1.2.3" or "v1.2.3"
+    /// Parse from "1.2.3", "v1.2.3", "1.2", or "v1.2" (missing patch defaults to 0)
     init?(string: String) {
         let normalized = string.hasPrefix("v") ? String(string.dropFirst()) : string
         let parts = normalized.split(separator: ".").compactMap { Int($0) }
-        guard parts.count == 3 else { return nil }
+        guard parts.count >= 2 && parts.count <= 3 else { return nil }
         self.major = parts[0]
         self.minor = parts[1]
-        self.patch = parts[2]
+        self.patch = parts.count == 3 ? parts[2] : 0
     }
 
     init(major: Int, minor: Int, patch: Int) {
