@@ -39,7 +39,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var findText: String = ""
     @State private var findMatches: [Range<String.Index>] = []
     @State private var currentMatchIndex: Int = 0
-    @State private var findRevision: Int = 0  // Increment to force view update
     @FocusState private var findFocused: Bool
     @State private var allowFindFocus: Bool = false
     @State private var highlightRanges: [NSRange] = []
@@ -92,7 +91,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         outputRanges: shouldColorize ? outputRanges : [],
                         errorRanges: shouldColorize ? errorRanges : []
                     )
-                    .id(findRevision)  // Force view update when navigating between matches
 
                     if indexer.isLoadingSession && indexer.loadingSessionID == id {
                         VStack(spacing: 12) {
@@ -367,11 +365,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             highlightRanges = []
             return
         }
-        let lower = transcript.lowercased()
-        let lowerQ = q.lowercased()
+        // Find matches directly on the original string using case-insensitive search
         var matches: [Range<String.Index>] = []
-        var searchStart = lower.startIndex
-        while let r = lower.range(of: lowerQ, range: searchStart..<lower.endIndex) {
+        var searchStart = transcript.startIndex
+        while let r = transcript.range(of: q, options: [.caseInsensitive], range: searchStart..<transcript.endIndex) {
             matches.append(r)
             searchStart = r.upperBound
         }
@@ -388,10 +385,35 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 if newIdx >= matches.count { newIdx = 0 }
                 currentMatchIndex = newIdx
             }
-            highlightRanges = matches.map { NSRange($0, in: transcript) }
+
+            // Convert to NSRange and validate bounds
+            let transcriptLength = (transcript as NSString).length
+            let validRanges = matches.compactMap { range -> NSRange? in
+                let nsRange = NSRange(range, in: transcript)
+                // Validate bounds
+                if NSMaxRange(nsRange) <= transcriptLength {
+                    return nsRange
+                } else {
+                    print("⚠️ FIND: Skipping out-of-bounds range \(nsRange) (transcript length: \(transcriptLength))")
+                    return nil
+                }
+            }
+
+            // Diagnostic logging for problematic sessions
+            if validRanges.count != matches.count {
+                print("⚠️ FIND: Filtered \(matches.count - validRanges.count) out-of-bounds ranges (query: '\(q)', transcript: \(transcriptLength) chars)")
+            }
+
+            highlightRanges = validRanges
+
+            // Adjust currentMatchIndex if out of bounds after filtering
+            if highlightRanges.isEmpty {
+                currentMatchIndex = 0
+            } else if currentMatchIndex >= highlightRanges.count {
+                currentMatchIndex = highlightRanges.count - 1
+            }
+
             updateSelectionToCurrentMatch()
-            // Increment revision to force immediate view update with new highlights
-            findRevision += 1
         }
     }
 
@@ -502,7 +524,11 @@ private struct PlainTextScrollView: NSViewRepresentable {
     let outputRanges: [NSRange]
     let errorRanges: [NSRange]
 
-    class Coordinator { var lastWidth: CGFloat = 0 }
+    class Coordinator {
+        var lastWidth: CGFloat = 0
+        var lastPaintedHighlights: [NSRange] = []
+        var lastPaintedIndex: Int = -1
+    }
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -526,6 +552,9 @@ private struct PlainTextScrollView: NSViewRepresentable {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
 
+        // Enable non-contiguous layout for better performance on large documents
+        textView.layoutManager?.allowsNonContiguousLayout = true
+
         // Apply dimming effect when Find is active (like Apple Notes)
         if !highlights.isEmpty {
             textView.backgroundColor = NSColor.black.withAlphaComponent(0.08)
@@ -534,7 +563,8 @@ private struct PlainTextScrollView: NSViewRepresentable {
         }
 
         textView.string = text
-        applyHighlights(textView)
+        applySyntaxColors(textView)
+        applyFindHighlights(textView, coordinator: context.coordinator)
 
         scroll.documentView = textView
         if let sel = selection {
@@ -547,7 +577,13 @@ private struct PlainTextScrollView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         if let tv = nsView.documentView as? NSTextView {
-            if tv.string != text { tv.string = text }
+            let textChanged = tv.string != text
+            if textChanged {
+                tv.string = text
+                applySyntaxColors(tv)
+                context.coordinator.lastPaintedHighlights = []
+            }
+
             if let font = tv.font, abs(font.pointSize - fontSize) > 0.5 {
                 tv.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
             }
@@ -562,7 +598,6 @@ private struct PlainTextScrollView: NSViewRepresentable {
             let width = max(1, nsView.contentSize.width)
             tv.textContainer?.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
             tv.setFrameSize(NSSize(width: width, height: tv.frame.size.height))
-            if let container = tv.textContainer { tv.layoutManager?.ensureLayout(for: container) }
 
             // Scroll to current match if any
             if let sel = selection {
@@ -571,16 +606,18 @@ private struct PlainTextScrollView: NSViewRepresentable {
                 tv.setSelectedRange(NSRange(location: 0, length: 0))
             }
 
-            applyHighlights(tv)
+            applyFindHighlights(tv, coordinator: context.coordinator)
         }
     }
 
-    private func applyHighlights(_ tv: NSTextView) {
+    // Apply syntax colors once when text changes (full document)
+    private func applySyntaxColors(_ tv: NSTextView) {
         guard let textStorage = tv.textStorage else { return }
         let full = NSRange(location: 0, length: (tv.string as NSString).length)
 
-        // Remove all previous attributes (use textStorage for persistent attributes)
-        textStorage.removeAttribute(.backgroundColor, range: full)
+        textStorage.beginEditing()
+
+        // Clear only foreground colors (not background - that's for find highlights)
         textStorage.removeAttribute(.foregroundColor, range: full)
 
         // Command colorization (foreground)
@@ -659,22 +696,96 @@ private struct PlainTextScrollView: NSViewRepresentable {
             }
         }
 
-        // Find match highlights - apply LAST to override all colorization and ensure visibility
-        // Apple Notes style: yellow for current match, white for others
-        // Use textStorage attributes (not temporary) so they persist regardless of focus
-        if !highlights.isEmpty {
-            let currentBG = NSColor(deviceRed: 1.0, green: 0.92, blue: 0.0, alpha: 1.0)  // Yellow (like Apple Notes)
-            let otherBG = NSColor(deviceRed: 1.0, green: 1.0, blue: 1.0, alpha: 0.9)   // White (more opaque for visibility)
-            let matchFG = NSColor.black  // Black text for contrast
-            for (i, r) in highlights.enumerated() {
-                if NSMaxRange(r) <= full.length {
-                    let bg = (i == currentIndex) ? currentBG : otherBG
-                    // Apply attributes to textStorage for persistent rendering
-                    textStorage.addAttribute(.backgroundColor, value: bg, range: r)
-                    textStorage.addAttribute(.foregroundColor, value: matchFG, range: r)
-                }
+        textStorage.endEditing()
+    }
+
+    // Apply find highlights with scoped layout/invalidation for performance
+    private func applyFindHighlights(_ tv: NSTextView, coordinator: Coordinator) {
+        assert(Thread.isMainThread, "applyFindHighlights must be called on main thread")
+
+        guard let textStorage = tv.textStorage,
+              let lm = tv.layoutManager,
+              let tc = tv.textContainer else {
+            print("⚠️ FIND: Missing textStorage/layoutManager/textContainer")
+            return
+        }
+
+        let full = NSRange(location: 0, length: (tv.string as NSString).length)
+
+        // Check if highlights or the current index changed
+        let highlightsChanged = coordinator.lastPaintedHighlights != highlights || coordinator.lastPaintedIndex != currentIndex
+
+        print("🔍 FIND: highlights=\(highlights.count), lastPainted=\(coordinator.lastPaintedHighlights.count), changed=\(highlightsChanged), currentIndex=\(currentIndex)")
+
+        if !highlightsChanged {
+            // Just show indicator, attributes already correct
+            if !highlights.isEmpty && currentIndex < highlights.count {
+                tv.showFindIndicator(for: highlights[currentIndex])
+            }
+            return
+        }
+
+        // Get visible range for scoped invalidation/layout (performance optimization)
+        // IMPORTANT: glyphRange(forBoundingRect:in:) expects container coordinates, not view coordinates
+        let visRectView = tv.enclosingScrollView?.contentView.documentVisibleRect ?? tv.visibleRect
+        let origin = tv.textContainerOrigin
+        let visRectInContainer = visRectView.offsetBy(dx: -origin.x, dy: -origin.y)
+        var visGlyphs = lm.glyphRange(forBoundingRect: visRectInContainer, in: tc)
+        var visChars = lm.characterRange(forGlyphRange: visGlyphs, actualGlyphRange: nil)
+        // Fallback: if visible character range is empty (can happen during layout churn), widen to a reasonable window
+        if visChars.length == 0 {
+            visChars = NSIntersectionRange(full, NSRange(location: max(0, tv.selectedRange().location - 2000), length: 4000))
+            visGlyphs = lm.glyphRange(forCharacterRange: visChars, actualCharacterRange: nil)
+        }
+
+        print("🔍 VISIBLE: visChars.length=\(visChars.length), visChars=\(visChars)")
+
+        textStorage.beginEditing()
+
+        // Clear ALL old highlights (full document - ensures clean slate)
+        for r in coordinator.lastPaintedHighlights {
+            if NSMaxRange(r) <= full.length {
+                textStorage.removeAttribute(.backgroundColor, range: r)
             }
         }
+
+        // Paint ALL new highlights (full document - ensures they're present when scrolling)
+        let currentBG = NSColor(deviceRed: 1.0, green: 0.92, blue: 0.0, alpha: 1.0)  // Yellow
+        let otherBG = NSColor(deviceRed: 1.0, green: 1.0, blue: 1.0, alpha: 0.9)     // White
+        let matchFG = NSColor.black
+        for (i, r) in highlights.enumerated() {
+            if NSMaxRange(r) <= full.length {
+                let bg = (i == currentIndex) ? currentBG : otherBG
+                textStorage.addAttribute(.backgroundColor, value: bg, range: r)
+                textStorage.addAttribute(.foregroundColor, value: matchFG, range: r)
+            }
+        }
+
+        textStorage.endEditing()
+
+        // Fix attributes only in VISIBLE region (performance win). Avoid clearing backgrounds.
+        textStorage.fixAttributes(in: visChars)
+
+        // Invalidate only VISIBLE region (performance win)
+        lm.invalidateDisplay(forCharacterRange: visChars)
+
+        // Layout only VISIBLE region (BIG performance win - avoids full-document layout thrashing)
+        let glyphRange = lm.glyphRange(forCharacterRange: visChars, actualCharacterRange: nil)
+        lm.ensureLayout(forGlyphRange: glyphRange)
+
+        tv.setNeedsDisplay(visRectView)
+
+        print("✅ FIND: Painted \(highlights.count) highlights, visibleRange=\(visChars)")
+
+        // Update cache
+        coordinator.lastPaintedHighlights = highlights
+
+        // Show Apple Notes-style find indicator for current match
+        if !highlights.isEmpty && currentIndex < highlights.count {
+            tv.showFindIndicator(for: highlights[currentIndex])
+        }
+
+        coordinator.lastPaintedIndex = currentIndex
     }
 }
 
