@@ -405,11 +405,9 @@ struct UnifiedSessionsView: View {
 private struct UnifiedSearchFiltersView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var search: SearchCoordinator
-    @FocusState private var focused: Bool
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var showInlineSearch: Bool = false
     private enum SearchFocusTarget: Hashable { case field, clear }
-    @State private var eventMonitor: Any?
     var body: some View {
         HStack(spacing: 8) {
             if showInlineSearch || !unified.queryDraft.isEmpty || search.isRunning {
@@ -420,12 +418,11 @@ private struct UnifiedSearchFiltersView: View {
                         .imageScale(.medium)
                     TextField("Search", text: $unified.queryDraft)
                         .textFieldStyle(.plain)
-                        .focused($focused)
                         .focused($searchFocus, equals: .field)
                         .onSubmit { startSearch() }
                         .frame(minWidth: 220)
                     if !unified.queryDraft.isEmpty {
-                        Button(action: { unified.queryDraft = ""; unified.query = ""; unified.recomputeNow(); search.cancel(); showInlineSearch = false; focused = false; searchFocus = nil }) {
+                        Button(action: { unified.queryDraft = ""; unified.query = ""; unified.recomputeNow(); search.cancel(); showInlineSearch = false; searchFocus = nil }) {
                             Image(systemName: "xmark.circle.fill")
                                 .imageScale(.medium)
                                 .foregroundStyle(.secondary)
@@ -443,15 +440,13 @@ private struct UnifiedSearchFiltersView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(focused ? Color.yellow : Color.gray.opacity(0.28), lineWidth: focused ? 2 : 1)
+                        .stroke(searchFocus == .field ? Color.yellow : Color.gray.opacity(0.28), lineWidth: searchFocus == .field ? 2 : 1)
                 )
-                .onAppear { DispatchQueue.main.async { focused = true; searchFocus = .field } }
-                .keyboardShortcut("f", modifiers: [.command, .option])
+                .onAppear { DispatchQueue.main.async { searchFocus = .field } }
                 // If focus leaves the search controls and query is empty, collapse
                 .onChange(of: searchFocus) { _, target in
                     if target == nil && unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !search.isRunning {
                         showInlineSearch = false
-                        focused = false
                     }
                 }
                 .onChange(of: unified.queryDraft) { _, newValue in
@@ -465,7 +460,6 @@ private struct UnifiedSearchFiltersView: View {
                 .onReceive(NotificationCenter.default.publisher(for: .collapseInlineSearchIfEmpty)) { _ in
                     if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !search.isRunning {
                         showInlineSearch = false
-                        focused = false
                         searchFocus = nil
                     }
                 }
@@ -473,14 +467,13 @@ private struct UnifiedSearchFiltersView: View {
                     if shown {
                         // Ensure programmatic focus after the field becomes visible
                         DispatchQueue.main.async {
-                            focused = true
                             searchFocus = .field
                         }
                     }
                 }
             } else {
                 // Compact loop button without border; inline search replaces it when active
-                Button(action: { showInlineSearch = true; DispatchQueue.main.async { focused = true; searchFocus = .field } }) {
+                Button(action: { showInlineSearch = true; DispatchQueue.main.async { searchFocus = .field } }) {
                     Image(systemName: "magnifyingglass")
                         .symbolRenderingMode(.monochrome)
                         .foregroundStyle(.secondary)
@@ -511,23 +504,6 @@ private struct UnifiedSearchFiltersView: View {
                 .background(Color.blue.opacity(0.1))
                 .background(RoundedRectangle(cornerRadius: 6).stroke(Color.blue.opacity(0.3)))
             }
-        }
-        .onAppear {
-            // Global event monitor to collapse empty inline search on click/tab outside
-            eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { ev in
-                if (ev.type == .keyDown && ev.keyCode == 48) || ev.type == .leftMouseDown || ev.type == .rightMouseDown { // Tab or click
-                    if showInlineSearch,
-                       unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                       !search.isRunning,
-                       !focused && searchFocus == nil {
-                        showInlineSearch = false
-                    }
-                }
-                return ev
-            }
-        }
-        .onDisappear {
-            if let m = eventMonitor { NSEvent.removeMonitor(m); eventMonitor = nil }
         }
     }
 
