@@ -1,6 +1,21 @@
 import Foundation
 import Combine
 
+// Actor for thread-safe promotion state
+private actor PromotionState {
+    private var promotedID: String?
+
+    func setPromoted(id: String) {
+        promotedID = id
+    }
+
+    func consumePromoted() -> String? {
+        let id = promotedID
+        promotedID = nil
+        return id
+    }
+}
+
 final class SearchCoordinator: ObservableObject {
     struct Progress: Equatable {
         enum Phase { case idle, small, large }
@@ -19,8 +34,7 @@ final class SearchCoordinator: ObservableObject {
     private var currentTask: Task<Void, Never>? = nil
     private let codexIndexer: SessionIndexer
     // Promotion support for large-queue preemption
-    private let promoLock = NSLock()
-    private var promotedID: String? = nil
+    private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
     private var runID = UUID()
 
@@ -43,7 +57,9 @@ final class SearchCoordinator: ObservableObject {
 
     // Promote a large session to be processed next in the large queue if present.
     func promote(id: String) {
-        promoLock.lock(); promotedID = id; promoLock.unlock()
+        Task {
+            await promotionState.setPromoted(id: id)
+        }
     }
 
     func start(query: String, filters: Filters, includeCodex: Bool, includeClaude: Bool, all: [Session]) {
@@ -77,13 +93,17 @@ final class SearchCoordinator: ObservableObject {
         large.sort { $0.modifiedAt > $1.modifiedAt }
 
         // Launch orchestration
+        // Capture counts to avoid capturing mutable arrays
+        let nonLargeCount = nonLarge.count
+        let largeCount = large.count
+
         currentTask = Task.detached { [weak self, newRunID] in
             guard let self else { return }
             await MainActor.run {
                 guard self.runID == newRunID else { return }
                 self.isRunning = true
                 self.results = []
-                self.progress = .init(phase: .small, scannedSmall: 0, totalSmall: nonLarge.count, scannedLarge: 0, totalLarge: large.count)
+                self.progress = .init(phase: .small, scannedSmall: 0, totalSmall: nonLargeCount, scannedLarge: 0, totalLarge: largeCount)
             }
 
             // Phase 1: nonLarge batched
@@ -95,9 +115,14 @@ final class SearchCoordinator: ObservableObject {
                 let batch = Array(nonLarge[start..<end])
                 let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold)
                 if Task.isCancelled { await self.finishCanceled(); return }
+
+                // Filter out duplicates before entering MainActor
+                let newHits = hits.filter { !seen.contains($0.id) }
+                for s in newHits { seen.insert(s.id) }
+
                 await MainActor.run {
                     guard self.runID == newRunID else { return }
-                    for s in hits where !seen.contains(s.id) { self.results.append(s); seen.insert(s.id) }
+                    self.results.append(contentsOf: newHits)
                     self.progress.scannedSmall += batch.count
                 }
             }
@@ -109,10 +134,7 @@ final class SearchCoordinator: ObservableObject {
             var idx = 0
             while idx < large.count {
                 // Check for promotion request and reorder so promoted item is next.
-                self.promoLock.lock()
-                let want = self.promotedID
-                self.promotedID = nil
-                self.promoLock.unlock()
+                let want = await self.promotionState.consumePromoted()
 
                 if let want, let pos = large[idx...].firstIndex(where: { $0.id == want }) {
                     if pos != idx { large.swapAt(idx, pos) }
@@ -123,9 +145,14 @@ final class SearchCoordinator: ObservableObject {
                 if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
                     if Task.isCancelled { await self.finishCanceled(); return }
                     if FilterEngine.sessionMatches(parsed, filters: filters) {
-                        await MainActor.run {
-                            guard self.runID == newRunID else { return }
-                            if !seen.contains(parsed.id) { self.results.append(parsed); seen.insert(parsed.id) }
+                        // Check and update seen outside MainActor
+                        let shouldAdd = !seen.contains(parsed.id)
+                        if shouldAdd {
+                            seen.insert(parsed.id)
+                            await MainActor.run {
+                                guard self.runID == newRunID else { return }
+                                self.results.append(parsed)
+                            }
                         }
                     }
                 }
@@ -170,17 +197,20 @@ final class SearchCoordinator: ObservableObject {
     private func parseFullIfNeeded(session s: Session, threshold: Int) async -> Session? {
         if !s.events.isEmpty { return s }
         let url = URL(fileURLWithPath: s.filePath)
-        return await withCheckedContinuation { cont in
-            DispatchQueue.global(qos: .userInitiated).async {
-                if s.source == .codex {
-                    let parsed = self.codexIndexer.parseFileFull(at: url)
-                    cont.resume(returning: parsed)
-                } else {
-                    let parsed = ClaudeSessionParser.parseFileFull(at: url)
-                    cont.resume(returning: parsed)
-                }
+        let source = s.source
+
+        // Capture indexer as nonisolated(unsafe) for use in detached task
+        // This is safe because parseFileFull is a stateless operation
+        nonisolated(unsafe) let indexer = self.codexIndexer
+
+        // Parse on background queue using Task instead of DispatchQueue to maintain isolation
+        return await Task.detached(priority: .userInitiated) {
+            if source == .codex {
+                return indexer.parseFileFull(at: url)
+            } else {
+                return ClaudeSessionParser.parseFileFull(at: url)
             }
-        }
+        }.value
     }
 
     private static func sizeBytes(for s: Session) -> Int {

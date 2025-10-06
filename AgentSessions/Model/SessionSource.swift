@@ -1,7 +1,7 @@
 import Foundation
 
 /// Identifies the source/type of a session (Codex CLI vs Claude Code)
-public enum SessionSource: String, Codable, CaseIterable {
+public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case codex = "codex"
     case claude = "claude"
 
