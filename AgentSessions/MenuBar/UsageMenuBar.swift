@@ -148,7 +148,7 @@ struct UsageMenuBarMenuContent: View {
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
-                            Text(resetLine(label: "5h:", percent: codexStatus.fiveHourPercent, reset: displayReset(codexStatus.fiveHourResetText, kind: "5h", lastUpdate: codexStatus.lastUpdate)))
+                            Text(resetLine(label: "5h:", percent: codexStatus.fiveHourPercent, reset: displayReset(codexStatus.fiveHourResetText, kind: "5h", source: .codex, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)))
                             Spacer()
                         }
                     }
@@ -156,7 +156,7 @@ struct UsageMenuBarMenuContent: View {
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
-                            Text(resetLine(label: "Wk:", percent: codexStatus.weekPercent, reset: displayReset(codexStatus.weekResetText, kind: "Wk", lastUpdate: codexStatus.lastUpdate)))
+                            Text(resetLine(label: "Wk:", percent: codexStatus.weekPercent, reset: displayReset(codexStatus.weekResetText, kind: "Wk", source: .codex, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)))
                             Spacer()
                         }
                     }
@@ -186,7 +186,7 @@ struct UsageMenuBarMenuContent: View {
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
-                            Text(resetLine(label: "5h:", percent: claudeStatus.sessionPercent, reset: displayReset(claudeStatus.sessionResetText, kind: "5h", lastUpdate: claudeStatus.lastUpdate)))
+                            Text(resetLine(label: "5h:", percent: claudeStatus.sessionPercent, reset: displayReset(claudeStatus.sessionResetText, kind: "5h", source: .claude, lastUpdate: claudeStatus.lastUpdate)))
                             Spacer()
                         }
                     }
@@ -194,7 +194,7 @@ struct UsageMenuBarMenuContent: View {
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
-                            Text(resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsPercent, reset: displayReset(claudeStatus.weekAllModelsResetText, kind: "Wk", lastUpdate: claudeStatus.lastUpdate)))
+                            Text(resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsPercent, reset: displayReset(claudeStatus.weekAllModelsResetText, kind: "Wk", source: .claude, lastUpdate: claudeStatus.lastUpdate)))
                             Spacer()
                         }
                     }
@@ -310,11 +310,11 @@ private func colorFor(percent: Int) -> Color {
     return .green
 }
 
-private func displayReset(_ text: String, kind: String, lastUpdate: Date?) -> String {
+private func displayReset(_ text: String, kind: String, source: UsageTrackingSource, lastUpdate: Date?, eventTimestamp: Date? = nil) -> String {
     guard !text.isEmpty else { return "—" }
 
     // Check if data is stale
-    if isResetInfoStale(kind: kind, lastUpdate: lastUpdate) {
+    if isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eventTimestamp) {
         return UsageStaleThresholds.outdatedCopy
     }
 

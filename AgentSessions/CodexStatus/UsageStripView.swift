@@ -21,8 +21,8 @@ struct UsageStripView: View {
                     .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
                     .frame(width: labelWidth, alignment: .leading)
             }
-            UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate)
-            UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate)
+            UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
+            UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
@@ -60,12 +60,13 @@ private struct UsageMeter: View {
     let percent: Int
     let reset: String
     let lastUpdate: Date?
+    let eventTimestamp: Date?
     @AppStorage("StripShowResetTime") private var showResetTime: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
         let includeReset = showResetTime && !reset.isEmpty
-        let stale = isResetInfoStale(kind: title, lastUpdate: lastUpdate)
+        let stale = isResetInfoStale(kind: title, source: .codex, lastUpdate: lastUpdate, eventTimestamp: eventTimestamp)
         let displayText = stale ? UsageStaleThresholds.outdatedCopy : formattedReset(reset)
 
         HStack(spacing: UsageMeterLayout.itemSpacing) {

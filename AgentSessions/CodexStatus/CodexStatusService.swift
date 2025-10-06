@@ -15,6 +15,7 @@ struct CodexUsageSnapshot: Equatable {
     var usageLine: String? = nil
     var accountLine: String? = nil
     var modelLine: String? = nil
+    var eventTimestamp: Date? = nil
 }
 
 @MainActor
@@ -29,6 +30,7 @@ final class CodexUsageModel: ObservableObject {
     @Published var accountLine: String? = nil
     @Published var modelLine: String? = nil
     @Published var lastUpdate: Date? = nil
+    @Published var lastEventTimestamp: Date? = nil
     @Published var cliUnavailable: Bool = false
 
     private var service: CodexStatusService?
@@ -109,6 +111,7 @@ final class CodexUsageModel: ObservableObject {
         accountLine = s.accountLine
         modelLine = s.modelLine
         lastUpdate = Date()
+        lastEventTimestamp = s.eventTimestamp
     }
 
     private func clampPercent(_ v: Int) -> Int { max(0, min(100, v)) }
@@ -392,6 +395,7 @@ actor CodexStatusService {
             s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
             lastFiveHourResetDate = summary.fiveHour.resetAt
             s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
+            s.eventTimestamp = summary.eventTimestamp
             snapshot = s
             updateHandler(snapshot)
         }

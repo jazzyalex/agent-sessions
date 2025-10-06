@@ -105,7 +105,7 @@ private struct UsageMeter: View {
 
     var body: some View {
         let includeReset = showResetTime && !reset.isEmpty
-        let stale = isResetInfoStale(kind: title, lastUpdate: lastUpdate)
+        let stale = isResetInfoStale(kind: title, source: .claude, lastUpdate: lastUpdate)
         let displayText = stale ? UsageStaleThresholds.outdatedCopy : formattedReset(reset)
 
         HStack(spacing: UsageMeterLayout.itemSpacing) {
