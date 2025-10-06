@@ -498,8 +498,6 @@ struct ClaudeTranscriptView: View {
                 )
                 .onTapGesture { allowFindFocus = true; findFocused = true }
 
-                Spacer().frame(width: 8)
-
                 Button(action: { performFind(resetIndex: false, direction: -1) }) {
                     Image(systemName: "chevron.up")
                         .frame(width: 16, height: 16)
@@ -525,6 +523,8 @@ struct ClaudeTranscriptView: View {
                         .frame(minWidth: 35)
                         .help("Current match position")
                 }
+
+                Spacer().frame(width: 8)
 
                 Divider().frame(height: 20)
 
