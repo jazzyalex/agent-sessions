@@ -416,10 +416,15 @@ private struct UnifiedSearchFiltersView: View {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
                         .imageScale(.medium)
-                    TextField("Search", text: $unified.queryDraft)
-                        .textFieldStyle(.plain)
-                        .focused($searchFocus, equals: .field)
-                        .onSubmit { startSearch() }
+                    // Use an AppKit-backed text field to ensure focus works inside a toolbar
+                    ToolbarSearchTextField(text: $unified.queryDraft,
+                                           placeholder: "Search",
+                                           isFirstResponder: Binding(get: { searchFocus == .field },
+                                                                     set: { want in
+                                                                         if want { searchFocus = .field }
+                                                                         else if searchFocus == .field { searchFocus = nil }
+                                                                     }),
+                                           onCommit: { startSearch() })
                         .frame(minWidth: 220)
                     if !unified.queryDraft.isEmpty {
                         Button(action: { unified.queryDraft = ""; unified.query = ""; unified.recomputeNow(); search.cancel(); showInlineSearch = false; searchFocus = nil }) {
@@ -442,7 +447,6 @@ private struct UnifiedSearchFiltersView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(searchFocus == .field ? Color.yellow : Color.gray.opacity(0.28), lineWidth: searchFocus == .field ? 2 : 1)
                 )
-                .onAppear { DispatchQueue.main.async { searchFocus = .field } }
                 // If focus leaves the search controls and query is empty, collapse
                 .onChange(of: searchFocus) { _, target in
                     if target == nil && unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !search.isRunning {
@@ -463,9 +467,13 @@ private struct UnifiedSearchFiltersView: View {
                         searchFocus = nil
                     }
                 }
+                .onAppear {
+                    searchFocus = .field
+                }
                 .onChange(of: showInlineSearch) { _, shown in
                     if shown {
-                        // Ensure programmatic focus after the field becomes visible
+                        // Multiple attempts at different timings to ensure focus sticks
+                        searchFocus = .field
                         DispatchQueue.main.async {
                             searchFocus = .field
                         }
@@ -473,7 +481,10 @@ private struct UnifiedSearchFiltersView: View {
                 }
             } else {
                 // Compact loop button without border; inline search replaces it when active
-                Button(action: { showInlineSearch = true; DispatchQueue.main.async { searchFocus = .field } }) {
+                Button(action: {
+                    showInlineSearch = true
+                    DispatchQueue.main.async { searchFocus = .field }
+                }) {
                     Image(systemName: "magnifyingglass")
                         .symbolRenderingMode(.monochrome)
                         .foregroundStyle(.secondary)
@@ -482,7 +493,6 @@ private struct UnifiedSearchFiltersView: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut("f", modifiers: [.command, .option])
-                .focusable(false)
                 .help("Search sessions (⌥⌘F)")
             }
 
@@ -522,5 +532,65 @@ private struct UnifiedSearchFiltersView: View {
                      includeCodex: unified.includeCodex,
                      includeClaude: unified.includeClaude,
                      all: unified.allSessions)
+    }
+}
+
+// MARK: - AppKit-backed text field for reliable toolbar focus
+private struct ToolbarSearchTextField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    @Binding var isFirstResponder: Bool
+    var onCommit: () -> Void
+
+    class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: ToolbarSearchTextField
+        init(parent: ToolbarSearchTextField) { self.parent = parent }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let tf = obj.object as? NSTextField else { return }
+            if parent.text != tf.stringValue { parent.text = tf.stringValue }
+        }
+
+        func controlTextDidBeginEditing(_ obj: Notification) {
+            parent.isFirstResponder = true
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            parent.isFirstResponder = false
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                parent.onCommit()
+                return true
+            }
+            return false
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let tf = NSTextField(string: text)
+        tf.placeholderString = placeholder
+        tf.isBezeled = false
+        tf.isBordered = false
+        tf.drawsBackground = false
+        tf.focusRingType = .none
+        tf.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        tf.delegate = context.coordinator
+        tf.lineBreakMode = .byTruncatingTail
+        // Force focus after the view is in the window
+        DispatchQueue.main.async { [weak tf] in
+            guard let tf, let window = tf.window else { return }
+            _ = window.makeFirstResponder(tf)
+        }
+        return tf
+    }
+
+    func updateNSView(_ tf: NSTextField, context: Context) {
+        if tf.stringValue != text { tf.stringValue = text }
+        if tf.placeholderString != placeholder { tf.placeholderString = placeholder }
+        // Don't rely on isFirstResponder binding - already set in makeNSView
     }
 }
