@@ -39,6 +39,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var findText: String = ""
     @State private var findMatches: [Range<String.Index>] = []
     @State private var currentMatchIndex: Int = 0
+    @State private var findRevision: Int = 0  // Increment to force view update
     @FocusState private var findFocused: Bool
     @State private var allowFindFocus: Bool = false
     @State private var highlightRanges: [NSRange] = []
@@ -91,6 +92,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         outputRanges: shouldColorize ? outputRanges : [],
                         errorRanges: shouldColorize ? errorRanges : []
                     )
+                    .id(findRevision)  // Force view update when navigating between matches
 
                     if indexer.isLoadingSession && indexer.loadingSessionID == id {
                         VStack(spacing: 12) {
@@ -388,6 +390,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
             highlightRanges = matches.map { NSRange($0, in: transcript) }
             updateSelectionToCurrentMatch()
+            // Increment revision to force immediate view update with new highlights
+            findRevision += 1
         }
     }
 
@@ -396,6 +400,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             selectedNSRange = nil
             return
         }
+        // Use selection only for scrolling, will be cleared immediately to avoid blue highlight
         selectedNSRange = highlightRanges[currentMatchIndex]
     }
 
@@ -532,7 +537,11 @@ private struct PlainTextScrollView: NSViewRepresentable {
         applyHighlights(textView)
 
         scroll.documentView = textView
-        if let sel = selection { textView.setSelectedRange(sel); textView.scrollRangeToVisible(sel) }
+        if let sel = selection {
+            textView.scrollRangeToVisible(sel)
+            // Clear selection immediately to avoid blue highlight - we use yellow/white backgrounds instead
+            textView.setSelectedRange(NSRange(location: 0, length: 0))
+        }
         return scroll
     }
 
@@ -554,10 +563,14 @@ private struct PlainTextScrollView: NSViewRepresentable {
             tv.textContainer?.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
             tv.setFrameSize(NSSize(width: width, height: tv.frame.size.height))
             if let container = tv.textContainer { tv.layoutManager?.ensureLayout(for: container) }
+
+            // Scroll to current match if any
             if let sel = selection {
-                tv.setSelectedRange(sel)
                 tv.scrollRangeToVisible(sel)
+                // Clear selection immediately to avoid blue highlight - we use yellow/white backgrounds instead
+                tv.setSelectedRange(NSRange(location: 0, length: 0))
             }
+
             applyHighlights(tv)
         }
     }
