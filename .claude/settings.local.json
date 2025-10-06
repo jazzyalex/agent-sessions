@@ -110,7 +110,8 @@
       "Bash(/opt/homebrew/bin/tmux -L test-trust kill-server)",
       "Read(//Users/alexm/Downloads/**)",
       "Bash(defaults read:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(sed:*)"
     ],
     "deny": [],
     "ask": []

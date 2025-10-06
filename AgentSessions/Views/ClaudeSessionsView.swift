@@ -462,6 +462,11 @@ struct ClaudeTranscriptView: View {
 
     private func toolbar(session: Session) -> some View {
         HStack(spacing: 6) {
+            // Invisible button to capture Cmd+F shortcut
+            Button(action: { allowFindFocus = true; findFocused = true }) { EmptyView() }
+                .keyboardShortcut("f", modifiers: .command)
+                .hidden()
+
             // Find controls group
             HStack(spacing: 4) {
                 HStack(spacing: 6) {
@@ -497,6 +502,7 @@ struct ClaudeTranscriptView: View {
                         .stroke(findFocused ? Color.blue.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: findFocused ? 2 : 1)
                 )
                 .onTapGesture { allowFindFocus = true; findFocused = true }
+                .onAppear { allowFindFocus = true }
 
                 Button(action: { performFind(resetIndex: false, direction: -1) }) {
                     Image(systemName: "chevron.up")
