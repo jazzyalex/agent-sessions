@@ -111,6 +111,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .onChange(of: id) { _, _ in rebuild(session: session) }
             .onChange(of: renderModeRaw) { _, _ in rebuild(session: session) }
             .onChange(of: session.events.count) { _, _ in rebuild(session: session) }
+            .onChange(of: indexer.activeSearchUI) { _, newValue in
+                if newValue == .transcriptFind {
+                    allowFindFocus = true
+                    findFocused = true
+                } else {
+                    findFocused = false
+                    allowFindFocus = false
+                }
+            }
             .onReceive(indexer.requestCopyPlainPublisher) { _ in copyAll() }
             .onReceive(indexer.requestTranscriptFindFocusPublisher) { _ in if allowFindFocus { findFocused = true } }
             .sheet(isPresented: $showRawSheet) { WholeSessionRawPrettySheet(session: session) }
@@ -130,7 +139,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func toolbar(session: Session) -> some View {
         HStack(spacing: 0) {
             // Invisible button to capture Cmd+F shortcut
-            Button(action: { allowFindFocus = true; findFocused = true }) { EmptyView() }
+            Button(action: { indexer.activeSearchUI = .transcriptFind }) { EmptyView() }
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
 
@@ -168,7 +177,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(findFocused ? Color.blue.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: findFocused ? 2 : 1)
                 )
-                .onTapGesture { allowFindFocus = true; findFocused = true }
+                .onTapGesture { indexer.activeSearchUI = .transcriptFind }
                 .onAppear { allowFindFocus = true }
 
                 Button(action: { performFind(resetIndex: false, direction: -1) }) {

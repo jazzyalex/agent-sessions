@@ -8,7 +8,9 @@ struct SearchFiltersView: View {
     var body: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                Button(action: { showSearchPopover = true; DispatchQueue.main.async { isSearchFocused = true } }) {
+                Button(action: {
+                    indexer.activeSearchUI = .sessionSearch
+                }) {
                     Image(systemName: "magnifyingglass")
                         .symbolRenderingMode(.monochrome)
                         .foregroundStyle(.secondary)
@@ -41,9 +43,15 @@ struct SearchFiltersView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.25)))
-            .onReceive(indexer.$requestFocusSearch) { _ in
-                showSearchPopover = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { isSearchFocused = true }
+            .onChange(of: indexer.activeSearchUI) { _, newValue in
+                if newValue == .sessionSearch {
+                    showSearchPopover = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        isSearchFocused = true
+                    }
+                } else {
+                    isSearchFocused = false
+                }
             }
 
             // Show active project filter with clear button

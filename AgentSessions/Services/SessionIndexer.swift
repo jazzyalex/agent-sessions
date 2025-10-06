@@ -74,7 +74,15 @@ final class SessionIndexer: ObservableObject {
     @Published var selectedModel: String? = nil
     @Published var selectedKinds: Set<SessionEventKind> = Set(SessionEventKind.allCases)
 
-    // UI focus coordination
+    // UI focus coordination (mutually exclusive search UI)
+    enum ActiveSearchUI {
+        case sessionSearch   // Search sessions list (Cmd+Option+F)
+        case transcriptFind  // Find in transcript (Cmd+F)
+        case none
+    }
+    @Published var activeSearchUI: ActiveSearchUI = .none
+
+    // Legacy focus coordination (deprecated in favor of activeSearchUI)
     @Published var requestFocusSearch: Bool = false
     @Published var requestTranscriptFindFocus: Bool = false
     @Published var requestCopyPlain: Bool = false
