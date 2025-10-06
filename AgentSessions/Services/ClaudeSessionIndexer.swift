@@ -24,6 +24,9 @@ final class ClaudeSessionIndexer: ObservableObject {
     @Published var isLoadingSession: Bool = false
     @Published var loadingSessionID: String? = nil
 
+    // Transcript cache for accurate search
+    private let transcriptCache = TranscriptCache()
+
     @AppStorage("ClaudeSessionsRootOverride") var sessionsRootOverride: String = ""
     @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }
@@ -59,7 +62,7 @@ final class ClaudeSessionIndexer: ObservableObject {
         .map { [weak self] input, kinds, all -> [Session] in
             let (q, from, to, model) = input
             let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
-            var results = FilterEngine.filterSessions(all, filters: filters)
+            var results = FilterEngine.filterSessions(all, filters: filters, transcriptCache: self?.transcriptCache)
 
             if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
             if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
@@ -123,6 +126,12 @@ final class ClaudeSessionIndexer: ObservableObject {
                 self.allSessions = sortedSessions
                 self.isIndexing = false
                 print("✅ CLAUDE INDEXING DONE: total=\(sessions.count)")
+
+                // Start background transcript indexing for accurate search (non-blocking)
+                let cache = self.transcriptCache
+                Task.detached(priority: .utility) {
+                    await cache.generateAndCache(sessions: sortedSessions)
+                }
             }
         }
     }
@@ -134,7 +143,7 @@ final class ClaudeSessionIndexer: ObservableObject {
 
     func recomputeNow() {
         let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
-        var results = FilterEngine.filterSessions(allSessions, filters: filters)
+        var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache)
         if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
         if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
         DispatchQueue.main.async { self.sessions = results }
@@ -168,6 +177,18 @@ final class ClaudeSessionIndexer: ObservableObject {
                 DispatchQueue.main.async {
                     if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                         self.allSessions[idx] = fullSession
+
+                        // Update transcript cache for accurate search
+                        let cache = self.transcriptCache
+                        Task.detached(priority: .utility) {
+                            let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
+                            let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
+                                session: fullSession,
+                                filters: filters,
+                                mode: .normal
+                            )
+                            cache.set(fullSession.id, transcript: transcript)
+                        }
                     }
                     self.isLoadingSession = false
                     self.loadingSessionID = nil

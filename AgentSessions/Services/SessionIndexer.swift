@@ -58,6 +58,9 @@ final class SessionIndexer: ObservableObject {
     @Published var isLoadingSession: Bool = false
     @Published var loadingSessionID: String? = nil
 
+    // Transcript cache for accurate search
+    private let transcriptCache = TranscriptCache()
+
     // Error states
     @Published var indexingError: String? = nil
     @Published var hasEmptyDirectory: Bool = false
@@ -150,7 +153,7 @@ final class SessionIndexer: ObservableObject {
             .map { [weak self] input, kinds, all -> [Session] in
                 let (q, from, to, model) = input
                 let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
-                var results = FilterEngine.filterSessions(all, filters: filters)
+                var results = FilterEngine.filterSessions(all, filters: filters, transcriptCache: self?.transcriptCache)
 
                 if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
                 if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
@@ -257,6 +260,18 @@ final class SessionIndexer: ObservableObject {
                         self.allSessions = updated
                         print("✅ Reloaded: \(filename) events=\(fullSession.events.count) nonMeta=\(fullSession.nonMetaCount) msgCount=\(fullSession.messageCount)")
 
+                        // Update transcript cache for accurate search
+                        let cache = self.transcriptCache
+                        Task.detached(priority: .utility) {
+                            let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
+                            let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
+                                session: fullSession,
+                                filters: filters,
+                                mode: .normal
+                            )
+                            cache.set(fullSession.id, transcript: transcript)
+                        }
+
                         // Clear loading state AFTER updating allSessions, with small delay for UI to render
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             if self.loadingSessionID == id {
@@ -289,7 +304,7 @@ final class SessionIndexer: ObservableObject {
     // Trigger immediate recompute of filtered sessions using current filters (no debounce).
     func recomputeNow() {
         let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
-        var results = FilterEngine.filterSessions(allSessions, filters: filters)
+        var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache)
         if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
         if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
         // FilterEngine now preserves order, so filtered results maintain allSessions sort order
@@ -378,6 +393,12 @@ final class SessionIndexer: ObservableObject {
                 let heavyCount = sessions.count - lightCount
                 let lightSessions = sessions.filter { $0.events.isEmpty }
                 print("✅ INDEXING DONE: total=\(sessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
+
+                // Start background transcript indexing for accurate search (non-blocking)
+                let cache = self.transcriptCache
+                Task.detached(priority: .utility) {
+                    await cache.generateAndCache(sessions: sortedSessions)
+                }
 
                 // Show lightweight sessions details
                 for s in lightSessions {

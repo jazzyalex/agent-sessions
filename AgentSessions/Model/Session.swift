@@ -396,7 +396,7 @@ struct Filters: Equatable {
 }
 
 enum FilterEngine {
-    static func sessionMatches(_ session: Session, filters: Filters) -> Bool {
+    static func sessionMatches(_ session: Session, filters: Filters, transcriptCache: TranscriptCache? = nil) -> Bool {
         // Parse query operators repo: and path:
         let parsed = parseOperators(filters.query)
         let effectiveRepo = filters.repoName ?? parsed.repo
@@ -431,7 +431,13 @@ enum FilterEngine {
         // Lightweight sessions: allow through if no text search (can't search without events)
         if session.events.isEmpty { return q.isEmpty }
 
-        // Full-text across rendered transcript fields only (not raw JSON) to reduce noise
+        // Search generated transcript if cache is provided (accurate - matches visible text)
+        if let cache = transcriptCache {
+            let transcript = cache.getOrGenerate(session: session)
+            return transcript.localizedCaseInsensitiveContains(q)
+        }
+
+        // Fallback: Search raw event fields (less accurate but works without cache)
         for e in session.events {
             if let t = e.text, !t.isEmpty, t.localizedCaseInsensitiveContains(q) { return true }
             if let ti = e.toolInput, !ti.isEmpty, ti.localizedCaseInsensitiveContains(q) { return true }
@@ -440,9 +446,9 @@ enum FilterEngine {
         return false
     }
 
-    static func filterSessions(_ sessions: [Session], filters: Filters) -> [Session] {
+    static func filterSessions(_ sessions: [Session], filters: Filters, transcriptCache: TranscriptCache? = nil) -> [Session] {
         // Preserve the original sort order from allSessions instead of re-sorting
-        sessions.filter { sessionMatches($0, filters: filters) }
+        sessions.filter { sessionMatches($0, filters: filters, transcriptCache: transcriptCache) }
     }
 
     private struct ParsedQuery { let freeText: String; let repo: String?; let path: String? }

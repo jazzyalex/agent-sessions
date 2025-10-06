@@ -20,6 +20,7 @@
 		B000001C2A0A000100000002 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000113A0A000100000001 /* Session.swift */; };
 		B000001C2A0A000100000003 /* SessionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000114A0A000100000001 /* SessionEvent.swift */; };
 		B000001C2A0A000100000004 /* SessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000115A0A000100000001 /* SessionIndexer.swift */; };
+		72A02C3B7A1D43F39A01FE89 /* TranscriptCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF1EEA498EA54B428BC1AEA8 /* TranscriptCache.swift */; };
 		B000001C2A0A000100000005 /* SessionsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000116A0A000100000001 /* SessionsListView.swift */; };
 		B000001C2A0A000100000008 /* SearchFiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000119A0A000100000001 /* SearchFiltersView.swift */; };
 		B000001C2A0A000100000009 /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000011AA0A000100000001 /* PreferencesView.swift */; };
@@ -104,6 +105,7 @@
 		B00000113A0A000100000001 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Session.swift; path = AgentSessions/Model/Session.swift; sourceTree = SOURCE_ROOT; };
 		B00000114A0A000100000001 /* SessionEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionEvent.swift; path = AgentSessions/Model/SessionEvent.swift; sourceTree = SOURCE_ROOT; };
 		B00000115A0A000100000001 /* SessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionIndexer.swift; path = AgentSessions/Services/SessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		DF1EEA498EA54B428BC1AEA8 /* TranscriptCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptCache.swift; sourceTree = "<group>"; };
 		B00000116A0A000100000001 /* SessionsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionsListView.swift; path = AgentSessions/Views/SessionsListView.swift; sourceTree = SOURCE_ROOT; };
 		B00000117A0A000100000001 /* SessionTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionTimelineView.swift; path = AgentSessions/Views/SessionTimelineView.swift; sourceTree = SOURCE_ROOT; };
 		B00000118A0A000100000001 /* EventInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EventInspectorView.swift; path = AgentSessions/Views/EventInspectorView.swift; sourceTree = SOURCE_ROOT; };
@@ -289,6 +291,7 @@
 			isa = PBXGroup;
 			children = (
 				B00000115A0A000100000001 /* SessionIndexer.swift */,
+				DF1EEA498EA54B428BC1AEA8 /* TranscriptCache.swift */,
 				B00000170A0A000100000001 /* TranscriptTheme.swift */,
 				B00000171A0A000100000001 /* SessionTranscriptBuilder.swift */,
 				B00000178A0A000100000001 /* AppAppearance.swift */,
@@ -492,6 +495,7 @@
 				B000001C2A0A000100000003 /* SessionEvent.swift in Sources */,
 				B0000SSS2A0A000100000001 /* SessionSource.swift in Sources */,
 				B000001C2A0A000100000004 /* SessionIndexer.swift in Sources */,
+				72A02C3B7A1D43F39A01FE89 /* TranscriptCache.swift in Sources */,
 				B000001C2A0A000100000070 /* TranscriptTheme.swift in Sources */,
 				B000001C2A0A000100000071 /* SessionTranscriptBuilder.swift in Sources */,
 				B000001C2A0A000100000005 /* SessionsListView.swift in Sources */,
