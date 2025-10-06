@@ -190,3 +190,9 @@ final class ClaudeSessionIndexer: ObservableObject {
         }
     }
 }
+
+// MARK: - SessionIndexerProtocol Conformance
+extension ClaudeSessionIndexer: SessionIndexerProtocol {
+    // Uses default implementations from protocol extension
+    // (requestOpenRawSheet, requestCopyPlainPublisher, requestTranscriptFindFocusPublisher)
+}

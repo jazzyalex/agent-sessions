@@ -3,6 +3,37 @@ import Combine
 import CryptoKit
 import SwiftUI
 
+// MARK: - Session Indexer Protocol
+
+/// Protocol defining the common interface for session indexers (Codex and Claude)
+protocol SessionIndexerProtocol: ObservableObject {
+    var allSessions: [Session] { get }
+    var sessions: [Session] { get }
+    var isLoadingSession: Bool { get }
+    var loadingSessionID: String? { get }
+
+    // Optional features (Codex only)
+    var requestOpenRawSheet: Bool { get set }
+    var requestCopyPlainPublisher: AnyPublisher<Void, Never> { get }
+    var requestTranscriptFindFocusPublisher: AnyPublisher<Void, Never> { get }
+}
+
+// Default implementations for Claude (which doesn't have these features)
+extension SessionIndexerProtocol {
+    var requestOpenRawSheet: Bool {
+        get { false }
+        set { }
+    }
+
+    var requestCopyPlainPublisher: AnyPublisher<Void, Never> {
+        Empty<Void, Never>().eraseToAnyPublisher()
+    }
+
+    var requestTranscriptFindFocusPublisher: AnyPublisher<Void, Never> {
+        Empty<Void, Never>().eraseToAnyPublisher()
+    }
+}
+
 // DEBUG logging helper (no-ops in Release)
 #if DEBUG
 @inline(__always) private func DBG(_ message: @autoclosure () -> String) {
@@ -823,3 +854,14 @@ final class SessionIndexer: ObservableObject {
 // swiftlint:enable type_body_length
 
 // (Codex picker parity helpers temporarily disabled while focusing on title parity.)
+
+// MARK: - SessionIndexerProtocol Conformance
+extension SessionIndexer: SessionIndexerProtocol {
+    var requestCopyPlainPublisher: AnyPublisher<Void, Never> {
+        $requestCopyPlain.map { _ in () }.eraseToAnyPublisher()
+    }
+
+    var requestTranscriptFindFocusPublisher: AnyPublisher<Void, Never> {
+        $requestTranscriptFindFocus.map { _ in () }.eraseToAnyPublisher()
+    }
+}

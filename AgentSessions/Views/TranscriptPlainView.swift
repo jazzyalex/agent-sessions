@@ -1,9 +1,36 @@
 import SwiftUI
 import AppKit
 
+/// Codex transcript view - now a wrapper around UnifiedTranscriptView
 struct TranscriptPlainView: View {
     @EnvironmentObject var indexer: SessionIndexer
     let sessionID: String?
+
+    var body: some View {
+        UnifiedTranscriptView(
+            indexer: indexer,
+            sessionID: sessionID,
+            sessionIDExtractor: codexSessionID,
+            sessionIDLabel: "Codex",
+            enableCaching: true
+        )
+    }
+
+    private func codexSessionID(for session: Session) -> String? {
+        // Extract full Codex session ID (base64 or UUID from filepath)
+        let base = URL(fileURLWithPath: session.filePath).deletingPathExtension().lastPathComponent
+        if base.count >= 8 { return base }
+        return nil
+    }
+}
+
+/// Unified transcript view that works with both Codex and Claude session indexers
+struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
+    @ObservedObject var indexer: Indexer
+    let sessionID: String?
+    let sessionIDExtractor: (Session) -> String?  // Extract ID for clipboard
+    let sessionIDLabel: String  // "Codex" or "Claude"
+    let enableCaching: Bool  // Codex uses cache, Claude doesn't
 
     // Plain transcript buffer
     @State private var transcript: String = ""
@@ -38,72 +65,69 @@ struct TranscriptPlainView: View {
     // Ephemeral copy confirmation (popover)
     @State private var showIDCopiedPopover: Bool = false
 
-    // Simple memoization to make session switching instant
+    // Simple memoization (for Codex)
     @State private var transcriptCache: [String: String] = [:]
     @State private var terminalCommandRangesCache: [String: [NSRange]] = [:]
     @State private var terminalUserRangesCache: [String: [NSRange]] = [:]
     @State private var lastBuildKey: String? = nil
 
     var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-                .frame(maxWidth: .infinity)
-                .background(Color(NSColor.controlBackgroundColor))
-            Divider()
-            ZStack {
-                PlainTextScrollView(
-                    text: transcript,
-                    selection: selectedNSRange,
-                    fontSize: CGFloat(transcriptFontSize),
-                    highlights: highlightRanges,
-                    currentIndex: currentMatchIndex,
-                    commandRanges: shouldColorize ? commandRanges : [],
-                    userRanges: shouldColorize ? userRanges : [],
-                    assistantRanges: shouldColorize ? assistantRanges : [],
-                    outputRanges: shouldColorize ? outputRanges : [],
-                    errorRanges: shouldColorize ? errorRanges : []
-                )
+        if let id = sessionID, let session = indexer.allSessions.first(where: { $0.id == id }) {
+            VStack(spacing: 0) {
+                toolbar(session: session)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(NSColor.controlBackgroundColor))
+                Divider()
+                ZStack {
+                    PlainTextScrollView(
+                        text: transcript,
+                        selection: selectedNSRange,
+                        fontSize: CGFloat(transcriptFontSize),
+                        highlights: highlightRanges,
+                        currentIndex: currentMatchIndex,
+                        commandRanges: shouldColorize ? commandRanges : [],
+                        userRanges: shouldColorize ? userRanges : [],
+                        assistantRanges: shouldColorize ? assistantRanges : [],
+                        outputRanges: shouldColorize ? outputRanges : [],
+                        errorRanges: shouldColorize ? errorRanges : []
+                    )
 
-                // Loading overlay for slow session loads (>1.5s)
-                if indexer.isLoadingSession && indexer.loadingSessionID == sessionID {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .scaleEffect(1.2)
-                        Text("Loading session...")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
+                    if indexer.isLoadingSession && indexer.loadingSessionID == id {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .scaleEffect(1.2)
+                            Text("Loading session...")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(24)
+                        .background(Color(NSColor.windowBackgroundColor).opacity(0.95))
+                        .cornerRadius(12)
+                        .shadow(radius: 8)
                     }
-                    .padding(24)
-                    .background(Color(NSColor.windowBackgroundColor).opacity(0.95))
-                    .cornerRadius(12)
-                    .shadow(radius: 8)
                 }
             }
-        }
-        .onAppear { syncPrefs(); rebuild() }
-        .onChange(of: sessionID) { _, _ in rebuild() }
-        // Avoid rebuilding on global index or query changes; only rebuild when this view's inputs change
-        .onChange(of: renderModeRaw) { _, _ in rebuild() }
-        // Rebuild when current session finishes lazy loading (events.count changes from 0 to N)
-        .onChange(of: currentSession?.events.count) { _, _ in rebuild() }
-        .onReceive(indexer.$requestCopyPlain) { _ in copyAll() }
-        .onReceive(indexer.$requestTranscriptFindFocus) { _ in if allowFindFocus { findFocused = true } }
-        .sheet(isPresented: $showRawSheet) { WholeSessionRawPrettySheet(session: currentSession) }
-        .onChange(of: indexer.requestOpenRawSheet) { _, newVal in
-            if newVal {
-                showRawSheet = true
-                indexer.requestOpenRawSheet = false
+            .onAppear { rebuild(session: session) }
+            .onChange(of: id) { _, _ in rebuild(session: session) }
+            .onChange(of: renderModeRaw) { _, _ in rebuild(session: session) }
+            .onChange(of: session.events.count) { _, _ in rebuild(session: session) }
+            .onReceive(indexer.requestCopyPlainPublisher) { _ in copyAll() }
+            .onReceive(indexer.requestTranscriptFindFocusPublisher) { _ in if allowFindFocus { findFocused = true } }
+            .sheet(isPresented: $showRawSheet) { WholeSessionRawPrettySheet(session: session) }
+            .onChange(of: indexer.requestOpenRawSheet) { _, newVal in
+                if newVal {
+                    showRawSheet = true
+                    indexer.requestOpenRawSheet = false
+                }
             }
+        } else {
+            Text("Select a session to view transcript")
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private var currentSession: Session? {
-        guard let sid = sessionID else { return nil }
-        if let s = indexer.sessions.first(where: { $0.id == sid }) { return s }
-        return indexer.allSessions.first(where: { $0.id == sid })
-    }
-
-    private var toolbar: some View {
+    private func toolbar(session: Session) -> some View {
         HStack(spacing: 6) {
             // Invisible button to capture Cmd+F shortcut
             Button(action: { allowFindFocus = true; findFocused = true }) { EmptyView() }
@@ -154,7 +178,6 @@ struct TranscriptPlainView: View {
                 .buttonStyle(.borderless)
                 .focusable(false)
                 .help("Jump to the previous match")
-                .disabled(findMatches.isEmpty)
 
                 Button(action: { performFind(resetIndex: false, direction: 1) }) {
                     Image(systemName: "chevron.down")
@@ -163,70 +186,63 @@ struct TranscriptPlainView: View {
                 .buttonStyle(.borderless)
                 .focusable(false)
                 .help("Jump to the next match")
-                .disabled(findMatches.isEmpty)
 
-                if !findText.isEmpty {
-                    Text("\(findMatches.isEmpty ? 0 : currentMatchIndex + 1)/\(findMatches.count)")
-                        .foregroundStyle(.secondary)
-                        .font(.system(size: 11, design: .monospaced))
-                        .frame(minWidth: 35)
-                        .help("Current match position")
-                }
+                Text(findStatus())
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 60, alignment: .leading)
+            }
 
-                Spacer().frame(width: 8)
+            Spacer(minLength: 8)
 
-                Divider().frame(height: 20)
+            Divider().frame(height: 20)
 
-                HStack(spacing: 2) {
+            HStack(spacing: 2) {
                 Button(action: { adjustFont(-1) }) {
                     Image(systemName: "textformat.size.smaller")
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("Make text smaller")
-                .help("Decrease font size")
                 .focusable(false)
+                .help("Decrease font size")
 
                 Button(action: { adjustFont(1) }) {
                     Image(systemName: "textformat.size.larger")
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("Make text bigger")
-                .help("Increase font size")
                 .focusable(false)
-                }
-
-                Button("Copy") { copyAll() }
-                    .buttonStyle(.borderless)
-                    .focusable(false)
-                    .help("Copy the entire session text to the clipboard")
+                .help("Increase font size")
             }
+
+            Button("Copy") { copyAll() }
+                .buttonStyle(.borderless)
+                .focusable(false)
+                .help("Copy entire transcript to clipboard")
+                .keyboardShortcut("c", modifiers: [.command, .option])
 
             Divider().frame(height: 20)
 
-            Spacer(minLength: 8)
-
             // View controls group
             HStack(spacing: 6) {
-                // ID button (copy full Codex UUID), placed before Transcript mode picker
-                if let short = codexShortID {
+                // Session ID (copy full ID from session)
+                if let short = extractShortID(for: session) {
                     Button("ID \(short)") {
-                        copyCodexSessionID()
+                        copySessionID(for: session)
                     }
                     .buttonStyle(.borderless)
                     .focusable(false)
-                    .help("Copy the full session ID to the clipboard")
+                    .help("Copy full session ID to clipboard")
                     .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
-                        Text("Session ID copied")
-                            .font(.caption)
+                        Text("Copied!")
                             .padding(8)
+                            .font(.system(size: 12))
                     }
                 } else {
                     Button("ID —") {}
                         .buttonStyle(.borderless)
                         .disabled(true)
-                        .help("No Codex session ID available")
+                        .help("No \(sessionIDLabel) session ID available")
                 }
 
                 Picker("View Style", selection: $renderModeRaw) {
@@ -248,64 +264,78 @@ struct TranscriptPlainView: View {
         .frame(height: 44)
     }
 
-    private func syncPrefs() {
-        // Defaults are off; nothing to sync
-    }
-
-    private func rebuild() {
-        guard let s = currentSession else { transcript = ""; lastBuildKey = nil; return }
+    private func rebuild(session: Session) {
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
         let mode = TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal
 
-        // Memoization key: session identity, event count, render mode, and timestamp setting
-        let key = "\(s.id)|\(s.events.count)|\(renderModeRaw)|\(showTimestamps ? 1 : 0)"
-        if lastBuildKey == key { return }
+        if enableCaching {
+            // Memoization key: session identity, event count, render mode, and timestamp setting
+            let key = "\(session.id)|\(session.events.count)|\(renderModeRaw)|\(showTimestamps ? 1 : 0)"
+            if lastBuildKey == key { return }
 
-        if mode == .terminal && shouldColorize {
-            // Try cache first (text + terminal ranges)
-            if let cached = transcriptCache[key] {
-                transcript = cached
-                commandRanges = terminalCommandRangesCache[key] ?? []
-                userRanges = terminalUserRangesCache[key] ?? []
-                assistantRanges = []
-                outputRanges = []
-                errorRanges = []
-                findAdditionalRanges()
-                lastBuildKey = key
+            if mode == .terminal && shouldColorize {
+                // Try cache first (text + terminal ranges)
+                if let cached = transcriptCache[key] {
+                    transcript = cached
+                    commandRanges = terminalCommandRangesCache[key] ?? []
+                    userRanges = terminalUserRangesCache[key] ?? []
+                    assistantRanges = []
+                    outputRanges = []
+                    errorRanges = []
+                    findAdditionalRanges()
+                    lastBuildKey = key
+                } else {
+                    let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
+                    transcript = built.0
+                    commandRanges = built.1
+                    userRanges = built.2
+                    assistantRanges = []
+                    outputRanges = []
+                    errorRanges = []
+                    findAdditionalRanges()
+                    transcriptCache[key] = transcript
+                    terminalCommandRangesCache[key] = commandRanges
+                    terminalUserRangesCache[key] = userRanges
+                    lastBuildKey = key
+                }
             } else {
-                let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: s, filters: filters)
+                if let cached = transcriptCache[key] {
+                    transcript = cached
+                    commandRanges = []
+                    userRanges = []
+                    assistantRanges = []
+                    outputRanges = []
+                    errorRanges = []
+                    lastBuildKey = key
+                } else {
+                    transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: mode)
+                    commandRanges = []
+                    userRanges = []
+                    assistantRanges = []
+                    outputRanges = []
+                    errorRanges = []
+                    transcriptCache[key] = transcript
+                    lastBuildKey = key
+                }
+            }
+        } else {
+            // No caching (Claude)
+            if mode == .terminal && shouldColorize {
+                let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
                 transcript = built.0
                 commandRanges = built.1
                 userRanges = built.2
-                // Still need to find assistant, output, and error ranges for terminal mode
                 assistantRanges = []
                 outputRanges = []
                 errorRanges = []
                 findAdditionalRanges()
-                transcriptCache[key] = transcript
-                terminalCommandRangesCache[key] = commandRanges
-                terminalUserRangesCache[key] = userRanges
-                lastBuildKey = key
-            }
-        } else {
-            // Normal mode – cache text only
-            if let cached = transcriptCache[key] {
-                transcript = cached
-                commandRanges = []
-                userRanges = []
-                assistantRanges = []
-                outputRanges = []
-                errorRanges = []
-                lastBuildKey = key
             } else {
-                transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: filters, mode: mode)
+                transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: mode)
                 commandRanges = []
                 userRanges = []
                 assistantRanges = []
                 outputRanges = []
                 errorRanges = []
-                transcriptCache[key] = transcript
-                lastBuildKey = key
             }
         }
 
@@ -314,13 +344,13 @@ struct TranscriptPlainView: View {
         selectedNSRange = nil
         updateSelectionToCurrentMatch()
 
-        // Auto-scroll to first conversational message when skipping preamble is enabled
+        // Auto-scroll to first conversational message if skipping preamble is enabled
         let d = UserDefaults.standard
         let skip = (d.object(forKey: "SkipAgentsPreamble") == nil) ? true : d.bool(forKey: "SkipAgentsPreamble")
         if skip, selectedNSRange == nil {
-            if let r = tpv_firstConversationRangeInTranscript(text: transcript) {
+            if let r = firstConversationRangeInTranscript(text: transcript) {
                 selectedNSRange = r
-            } else if let s = currentSession, let anchor = tpv_firstConversationAnchor(in: s), let rr = transcript.range(of: anchor) {
+            } else if let anchor = firstConversationAnchor(in: session), let rr = transcript.range(of: anchor) {
                 selectedNSRange = NSRange(rr, in: transcript)
             }
         }
@@ -334,59 +364,49 @@ struct TranscriptPlainView: View {
             highlightRanges = []
             return
         }
-
-        // First search in the rendered transcript
-        let lowerText = transcript.lowercased()
+        let lower = transcript.lowercased()
         let lowerQ = q.lowercased()
         var matches: [Range<String.Index>] = []
-        var searchStart = lowerText.startIndex
-        while let r = lowerText.range(of: lowerQ, range: searchStart..<lowerText.endIndex) {
-            let origStart = transcript.index(transcript.startIndex, offsetBy: lowerText.distance(from: lowerText.startIndex, to: r.lowerBound))
-            let origEnd = transcript.index(origStart, offsetBy: lowerQ.count)
-            matches.append(origStart..<origEnd)
+        var searchStart = lower.startIndex
+        while let r = lower.range(of: lowerQ, range: searchStart..<lower.endIndex) {
+            matches.append(r)
             searchStart = r.upperBound
         }
-
-        // If no matches in transcript, check if the term exists in raw session data
-        // to provide feedback consistent with global search
-        if matches.isEmpty, let session = currentSession {
-            let hasMatchInRawData = session.events.contains { e in
-                if let t = e.text, t.localizedCaseInsensitiveContains(q) { return true }
-                if let ti = e.toolInput, ti.localizedCaseInsensitiveContains(q) { return true }
-                if let to = e.toolOutput, to.localizedCaseInsensitiveContains(q) { return true }
-                if e.rawJSON.localizedCaseInsensitiveContains(q) { return true }
-                return false
-            }
-
-            // If found in raw data but not in transcript, show a helpful message
-            if hasMatchInRawData {
-                // Insert a note in the transcript about hidden matches
-                let noteText = "\n[Note: '\(q)' found in raw session data but not in rendered transcript. Use Raw JSON view to see all content.]\n"
-                transcript += noteText
-
-                // Find the note in the updated transcript
-                let updatedLowerText = transcript.lowercased()
-                if let noteRange = updatedLowerText.range(of: "note:") {
-                    let origStart = transcript.index(transcript.startIndex, offsetBy: updatedLowerText.distance(from: updatedLowerText.startIndex, to: noteRange.lowerBound))
-                    let origEnd = transcript.index(origStart, offsetBy: noteText.count - 2) // Exclude newlines
-                    matches.append(origStart..<origEnd)
-                }
-            }
-        }
-
         findMatches = matches
-        // Build NSRanges for temporary highlight attributes
-        var nsRanges: [NSRange] = []
-        for r in matches {
-            if let nsr = NSRange(r, in: transcript) as NSRange? { nsRanges.append(nsr) }
+        if matches.isEmpty {
+            currentMatchIndex = 0
+            highlightRanges = []
+        } else {
+            if resetIndex {
+                currentMatchIndex = 0
+            } else {
+                var newIdx = currentMatchIndex + direction
+                if newIdx < 0 { newIdx = matches.count - 1 }
+                if newIdx >= matches.count { newIdx = 0 }
+                currentMatchIndex = newIdx
+            }
+            highlightRanges = matches.map { NSRange($0, in: transcript) }
+            updateSelectionToCurrentMatch()
         }
-        highlightRanges = nsRanges
-        if resetIndex { currentMatchIndex = matches.isEmpty ? 0 : 0 }
-        else if !matches.isEmpty {
-            currentMatchIndex = (currentMatchIndex + direction + matches.count) % matches.count
+    }
+
+    private func updateSelectionToCurrentMatch() {
+        guard !highlightRanges.isEmpty, currentMatchIndex < highlightRanges.count else {
+            selectedNSRange = nil
+            return
         }
-        // Note: We intentionally avoid styling/highlights per spec (plain text only)
-        updateSelectionToCurrentMatch()
+        selectedNSRange = highlightRanges[currentMatchIndex]
+    }
+
+    private func findStatus() -> String {
+        if findText.isEmpty { return "" }
+        if findMatches.isEmpty { return "0/0" }
+        return "\(currentMatchIndex + 1)/\(findMatches.count)"
+    }
+
+    private func adjustFont(_ delta: Int) {
+        let newSize = transcriptFontSize + Double(delta)
+        transcriptFontSize = max(8, min(32, newSize))
     }
 
     private func copyAll() {
@@ -394,86 +414,75 @@ struct TranscriptPlainView: View {
         NSPasteboard.general.setString(transcript, forType: .string)
     }
 
-    private var codexShortID: String? {
-        guard let sid = currentSession?.codexFilenameUUID, !sid.isEmpty else { return nil }
-        return String(sid.prefix(6))
-    }
-
-    private func copyCodexSessionID() {
-        guard let sid = currentSession?.codexFilenameUUID, !sid.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(sid, forType: .string)
-        showIDCopiedPopover = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            showIDCopiedPopover = false
-        }
-    }
-
-    // Parse the rendered transcript to find the first user line that is not a preamble.
-    private func tpv_firstConversationRangeInTranscript(text: String) -> NSRange? {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        var cursor = 0
-        for lineSub in lines {
-            let line = String(lineSub)
-            var work = line
-            // Strip optional timestamp prefix "HH:MM:SS "
-            if work.count >= 9, work[work.index(work.startIndex, offsetBy: 2)] == ":",
-               let space = work.firstIndex(of: " ") {
-                work = String(work[work.index(after: space)...])
-            }
-            if work.hasPrefix("> ") {
-                let content = String(work.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-                if !content.isEmpty && !tpv_looksLikePreamble(content) {
-                    let len = (line as NSString).length
-                    return NSRange(location: cursor, length: min(len, 120))
-                }
-            }
-            cursor += (line as NSString).length + 1
+    private func extractShortID(for session: Session) -> String? {
+        if let full = sessionIDExtractor(session) {
+            return String(full.prefix(6))
         }
         return nil
     }
 
-    private func findAdditionalRanges() {
-        let lines = transcript.split(separator: "\n", omittingEmptySubsequences: false)
-        var cursor = 0
+    private func copySessionID(for session: Session) {
+        guard let id = sessionIDExtractor(session) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(id, forType: .string)
+        showIDCopiedPopover = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { showIDCopiedPopover = false }
+    }
 
+    // Terminal mode additional colorization
+    private func findAdditionalRanges() {
+        let text = transcript
+        var asst: [NSRange] = []
+        var out: [NSRange] = []
+        var err: [NSRange] = []
+
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var pos = 0
         for line in lines {
-            let s = String(line)
-            // Skip timestamp prefix if present (HH:MM:SS format)
-            var lineStr = s
-            var timestampOffset = 0
-            if lineStr.count >= 9, lineStr[lineStr.index(lineStr.startIndex, offsetBy: 2)] == ":" {
-                if let space = lineStr.firstIndex(of: " ") {
-                    timestampOffset = lineStr.distance(from: lineStr.startIndex, to: lineStr.index(after: space))
-                    lineStr = String(lineStr[lineStr.index(after: space)...])
+            let len = line.utf16.count
+            let lineStr = String(line)
+            if lineStr.hasPrefix("assistant ∎ ") {
+                let r = NSRange(location: pos, length: len)
+                asst.append(r)
+            } else if lineStr.hasPrefix("output ≡ ") || lineStr.hasPrefix("  | ") {
+                let r = NSRange(location: pos, length: len)
+                out.append(r)
+            } else if lineStr.hasPrefix("error ⚠ ") {
+                let r = NSRange(location: pos, length: len)
+                err.append(r)
+            }
+            pos += len + 1
+        }
+        assistantRanges = asst
+        outputRanges = out
+        errorRanges = err
+    }
+
+    private func firstConversationAnchor(in s: Session) -> String? {
+        for ev in s.events.prefix(5000) {
+            if ev.kind == .assistant, let t = ev.text, !t.isEmpty {
+                let clean = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                if clean.count >= 10 {
+                    return String(clean.prefix(60))
                 }
             }
-
-            // Tool output: "⟪out⟫ text"
-            if lineStr.hasPrefix("⟪out⟫ ") {
-                let start = cursor + timestampOffset
-                let len = (s as NSString).length - timestampOffset
-                if len > 0 { outputRanges.append(NSRange(location: start, length: len)) }
-            }
-            // Errors: "! error text"
-            else if lineStr.hasPrefix("! error ") {
-                let start = cursor + timestampOffset
-                let len = (s as NSString).length - timestampOffset
-                if len > 0 { errorRanges.append(NSRange(location: start, length: len)) }
-            }
-            // Assistant responses: everything else that's not empty and not a known prefix
-            else if !lineStr.isEmpty && !lineStr.hasPrefix("⟪") && !lineStr.hasPrefix("›") && !lineStr.hasPrefix("!") && !lineStr.hasPrefix("> ") && !lineStr.hasPrefix("bash ") && !lineStr.hasPrefix("cd ") {
-                let start = cursor + timestampOffset
-                let len = (s as NSString).length - timestampOffset
-                if len > 0 { assistantRanges.append(NSRange(location: start, length: len)) }
-            }
-
-            cursor += (s as NSString).length + 1
         }
+        return nil
+    }
+
+    private func firstConversationRangeInTranscript(text: String) -> NSRange? {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var pos = 0
+        for line in lines {
+            let len = line.utf16.count
+            if String(line).hasPrefix("assistant ∎ ") {
+                return NSRange(location: pos, length: len)
+            }
+            pos += len + 1
+        }
+        return nil
     }
 }
-
-// MARK: - NSViewRepresentable plain text, selectable, scrollable
 
 private struct PlainTextScrollView: NSViewRepresentable {
     let text: String
@@ -628,51 +637,6 @@ private struct PlainTextScrollView: NSViewRepresentable {
                 lm.addTemporaryAttribute(.backgroundColor, value: color, forCharacterRange: r)
             }
         }
-    }
-}
-
-// MARK: - Find selection helper
-
-private extension TranscriptPlainView {
-    func updateSelectionToCurrentMatch() {
-        guard !findMatches.isEmpty else { selectedNSRange = nil; return }
-        let range = findMatches[min(currentMatchIndex, findMatches.count - 1)]
-        if let nsRange = NSRange(range, in: transcript) as NSRange? { selectedNSRange = nsRange }
-    }
-    func adjustFont(_ delta: Double) {
-        transcriptFontSize = max(9, min(30, transcriptFontSize + delta))
-    }
-
-    // Heuristics to find the first real conversational message for auto-scroll
-    func tpv_firstConversationAnchor(in session: Session) -> String? {
-        let head = session.events.prefix(50)
-        for e in head where e.kind == .user {
-            guard let t = e.text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { continue }
-            if tpv_looksLikePreamble(t) { continue }
-            return String(t.prefix(120))
-        }
-        for e in head where e.kind == .assistant {
-            if let t = e.text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return String(t.prefix(120)) }
-        }
-        return nil
-    }
-
-    func tpv_looksLikePreamble(_ text: String) -> Bool {
-        let lower = text.lowercased()
-        if lower.contains("<user_instructions>") || lower.contains("</user_instructions>") { return true }
-        if lower.contains("caveat: the messages below were generated by the user while running local commands") { return true }
-        if lower.contains("<command-name>/clear</command-name>") { return true }
-        let anchors = [
-            "# agent sessions agents playbook",
-            "## required workflow",
-            "## plan mode",
-            "commit policy (project‑wide)",
-            "docs style policy (strict)",
-            "# instructions",
-            "## instructions"
-        ]
-        if anchors.contains(where: { lower.contains($0) }) { return true }
-        return false
     }
 }
 
