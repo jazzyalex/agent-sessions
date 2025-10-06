@@ -24,9 +24,6 @@ struct UsageStripView: View {
             UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate)
             UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate)
             Spacer(minLength: 0)
-            if let line = codexStatus.usageLine, !line.isEmpty {
-                Text(line).font(.caption).foregroundStyle(.secondary)
-            }
         }
         .padding(.horizontal, 10)
         .padding(.top, collapseTop ? 0 : verticalPadding)

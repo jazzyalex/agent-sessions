@@ -5,7 +5,7 @@ import Foundation
 enum UsageStaleThresholds {
     static let fiveHour: TimeInterval = 60 * 60 // 1 hour
     static let weekly: TimeInterval = 8 * 60 * 60 // 8 hours
-    static let outdatedCopy = "Outdated data. Check manually"
+    static let outdatedCopy = "Outdated. Update manually"
 }
 
 // MARK: - Stale Check
