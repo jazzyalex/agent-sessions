@@ -128,7 +128,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func toolbar(session: Session) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
             // Invisible button to capture Cmd+F shortcut
             Button(action: { allowFindFocus = true; findFocused = true }) { EmptyView() }
                 .keyboardShortcut("f", modifiers: .command)
@@ -192,6 +192,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 60, alignment: .leading)
             }
+            .padding(.leading, 8)
 
             Spacer(minLength: 8)
 
@@ -519,7 +520,14 @@ private struct PlainTextScrollView: NSViewRepresentable {
         textView.textContainer?.lineFragmentPadding = 0
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
-        textView.backgroundColor = .clear
+
+        // Apply dimming effect when Find is active (like Apple Notes)
+        if !highlights.isEmpty {
+            textView.backgroundColor = NSColor.black.withAlphaComponent(0.08)
+        } else {
+            textView.backgroundColor = .clear
+        }
+
         textView.string = text
         applyHighlights(textView)
 
@@ -534,6 +542,14 @@ private struct PlainTextScrollView: NSViewRepresentable {
             if let font = tv.font, abs(font.pointSize - fontSize) > 0.5 {
                 tv.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
             }
+
+            // Apply/remove dimming effect based on Find state (like Apple Notes)
+            if !highlights.isEmpty {
+                tv.backgroundColor = NSColor.black.withAlphaComponent(0.08)
+            } else {
+                tv.backgroundColor = .clear
+            }
+
             let width = max(1, nsView.contentSize.width)
             tv.textContainer?.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
             tv.setFrameSize(NSSize(width: width, height: tv.frame.size.height))
@@ -551,6 +567,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         let full = NSRange(location: 0, length: (tv.string as NSString).length)
         lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: full)
         lm.removeTemporaryAttribute(.foregroundColor, forCharacterRange: full)
+
         // Command colorization (foreground)
         if !commandRanges.isEmpty {
             let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
@@ -626,16 +643,29 @@ private struct PlainTextScrollView: NSViewRepresentable {
                 }
             }
         }
-        // Find match background highlights
-        guard !highlights.isEmpty else { return }
-        // Colors that read well in both light and dark appearances
-        let matchBG = NSColor.systemYellow.withAlphaComponent(0.35)
-        let currentBG = NSColor.systemOrange.withAlphaComponent(0.55)
-        for (i, r) in highlights.enumerated() {
-            if NSMaxRange(r) <= full.length {
-                let color = (i == currentIndex) ? currentBG : matchBG
-                lm.addTemporaryAttribute(.backgroundColor, value: color, forCharacterRange: r)
+
+        // Find match highlights - apply LAST to override all colorization and ensure visibility
+        // Apple Notes style: yellow for current match, white for others
+        // The dimmed text view background makes both colors stand out clearly
+        if !highlights.isEmpty {
+            let currentBG = NSColor(deviceRed: 1.0, green: 0.92, blue: 0.0, alpha: 1.0)  // Yellow (like Apple Notes)
+            let otherBG = NSColor(deviceRed: 1.0, green: 1.0, blue: 1.0, alpha: 0.9)   // White (more opaque for visibility)
+            let matchFG = NSColor.black  // Black text for contrast
+            for (i, r) in highlights.enumerated() {
+                if NSMaxRange(r) <= full.length {
+                    let bg = (i == currentIndex) ? currentBG : otherBG
+                    // Remove any existing attributes first
+                    lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: r)
+                    lm.removeTemporaryAttribute(.foregroundColor, forCharacterRange: r)
+                    // Then apply highlight attributes
+                    lm.addTemporaryAttribute(.backgroundColor, value: bg, forCharacterRange: r)
+                    lm.addTemporaryAttribute(.foregroundColor, value: matchFG, forCharacterRange: r)
+                    // Force layout manager to redraw this range
+                    lm.invalidateDisplay(forCharacterRange: r)
+                }
             }
+            // Ensure the text view redraws
+            tv.setNeedsDisplay(tv.bounds)
         }
     }
 }
