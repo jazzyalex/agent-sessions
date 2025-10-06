@@ -12,6 +12,9 @@ protocol SessionIndexerProtocol: ObservableObject {
     var isLoadingSession: Bool { get }
     var loadingSessionID: String? { get }
 
+    // Focus coordination
+    var activeSearchUI: SessionIndexer.ActiveSearchUI { get set }
+
     // Optional features (Codex only)
     var requestOpenRawSheet: Bool { get set }
     var requestCopyPlainPublisher: AnyPublisher<Void, Never> { get }

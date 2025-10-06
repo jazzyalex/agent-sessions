@@ -24,6 +24,9 @@ final class ClaudeSessionIndexer: ObservableObject {
     @Published var isLoadingSession: Bool = false
     @Published var loadingSessionID: String? = nil
 
+    // UI focus coordination (shared with Codex via protocol)
+    @Published var activeSearchUI: SessionIndexer.ActiveSearchUI = .none
+
     // Transcript cache for accurate search
     private let transcriptCache = TranscriptCache()
 
