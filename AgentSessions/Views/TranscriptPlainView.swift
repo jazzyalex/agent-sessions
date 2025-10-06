@@ -576,10 +576,12 @@ private struct PlainTextScrollView: NSViewRepresentable {
     }
 
     private func applyHighlights(_ tv: NSTextView) {
-        guard let lm = tv.layoutManager else { return }
+        guard let textStorage = tv.textStorage else { return }
         let full = NSRange(location: 0, length: (tv.string as NSString).length)
-        lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: full)
-        lm.removeTemporaryAttribute(.foregroundColor, forCharacterRange: full)
+
+        // Remove all previous attributes (use textStorage for persistent attributes)
+        textStorage.removeAttribute(.backgroundColor, range: full)
+        textStorage.removeAttribute(.foregroundColor, range: full)
 
         // Command colorization (foreground)
         if !commandRanges.isEmpty {
@@ -592,7 +594,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             }()
             for r in commandRanges {
                 if NSMaxRange(r) <= full.length {
-                    lm.addTemporaryAttribute(.foregroundColor, value: green, forCharacterRange: r)
+                    textStorage.addAttribute(.foregroundColor, value: green, range: r)
                 }
             }
         }
@@ -607,7 +609,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             }()
             for r in userRanges {
                 if NSMaxRange(r) <= full.length {
-                    lm.addTemporaryAttribute(.foregroundColor, value: blue, forCharacterRange: r)
+                    textStorage.addAttribute(.foregroundColor, value: blue, range: r)
                 }
             }
         }
@@ -622,7 +624,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             }()
             for r in assistantRanges {
                 if NSMaxRange(r) <= full.length {
-                    lm.addTemporaryAttribute(.foregroundColor, value: gray, forCharacterRange: r)
+                    textStorage.addAttribute(.foregroundColor, value: gray, range: r)
                 }
             }
         }
@@ -637,7 +639,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             }()
             for r in outputRanges {
                 if NSMaxRange(r) <= full.length {
-                    lm.addTemporaryAttribute(.foregroundColor, value: dimmedGreen, forCharacterRange: r)
+                    textStorage.addAttribute(.foregroundColor, value: dimmedGreen, range: r)
                 }
             }
         }
@@ -652,14 +654,14 @@ private struct PlainTextScrollView: NSViewRepresentable {
             }()
             for r in errorRanges {
                 if NSMaxRange(r) <= full.length {
-                    lm.addTemporaryAttribute(.foregroundColor, value: red, forCharacterRange: r)
+                    textStorage.addAttribute(.foregroundColor, value: red, range: r)
                 }
             }
         }
 
         // Find match highlights - apply LAST to override all colorization and ensure visibility
         // Apple Notes style: yellow for current match, white for others
-        // The dimmed text view background makes both colors stand out clearly
+        // Use textStorage attributes (not temporary) so they persist regardless of focus
         if !highlights.isEmpty {
             let currentBG = NSColor(deviceRed: 1.0, green: 0.92, blue: 0.0, alpha: 1.0)  // Yellow (like Apple Notes)
             let otherBG = NSColor(deviceRed: 1.0, green: 1.0, blue: 1.0, alpha: 0.9)   // White (more opaque for visibility)
@@ -667,18 +669,11 @@ private struct PlainTextScrollView: NSViewRepresentable {
             for (i, r) in highlights.enumerated() {
                 if NSMaxRange(r) <= full.length {
                     let bg = (i == currentIndex) ? currentBG : otherBG
-                    // Remove any existing attributes first
-                    lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: r)
-                    lm.removeTemporaryAttribute(.foregroundColor, forCharacterRange: r)
-                    // Then apply highlight attributes
-                    lm.addTemporaryAttribute(.backgroundColor, value: bg, forCharacterRange: r)
-                    lm.addTemporaryAttribute(.foregroundColor, value: matchFG, forCharacterRange: r)
-                    // Force layout manager to redraw this range
-                    lm.invalidateDisplay(forCharacterRange: r)
+                    // Apply attributes to textStorage for persistent rendering
+                    textStorage.addAttribute(.backgroundColor, value: bg, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: matchFG, range: r)
                 }
             }
-            // Ensure the text view redraws
-            tv.setNeedsDisplay(tv.bounds)
         }
     }
 }
