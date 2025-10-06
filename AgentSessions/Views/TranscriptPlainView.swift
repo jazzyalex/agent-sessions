@@ -123,6 +123,17 @@ struct TranscriptPlainView: View {
                     .onSubmit { performFind(resetIndex: true) }
                     .help("Enter text to highlight matches in the session")
 
+                if !findText.isEmpty {
+                    Button(action: { findText = ""; performFind(resetIndex: true) }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.borderless)
+                    .focusable(false)
+                    .help("Clear search")
+                }
+
                 Button(action: { performFind(resetIndex: false, direction: -1) }) {
                     Image(systemName: "chevron.up")
                         .frame(width: 16, height: 16)
