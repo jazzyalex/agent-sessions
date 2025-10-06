@@ -89,12 +89,12 @@ struct AgentSessionsApp: App {
                     PreferencesWindowController.shared.show(indexer: indexer, initialTab: .about)
                     NSApp.activate(ignoringOtherApps: true)
                 }
+                Divider()
+                Button("Check for Updates…") { updateModel.checkManually() }
             }
             CommandGroup(after: .newItem) {
                 Button("Refresh") { unifiedIndexerHolder.unified?.refresh() }.keyboardShortcut("r", modifiers: .command)
                 Button("Find in Transcript") { /* unified find focuses handled in view */ }.keyboardShortcut("f", modifiers: .command).disabled(true)
-                Divider()
-                Button("Check for Updates…") { updateModel.checkManually() }
             }
             CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer) }.keyboardShortcut(",", modifiers: .command) }
             CommandGroup(after: .windowArrangement) {

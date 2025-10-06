@@ -107,32 +107,41 @@ struct TranscriptPlainView: View {
         HStack(spacing: 6) {
             // Find controls group
             HStack(spacing: 4) {
-                Button(action: { allowFindFocus = true; performFind(resetIndex: true); findFocused = true }) {
+                HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
-                        .frame(width: 16, height: 16)
-                }
-                .buttonStyle(.borderless)
-                .focusable(false)
-                .help("Search within this session")
-
-                TextField("Find", text: $findText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minWidth: 120, maxWidth: 180)
-                    .focused($findFocused)
-                    .focusable(allowFindFocus)
-                    .onSubmit { performFind(resetIndex: true) }
-                    .help("Enter text to highlight matches in the session")
-
-                if !findText.isEmpty {
-                    Button(action: { findText = ""; performFind(resetIndex: true) }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                            .frame(width: 16, height: 16)
+                        .foregroundStyle(.secondary)
+                        .imageScale(.medium)
+                    TextField("Find", text: $findText)
+                        .textFieldStyle(.plain)
+                        .focused($findFocused)
+                        .focusable(allowFindFocus)
+                        .onSubmit { performFind(resetIndex: true) }
+                        .help("Enter text to highlight matches in the session")
+                        .frame(minWidth: 180)
+                    if !findText.isEmpty {
+                        Button(action: { findText = ""; performFind(resetIndex: true) }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .imageScale(.medium)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        .help("Clear search")
                     }
-                    .buttonStyle(.borderless)
-                    .focusable(false)
-                    .help("Clear search")
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(findFocused ? Color.blue.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: findFocused ? 2 : 1)
+                )
+                .onTapGesture { allowFindFocus = true; findFocused = true }
+
+                Spacer().frame(width: 8)
 
                 Button(action: { performFind(resetIndex: false, direction: -1) }) {
                     Image(systemName: "chevron.up")
