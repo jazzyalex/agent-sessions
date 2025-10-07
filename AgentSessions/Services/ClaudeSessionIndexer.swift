@@ -159,6 +159,13 @@ final class ClaudeSessionIndexer: ObservableObject {
         Array(Set(allSessions.compactMap { $0.model })).sorted()
     }
 
+    // Update an existing session in allSessions (used by SearchCoordinator to persist parsed sessions)
+    func updateSession(_ updated: Session) {
+        if let idx = allSessions.firstIndex(where: { $0.id == updated.id }) {
+            allSessions[idx] = updated
+        }
+    }
+
     // Reload a specific lightweight session with full parse
     func reloadSession(id: String) {
         guard let existing = allSessions.first(where: { $0.id == id }),

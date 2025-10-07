@@ -151,6 +151,19 @@ final class SearchCoordinator: ObservableObject {
                 if Task.isCancelled { await self.finishCanceled(); return }
                 if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
                     if Task.isCancelled { await self.finishCanceled(); return }
+
+                    // Persist parsed session in canonical allSessions (fixes message count reversion bug)
+                    // This ensures message counts remain visible even after search is cleared
+                    await MainActor.run {
+                        if parsed.source == .codex {
+                            self.codexIndexer.updateSession(parsed)
+                            print("📊 Search updated Codex session: \(parsed.id.prefix(8)) → \(parsed.messageCount) msgs")
+                        } else {
+                            self.claudeIndexer.updateSession(parsed)
+                            print("📊 Search updated Claude session: \(parsed.id.prefix(8)) → \(parsed.messageCount) msgs")
+                        }
+                    }
+
                     let cache = self.transcriptCache(for: parsed.source)
                     if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
                         // Check and update seen outside MainActor
@@ -195,6 +208,15 @@ final class SearchCoordinator: ObservableObject {
                 let size = Self.sizeBytes(for: s)
                 if size < threshold, let parsed = await parseFullIfNeeded(session: s, threshold: threshold) {
                     s = parsed
+
+                    // Persist parsed session in canonical allSessions (same as Phase 2)
+                    await MainActor.run {
+                        if parsed.source == .codex {
+                            self.codexIndexer.updateSession(parsed)
+                        } else {
+                            self.claudeIndexer.updateSession(parsed)
+                        }
+                    }
                 }
             }
             let cache = self.transcriptCache(for: s.source)

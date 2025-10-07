@@ -212,6 +212,15 @@ final class SessionIndexer: ObservableObject {
         recomputeNow()
     }
 
+    // Update an existing session in allSessions (used by SearchCoordinator to persist parsed sessions)
+    func updateSession(_ updated: Session) {
+        if let idx = allSessions.firstIndex(where: { $0.id == updated.id }) {
+            var sessions = allSessions
+            sessions[idx] = updated
+            allSessions = sessions
+        }
+    }
+
     // Reload a specific lightweight session with full parse
     func reloadSession(id: String) {
         // Check if already reloading this session
