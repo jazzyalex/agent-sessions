@@ -508,8 +508,12 @@ actor CodexStatusService {
             guard (payload["type"] as? String) == "token_count" else { continue }
 
             var createdAt: Date? = nil
+            // Try created_at first (preferred field name)
             if let s = obj["created_at"] as? String { createdAt = iso.date(from: s) }
             if createdAt == nil, let s = payload["created_at"] as? String { createdAt = iso.date(from: s) }
+            // Fallback to timestamp field (Codex uses this)
+            if createdAt == nil, let s = obj["timestamp"] as? String { createdAt = iso.date(from: s) }
+            if createdAt == nil, let s = payload["timestamp"] as? String { createdAt = iso.date(from: s) }
 
             guard let created = createdAt else {
                 // Skip events without timestamps - cannot determine staleness accurately
