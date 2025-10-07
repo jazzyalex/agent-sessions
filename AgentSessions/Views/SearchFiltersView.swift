@@ -43,13 +43,15 @@ struct SearchFiltersView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.25)))
-            .onChange(of: indexer.activeSearchUI) { _, newValue in
-                if newValue == .sessionSearch {
+            .onChange(of: indexer.activeSearchUI) { oldValue, newValue in
+                // Only focus if actively transitioning TO sessionSearch (not just because it IS sessionSearch)
+                if oldValue != .sessionSearch && newValue == .sessionSearch {
                     showSearchPopover = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         isSearchFocused = true
                     }
-                } else {
+                } else if newValue != .sessionSearch && newValue != .none {
+                    // Another search UI became active - release focus
                     isSearchFocused = false
                 }
             }

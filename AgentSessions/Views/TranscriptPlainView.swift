@@ -27,6 +27,7 @@ struct TranscriptPlainView: View {
 /// Unified transcript view that works with both Codex and Claude session indexers
 struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @ObservedObject var indexer: Indexer
+    @EnvironmentObject var focusCoordinator: WindowFocusCoordinator
     let sessionID: String?
     let sessionIDExtractor: (Session) -> String?  // Extract ID for clipboard
     let sessionIDLabel: String  // "Codex" or "Claude"
@@ -111,11 +112,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .onChange(of: id) { _, _ in rebuild(session: session) }
             .onChange(of: renderModeRaw) { _, _ in rebuild(session: session) }
             .onChange(of: session.events.count) { _, _ in rebuild(session: session) }
-            .onChange(of: indexer.activeSearchUI) { _, newValue in
-                if newValue == .transcriptFind {
+            .onChange(of: focusCoordinator.activeFocus) { oldFocus, newFocus in
+                // Only focus if actively transitioning TO transcriptFind (not just because it IS transcriptFind)
+                if oldFocus != .transcriptFind && newFocus == .transcriptFind {
                     allowFindFocus = true
                     findFocused = true
-                } else {
+                } else if newFocus != .transcriptFind && newFocus != .none {
+                    // Another search UI became active - release focus
                     findFocused = false
                     allowFindFocus = false
                 }
@@ -139,7 +142,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func toolbar(session: Session) -> some View {
         HStack(spacing: 0) {
             // Invisible button to capture Cmd+F shortcut
-            Button(action: { indexer.activeSearchUI = .transcriptFind }) { EmptyView() }
+            Button(action: { focusCoordinator.perform(.openTranscriptFind) }) { EmptyView() }
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
 
@@ -177,7 +180,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(findFocused ? Color.blue.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: findFocused ? 2 : 1)
                 )
-                .onTapGesture { indexer.activeSearchUI = .transcriptFind }
+                .onTapGesture { focusCoordinator.perform(.openTranscriptFind) }
                 .onAppear { allowFindFocus = true }
 
                 Button(action: { performFind(resetIndex: false, direction: -1) }) {
@@ -564,14 +567,23 @@ private struct PlainTextScrollView: NSViewRepresentable {
         // Enable non-contiguous layout for better performance on large documents
         textView.layoutManager?.allowsNonContiguousLayout = true
 
+        // Set background with proper dark mode support
+        let isDark = (textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+        let baseBackground: NSColor = isDark ? NSColor(white: 0.15, alpha: 1.0) : NSColor.textBackgroundColor
+
         // Apply dimming effect when Find is active (like Apple Notes)
         if !highlights.isEmpty {
-            textView.backgroundColor = NSColor.black.withAlphaComponent(0.08)
+            textView.backgroundColor = isDark ? NSColor(white: 0.12, alpha: 1.0) : NSColor.black.withAlphaComponent(0.08)
         } else {
-            textView.backgroundColor = .clear
+            textView.backgroundColor = baseBackground
         }
 
         textView.string = text
+
+        // Set default text color - white in dark mode, black in light mode
+        let isDarkMode = (textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+        textView.textColor = isDarkMode ? NSColor(white: 0.92, alpha: 1.0) : NSColor.labelColor
+
         applySyntaxColors(textView)
         applyFindHighlights(textView, coordinator: context.coordinator)
 
@@ -597,11 +609,19 @@ private struct PlainTextScrollView: NSViewRepresentable {
                 tv.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
             }
 
+            // Set default text color - white in dark mode, black in light mode
+            let isDarkMode = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+            tv.textColor = isDarkMode ? NSColor(white: 0.92, alpha: 1.0) : NSColor.labelColor
+
+            // Set background with proper dark mode support
+            let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+            let baseBackground: NSColor = isDark ? NSColor(white: 0.15, alpha: 1.0) : NSColor.textBackgroundColor
+
             // Apply/remove dimming effect based on Find state (like Apple Notes)
             if !highlights.isEmpty {
-                tv.backgroundColor = NSColor.black.withAlphaComponent(0.08)
+                tv.backgroundColor = isDark ? NSColor(white: 0.12, alpha: 1.0) : NSColor.black.withAlphaComponent(0.08)
             } else {
-                tv.backgroundColor = .clear
+                tv.backgroundColor = baseBackground
             }
 
             let width = max(1, nsView.contentSize.width)
@@ -628,6 +648,11 @@ private struct PlainTextScrollView: NSViewRepresentable {
 
         // Clear only foreground colors (not background - that's for find highlights)
         textStorage.removeAttribute(.foregroundColor, range: full)
+
+        // Set base text color for all text (soft white in dark mode)
+        let isDarkMode = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+        let baseColor = isDarkMode ? NSColor(white: 0.92, alpha: 1.0) : NSColor.labelColor
+        textStorage.addAttribute(.foregroundColor, value: baseColor, range: full)
 
         // Command colorization (foreground)
         if !commandRanges.isEmpty {

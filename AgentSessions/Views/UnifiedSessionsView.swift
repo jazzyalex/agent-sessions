@@ -30,6 +30,7 @@ struct UnifiedSessionsView: View {
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
 
     @StateObject private var searchCoordinator: SearchCoordinator
+    @StateObject private var focusCoordinator = WindowFocusCoordinator()
     private var rows: [Session] { (searchCoordinator.isRunning || !searchCoordinator.results.isEmpty) ? searchCoordinator.results : unified.sessions }
 
     init(unified: UnifiedSessionIndexer, codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, layoutMode: LayoutMode, onToggleLayout: @escaping () -> Void) {
@@ -101,7 +102,7 @@ struct UnifiedSessionsView: View {
                     .help("Show or hide Claude sessions in the list")
                 }
             }
-            ToolbarItem(placement: .automatic) { UnifiedSearchFiltersView(unified: unified, search: searchCoordinator) }
+            ToolbarItem(placement: .automatic) { UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator) }
             ToolbarItem(placement: .automatic) {
                 Button(action: { if let s = selectedSession { resume(s) } }) {
                     Label("Resume", systemImage: "play.circle")
@@ -136,6 +137,8 @@ struct UnifiedSessionsView: View {
         }
         .onChange(of: selection) { _, id in
             guard let id, let s = rows.first(where: { $0.id == id }) else { return }
+            // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
+            focusCoordinator.perform(.selectSession(id: id))
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
             // If a large, unparsed session is clicked during an active search, promote it in the coordinator.
             let sizeBytes = s.fileSizeBytes ?? 0
@@ -273,8 +276,10 @@ struct UnifiedSessionsView: View {
                 if s.source == .codex {
                     TranscriptPlainView(sessionID: selection)
                         .environmentObject(codexIndexer)
+                        .environmentObject(focusCoordinator)
                 } else {
                     ClaudeTranscriptView(indexer: claudeIndexer, sessionID: selection)
+                        .environmentObject(focusCoordinator)
                 }
             } else {
                 Text("Select a session to view transcript").foregroundColor(.secondary)
@@ -405,6 +410,7 @@ struct UnifiedSessionsView: View {
 private struct UnifiedSearchFiltersView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var search: SearchCoordinator
+    @ObservedObject var focus: WindowFocusCoordinator
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var showInlineSearch: Bool = false
     private enum SearchFocusTarget: Hashable { case field, clear }
@@ -482,8 +488,7 @@ private struct UnifiedSearchFiltersView: View {
             } else {
                 // Compact loop button without border; inline search replaces it when active
                 Button(action: {
-                    showInlineSearch = true
-                    DispatchQueue.main.async { searchFocus = .field }
+                    focus.perform(.openSessionSearch)
                 }) {
                     Image(systemName: "magnifyingglass")
                         .symbolRenderingMode(.monochrome)
@@ -513,6 +518,19 @@ private struct UnifiedSearchFiltersView: View {
                 .padding(.vertical, 4)
                 .background(Color.blue.opacity(0.1))
                 .background(RoundedRectangle(cornerRadius: 6).stroke(Color.blue.opacity(0.3)))
+            }
+        }
+        .onChange(of: focus.activeFocus) { _, newFocus in
+            if newFocus == .sessionSearch {
+                showInlineSearch = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    searchFocus = .field
+                }
+            } else if newFocus == .none || newFocus == .transcriptFind {
+                if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !search.isRunning {
+                    showInlineSearch = false
+                    searchFocus = nil
+                }
             }
         }
     }
