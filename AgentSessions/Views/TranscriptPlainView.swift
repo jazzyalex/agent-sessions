@@ -281,6 +281,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
         let mode = TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal
 
+        #if DEBUG
+        print("🔨 REBUILD: mode=\(mode) shouldColorize=\(shouldColorize) enableCaching=\(enableCaching)")
+        #endif
+
         if enableCaching {
             // Memoization key: session identity, event count, render mode, and timestamp setting
             let key = "\(session.id)|\(session.events.count)|\(renderModeRaw)|\(showTimestamps ? 1 : 0)"
@@ -579,11 +583,6 @@ private struct PlainTextScrollView: NSViewRepresentable {
         }
 
         textView.string = text
-
-        // Set default text color - white in dark mode, black in light mode
-        let isDarkMode = (textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-        textView.textColor = isDarkMode ? NSColor(white: 0.92, alpha: 1.0) : NSColor.labelColor
-
         applySyntaxColors(textView)
         applyFindHighlights(textView, coordinator: context.coordinator)
 
@@ -608,10 +607,6 @@ private struct PlainTextScrollView: NSViewRepresentable {
             if let font = tv.font, abs(font.pointSize - fontSize) > 0.5 {
                 tv.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
             }
-
-            // Set default text color - white in dark mode, black in light mode
-            let isDarkMode = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-            tv.textColor = isDarkMode ? NSColor(white: 0.92, alpha: 1.0) : NSColor.labelColor
 
             // Set background with proper dark mode support
             let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
@@ -643,6 +638,10 @@ private struct PlainTextScrollView: NSViewRepresentable {
     private func applySyntaxColors(_ tv: NSTextView) {
         guard let textStorage = tv.textStorage else { return }
         let full = NSRange(location: 0, length: (tv.string as NSString).length)
+
+        #if DEBUG
+        print("🎨 SYNTAX: cmd=\(commandRanges.count) user=\(userRanges.count) asst=\(assistantRanges.count) out=\(outputRanges.count) err=\(errorRanges.count)")
+        #endif
 
         textStorage.beginEditing()
 
