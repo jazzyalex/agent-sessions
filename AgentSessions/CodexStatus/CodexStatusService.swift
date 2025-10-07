@@ -510,7 +510,14 @@ actor CodexStatusService {
             var createdAt: Date? = nil
             if let s = obj["created_at"] as? String { createdAt = iso.date(from: s) }
             if createdAt == nil, let s = payload["created_at"] as? String { createdAt = iso.date(from: s) }
-            let created = createdAt ?? Date()
+
+            guard let created = createdAt else {
+                // Skip events without timestamps - cannot determine staleness accurately
+                continue
+            }
+
+            // Additional safety: reject future timestamps (clock skew protection)
+            guard created <= Date() else { continue }
 
             guard let rate = payload["rate_limits"] as? [String: Any] else { continue }
             let primary = rate["primary"] as? [String: Any]

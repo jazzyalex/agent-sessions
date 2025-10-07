@@ -65,9 +65,11 @@ private struct UsageMeter: View {
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
-        let includeReset = showResetTime && !reset.isEmpty
+        let includeReset = showResetTime
         let stale = isResetInfoStale(kind: title, source: .codex, lastUpdate: lastUpdate, eventTimestamp: eventTimestamp)
-        let displayText = stale ? UsageStaleThresholds.outdatedCopy : formattedReset(reset)
+        let displayText = (stale || reset.isEmpty)
+            ? UsageStaleThresholds.outdatedCopy
+            : formattedReset(reset)
 
         HStack(spacing: UsageMeterLayout.itemSpacing) {
             Text(title)
