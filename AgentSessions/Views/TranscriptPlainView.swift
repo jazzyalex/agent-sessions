@@ -112,19 +112,41 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .onChange(of: id) { _, _ in rebuild(session: session) }
             .onChange(of: renderModeRaw) { _, _ in rebuild(session: session) }
             .onChange(of: session.events.count) { _, _ in rebuild(session: session) }
+            .onChange(of: findFocused) { _, newValue in
+                #if DEBUG
+                print("🔍 FIND FOCUSED CHANGED: \(newValue) (allowFindFocus=\(allowFindFocus))")
+                #endif
+            }
+            .onChange(of: allowFindFocus) { _, newValue in
+                #if DEBUG
+                print("🔓 ALLOW FIND FOCUS CHANGED: \(newValue)")
+                #endif
+            }
             .onChange(of: focusCoordinator.activeFocus) { oldFocus, newFocus in
+                #if DEBUG
+                print("🎯 COORDINATOR FOCUS CHANGE: \(oldFocus) → \(newFocus)")
+                #endif
                 // Only focus if actively transitioning TO transcriptFind (not just because it IS transcriptFind)
                 if oldFocus != .transcriptFind && newFocus == .transcriptFind {
+                    #if DEBUG
+                    print("  ↳ Setting allowFindFocus=true, findFocused=true")
+                    #endif
                     allowFindFocus = true
                     findFocused = true
                 } else if newFocus != .transcriptFind && newFocus != .none {
+                    #if DEBUG
+                    print("  ↳ Setting findFocused=false, allowFindFocus=false")
+                    #endif
                     // Another search UI became active - release focus
                     findFocused = false
                     allowFindFocus = false
+                } else {
+                    #if DEBUG
+                    print("  ↳ NO ACTION (newFocus=\(newFocus))")
+                    #endif
                 }
             }
             .onReceive(indexer.requestCopyPlainPublisher) { _ in copyAll() }
-            .onReceive(indexer.requestTranscriptFindFocusPublisher) { _ in if allowFindFocus { findFocused = true } }
             .sheet(isPresented: $showRawSheet) { WholeSessionRawPrettySheet(session: session) }
             .onChange(of: indexer.requestOpenRawSheet) { _, newVal in
                 if newVal {
@@ -181,7 +203,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         .stroke(findFocused ? Color.blue.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: findFocused ? 2 : 1)
                 )
                 .onTapGesture { focusCoordinator.perform(.openTranscriptFind) }
-                .onAppear { allowFindFocus = true }
+                .onAppear {
+                    #if DEBUG
+                    print("👁️ FIND BAR ON APPEAR: Setting allowFindFocus=true")
+                    #endif
+                    allowFindFocus = true
+                }
 
                 Button(action: { performFind(resetIndex: false, direction: -1) }) {
                     Image(systemName: "chevron.up")
