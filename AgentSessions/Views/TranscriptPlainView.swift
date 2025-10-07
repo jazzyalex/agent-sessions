@@ -168,6 +168,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
 
+            // Invisible button to toggle view mode with Cmd+Shift+T
+            Button(action: {
+                renderModeRaw = (renderModeRaw == TranscriptRenderMode.normal.rawValue)
+                    ? TranscriptRenderMode.terminal.rawValue
+                    : TranscriptRenderMode.normal.rawValue
+            }) { EmptyView() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .hidden()
+
             // === LEADING GROUP: View Mode Segmented Control ===
             Picker("View Style", selection: $renderModeRaw) {
                 Text("Transcript")
@@ -180,7 +189,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .controlSize(.large)
             .frame(width: 200)
             .accessibilityLabel("View Style")
-            .help("Switch between Transcript (plain text) and Terminal (colorized) view")
+            .help("Switch between Transcript and Terminal view (⌘⇧T)")
             .padding(.leading, 12)
 
             // System flexible space pushes trailing group to the right
@@ -200,7 +209,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
-                    .help("Copy session ID: \(short)")
+                    .help("Copy session ID: \(short) (⌘⇧C)")
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
                     .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
                         Text("ID Copied!")
                             .padding(8)
@@ -218,7 +228,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
-                    .help("Decrease font size")
+                    .help("Decrease font size (⌘-)")
+                    .keyboardShortcut("-", modifiers: .command)
 
                     Button(action: { adjustFont(1) }) {
                         Image(systemName: "textformat.size.larger")
@@ -226,7 +237,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
-                    .help("Increase font size")
+                    .help("Increase font size (⌘+)")
+                    .keyboardShortcut("+", modifiers: .command)
                 }
 
                 // Copy transcript button
@@ -234,7 +246,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .buttonStyle(.borderless)
                     .controlSize(.small)
                     .font(.system(size: 14))
-                    .help("Copy entire transcript to clipboard")
+                    .help("Copy entire transcript to clipboard (⌥⌘C)")
                     .keyboardShortcut("c", modifiers: [.command, .option])
             }
 
@@ -261,7 +273,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .help("Clear search (Esc)")
+                        .help("Clear search (⎋)")
+                        .keyboardShortcut(.escape)
                     }
                 }
                 .padding(.horizontal, 8)

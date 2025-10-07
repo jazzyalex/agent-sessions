@@ -103,7 +103,8 @@ struct UnifiedSessionsView: View {
                             .fixedSize()
                     }
                     .toggleStyle(.button)
-                    .help("Show or hide Codex sessions in the list")
+                    .help("Show or hide Codex sessions in the list (⌘1)")
+                    .keyboardShortcut("1", modifiers: .command)
 
                     Toggle(isOn: $unified.includeClaude) {
                         Text("Claude")
@@ -111,7 +112,8 @@ struct UnifiedSessionsView: View {
                             .fixedSize()
                     }
                     .toggleStyle(.button)
-                    .help("Show or hide Claude sessions in the list")
+                    .help("Show or hide Claude sessions in the list (⌘2)")
+                    .keyboardShortcut("2", modifiers: .command)
                 }
             }
             ToolbarItem(placement: .automatic) {
@@ -123,27 +125,31 @@ struct UnifiedSessionsView: View {
                 }
                 .keyboardShortcut("r", modifiers: [.command, .control])
                 .disabled(selectedSession == nil)
-                .help("Attempt to resume the selected session in its original CLI. Some sessions cannot be relaunched.")
+                .help("Resume the selected session in its original CLI (⌃⌘R)")
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: { if let s = selectedSession { openDir(s) } }) { Label("Open Working Directory", systemImage: "folder") }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
                     .disabled(selectedSession == nil)
-                    .help("Reveal the selected session's working directory in Finder")
+                    .help("Reveal the selected session's working directory in Finder (⌘⇧O)")
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: { unified.refresh() }) {
                     if unified.isIndexing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
                 }
-                    .help("Re-run the session indexer to discover new logs")
+                    .keyboardShortcut("r", modifiers: .command)
+                    .help("Re-run the session indexer to discover new logs (⌘R)")
             }
             ToolbarItem(placement: .automatic) { Divider() }
             ToolbarItem(placement: .automatic) {
                 Button(action: { onToggleLayout() }) { Image(systemName: layoutMode == .vertical ? "rectangle.split.1x2" : "rectangle.split.2x1") }
-                    .help("Toggle between vertical and horizontal layout modes")
+                    .keyboardShortcut("l", modifiers: .command)
+                    .help("Toggle between vertical and horizontal layout modes (⌘L)")
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, initialTab: .general) }) { Image(systemName: "gear") }
-                    .help("Open preferences for appearance, indexing, and agents")
+                    .keyboardShortcut(",", modifiers: .command)
+                    .help("Open preferences for appearance, indexing, and agents (⌘,)")
             }
         }
         .onAppear {
@@ -242,24 +248,27 @@ struct UnifiedSessionsView: View {
         .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let id = ids.first, let s = rows.first(where: { $0.id == id }) {
                 Button("Open Working Directory") { openDir(s) }
-                    .help("Reveal the working directory for \(s.title) in Finder")
-                Button("Open Session in Folder") { revealSessionFile(s) }
-                    .help("Show the raw session log in Finder")
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
+                    .help("Reveal working directory in Finder (⌘⇧O)")
+                Button("Reveal Session Log") { revealSessionFile(s) }
+                    .keyboardShortcut("l", modifiers: [.command, .option])
+                    .help("Show session log file in Finder (⌥⌘L)")
                 if let name = s.repoName, !name.isEmpty {
                     Divider()
                     Button("Filter by Project: \(name)") { unified.projectFilter = name; unified.recomputeNow() }
-                        .help("Filter to sessions from \(name)")
+                        .keyboardShortcut("p", modifiers: [.command, .option])
+                        .help("Show only sessions from \(name) (⌥⌘P)")
                 }
             } else {
                 Button("Open Working Directory") {}
                     .disabled(true)
-                    .help("Select a single session with a known working directory")
-                Button("Open Session in Folder") {}
+                    .help("Select a session to open its working directory")
+                Button("Reveal Session Log") {}
                     .disabled(true)
-                    .help("Select one session to reveal its log in Finder")
+                    .help("Select a session to reveal its log file")
                 Button("Filter by Project") {}
                     .disabled(true)
-                    .help("Select one session that has project metadata to filter by")
+                    .help("Select a session with project metadata to filter")
             }
         }
         .onChange(of: sortOrder) { _, newValue in
@@ -457,7 +466,8 @@ private struct UnifiedSearchFiltersView: View {
                         }
                         .focused($searchFocus, equals: .clear)
                         .buttonStyle(.plain)
-                        .help("Clear search")
+                        .keyboardShortcut(.escape)
+                        .help("Clear search (⎋)")
                     }
                 }
                 .padding(.horizontal, 10)

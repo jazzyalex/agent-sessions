@@ -15,8 +15,20 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var selectedModel: String? = nil
     @Published var selectedKinds: Set<SessionEventKind> = Set(SessionEventKind.allCases)
     @Published var projectFilter: String? = nil
-    @Published var includeCodex: Bool = true
-    @Published var includeClaude: Bool = true
+
+    // Source filters (persisted with @Published for Combine compatibility)
+    @Published var includeCodex: Bool = UserDefaults.standard.object(forKey: "IncludeCodexSessions") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(includeCodex, forKey: "IncludeCodexSessions")
+            recomputeNow()
+        }
+    }
+    @Published var includeClaude: Bool = UserDefaults.standard.object(forKey: "IncludeClaudeSessions") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(includeClaude, forKey: "IncludeClaudeSessions")
+            recomputeNow()
+        }
+    }
 
     // Sorting
     struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title, agent } }
