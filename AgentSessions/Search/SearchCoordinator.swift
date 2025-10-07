@@ -33,13 +33,20 @@ final class SearchCoordinator: ObservableObject {
 
     private var currentTask: Task<Void, Never>? = nil
     private let codexIndexer: SessionIndexer
+    private let claudeIndexer: ClaudeSessionIndexer
     // Promotion support for large-queue preemption
     private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
     private var runID = UUID()
 
-    init(codexIndexer: SessionIndexer) {
+    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer) {
         self.codexIndexer = codexIndexer
+        self.claudeIndexer = claudeIndexer
+    }
+
+    // Get appropriate transcript cache based on session source
+    private func transcriptCache(for source: SessionSource) -> TranscriptCache {
+        source == .codex ? codexIndexer.searchTranscriptCache : claudeIndexer.searchTranscriptCache
     }
 
     func cancel() {
@@ -144,7 +151,8 @@ final class SearchCoordinator: ObservableObject {
                 if Task.isCancelled { await self.finishCanceled(); return }
                 if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
                     if Task.isCancelled { await self.finishCanceled(); return }
-                    if FilterEngine.sessionMatches(parsed, filters: filters) {
+                    let cache = self.transcriptCache(for: parsed.source)
+                    if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
                         // Check and update seen outside MainActor
                         let shouldAdd = !seen.contains(parsed.id)
                         if shouldAdd {
@@ -189,7 +197,8 @@ final class SearchCoordinator: ObservableObject {
                     s = parsed
                 }
             }
-            if FilterEngine.sessionMatches(s, filters: filters) { out.append(s) }
+            let cache = self.transcriptCache(for: s.source)
+            if FilterEngine.sessionMatches(s, filters: filters, transcriptCache: cache) { out.append(s) }
         }
         return out
     }

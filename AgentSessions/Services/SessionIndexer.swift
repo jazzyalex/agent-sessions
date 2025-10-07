@@ -64,6 +64,9 @@ final class SessionIndexer: ObservableObject {
     // Transcript cache for accurate search
     private let transcriptCache = TranscriptCache()
 
+    // Expose cache for SearchCoordinator (internal - not public API)
+    internal var searchTranscriptCache: TranscriptCache { transcriptCache }
+
     // Error states
     @Published var indexingError: String? = nil
     @Published var hasEmptyDirectory: Bool = false

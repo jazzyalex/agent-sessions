@@ -219,17 +219,17 @@ actor ClaudeStatusService {
 
             if let session = obj["session_5h"] as? [String: Any] {
                 snapshot.sessionPercent = session["pct_used"] as? Int ?? 0
-                snapshot.sessionResetText = stripTimezone(session["resets"] as? String ?? "")
+                snapshot.sessionResetText = formatResetTime(session["resets"] as? String ?? "", isWeekly: false)
             }
 
             if let weekAll = obj["week_all_models"] as? [String: Any] {
                 snapshot.weekAllModelsPercent = weekAll["pct_used"] as? Int ?? 0
-                snapshot.weekAllModelsResetText = stripTimezone(weekAll["resets"] as? String ?? "")
+                snapshot.weekAllModelsResetText = formatResetTime(weekAll["resets"] as? String ?? "", isWeekly: true)
             }
 
             if let weekOpus = obj["week_opus"] as? [String: Any] {
                 snapshot.weekOpusPercent = weekOpus["pct_used"] as? Int
-                snapshot.weekOpusResetText = (weekOpus["resets"] as? String).map(stripTimezone)
+                snapshot.weekOpusResetText = (weekOpus["resets"] as? String).map { formatResetTime($0, isWeekly: true) }
             }
 
             return snapshot
@@ -238,13 +238,91 @@ actor ClaudeStatusService {
         }
     }
 
-    private func stripTimezone(_ text: String) -> String {
-        // Remove timezone like "(America/Los_Angeles)" to match Codex format
-        // "12:59am (America/Los_Angeles)" -> "12:59am"
-        guard let parenIndex = text.firstIndex(of: "(") else {
-            return text
+    private func formatResetTime(_ text: String, isWeekly: Bool) -> String {
+        // Claude CLI outputs formats like:
+        // - "1am (America/Los_Angeles)" for 5h
+        // - "Oct 9 at 2pm (America/Los_Angeles)" for weekly
+        // Convert to Codex format:
+        // - "resets HH:mm" for 5h
+        // - "resets HH:mm on d MMM" for weekly
+
+        guard !text.isEmpty else { return "" }
+
+        // Strip timezone first
+        var cleanText = text
+        if let parenIndex = text.firstIndex(of: "(") {
+            cleanText = String(text[..<parenIndex]).trimmingCharacters(in: .whitespaces)
         }
-        return text[..<parenIndex].trimmingCharacters(in: .whitespaces)
+
+        // Use Pacific timezone to match Codex
+        let tz = TimeZone(identifier: "America/Los_Angeles")!
+
+        if isWeekly {
+            // Parse "Oct 9 at 2pm" format
+            // Try multiple formats Claude might use
+            let formats = [
+                "MMM d 'at' ha",      // Oct 9 at 2pm
+                "MMM d 'at' h:mma",   // Oct 9 at 2:00pm
+                "MMM d 'at' h a",     // Oct 9 at 2 pm
+            ]
+
+            for format in formats {
+                let parser = DateFormatter()
+                parser.locale = Locale(identifier: "en_US_POSIX")
+                parser.timeZone = tz
+                parser.dateFormat = format
+
+                if let date = parser.date(from: cleanText) {
+                    // Format as "HH:mm"
+                    let timeFmt = DateFormatter()
+                    timeFmt.locale = Locale(identifier: "en_US_POSIX")
+                    timeFmt.timeZone = tz
+                    timeFmt.dateFormat = "HH:mm"
+                    let time = timeFmt.string(from: date)
+
+                    // Format as "d MMM"
+                    let dateFmt = DateFormatter()
+                    dateFmt.locale = Locale(identifier: "en_US_POSIX")
+                    dateFmt.timeZone = tz
+                    dateFmt.dateFormat = "d MMM"
+                    let dateStr = dateFmt.string(from: date)
+
+                    return "resets \(time) on \(dateStr)"
+                }
+            }
+        } else {
+            // Parse "1am" or "1:00am" format for 5h
+            let formats = [
+                "ha",      // 1am
+                "h:mma",   // 1:00am
+                "h a",     // 1 am
+            ]
+
+            for format in formats {
+                let parser = DateFormatter()
+                parser.locale = Locale(identifier: "en_US_POSIX")
+                parser.timeZone = tz
+                parser.dateFormat = format
+
+                if let date = parser.date(from: cleanText) {
+                    // Format as "HH:mm"
+                    let timeFmt = DateFormatter()
+                    timeFmt.locale = Locale(identifier: "en_US_POSIX")
+                    timeFmt.timeZone = tz
+                    timeFmt.dateFormat = "HH:mm"
+                    let time = timeFmt.string(from: date)
+
+                    return "resets \(time)"
+                }
+            }
+        }
+
+        // Fallback: return original text with "resets" prefix if not already present
+        let lower = cleanText.lowercased()
+        if lower.hasPrefix("reset") {
+            return cleanText
+        }
+        return "resets \(cleanText)"
     }
 
     private func nextInterval() -> UInt64 {

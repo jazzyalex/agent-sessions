@@ -30,6 +30,9 @@ final class ClaudeSessionIndexer: ObservableObject {
     // Transcript cache for accurate search
     private let transcriptCache = TranscriptCache()
 
+    // Expose cache for SearchCoordinator (internal - not public API)
+    internal var searchTranscriptCache: TranscriptCache { transcriptCache }
+
     @AppStorage("ClaudeSessionsRootOverride") var sessionsRootOverride: String = ""
     @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }

@@ -428,16 +428,17 @@ enum FilterEngine {
         let q = parsed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { return true }
 
-        // Lightweight sessions: allow through if no text search (can't search without events)
-        if session.events.isEmpty { return q.isEmpty }
-
-        // Search generated transcript if cache is provided (accurate - matches visible text)
+        // Priority 1: Search generated transcript if cache is provided (accurate - matches visible text)
+        // This works for both full and lightweight sessions if the transcript is cached
         if let cache = transcriptCache {
             let transcript = cache.getOrGenerate(session: session)
             return transcript.localizedCaseInsensitiveContains(q)
         }
 
-        // Fallback: Search raw event fields (less accurate but works without cache)
+        // Priority 2: Lightweight sessions without cache cannot be searched (no events to search)
+        if session.events.isEmpty { return q.isEmpty }
+
+        // Priority 3: Fallback to raw event fields (less accurate but works without cache)
         for e in session.events {
             if let t = e.text, !t.isEmpty, t.localizedCaseInsensitiveContains(q) { return true }
             if let ti = e.toolInput, !ti.isEmpty, ti.localizedCaseInsensitiveContains(q) { return true }

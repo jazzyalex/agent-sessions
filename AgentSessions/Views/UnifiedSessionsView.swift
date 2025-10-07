@@ -39,7 +39,7 @@ struct UnifiedSessionsView: View {
         self.claudeIndexer = claudeIndexer
         self.layoutMode = layoutMode
         self.onToggleLayout = onToggleLayout
-        _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(codexIndexer: codexIndexer))
+        _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer))
     }
 
     var body: some View {
