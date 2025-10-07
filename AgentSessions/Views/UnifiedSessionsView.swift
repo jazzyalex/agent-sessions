@@ -98,18 +98,25 @@ struct UnifiedSessionsView: View {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 2) {
                     Toggle(isOn: $unified.includeCodex) {
-                        Text("Codex").foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.blue : .primary))
+                        Text("Codex")
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.blue : .primary))
+                            .fixedSize()
                     }
                     .toggleStyle(.button)
                     .help("Show or hide Codex sessions in the list")
+
                     Toggle(isOn: $unified.includeClaude) {
-                        Text("Claude").foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary))
+                        Text("Claude")
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary))
+                            .fixedSize()
                     }
                     .toggleStyle(.button)
                     .help("Show or hide Claude sessions in the list")
                 }
             }
-            ToolbarItem(placement: .automatic) { UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator) }
+            ToolbarItem(placement: .automatic) {
+                UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator)
+            }
             ToolbarItem(placement: .automatic) {
                 Button(action: { if let s = selectedSession { resume(s) } }) {
                     Label("Resume", systemImage: "play.circle")
@@ -158,6 +165,9 @@ struct UnifiedSessionsView: View {
             } else if s.source == .claude, let exist = claudeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
                 claudeIndexer.reloadSession(id: id)
             }
+        }
+        .onAppear {
+            if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }
         }
     }
 
@@ -619,3 +629,4 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
         // Don't rely on isFirstResponder binding - already set in makeNSView
     }
 }
+

@@ -16,7 +16,7 @@ enum UsageStaleThresholds {
     static let claudeFiveHour: TimeInterval = 90 * 60 // 90 minutes
     static let claudeWeekly: TimeInterval = 6 * 60 * 60 // 6 hours
 
-    static let outdatedCopy = "N/A. Check manually"
+    static let outdatedCopy = "Stale data. Check manually"
 }
 
 // MARK: - Stale Check

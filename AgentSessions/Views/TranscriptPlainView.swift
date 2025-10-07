@@ -168,8 +168,81 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
 
-            // Find controls group
-            HStack(spacing: 4) {
+            // === LEADING GROUP: View Mode Segmented Control ===
+            Picker("View Style", selection: $renderModeRaw) {
+                Text("Transcript")
+                    .tag(TranscriptRenderMode.normal.rawValue)
+                Text("Terminal")
+                    .tag(TranscriptRenderMode.terminal.rawValue)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.large)
+            .frame(width: 200)
+            .accessibilityLabel("View Style")
+            .help("Switch between Transcript (plain text) and Terminal (colorized) view")
+            .padding(.leading, 12)
+
+            // System flexible space pushes trailing group to the right
+            Spacer()
+
+            // === CENTER: Secondary Actions (optional - can go to overflow) ===
+            HStack(spacing: 8) {
+                // Copy ID button
+                if let short = extractShortID(for: session) {
+                    Button(action: { copySessionID(for: session) }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.on.doc")
+                                .imageScale(.small)
+                            Text("ID \(String(short.prefix(4)))")
+                                .font(.system(size: 13))
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Copy session ID: \(short)")
+                    .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
+                        Text("ID Copied!")
+                            .padding(8)
+                            .font(.system(size: 12))
+                    }
+                }
+
+                Divider().frame(height: 20)
+
+                // Font size controls
+                HStack(spacing: 2) {
+                    Button(action: { adjustFont(-1) }) {
+                        Image(systemName: "textformat.size.smaller")
+                            .imageScale(.medium)
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Decrease font size")
+
+                    Button(action: { adjustFont(1) }) {
+                        Image(systemName: "textformat.size.larger")
+                            .imageScale(.medium)
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Increase font size")
+                }
+
+                // Copy transcript button
+                Button("Copy") { copyAll() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .font(.system(size: 14))
+                    .help("Copy entire transcript to clipboard")
+                    .keyboardShortcut("c", modifiers: [.command, .option])
+            }
+
+            Spacer()
+
+            // === TRAILING GROUP: Find Controls (HIG-compliant placement) ===
+            HStack(spacing: 6) {
+                // Find search field
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
@@ -179,8 +252,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         .focused($findFocused)
                         .focusable(allowFindFocus)
                         .onSubmit { performFind(resetIndex: true) }
-                        .help("Enter text to highlight matches in the session")
-                        .frame(minWidth: 180)
+                        .accessibilityLabel("Find in transcript")
+                        .frame(minWidth: 120, idealWidth: 220, maxWidth: 360)
                     if !findText.isEmpty {
                         Button(action: { findText = ""; performFind(resetIndex: true) }) {
                             Image(systemName: "xmark.circle.fill")
@@ -188,19 +261,18 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .focusable(false)
-                        .help("Clear search")
+                        .help("Clear search (Esc)")
                     }
                 }
                 .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.vertical, 5)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color(nsColor: .textBackgroundColor))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(findFocused ? Color.blue.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: findFocused ? 2 : 1)
+                        .stroke(findFocused ? Color.accentColor.opacity(0.5) : Color.gray.opacity(0.25), lineWidth: findFocused ? 2 : 1)
                 )
                 .onTapGesture { focusCoordinator.perform(.openTranscriptFind) }
                 .onAppear {
@@ -210,98 +282,40 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     allowFindFocus = true
                 }
 
-                Button(action: { performFind(resetIndex: false, direction: -1) }) {
-                    Image(systemName: "chevron.up")
-                        .frame(width: 16, height: 16)
-                }
-                .buttonStyle(.borderless)
-                .focusable(false)
-                .help("Jump to the previous match")
-
-                Button(action: { performFind(resetIndex: false, direction: 1) }) {
-                    Image(systemName: "chevron.down")
-                        .frame(width: 16, height: 16)
-                }
-                .buttonStyle(.borderless)
-                .focusable(false)
-                .help("Jump to the next match")
-
-                Text(findStatus())
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 60, alignment: .leading)
-            }
-            .padding(.leading, 8)
-
-            Spacer(minLength: 8)
-
-            Divider().frame(height: 20)
-
-            HStack(spacing: 2) {
-                Button(action: { adjustFont(-1) }) {
-                    Image(systemName: "textformat.size.smaller")
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.borderless)
-                .focusable(false)
-                .help("Decrease font size")
-
-                Button(action: { adjustFont(1) }) {
-                    Image(systemName: "textformat.size.larger")
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.borderless)
-                .focusable(false)
-                .help("Increase font size")
-            }
-
-            Button("Copy") { copyAll() }
-                .buttonStyle(.borderless)
-                .focusable(false)
-                .help("Copy entire transcript to clipboard")
-                .keyboardShortcut("c", modifiers: [.command, .option])
-
-            Divider().frame(height: 20)
-
-            // View controls group
-            HStack(spacing: 6) {
-                // Session ID (copy full ID from session)
-                if let short = extractShortID(for: session) {
-                    Button("ID \(short)") {
-                        copySessionID(for: session)
+                // Next/Previous controls group
+                HStack(spacing: 2) {
+                    Button(action: { performFind(resetIndex: false, direction: -1) }) {
+                        Image(systemName: "chevron.up")
                     }
                     .buttonStyle(.borderless)
-                    .focusable(false)
-                    .help("Copy full session ID to clipboard")
-                    .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
-                        Text("Copied!")
-                            .padding(8)
-                            .font(.system(size: 12))
+                    .controlSize(.small)
+                    .disabled(findMatches.isEmpty)
+                    .help("Previous match (⇧⌘G)")
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+
+                    Button(action: { performFind(resetIndex: false, direction: 1) }) {
+                        Image(systemName: "chevron.down")
                     }
-                } else {
-                    Button("ID —") {}
-                        .buttonStyle(.borderless)
-                        .disabled(true)
-                        .help("No \(sessionIDLabel) session ID available")
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .disabled(findMatches.isEmpty)
+                    .help("Next match (⌘G)")
+                    .keyboardShortcut("g", modifiers: .command)
                 }
 
-                Picker("View Style", selection: $renderModeRaw) {
-                    Text("Transcript")
-                        .tag(TranscriptRenderMode.normal.rawValue)
-                        .help("Plain text view with roles and tool labels; no semantic colorization")
-                    Text("Terminal")
-                        .tag(TranscriptRenderMode.terminal.rawValue)
-                        .help("Terminal view that expands shell calls into commands and color‑highlights commands (green), user input (blue), outputs (dim green), and errors (red)")
+                // Match count badge
+                if !findText.isEmpty {
+                    Text(findStatus())
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(findMatches.isEmpty ? .red : .secondary)
+                        .frame(minWidth: 32, alignment: .trailing)
+                        .accessibilityLabel("\(currentMatchIndex + 1) of \(findMatches.count) matches")
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 140)
-                .labelsHidden()
-                .focusable(false)
             }
+            .padding(.trailing, 12)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
         .frame(height: 44)
+        .background(Color(NSColor.controlBackgroundColor))
     }
 
     private func rebuild(session: Session) {
