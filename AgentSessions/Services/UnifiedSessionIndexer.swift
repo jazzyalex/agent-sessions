@@ -103,17 +103,30 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     func applySearch() { query = queryDraft.trimmingCharacters(in: .whitespacesAndNewlines) }
     func recomputeNow() {
-        // Force recompute by setting sessions from allSessions path
-        let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
-        var base = allSessions
+        sessions = applyFiltersAndSort(to: allSessions)
+    }
+
+    /// Apply current UI filters and sort preferences to a list of sessions.
+    /// Used for both unified.sessions and search results to ensure consistent filtering/sorting.
+    func applyFiltersAndSort(to sessions: [Session]) -> [Session] {
+        // Filter by source (Codex/Claude toggles)
+        var base = sessions
         if !includeCodex || !includeClaude {
             base = base.filter { s in (s.source == .codex && includeCodex) || (s.source == .claude && includeClaude) }
         }
+
+        // Apply FilterEngine (query, date, model, kinds, project, path)
+        let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
         var results = FilterEngine.filterSessions(base, filters: filters)
+
+        // Filter by message count preferences
         if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
         if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
+
+        // Apply sort
         results = applySort(results)
-        sessions = results
+
+        return results
     }
 
     private func applySort(_ list: [Session]) -> [Session] {

@@ -31,7 +31,14 @@ struct UnifiedSessionsView: View {
 
     @StateObject private var searchCoordinator: SearchCoordinator
     @StateObject private var focusCoordinator = WindowFocusCoordinator()
-    private var rows: [Session] { (searchCoordinator.isRunning || !searchCoordinator.results.isEmpty) ? searchCoordinator.results : unified.sessions }
+    private var rows: [Session] {
+        if searchCoordinator.isRunning || !searchCoordinator.results.isEmpty {
+            // Apply current UI filters and sort to search results
+            return unified.applyFiltersAndSort(to: searchCoordinator.results)
+        } else {
+            return unified.sessions
+        }
+    }
 
     init(unified: UnifiedSessionIndexer, codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, layoutMode: LayoutMode, onToggleLayout: @escaping () -> Void) {
         self.unified = unified
