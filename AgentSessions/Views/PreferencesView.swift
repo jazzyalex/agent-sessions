@@ -535,7 +535,16 @@ struct PreferencesView: View {
                 labeledRow("Binary Source") {
                     Picker("Binary Source", selection: Binding(
                         get: { claudeSettings.binaryPath.isEmpty ? 0 : 1 },
-                        set: { idx in if idx == 0 { claudeSettings.setBinaryPath(""); scheduleClaudeProbe() } }
+                        set: { idx in
+                            if idx == 0 {
+                                // Auto: clear override
+                                claudeSettings.setBinaryPath("")
+                                scheduleClaudeProbe()
+                            } else {
+                                // Custom: open file picker
+                                pickClaudeBinary()
+                            }
+                        }
                     )) {
                         Text("Auto").tag(0)
                         Text("Custom").tag(1)
