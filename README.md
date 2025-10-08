@@ -10,7 +10,7 @@
 </div>
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.0/AgentSessions-2.0.dmg"><b>Download Agent Sessions 2.0 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.1/AgentSessions-2.1.dmg"><b>Download Agent Sessions 2.1 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -89,7 +89,7 @@ It reads JSONL logs from both tools and builds a searchable, resumable timeline 
 ## Install
 
 ### Option A — Download
-1. Get the latest DMG: [AgentSessions-2.0.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.0/AgentSessions-2.0.dmg)
+1. Get the latest DMG: [AgentSessions-2.0.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.1/AgentSessions-2.1.dmg)
 2. Drag **Agent Sessions.app** to your Applications folder.
 
 ### Option B — Homebrew Tap
