@@ -395,7 +395,18 @@ struct PreferencesView: View {
                 labeledRow("Binary Source") {
                     Picker("Binary Source", selection: Binding(
                         get: { codexBinaryOverride.isEmpty ? 0 : 1 },
-                        set: { idx in if idx == 0 { codexBinaryOverride = ""; validateBinaryOverride(); resumeSettings.setBinaryOverride(""); scheduleCodexProbe() } }
+                        set: { idx in
+                            if idx == 0 {
+                                // Auto: clear override
+                                codexBinaryOverride = ""
+                                validateBinaryOverride()
+                                resumeSettings.setBinaryOverride("")
+                                scheduleCodexProbe()
+                            } else {
+                                // Custom: open file picker
+                                pickCodexBinary()
+                            }
+                        }
                     )) {
                         Text("Auto").tag(0)
                         Text("Custom").tag(1)
@@ -439,11 +450,12 @@ struct PreferencesView: View {
                     HStack(spacing: 10) {
                         TextField("/path/to/codex", text: $codexBinaryOverride)
                             .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 360)
                             .onSubmit { validateBinaryOverride(); commitCodexBinaryIfValid() }
                             .onChange(of: codexBinaryOverride) { _, _ in validateBinaryOverride(); commitCodexBinaryIfValid() }
                             .help("Enter the full path to a custom Codex binary")
                         Button("Choose…", action: pickCodexBinary)
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.borderedProminent)
                             .help("Select the Codex binary from the filesystem")
                         Button("Clear") {
                             codexBinaryOverride = ""
