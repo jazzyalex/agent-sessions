@@ -280,7 +280,7 @@ struct UnifiedSessionsView: View {
                 if first.keyPath == \Session.modifiedAt { key = .modified }
                 else if first.keyPath == \Session.messageCount { key = .msgs }
                 else if first.keyPath == \Session.repoDisplay { key = .repo }
-                else if first.keyPath == \Session.source { key = .agent }
+                else if first.keyPath == \Session.sourceKey { key = .agent }
                 else if first.keyPath == \Session.title { key = .title }
                 else { key = .title }
                 unified.sortDescriptor = .init(key: key, ascending: first.order == .forward)
