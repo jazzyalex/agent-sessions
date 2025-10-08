@@ -1,78 +1,184 @@
 # Agent Sessions Deployment Runbook
 
-This runbook describes a flexible, Codex‑friendly process to ship a new Agent Sessions build. It pairs with the automation script `./deploy-agent-sessions.sh` for common paths while leaving room for interactive steps when needed.
+This runbook provides a fully automated deployment process with upfront validation.
+All questions are answered before running the script, which then executes non-interactively.
 
-## Goals
-- Produce a signed, notarized DMG
-- Publish it to GitHub Releases with accurate notes
-- Update README and GitHub Pages download links
-- Optionally update the Homebrew cask
+## Pre-flight Checklist
 
-## Preconditions
-- macOS with Xcode CLT installed
-- Developer ID Application certificate installed in the login keychain
-- Notary profile stored in Keychain:
+Complete this checklist **before** running the deployment script. Answer all questions and verify all conditions.
 
-```bash
-xcrun notarytool store-credentials AgentSessionsNotary \
-  --apple-id "<your-apple-id@example.com>" \
-  --team-id "<YOUR_TEAM_ID>" \
-  --password "<app-specific-password>"
-```
+### 1. Version Planning
+- [ ] What version are you releasing? (e.g., 2.2)
+- [ ] Current MARKETING_VERSION in project.pbxproj: _________
+- [ ] Confirm version bump is correct (major/minor/patch)
 
-- GitHub CLI authenticated: `gh auth login`
-
-## Versioning
-- Confirm current version (`MARKETING_VERSION`) in `AgentSessions.xcodeproj/project.pbxproj`.
-- Choose the release version (for example, `1.2`).
-
-## Asset preparation
-- Update screenshots:
+### 2. Asset Preparation
+- [ ] Screenshots updated (if UI changed):
   - `docs/assets/screenshot-V.png`
   - `docs/assets/screenshot-H.png`
-- Update `docs/CHANGELOG.md` with a section for the new version.
-- Review `README.md` for any copy or link adjustments.
+  - `docs/assets/screenshot-menubar.png`
+- [ ] `docs/CHANGELOG.md` has section for new version
+- [ ] README.md reviewed for accuracy
+- [ ] All code changes committed and pushed to main
 
-## Automated path (recommended)
+### 3. Environment Validation
+- [ ] macOS with Xcode CLT installed
+- [ ] Developer ID Application certificate in Keychain
+- [ ] Notary profile configured: `xcrun notarytool history --keychain-profile AgentSessionsNotary`
+- [ ] GitHub CLI authenticated: `gh auth status`
+- [ ] Clean working directory: `git status`
+- [ ] On main branch: `git branch --show-current`
+
+### 4. Deployment Parameters
+
+Gather these values before running the script:
 
 ```bash
-chmod +x tools/release/deploy-agent-sessions.sh
-VERSION=1.2 tools/release/deploy-agent-sessions.sh
+# Required
+VERSION=2.2                                           # Target version
+
+# Optional (auto-detected if not set)
+TEAM_ID=24NDRU35WD                                    # Apple Team ID
+NOTARY_PROFILE=AgentSessionsNotary                    # Keychain profile name
+DEV_ID_APP="Developer ID Application: Alex M (24NDRU35WD)"  # Code signing identity
+
+# Optional (defaults shown)
+UPDATE_CASK=1                                         # Update Homebrew cask (1=yes, 0=no)
+SKIP_CONFIRM=1                                        # Skip interactive prompts (1=yes, 0=no)
 ```
 
-Script flow:
-1. Shows current version and prompts for target version
-2. Runs preflight checks (xcodebuild, gh, notary profile, Developer ID identity)
-3. Builds, signs, notarizes, and staples the DMG
-4. Updates README and website links
-5. Generates release notes from `docs/CHANGELOG.md` section for the version or falls back to `git log` since the last tag
-6. Creates or updates the GitHub Release and uploads assets
-7. Optionally updates the local Homebrew cask if present
+## Automated Deployment
 
-Environment variables (optional, set in `tools/release/.env`, not committed):
+Once pre-flight is complete, run the deployment script with all parameters:
+
+```bash
+VERSION=2.2 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
+```
+
+### What the script does automatically:
+
+1. **Pre-checks**
+   - Validates xcodebuild, gh, notarytool are available
+   - Auto-detects Developer ID certificate
+   - Verifies CHANGELOG.md has version section
+
+2. **Build & Notarize** (5-15 minutes)
+   - Builds Release configuration
+   - Code signs with hardened runtime
+   - Creates DMG
+   - Submits to Apple notary service
+   - Waits for approval
+   - Staples notarization ticket
+
+3. **Update Documentation**
+   - Updates download links in README.md
+   - Updates download links in docs/index.html
+   - Commits and pushes changes
+
+4. **Update Homebrew Cask**
+   - Updates version and sha256 in local cask
+   - Commits and pushes to homebrew-agent-sessions repo
+
+5. **Create GitHub Release**
+   - Extracts release notes from CHANGELOG.md
+   - Creates or updates GitHub Release
+   - Uploads DMG and SHA256 checksum
+
+### Script output location:
+- DMG: `dist/AgentSessions-{VERSION}.dmg`
+- SHA: `dist/AgentSessions-{VERSION}.dmg.sha256`
+- Build logs: Terminal output
+
+## Post-Deployment Checklist
+
+After script completes successfully:
+
+### Immediate Verification (5-10 minutes)
+- [ ] GitHub Release exists: https://github.com/jazzyalex/agent-sessions/releases/tag/v{VERSION}
+- [ ] DMG and SHA256 are attached to release
+- [ ] Release notes are correct and complete
+- [ ] Download links in README.md point to new version
+- [ ] Download links in docs/index.html point to new version
+- [ ] Homebrew cask updated (if UPDATE_CASK=1)
+
+### Quality Assurance (30-60 minutes)
+- [ ] Download DMG from GitHub Release
+- [ ] Verify SHA256 checksum matches
+- [ ] Test installation on clean macOS system
+- [ ] Verify Gatekeeper accepts app (right-click → Open)
+- [ ] Test app launches without errors
+- [ ] Test basic functionality (session list, search, resume)
+- [ ] Test Homebrew installation: `brew upgrade agent-sessions`
+
+### Communication
+- [ ] Update website if needed (jazzyalex.github.io/agent-sessions)
+- [ ] Announce release (if applicable)
+- [ ] Monitor GitHub issues for installation problems
+
+### Monitoring (24-48 hours)
+- [ ] Check GitHub Release download count
+- [ ] Monitor for new issues or bug reports
+- [ ] Verify no Gatekeeper or notarization complaints
+
+## Troubleshooting
+
+### Notary profile errors
+```bash
+xcrun notarytool store-credentials AgentSessionsNotary \
+  --apple-id "your-apple-id@example.com" \
+  --team-id "24NDRU35WD" \
+  --password "app-specific-password"
+```
+
+### GitHub CLI authentication
+```bash
+gh auth login
+gh auth status
+```
+
+### Developer ID certificate not found
+```bash
+security find-identity -v -p codesigning
+```
+
+### Build failures
+- Check Xcode version: `xcodebuild -version`
+- Clean build folder: `rm -rf build/ dist/`
+- Verify project.pbxproj MARKETING_VERSION is correct
+
+### Notarization rejected
+- Review notary log: `xcrun notarytool log --keychain-profile AgentSessionsNotary {submission-id}`
+- Common issues: unsigned binaries, incorrect entitlements, missing hardened runtime
+
+### Homebrew cask not updated
+- Verify local tap exists: `ls /opt/homebrew/Library/Taps/jazzyalex/homebrew-agent-sessions/`
+- Check UPDATE_CASK=1 was set
+- Manually update: Edit `Casks/agent-sessions.rb`, update version/sha256/url
+
+## Manual Deployment (Alternative)
+
+If automation fails, use manual steps:
+
+1. Build: `xcodebuild -scheme AgentSessions -configuration Release SYMROOT=build`
+2. Sign: `codesign --deep --force --verify --verbose --timestamp --options runtime --sign "Developer ID Application: Alex M (24NDRU35WD)" build/Release/AgentSessions.app`
+3. Create DMG: `hdiutil create -volname "Agent Sessions" -srcfolder build/Release/AgentSessions.app -ov -format UDZO dist/AgentSessions-{VERSION}.dmg`
+4. Notarize: `xcrun notarytool submit dist/AgentSessions-{VERSION}.dmg --keychain-profile AgentSessionsNotary --wait`
+5. Staple: `xcrun stapler staple dist/AgentSessions-{VERSION}.dmg`
+6. Compute SHA: `shasum -a 256 dist/AgentSessions-{VERSION}.dmg > dist/AgentSessions-{VERSION}.dmg.sha256`
+7. Create release: `gh release create v{VERSION} dist/AgentSessions-{VERSION}.dmg dist/AgentSessions-{VERSION}.dmg.sha256 --title "Agent Sessions {VERSION}" --notes-file notes.txt`
+8. Update README/docs download links manually
+9. Update Homebrew cask manually
+
+## Environment Configuration
+
+Optional: Create `tools/release/.env` (not committed) with default values:
 
 ```bash
 TEAM_ID=24NDRU35WD
 NOTARY_PROFILE=AgentSessionsNotary
-DEV_ID_APP="Developer ID Application: Your Name (24NDRU35WD)"
+DEV_ID_APP="Developer ID Application: Alex M (24NDRU35WD)"
+UPDATE_CASK=1
+SKIP_CONFIRM=1
 ```
 
-## Manual steps (when deviating from the script)
-1. Build Release to `dist/` using `xcodebuild`
-2. Codesign with hardened runtime
-3. Create DMG with `hdiutil`
-4. Notarize with `xcrun notarytool submit --wait` and staple
-5. Compute SHA256 and upload DMG and checksum to GitHub Release (`gh release create|upload`)
-6. Update README and website links to the new DMG URL
-7. Update Homebrew cask with new `version`, `sha256`, and URL pattern
-
-## Acceptance criteria
-- DMG is stapled and passes Gatekeeper assessment on a fresh system
-- GitHub Release contains DMG and `.sha256`, with correct notes
-- README and website link to the exact versioned DMG
-- Optional: Homebrew cask installs the new version
-
-## Troubleshooting
-- Notary profile errors: re‑run `store-credentials` with correct Apple ID, team id, and app‑specific password
-- Gatekeeper says “Insufficient Context” on stapled DMG: verify notarization shows `Accepted`, and staple again
-- `gh` errors: confirm `gh auth status` and token scopes include `repo` and `workflow`
+This file is sourced automatically by the script.

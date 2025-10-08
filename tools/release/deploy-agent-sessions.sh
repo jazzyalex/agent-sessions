@@ -21,8 +21,9 @@ CURR_VERSION=$(sed -n 's/.*MARKETING_VERSION = \([0-9][0-9.]*\).*/\1/p' AgentSes
 
 VERSION=${VERSION:-}
 if [[ -z "${VERSION}" ]]; then
-  read -r -p "Version to release [current ${CURR_VERSION:-unknown}]: " VERSION
-  if [[ -z "${VERSION}" && -n "${CURR_VERSION:-}" ]]; then VERSION="$CURR_VERSION"; fi
+  red "ERROR: VERSION not provided. Set VERSION=X.Y environment variable."
+  echo "Current version in project: ${CURR_VERSION:-unknown}"
+  exit 1
 fi
 TAG=${TAG:-v$VERSION}
 
@@ -31,6 +32,7 @@ NOTARY_PROFILE=${NOTARY_PROFILE:-AgentSessionsNotary}
 DEV_ID_APP=${DEV_ID_APP:-}
 NOTES_FILE=${NOTES_FILE:-}
 UPDATE_CASK=${UPDATE_CASK:-1}
+SKIP_CONFIRM=${SKIP_CONFIRM:-0}
 
 green(){ printf "\033[32m%s\033[0m\n" "$*"; }
 yellow(){ printf "\033[33m%s\033[0m\n" "$*"; }
@@ -81,14 +83,19 @@ echo "  - Notary profile available in Keychain (${NOTARY_PROFILE})"
 # Simple validations
 if [[ -f "docs/CHANGELOG.md" ]]; then
   if ! grep -q -E "^##[ ]*\[?${VERSION}\]?" docs/CHANGELOG.md; then
-    yellow "Note: docs/CHANGELOG.md has no explicit section for ${VERSION}. Release notes will fall back to git log."
+    yellow "WARNING: docs/CHANGELOG.md has no explicit section for ${VERSION}. Release notes will fall back to git log."
   fi
 fi
 
-read -r -p "Proceed with build/sign/notarize now? [y/N] " go
-if [[ "${go:-}" != "y" && "${go:-}" != "Y" ]]; then
-  yellow "Aborted by user"
-  exit 0
+# Skip confirmation if SKIP_CONFIRM=1
+if [[ "${SKIP_CONFIRM}" != "1" ]]; then
+  read -r -p "Proceed with build/sign/notarize now? [y/N] " go
+  if [[ "${go:-}" != "y" && "${go:-}" != "Y" ]]; then
+    yellow "Aborted by user"
+    exit 0
+  fi
+else
+  green "Proceeding automatically (SKIP_CONFIRM=1)"
 fi
 
 export TEAM_ID NOTARY_PROFILE DEV_ID_APP VERSION TAG
@@ -163,4 +170,14 @@ else
 fi
 
 green "Done."
+echo
+green "==> Post-deployment reminders"
+echo "1. Verify GitHub Release: https://github.com/jazzyalex/agent-sessions/releases/tag/${TAG}"
+echo "2. Test DMG download and installation on a clean system"
+echo "3. Verify Gatekeeper acceptance: right-click → Open on fresh macOS"
+echo "4. Test Homebrew installation: brew upgrade agent-sessions"
+echo "5. Update marketing materials if needed"
+echo "6. Announce release in relevant channels"
+echo "7. Monitor for installation issues in the first 24 hours"
+echo
 
