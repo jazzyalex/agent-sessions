@@ -9,6 +9,7 @@ import SwiftUI
 protocol SessionIndexerProtocol: ObservableObject {
     var allSessions: [Session] { get }
     var sessions: [Session] { get }
+    var isIndexing: Bool { get }
     var isLoadingSession: Bool { get }
     var loadingSessionID: String? { get }
 

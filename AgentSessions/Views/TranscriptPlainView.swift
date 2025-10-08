@@ -72,6 +72,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var terminalUserRangesCache: [String: [NSRange]] = [:]
     @State private var lastBuildKey: String? = nil
 
+    private var shouldShowLoadingAnimation: Bool {
+        guard let id = sessionID else { return false }
+        return (indexer.isLoadingSession && indexer.loadingSessionID == id) || indexer.isIndexing
+    }
+
     var body: some View {
         if let id = sessionID, let session = indexer.allSessions.first(where: { $0.id == id }) {
             VStack(spacing: 0) {
@@ -93,18 +98,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         errorRanges: shouldColorize ? errorRanges : []
                     )
 
-                    if indexer.isLoadingSession && indexer.loadingSessionID == id {
-                        VStack(spacing: 12) {
-                            ProgressView()
-                                .scaleEffect(1.2)
-                            Text("Loading session...")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(24)
-                        .background(Color(NSColor.windowBackgroundColor).opacity(0.95))
-                        .cornerRadius(12)
-                        .shadow(radius: 8)
+                    // Show animation during lazy load OR full refresh
+                    if shouldShowLoadingAnimation {
+                        LoadingAnimationView(
+                            codexColor: .blue,
+                            claudeColor: Color(red: 204/255, green: 121/255, blue: 90/255)
+                        )
                     }
                 }
             }

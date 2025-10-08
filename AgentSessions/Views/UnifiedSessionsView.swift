@@ -134,7 +134,10 @@ struct UnifiedSessionsView: View {
                     .help("Reveal the selected session's working directory in Finder (⌘⇧O)")
             }
             ToolbarItem(placement: .automatic) {
-                Button(action: { unified.refresh() }) {
+                Button(action: {
+                    // Don't clear selection - let the transcript view show loading animation
+                    unified.refresh()
+                }) {
                     if unified.isIndexing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
                 }
                     .keyboardShortcut("r", modifiers: .command)
@@ -307,6 +310,11 @@ struct UnifiedSessionsView: View {
                     ClaudeTranscriptView(indexer: claudeIndexer, sessionID: selection)
                         .environmentObject(focusCoordinator)
                 }
+            } else if unified.isIndexing {
+                LoadingAnimationView(
+                    codexColor: .blue,
+                    claudeColor: Color(red: 204/255, green: 121/255, blue: 90/255)
+                )
             } else {
                 Text("Select a session to view transcript").foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

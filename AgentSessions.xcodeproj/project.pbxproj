@@ -80,7 +80,8 @@
 		7D3211A8042C4D30AE226E0C /* UpdateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43F39BE67C6349D1B76115C9 /* UpdateModels.swift */; };
 		AA522C190292439CA3A83AD8 /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */; };
 		STALE000020000000000000001 /* UsageStaleCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = STALE000010000000000000001 /* UsageStaleCheck.swift */; };
-/* End PBXBuildFile section */
+		E1DDA78C704848A381A6A426 /* LoadingAnimationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F188663773714C61A568F7AA /* LoadingAnimationView.swift */; };
+		/* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		B000001C2A0A000100000010 /* PBXContainerItemProxy */ = {
@@ -174,7 +175,8 @@
 		43F39BE67C6349D1B76115C9 /* UpdateModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateModels.swift; path = AgentSessions/Update/UpdateModels.swift; sourceTree = SOURCE_ROOT; };
 		8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateCheckerTests.swift; path = AgentSessionsTests/UpdateCheckerTests.swift; sourceTree = SOURCE_ROOT; };
 		STALE000010000000000000001 /* UsageStaleCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStaleCheck.swift; path = AgentSessions/CodexStatus/UsageStaleCheck.swift; sourceTree = SOURCE_ROOT; };
-/* End PBXFileReference section */
+		F188663773714C61A568F7AA /* LoadingAnimationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LoadingAnimationView.swift; path = AgentSessions/Views/LoadingAnimationView.swift; sourceTree = SOURCE_ROOT; };
+		/* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		B00000124A0A000100000001 /* Frameworks */ = {
@@ -327,6 +329,7 @@
 				B00000116A0A000100000001 /* SessionsListView.swift */,
 				B00000175A0A000100000001 /* TranscriptPlainView.swift */,
 				B00000117A0A000100000001 /* SessionTimelineView.swift */,
+				F188663773714C61A568F7AA /* LoadingAnimationView.swift */,
 				B00000118A0A000100000001 /* EventInspectorView.swift */,
 				B00000119A0A000100000001 /* SearchFiltersView.swift */,
 				B0000011AA0A000100000001 /* PreferencesView.swift */,
@@ -555,6 +558,7 @@
 				5731AD7A25CF4B4DAA9BDF27 /* UpdateDefaults.swift in Sources */,
 				7D3211A8042C4D30AE226E0C /* UpdateModels.swift in Sources */,
 				STALE000020000000000000001 /* UsageStaleCheck.swift in Sources */,				24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */,
+				E1DDA78C704848A381A6A426 /* LoadingAnimationView.swift in Sources */,
 );
 			runOnlyForDeploymentPostprocessing = 0;
 		};
