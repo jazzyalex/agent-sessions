@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.2] - 2025-10-08
+
+### Performance & Energy
+- Background sorting with sortDescriptor in Combine pipeline to prevent main thread blocking
+- Debounced filter/sort operations (150ms) with background processing
+- Configurable usage polling intervals (1/2/3/10 minutes, default 2 minutes)
+- Reduced polling when strips/menu bar hidden (1 hour interval vs 5 minutes)
+- Energy-aware refresh with longer intervals on battery power
+
+### Fixed
+- CLI Agent column sorting now works correctly (using sourceKey keypath)
+- Session column sorting verified and working
+
+### UI/UX
+- Unified Codex CLI and Claude Code binary settings UI styling
+- Consolidated duplicate Codex CLI preferences sections
+- Made Custom binary picker button functional
+- Moved Codex CLI version info to appropriate preference tab
+
+### Documentation
+- Refined messaging in README with clearer value propositions
+- Added OpenGraph and Twitter Card meta tags for better social sharing
+- Improved feature descriptions and website clarity
+
 ## [2.1] - 2025-10-07
 
 ### Added
