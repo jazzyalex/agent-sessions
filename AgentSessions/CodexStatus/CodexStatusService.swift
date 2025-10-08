@@ -186,7 +186,13 @@ actor CodexStatusService {
     }
 
     func setVisible(_ isVisible: Bool) {
+        let wasVisible = visible
         visible = isVisible
+
+        // If transitioning from hidden → visible, immediately refresh to show current data
+        if !wasVisible && isVisible {
+            Task { await self.refreshTick() }
+        }
     }
 
     func refreshNow() {
@@ -405,16 +411,21 @@ actor CodexStatusService {
         // Read user preference for polling interval (default 120s = 2 min)
         let userInterval = UInt64(UserDefaults.standard.object(forKey: "UsagePollingInterval") as? Int ?? 120)
 
-        // Policy:
-        // - On AC power: use userInterval when any indicator visible (strip OR menubar), else 300s.
-        // - On battery: always 300s (keep it simple; no urgency override).
-        // - Urgency still pins to userInterval on AC power only.
+        // Energy optimization: Stop polling entirely when nothing is visible
+        // (menu bar and strips both hidden)
+        let urgent = isUrgent()
+        if !visible && !urgent {
+            // When hidden and not urgent: don't poll at all (1 hour = effectively disabled)
+            return 3600 * 1_000_000_000
+        }
+
+        // Policy when visible or urgent:
+        // - On AC power: use userInterval
+        // - On battery: 300s
         if !Self.onACPower() {
             return 300 * 1_000_000_000
         }
-        var seconds: UInt64 = visible ? userInterval : 300
-        if isUrgent() { seconds = userInterval }
-        return seconds * 1_000_000_000
+        return userInterval * 1_000_000_000
     }
 
     private func isUrgent() -> Bool {
