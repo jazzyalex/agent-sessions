@@ -390,18 +390,76 @@ struct PreferencesView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            sectionHeader("Codex CLI Version")
+            sectionHeader("Codex CLI Binary")
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Detected version:").font(.caption)
-                    Text(probeVersion?.description ?? "unknown").font(.caption).monospaced()
+                labeledRow("Binary Source") {
+                    Picker("Binary Source", selection: Binding(
+                        get: { codexBinaryOverride.isEmpty ? 0 : 1 },
+                        set: { idx in if idx == 0 { codexBinaryOverride = ""; validateBinaryOverride(); resumeSettings.setBinaryOverride(""); scheduleCodexProbe() } }
+                    )) {
+                        Text("Auto").tag(0)
+                        Text("Custom").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 220)
+                    .help("Choose the Codex binary automatically or specify a custom executable")
                 }
-                if let path = resolvedCodexPath {
-                    Text(path).font(.caption2).foregroundStyle(.secondary)
+
+                if codexBinaryOverride.isEmpty {
+                    // Auto mode: show detected binary
+                    HStack {
+                        Text("Detected:").font(.caption)
+                        Text(probeVersion?.description ?? "unknown").font(.caption).monospaced()
+                    }
+                    if let path = resolvedCodexPath {
+                        Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                    HStack(spacing: 12) {
+                        Button("Check Version") { probeCodex() }
+                            .buttonStyle(.bordered)
+                            .help("Query the currently detected Codex binary for its version")
+                        Button("Copy Path") {
+                            if let p = resolvedCodexPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(p, forType: .string)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Copy the detected Codex binary path to clipboard")
+                        Button("Reveal") {
+                            if let p = resolvedCodexPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Reveal the detected Codex binary in Finder")
+                    }
+                } else {
+                    // Custom mode: text field for override
+                    HStack(spacing: 10) {
+                        TextField("/path/to/codex", text: $codexBinaryOverride)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { validateBinaryOverride(); commitCodexBinaryIfValid() }
+                            .onChange(of: codexBinaryOverride) { _, _ in validateBinaryOverride(); commitCodexBinaryIfValid() }
+                            .help("Enter the full path to a custom Codex binary")
+                        Button("Choose…", action: pickCodexBinary)
+                            .buttonStyle(.bordered)
+                            .help("Select the Codex binary from the filesystem")
+                        Button("Clear") {
+                            codexBinaryOverride = ""
+                            validateBinaryOverride()
+                            resumeSettings.setBinaryOverride("")
+                            scheduleCodexProbe()
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Remove the custom binary override")
+                    }
+                    if !codexBinaryValid {
+                        Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
-                Button("Re-probe") { probeCodex() }
-                    .buttonStyle(.bordered)
-                    .help("Check again for the Codex CLI version and path")
             }
 
             sectionHeader("Sessions Directory")
@@ -442,60 +500,6 @@ struct PreferencesView: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-
-            sectionHeader("Binary")
-            VStack(alignment: .leading, spacing: 10) {
-                labeledRow("Binary Source") {
-                    Picker("Binary Source", selection: Binding(
-                        get: { codexBinaryOverride.isEmpty ? 0 : 1 },
-                        set: { idx in if idx == 0 { codexBinaryOverride = ""; validateBinaryOverride(); resumeSettings.setBinaryOverride(""); scheduleCodexProbe() } }
-                    )) {
-                        Text("Auto").tag(0)
-                        Text("Custom").tag(1)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 220)
-                    .help("Choose the Codex binary automatically or specify a custom executable")
-                }
-
-                if codexBinaryOverride.isEmpty {
-                    HStack(spacing: 10) {
-                        Text(resolvedCodexPath ?? "")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if let version = probeVersion { Text("• v\(version.description)").font(.caption).foregroundStyle(.secondary) }
-                        Button(action: probeCodex) { Text("Check Version").underline() }
-                            .buttonStyle(.plain).foregroundColor(.accentColor)
-                            .help("Query the currently detected Codex binary for its version")
-                        Button(action: { if let p = resolvedCodexPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p, forType: .string) } }) { Text("Copy").underline() }
-                            .buttonStyle(.plain).foregroundColor(.accentColor)
-                            .help("Copy the detected Codex binary path")
-                        Button(action: { if let p = resolvedCodexPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } }) { Text("Reveal").underline() }
-                            .buttonStyle(.plain).foregroundColor(.accentColor)
-                            .help("Reveal the detected Codex binary in Finder")
-                    }
-                } else {
-                    HStack(spacing: 10) {
-                        TextField("/path/to/codex", text: $codexBinaryOverride)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit { validateBinaryOverride(); commitCodexBinaryIfValid() }
-                            .onChange(of: codexBinaryOverride) { _, _ in validateBinaryOverride(); commitCodexBinaryIfValid() }
-                            .help("Enter the full path to a custom Codex binary")
-                        Button("Choose…", action: pickCodexBinary).buttonStyle(.bordered)
-                            .help("Select the Codex binary from the filesystem")
-                        Button("Clear") { codexBinaryOverride = ""; validateBinaryOverride(); resumeSettings.setBinaryOverride(""); scheduleCodexProbe() }.buttonStyle(.bordered)
-                            .help("Remove the custom binary override")
-                    }
-                    if !codexBinaryValid {
-                        Label("Must be an executable file", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red)
-                    }
-                }
-            }
-
-            // Usage Tracking controls live in the Unified Window tab.
         }
     }
 
