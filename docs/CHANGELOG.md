@@ -4,6 +4,67 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.1] - 2025-10-07
+
+### Added
+- Loading animation for app launch and session refresh with smooth fade-in transitions
+- Comprehensive keyboard shortcuts with persistent toggle state across app restarts
+- Apple Notes-style Find feature with dimming effect for focused search results
+- Background transcript indexing for accurate search without false positives
+- Window-level focus coordinator for improved dark mode and search field management
+- Clear button for transcript Find field in both Codex and Claude views
+- Cmd+F keyboard shortcut to focus Find field in transcript view
+- TranscriptCache service to persist parsed sessions and improve search accuracy
+
+### Changed
+- Unified Codex and Claude transcript views for consistent UX
+- HIG-compliant toolbar layout with improved messaging and visual consistency
+- Enhanced search to use transcript cache instead of raw JSON, eliminating false positives
+- Mutually exclusive search focus behavior matching Apple Notes experience
+- Applied filters and sorting to search results for better organization
+
+### Fixed
+- Search false positives by using cached transcripts instead of binary JSON data
+- Message count reversion bug by persisting parsed sessions
+- Focus stealing issue in Codex sessions by removing legacy publisher
+- Find highlights not rendering in large sessions by using persistent textStorage attributes
+- Blue highlighting in Find by eliminating unwanted textView.textColor override
+- Terminal mode colorization by removing conflicting textView.textColor settings
+- Codex usage tracking to parse timestamp field from token_count events
+- Stale usage data by rejecting events without timestamps
+- Usage display to show "Outdated" message in reset time position
+- Version parsing to support 2-part version numbers (e.g., "2.0")
+- Search field focus issues in unified sessions view with AppKit NSTextField
+- Swift 6 concurrency warnings in SearchCoordinator
+
+### Documentation
+- Added comprehensive v2.1 QA testing plan with 200+ test cases
+- Created focus architecture documentation explaining focus coordination system
+- Created search architecture documentation covering two-phase indexing
+- Added focus bug troubleshooting guide
+
+## [2.0] - 2025-10-04
+
+### Added
+- Full Claude Code support with parsing, transcript rendering, and resume functionality
+- Unified session browser combining Codex CLI and Claude Code sessions
+- Two-phase incremental search with progress tracking and instant cancellation
+- Separate 5-hour and weekly usage tracking for both Codex and Claude
+- Menu bar widget with real-time usage display and color-coded thresholds
+- Source filtering to toggle between Codex, Claude, or unified view
+- Smart search v2 with cancellable pipeline (small files first, large deferred)
+- Dual source icons (ChatGPT/Claude) in session list for visual identification
+
+### Changed
+- Migrated from Codex-only to unified dual-source architecture
+- Enhanced session metadata extraction for both Codex and Claude formats
+- Improved performance with lazy hydration for sessions ≥10 MB
+- Updated UI to support filtering by session source
+
+### Fixed
+- Large session handling with off-main parsing to prevent UI freezes
+- Fast indexing for 1000+ sessions with metadata-first scanning
+
 ## [1.2.2] - 2025-09-30
 
 ### Fixed
