@@ -326,15 +326,18 @@ actor ClaudeStatusService {
     }
 
     private func nextInterval() -> UInt64 {
-        // Policy (same as Codex):
-        // - On AC power: 60s when visible, else 300s
+        // Read user preference for polling interval (default 120s = 2 min)
+        let userInterval = UInt64(UserDefaults.standard.object(forKey: "UsagePollingInterval") as? Int ?? 120)
+
+        // Policy:
+        // - On AC power: use userInterval when visible, else 300s
         // - On battery: always 300s
-        // - Urgency: 60s if session >= 80%
+        // - Urgency: use userInterval if session >= 80%
         if !Self.onACPower() {
             return 300 * 1_000_000_000
         }
-        var seconds: UInt64 = visible ? 60 : 300
-        if snapshot.sessionPercent >= 80 { seconds = 60 }
+        var seconds: UInt64 = visible ? userInterval : 300
+        if snapshot.sessionPercent >= 80 { seconds = userInterval }
         return seconds * 1_000_000_000
     }
 

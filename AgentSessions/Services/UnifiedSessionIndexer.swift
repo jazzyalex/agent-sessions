@@ -49,6 +49,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let claude: ClaudeSessionIndexer
     private var cancellables = Set<AnyCancellable>()
 
+    // Debouncing for expensive operations
+    private var recomputeDebouncer: DispatchWorkItem? = nil
+
     init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer) {
         self.codex = codexIndexer
         self.claude = claudeIndexer
@@ -75,16 +78,20 @@ final class UnifiedSessionIndexer: ObservableObject {
             .map { codexErr, claudeErr in codexErr ?? claudeErr }
             .assign(to: &$indexingError)
 
-        // Debounced filtering pipeline
+        // Debounced filtering and sorting pipeline (runs off main thread)
         let inputs = Publishers.CombineLatest4(
             $query.removeDuplicates(),
             $dateFrom.removeDuplicates(by: Self.dateEq),
             $dateTo.removeDuplicates(by: Self.dateEq),
             $selectedModel.removeDuplicates()
         )
-        Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, Publishers.CombineLatest($includeCodex, $includeClaude))
+        Publishers.CombineLatest(
+            Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, Publishers.CombineLatest($includeCodex, $includeClaude)),
+            $sortDescriptor.removeDuplicates()
+        )
             .receive(on: DispatchQueue.global(qos: .userInitiated))
-            .map { [weak self] input, kinds, all, sources -> [Session] in
+            .map { [weak self] combined, sortDesc -> [Session] in
+                let (input, kinds, all, sources) = combined
                 let (q, from, to, model) = input
                 let (incCodex, incClaude) = sources
                 let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
@@ -95,8 +102,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                 var results = FilterEngine.filterSessions(base, filters: filters)
                 if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
                 if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
-                // Apply sort descriptor
-                results = self?.applySort(results) ?? results
+                // Apply sort descriptor (now included in pipeline so changes trigger background re-sort)
+                results = self?.applySort(results, descriptor: sortDesc) ?? results
                 return results
             }
             .receive(on: DispatchQueue.main)
@@ -114,8 +121,21 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     func applySearch() { query = queryDraft.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     func recomputeNow() {
-        sessions = applyFiltersAndSort(to: allSessions)
+        // Debounce rapid recompute calls (e.g., from projectFilter changes) to prevent UI freezes
+        recomputeDebouncer?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let results = self.applyFiltersAndSort(to: self.allSessions)
+                DispatchQueue.main.async {
+                    self.sessions = results
+                }
+            }
+        }
+        recomputeDebouncer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     /// Apply current UI filters and sort preferences to a list of sessions.
@@ -136,36 +156,36 @@ final class UnifiedSessionIndexer: ObservableObject {
         if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
 
         // Apply sort
-        results = applySort(results)
+        results = applySort(results, descriptor: sortDescriptor)
 
         return results
     }
 
-    private func applySort(_ list: [Session]) -> [Session] {
-        switch sortDescriptor.key {
+    private func applySort(_ list: [Session], descriptor: SessionSortDescriptor) -> [Session] {
+        switch descriptor.key {
         case .modified:
             return list.sorted { lhs, rhs in
-                sortDescriptor.ascending ? lhs.modifiedAt < rhs.modifiedAt : lhs.modifiedAt > rhs.modifiedAt
+                descriptor.ascending ? lhs.modifiedAt < rhs.modifiedAt : lhs.modifiedAt > rhs.modifiedAt
             }
         case .msgs:
             return list.sorted { lhs, rhs in
-                sortDescriptor.ascending ? lhs.messageCount < rhs.messageCount : lhs.messageCount > rhs.messageCount
+                descriptor.ascending ? lhs.messageCount < rhs.messageCount : lhs.messageCount > rhs.messageCount
             }
         case .repo:
             return list.sorted { lhs, rhs in
                 let l = lhs.repoDisplay.lowercased(); let r = rhs.repoDisplay.lowercased()
-                return sortDescriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
+                return descriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
             }
         case .title:
             return list.sorted { lhs, rhs in
                 let l = lhs.title.lowercased(); let r = rhs.title.lowercased()
-                return sortDescriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
+                return descriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
             }
         case .agent:
             return list.sorted { lhs, rhs in
                 let l = lhs.source.rawValue
                 let r = rhs.source.rawValue
-                return sortDescriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
+                return descriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
             }
         }
     }

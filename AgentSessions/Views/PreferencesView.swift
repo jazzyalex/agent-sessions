@@ -21,6 +21,7 @@ struct PreferencesView: View {
     @AppStorage("StripMonochromeMeters") private var stripMonochromeGlobal: Bool = false
     @AppStorage("HideZeroMessageSessions") private var hideZeroMessageSessionsPref: Bool = true
     @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = false
+    @AppStorage("UsagePollingInterval") private var usagePollingInterval: Int = 120 // seconds (default 2 min)
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
@@ -306,7 +307,21 @@ struct PreferencesView: View {
                         .help("Force a usage refresh immediately when Claude tracking is enabled")
                 }
                 HStack(spacing: 16) { toggleRow("Show reset times", isOn: $stripShowResetTime, help: "Display the usage reset timestamp next to each meter") }
-                Text("Strips stack vertically when both are shown.")
+
+                Divider()
+
+                labeledRow("Polling Interval") {
+                    Picker("", selection: $usagePollingInterval) {
+                        Text("1 minute").tag(60)
+                        Text("2 minutes").tag(120)
+                        Text("3 minutes").tag(180)
+                        Text("10 minutes").tag(600)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 360)
+                    .help("How often to check usage data (affects both Codex and Claude)")
+                }
+                Text("Longer intervals reduce CPU usage. Strips stack vertically when both are shown.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

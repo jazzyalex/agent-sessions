@@ -147,6 +147,7 @@ final class SessionIndexer: ObservableObject {
     func setTranscriptRenderMode(_ m: TranscriptRenderMode) { renderModeRaw = m.rawValue }
 
     private var cancellables = Set<AnyCancellable>()
+    private var recomputeDebouncer: DispatchWorkItem? = nil
 
     init() {
         // Load persisted project filter
@@ -325,14 +326,24 @@ final class SessionIndexer: ObservableObject {
         }
     }
 
-    // Trigger immediate recompute of filtered sessions using current filters (no debounce).
+    // Trigger recompute of filtered sessions using current filters (debounced and off main thread).
     func recomputeNow() {
-        let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
-        var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache)
-        if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
-        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
-        // FilterEngine now preserves order, so filtered results maintain allSessions sort order
-        DispatchQueue.main.async { self.sessions = results }
+        recomputeDebouncer?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let filters = Filters(query: self.query, dateFrom: self.dateFrom, dateTo: self.dateTo, model: self.selectedModel, kinds: self.selectedKinds, repoName: self.projectFilter, pathContains: nil)
+                var results = FilterEngine.filterSessions(self.allSessions, filters: filters, transcriptCache: self.transcriptCache)
+                if self.hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
+                if self.hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
+                // FilterEngine now preserves order, so filtered results maintain allSessions sort order
+                DispatchQueue.main.async {
+                    self.sessions = results
+                }
+            }
+        }
+        recomputeDebouncer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     var modelsSeen: [String] {

@@ -402,15 +402,18 @@ actor CodexStatusService {
     }
 
     private func nextInterval() -> UInt64 {
+        // Read user preference for polling interval (default 120s = 2 min)
+        let userInterval = UInt64(UserDefaults.standard.object(forKey: "UsagePollingInterval") as? Int ?? 120)
+
         // Policy:
-        // - On AC power: 60s when any indicator visible (strip OR menubar), else 300s.
+        // - On AC power: use userInterval when any indicator visible (strip OR menubar), else 300s.
         // - On battery: always 300s (keep it simple; no urgency override).
-        // - Urgency still pins to 60s on AC power only.
+        // - Urgency still pins to userInterval on AC power only.
         if !Self.onACPower() {
             return 300 * 1_000_000_000
         }
-        var seconds: UInt64 = visible ? 60 : 300
-        if isUrgent() { seconds = 60 }
+        var seconds: UInt64 = visible ? userInterval : 300
+        if isUrgent() { seconds = userInterval }
         return seconds * 1_000_000_000
     }
 
