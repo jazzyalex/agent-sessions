@@ -53,6 +53,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var showTimestamps: Bool = false
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("TranscriptRenderMode") private var renderModeRaw: String = TranscriptRenderMode.normal.rawValue
+    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     // Auto-colorize in Terminal mode
     private var shouldColorize: Bool {
@@ -95,7 +96,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         userRanges: shouldColorize ? userRanges : [],
                         assistantRanges: shouldColorize ? assistantRanges : [],
                         outputRanges: shouldColorize ? outputRanges : [],
-                        errorRanges: shouldColorize ? errorRanges : []
+                        errorRanges: shouldColorize ? errorRanges : [],
+                        appAppearanceRaw: appAppearanceRaw
                     )
 
                     // Show animation during lazy load OR full refresh
@@ -592,11 +594,13 @@ private struct PlainTextScrollView: NSViewRepresentable {
     let assistantRanges: [NSRange]
     let outputRanges: [NSRange]
     let errorRanges: [NSRange]
+    let appAppearanceRaw: String
 
     class Coordinator {
         var lastWidth: CGFloat = 0
         var lastPaintedHighlights: [NSRange] = []
         var lastPaintedIndex: Int = -1
+        var lastAppearanceRaw: String = ""
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -623,6 +627,21 @@ private struct PlainTextScrollView: NSViewRepresentable {
 
         // Enable non-contiguous layout for better performance on large documents
         textView.layoutManager?.allowsNonContiguousLayout = true
+
+        // Explicitly set appearance to match app preference
+        let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
+        switch appAppearance {
+        case .light:
+            scroll.appearance = NSAppearance(named: .aqua)
+            textView.appearance = NSAppearance(named: .aqua)
+        case .dark:
+            scroll.appearance = NSAppearance(named: .darkAqua)
+            textView.appearance = NSAppearance(named: .darkAqua)
+        case .system:
+            scroll.appearance = nil
+            textView.appearance = nil
+        }
+        context.coordinator.lastAppearanceRaw = appAppearanceRaw
 
         // Set background with proper dark mode support
         let isDark = (textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
@@ -651,10 +670,34 @@ private struct PlainTextScrollView: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         if let tv = nsView.documentView as? NSTextView {
             let textChanged = tv.string != text
+            let appearanceChanged = context.coordinator.lastAppearanceRaw != appAppearanceRaw
+
+            // Explicitly set NSView appearance when app appearance changes
+            if appearanceChanged {
+                let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
+                switch appAppearance {
+                case .light:
+                    nsView.appearance = NSAppearance(named: .aqua)
+                    tv.appearance = NSAppearance(named: .aqua)
+                case .dark:
+                    nsView.appearance = NSAppearance(named: .darkAqua)
+                    tv.appearance = NSAppearance(named: .darkAqua)
+                case .system:
+                    nsView.appearance = nil
+                    tv.appearance = nil
+                }
+                context.coordinator.lastAppearanceRaw = appAppearanceRaw
+            }
+
             if textChanged {
                 tv.string = text
                 applySyntaxColors(tv)
                 context.coordinator.lastPaintedHighlights = []
+            }
+
+            // Reapply colors when appearance changes (dark/light mode switch)
+            if appearanceChanged {
+                applySyntaxColors(tv)
             }
 
             if let font = tv.font, abs(font.pointSize - fontSize) > 0.5 {
