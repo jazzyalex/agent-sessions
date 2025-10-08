@@ -89,19 +89,48 @@ VERSION=2.2 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
 - SHA: `dist/AgentSessions-{VERSION}.dmg.sha256`
 - Build logs: Terminal output
 
-## Post-Deployment Checklist
+## Post-Deployment Verification
 
-After script completes successfully:
+After script completes successfully, run automated and manual checks.
 
-### Immediate Verification (5-10 minutes)
-- [ ] GitHub Release exists: https://github.com/jazzyalex/agent-sessions/releases/tag/v{VERSION}
-- [ ] DMG and SHA256 are attached to release
-- [ ] Release notes are correct and complete
-- [ ] Download links in README.md point to new version
-- [ ] Download links in docs/index.html point to new version
-- [ ] Homebrew cask updated (if UPDATE_CASK=1)
+### Automated Checks (Run by Agent - 1-2 minutes)
 
-### Quality Assurance (30-60 minutes)
+These checks should be performed automatically by the deployment agent:
+
+```bash
+# 1. Verify GitHub release exists with correct assets
+gh release view v{VERSION} --json name,assets | jq '.assets[] | .name'
+# Expected: AgentSessions-{VERSION}.dmg and AgentSessions-{VERSION}.dmg.sha256
+
+# 2. Verify README.md download links point to new version
+grep "releases/download/v" README.md | grep "{VERSION}"
+# Should find: AgentSessions-{VERSION}.dmg URLs and text labels with {VERSION}
+
+# 3. Verify docs/index.html download links point to new version
+grep "releases/download/v" docs/index.html | grep "{VERSION}"
+# Should find: AgentSessions-{VERSION}.dmg URL and "Download Agent Sessions {VERSION}" text
+
+# 4. Verify Homebrew cask updated (if local tap exists)
+grep -E "(version|sha256)" /opt/homebrew/Library/Taps/jazzyalex/homebrew-agent-sessions/Casks/agent-sessions.rb | head -2
+# Expected: version "{VERSION}" and matching sha256
+
+# 5. Verify release notes match CHANGELOG.md
+gh release view v{VERSION} --json body -q '.body' > /tmp/release_notes.txt
+awk '/^## \[{VERSION}\]/,/^## \[/' docs/CHANGELOG.md > /tmp/changelog_section.txt
+diff -u /tmp/changelog_section.txt /tmp/release_notes.txt
+# Expected: no significant differences
+
+# 6. Verify git is clean
+git status --porcelain
+# Expected: empty output or only .claude/settings.local.json, project.pbxproj, CLAUDE.md
+```
+
+**Agent should automatically fix any issues found:**
+- Incorrect version numbers in download button text → Edit and commit
+- Missing Homebrew cask update → Update cask, commit, and push
+- Uncommitted documentation changes → Commit and push
+
+### Human-Required Checks (30-60 minutes)
 - [ ] Download DMG from GitHub Release
 - [ ] Verify SHA256 checksum matches
 - [ ] Test installation on clean macOS system
