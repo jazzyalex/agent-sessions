@@ -111,7 +111,15 @@
       "Read(//Users/alexm/Downloads/**)",
       "Bash(defaults read:*)",
       "Bash(curl:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(swift test:*)",
+      "Bash(swift build:*)",
+      "Bash(uuidgen)",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib python generate_assets.py)",
+      "WebFetch(domain:commons.wikimedia.org)"
     ],
     "deny": [],
     "ask": []
