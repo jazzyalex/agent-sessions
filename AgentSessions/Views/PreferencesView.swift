@@ -381,25 +381,6 @@ struct PreferencesView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            sectionHeader("Codex CLI")
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Detected version:").font(.caption)
-                    Text(probeVersion?.description ?? "unknown").font(.caption).monospaced()
-                }
-                if let path = resolvedCodexPath {
-                    Text(path).font(.caption2).foregroundStyle(.secondary)
-                }
-                HStack(spacing: 12) {
-                    Button("Re-probe") { probeCodex() }
-                        .buttonStyle(.bordered)
-                        .help("Check again for the Codex CLI version and path")
-                    Button("Open Codex CLI Preferences…") { selectedTab = .codexCLI }
-                        .buttonStyle(.bordered)
-                        .help("Jump to the Codex CLI tab for detailed configuration")
-                }
-            }
         }
     }
 
@@ -408,6 +389,20 @@ struct PreferencesView: View {
             Text("Codex CLI")
                 .font(.title2)
                 .fontWeight(.semibold)
+
+            sectionHeader("Codex CLI Version")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Detected version:").font(.caption)
+                    Text(probeVersion?.description ?? "unknown").font(.caption).monospaced()
+                }
+                if let path = resolvedCodexPath {
+                    Text(path).font(.caption2).foregroundStyle(.secondary)
+                }
+                Button("Re-probe") { probeCodex() }
+                    .buttonStyle(.bordered)
+                    .help("Check again for the Codex CLI version and path")
+            }
 
             sectionHeader("Sessions Directory")
             VStack(alignment: .leading, spacing: 12) {
