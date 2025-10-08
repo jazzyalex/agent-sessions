@@ -556,37 +556,50 @@ struct PreferencesView: View {
 
                 // Auto row (detected path + version + actions)
                 if claudeSettings.binaryPath.isEmpty {
-                    HStack(spacing: 10) {
-                        // Path and version
-                        Text(claudeResolvedPath ?? "")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if let ver = claudeVersionString { Text("• v\(ver)").font(.caption).foregroundStyle(.secondary) }
-                        Button(action: probeClaude) { Text("Check Version").underline() }
-                            .buttonStyle(.plain).foregroundColor(.accentColor)
+                    HStack {
+                        Text("Detected:").font(.caption)
+                        Text(claudeVersionString ?? "unknown").font(.caption).monospaced()
+                    }
+                    if let path = claudeResolvedPath {
+                        Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                    HStack(spacing: 12) {
+                        Button("Check Version") { probeClaude() }
+                            .buttonStyle(.bordered)
                             .help("Query the detected Claude CLI for its version")
-                        Button(action: { if let p = claudeResolvedPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(p, forType: .string) } }) { Text("Copy").underline() }
-                            .buttonStyle(.plain).foregroundColor(.accentColor)
-                            .help("Copy the detected Claude CLI path")
-                        Button(action: { if let p = claudeResolvedPath { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) } }) { Text("Reveal").underline() }
-                            .buttonStyle(.plain).foregroundColor(.accentColor)
-                            .help("Reveal the detected Claude CLI binary in Finder")
+                        Button("Copy Path") {
+                            if let p = claudeResolvedPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(p, forType: .string)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Copy the detected Claude CLI path to clipboard")
+                        Button("Reveal") {
+                            if let p = claudeResolvedPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Reveal the detected Claude CLI binary in Finder")
                     }
                 } else {
-                    // Custom row
+                    // Custom mode: text field for override
                     HStack(spacing: 10) {
                         TextField("/path/to/claude", text: Binding(get: { claudeSettings.binaryPath }, set: { claudeSettings.setBinaryPath($0) }))
                             .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 360)
                             .onSubmit { scheduleClaudeProbe() }
                             .onChange(of: claudeSettings.binaryPath) { _, _ in scheduleClaudeProbe() }
-                            .help("Specify a custom Claude CLI executable path")
-                        Button("Choose…", action: pickClaudeBinary).buttonStyle(.bordered)
-                            .help("Select the Claude CLI executable")
-                        Button("Clear") { claudeSettings.setBinaryPath("") }.buttonStyle(.bordered)
-                            .help("Remove the custom Claude CLI path")
+                            .help("Enter the full path to a custom Claude CLI binary")
+                        Button("Choose…", action: pickClaudeBinary)
+                            .buttonStyle(.borderedProminent)
+                            .help("Select the Claude CLI binary from the filesystem")
+                        Button("Clear") {
+                            claudeSettings.setBinaryPath("")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Remove the custom binary override")
                     }
                 }
             }
