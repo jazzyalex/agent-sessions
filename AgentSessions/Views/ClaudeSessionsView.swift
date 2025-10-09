@@ -345,7 +345,7 @@ private struct ClaudeSessionsListView: View {
            let id = selectedIDs.first,
            let session = session(for: id) {
             if isResumeEnabled {
-                Button("Resume in Claude") { onResume?(session) }
+                Button("Resume in Claude Code") { onResume?(session) }
                 Divider()
             }
             Button("Open Working Directory") {

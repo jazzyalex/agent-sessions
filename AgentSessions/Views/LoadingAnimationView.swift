@@ -8,7 +8,7 @@ struct LoadingAnimationView: View {
     @State private var currentWordIndex = 0
     @State private var opacity: Double = 0.0
 
-    private let words = ["Codex", "Claude", "Sessions"]
+    private let words = ["Codex CLI", "Claude Code", "Agent Sessions"]
 
     var body: some View {
         ZStack {

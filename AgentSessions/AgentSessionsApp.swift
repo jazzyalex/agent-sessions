@@ -97,12 +97,6 @@ struct AgentSessionsApp: App {
                 Button("Find in Transcript") { /* unified find focuses handled in view */ }.keyboardShortcut("f", modifiers: .command).disabled(true)
             }
             CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer) }.keyboardShortcut(",", modifiers: .command) }
-            CommandGroup(after: .windowArrangement) {
-                Button("Codex Only (Unified)") { focusUnified(preset: .codexOnly) }
-                    .keyboardShortcut("1", modifiers: [.command, .shift])
-                Button("Claude Only (Unified)") { focusUnified(preset: .claudeOnly) }
-                    .keyboardShortcut("2", modifiers: [.command, .shift])
-            }
         }
 
         // Legacy windows removed; Unified is the single window.
@@ -123,37 +117,7 @@ final class _UnifiedHolder: ObservableObject {
     }
 }
 
-// Window helpers
 extension AgentSessionsApp {
-    enum UnifiedPreset { case codexOnly, claudeOnly, both }
-    private func focusUnified(preset: UnifiedPreset) {
-        // Ensure Unified indexer exists and set source filters
-        let unified = unifiedIndexerHolder.makeUnified(codexIndexer: indexer, claudeIndexer: claudeIndexer)
-        switch preset {
-        case .codexOnly:
-            unified.includeCodex = true; unified.includeClaude = false
-        case .claudeOnly:
-            unified.includeCodex = false; unified.includeClaude = true
-        case .both:
-            unified.includeCodex = true; unified.includeClaude = true
-        }
-        unified.recomputeNow()
-
-        // Bring Unified window to front (create if none by activating the app)
-        NSApp.activate(ignoringOtherApps: true)
-
-        // One-time notice replacing legacy windows
-        if !unifiedNoticeShown {
-            unifiedNoticeShown = true
-            let alert = NSAlert()
-            alert.messageText = "Unified Window"
-            alert.informativeText = "Legacy Codex/Claude windows have been replaced by the Unified window. Use Shift+Cmd+1 for Codex only, Shift+Cmd+2 for Claude only."
-            alert.addButton(withTitle: "OK")
-            alert.alertStyle = .informational
-            alert.runModal()
-        }
-    }
-
     private func updateUsageModels() {
         let d = UserDefaults.standard
         // Codex usage model is independent of Claude experimental flag

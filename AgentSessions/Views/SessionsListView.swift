@@ -199,12 +199,13 @@ struct SessionsListView: View {
         if selectedIDs.count == 1,
            let id = selectedIDs.first,
            let session = session(for: id) {
-            Button("Resume in Codex") {
+            Button("Resume in Codex CLI") {
                 tableSelection = [id]
                 selection = id
                 onLaunchTerminal(session)
             }
             .help("Open this session in the Codex terminal if it supports resume. Some sessions lack enough data to relaunch.")
+            Divider()
             Button("Open Working Directory") {
                 tableSelection = [id]
                 selection = id
@@ -231,7 +232,7 @@ struct SessionsListView: View {
                     .help("Project information is unavailable for this session")
             }
         } else {
-            Button("Resume in Codex") {}
+            Button("Resume in Codex CLI") {}
                 .disabled(true)
                 .help("Select exactly one session to attempt a Codex resume")
             Button("Open Working Directory") {}

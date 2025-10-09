@@ -250,6 +250,10 @@ struct UnifiedSessionsView: View {
         }
         .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let id = ids.first, let s = rows.first(where: { $0.id == id }) {
+                Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
+                    .keyboardShortcut("r", modifiers: [.command, .control])
+                    .help("Resume the selected session in its original CLI (⌃⌘R)")
+                Divider()
                 Button("Open Working Directory") { openDir(s) }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                     .help("Reveal working directory in Finder (⌘⇧O)")
@@ -263,6 +267,8 @@ struct UnifiedSessionsView: View {
                         .help("Show only sessions from \(name) (⌥⌘P)")
                 }
             } else {
+                Button("Resume") {}
+                    .disabled(true)
                 Button("Open Working Directory") {}
                     .disabled(true)
                     .help("Select a session to open its working directory")
