@@ -124,10 +124,10 @@ if [[ "${UPDATE_CASK}" == "1" ]] && [[ -d "/opt/homebrew/Library/Taps/jazzyalex/
   CASK="/opt/homebrew/Library/Taps/jazzyalex/homebrew-agent-sessions/Casks/agent-sessions.rb"
   if [[ -f "$CASK" ]]; then
     green "==> Updating local Homebrew cask"
-    sed -i '' -E "s/^\s*version \"[0-9.]+\"/  version \"${VERSION}\"/" "$CASK"
-    sed -i '' -E "s/^\s*sha256 \"[a-f0-9]+\"/  sha256 \"${SHA}\"/" "$CASK"
+    sed -i '' -E "s/^[[:space:]]*version \"[0-9.]+\"/  version \"${VERSION}\"/" "$CASK"
+    sed -i '' -E "s/^[[:space:]]*sha256 \"[a-f0-9]+\"/  sha256 \"${SHA}\"/" "$CASK"
     sed -i '' -E "s#AgentSessions(-[0-9.]+)?\.dmg#AgentSessions-${VERSION}.dmg#g" "$CASK"
-    (cd "$(dirname "$CASK")/.." && git add "$CASK" && git commit -m "agent-sessions ${VERSION} (cask): update url and sha256" && git push origin HEAD:main) || true
+    (cd "$(dirname "$CASK")/.." && git add "$CASK" && git commit -m "chore: update agent-sessions to ${VERSION}" && git push origin HEAD:main) || true
   fi
 fi
 
