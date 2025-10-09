@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.2.1] - 2025-10-09
+
+### Changed
+- Replace menubar icons with text symbols (CX/CL) for better clarity
+- CX for Codex CLI, CL for Claude Code (SF Pro Text Semibold 11pt, -2% tracking)
+- Always show prefixes for all source modes
+- Revert to monospaced font for metrics (12pt regular)
+
+### Added
+- "Resume in [CLI name]" as first menu item in all session context menus
+- Dynamic context menu labels based on session source (Codex CLI or Claude Code)
+- Dividers after Resume option for better visual separation
+
+### Fixed
+- Update loading animation with full product names (Codex CLI, Claude Code, Agent Sessions)
+
+### Removed
+- Legacy Window menu items: "Codex Only (Unified)" and "Claude Only (Unified)"
+- Unused focusUnified() helper and UnifiedPreset enum
+
 ## [2.2] - 2025-10-08
 
 ### Performance & Energy
