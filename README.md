@@ -10,7 +10,7 @@
 </div>
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.2/AgentSessions-2.2.dmg"><b>Download Agent Sessions 2.2 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.2.1/AgentSessions-2.2.1.dmg"><b>Download Agent Sessions 2.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -66,7 +66,7 @@ No cloud uploads or telemetry — **read-only by design.**
 ## 💻 Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.2/AgentSessions-2.2.dmg)  
+1. [Download AgentSessions-2.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.2.1/AgentSessions-2.2.1.dmg)  
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew Tap
