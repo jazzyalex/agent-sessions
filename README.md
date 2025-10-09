@@ -29,12 +29,12 @@ Look up any past session — even the ancient ones `/resume` can’t show — or
 **Local-first, open source, and built for terminal vibe warriors.**
 
 <div align="center">
-  <img src="docs/assets/screenshot-V.png" alt="Session browser with search and filters" width="100%" style="max-width:960px;border:1px solid #d0d7de;border-radius:8px;"/>
-  <p><em>Session browser with grouped timeline and full-text search</em></p>
-  <img src="docs/assets/screenshot-H.png" alt="Transcript view with role-based styling" width="100%" style="max-width:960px;border:1px solid #d0d7de;border-radius:8px;"/>
-  <p><em>Transcript view with timestamps and role-based styling</em></p>
-  <img src="docs/assets/screenshot-menubar.png" alt="Menu bar usage tracking" width="50%" style="max-width:480px;border:1px solid #d0d7de;border-radius:8px;"/>
-  <p><em>Menu-bar indicator showing 5-hour and weekly usage percentages</em></p>
+  <p style="margin:0 0 0px 0;"><em>Transcript view with search (Dark Mode)</em></p>
+  <img src="docs/assets/screenshot-H.png" alt="Transcript view with search (Dark Mode)" width="100%" style="max-width:960px;border:1px solid #d0d7de;border-radius:8px;margin:5px 0;"/>
+  <p style="margin:0 0 0px 0;"><em>Resume any Codex CLI and Claude Code session</em></p>
+  <img src="docs/assets/screenshot-V.png" alt="Resume any Codex CLI and Claude Code session" width="100%" style="max-width:960px;border:1px solid #d0d7de;border-radius:8px;margin:5px 0;"/>
+  <p style="margin:0 0 15px 0;"><em>Menu bar usage tracking with 5-hour and weekly percentages</em></p>
+  <img src="docs/assets/screenshot-menubar.png" alt="Menu bar usage tracking with 5-hour and weekly percentages" width="50%" style="max-width:480px;border:1px solid #d0d7de;border-radius:8px;margin:5px auto;display:block;"/>
 </div>
 
 ---
