@@ -1,14 +1,20 @@
 # Agent Sessions (macOS)
 
 [![Build](https://github.com/jazzyalex/agent-sessions/actions/workflows/ci.yml/badge.svg)](https://github.com/jazzyalex/agent-sessions/actions/workflows/ci.yml)
-<a href="https://www.producthunt.com/products/agent-sessions?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-agent&#0045;sessions" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1024948&theme=neutral&t=1760361262209" alt="Agent&#0032;Sessions&#0032;-&#0032;Unified&#0032;history&#0032;&#0038;&#0032;usage&#0032;for&#0032;Codex&#0032;CLI&#0032;and&#0032;Claude&#0032;Code | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 
-> **Unified session browser for Codex CLI and Claude Code.**  
-> Search, browse, and resume any past AI-coding session in a single local-first macOS app.
+<table>
+<tr>
+<td width="100" align="center">
+  <img src="docs/assets/app-icon-512.png" alt="App Icon" width="80" height="80"/>
+</td>
+<td>
 
-<div align="center">
-  <img src="docs/assets/app-icon-512.png" alt="App Icon" width="128" height="128"/>
-</div>
+ **Unified session browser for Codex CLI and Claude Code.**  
+ Search, browse, and resume any past AI-coding session in a single local-first macOS app.
+
+</td>
+</tr>
+</table>
 
 <p align="center">
   <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.2.1/AgentSessions-2.2.1.dmg"><b>Download Agent Sessions 2.2.1 (DMG)</b></a>
@@ -18,11 +24,15 @@
   <a href="#install">Install</a>
   •
   <a href="#resume-workflows">Resume Workflows</a>
+
 </p>
+<p></p>
+<div align="center">
 
----
+<a href="https://www.producthunt.com/products/agent-sessions?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-agent&#0045;sessions" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1024948&theme=light&t=1760385821577" alt="Agent&#0032;Sessions&#0032; - Unified&#0032;history&#0032;&#0038;&#0032;usage&#0032;for&#0032;Codex&#0032;CLI&#0032;and&#0032;Claude&#0032;Code | Product Hunt" style="width: 250px; height: 76px;" width="250" height="76" /></a>
+</div>
 
-## ✨ Overview
+##  Overview
 
 Agent Sessions 2 brings **Codex CLI** and **Claude Code** together in one interface.  
 Look up any past session — even the ancient ones `/resume` can’t show — or browse visually to find that perfect prompt or code snippet, then instantly copy or resume it.
