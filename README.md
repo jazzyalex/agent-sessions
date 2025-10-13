@@ -1,6 +1,7 @@
 # Agent Sessions (macOS)
 
 [![Build](https://github.com/jazzyalex/agent-sessions/actions/workflows/ci.yml/badge.svg)](https://github.com/jazzyalex/agent-sessions/actions/workflows/ci.yml)
+<a href="https://www.producthunt.com/products/agent-sessions?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-agent&#0045;sessions" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1024948&theme=neutral&t=1760361262209" alt="Agent&#0032;Sessions&#0032;-&#0032;Unified&#0032;history&#0032;&#0038;&#0032;usage&#0032;for&#0032;Codex&#0032;CLI&#0032;and&#0032;Claude&#0032;Code | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 
 > **Unified session browser for Codex CLI and Claude Code.**  
 > Search, browse, and resume any past AI-coding session in a single local-first macOS app.
