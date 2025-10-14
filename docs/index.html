@@ -100,21 +100,9 @@
     }
 
     .button-row > .btn { height: 40px; }
-    .product-hunt { display:flex; align-items:center; height:40px; }
-    .product-hunt img {
-      height: 40px; /* exact match with .btn height */
-      width: auto;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
-      padding: 0;
-      display: inline-block;
-      vertical-align: middle;
-      opacity: 0.95;
-      position: relative;
-      top: 0;
-    }
-    .product-hunt img:hover { opacity: 1; }
+    .header-right { display:flex; align-items:center; gap:12px; }
+    .ph-badge img { height:24px; width:auto; opacity:0.9; vertical-align:middle; }
+    .ph-badge img:hover { opacity:1; }
 
     .features {
       display: grid;
@@ -189,7 +177,9 @@
         <h1 style="margin:0;font-size:20px;">Agent Sessions</h1>
       </a>
     </div>
-    <span>• macOS • Open Source</span>
+    <div class="header-right">
+      <span>• macOS • Open Source</span>
+    </div>
   </header>
   <div class="container">
     <h1 style="font-size: 24px;">Session Browser for Codex CLI, Claude Code & Gemini CLI</h1>
@@ -200,9 +190,20 @@
       lost
       perfect prompt or code snippet, then instantly copy or resume what you need.
     <p></p>
-    <span
-      style="text-align: center; font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-weight: 600; color: #4B5563; font-size: 0.8em; font-variant: small-caps; letter-spacing: 0.05em;">local-first,
-      open source, and built for terminal vibe warriors.</span></p>
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+      <span
+        style="font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-weight: 600; color: #4B5563; font-size: 0.8em; font-variant: small-caps; letter-spacing: 0.05em;">local-first,
+        open source, and built for terminal vibe warriors.</span>
+      
+      <a class="ph-badge" href="https://www.producthunt.com/products/agent-sessions" target="_blank" rel="noopener">
+        <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1024948&theme=light"
+             alt="Agent Sessions on Product Hunt"
+             style="height:24px; width:auto; opacity:0.9; vertical-align:middle;">
+      </a>
+    </div>
+
+      
+      
     <div class="button-row" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
       <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.3.1/AgentSessions-2.3.1.dmg"
         class="btn primary"
@@ -217,18 +218,12 @@
 
       <a href="https://x.com/jazzyalex" class="btn secondary"
         style="padding:10px 18px;border-radius:8px;background:#f2f2f2;color:#111;text-decoration:none;font-weight:500">
-        Follow on X (Twitter)
+        Follow on X
       </a>
-      <a href="https://www.producthunt.com/products/agent-sessions?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-agent&#0045;sessions"
-      target="_blank"><img
-        src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1024948&theme=light&t=1760428775700"
-        alt="Agent&#0032;Sessions&#0032; - Unified&#0032;history&#0032;&#0038;&#0032;usage&#0032;for&#0032;Codex&#0032;CLI&#0032;and&#0032;Claude&#0032;Code | Product Hunt"
-        style="width: 180px; height: 54px;" width="250" height="54" /></a>
-
     </div>
-  
 
     <h3 style="margin-top:40px;">Install with Homebrew Tap</h3>
+    
     <pre><code style="font-size: 12px;">brew tap jazzyalex/agent-sessions
 brew install --cask agent-sessions</code></pre>
 
@@ -237,7 +232,9 @@ brew install --cask agent-sessions</code></pre>
         <h3>Unified Interface v2</h3>
         <p>Browse <em>Codex CLI</em>, <em>Claude Code</em>, and <em>Gemini CLI</em> side-by-side. Toggle
           between sources
-          with strict filtering and unified search.</p>
+          with strict filtering and unified search.
+        <p>
+          ★ Star important sessions for quick access — one click in the toolbar brings up your favorites.</p>
       </div>
       <div class="card">
         <h3>Unified Search v2</h3>
@@ -282,11 +279,11 @@ brew install --cask agent-sessions</code></pre>
       with search (Dark Mode)
     </em></p>
   <img src="assets/screenshot-H.png" alt="Transcript view with search (Dark Mode)"
-    style="width:100%; max-width:960px; margin:5px 0;" />
+    style="width:100%; max-width:960px; margin:5px auto; display:block;" />
   <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:0px;"><em>Resume any Codex
       CLI and Claude Code session</em></p>
   <img src="assets/screenshot-V.png" alt="Resume any Codex CLI and Claude Code session"
-    style="width:100%; max-width:960px; margin:5px 0;" />
+    style="width:100%; max-width:960px; margin:5px auto; display:block;" />
 
   <div style="text-align:center;">
     <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:15px;"><em>Menu bar usage

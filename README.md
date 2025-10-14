@@ -32,7 +32,7 @@
 
 ##  Overview
 
-Agent Sessions 2 brings **Codex CLI**, **Claude Code**, and **Gemini CLI (read‑only)** together in one interface.  
+Agent Sessions 2 brings **Codex CLI**, **Claude Code**, and **Gemini CLI** together in one interface.  
 Look up any past session — even the ancient ones `/resume` can’t show — or browse visually to find that perfect prompt or code snippet, then instantly copy or resume it.
 
 <div align="center">
@@ -45,18 +45,20 @@ Local-first, open source, and built for terminal vibe warriors.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Transcript view with search (Dark Mode)</em></p>
-  <img src="docs/assets/screenshot-H.png" alt="Transcript view with search (Dark Mode)" width="100%" style="max-width:960px;border:1px solid #d0d7de;border-radius:8px;margin:5px 0;"/>
+  <img src="docs/assets/screenshot-H.png" alt="Transcript view with search (Dark Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
+
   <p style="margin:0 0 0px 0;"><em>Resume any Codex CLI and Claude Code session</em></p>
-  <img src="docs/assets/screenshot-V.png" alt="Resume any Codex CLI and Claude Code session" width="100%" style="max-width:960px;border:1px solid #d0d7de;border-radius:8px;margin:5px 0;"/>
+  <img src="docs/assets/screenshot-V.png" alt="Resume any Codex CLI and Claude Code session" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
+
   <p style="margin:0 0 15px 0;"><em>Menu bar usage tracking with 5-hour and weekly percentages</em></p>
-  <img src="docs/assets/screenshot-menubar.png" alt="Menu bar usage tracking with 5-hour and weekly percentages" width="50%" style="max-width:480px;border:1px solid #d0d7de;border-radius:8px;margin:5px auto;display:block;"/>
+  <img src="docs/assets/screenshot-menubar.png" alt="Menu bar usage tracking with 5-hour and weekly percentages" width="50%" style="max-width:480px;border-radius:8px;margin:5px auto;display:block;"/>
 </div>
 
 ---
 
 ## What's New in 2.3
 
-- Gemini CLI (read‑only, ephemeral):
+- Gemini CLI:
   - Indexes `~/.gemini/tmp/**/session-*.json` (and common variants)
   - Lists and opens transcripts in the existing viewer (no writes, no resume)
   - Unified search and source toggle alongside Codex/Claude
@@ -72,7 +74,7 @@ Local-first, open source, and built for terminal vibe warriors.
 ## Core Features
 
 ### Unified Interface v2
-Browse **Codex CLI**, **Claude Code**, and **Gemini CLI (read‑only)** sessions side-by-side. Toggle between sources (Both / Codex / Claude / Gemini) with strict filtering and unified search.
+Browse **Codex CLI**, **Claude Code**, and **Gemini CLI** sessions side-by-side. Toggle between sources (Both / Codex / Claude / Gemini) with strict filtering and unified search.
 
 ### Unified Search v2
 One search for everything. Find any snippet or prompt instantly — no matter which agent or project it came from (Codex, Claude, or Gemini CLI).  
