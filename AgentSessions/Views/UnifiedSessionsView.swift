@@ -28,6 +28,7 @@ struct UnifiedSessionsView: View {
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @State private var autoSelectEnabled: Bool = true
     @State private var programmaticSelectionUpdate: Bool = false
+    @State private var isAutoSelectingFromSearch: Bool = false
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
 
@@ -184,9 +185,12 @@ struct UnifiedSessionsView: View {
         }
         .onChange(of: selection) { _, id in
             guard let id, let s = cachedRows.first(where: { $0.id == id }) else { return }
-            // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
-            focusCoordinator.perform(.selectSession(id: id))
-            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+            // When selection is changed due to search auto-selection, do not steal focus or collapse inline search
+            if !isAutoSelectingFromSearch {
+                // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
+                focusCoordinator.perform(.selectSession(id: id))
+                NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+            }
             // If a large, unparsed session is clicked during an active search, promote it in the coordinator.
             let sizeBytes = s.fileSizeBytes ?? 0
             if searchCoordinator.isRunning, s.events.isEmpty, sizeBytes >= 10 * 1024 * 1024 {
@@ -355,7 +359,9 @@ struct UnifiedSessionsView: View {
                 // User interacted with the table; stop auto-selection
                 autoSelectEnabled = false
             }
-            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+            if !programmaticSelectionUpdate {
+                NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+            }
         }
         .onChange(of: unified.sessions) { _, _ in
             updateSelectionBridge()
@@ -363,6 +369,20 @@ struct UnifiedSessionsView: View {
         }
         .onChange(of: searchCoordinator.results) { _, _ in
             updateCachedRows()
+            // If we have search results but no valid selection (none selected or selected not in results),
+            // auto-select the first match without stealing focus
+            if selectedSession == nil, let first = cachedRows.first {
+                isAutoSelectingFromSearch = true
+                selection = first.id
+                let desired: Set<String> = [first.id]
+                if tableSelection != desired {
+                    programmaticSelectionUpdate = true
+                    tableSelection = desired
+                    DispatchQueue.main.async { programmaticSelectionUpdate = false }
+                }
+                // Reset the flag on the next runloop to ensure onChange handlers have observed it
+                DispatchQueue.main.async { isAutoSelectingFromSearch = false }
+            }
         }
     }
 
