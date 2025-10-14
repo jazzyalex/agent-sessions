@@ -21,6 +21,7 @@ final class GeminiSessionParser {
         }
 
         let (items, meta) = extractItemsAndMeta(from: any)
+        let folderHash = projectHash(from: url)
         let count = items?.count ?? 0
 
         // Title: first meaningful user line (from preview logic similar to Session.title expectations)
@@ -28,6 +29,24 @@ final class GeminiSessionParser {
         if let arr = items {
             title = firstUserText(from: arr)?.trimmingCharacters(in: .whitespacesAndNewlines)
         }
+
+        // Lightweight cwd extraction (bounded scan to keep preview fast)
+        var cwd: String? = nil
+        var cwdLockedByResolver = false
+        // Resolver-first
+        if let hash = folderHash, let mapped = GeminiHashResolver.shared.resolve(hash), let v = validateCwd(mapped) { cwd = v; cwdLockedByResolver = true }
+        // Heuristics only if not locked; require hash match when folderHash present
+        if !cwdLockedByResolver, let arr = items {
+            if let cand = extractCwd(from: arr, limit: 20), let norm = validateCwd(cand) {
+                if let hash = folderHash {
+                    if sha256(path: normalizePath(norm)) == hash { cwd = norm }
+                } else {
+                    cwd = norm
+                }
+            }
+        }
+        // As final attempt, check resolver again (in case it was seeded mid-parse)
+        if !cwdLockedByResolver, cwd == nil, let hash = folderHash, let mapped = GeminiHashResolver.shared.resolve(hash) { cwd = validateCwd(mapped) }
 
         // start/end times from meta or from items timestamps
         var tmin: Date? = decodeDate(meta.startTime) ?? decodeDate(meta.firstTS)
@@ -45,7 +64,7 @@ final class GeminiSessionParser {
                        fileSizeBytes: size >= 0 ? size : nil,
                        eventCount: max(0, count),
                        events: [],
-                       cwd: nil,
+                       cwd: cwd,
                        repoName: nil,
                        lightweightTitle: title)
     }
@@ -61,11 +80,16 @@ final class GeminiSessionParser {
         }
 
         let (items, meta) = extractItemsAndMeta(from: any)
+        let folderHash = projectHash(from: url)
 
         var events: [SessionEvent] = []
         var model = meta.model
         var tmin: Date? = decodeDate(meta.startTime) ?? decodeDate(meta.firstTS)
         var tmax: Date? = decodeDate(meta.lastUpdated) ?? decodeDate(meta.lastTS) ?? tmin
+        var cwd: String? = nil
+        var cwdLockedByResolver = false
+        // Resolver-first
+        if let hash = folderHash, let mapped = GeminiHashResolver.shared.resolve(hash), let v = validateCwd(mapped) { cwd = v; cwdLockedByResolver = true }
 
         if let arr = items {
             events.reserveCapacity(arr.count)
@@ -118,6 +142,17 @@ final class GeminiSessionParser {
 
                 let text = contentString(of: obj)
 
+                // Opportunistic cwd extraction while walking items (cheap checks)
+                if !cwdLockedByResolver, cwd == nil {
+                    if let c = directCwd(from: obj) ?? cwdFromText(text), let norm = validateCwd(c) {
+                        if let hash = folderHash {
+                            if sha256(path: normalizePath(norm)) == hash { cwd = norm }
+                        } else {
+                            cwd = norm
+                        }
+                    }
+                }
+
                 var toolName: String? = nil
                 var toolInput: String? = nil
                 var toolOutput: String? = nil
@@ -150,6 +185,9 @@ final class GeminiSessionParser {
             }
         }
 
+        // If still no cwd, try resolver again
+        if !cwdLockedByResolver, cwd == nil, let hash = folderHash, let mapped = GeminiHashResolver.shared.resolve(hash) { cwd = validateCwd(mapped) }
+
         let id = sha256(path: url.path)
         return Session(id: id,
                        source: .gemini,
@@ -160,7 +198,7 @@ final class GeminiSessionParser {
                        fileSizeBytes: size >= 0 ? size : nil,
                        eventCount: events.count,
                        events: events,
-                       cwd: nil,
+                       cwd: cwd,
                        repoName: nil,
                        lightweightTitle: nil)
     }
@@ -228,6 +266,112 @@ final class GeminiSessionParser {
                 else if p["inlineData"] != nil || p["inline_file"] != nil { texts.append("[inline data omitted]") }
             }
             if !texts.isEmpty { return texts.joined(separator: "\n") }
+        }
+        return nil
+    }
+
+    /// Extract hashed project folder from path: ~/.gemini/tmp/<hash>/(chats)?/session-*.json
+    private static func projectHash(from url: URL) -> String? {
+        let comps = url.pathComponents
+        guard let idx = comps.firstIndex(of: "tmp"), comps.count > idx + 1 else { return nil }
+        let candidate = comps[idx + 1]
+        // Basic sanity check: hex-like hash length 32..64
+        if candidate.count >= 32 && candidate.allSatisfy({ $0.isHexDigit }) { return candidate }
+        return nil
+    }
+
+    // MARK: - CWD extraction helpers
+
+    /// Bounded scan to keep indexing responsive
+    private static func extractCwd(from arr: [Any], limit: Int) -> String? {
+        let n = min(limit, arr.count)
+        for i in 0..<n {
+            guard let obj = arr[i] as? [String: Any] else { continue }
+            // 1) Direct keys first
+            if let c = directCwd(from: obj), let v = validateCwd(c) { return v }
+            // 2) Text blocks with <cwd>…</cwd> or absolute path hints
+            if let t = contentString(of: obj) {
+                if let c = cwdFromText(t), let v = validateCwd(c) { return v }
+            }
+        }
+        return nil
+    }
+
+    /// Recognize common keys used by various builds
+    private static func directCwd(from obj: [String: Any]) -> String? {
+        let keys = ["cwd", "workingDir", "workdir", "project_root", "projectRoot", "rootDir"]
+        for k in keys {
+            if let v = obj[k] as? String, !v.isEmpty { return v }
+        }
+        // Nested repo/root
+        if let repo = obj["repo"] as? [String: Any], let root = repo["root"] as? String, !root.isEmpty { return root }
+        // Some payloads nest useful fields
+        if let payload = obj["payload"] as? [String: Any] {
+            for k in keys { if let v = payload[k] as? String, !v.isEmpty { return v } }
+            if let repo = payload["repo"] as? [String: Any], let root = repo["root"] as? String, !root.isEmpty { return root }
+        }
+        return nil
+    }
+
+    /// Parse <cwd>…</cwd> or extract plausible absolute paths from text
+    private static func cwdFromText(_ text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        if let start = text.range(of: "<cwd>"), let end = text.range(of: "</cwd>", range: start.upperBound..<text.endIndex) {
+            let candidate = String(text[start.upperBound..<end.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !candidate.isEmpty { return candidate }
+        }
+        // Simple absolute-path heuristic (avoid over-matching)
+        // Prefer lines that look like declarations: "Working directory: /path" or start-with-slash tokens
+        for line in text.components(separatedBy: .newlines) {
+            let l = line.trimmingCharacters(in: .whitespaces)
+            // working directory hint
+            if let r = l.range(of: ": ") {
+                let after = l[r.upperBound...].trimmingCharacters(in: .whitespaces)
+                if after.hasPrefix("/") { return String(after) }
+            }
+            // tokenized path at start
+            if l.hasPrefix("/") { return l }
+        }
+        return nil
+    }
+
+    /// Validate a candidate path and prefer the git repo root when available
+    private static func validateCwd(_ path: String?) -> String? {
+        guard var p = path?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty else { return nil }
+        // Expand ~ if present
+        if p.hasPrefix("~") { p = (p as NSString).expandingTildeInPath }
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: p, isDirectory: &isDir), isDir.boolValue {
+            if let root = gitRootOf(p) { return root }
+            return p
+        }
+        return nil
+    }
+    private static func normalizePath(_ p: String) -> String {
+        var s = (p as NSString).expandingTildeInPath
+        while s.hasSuffix("/") && s.count > 1 { s.removeLast() }
+        return URL(fileURLWithPath: s).path
+    }
+
+    /// Lightweight git root detection (duplicated here because Session.gitInfo is fileprivate)
+    private static func gitRootOf(_ start: String, maxLevels: Int = 6) -> String? {
+        var url = URL(fileURLWithPath: start)
+        let fm = FileManager.default
+        for _ in 0..<maxLevels {
+            let dotGitDir = url.appendingPathComponent(".git")
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: dotGitDir.path, isDirectory: &isDir), isDir.boolValue {
+                return url.path
+            }
+            if fm.fileExists(atPath: dotGitDir.path) {
+                if let data = try? String(contentsOf: dotGitDir, encoding: .utf8), data.contains("gitdir:") {
+                    // Treat as repo root; callers only need root path
+                    return url.path
+                }
+            }
+            let parent = url.deletingLastPathComponent()
+            if parent.path == url.path { break }
+            url = parent
         }
         return nil
     }

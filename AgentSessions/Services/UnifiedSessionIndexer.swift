@@ -125,12 +125,48 @@ final class UnifiedSessionIndexer: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.recomputeNow() }
             .store(in: &cancellables)
+
+        // Seed Gemini hash resolver with known working directories from Codex/Claude sessions
+        Publishers.CombineLatest(codex.$allSessions, claude.$allSessions)
+            .debounce(for: .milliseconds(150), scheduler: DispatchQueue.global(qos: .utility))
+            .sink { codexList, claudeList in
+                let paths = (codexList + claudeList).compactMap { $0.cwd }
+                GeminiHashResolver.shared.registerCandidates(paths)
+            }
+            .store(in: &cancellables)
     }
 
     func refresh() {
-        codex.refresh()
-        claude.refresh()
-        gemini.refresh()
+        // Sequential refresh: Codex → Claude → Gemini, gated by source toggles
+        // This stabilizes resolver seeding and avoids UI churn from parallel updates.
+        struct Step { let enabled: Bool; let start: () -> Void; let busy: () -> Bool }
+        let steps: [Step] = [
+            Step(enabled: includeCodex, start: { self.codex.refresh() }, busy: { self.codex.isIndexing }),
+            Step(enabled: includeClaude, start: { self.claude.refresh() }, busy: { self.claude.isIndexing }),
+            Step(enabled: includeGemini, start: { self.gemini.refresh() }, busy: { self.gemini.isIndexing })
+        ]
+
+        func run(from index: Int) {
+            // Find next enabled step
+            var i = index
+            while i < steps.count && !steps[i].enabled { i += 1 }
+            guard i < steps.count else { return }
+
+            let step = steps[i]
+            step.start()
+
+            func poll() {
+                if step.busy() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { poll() }
+                } else {
+                    run(from: i + 1)
+                }
+            }
+            // Poll until this step finishes, then move on
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { poll() }
+        }
+
+        run(from: 0)
     }
 
     // Remove a session from the unified list (e.g., missing file cleanup)

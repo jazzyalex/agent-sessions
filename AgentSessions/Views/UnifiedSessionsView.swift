@@ -19,6 +19,7 @@ struct UnifiedSessionsView: View {
     @State private var selection: String?
     @State private var tableSelection: Set<String> = []
     @State private var sortOrder: [KeyPathComparator<Session>] = []
+    @State private var cachedRows: [Session] = []
     @AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
     @AppStorage("UnifiedShowCodexStrip") private var showCodexStrip: Bool = false
     @AppStorage("UnifiedShowClaudeStrip") private var showClaudeStrip: Bool = false
@@ -168,9 +169,10 @@ struct UnifiedSessionsView: View {
         }
         .onAppear {
             if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }
+            updateCachedRows()
         }
         .onChange(of: selection) { _, id in
-            guard let id, let s = rows.first(where: { $0.id == id }) else { return }
+            guard let id, let s = cachedRows.first(where: { $0.id == id }) else { return }
             // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
             focusCoordinator.perform(.selectSession(id: id))
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
@@ -195,7 +197,7 @@ struct UnifiedSessionsView: View {
 
     private var listPane: some View {
         VStack(spacing: 0) {
-        Table(rows, selection: $tableSelection, sortOrder: $sortOrder) {
+        Table(cachedRows, selection: $tableSelection, sortOrder: $sortOrder) {
             // Always include CLI Agent column; collapse width when hidden to avoid type-check complexity
             TableColumn("CLI Agent", value: \Session.sourceKey) { s in
                 let label: String = {
@@ -212,11 +214,7 @@ struct UnifiedSessionsView: View {
             .width(min: showSourceColumn ? 90 : 0, ideal: showSourceColumn ? 100 : 0, max: showSourceColumn ? 120 : 0)
 
             TableColumn("Session", value: \Session.title) { s in
-                Text(s.title)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .background(Color.clear)
+                SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
             }
             .width(min: 160, ideal: 320, max: 2000)
 
@@ -232,10 +230,15 @@ struct UnifiedSessionsView: View {
             .width(min: 120, ideal: 120, max: 140)
 
             TableColumn("Project", value: \Session.repoDisplay) { s in
-                Text(s.repoDisplay)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                let display: String = {
+                    if s.source == .gemini {
+                        if let name = s.repoName, !name.isEmpty { return name }
+                        return "—"
+                    } else {
+                        return s.repoDisplay
+                    }
+                }()
+                ProjectCellView(id: s.id, display: display)
                     .onTapGesture(count: 2) {
                         if let name = s.repoName { unified.projectFilter = name; unified.recomputeNow() }
                     }
@@ -248,19 +251,7 @@ struct UnifiedSessionsView: View {
             }
             .width(min: 64, ideal: 64, max: 80)
 
-            // Gemini-only stale preview affordance
-            TableColumn(" ") { s in
-                if s.source == .gemini, geminiIndexer.isPreviewStale(id: s.id) {
-                    Button(action: { geminiIndexer.refreshPreview(id: s.id) }) {
-                        Text("Refresh preview")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.teal)
-                    .help("Update this session's preview to reflect the latest file contents")
-                }
-            }
-            .width(min: 0, ideal: 120, max: 140)
+            // Removed separate Refresh column to avoid churn
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .environment(\.defaultMinListRowHeight, 22)
@@ -283,7 +274,7 @@ struct UnifiedSessionsView: View {
         }
         }
         .contextMenu(forSelectionType: String.self) { ids in
-            if ids.count == 1, let id = ids.first, let s = rows.first(where: { $0.id == id }) {
+            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
                 Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
                     .keyboardShortcut("r", modifiers: [.command, .control])
                     .help("Resume the selected session in its original CLI (⌃⌘R)")
@@ -327,6 +318,7 @@ struct UnifiedSessionsView: View {
                 unified.recomputeNow()
             }
             updateSelectionBridge()
+            updateCachedRows()
         }
         .onChange(of: tableSelection) { _, newSel in
             selection = newSel.first
@@ -336,7 +328,13 @@ struct UnifiedSessionsView: View {
             }
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         }
-        .onChange(of: unified.sessions) { _, _ in updateSelectionBridge() }
+        .onChange(of: unified.sessions) { _, _ in
+            updateSelectionBridge()
+            updateCachedRows()
+        }
+        .onChange(of: searchCoordinator.results) { _, _ in
+            updateCachedRows()
+        }
     }
 
     private var transcriptPane: some View {
@@ -409,7 +407,7 @@ struct UnifiedSessionsView: View {
         })
     }
 
-    private var selectedSession: Session? { selection.flatMap { id in rows.first(where: { $0.id == id }) } }
+    private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
 
     // Local helper mirrors SessionsListView absolute time formatting
     private func absoluteTimeUnified(_ date: Date?) -> String {
@@ -424,13 +422,21 @@ struct UnifiedSessionsView: View {
 
     private func updateSelectionBridge() {
         // If auto-selection is enabled, keep the selection pinned to the first row
-        if autoSelectEnabled, let first = rows.first { selection = first.id }
+        if autoSelectEnabled, let first = cachedRows.first { selection = first.id }
         // Keep single-selection Set in sync with selection id
         let desired: Set<String> = selection.map { [$0] } ?? []
         if tableSelection != desired {
             programmaticSelectionUpdate = true
             tableSelection = desired
             DispatchQueue.main.async { programmaticSelectionUpdate = false }
+        }
+    }
+
+    private func updateCachedRows() {
+        cachedRows = rows.sorted(using: sortOrder)
+        if let sel = selection, !cachedRows.contains(where: { $0.id == sel }) {
+            selection = cachedRows.first?.id
+            tableSelection = selection.map { [$0] } ?? []
         }
     }
 
@@ -532,6 +538,50 @@ struct UnifiedSessionsView: View {
         case .large:
             return "Scanning large… \(p.scannedLarge)/\(p.totalLarge)"
         }
+    }
+}
+
+// Session title cell with inline Gemini refresh affordance (hover-only)
+private struct SessionTitleCell: View {
+    let session: Session
+    @ObservedObject var geminiIndexer: GeminiSessionIndexer
+    @State private var hover: Bool = false
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Text(session.title)
+                .font(.system(size: 13))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .background(Color.clear)
+            if session.source == .gemini, geminiIndexer.isPreviewStale(id: session.id) {
+                Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {
+                    Text("Refresh")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .tint(.teal)
+                .opacity(hover ? 1 : 0)
+                .help("Update this session's preview to reflect the latest file contents")
+            }
+        }
+        .onHover { hover = $0 }
+    }
+}
+
+// Stable, equatable cell to prevent Table reuse glitches in Project column
+private struct ProjectCellView: View, Equatable {
+    let id: String
+    let display: String
+    static func == (lhs: ProjectCellView, rhs: ProjectCellView) -> Bool {
+        lhs.id == rhs.id && lhs.display == rhs.display
+    }
+    var body: some View {
+        Text(display)
+            .font(.system(size: 13))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .id("project-cell-\(id)")
     }
 }
 

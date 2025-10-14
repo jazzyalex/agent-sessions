@@ -243,12 +243,16 @@ public struct Session: Identifiable, Equatable, Codable {
 
     // MARK: - Repo/CWD helpers
     public var cwd: String? {
+        // Gemini sessions: trust lightweightCwd even after full parse (JSON rarely carries cwd)
+        if source == .gemini, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
+            return lightCwd
+        }
         // 0) Claude sessions: use cwd extracted during parsing
         if source == .claude, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
             return lightCwd
         }
 
-        // 1) Lightweight Codex session: use extracted cwd
+        // 1) Lightweight session: use extracted cwd
         if events.isEmpty, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
             return lightCwd
         }

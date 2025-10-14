@@ -41,7 +41,7 @@ struct AgentSessionsApp: App {
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
                 .onAppear {
-                    indexer.refresh(); claudeIndexer.refresh(); geminiIndexer.refresh()
+                    unifiedIndexerHolder.unified?.refresh()
                     updateUsageModels()
                     updateModel.checkOnLaunch()
                 }
