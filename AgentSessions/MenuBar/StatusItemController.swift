@@ -163,7 +163,7 @@ final class StatusItemController: NSObject {
     @objc private func setScope5h() { UserDefaults.standard.set(MenuBarScope.fiveHour.rawValue, forKey: "MenuBarScope"); updateLength() }
     @objc private func setScopeWeekly() { UserDefaults.standard.set(MenuBarScope.weekly.rawValue, forKey: "MenuBarScope"); updateLength() }
     @objc private func setScopeBoth() { UserDefaults.standard.set(MenuBarScope.both.rawValue, forKey: "MenuBarScope"); updateLength() }
-    @objc private func openPreferences() { PreferencesWindowController.shared.show(indexer: indexer, initialTab: .menuBar); NSApp.activate(ignoringOtherApps: true) }
+    @objc private func openPreferences() { PreferencesWindowController.shared.show(indexer: indexer, initialTab: .usageTracking); NSApp.activate(ignoringOtherApps: true) }
     @objc private func refreshLimits() {
         let src = UserDefaults.standard.string(forKey: "MenuBarSource") ?? MenuBarSource.codex.rawValue
         if src == MenuBarSource.codex.rawValue || src == MenuBarSource.both.rawValue { codexStatus.refreshNow() }

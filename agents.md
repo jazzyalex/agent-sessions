@@ -66,3 +66,16 @@ Exiting Plan Mode happens automatically when a subsequent prompt does not meet t
 - Use clear headings and plain text. Prefer descriptive words over pictograms.
 - Keep section titles short and consistent (e.g., "Requirements", "Install", "Usage").
 - Avoid decorative characters that may reduce accessibility or searchability.
+
+## UI/UX Implementation Rules
+
+- Do not introduce layouts that overflow the default window size. When content can exceed the pane height (e.g., Preferences), wrap the main content in a vertical ScrollView and keep footer controls outside the scroll region so actions remain visible.
+- Follow Apple HIG for toolbars and controls:
+  - Use consistent control sizes within a toolbar. Group related items with spacers or separators; avoid crowding.
+  - Keep segmented controls concise (2–5 segments) with clear on/off states; equal widths where appropriate.
+  - Provide an accessible label, help tooltip, and keyboard shortcut where appropriate for every interactive item.
+- Preferences panes:
+  - Prefer compact row layouts (e.g., 2–3 columns per row using HStack/Grid) to reduce vertical height.
+  - Avoid creating extra rows for single toggles when they can fit as a third column in an existing row.
+  - Test at the app’s default Preferences window size to ensure all controls are reachable without resizing.
+- If you add, move, or rename Swift files (app or tests), update AgentSessions.xcodeproj so new files are included in the correct targets; otherwise the build will fail.

@@ -187,7 +187,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .controlSize(.large)
+            .controlSize(.regular)
             .frame(width: 200)
             .accessibilityLabel("View Style")
             .help("Switch between Transcript and Terminal view (⌘⇧T)")
@@ -196,23 +196,23 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // System flexible space pushes trailing group to the right
             Spacer()
 
-            // === CENTER: Secondary Actions (optional - can go to overflow) ===
+            // === CENTER: Quiet secondary ID label (click-to-copy) ===
             HStack(spacing: 8) {
-                // Copy ID button
                 if let fullID = sessionIDExtractor(session) {
                     let displayLast4 = String(fullID.suffix(4))
                     let short = extractShortID(for: session) ?? String(fullID.prefix(6))
                     Button(action: { copySessionID(for: session) }) {
                         HStack(spacing: 4) {
                             Image(systemName: "doc.on.doc")
-                                .imageScale(.small)
+                                .imageScale(.medium)
                             Text("ID \(displayLast4)")
                                 .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .buttonStyle(.borderless)
-                    .controlSize(.small)
                     .help("Copy session ID: \(short) (⌘⇧C)")
+                    .accessibilityLabel("Copy Session ID")
                     .keyboardShortcut("c", modifiers: [.command, .shift])
                     .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
                         Text("ID Copied!")
@@ -220,43 +220,37 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             .font(.system(size: 12))
                     }
                 }
-
-                Divider().frame(height: 20)
-
-                // Font size controls
-                HStack(spacing: 2) {
-                    Button(action: { adjustFont(-1) }) {
-                        Image(systemName: "textformat.size.smaller")
-                            .imageScale(.medium)
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .help("Decrease font size (⌘-)")
-                    .keyboardShortcut("-", modifiers: .command)
-
-                    Button(action: { adjustFont(1) }) {
-                        Image(systemName: "textformat.size.larger")
-                            .imageScale(.medium)
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .help("Increase font size (⌘+)")
-                    .keyboardShortcut("+", modifiers: .command)
-                }
-
-                // Copy transcript button
-                Button("Copy") { copyAll() }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .font(.system(size: 14))
-                    .help("Copy entire transcript to clipboard (⌥⌘C)")
-                    .keyboardShortcut("c", modifiers: [.command, .option])
             }
 
             Spacer()
 
-            // === TRAILING GROUP: Find Controls (HIG-compliant placement) ===
-            HStack(spacing: 6) {
+            // === TRAILING GROUP: Text size, Copy, and Find Controls ===
+            HStack(spacing: 12) {
+                // Text size stepper (clear affordance)
+                Stepper("Text Size", onIncrement: { adjustFont(1) }, onDecrement: { adjustFont(-1) })
+                    .help("Adjust transcript text size")
+                    .accessibilityLabel("Text Size")
+
+                // Keyboard shortcuts for size changes (hidden)
+                Button(action: { adjustFont(-1) }) { EmptyView() }
+                    .keyboardShortcut("-", modifiers: .command)
+                    .hidden()
+                Button(action: { adjustFont(1) }) { EmptyView() }
+                    .keyboardShortcut("+", modifiers: .command)
+                    .hidden()
+
+                // Copy transcript button
+                Button("Copy") { copyAll() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 14))
+                    .help("Copy entire transcript to clipboard (⌥⌘C)")
+                    .keyboardShortcut("c", modifiers: [.command, .option])
+                    .accessibilityLabel("Copy Transcript")
+
+                Divider().frame(height: 20)
+
+                // Find Controls (HIG-compliant placement)
+                HStack(spacing: 6) {
                 // Find search field
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
@@ -304,7 +298,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         Image(systemName: "chevron.up")
                     }
                     .buttonStyle(.borderless)
-                    .controlSize(.small)
                     .disabled(findMatches.isEmpty)
                     .help("Previous match (⇧⌘G)")
                     .keyboardShortcut("g", modifiers: [.command, .shift])
@@ -313,12 +306,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         Image(systemName: "chevron.down")
                     }
                     .buttonStyle(.borderless)
-                    .controlSize(.small)
                     .disabled(findMatches.isEmpty)
                     .help("Next match (⌘G)")
                     .keyboardShortcut("g", modifiers: .command)
                 }
-
+                
                 // Match count badge
                 if !findText.isEmpty {
                     Text(findStatus())
@@ -326,6 +318,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         .foregroundStyle(findMatches.isEmpty ? .red : .secondary)
                         .frame(minWidth: 32, alignment: .trailing)
                         .accessibilityLabel("\(currentMatchIndex + 1) of \(findMatches.count) matches")
+                }
                 }
             }
             .padding(.trailing, 12)

@@ -62,8 +62,13 @@ struct PreferencesView: View {
             // Fix the sidebar width to avoid horizontal jumps when switching panes
             .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)
         } detail: {
+            // Make content scrollable so footer actions remain visible on smaller panes
             VStack(spacing: 0) {
-                tabBody
+                ScrollView {
+                    tabBody
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(.bottom, 12)
+                }
                 Divider()
                 footer
             }
@@ -120,8 +125,8 @@ struct PreferencesView: View {
             switch selectedTab ?? .general {
             case .general:
                 generalTab
-            case .menuBar:
-                menuBarTab
+            case .usageTracking:
+                usageTrackingTab
             case .unified:
                 unifiedTab
             case .codexCLI:
@@ -185,6 +190,65 @@ struct PreferencesView: View {
 
                 Divider()
 
+                // Modified Date moved to Unified Window pane
+
+                // Agent color is controlled by UI Elements (Monochrome/Color)
+
+                labeledRow("Agent Accents") {
+                    Picker("", selection: Binding(
+                        get: { stripMonochromeGlobal ? 1 : 0 },
+                        set: { stripMonochromeGlobal = ($0 == 1) }
+                    )) {
+                        Text("Color").tag(0)
+                        Text("Monochrome").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Choose colored or monochrome styling for agent accents")
+                }
+                Text("Affects usage strips, source labels, and CLI Agent colors in Sessions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            sectionHeader("Resume")
+            VStack(alignment: .leading, spacing: 12) {
+                // Terminal app preference for both Codex and Claude resumes
+                labeledRow("Terminal App") {
+                    Picker("", selection: Binding(
+                        get: { (resumeSettings.launchMode == .iterm || claudeSettings.preferITerm) ? 1 : 0 },
+                        set: { idx in
+                            // Apply to Codex
+                            resumeSettings.setLaunchMode(idx == 1 ? .iterm : .terminal)
+                            // Apply to Claude
+                            claudeSettings.setPreferITerm(idx == 1)
+                        }
+                    )) {
+                        Text("Terminal").tag(0)
+                        Text("iTerm2").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 260)
+                    .help("Choose which terminal application handles Resume for both Codex and Claude")
+                }
+                Text("Affects Resume actions in the Sessions window for Codex and Claude.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            
+            
+        }
+    }
+
+    private var unifiedTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Unified Window")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            // Sessions List header removed per guidance; keep content compact
+            VStack(alignment: .leading, spacing: 12) {
+                // Modified Date (moved from General)
                 labeledRow("Modified Date") {
                     Picker("", selection: $modifiedDisplay) {
                         ForEach(SessionIndexer.ModifiedDisplay.allCases) { mode in
@@ -197,61 +261,33 @@ struct PreferencesView: View {
                     }
                     .help("Switch between relative and absolute modified timestamps")
                 }
-
-                // Agent color is controlled by UI Elements (Monochrome/Color)
-
-                labeledRow("UI Elements") {
-                    Picker("", selection: Binding(
-                        get: { stripMonochromeGlobal ? 1 : 0 },
-                        set: { stripMonochromeGlobal = ($0 == 1) }
-                    )) {
-                        Text("Color").tag(0)
-                        Text("Monochrome").tag(1)
-                    }
-                    .pickerStyle(.segmented)
-                    .help("Choose colored or monochrome styling for agent accents")
-                }
-                Text("Affects usage strips, Unified toolbar source labels, and CLI Agent column coloring in Sessions.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            
-
-        }
-    }
-
-    private var unifiedTab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Unified Window")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            sectionHeader("Sessions List")
-            VStack(alignment: .leading, spacing: 12) {
+                // Micro-header for columns
+                Text("Columns")
+                    .font(.subheadline)
+                Divider()
+                // First row: three columns to reduce height
                 HStack(spacing: 16) {
                     Toggle("Session titles", isOn: $indexer.showTitleColumn)
                         .help("Show or hide the Session title column in the Sessions list")
                     Toggle("Project names", isOn: $indexer.showProjectColumn)
                         .help("Show or hide the Project column in the Sessions list")
-                }
-                HStack(spacing: 16) {
-                    Toggle("Message counts", isOn: $indexer.showMsgsColumn)
-                        .help("Show or hide message counts in the Sessions list")
-                    Toggle("Modified date", isOn: $indexer.showModifiedColumn)
-                        .help("Show or hide the modified date column")
-                }
-                HStack(spacing: 16) {
                     Toggle("Source column", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: "UnifiedShowSourceColumn") },
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowSourceColumn") }
                     ))
                     .help("Show or hide the CLI Agent source column in the Unified list")
                 }
-                Divider()
-                Text("Exclude Sessions with:")
+                // Second row: remaining columns
+                HStack(spacing: 16) {
+                    Toggle("Message counts", isOn: $indexer.showMsgsColumn)
+                        .help("Show or hide message counts in the Sessions list")
+                    Toggle("Modified date", isOn: $indexer.showModifiedColumn)
+                        .help("Show or hide the modified date column")
+                }
+                // Micro-header for filters
+                Text("Filters")
                     .font(.subheadline)
-                    .fontWeight(.semibold)
+                Divider()
                 HStack(spacing: 16) {
                     Toggle("Zero msgs", isOn: $hideZeroMessageSessionsPref)
                         .onChange(of: hideZeroMessageSessionsPref) { _, _ in indexer.recomputeNow() }
@@ -269,7 +305,18 @@ struct PreferencesView: View {
                 .help("Ignore agents.md-style preambles for titles and previews (content remains visible in transcripts)")
             }
 
-            sectionHeader("Usage Tracking")
+            // Usage Tracking moved to General pane
+        }
+    }
+
+    // New Usage Tracking pane (combines usage strips and menu bar configuration)
+    private var usageTrackingTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Usage Tracking")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            // Top section: usage strips (no explicit section header; pane title is sufficient)
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 16) {
                     toggleRow("Codex strip", isOn: Binding(
@@ -300,22 +347,70 @@ struct PreferencesView: View {
                         .disabled(!UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip"))
                         .help("Force a usage refresh immediately when Claude tracking is enabled")
                 }
-                HStack(spacing: 16) { toggleRow("Show reset times", isOn: $stripShowResetTime, help: "Display the usage reset timestamp next to each meter") }
-
+                HStack(spacing: 16) {
+                    toggleRow("Show reset times", isOn: $stripShowResetTime, help: "Display the usage reset timestamp next to each meter")
+                }
                 Divider()
-
-                labeledRow("Polling Interval") {
+                labeledRow("Refresh Interval") {
                     Picker("", selection: $usagePollingInterval) {
                         Text("1 minute").tag(60)
                         Text("2 minutes").tag(120)
-                        Text("3 minutes").tag(180)
                         Text("10 minutes").tag(600)
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 360)
-                    .help("How often to check usage data (affects both Codex and Claude)")
+                    .help("How often to refresh usage data (affects both Codex and Claude)")
                 }
                 Text("Longer intervals reduce CPU usage. Strips stack vertically when both are shown.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Menu Bar section
+            sectionHeader("Menu Bar")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow("Show menu bar usage", isOn: $menuBarEnabled, help: "Add a menu bar item that displays usage meters")
+
+                labeledRow("Source") {
+                    Picker("Source", selection: Binding(
+                        get: { UserDefaults.standard.string(forKey: "MenuBarSource") ?? MenuBarSource.codex.rawValue },
+                        set: { UserDefaults.standard.set($0, forKey: "MenuBarSource") }
+                    )) {
+                        ForEach(MenuBarSource.allCases) { s in
+                            Text(s.title).tag(s.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!menuBarEnabled)
+                    .frame(maxWidth: 360)
+                    .help("Choose which agent usage the menu bar item displays")
+                }
+
+                labeledRow("Scope") {
+                    Picker("Scope", selection: $menuBarScopeRaw) {
+                        ForEach(MenuBarScope.allCases) { s in
+                            Text(s.title).tag(s.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!menuBarEnabled)
+                    .frame(maxWidth: 360)
+                    .help("Select whether the menu bar shows 5-hour, weekly, or both usage windows")
+                }
+
+                labeledRow("Style") {
+                    Picker("Style", selection: $menuBarStyleRaw) {
+                        ForEach(MenuBarStyleKind.allCases) { k in
+                            Text(k.title).tag(k.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(!menuBarEnabled)
+                    .frame(maxWidth: 360)
+                    .help("Switch between bar graphs and numeric usage in the menu bar")
+                }
+
+                Text("Source: Codex, Claude, or Both. Style: Bars or numbers. Scope: 5h, weekly, or both.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -387,7 +482,7 @@ struct PreferencesView: View {
             sectionHeader("Codex CLI Binary")
             VStack(alignment: .leading, spacing: 12) {
                 labeledRow("Binary Source") {
-                    Picker("Binary Source", selection: Binding(
+                    Picker("", selection: Binding(
                         get: { codexBinaryOverride.isEmpty ? 0 : 1 },
                         set: { idx in
                             if idx == 0 {
@@ -513,21 +608,11 @@ struct PreferencesView: View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Claude Code").font(.title2).fontWeight(.semibold)
 
-            sectionHeader("Resume")
+            // Binary Source
             VStack(alignment: .leading, spacing: 10) {
-                labeledRow("Terminal App") {
-                    Picker("Terminal App", selection: Binding(get: { claudeSettings.preferITerm ? 1 : 0 }, set: { claudeSettings.setPreferITerm($0 == 1) })) {
-                        Text("Terminal").tag(0)
-                        Text("iTerm2").tag(1)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 360)
-                    .help("Choose which terminal application handles Claude resume commands")
-                }
-
                 // Binary source segmented: Auto | Custom
                 labeledRow("Binary Source") {
-                    Picker("Binary Source", selection: Binding(
+                    Picker("", selection: Binding(
                         get: { claudeSettings.binaryPath.isEmpty ? 0 : 1 },
                         set: { idx in
                             if idx == 0 {
@@ -935,7 +1020,7 @@ struct PreferencesView: View {
 
 enum PreferencesTab: String, CaseIterable, Identifiable {
     case general
-    case menuBar
+    case usageTracking
     case unified
     case codexCLI
     case claudeResume
@@ -946,7 +1031,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: return "General"
-        case .menuBar: return "Menu Bar"
+        case .usageTracking: return "Usage Tracking"
         case .unified: return "Unified Window"
         case .codexCLI: return "Codex CLI"
         case .claudeResume: return "Claude Code"
@@ -957,7 +1042,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     var iconName: String {
         switch self {
         case .general: return "gearshape"
-        case .menuBar: return "menubar.rectangle"
+        case .usageTracking: return "chart.bar"
         case .unified: return "square.grid.2x2"
         case .codexCLI: return "terminal"
         case .claudeResume: return "chevron.left.slash.chevron.right"
@@ -967,8 +1052,8 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 }
 
 private extension PreferencesView {
-    // Sidebar order: General → Codex CLI → Claude Code → Unified Window → Menu Bar → About
-    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, .unified, .menuBar, .about] }
+    // Sidebar order: General → Codex CLI → Claude Code → Unified Window → Usage Tracking → About
+    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, .unified, .usageTracking, .about] }
 }
 
 // MARK: - Probe helpers
@@ -1027,7 +1112,7 @@ private extension PreferencesView {
     // Trigger background probes only when a relevant pane is active
     func maybeProbe(for tab: PreferencesTab) {
         switch tab {
-        case .codexCLI, .menuBar:
+        case .codexCLI, .usageTracking:
             if probeVersion == nil && probeState != .probing { probeCodex() }
         case .claudeResume:
             if claudeVersionString == nil && claudeProbeState != .probing { probeClaude() }
