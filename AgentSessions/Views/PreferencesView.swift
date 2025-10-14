@@ -216,6 +216,17 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
             }
 
+            
+
+        }
+    }
+
+    private var unifiedTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Unified Window")
+                .font(.title2)
+                .fontWeight(.semibold)
+
             sectionHeader("Sessions List")
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 16) {
@@ -256,23 +267,6 @@ struct PreferencesView: View {
                     set: { UserDefaults.standard.set($0, forKey: "SkipAgentsPreamble"); indexer.recomputeNow() }
                 ))
                 .help("Ignore agents.md-style preambles for titles and previews (content remains visible in transcripts)")
-            }
-
-        }
-    }
-
-    private var unifiedTab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Unified Window")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            sectionHeader("Display")
-            VStack(alignment: .leading, spacing: 12) {
-                // Controls for columns are available in General → Sessions List
-                Text("Configure list columns in General.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             sectionHeader("Usage Tracking")
