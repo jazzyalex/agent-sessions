@@ -346,12 +346,13 @@ struct SessionTranscriptBuilder {
             }
         case .assistant:
             let head = timestampPrefix(b.timestamp, options: options)
+            let marker = options.renderMode == .terminal ? "[assistant] " : ""
             if let nl = b.text.firstIndex(of: "\n") {
                 let first = String(b.text[..<nl])
                 let rest = String(b.text[nl...])
-                return head + first + rest
+                return head + marker + first + rest
             } else {
-                return head + b.text
+                return head + marker + b.text
             }
         case .toolCall:
             let head = timestampPrefix(b.timestamp, options: options)
@@ -361,22 +362,27 @@ struct SessionTranscriptBuilder {
                 return head + "\(toolPrefix) \(b.text)"
             }
         case .toolOut:
-            guard !b.text.isEmpty else { return timestampPrefix(b.timestamp, options: options) + outPrefix }
+            guard !b.text.isEmpty else {
+                let pfx = options.renderMode == .terminal ? "[out]" : outPrefix
+                return timestampPrefix(b.timestamp, options: options) + pfx
+            }
+            let prefixLabel = options.renderMode == .terminal ? "[out]" : outPrefix
             if let nl = b.text.firstIndex(of: "\n") {
                 let first = String(b.text[..<nl])
                 let rest = String(b.text[nl...])
-                return timestampPrefix(b.timestamp, options: options) + "\(outPrefix) \(first)" + rest
+                return timestampPrefix(b.timestamp, options: options) + "\(prefixLabel) \(first)" + rest
             } else {
-                return timestampPrefix(b.timestamp, options: options) + "\(outPrefix) \(b.text)"
+                return timestampPrefix(b.timestamp, options: options) + "\(prefixLabel) \(b.text)"
             }
         case .error:
             let head = timestampPrefix(b.timestamp, options: options)
+            let marker = options.renderMode == .terminal ? "[error] " : (errorPrefix + " ")
             if let nl = b.text.firstIndex(of: "\n") {
                 let first = String(b.text[..<nl])
                 let rest = String(b.text[nl...])
-                return head + errorPrefix + " " + first + rest
+                return head + marker + first + rest
             } else {
-                return head + errorPrefix + " " + b.text
+                return head + marker + b.text
             }
         case .meta:
             let head = timestampPrefix(b.timestamp, options: options)

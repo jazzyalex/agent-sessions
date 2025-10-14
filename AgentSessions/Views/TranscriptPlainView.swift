@@ -535,13 +535,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         for line in lines {
             let len = line.utf16.count
             let lineStr = String(line)
-            if lineStr.hasPrefix("assistant ∎ ") {
+            // Assistant markers: prefer ASCII, fall back to legacy glyph variant
+            if lineStr.hasPrefix("[assistant] ") || lineStr.hasPrefix("assistant ∎ ") {
                 let r = NSRange(location: pos, length: len)
                 asst.append(r)
-            } else if lineStr.hasPrefix("output ≡ ") || lineStr.hasPrefix("  | ") {
+            // Output markers: prefer ASCII, also match legacy glyph and pipe-prefixed blocks
+            } else if lineStr.hasPrefix("[out] ") || lineStr.hasPrefix("output ≡ ") || lineStr.hasPrefix("  | ") || lineStr.hasPrefix("⟪out⟫ ") {
                 let r = NSRange(location: pos, length: len)
                 out.append(r)
-            } else if lineStr.hasPrefix("error ⚠ ") {
+            // Error markers: prefer ASCII, fall back to legacy glyph variant
+            } else if lineStr.hasPrefix("[error] ") || lineStr.hasPrefix("error ⚠ ") || lineStr.hasPrefix("! error ") {
                 let r = NSRange(location: pos, length: len)
                 err.append(r)
             }
