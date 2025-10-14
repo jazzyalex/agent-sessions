@@ -38,3 +38,6 @@ docs/Sonnet-4.5-review.md
 
 # Claude AI local settings
 .claude/settings.local.json
+
+# Temporary archives
+*.zip
