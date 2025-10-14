@@ -9,7 +9,7 @@
 </td>
 <td>
 
- **Unified session browser for Codex CLI and Claude Code.**  
+ **Unified session browser for Codex CLI, Claude Code, and Gemini CLI (read‑only).**  
  Search, browse, and resume any past AI-coding session in a single local-first macOS app.
 
 </td>
@@ -34,7 +34,7 @@
 
 ##  Overview
 
-Agent Sessions 2 brings **Codex CLI** and **Claude Code** together in one interface.  
+Agent Sessions 2 brings **Codex CLI**, **Claude Code**, and **Gemini CLI (read‑only)** together in one interface.  
 Look up any past session — even the ancient ones `/resume` can’t show — or browse visually to find that perfect prompt or code snippet, then instantly copy or resume it.
 
 **Local-first, open source, and built for terminal vibe warriors.**
@@ -50,13 +50,28 @@ Look up any past session — even the ancient ones `/resume` can’t show — or
 
 ---
 
-## 🔧 Core Features
+## What's New in 2.3
+
+- Gemini CLI (read‑only, ephemeral):
+  - Indexes `~/.gemini/tmp/**/session-*.json` (and common variants)
+  - Lists and opens transcripts in the existing viewer (no writes, no resume)
+  - Unified search and source toggle alongside Codex/Claude
+- Favorites (★):
+  - Inline star on each row + context menu Add/Remove
+  - Toolbar “Favorites” toggle filters list (AND with search)
+  - Persisted in UserDefaults; zero schema changes
+- UI polish and fixes:
+  - Transcript vs Terminal parity across providers
+  - Persistent window/split positions; toolbar spacing adjustments
+  - “Refresh preview” affordance for stale Gemini files
+
+## Core Features
 
 ### Unified Interface v2
-Browse **Codex CLI** and **Claude Code** sessions side-by-side. Toggle between Both / Codex / Claude sources with strict filtering and unified search.
+Browse **Codex CLI**, **Claude Code**, and **Gemini CLI (read‑only)** sessions side-by-side. Toggle between sources (Both / Codex / Claude / Gemini) with strict filtering and unified search.
 
 ### Unified Search v2
-One search for everything. Find any snippet or prompt instantly — no matter which agent or project it came from.  
+One search for everything. Find any snippet or prompt instantly — no matter which agent or project it came from (Codex, Claude, or Gemini CLI).  
 Smart sorting, instant cancel, full-text search with project filters.
 
 ### Instant Resume & Re-use
@@ -69,8 +84,8 @@ A color-coded **menu-bar indicator** (or in-app strip) shows live percentages an
 
 ### Local, Private & Safe
 All processing runs on your Mac.  
-Reads `~/.codex/sessions` and `~/.claude/sessions` locally.  
-No cloud uploads or telemetry — **read-only by design.**
+Reads `~/.codex/sessions`, `~/.claude/sessions`, and Gemini CLI checkpoints under `~/.gemini/tmp` (read‑only).  
+No cloud uploads or telemetry — **read‑only by design.**
 
 ---
 
