@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.3] - 2025-10-14
+
+### Added
+- Gemini CLI (read-only, ephemeral) provider:
+  - Discovers `~/.gemini/tmp/**/session-*.json` (and common variants)
+  - Lists/opens transcripts in the existing viewer (no writes, no resume)
+  - Source toggle + unified search (alongside Codex/Claude)
+- Favorites (★): inline star per row, context menu Add/Remove, and toolbar “Favorites” filter (AND with search). Persisted via UserDefaults; no schema changes.
+
+### Changed
+- Transcript vs Terminal parity across providers; consistent colorization and plain modes
+- Persistent window/split positions; improved toolbar spacing
+
+### Fixed
+- “Refresh preview” affordance for stale Gemini files; safer staleness detection
+- Minor layout/content polish on website (Product Hunt badge alignment)
+
 ## [2.2.1] - 2025-10-09
 
 ### Changed

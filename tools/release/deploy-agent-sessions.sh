@@ -120,14 +120,66 @@ git add README.md docs/index.html || true
 git commit -m "docs: update download links for ${VERSION}" || true
 git push origin HEAD:main || true
 
-if [[ "${UPDATE_CASK}" == "1" ]] && [[ -d "/opt/homebrew/Library/Taps/jazzyalex/homebrew-agent-sessions/Casks" ]]; then
-  CASK="/opt/homebrew/Library/Taps/jazzyalex/homebrew-agent-sessions/Casks/agent-sessions.rb"
-  if [[ -f "$CASK" ]]; then
-    green "==> Updating local Homebrew cask"
-    sed -i '' -E "s/^[[:space:]]*version \"[0-9.]+\"/  version \"${VERSION}\"/" "$CASK"
-    sed -i '' -E "s/^[[:space:]]*sha256 \"[a-f0-9]+\"/  sha256 \"${SHA}\"/" "$CASK"
-    sed -i '' -E "s#AgentSessions(-[0-9.]+)?\.dmg#AgentSessions-${VERSION}.dmg#g" "$CASK"
-    (cd "$(dirname "$CASK")/.." && git add "$CASK" && git commit -m "chore: update agent-sessions to ${VERSION}" && git push origin HEAD:main) || true
+# Always update the tap via GitHub API (no local clone required)
+if [[ "${UPDATE_CASK}" == "1" ]]; then
+  green "==> Updating Homebrew cask in jazzyalex/homebrew-agent-sessions"
+  CASK_REPO=${CASK_REPO:-"jazzyalex/homebrew-agent-sessions"}
+  CASK_PATH="Casks/agent-sessions.rb"
+
+  # Compose cask content (use placeholders to avoid accidental interpolation)
+  CASK_FILE=$(mktemp)
+  cat >"$CASK_FILE" <<'CASK'
+cask "agent-sessions" do
+  version "__VERSION__"
+  sha256 "__SHA__"
+
+  url "https://github.com/jazzyalex/agent-sessions/releases/download/v#{version}/AgentSessions-#{version}.dmg",
+      verified: "github.com/jazzyalex/agent-sessions/"
+  name "Agent Sessions"
+  desc "Unified session browser for Codex CLI, Claude Code, and Gemini CLI (read-only)"
+  homepage "https://jazzyalex.github.io/agent-sessions/"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  depends_on macos: ">= :sonoma"
+
+  app "AgentSessions.app", target: "AgentSessions.app"
+
+  zap trash: [
+    "~/Library/Application Support/Agent Sessions",
+    "~/Library/Preferences/com.triada.AgentSessions.plist",
+    "~/Library/Saved Application State/com.triada.AgentSessions.savedState",
+  ]
+end
+CASK
+
+  # Replace placeholders
+  sed -i '' -e "s/__VERSION__/${VERSION}/g" -e "s/__SHA__/${SHA}/g" "$CASK_FILE"
+
+  # Base64 encode the content without newlines
+  B64=$(base64 <"$CASK_FILE" | tr -d '\n')
+
+  # Get current file sha if exists
+  CURR_SHA=$(gh api -H "Accept: application/vnd.github+json" \
+    "/repos/${CASK_REPO}/contents/${CASK_PATH}" --jq .sha 2>/dev/null || true)
+
+  # Create or update the file on main branch
+  if [[ -n "$CURR_SHA" ]]; then
+    gh api -X PUT -H "Accept: application/vnd.github+json" \
+      "/repos/${CASK_REPO}/contents/${CASK_PATH}" \
+      -f message="agent-sessions ${VERSION}" \
+      -f content="$B64" \
+      -f branch=main \
+      -f sha="$CURR_SHA" >/dev/null
+  else
+    gh api -X PUT -H "Accept: application/vnd.github+json" \
+      "/repos/${CASK_REPO}/contents/${CASK_PATH}" \
+      -f message="agent-sessions ${VERSION}" \
+      -f content="$B64" \
+      -f branch=main >/dev/null
   fi
 fi
 
@@ -180,4 +232,3 @@ echo "5. Update marketing materials if needed"
 echo "6. Announce release in relevant channels"
 echo "7. Monitor for installation issues in the first 24 hours"
 echo
-
