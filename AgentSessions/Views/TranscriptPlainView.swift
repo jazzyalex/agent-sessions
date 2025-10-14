@@ -199,12 +199,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // === CENTER: Secondary Actions (optional - can go to overflow) ===
             HStack(spacing: 8) {
                 // Copy ID button
-                if let short = extractShortID(for: session) {
+                if let fullID = sessionIDExtractor(session) {
+                    let displayLast4 = String(fullID.suffix(4))
+                    let short = extractShortID(for: session) ?? String(fullID.prefix(6))
                     Button(action: { copySessionID(for: session) }) {
                         HStack(spacing: 4) {
                             Image(systemName: "doc.on.doc")
                                 .imageScale(.small)
-                            Text("ID \(String(short.prefix(4)))")
+                            Text("ID \(displayLast4)")
                                 .font(.system(size: 13))
                         }
                     }
