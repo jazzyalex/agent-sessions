@@ -59,11 +59,18 @@ final class GeminiSessionDiscovery: SessionDiscovery {
 
         // Sort by modification time (desc)
         out.sort { (lhs, rhs) in
-            let lm = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let rm = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return (lm ?? .distantPast) > (rm ?? .distantPast)
+            let lm: Date = {
+                if let rv = try? lhs.resourceValues(forKeys: [.contentModificationDateKey]),
+                   let d = rv.contentModificationDate { return d }
+                return .distantPast
+            }()
+            let rm: Date = {
+                if let rv = try? rhs.resourceValues(forKeys: [.contentModificationDateKey]),
+                   let d = rv.contentModificationDate { return d }
+                return .distantPast
+            }()
+            return lm > rm
         }
         return out
     }
 }
-

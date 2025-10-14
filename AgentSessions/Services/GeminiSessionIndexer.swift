@@ -93,8 +93,9 @@ final class GeminiSessionIndexer: ObservableObject {
                 if let session = GeminiSessionParser.parseFile(at: url) {
                     sessions.append(session)
                     // Record preview build mtime for staleness detection
-                    if let m = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate {
-                        self.previewMTimeByID[session.id] = m ?? Date()
+                    if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+                       let m = rv.contentModificationDate {
+                        self.previewMTimeByID[session.id] = m
                     }
                 }
                 DispatchQueue.main.async {
@@ -153,8 +154,9 @@ final class GeminiSessionIndexer: ObservableObject {
                 if let full, let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                     self.allSessions[idx] = full
                     self.unreadableSessionIDs.remove(id)
-                    if let m = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate {
-                        self.previewMTimeByID[id] = m ?? Date()
+                    if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+                       let m = rv.contentModificationDate {
+                        self.previewMTimeByID[id] = m
                     }
                 }
                 self.isLoadingSession = false
@@ -167,9 +169,10 @@ final class GeminiSessionIndexer: ObservableObject {
     func isPreviewStale(id: String) -> Bool {
         guard let existing = allSessions.first(where: { $0.id == id }) else { return false }
         let url = URL(fileURLWithPath: existing.filePath)
-        guard let current = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? nil else { return false }
+        guard let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+              let current = rv.contentModificationDate else { return false }
         guard let preview = previewMTimeByID[id] else { return false }
-        return (current ?? Date.distantPast) > preview
+        return current > preview
     }
 
     func refreshPreview(id: String) {
@@ -180,8 +183,9 @@ final class GeminiSessionIndexer: ObservableObject {
                 DispatchQueue.main.async {
                     if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                         self.allSessions[idx] = light
-                        if let m = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate {
-                            self.previewMTimeByID[id] = m ?? Date()
+                        if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+                           let m = rv.contentModificationDate {
+                            self.previewMTimeByID[id] = m
                         }
                     }
                 }

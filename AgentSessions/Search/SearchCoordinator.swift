@@ -243,8 +243,6 @@ final class SearchCoordinator: ObservableObject {
         // Capture indexer as nonisolated(unsafe) for use in detached task
         // This is safe because parseFileFull is a stateless operation
         nonisolated(unsafe) let codex = self.codexIndexer
-        nonisolated(unsafe) let claude = self.claudeIndexer
-        nonisolated(unsafe) let gemini = self.geminiIndexer
 
         // Parse on background queue using Task instead of DispatchQueue to maintain isolation
         return await Task.detached(priority: .userInitiated) {
