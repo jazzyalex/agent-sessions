@@ -100,6 +100,11 @@ struct AgentSessionsApp: App {
                 Button("Find in Transcript") { /* unified find focuses handled in view */ }.keyboardShortcut("f", modifiers: .command).disabled(true)
             }
             CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer) }.keyboardShortcut(",", modifiers: .command) }
+            // View menu with Favorites Only toggle (stateful)
+            CommandMenu("View") {
+                // Bind through UserDefaults so it persists; also forward to unified when it changes
+                FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
+            }
         }
 
         // Legacy windows removed; Unified is the single window.
@@ -117,6 +122,24 @@ final class _UnifiedHolder: ObservableObject {
         let u = UnifiedSessionIndexer(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer, geminiIndexer: geminiIndexer)
         unified = u
         return u
+    }
+}
+
+// MARK: - View Menu Toggle Wrapper
+private struct FavoritesOnlyToggle: View {
+    @AppStorage("ShowFavoritesOnly") private var favsOnly: Bool = false
+    @ObservedObject var unifiedHolder: _UnifiedHolder
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: { favsOnly },
+            set: { newVal in
+                favsOnly = newVal
+                unifiedHolder.unified?.showFavoritesOnly = newVal
+            }
+        )) {
+            Text("Favorites Only")
+        }
     }
 }
 

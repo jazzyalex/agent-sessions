@@ -4,6 +4,21 @@ import SwiftUI
 
 /// Aggregates Codex and Claude sessions into a single list with unified filters and search.
 final class UnifiedSessionIndexer: ObservableObject {
+    // Lightweight favorites store (UserDefaults overlay)
+    struct FavoritesStore {
+        static let key = "favoriteSessionIDs"
+        private(set) var ids: Set<String>
+        private let defaults: UserDefaults
+        init(defaults: UserDefaults = .standard) {
+            self.defaults = defaults
+            ids = Set(defaults.stringArray(forKey: Self.key) ?? [])
+        }
+        func contains(_ id: String) -> Bool { ids.contains(id) }
+        mutating func toggle(_ id: String) { if ids.contains(id) { ids.remove(id) } else { ids.insert(id) }; persist() }
+        mutating func add(_ id: String) { ids.insert(id); persist() }
+        mutating func remove(_ id: String) { ids.remove(id); persist() }
+        private func persist() { defaults.set(Array(ids), forKey: Self.key) }
+    }
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
 
@@ -43,6 +58,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     // Indexing state aggregation
     @Published private(set) var isIndexing: Bool = false
     @Published private(set) var indexingError: String? = nil
+    @Published var showFavoritesOnly: Bool = UserDefaults.standard.bool(forKey: "ShowFavoritesOnly") {
+        didSet {
+            UserDefaults.standard.set(showFavoritesOnly, forKey: "ShowFavoritesOnly")
+            recomputeNow()
+        }
+    }
 
     @AppStorage("HideZeroMessageSessions") private var hideZeroMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }
@@ -55,6 +76,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let claude: ClaudeSessionIndexer
     private let gemini: GeminiSessionIndexer
     private var cancellables = Set<AnyCancellable>()
+    private var favorites = FavoritesStore()
 
     // Debouncing for expensive operations
     private var recomputeDebouncer: DispatchWorkItem? = nil
@@ -71,8 +93,11 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         // Merge underlying allSessions whenever any changes
         Publishers.CombineLatest3(codex.$allSessions, claude.$allSessions, gemini.$allSessions)
-            .map { codexList, claudeList, geminiList -> [Session] in
-                let merged = codexList + claudeList + geminiList
+            .map { [weak self] codexList, claudeList, geminiList -> [Session] in
+                var merged = codexList + claudeList + geminiList
+                if let favs = self?.favorites {
+                    for i in merged.indices { merged[i].isFavorite = favs.contains(merged[i].id) }
+                }
                 return merged.sorted { lhs, rhs in
                     if lhs.modifiedAt == rhs.modifiedAt { return lhs.id > rhs.id }
                     return lhs.modifiedAt > rhs.modifiedAt
@@ -246,6 +271,9 @@ final class UnifiedSessionIndexer: ObservableObject {
         let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
         var results = FilterEngine.filterSessions(base, filters: filters)
 
+        // Favorites-only filter (AND with text search)
+        if showFavoritesOnly { results = results.filter { $0.isFavorite } }
+
         // Filter by message count preferences
         if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
         if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
@@ -318,5 +346,14 @@ final class UnifiedSessionIndexer: ObservableObject {
         if withinGuard(lastAutoRefreshGemini) { return }
         lastAutoRefreshGemini = Date()
         gemini.refresh()
+    }
+
+    // MARK: - Favorites
+    func toggleFavorite(_ id: String) {
+        favorites.toggle(id)
+        if let idx = allSessions.firstIndex(where: { $0.id == id }) {
+            allSessions[idx].isFavorite.toggle()
+        }
+        recomputeNow()
     }
 }

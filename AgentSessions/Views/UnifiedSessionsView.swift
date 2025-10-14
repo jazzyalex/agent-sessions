@@ -133,6 +133,15 @@ struct UnifiedSessionsView: View {
             ToolbarItem(placement: .automatic) {
                 UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator)
             }
+            // Compact Favorites filter toggle
+            ToolbarItem(placement: .automatic) {
+                Toggle(isOn: $unified.showFavoritesOnly) {
+                    Label("Favorites", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
+                }
+                .toggleStyle(.button)
+                .help("Show only favorited sessions")
+                .accessibilityLabel("Favorites Only")
+            }
             ToolbarItem(placement: .automatic) {
                 Button(action: { if let s = selectedSession { resume(s) } }) {
                     Label("Resume", systemImage: "play.circle")
@@ -212,9 +221,20 @@ struct UnifiedSessionsView: View {
                     case .gemini: return "Gemini"
                     }
                 }()
-                Text(label)
-                    .font(.system(size: 12))
-                    .foregroundStyle(!stripMonochrome ? sourceAccent(s) : .secondary)
+                HStack(spacing: 6) {
+                    Text(label)
+                        .font(.system(size: 12))
+                        .foregroundStyle(!stripMonochrome ? sourceAccent(s) : .secondary)
+                    Spacer(minLength: 4)
+                    Button(action: { unified.toggleFavorite(s.id) }) {
+                        Image(systemName: s.isFavorite ? "star.fill" : "star")
+                            .imageScale(.medium)
+                            .foregroundStyle(.primary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                    .accessibilityLabel(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                }
             }
             .width(min: showSourceColumn ? 90 : 0, ideal: showSourceColumn ? 100 : 0, max: showSourceColumn ? 120 : 0)
 
@@ -280,6 +300,8 @@ struct UnifiedSessionsView: View {
         }
         .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
+                Button(s.isFavorite ? "Remove from Favorites" : "Add to Favorites") { unified.toggleFavorite(id) }
+                Divider()
                 if s.source != .gemini {
                     Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
                         .keyboardShortcut("r", modifiers: [.command, .control])

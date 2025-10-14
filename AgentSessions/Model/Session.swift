@@ -15,6 +15,9 @@ public struct Session: Identifiable, Equatable, Codable {
     public let lightweightCwd: String?
     public let lightweightTitle: String?
 
+    // Runtime UI state (not persisted in session files)
+    public var isFavorite: Bool = false
+
     // Default initializer for full sessions
     public init(id: String,
                 source: SessionSource = .codex,
@@ -36,6 +39,7 @@ public struct Session: Identifiable, Equatable, Codable {
         self.events = events
         self.lightweightCwd = nil
         self.lightweightTitle = nil
+        self.isFavorite = false
     }
 
     // Lightweight session initializer
@@ -62,6 +66,22 @@ public struct Session: Identifiable, Equatable, Codable {
         self.events = events
         self.lightweightCwd = cwd
         self.lightweightTitle = lightweightTitle
+        self.isFavorite = false
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case source
+        case startTime
+        case endTime
+        case model
+        case filePath
+        case fileSizeBytes
+        case eventCount
+        case events
+        case lightweightCwd
+        case lightweightTitle
+        // isFavorite intentionally excluded (runtime only)
     }
 
     public var shortID: String { String(id.prefix(6)) }

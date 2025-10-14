@@ -300,6 +300,24 @@ final class UpdateCheckerTests: XCTestCase {
     }
 }
 
+// MARK: - Favorites Store (lightweight) tests
+final class FavoritesOverlayTests: XCTestCase {
+    func testFavoritesStoreTogglePersists() {
+        let suiteName = "FavoritesOverlayTests.suite"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+
+        var store = UnifiedSessionIndexer.FavoritesStore(defaults: defaults)
+        XCTAssertFalse(store.contains("s1"))
+        store.toggle("s1")
+        XCTAssertTrue(store.contains("s1"))
+
+        // Recreate to verify persistence
+        let store2 = UnifiedSessionIndexer.FavoritesStore(defaults: defaults)
+        XCTAssertTrue(store2.contains("s1"))
+    }
+}
+
 // MARK: - Mock Implementations
 
 private final class MockGitHubClient: GitHubAPIClient {

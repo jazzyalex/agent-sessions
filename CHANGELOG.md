@@ -5,6 +5,14 @@ All notable changes to Agent Sessions will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Favorites (★):
+  - Inline star in Sessions list with context menu (Add/Remove from Favorites)
+  - Toolbar toggle “Favorites” filters list (AND with search), persisted across launches
+  - Favorites persist via UserDefaults (no schema changes)
+
 ## [2.0.0] - 2025-10-04
 
 ### Major Release - Unified Interface & Claude Code Support
