@@ -34,19 +34,25 @@ final class SearchCoordinator: ObservableObject {
     private var currentTask: Task<Void, Never>? = nil
     private let codexIndexer: SessionIndexer
     private let claudeIndexer: ClaudeSessionIndexer
+    private let geminiIndexer: GeminiSessionIndexer
     // Promotion support for large-queue preemption
     private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
     private var runID = UUID()
 
-    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer) {
+    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, geminiIndexer: GeminiSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
+        self.geminiIndexer = geminiIndexer
     }
 
     // Get appropriate transcript cache based on session source
     private func transcriptCache(for source: SessionSource) -> TranscriptCache {
-        source == .codex ? codexIndexer.searchTranscriptCache : claudeIndexer.searchTranscriptCache
+        switch source {
+        case .codex: return codexIndexer.searchTranscriptCache
+        case .claude: return claudeIndexer.searchTranscriptCache
+        case .gemini: return geminiIndexer.searchTranscriptCache
+        }
     }
 
     func cancel() {
@@ -69,7 +75,7 @@ final class SearchCoordinator: ObservableObject {
         }
     }
 
-    func start(query: String, filters: Filters, includeCodex: Bool, includeClaude: Bool, all: [Session]) {
+    func start(query: String, filters: Filters, includeCodex: Bool, includeClaude: Bool, includeGemini: Bool, all: [Session]) {
         // Cancel any in-flight search
         currentTask?.cancel()
         wasCanceled = false
@@ -77,12 +83,11 @@ final class SearchCoordinator: ObservableObject {
         runID = newRunID
 
         let allowed: Set<SessionSource> = {
-            switch (includeCodex, includeClaude) {
-            case (true, true): return [.codex, .claude]
-            case (true, false): return [.codex]
-            case (false, true): return [.claude]
-            default: return []
-            }
+            var set = Set<SessionSource>()
+            if includeCodex { set.insert(.codex) }
+            if includeClaude { set.insert(.claude) }
+            if includeGemini { set.insert(.gemini) }
+            return set
         }()
         let candidates = all.filter { allowed.contains($0.source) }
 
@@ -158,9 +163,12 @@ final class SearchCoordinator: ObservableObject {
                         if parsed.source == .codex {
                             self.codexIndexer.updateSession(parsed)
                             print("📊 Search updated Codex session: \(parsed.id.prefix(8)) → \(parsed.messageCount) msgs")
-                        } else {
+                        } else if parsed.source == .claude {
                             self.claudeIndexer.updateSession(parsed)
                             print("📊 Search updated Claude session: \(parsed.id.prefix(8)) → \(parsed.messageCount) msgs")
+                        } else {
+                            self.geminiIndexer.updateSession(parsed)
+                            print("📊 Search updated Gemini session: \(parsed.id.prefix(8)) → \(parsed.messageCount) msgs")
                         }
                     }
 
@@ -213,8 +221,10 @@ final class SearchCoordinator: ObservableObject {
                     await MainActor.run {
                         if parsed.source == .codex {
                             self.codexIndexer.updateSession(parsed)
-                        } else {
+                        } else if parsed.source == .claude {
                             self.claudeIndexer.updateSession(parsed)
+                        } else {
+                            self.geminiIndexer.updateSession(parsed)
                         }
                     }
                 }
@@ -232,14 +242,19 @@ final class SearchCoordinator: ObservableObject {
 
         // Capture indexer as nonisolated(unsafe) for use in detached task
         // This is safe because parseFileFull is a stateless operation
-        nonisolated(unsafe) let indexer = self.codexIndexer
+        nonisolated(unsafe) let codex = self.codexIndexer
+        nonisolated(unsafe) let claude = self.claudeIndexer
+        nonisolated(unsafe) let gemini = self.geminiIndexer
 
         // Parse on background queue using Task instead of DispatchQueue to maintain isolation
         return await Task.detached(priority: .userInitiated) {
-            if source == .codex {
-                return indexer.parseFileFull(at: url)
-            } else {
+            switch source {
+            case .codex:
+                return codex.parseFileFull(at: url)
+            case .claude:
                 return ClaudeSessionParser.parseFileFull(at: url)
+            case .gemini:
+                return GeminiSessionParser.parseFileFull(at: url)
             }
         }.value
     }

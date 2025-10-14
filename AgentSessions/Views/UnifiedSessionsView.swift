@@ -9,6 +9,7 @@ struct UnifiedSessionsView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
+    @ObservedObject var geminiIndexer: GeminiSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
 
@@ -40,13 +41,14 @@ struct UnifiedSessionsView: View {
         }
     }
 
-    init(unified: UnifiedSessionIndexer, codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, layoutMode: LayoutMode, onToggleLayout: @escaping () -> Void) {
+    init(unified: UnifiedSessionIndexer, codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, geminiIndexer: GeminiSessionIndexer, layoutMode: LayoutMode, onToggleLayout: @escaping () -> Void) {
         self.unified = unified
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
+        self.geminiIndexer = geminiIndexer
         self.layoutMode = layoutMode
         self.onToggleLayout = onToggleLayout
-        _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer))
+        _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer, geminiIndexer: geminiIndexer))
     }
 
     var body: some View {
@@ -114,6 +116,15 @@ struct UnifiedSessionsView: View {
                     .toggleStyle(.button)
                     .help("Show or hide Claude sessions in the list (⌘2)")
                     .keyboardShortcut("2", modifiers: .command)
+
+                    Toggle(isOn: $unified.includeGemini) {
+                        Text("Gemini")
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeGemini ? Color.teal : .primary))
+                            .fixedSize()
+                    }
+                    .toggleStyle(.button)
+                    .help("Show or hide Gemini sessions in the list (⌘3)")
+                    .keyboardShortcut("3", modifiers: .command)
                 }
             }
             ToolbarItem(placement: .automatic) {
@@ -173,6 +184,8 @@ struct UnifiedSessionsView: View {
                 codexIndexer.reloadSession(id: id)
             } else if s.source == .claude, let exist = claudeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
                 claudeIndexer.reloadSession(id: id)
+            } else if s.source == .gemini, let exist = geminiIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+                geminiIndexer.reloadSession(id: id)
             }
         }
         .onAppear {
@@ -185,7 +198,14 @@ struct UnifiedSessionsView: View {
         Table(rows, selection: $tableSelection, sortOrder: $sortOrder) {
             // Always include CLI Agent column; collapse width when hidden to avoid type-check complexity
             TableColumn("CLI Agent", value: \Session.sourceKey) { s in
-                Text(s.source == .codex ? "Codex" : "Claude")
+                let label: String = {
+                    switch s.source {
+                    case .codex: return "Codex"
+                    case .claude: return "Claude"
+                    case .gemini: return "Gemini"
+                    }
+                }()
+                Text(label)
                     .font(.system(size: 12))
                     .foregroundStyle(!stripMonochrome ? sourceAccent(s) : .secondary)
             }
@@ -227,6 +247,20 @@ struct UnifiedSessionsView: View {
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
             }
             .width(min: 64, ideal: 64, max: 80)
+
+            // Gemini-only stale preview affordance
+            TableColumn(" ") { s in
+                if s.source == .gemini, geminiIndexer.isPreviewStale(id: s.id) {
+                    Button(action: { geminiIndexer.refreshPreview(id: s.id) }) {
+                        Text("Refresh preview")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.teal)
+                    .help("Update this session's preview to reflect the latest file contents")
+                }
+            }
+            .width(min: 0, ideal: 120, max: 140)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .environment(\.defaultMinListRowHeight, 22)
@@ -308,13 +342,57 @@ struct UnifiedSessionsView: View {
     private var transcriptPane: some View {
         Group {
             if let s = selectedSession {
-                if s.source == .codex {
-                    TranscriptPlainView(sessionID: selection)
-                        .environmentObject(codexIndexer)
-                        .environmentObject(focusCoordinator)
+                // Missing-file or unreadable banners (ephemeral providers)
+                if !FileManager.default.fileExists(atPath: s.filePath) {
+                    let providerName: String = (s.source == .codex ? "Codex" : (s.source == .claude ? "Claude" : "Gemini"))
+                    let accent: Color = sourceAccent(s)
+                    VStack(spacing: 12) {
+                        Label("Session file not found", systemImage: "exclamationmark.triangle.fill")
+                            .font(.headline)
+                            .foregroundStyle(accent)
+                        Text("This \(providerName) session was removed by the system or CLI.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            Button("Remove") { if let id = selection { unified.removeSession(id: id) } }
+                                .buttonStyle(.borderedProminent)
+                            Button("Re-scan") { unified.refresh() }
+                                .buttonStyle(.bordered)
+                            Button("Locate…") { revealParentOfMissing(s) }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .textBackgroundColor))
+                } else if s.source == .gemini, geminiIndexer.unreadableSessionIDs.contains(s.id) {
+                    VStack(spacing: 12) {
+                        Label("Could not open session", systemImage: "exclamationmark.triangle.fill")
+                            .font(.headline)
+                            .foregroundStyle(sourceAccent(s))
+                        Text("This Gemini session could not be parsed. It may be truncated or corrupted.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            Button("Open in Finder") { revealSessionFile(s) }
+                                .buttonStyle(.borderedProminent)
+                            Button("Re-scan") { unified.refresh() }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .textBackgroundColor))
                 } else {
-                    ClaudeTranscriptView(indexer: claudeIndexer, sessionID: selection)
-                        .environmentObject(focusCoordinator)
+                    if s.source == .codex {
+                        TranscriptPlainView(sessionID: selection)
+                            .environmentObject(codexIndexer)
+                            .environmentObject(focusCoordinator)
+                    } else if s.source == .claude {
+                        ClaudeTranscriptView(indexer: claudeIndexer, sessionID: selection)
+                            .environmentObject(focusCoordinator)
+                    } else {
+                        GeminiTranscriptView(indexer: geminiIndexer, sessionID: selection)
+                            .environmentObject(focusCoordinator)
+                    }
                 }
             } else if unified.isIndexing {
                 LoadingAnimationView(
@@ -368,6 +446,12 @@ struct UnifiedSessionsView: View {
         let url = URL(fileURLWithPath: s.filePath)
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func revealParentOfMissing(_ s: Session) {
+        let url = URL(fileURLWithPath: s.filePath)
+        let dir = url.deletingLastPathComponent()
+        NSWorkspace.shared.open(dir)
     }
 
     private func resume(_ s: Session) {
@@ -432,7 +516,11 @@ struct UnifiedSessionsView: View {
     }
 
     private func sourceAccent(_ s: Session) -> Color {
-        return s.source == .codex ? Color.blue : Color(red: 204/255, green: 121/255, blue: 90/255)
+        switch s.source {
+        case .codex: return Color.blue
+        case .claude: return Color(red: 204/255, green: 121/255, blue: 90/255)
+        case .gemini: return Color.teal
+        }
     }
 
     private func progressLineText(_ p: SearchCoordinator.Progress) -> String {
@@ -590,6 +678,7 @@ private struct UnifiedSearchFiltersView: View {
                      filters: filters,
                      includeCodex: unified.includeCodex,
                      includeClaude: unified.includeClaude,
+                     includeGemini: unified.includeGemini,
                      all: unified.allSessions)
     }
 }
@@ -653,4 +742,3 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
         // Don't rely on isFirstResponder binding - already set in makeNSView
     }
 }
-

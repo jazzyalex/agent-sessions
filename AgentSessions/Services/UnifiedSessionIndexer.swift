@@ -29,6 +29,12 @@ final class UnifiedSessionIndexer: ObservableObject {
             recomputeNow()
         }
     }
+    @Published var includeGemini: Bool = UserDefaults.standard.object(forKey: "IncludeGeminiSessions") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(includeGemini, forKey: "IncludeGeminiSessions")
+            recomputeNow()
+        }
+    }
 
     // Sorting
     struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title, agent } }
@@ -47,19 +53,21 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private let codex: SessionIndexer
     private let claude: ClaudeSessionIndexer
+    private let gemini: GeminiSessionIndexer
     private var cancellables = Set<AnyCancellable>()
 
     // Debouncing for expensive operations
     private var recomputeDebouncer: DispatchWorkItem? = nil
 
-    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer) {
+    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, geminiIndexer: GeminiSessionIndexer) {
         self.codex = codexIndexer
         self.claude = claudeIndexer
+        self.gemini = geminiIndexer
 
-        // Merge underlying allSessions whenever either changes
-        Publishers.CombineLatest(codex.$allSessions, claude.$allSessions)
-            .map { codexList, claudeList -> [Session] in
-                let merged = codexList + claudeList
+        // Merge underlying allSessions whenever any changes
+        Publishers.CombineLatest3(codex.$allSessions, claude.$allSessions, gemini.$allSessions)
+            .map { codexList, claudeList, geminiList -> [Session] in
+                let merged = codexList + claudeList + geminiList
                 return merged.sorted { lhs, rhs in
                     if lhs.modifiedAt == rhs.modifiedAt { return lhs.id > rhs.id }
                     return lhs.modifiedAt > rhs.modifiedAt
@@ -68,14 +76,14 @@ final class UnifiedSessionIndexer: ObservableObject {
             .receive(on: DispatchQueue.main)
             .assign(to: &$allSessions)
 
-        // isIndexing reflects either indexer working
-        Publishers.CombineLatest(codex.$isIndexing, claude.$isIndexing)
-            .map { $0 || $1 }
+        // isIndexing reflects any indexer working
+        Publishers.CombineLatest3(codex.$isIndexing, claude.$isIndexing, gemini.$isIndexing)
+            .map { $0 || $1 || $2 }
             .assign(to: &$isIndexing)
 
-        // Forward errors (simple preference for codex error else claude error)
-        Publishers.CombineLatest(codex.$indexingError, claude.$indexingError)
-            .map { codexErr, claudeErr in codexErr ?? claudeErr }
+        // Forward errors (preference order codex → claude → gemini)
+        Publishers.CombineLatest3(codex.$indexingError, claude.$indexingError, gemini.$indexingError)
+            .map { codexErr, claudeErr, geminiErr in codexErr ?? claudeErr ?? geminiErr }
             .assign(to: &$indexingError)
 
         // Debounced filtering and sorting pipeline (runs off main thread)
@@ -86,18 +94,22 @@ final class UnifiedSessionIndexer: ObservableObject {
             $selectedModel.removeDuplicates()
         )
         Publishers.CombineLatest(
-            Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, Publishers.CombineLatest($includeCodex, $includeClaude)),
+            Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, Publishers.CombineLatest3($includeCodex, $includeClaude, $includeGemini)),
             $sortDescriptor.removeDuplicates()
         )
             .receive(on: DispatchQueue.global(qos: .userInitiated))
             .map { [weak self] combined, sortDesc -> [Session] in
                 let (input, kinds, all, sources) = combined
                 let (q, from, to, model) = input
-                let (incCodex, incClaude) = sources
+                let (incCodex, incClaude, incGemini) = sources
                 let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
                 var base = all
-                if !incCodex || !incClaude {
-                    base = base.filter { s in (s.source == .codex && incCodex) || (s.source == .claude && incClaude) }
+                if !incCodex || !incClaude || !incGemini {
+                    base = base.filter { s in
+                        (s.source == .codex && incCodex) ||
+                        (s.source == .claude && incClaude) ||
+                        (s.source == .gemini && incGemini)
+                    }
                 }
                 var results = FilterEngine.filterSessions(base, filters: filters)
                 if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
@@ -118,6 +130,13 @@ final class UnifiedSessionIndexer: ObservableObject {
     func refresh() {
         codex.refresh()
         claude.refresh()
+        gemini.refresh()
+    }
+
+    // Remove a session from the unified list (e.g., missing file cleanup)
+    func removeSession(id: String) {
+        allSessions.removeAll { $0.id == id }
+        recomputeNow()
     }
 
     func applySearch() { query = queryDraft.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -143,8 +162,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     func applyFiltersAndSort(to sessions: [Session]) -> [Session] {
         // Filter by source (Codex/Claude toggles)
         var base = sessions
-        if !includeCodex || !includeClaude {
-            base = base.filter { s in (s.source == .codex && includeCodex) || (s.source == .claude && includeClaude) }
+        if !includeCodex || !includeClaude || !includeGemini {
+            base = base.filter { s in
+                (s.source == .codex && includeCodex) ||
+                (s.source == .claude && includeClaude) ||
+                (s.source == .gemini && includeGemini)
+            }
         }
 
         // Apply FilterEngine (query, date, model, kinds, project, path)

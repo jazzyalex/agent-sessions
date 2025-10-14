@@ -4,11 +4,13 @@ import Foundation
 public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case codex = "codex"
     case claude = "claude"
+    case gemini = "gemini"
 
     public var displayName: String {
         switch self {
         case .codex: return "Codex CLI"
         case .claude: return "Claude Code"
+        case .gemini: return "Gemini"
         }
     }
 
@@ -16,6 +18,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         switch self {
         case .codex: return "terminal"
         case .claude: return "command"
+        case .gemini: return "sparkles"
         }
     }
 }

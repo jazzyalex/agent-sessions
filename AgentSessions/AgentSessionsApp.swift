@@ -7,6 +7,7 @@ struct AgentSessionsApp: App {
     @StateObject private var claudeIndexer = ClaudeSessionIndexer()
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
+    @StateObject private var geminiIndexer = GeminiSessionIndexer()
     @StateObject private var updateModel = UpdateCheckModel.shared
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @State private var statusItemController: StatusItemController? = nil
@@ -28,9 +29,10 @@ struct AgentSessionsApp: App {
     var body: some Scene {
         // Default unified window
         WindowGroup("Agent Sessions") {
-            UnifiedSessionsView(unified: unifiedIndexerHolder.makeUnified(codexIndexer: indexer, claudeIndexer: claudeIndexer),
+            UnifiedSessionsView(unified: unifiedIndexerHolder.makeUnified(codexIndexer: indexer, claudeIndexer: claudeIndexer, geminiIndexer: geminiIndexer),
                                 codexIndexer: indexer,
                                 claudeIndexer: claudeIndexer,
+                                geminiIndexer: geminiIndexer,
                                 layoutMode: LayoutMode(rawValue: layoutModeRaw) ?? .vertical,
                                 onToggleLayout: {
                                     let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
@@ -39,7 +41,7 @@ struct AgentSessionsApp: App {
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
                 .onAppear {
-                    indexer.refresh(); claudeIndexer.refresh()
+                    indexer.refresh(); claudeIndexer.refresh(); geminiIndexer.refresh()
                     updateUsageModels()
                     updateModel.checkOnLaunch()
                 }
@@ -109,9 +111,9 @@ struct AgentSessionsApp: App {
 final class _UnifiedHolder: ObservableObject {
     // Internal cache only; no need to publish during view updates
     var unified: UnifiedSessionIndexer? = nil
-    func makeUnified(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer) -> UnifiedSessionIndexer {
+    func makeUnified(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, geminiIndexer: GeminiSessionIndexer) -> UnifiedSessionIndexer {
         if let u = unified { return u }
-        let u = UnifiedSessionIndexer(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer)
+        let u = UnifiedSessionIndexer(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer, geminiIndexer: geminiIndexer)
         unified = u
         return u
     }

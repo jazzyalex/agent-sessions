@@ -10,6 +10,10 @@
 		24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */; };
 
 		09C4E2A7C54B4EA3BF4473C7 /* CodexVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3233D9D6CE429AB0173B04 /* CodexVersion.swift */; };
+		GEMB000010000000000000001 /* AgentSessions/Services/GeminiSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000001 /* AgentSessions/Services/GeminiSessionDiscovery.swift */; };
+		GEMB000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift */; };
+		GEMB000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift */; };
+		GEMV000020000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEMV000010000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift */; };
 		1AB05D2296DC475580CB52EF /* CodexResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */; };
 		2B31E3D104D74827B0E65D5E /* CodexResumeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E8EFD200FFA4B90BCCF3434 /* CodexResumeSheet.swift */; };
 		580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */; };
@@ -166,6 +170,7 @@
 		DE3233D9D6CE429AB0173B04 /* CodexVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexVersion.swift; path = AgentSessions/Resume/CodexVersion.swift; sourceTree = SOURCE_ROOT; };
 		E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageMenuBar.swift; path = AgentSessions/MenuBar/UsageMenuBar.swift; sourceTree = SOURCE_ROOT; };
 		F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCoordinatorTests.swift; path = AgentSessionsTests/CodexResumeCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
+		GEMT000010000000000000001 /* AgentSessionsTests/GeminiParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/GeminiParserTests.swift; sourceTree = SOURCE_ROOT; };
     SRCH000010000000000000001 /* AgentSessions/Search/SearchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Search/SearchCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		EAD4071F08354BC681A6E5D9 /* GitHubClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GitHubClient.swift; path = AgentSessions/Update/GitHubClient.swift; sourceTree = SOURCE_ROOT; };
 		16EEA49AD2C64DCF8BDC1241 /* SemanticVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SemanticVersion.swift; path = AgentSessions/Update/SemanticVersion.swift; sourceTree = SOURCE_ROOT; };
@@ -176,6 +181,10 @@
 		8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateCheckerTests.swift; path = AgentSessionsTests/UpdateCheckerTests.swift; sourceTree = SOURCE_ROOT; };
 		STALE000010000000000000001 /* UsageStaleCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStaleCheck.swift; path = AgentSessions/CodexStatus/UsageStaleCheck.swift; sourceTree = SOURCE_ROOT; };
 		F188663773714C61A568F7AA /* LoadingAnimationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LoadingAnimationView.swift; path = AgentSessions/Views/LoadingAnimationView.swift; sourceTree = SOURCE_ROOT; };
+		GEMV000010000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/GeminiTranscriptView.swift; sourceTree = SOURCE_ROOT; };
+		GEM000010000000000000001 /* AgentSessions/Services/GeminiSessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
+		GEM000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		GEM000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionParser.swift; sourceTree = SOURCE_ROOT; };
 		/* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -263,8 +272,9 @@
 				B00000179A0A000100000001 /* SessionTitleTests.swift */,
 				A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */,
 				F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */,
-			
-				8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */,);
+				8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */,
+				GEMT000010000000000000001 /* AgentSessionsTests/GeminiParserTests.swift */,
+			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
 		};
@@ -307,6 +317,9 @@
 				CFA900010000000000000003 /* AgentSessions/Services/ClaudeSessionParser.swift */,
 				CFA900010000000000000004 /* AgentSessions/Services/ClaudeSessionIndexer.swift */,
 				CFU000010000000000000001 /* AgentSessions/Services/UnifiedSessionIndexer.swift */,
+				GEM000010000000000000001 /* AgentSessions/Services/GeminiSessionDiscovery.swift */,
+				GEM000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift */,
+				GEM000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift */,
 				SRCH000010000000000000001 /* AgentSessions/Search/SearchCoordinator.swift */,
 			);
 			path = Services;
@@ -335,6 +348,7 @@
 				B0000011AA0A000100000001 /* PreferencesView.swift */,
 				CFA900010000000000000005 /* AgentSessions/Views/ClaudeSessionsView.swift */,
 				CFU000010000000000000002 /* AgentSessions/Views/UnifiedSessionsView.swift */,
+				GEMV000010000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -543,7 +557,11 @@
 				CFB900010000000000000016 /* AgentSessions/ClaudeResume/ClaudeResumeSettings.swift in Sources */,
 				CFB900010000000000000017 /* AgentSessions/ClaudeResume/ClaudeITermLauncher.swift in Sources */,
 				CFU000020000000000000001 /* AgentSessions/Services/UnifiedSessionIndexer.swift in Sources */,
+				GEMB000010000000000000001 /* AgentSessions/Services/GeminiSessionDiscovery.swift in Sources */,
+				GEMB000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift in Sources */,
+				GEMB000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift in Sources */,
 				CFU000020000000000000002 /* AgentSessions/Views/UnifiedSessionsView.swift in Sources */,
+				GEMV000020000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift in Sources */,
 				CLC000010000000000000001 /* AgentSessions/ClaudeStatus/ClaudeUsageModel.swift in Sources */,
 				CLC000010000000000000002 /* AgentSessions/ClaudeStatus/ClaudeStatusService.swift in Sources */,
 				CLC000010000000000000004 /* AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift in Sources */,
@@ -557,7 +575,7 @@
 				7DEC6F1AF64D4A61B0B11AFD /* UpdateCheckModel.swift in Sources */,
 				5731AD7A25CF4B4DAA9BDF27 /* UpdateDefaults.swift in Sources */,
 				7D3211A8042C4D30AE226E0C /* UpdateModels.swift in Sources */,
-				STALE000020000000000000001 /* UsageStaleCheck.swift in Sources */,				24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */,
+		STALE000020000000000000001 /* UsageStaleCheck.swift in Sources */,				24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */,
 				E1DDA78C704848A381A6A426 /* LoadingAnimationView.swift in Sources */,
 );
 			runOnlyForDeploymentPostprocessing = 0;
@@ -571,6 +589,7 @@
 				B000001C2A0A000100000078 /* SessionTitleTests.swift in Sources */,
 				F7079DCFE7E6447F920DBF84 /* CodexResumeTests.swift in Sources */,
 				580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */,
+				GEMT000020000000000000001 /* AgentSessionsTests/GeminiParserTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
