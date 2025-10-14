@@ -69,9 +69,11 @@
     }
 
     .btn {
-      display: inline-block;
-      margin: 10px 10px 0 0;
-      padding: 10px 16px;
+      display: inline-flex;
+      align-items: center;
+      height: 40px;
+      margin: 0;
+      padding: 0 16px;
       border-radius: 8px;
       text-decoration: none;
       font-weight: 600;
@@ -97,14 +99,22 @@
       margin: 10px 0;
     }
 
+    .button-row > .btn { height: 40px; }
+    .product-hunt { display:flex; align-items:center; height:40px; }
     .product-hunt img {
-      height: 32px;
+      height: 40px; /* exact match with .btn height */
       width: auto;
-      border-radius: 6px;
-      border: 1px solid #d0d7de;
-      background: white;
-      padding: 2px 6px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      padding: 0;
+      display: inline-block;
+      vertical-align: middle;
+      opacity: 0.95;
+      position: relative;
+      top: 0;
     }
+    .product-hunt img:hover { opacity: 1; }
 
     .features {
       display: grid;
@@ -183,7 +193,8 @@
   </header>
   <div class="container">
     <h1 style="font-size: 24px;">Session Browser for Codex CLI, Claude Code & Gemini CLI</h1>
-    <p><em>Agent Sessions 2</em> brings <strong>Codex CLI</strong>, <strong>Claude Code</strong>, and <strong>Gemini CLI (read-only)</strong> together in a single, powerful
+    <p><em>Agent Sessions 2</em> brings <strong>Codex CLI</strong>, <strong>Claude Code</strong>, and <strong>Gemini CLI
+        (read-only)</strong> together in a single, powerful
       interface. Look up any past session — even the ancient ones <code>/resume</code> can't show — or browse visually
       to find that
       lost
@@ -192,19 +203,30 @@
     <span
       style="text-align: center; font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-weight: 600; color: #4B5563; font-size: 0.8em; font-variant: small-caps; letter-spacing: 0.05em;">local-first,
       open source, and built for terminal vibe warriors.</span></p>
-
-    <div class="button-row">
+    <div class="button-row" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
       <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.3/AgentSessions-2.3.dmg"
-        class="btn primary">Download Agent Sessions 2.3</a>
-      <a href="https://github.com/jazzyalex/agent-sessions" class="btn secondary">View on GitHub</a>
-      <a href="https://x.com/jazzyalex" class="btn secondary">Follow on X (Twitter)</a>
-      <a class="product-hunt"
-        href="https://www.producthunt.com/products/agent-sessions?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-agent&#0045;sessions"
-        target="_blank" rel="noopener">
-        <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1024948&theme=light&t=1760385821577"
-          alt="Agent Sessions on Product Hunt" width="96" height="32" />
+        class="btn primary"
+        style="padding:10px 18px;border-radius:8px;background:#007aff;color:#fff;text-decoration:none;font-weight:500">
+        Download Agent Sessions 2.3
       </a>
+
+      <a href="https://github.com/jazzyalex/agent-sessions" class="btn secondary"
+        style="padding:10px 18px;border-radius:8px;background:#f2f2f2;color:#111;text-decoration:none;font-weight:500">
+        View on GitHub
+      </a>
+
+      <a href="https://x.com/jazzyalex" class="btn secondary"
+        style="padding:10px 18px;border-radius:8px;background:#f2f2f2;color:#111;text-decoration:none;font-weight:500">
+        Follow on X (Twitter)
+      </a>
+      <a href="https://www.producthunt.com/products/agent-sessions?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-agent&#0045;sessions"
+      target="_blank"><img
+        src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1024948&theme=light&t=1760428775700"
+        alt="Agent&#0032;Sessions&#0032; - Unified&#0032;history&#0032;&#0038;&#0032;usage&#0032;for&#0032;Codex&#0032;CLI&#0032;and&#0032;Claude&#0032;Code | Product Hunt"
+        style="width: 180px; height: 54px;" width="250" height="54" /></a>
+
     </div>
+  
 
     <h3 style="margin-top:40px;">Install with Homebrew Tap</h3>
     <pre><code style="font-size: 12px;">brew tap jazzyalex/agent-sessions
@@ -213,13 +235,16 @@ brew install --cask agent-sessions</code></pre>
     <div class="features">
       <div class="card">
         <h3>Unified Interface v2</h3>
-        <p>Browse <em>Codex CLI</em>, <em>Claude Code</em>, and <em>Gemini CLI (read-only)</em> side-by-side. Toggle between sources
+        <p>Browse <em>Codex CLI</em>, <em>Claude Code</em>, and <em>Gemini CLI (read-only)</em> side-by-side. Toggle
+          between sources
           with strict filtering and unified search.</p>
       </div>
       <div class="card">
         <h3>Unified Search v2</h3>
-        <p>One unified search across <em>Codex</em>, <em>Claude</em>, and <em>Gemini CLI</em> sessions. Find any snippet or prompt instantly — no
-          matter which agent or terminal it came from. Smart sorting, instant cancel, full-text search with project filters.</p>
+        <p>One unified search across <em>Codex</em>, <em>Claude</em>, and <em>Gemini CLI</em> sessions. Find any snippet
+          or prompt instantly — no
+          matter which agent or terminal it came from. Smart sorting, instant cancel, full-text search with project
+          filters.</p>
       </div>
       <div class="card">
         <h3>Instant Resume & Re-use</h3>
@@ -245,7 +270,8 @@ brew install --cask agent-sessions</code></pre>
       </div>
       <div class="card">
         <h3>Local, Private & Safe</h3>
-        <p>All processing on your Mac. Reads <code>~/.codex/sessions</code>, <code>~/.claude/sessions</code>, and Gemini CLI checkpoints under <code>~/.gemini/tmp</code> (read-only).
+        <p>All processing on your Mac. Reads <code>~/.codex/sessions</code>, <code>~/.claude/sessions</code>, and Gemini
+          CLI checkpoints under <code>~/.gemini/tmp</code> (read-only).
           No cloud uploads or telemetry. <strong>Read only</strong> – your sessions are always safe.</p>
       </div>
 
@@ -253,48 +279,53 @@ brew install --cask agent-sessions</code></pre>
 
     <h3 style="margin-top:40px;">What’s New in 2.3</h3>
     <ul>
-      <li><strong>Gemini CLI</strong> (read-only): list/search/open transcripts from <code>~/.gemini/tmp</code>; source toggle; unified search.</li>
+      <li><strong>Gemini CLI</strong> (read-only): list/search/open transcripts from <code>~/.gemini/tmp</code>; source
+        toggle; unified search.</li>
       <li><strong>Favorites</strong>: inline star per row + toolbar “Favorites” filter; persisted across launches.</li>
-      <li><strong>UI polish & fixes</strong>: transcript/terminal mode parity, persistent window/split positions, improved toolbar spacing.</li>
+      <li><strong>UI polish & fixes</strong>: transcript/terminal mode parity, persistent window/split positions,
+        improved toolbar spacing.</li>
     </ul>
-    </div>
+  </div>
 
-    <h3 style="margin-top:40px;">Screenshots</h3>
- 
-    <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:0px;"><em>Transcript view with search (Dark Mode)
-      </em></p>
-    <img src="assets/screenshot-H.png" alt="Transcript view with search (Dark Mode)"
-      style="width:100%; max-width:960px; margin:5px 0;" />
-    <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:0px;"><em>Resume any Codex CLI and Claude Code session</em></p>
-    <img src="assets/screenshot-V.png" alt="Resume any Codex CLI and Claude Code session"
-      style="width:100%; max-width:960px; margin:5px 0;" />
+  <h3 style="margin-top:40px;">Screenshots</h3>
 
-    <div style="text-align:center;">
-      <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:15px;"><em>Menu bar usage tracking with
-          5-hour and weekly percentages</em></p>
-      <img src="assets/screenshot-menubar.png" alt="Menu bar usage tracking with 5-hour and weekly percentages"
-        style="width:50%; max-width:480px; margin:5px auto; display:block;" />
-    </div>
+  <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:0px;"><em>Transcript view
+      with search (Dark Mode)
+    </em></p>
+  <img src="assets/screenshot-H.png" alt="Transcript view with search (Dark Mode)"
+    style="width:100%; max-width:960px; margin:5px 0;" />
+  <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:0px;"><em>Resume any Codex
+      CLI and Claude Code session</em></p>
+  <img src="assets/screenshot-V.png" alt="Resume any Codex CLI and Claude Code session"
+    style="width:100%; max-width:960px; margin:5px 0;" />
 
-    <!-- <img src="assets/screenshot-setings.png" alt="Preferences window" style="width:100%; max-width:960px; margin:10px 0;" /> -->
-    <!-- <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px;"><em>Preferences: Codex CLI configuration and usage display options</em></p> -->
+  <div style="text-align:center;">
+    <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:15px;"><em>Menu bar usage
+        tracking with
+        5-hour and weekly percentages</em></p>
+    <img src="assets/screenshot-menubar.png" alt="Menu bar usage tracking with 5-hour and weekly percentages"
+      style="width:50%; max-width:480px; margin:5px auto; display:block;" />
+  </div>
 
-    <footer>
-      <section id="disclaimer" style="margin-top:2rem; padding:1rem; border-top:1px solid #ccc;">
-        <h2>Disclaimer</h2>
-        <p><strong>Agent Sessions</strong> is an independent open-source project.</p>
-        <p>
-          It is <strong>not affiliated with, endorsed by, or sponsored by OpenAI, Anthropic,
-            or any of their products or services</strong> (including ChatGPT, Claude, or Codex CLI).
-        </p>
-        <p>
-          All trademarks and brand names belong to their respective owners. References to “OpenAI,”
-          “Anthropic,” or “Codex CLI” are made solely for descriptive purposes.
-        </p>
-      </section>
-      © <span id="year"></span> Agent Sessions
-      <!-- • <a href="./privacy.html">Privacy</a> • <a href="./security.html">Security</a> -->
-    </footer>
+  <!-- <img src="assets/screenshot-setings.png" alt="Preferences window" style="width:100%; max-width:960px; margin:10px 0;" /> -->
+  <!-- <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px;"><em>Preferences: Codex CLI configuration and usage display options</em></p> -->
+
+  <footer>
+    <section id="disclaimer" style="margin-top:2rem; padding:1rem; border-top:1px solid #ccc;">
+      <h2>Disclaimer</h2>
+      <p><strong>Agent Sessions</strong> is an independent open-source project.</p>
+      <p>
+        It is <strong>not affiliated with, endorsed by, or sponsored by OpenAI, Anthropic,
+          or any of their products or services</strong> (including ChatGPT, Claude, or Codex CLI).
+      </p>
+      <p>
+        All trademarks and brand names belong to their respective owners. References to “OpenAI,”
+        “Anthropic,” or “Codex CLI” are made solely for descriptive purposes.
+      </p>
+    </section>
+    © <span id="year"></span> Agent Sessions
+    <!-- • <a href="./privacy.html">Privacy</a> • <a href="./security.html">Security</a> -->
+  </footer>
   </div>
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
