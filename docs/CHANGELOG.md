@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.3.1] - 2025-10-14
+
+### Fixed
+- Search: auto-select first result in Sessions list when none selected; transcript shows immediately without stealing focus.
+
 ## [Unreleased]
 
 ## [2.3] - 2025-10-14
