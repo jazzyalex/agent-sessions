@@ -195,6 +195,9 @@ struct UnifiedSessionsView: View {
         .onAppear {
             if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }
         }
+        .onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
+        .onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
+        .onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
     }
 
     private var listPane: some View {
@@ -520,6 +523,23 @@ struct UnifiedSessionsView: View {
     private func fallbackEstimate(_ count: Int) -> String {
         if count >= 1000 { return "1000+" }
         return "~\(count)"
+    }
+    
+    private func restartSearchIfRunning() {
+        guard searchCoordinator.isRunning else { return }
+        let filters = Filters(query: unified.query,
+                              dateFrom: unified.dateFrom,
+                              dateTo: unified.dateTo,
+                              model: unified.selectedModel,
+                              kinds: unified.selectedKinds,
+                              repoName: unified.projectFilter,
+                              pathContains: nil)
+        searchCoordinator.start(query: unified.query,
+                                filters: filters,
+                                includeCodex: unified.includeCodex,
+                                includeClaude: unified.includeClaude,
+                                includeGemini: unified.includeGemini,
+                                all: unified.allSessions)
     }
 
     private func sourceAccent(_ s: Session) -> Color {

@@ -58,6 +58,11 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     // Debouncing for expensive operations
     private var recomputeDebouncer: DispatchWorkItem? = nil
+    
+    // Auto-refresh recency guards (per provider)
+    private var lastAutoRefreshCodex: Date? = nil
+    private var lastAutoRefreshClaude: Date? = nil
+    private var lastAutoRefreshGemini: Date? = nil
 
     init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, geminiIndexer: GeminiSessionIndexer) {
         self.codex = codexIndexer
@@ -132,6 +137,37 @@ final class UnifiedSessionIndexer: ObservableObject {
             .sink { codexList, claudeList in
                 let paths = (codexList + claudeList).compactMap { $0.cwd }
                 GeminiHashResolver.shared.registerCandidates(paths)
+            }
+            .store(in: &cancellables)
+
+        // Auto-refresh providers when toggled ON (10s recency guard, debounced)
+        $includeCodex
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                if enabled { self.maybeAutoRefreshCodex() }
+            }
+            .store(in: &cancellables)
+
+        $includeClaude
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                if enabled { self.maybeAutoRefreshClaude() }
+            }
+            .store(in: &cancellables)
+
+        $includeGemini
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                if enabled { self.maybeAutoRefreshGemini() }
             }
             .store(in: &cancellables)
     }
@@ -255,5 +291,32 @@ final class UnifiedSessionIndexer: ObservableObject {
         case let (l?, r?): return abs(l.timeIntervalSince1970 - r.timeIntervalSince1970) < 0.5
         default: return false
         }
+    }
+
+    // MARK: - Auto-refresh helpers
+    private func withinGuard(_ last: Date?) -> Bool {
+        guard let last else { return false }
+        return Date().timeIntervalSince(last) < 10.0
+    }
+
+    private func maybeAutoRefreshCodex() {
+        if codex.isIndexing { return }
+        if withinGuard(lastAutoRefreshCodex) { return }
+        lastAutoRefreshCodex = Date()
+        codex.refresh()
+    }
+
+    private func maybeAutoRefreshClaude() {
+        if claude.isIndexing { return }
+        if withinGuard(lastAutoRefreshClaude) { return }
+        lastAutoRefreshClaude = Date()
+        claude.refresh()
+    }
+
+    private func maybeAutoRefreshGemini() {
+        if gemini.isIndexing { return }
+        if withinGuard(lastAutoRefreshGemini) { return }
+        lastAutoRefreshGemini = Date()
+        gemini.refresh()
     }
 }
