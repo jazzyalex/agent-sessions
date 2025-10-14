@@ -61,6 +61,7 @@ struct UnifiedSessionsView: View {
                     transcriptPane
                         .frame(minWidth: 450)
                 }
+                .background(SplitViewAutosave(key: "UnifiedSplit-H"))
             } else {
                 VSplitView {
                     listPane
@@ -68,6 +69,7 @@ struct UnifiedSessionsView: View {
                     transcriptPane
                         .frame(minHeight: 240)
                 }
+                .background(SplitViewAutosave(key: "UnifiedSplit-V"))
             }
 
             // Usage strips
@@ -136,7 +138,7 @@ struct UnifiedSessionsView: View {
                     Label("Resume", systemImage: "play.circle")
                 }
                 .keyboardShortcut("r", modifiers: [.command, .control])
-                .disabled(selectedSession == nil)
+                .disabled(selectedSession == nil || selectedSession?.source == .gemini)
                 .help("Resume the selected session in its original CLI (⌃⌘R)")
             }
             ToolbarItem(placement: .automatic) {
@@ -275,10 +277,12 @@ struct UnifiedSessionsView: View {
         }
         .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
-                Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
-                    .keyboardShortcut("r", modifiers: [.command, .control])
-                    .help("Resume the selected session in its original CLI (⌃⌘R)")
-                Divider()
+                if s.source != .gemini {
+                    Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
+                        .keyboardShortcut("r", modifiers: [.command, .control])
+                        .help("Resume the selected session in its original CLI (⌃⌘R)")
+                    Divider()
+                }
                 Button("Open Working Directory") { openDir(s) }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                     .help("Reveal working directory in Finder (⌘⇧O)")
@@ -380,17 +384,13 @@ struct UnifiedSessionsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .textBackgroundColor))
                 } else {
-                    if s.source == .codex {
-                        TranscriptPlainView(sessionID: selection)
-                            .environmentObject(codexIndexer)
-                            .environmentObject(focusCoordinator)
-                    } else if s.source == .claude {
-                        ClaudeTranscriptView(indexer: claudeIndexer, sessionID: selection)
-                            .environmentObject(focusCoordinator)
-                    } else {
-                        GeminiTranscriptView(indexer: geminiIndexer, sessionID: selection)
-                            .environmentObject(focusCoordinator)
-                    }
+                    TranscriptHostView(kind: s.source,
+                                       selection: selection,
+                                       codexIndexer: codexIndexer,
+                                       claudeIndexer: claudeIndexer,
+                                       geminiIndexer: geminiIndexer)
+                        .environmentObject(focusCoordinator)
+                        .id("transcript-host")
                 }
             } else if unified.isIndexing {
                 LoadingAnimationView(
@@ -461,6 +461,7 @@ struct UnifiedSessionsView: View {
     }
 
     private func resume(_ s: Session) {
+        if s.source == .gemini { return } // No resume support for Gemini
         if s.source == .codex {
             Task { @MainActor in
                 _ = await CodexResumeCoordinator.shared.quickLaunchInTerminal(session: s)
@@ -538,6 +539,29 @@ struct UnifiedSessionsView: View {
         case .large:
             return "Scanning large… \(p.scannedLarge)/\(p.totalLarge)"
         }
+    }
+}
+
+// Stable transcript host that preserves layout identity across provider switches
+private struct TranscriptHostView: View {
+    let kind: SessionSource
+    let selection: String?
+    @ObservedObject var codexIndexer: SessionIndexer
+    @ObservedObject var claudeIndexer: ClaudeSessionIndexer
+    @ObservedObject var geminiIndexer: GeminiSessionIndexer
+
+    var body: some View {
+        ZStack { // keep one stable container to avoid split reset
+            TranscriptPlainView(sessionID: selection)
+                .environmentObject(codexIndexer)
+                .opacity(kind == .codex ? 1 : 0)
+            ClaudeTranscriptView(indexer: claudeIndexer, sessionID: selection)
+                .opacity(kind == .claude ? 1 : 0)
+            GeminiTranscriptView(indexer: geminiIndexer, sessionID: selection)
+                .opacity(kind == .gemini ? 1 : 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
     }
 }
 

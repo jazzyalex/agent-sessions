@@ -32,6 +32,7 @@ struct ClaudeSessionsView: View {
                     ClaudeTranscriptView(indexer: indexer, sessionID: selection)
                         .frame(minWidth: 450)
                 }
+                .background(SplitViewAutosave(key: "ClaudeSplit-H"))
             } else {
                 VSplitView {
                     ClaudeSessionsListView(indexer: indexer, selection: $selection, isResumeEnabled: isClaudeResumeEnabled, onResume: { session in
@@ -41,6 +42,7 @@ struct ClaudeSessionsView: View {
                     ClaudeTranscriptView(indexer: indexer, sessionID: selection)
                         .frame(minHeight: 240)
                 }
+                .background(SplitViewAutosave(key: "ClaudeSplit-V"))
             }
             if showUsageStrip {
                 ClaudeUsageStripView(status: claudeUsageModel)

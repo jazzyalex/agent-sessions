@@ -11,6 +11,7 @@
    - Add a bullet under [Unreleased] in /docs/CHANGELOG.md.
 4) If you change user-visible behavior:
    - Add a 1–2 bullet note in /docs/summaries/YYYY-MM.md.
+ 5) If you add, move, or rename Swift files (app or tests), you must also add/update them in the Xcode project (AgentSessions.xcodeproj): ensure PBXFileReference appears in the correct group and a PBXBuildFile entry is present in the app or test target Sources list. Failure to do this will break builds with “Cannot find … in scope”.
 
 ## Commit message examples
 - feat(ui): add session title visibility in vertical layout

@@ -40,6 +40,7 @@ struct AgentSessionsApp: App {
                                 })
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
+                .background(WindowAutosave(name: "MainWindow"))
                 .onAppear {
                     unifiedIndexerHolder.unified?.refresh()
                     updateUsageModels()

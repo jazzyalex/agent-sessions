@@ -14,6 +14,8 @@
 		GEMB000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift */; };
 		GEMB000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift */; };
 		GEMV000020000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEMV000010000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift */; };
+        UTILW00002000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTILW00001000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift */; };
+        UTILS00002000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTILS00001000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift */; };
         GEMH000020000000000000001 /* AgentSessions/Services/GeminiHashResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEMH000010000000000000001 /* AgentSessions/Services/GeminiHashResolver.swift */; };
 		1AB05D2296DC475580CB52EF /* CodexResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */; };
 		2B31E3D104D74827B0E65D5E /* CodexResumeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E8EFD200FFA4B90BCCF3434 /* CodexResumeSheet.swift */; };
@@ -98,7 +100,7 @@
 		};
 /* End PBXContainerItemProxy section */
 
-/* Begin PBXFileReference section */
+		/* Begin PBXFileReference section */
 		9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WindowFocusCoordinator.swift; path = AgentSessions/Services/WindowFocusCoordinator.swift; sourceTree = SOURCE_ROOT; };
 
 		001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeSettings.swift; path = AgentSessions/Resume/CodexResumeSettings.swift; sourceTree = SOURCE_ROOT; };
@@ -187,6 +189,8 @@
 		GEM000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
 		GEM000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionParser.swift; sourceTree = SOURCE_ROOT; };
 		GEMH000010000000000000001 /* AgentSessions/Services/GeminiHashResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiHashResolver.swift; sourceTree = SOURCE_ROOT; };
+        UTILW00001000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/WindowAutosave.swift; sourceTree = SOURCE_ROOT; };
+        UTILS00001000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/SplitViewAutosave.swift; sourceTree = SOURCE_ROOT; };
 		/* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -335,6 +339,8 @@
 				B0000011CA0A000100000001 /* PrettyJSON.swift */,
 				B00000176A0A000100000001 /* PreferencesWindowController.swift */,
 				B00000177A0A000100000001 /* FlowLayout.swift */,
+                UTILW00001000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift */,
+                UTILS00001000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -566,6 +572,8 @@
 				GEMH000020000000000000001 /* AgentSessions/Services/GeminiHashResolver.swift in Sources */,
 				CFU000020000000000000002 /* AgentSessions/Views/UnifiedSessionsView.swift in Sources */,
 				GEMV000020000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift in Sources */,
+				UTILW00002000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift in Sources */,
+				UTILS00002000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift in Sources */,
 				CLC000010000000000000001 /* AgentSessions/ClaudeStatus/ClaudeUsageModel.swift in Sources */,
 				CLC000010000000000000002 /* AgentSessions/ClaudeStatus/ClaudeStatusService.swift in Sources */,
 				CLC000010000000000000004 /* AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift in Sources */,
