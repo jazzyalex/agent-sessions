@@ -103,6 +103,8 @@
     .header-right { display:flex; align-items:center; gap:12px; }
     .ph-badge img { height:24px; width:auto; opacity:0.9; vertical-align:middle; }
     .ph-badge img:hover { opacity:1; }
+    .hero-row { position: relative; }
+    .ph-badge { position: absolute; right: 30px; top: 50%; transform: translateY(-50%); }
 
     .features {
       display: grid;
@@ -190,7 +192,7 @@
       lost
       perfect prompt or code snippet, then instantly copy or resume what you need.
     <p></p>
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+    <div class="hero-row" style="margin-bottom: 20px;">
       <span
         style="font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-weight: 600; color: #4B5563; font-size: 0.8em; font-variant: small-caps; letter-spacing: 0.05em;">local-first,
         open source, and built for terminal vibe warriors.</span>
@@ -198,11 +200,11 @@
       <a class="ph-badge" href="https://www.producthunt.com/products/agent-sessions" target="_blank" rel="noopener">
         <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1024948&theme=light"
              alt="Agent Sessions on Product Hunt"
-             style="height:24px; width:auto; opacity:0.9; vertical-align:middle;">
+             style="height:24px; width:auto; opacity:0.9; vertical-align:top;">
       </a>
     </div>
 
-      
+      <br>
       
     <div class="button-row" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
       <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.3.1/AgentSessions-2.3.1.dmg"
