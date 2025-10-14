@@ -17,7 +17,7 @@
 </table>
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.3.1/AgentSessions-2.3.1.dmg"><b>Download Agent Sessions 2.3 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.3.1/AgentSessions-2.3.1.dmg"><b>Download Agent Sessions 2.3.1 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -27,7 +27,6 @@
 
 </p>
 <p></p>
-<div align="center">
 
 
 
@@ -36,7 +35,13 @@
 Agent Sessions 2 brings **Codex CLI**, **Claude Code**, and **Gemini CLI (read‑only)** together in one interface.  
 Look up any past session — even the ancient ones `/resume` can’t show — or browse visually to find that perfect prompt or code snippet, then instantly copy or resume it.
 
-**Local-first, open source, and built for terminal vibe warriors.**
+<div align="center">
+
+```
+Local-first, open source, and built for terminal vibe warriors.
+```
+
+</div>
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Transcript view with search (Dark Mode)</em></p>
@@ -88,10 +93,10 @@ No cloud uploads or telemetry — **read‑only by design.**
 
 ---
 
-## 💻 Install
+## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.3.1/AgentSessions-2.3.1.dmg)  
+1. [Download AgentSessions-2.3.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.3.1/AgentSessions-2.3.1.dmg)  
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew Tap

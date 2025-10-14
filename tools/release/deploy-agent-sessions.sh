@@ -120,6 +120,19 @@ git add README.md docs/index.html || true
 git commit -m "docs: update download links for ${VERSION}" || true
 git push origin HEAD:main || true
 
+# Ensure visible version strings in buttons and file names also updated (no release notes)
+sed -i '' -E \
+  "s/Download Agent Sessions [0-9.]+/Download Agent Sessions ${VERSION}/g" \
+  "$REPO_ROOT/README.md" "$REPO_ROOT/docs/index.html"
+sed -i '' -E \
+  "s/AgentSessions-[0-9.]+\\.dmg/AgentSessions-${VERSION}.dmg/g" \
+  "$REPO_ROOT/README.md"
+git diff --quiet README.md docs/index.html || {
+  git add README.md docs/index.html || true
+  git commit -m "docs: normalize visible version labels to ${VERSION}" || true
+  git push origin HEAD:main || true
+}
+
 # Always update the tap via GitHub API (no local clone required)
 if [[ "${UPDATE_CASK}" == "1" ]]; then
   green "==> Updating Homebrew cask in jazzyalex/homebrew-agent-sessions"

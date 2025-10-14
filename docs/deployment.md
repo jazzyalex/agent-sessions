@@ -17,8 +17,13 @@ Complete this checklist **before** running the deployment script. Answer all que
   - `docs/assets/screenshot-V.png`
   - `docs/assets/screenshot-H.png`
   - `docs/assets/screenshot-menubar.png`
-- [ ] `docs/CHANGELOG.md` has section for new version
-- [ ] README.md reviewed for accuracy
+- [ ] `docs/CHANGELOG.md` has a section for the new version
+- [ ] README.md and docs/index.html reviewed and updated:
+  - Download button/link points to `{VERSION}` and visible label reads `Download Agent Sessions {VERSION}`
+  - File name references use `AgentSessions-{VERSION}.dmg`
+  - No release notes added to README or website (keep feature overview current; detailed notes live in `docs/CHANGELOG.md`)
+  - Gemini remains noted as read-only; Favorites listed if present
+  - Product Hunt badge aligns with the social buttons row and matches button height
 - [ ] All code changes committed and pushed to main
 
 ### 3. Environment Validation
@@ -71,8 +76,9 @@ VERSION=2.2 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
    - Staples notarization ticket
 
 3. **Update Documentation**
-   - Updates download links in README.md
-   - Updates download links in docs/index.html
+   - Updates download links in README.md and docs/index.html
+   - Normalizes visible version strings in download button labels and file names
+   - Does not inject release notes; README/site remain feature-focused
    - Commits and pushes changes
 
 4. **Update Homebrew Cask**
@@ -102,13 +108,13 @@ These checks should be performed automatically by the deployment agent:
 gh release view v{VERSION} --json name,assets | jq '.assets[] | .name'
 # Expected: AgentSessions-{VERSION}.dmg and AgentSessions-{VERSION}.dmg.sha256
 
-# 2. Verify README.md download links point to new version
-grep "releases/download/v" README.md | grep "{VERSION}"
-# Should find: AgentSessions-{VERSION}.dmg URLs and text labels with {VERSION}
+# 2. Verify README.md download links and labels point to new version
+grep -E "releases/download/v{VERSION}/AgentSessions-{VERSION}\.dmg|Download Agent Sessions {VERSION}" README.md
+// Should find: AgentSessions-{VERSION}.dmg URL and a visible "Download Agent Sessions {VERSION}" label
 
-# 3. Verify docs/index.html download links point to new version
-grep "releases/download/v" docs/index.html | grep "{VERSION}"
-# Should find: AgentSessions-{VERSION}.dmg URL and "Download Agent Sessions {VERSION}" text
+# 3. Verify docs/index.html download links and labels point to new version
+grep -E "releases/download/v{VERSION}/AgentSessions-{VERSION}\.dmg|Download Agent Sessions {VERSION}" docs/index.html
+// Should find: AgentSessions-{VERSION}.dmg URL and a visible "Download Agent Sessions {VERSION}" label
 
 # 4. Verify Homebrew cask updated (if local tap exists)
 grep -E "(version|sha256)" /opt/homebrew/Library/Taps/jazzyalex/homebrew-agent-sessions/Casks/agent-sessions.rb | head -2
@@ -126,9 +132,19 @@ git status --porcelain
 ```
 
 **Agent should automatically fix any issues found:**
-- Incorrect version numbers in download button text → Edit and commit
+- Incorrect version numbers in download button text or filenames → Edit and commit
 - Missing Homebrew cask update → Update cask, commit, and push
 - Uncommitted documentation changes → Commit and push
+
+## Website/README Content Guidelines (Mandatory)
+- Do not add release notes to README or the website. Keep detailed changes in `docs/CHANGELOG.md`.
+- Keep features current. If a patch release (e.g., 2.3.1) has no new features, leave "What's New" at the latest minor (e.g., 2.3).
+- Always update:
+  - The download URL to `v{VERSION}/AgentSessions-{VERSION}.dmg`
+  - The visible label to `Download Agent Sessions {VERSION}`
+  - Any text references to `AgentSessions-{VERSION}.dmg`
+- Product Hunt badge should be in the same row as GitHub/X buttons and visually aligned (matching height).
+- Follow Docs Style Policy: no emojis, clear headings, accessible text.
 
 ### Human-Required Checks (30-60 minutes)
 - [ ] Download DMG from GitHub Release
