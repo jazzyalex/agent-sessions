@@ -28,6 +28,12 @@ Outputs:
 
 If any step fails, see “Troubleshooting” below.
 
+### Agent Execution (Codex CLI)
+- The Agent can and will run xcodebuild, codesign, notarytool, hdiutil, and gh with escalated permissions when you request a release.
+- Certificates and notary profile are assumed to be installed on the system Keychain (per this project’s setup). The Agent won’t prompt for them each time.
+- To avoid repeated questions, prefer SKIP_CONFIRM=1 and provide VERSION/TEAM_ID/DEV_ID_APP/NOTARY_PROFILE explicitly.
+- The Agent will request elevation when necessary (build/sign/notarize/upload/cask writes) and proceed non‑interactively.
+
 ## Pre-flight Checklist
 
 Complete this checklist **before** running the deployment script. Answer all questions and verify all conditions.
