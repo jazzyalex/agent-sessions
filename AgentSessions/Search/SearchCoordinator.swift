@@ -39,6 +39,8 @@ final class SearchCoordinator: ObservableObject {
     private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
     private var runID = UUID()
+    // Throttle guards for progress updates
+    private var progressThrottleLastFlush = DispatchTime.now()
 
     init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, geminiIndexer: GeminiSessionIndexer) {
         self.codexIndexer = codexIndexer
@@ -109,7 +111,8 @@ final class SearchCoordinator: ObservableObject {
         let nonLargeCount = nonLarge.count
         let largeCount = large.count
 
-        currentTask = Task.detached { [weak self, newRunID] in
+        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+        currentTask = Task.detached(priority: prio) { [weak self, newRunID] in
             guard let self else { return }
             await MainActor.run {
                 guard self.runID == newRunID else { return }
@@ -135,8 +138,17 @@ final class SearchCoordinator: ObservableObject {
                 await MainActor.run {
                     guard self.runID == newRunID else { return }
                     self.results.append(contentsOf: newHits)
-                    self.progress.scannedSmall += batch.count
+                    if FeatureFlags.throttleSearchUIUpdates {
+                        let now = DispatchTime.now()
+                        if now.uptimeNanoseconds - self.progressThrottleLastFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
+                            self.progress.scannedSmall = min(self.progress.totalSmall, self.progress.scannedSmall + batch.count)
+                            self.progressThrottleLastFlush = now
+                        }
+                    } else {
+                        self.progress.scannedSmall = min(self.progress.totalSmall, self.progress.scannedSmall + batch.count)
+                    }
                 }
+                if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
             }
 
             if Task.isCancelled { await self.finishCanceled(); return }
@@ -144,6 +156,8 @@ final class SearchCoordinator: ObservableObject {
             // Phase 2: large sequential
             await MainActor.run { if self.runID == newRunID { self.progress.phase = .large } }
             var idx = 0
+            var staged: [Session] = []
+            var lastResultsFlush = DispatchTime.now()
             while idx < large.count {
                 // Check for promotion request and reorder so promoted item is next.
                 let want = await self.promotionState.consumePromoted()
@@ -178,15 +192,49 @@ final class SearchCoordinator: ObservableObject {
                         let shouldAdd = !seen.contains(parsed.id)
                         if shouldAdd {
                             seen.insert(parsed.id)
-                            await MainActor.run {
-                                guard self.runID == newRunID else { return }
-                                self.results.append(parsed)
+                            if FeatureFlags.coalesceSearchResults {
+                                staged.append(parsed)
+                                let now = DispatchTime.now()
+                                if now.uptimeNanoseconds - lastResultsFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
+                                    let toFlush = staged
+                                    staged.removeAll(keepingCapacity: true)
+                                    lastResultsFlush = now
+                                    await MainActor.run {
+                                        guard self.runID == newRunID else { return }
+                                        self.results.append(contentsOf: toFlush)
+                                    }
+                                }
+                            } else {
+                                await MainActor.run {
+                                    guard self.runID == newRunID else { return }
+                                    self.results.append(parsed)
+                                }
                             }
                         }
                     }
                 }
-                await MainActor.run { if self.runID == newRunID { self.progress.scannedLarge += 1 } }
+                if FeatureFlags.throttleSearchUIUpdates {
+                    let now = DispatchTime.now()
+                    if now.uptimeNanoseconds - self.progressThrottleLastFlush.uptimeNanoseconds > 100_000_000 {
+                        await MainActor.run {
+                            if self.runID == newRunID { self.progress.scannedLarge = idx + 1 }
+                            self.progressThrottleLastFlush = now
+                        }
+                    }
+                } else {
+                    await MainActor.run { if self.runID == newRunID { self.progress.scannedLarge = idx + 1 } }
+                }
+                if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
                 idx += 1
+            }
+            // Final flush of any staged results
+            if FeatureFlags.coalesceSearchResults && !staged.isEmpty {
+                let toFlush = staged
+                staged.removeAll()
+                await MainActor.run {
+                    guard self.runID == newRunID else { return }
+                    self.results.append(contentsOf: toFlush)
+                }
             }
 
             if Task.isCancelled { await self.finishCanceled(); return }

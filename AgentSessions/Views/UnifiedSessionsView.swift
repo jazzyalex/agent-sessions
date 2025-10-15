@@ -701,6 +701,7 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var focus: WindowFocusCoordinator
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var showInlineSearch: Bool = false
+    @State private var searchDebouncer: DispatchWorkItem? = nil
     private enum SearchFocusTarget: Hashable { case field, clear }
     var body: some View {
         HStack(spacing: 8) {
@@ -718,7 +719,7 @@ private struct UnifiedSearchFiltersView: View {
                                                                          if want { searchFocus = .field }
                                                                          else if searchFocus == .field { searchFocus = nil }
                                                                      }),
-                                           onCommit: { startSearch() })
+                                           onCommit: { startSearchImmediate() })
                         .frame(minWidth: 220)
                     if !unified.queryDraft.isEmpty {
                         Button(action: { unified.queryDraft = ""; unified.query = ""; unified.recomputeNow(); search.cancel(); showInlineSearch = false; searchFocus = nil }) {
@@ -754,7 +755,11 @@ private struct UnifiedSearchFiltersView: View {
                     if q.isEmpty {
                         search.cancel()
                     } else {
-                        startSearch()
+                        if FeatureFlags.increaseDeepSearchDebounce {
+                            scheduleSearch()
+                        } else {
+                            startSearch()
+                        }
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .collapseInlineSearchIfEmpty)) { _ in
@@ -841,6 +846,36 @@ private struct UnifiedSearchFiltersView: View {
                      includeClaude: unified.includeClaude,
                      includeGemini: unified.includeGemini,
                      all: unified.allSessions)
+    }
+
+    private func startSearchImmediate() {
+        searchDebouncer?.cancel(); searchDebouncer = nil
+        startSearch()
+    }
+
+    private func scheduleSearch() {
+        searchDebouncer?.cancel()
+        let work = DispatchWorkItem { [weak unified, weak search] in
+            guard let unified = unified, let search = search else { return }
+            let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !q.isEmpty else { search.cancel(); return }
+            let filters = Filters(query: q,
+                                  dateFrom: unified.dateFrom,
+                                  dateTo: unified.dateTo,
+                                  model: unified.selectedModel,
+                                  kinds: unified.selectedKinds,
+                                  repoName: unified.projectFilter,
+                                  pathContains: nil)
+            search.start(query: q,
+                         filters: filters,
+                         includeCodex: unified.includeCodex,
+                         includeClaude: unified.includeClaude,
+                         includeGemini: unified.includeGemini,
+                         all: unified.allSessions)
+        }
+        searchDebouncer = work
+        let delay: TimeInterval = FeatureFlags.increaseDeepSearchDebounce ? 0.28 : 0.15
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 }
 
