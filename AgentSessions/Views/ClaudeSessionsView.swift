@@ -285,6 +285,13 @@ private struct ClaudeSessionsListView: View {
             updateCachedRows()
         }
         .onChange(of: tableSelection) { oldSel, newSel in
+            // Prevent clearing selection by clicking empty area
+            if newSel.isEmpty, let current = selection {
+                if tableSelection != [current] {
+                    tableSelection = [current]
+                }
+                return
+            }
             // Force single selection
             if newSel.count > 1 {
                 // Keep only the newly selected item

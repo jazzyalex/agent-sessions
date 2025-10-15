@@ -354,6 +354,15 @@ struct UnifiedSessionsView: View {
             updateCachedRows()
         }
         .onChange(of: tableSelection) { _, newSel in
+            // Prevent clearing the current selection by clicking empty table space (HIG: avoid accidental context loss)
+            if newSel.isEmpty, let current = selection {
+                if tableSelection != [current] {
+                    programmaticSelectionUpdate = true
+                    tableSelection = [current]
+                    DispatchQueue.main.async { programmaticSelectionUpdate = false }
+                }
+                return
+            }
             selection = newSel.first
             if !programmaticSelectionUpdate {
                 // User interacted with the table; stop auto-selection

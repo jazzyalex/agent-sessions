@@ -142,6 +142,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                     }
                 }
                 var results = FilterEngine.filterSessions(base, filters: filters)
+                // Favorites-only must persist regardless of search clearing
+                if self?.showFavoritesOnly == true { results = results.filter { $0.isFavorite } }
                 if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
                 if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
                 // Apply sort descriptor (now included in pipeline so changes trigger background re-sort)

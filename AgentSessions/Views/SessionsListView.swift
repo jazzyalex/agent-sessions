@@ -147,6 +147,13 @@ struct SessionsListView: View {
             updateCachedRows()
         }
         .onChange(of: tableSelection) { _, newSel in
+            // Prevent clearing selection by clicking empty whitespace in the table
+            if newSel.isEmpty, let current = selection {
+                if tableSelection != [current] {
+                    tableSelection = [current]
+                }
+                return
+            }
             if newSel.count > 1, let first = newSel.first {
                 let trimmed: Set<String> = [first]
                 if newSel != trimmed {
