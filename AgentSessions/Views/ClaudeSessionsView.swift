@@ -28,11 +28,12 @@ struct ClaudeSessionsView: View {
                     ClaudeSessionsListView(indexer: indexer, selection: $selection, isResumeEnabled: isClaudeResumeEnabled, onResume: { session in
                         handleResume(session)
                     })
-                        .frame(minWidth: 320, idealWidth: 600, maxWidth: 1200)
+                        .frame(minWidth: 320, maxWidth: 1200)
                     ClaudeTranscriptView(indexer: indexer, sessionID: selection)
                         .frame(minWidth: 450)
                 }
                 .background(SplitViewAutosave(key: "ClaudeSplit-H"))
+                .transaction { $0.animation = nil }
             } else {
                 VSplitView {
                     ClaudeSessionsListView(indexer: indexer, selection: $selection, isResumeEnabled: isClaudeResumeEnabled, onResume: { session in
@@ -43,6 +44,7 @@ struct ClaudeSessionsView: View {
                         .frame(minHeight: 240)
                 }
                 .background(SplitViewAutosave(key: "ClaudeSplit-V"))
+                .transaction { $0.animation = nil }
             }
             if showUsageStrip {
                 ClaudeUsageStripView(status: claudeUsageModel)

@@ -58,11 +58,12 @@ struct UnifiedSessionsView: View {
             if layoutMode == .vertical {
                 HSplitView {
                     listPane
-                        .frame(minWidth: 320, idealWidth: 600, maxWidth: 1200)
+                        .frame(minWidth: 320, maxWidth: 1200)
                     transcriptPane
                         .frame(minWidth: 450)
                 }
                 .background(SplitViewAutosave(key: "UnifiedSplit-H"))
+                .transaction { $0.animation = nil }
             } else {
                 VSplitView {
                     listPane
@@ -71,6 +72,7 @@ struct UnifiedSessionsView: View {
                         .frame(minHeight: 240)
                 }
                 .background(SplitViewAutosave(key: "UnifiedSplit-V"))
+                .transaction { $0.animation = nil }
             }
 
             // Usage strips
@@ -214,7 +216,7 @@ struct UnifiedSessionsView: View {
     }
 
     private var listPane: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .bottom) {
         Table(cachedRows, selection: $tableSelection, sortOrder: $sortOrder) {
             // Always include CLI Agent column; collapse width when hidden to avoid type-check complexity
             TableColumn("CLI Agent", value: \Session.sourceKey) { s in
@@ -287,20 +289,24 @@ struct UnifiedSessionsView: View {
         .simultaneousGesture(TapGesture().onEnded {
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         })
-        if searchCoordinator.isRunning {
-            let p = searchCoordinator.progress
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text(progressLineText(p))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color(nsColor: .underPageBackgroundColor))
-            .overlay(Divider(), alignment: .top)
         }
+        // Bottom overlay to avoid changing intrinsic size of the list pane
+        .overlay(alignment: .bottom) {
+            if searchCoordinator.isRunning {
+                let p = searchCoordinator.progress
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(progressLineText(p))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color(nsColor: .underPageBackgroundColor))
+                .overlay(Divider(), alignment: .top)
+                .allowsHitTesting(false)
+            }
         }
         .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
@@ -396,9 +402,18 @@ struct UnifiedSessionsView: View {
     }
 
     private var transcriptPane: some View {
-        Group {
+        ZStack {
+            // Base host is always mounted to keep a stable split subview identity
+            TranscriptHostView(kind: selectedSession?.source ?? .codex,
+                               selection: selection,
+                               codexIndexer: codexIndexer,
+                               claudeIndexer: claudeIndexer,
+                               geminiIndexer: geminiIndexer)
+                .environmentObject(focusCoordinator)
+                .id("transcript-host")
+
+            // Overlays for error/empty/loading states to avoid replacing the base view
             if let s = selectedSession {
-                // Missing-file or unreadable banners (ephemeral providers)
                 if !FileManager.default.fileExists(atPath: s.filePath) {
                     let providerName: String = (s.source == .codex ? "Codex" : (s.source == .claude ? "Claude" : "Gemini"))
                     let accent: Color = sourceAccent(s)
@@ -437,23 +452,18 @@ struct UnifiedSessionsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .textBackgroundColor))
-                } else {
-                    TranscriptHostView(kind: s.source,
-                                       selection: selection,
-                                       codexIndexer: codexIndexer,
-                                       claudeIndexer: claudeIndexer,
-                                       geminiIndexer: geminiIndexer)
-                        .environmentObject(focusCoordinator)
-                        .id("transcript-host")
                 }
-            } else if unified.isIndexing {
-                LoadingAnimationView(
-                    codexColor: .blue,
-                    claudeColor: Color(red: 204/255, green: 121/255, blue: 90/255)
-                )
             } else {
-                Text("Select a session to view transcript").foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if unified.isIndexing {
+                    LoadingAnimationView(
+                        codexColor: .blue,
+                        claudeColor: Color(red: 204/255, green: 121/255, blue: 90/255)
+                    )
+                } else {
+                    Text("Select a session to view transcript")
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
         .simultaneousGesture(TapGesture().onEnded {
