@@ -245,7 +245,8 @@ final class SearchCoordinator: ObservableObject {
         nonisolated(unsafe) let codex = self.codexIndexer
 
         // Parse on background queue using Task instead of DispatchQueue to maintain isolation
-        return await Task.detached(priority: .userInitiated) {
+        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+        return await Task.detached(priority: prio) {
             switch source {
             case .codex:
                 return codex.parseFileFull(at: url)

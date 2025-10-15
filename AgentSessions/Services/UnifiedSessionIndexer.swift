@@ -127,7 +127,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, Publishers.CombineLatest3($includeCodex, $includeClaude, $includeGemini)),
             $sortDescriptor.removeDuplicates()
         )
-            .receive(on: DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
             .map { [weak self] combined, sortDesc -> [Session] in
                 let (input, kinds, all, sources) = combined
                 let (q, from, to, model) = input
@@ -245,7 +245,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         recomputeDebouncer?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            DispatchQueue.global(qos: .userInitiated).async {
+            let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+            bgQueue.async {
                 let results = self.applyFiltersAndSort(to: self.allSessions)
                 DispatchQueue.main.async {
                     self.sessions = results
@@ -253,7 +254,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
         }
         recomputeDebouncer = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+        let delay: TimeInterval = FeatureFlags.increaseFilterDebounce ? 0.28 : 0.15
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// Apply current UI filters and sort preferences to a list of sessions.

@@ -48,6 +48,23 @@ extension SessionIndexerProtocol {
 #endif
 // swiftlint:disable type_body_length
 final class SessionIndexer: ObservableObject {
+    // Throttler for coalescing progress UI updates
+    final class ProgressThrottler {
+        private var lastFlush = DispatchTime.now()
+        private var pendingFiles = 0
+        private let intervalMs: Int = 100 // ~10 Hz
+        func incrementAndShouldFlush() -> Bool {
+            pendingFiles += 1
+            let now = DispatchTime.now()
+            if now.uptimeNanoseconds - lastFlush.uptimeNanoseconds > UInt64(intervalMs) * 1_000_000 {
+                lastFlush = now
+                pendingFiles = 0
+                return true
+            }
+            if pendingFiles >= 50 { pendingFiles = 0; return true }
+            return false
+        }
+    }
     // Source of truth
     @Published private(set) var allSessions: [Session] = []
     // Exposed to UI after filters
@@ -64,6 +81,7 @@ final class SessionIndexer: ObservableObject {
 
     // Transcript cache for accurate search
     private let transcriptCache = TranscriptCache()
+    private let progressThrottler = ProgressThrottler()
 
     // Expose cache for SearchCoordinator (internal - not public API)
     internal var searchTranscriptCache: TranscriptCache { transcriptCache }
@@ -165,11 +183,14 @@ final class SessionIndexer: ObservableObject {
             $selectedKinds.removeDuplicates(),
             $allSessions
         )
-            .receive(on: DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
             .map { [weak self] input, kinds, all -> [Session] in
                 let (q, from, to, model) = input
                 let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
-                var results = FilterEngine.filterSessions(all, filters: filters, transcriptCache: self?.transcriptCache)
+                var results = FilterEngine.filterSessions(all,
+                                                         filters: filters,
+                                                         transcriptCache: self?.transcriptCache,
+                                                         allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
 
                 if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
                 if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
@@ -235,7 +256,8 @@ final class SessionIndexer: ObservableObject {
         reloadingSessionIDs.insert(id)
         reloadLock.unlock()
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        bgQueue.async {
             let loadingTimer: DispatchSourceTimer? = nil
             defer {
                 // Always clean up timer and reloading state
@@ -331,9 +353,13 @@ final class SessionIndexer: ObservableObject {
         recomputeDebouncer?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            DispatchQueue.global(qos: .userInitiated).async {
+            let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+            bgQueue.async {
                 let filters = Filters(query: self.query, dateFrom: self.dateFrom, dateTo: self.dateTo, model: self.selectedModel, kinds: self.selectedKinds, repoName: self.projectFilter, pathContains: nil)
-                var results = FilterEngine.filterSessions(self.allSessions, filters: filters, transcriptCache: self.transcriptCache)
+                var results = FilterEngine.filterSessions(self.allSessions,
+                                                         filters: filters,
+                                                         transcriptCache: self.transcriptCache,
+                                                         allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
                 if self.hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
                 if self.hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
                 // FilterEngine now preserves order, so filtered results maintain allSessions sort order
@@ -343,7 +369,8 @@ final class SessionIndexer: ObservableObject {
             }
         }
         recomputeDebouncer = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+        let delay: TimeInterval = FeatureFlags.increaseFilterDebounce ? 0.28 : 0.15
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     var modelsSeen: [String] {
@@ -376,7 +403,8 @@ final class SessionIndexer: ObservableObject {
         hasEmptyDirectory = false
 
         let fm = FileManager.default
-        DispatchQueue.global(qos: .userInitiated).async {
+        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        ioQueue.async {
             // Check if directory exists and is accessible
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
@@ -413,9 +441,18 @@ final class SessionIndexer: ObservableObject {
                     sessions.append(session)
                 }
                 // Update progress counter but don't replace allSessions yet (causes flicker)
-                DispatchQueue.main.async {
-                    self.filesProcessed = i + 1
-                    self.progressText = "Indexed \(i + 1)/\(sortedFiles.count)"
+                if FeatureFlags.throttleIndexingUIUpdates {
+                    if self.progressThrottler.incrementAndShouldFlush() {
+                        DispatchQueue.main.async {
+                            self.filesProcessed = i + 1
+                            self.progressText = "Indexed \(i + 1)/\(sortedFiles.count)"
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        self.filesProcessed = i + 1
+                        self.progressText = "Indexed \(i + 1)/\(sortedFiles.count)"
+                    }
                 }
             }
 
@@ -431,13 +468,19 @@ final class SessionIndexer: ObservableObject {
 
                 // Start background transcript indexing for accurate search (non-blocking)
                 let cache = self.transcriptCache
-                Task.detached(priority: .utility) {
+                Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
                     await cache.generateAndCache(sessions: sortedSessions)
                 }
 
                 // Show lightweight sessions details
                 for s in lightSessions {
                     print("  💡 Lightweight: \(s.filePath.components(separatedBy: "/").last ?? "?") msgCount=\(s.messageCount)")
+                }
+
+                // Ensure final progress update is shown
+                if FeatureFlags.throttleIndexingUIUpdates {
+                    self.filesProcessed = self.totalFiles
+                    self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"
                 }
 
                 // Wait a moment for filters to apply, then check what's visible

@@ -4,6 +4,23 @@ import SwiftUI
 
 /// Session indexer for Gemini CLI sessions (ephemeral, read-only)
 final class GeminiSessionIndexer: ObservableObject {
+    // Throttler for coalescing progress UI updates
+    final class ProgressThrottler {
+        private var lastFlush = DispatchTime.now()
+        private var pendingFiles = 0
+        private let intervalMs: Int = 100
+        func incrementAndShouldFlush() -> Bool {
+            pendingFiles += 1
+            let now = DispatchTime.now()
+            if now.uptimeNanoseconds - lastFlush.uptimeNanoseconds > UInt64(intervalMs) * 1_000_000 {
+                lastFlush = now
+                pendingFiles = 0
+                return true
+            }
+            if pendingFiles >= 50 { pendingFiles = 0; return true }
+            return false
+        }
+    }
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
@@ -32,6 +49,7 @@ final class GeminiSessionIndexer: ObservableObject {
 
     // Minimal transcript cache is not needed for MVP indexing; search integration comes later
     private let discovery: GeminiSessionDiscovery
+    private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
     private var previewMTimeByID: [String: Date] = [:]
 
@@ -46,7 +64,7 @@ final class GeminiSessionIndexer: ObservableObject {
             $selectedModel.removeDuplicates()
         )
         Publishers.CombineLatest3(inputs, $selectedKinds.removeDuplicates(), $allSessions)
-            .receive(on: DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
             .map { [weak self] input, kinds, all -> [Session] in
                 let (q, from, to, model) = input
                 let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
@@ -79,7 +97,8 @@ final class GeminiSessionIndexer: ObservableObject {
         indexingError = nil
         hasEmptyDirectory = false
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        ioQueue.async {
             let files = self.discovery.discoverSessionFiles()
             DispatchQueue.main.async {
                 self.totalFiles = files.count
@@ -98,9 +117,18 @@ final class GeminiSessionIndexer: ObservableObject {
                         self.previewMTimeByID[session.id] = m
                     }
                 }
-                DispatchQueue.main.async {
-                    self.filesProcessed = i + 1
-                    self.progressText = "Indexed \(i + 1)/\(files.count)"
+                if FeatureFlags.throttleIndexingUIUpdates {
+                    if self.progressThrottler.incrementAndShouldFlush() {
+                        DispatchQueue.main.async {
+                            self.filesProcessed = i + 1
+                            self.progressText = "Indexed \(i + 1)/\(files.count)"
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        self.filesProcessed = i + 1
+                        self.progressText = "Indexed \(i + 1)/\(files.count)"
+                    }
                 }
             }
 
@@ -108,11 +136,15 @@ final class GeminiSessionIndexer: ObservableObject {
             DispatchQueue.main.async {
                 self.allSessions = sorted
                 self.isIndexing = false
+                if FeatureFlags.throttleIndexingUIUpdates {
+                    self.filesProcessed = self.totalFiles
+                    self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"
+                }
                 print("✅ GEMINI INDEXING DONE: total=\(sessions.count)")
 
                 // Background transcript cache generation for accurate search
                 let cache = self.transcriptCache
-                Task.detached(priority: .utility) {
+                Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
                     await cache.generateAndCache(sessions: sorted)
                 }
             }
@@ -144,7 +176,8 @@ final class GeminiSessionIndexer: ObservableObject {
         isLoadingSession = true
         loadingSessionID = id
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        bgQueue.async {
             let start = Date()
             let full = GeminiSessionParser.parseFileFull(at: url)
             let elapsed = Date().timeIntervalSince(start)
@@ -178,7 +211,8 @@ final class GeminiSessionIndexer: ObservableObject {
     func refreshPreview(id: String) {
         guard let existing = allSessions.first(where: { $0.id == id }) else { return }
         let url = URL(fileURLWithPath: existing.filePath)
-        DispatchQueue.global(qos: .userInitiated).async {
+        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        bgQueue.async {
             if let light = GeminiSessionParser.parseFile(at: url) {
                 DispatchQueue.main.async {
                     if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {

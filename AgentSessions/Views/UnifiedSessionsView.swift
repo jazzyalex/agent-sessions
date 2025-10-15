@@ -497,7 +497,12 @@ struct UnifiedSessionsView: View {
     }
 
     private func updateCachedRows() {
-        cachedRows = rows.sorted(using: sortOrder)
+        if FeatureFlags.coalesceListResort {
+            // unified.sessions is already sorted by the view model's descriptor
+            cachedRows = rows
+        } else {
+            cachedRows = rows.sorted(using: sortOrder)
+        }
         if let sel = selection, !cachedRows.contains(where: { $0.id == sel }) {
             selection = cachedRows.first?.id
             tableSelection = selection.map { [$0] } ?? []
@@ -744,6 +749,7 @@ private struct UnifiedSearchFiltersView: View {
                     }
                 }
                 .onChange(of: unified.queryDraft) { _, newValue in
+                    TypingActivity.shared.bump()
                     let q = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                     if q.isEmpty {
                         search.cancel()

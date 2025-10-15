@@ -4,6 +4,23 @@ import SwiftUI
 
 /// Session indexer for Claude Code sessions
 final class ClaudeSessionIndexer: ObservableObject {
+    // Throttler for coalescing progress UI updates
+    final class ProgressThrottler {
+        private var lastFlush = DispatchTime.now()
+        private var pendingFiles = 0
+        private let intervalMs: Int = 100
+        func incrementAndShouldFlush() -> Bool {
+            pendingFiles += 1
+            let now = DispatchTime.now()
+            if now.uptimeNanoseconds - lastFlush.uptimeNanoseconds > UInt64(intervalMs) * 1_000_000 {
+                lastFlush = now
+                pendingFiles = 0
+                return true
+            }
+            if pendingFiles >= 50 { pendingFiles = 0; return true }
+            return false
+        }
+    }
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
@@ -47,6 +64,7 @@ final class ClaudeSessionIndexer: ObservableObject {
     }
 
     private let discovery: ClaudeSessionDiscovery
+    private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -64,11 +82,14 @@ final class ClaudeSessionIndexer: ObservableObject {
             $selectedKinds.removeDuplicates(),
             $allSessions
         )
-        .receive(on: DispatchQueue.global(qos: .userInitiated))
+        .receive(on: FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
         .map { [weak self] input, kinds, all -> [Session] in
             let (q, from, to, model) = input
             let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
-            var results = FilterEngine.filterSessions(all, filters: filters, transcriptCache: self?.transcriptCache)
+            var results = FilterEngine.filterSessions(all,
+                                                     filters: filters,
+                                                     transcriptCache: self?.transcriptCache,
+                                                     allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
 
             if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
             if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
@@ -101,7 +122,8 @@ final class ClaudeSessionIndexer: ObservableObject {
         indexingError = nil
         hasEmptyDirectory = false
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        ioQueue.async {
             let files = self.discovery.discoverSessionFiles()
 
             print("📁 Found \(files.count) Claude Code session files")
@@ -119,9 +141,18 @@ final class ClaudeSessionIndexer: ObservableObject {
                     sessions.append(session)
                 }
 
-                DispatchQueue.main.async {
-                    self.filesProcessed = i + 1
-                    self.progressText = "Indexed \(i + 1)/\(files.count)"
+                if FeatureFlags.throttleIndexingUIUpdates {
+                    if self.progressThrottler.incrementAndShouldFlush() {
+                        DispatchQueue.main.async {
+                            self.filesProcessed = i + 1
+                            self.progressText = "Indexed \(i + 1)/\(files.count)"
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        self.filesProcessed = i + 1
+                        self.progressText = "Indexed \(i + 1)/\(files.count)"
+                    }
                 }
             }
 
@@ -135,7 +166,7 @@ final class ClaudeSessionIndexer: ObservableObject {
 
                 // Start background transcript indexing for accurate search (non-blocking)
                 let cache = self.transcriptCache
-                Task.detached(priority: .utility) {
+                Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
                     await cache.generateAndCache(sessions: sortedSessions)
                 }
             }
@@ -149,7 +180,10 @@ final class ClaudeSessionIndexer: ObservableObject {
 
     func recomputeNow() {
         let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
-        var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache)
+        var results = FilterEngine.filterSessions(allSessions,
+                                                 filters: filters,
+                                                 transcriptCache: transcriptCache,
+                                                 allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
         if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
         if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
         DispatchQueue.main.async { self.sessions = results }
@@ -180,7 +214,8 @@ final class ClaudeSessionIndexer: ObservableObject {
         isLoadingSession = true
         loadingSessionID = id
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        bgQueue.async {
             let startTime = Date()
 
             if let fullSession = ClaudeSessionParser.parseFileFull(at: url) {
@@ -193,7 +228,7 @@ final class ClaudeSessionIndexer: ObservableObject {
 
                         // Update transcript cache for accurate search
                         let cache = self.transcriptCache
-                        Task.detached(priority: .utility) {
+                        Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
                             let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
                             let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
                                 session: fullSession,

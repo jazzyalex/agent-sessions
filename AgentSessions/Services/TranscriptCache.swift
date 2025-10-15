@@ -40,6 +40,11 @@ final class TranscriptCache {
         var indexed = 0
 
         for session in sessions {
+            if FeatureFlags.gatePrewarmWhileTyping && TypingActivity.shared.isUserLikelyTyping {
+                // Back off while the user is actively typing to avoid contention
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                continue
+            }
             // Check if already cached (thread-safe)
             let alreadyCached = await MainActor.run {
                 lock.lock()
@@ -64,10 +69,9 @@ final class TranscriptCache {
 
             indexed += 1
 
-            // Yield periodically to avoid blocking
-            if indexed % 50 == 0 {
-                await Task.yield()
-            }
+            // Cooperative yield after each item to avoid long bursts
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            if indexed % 50 == 0 { await Task.yield() }
         }
 
         let totalCount = await MainActor.run {
