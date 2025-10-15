@@ -2,12 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+## [2.3.2] - 2025-10-15
+
+### Performance
+- Interactive filtering now uses cached transcripts only; falls back to raw session fields without generating new transcripts.
+- Demoted heavy background work (filtering, indexing, parsing, search orchestration) to `.utility` priority for better cooperativeness.
+- Throttled indexing and search progress updates (~10 Hz) and batched large search results to reduce main-thread churn.
+- Gated transcript pre-warm during typing bursts, increased interactive filter debounce, and debounced deep search starts when typing rapidly.
+- Built large transcripts off the main thread when not cached, applying results on the main thread to avoid beachballs.
+
+### Documentation
+- Added `docs/Energy-and-Performance.md` summarizing performance improvements, current energy behavior, and future options.
+
 ## [2.3.1] - 2025-10-14
 
 ### Fixed
 - Search: auto-select first result in Sessions list when none selected; transcript shows immediately without stealing focus.
-
-## [Unreleased]
 
 ## [2.3] - 2025-10-14
 
