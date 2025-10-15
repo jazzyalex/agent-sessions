@@ -11,4 +11,5 @@ enum FeatureFlags {
     static let throttleSearchUIUpdates = true
     static let coalesceSearchResults = true
     static let increaseDeepSearchDebounce = true
+    static let offloadTranscriptBuildInView = true
 }

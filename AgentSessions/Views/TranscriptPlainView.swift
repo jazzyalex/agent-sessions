@@ -353,51 +353,101 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // Memoization key: session identity, event count, render mode, and timestamp setting
             let key = "\(session.id)|\(session.events.count)|\(renderModeRaw)|\(showTimestamps ? 1 : 0)"
             if lastBuildKey == key { return }
-
-            if mode == .terminal && shouldColorize {
-                // Try cache first (text + terminal ranges)
-                if let cached = transcriptCache[key] {
-                    transcript = cached
+            // Try in-view memo cache first
+            if let cached = transcriptCache[key] {
+                transcript = cached
+                if mode == .terminal && shouldColorize {
                     commandRanges = terminalCommandRangesCache[key] ?? []
                     userRanges = terminalUserRangesCache[key] ?? []
-                    assistantRanges = []
-                    outputRanges = []
-                    errorRanges = []
                     findAdditionalRanges()
-                    lastBuildKey = key
                 } else {
-                    let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
-                    transcript = built.0
-                    commandRanges = built.1
-                    userRanges = built.2
-                    assistantRanges = []
-                    outputRanges = []
-                    errorRanges = []
-                    findAdditionalRanges()
-                    transcriptCache[key] = transcript
-                    terminalCommandRangesCache[key] = commandRanges
-                    terminalUserRangesCache[key] = userRanges
-                    lastBuildKey = key
+                    commandRanges = []; userRanges = []; assistantRanges = []; outputRanges = []; errorRanges = []
                 }
+                lastBuildKey = key
+                // Reset find state
+                performFind(resetIndex: true)
+                selectedNSRange = nil
+                updateSelectionToCurrentMatch()
+                return
+            }
+
+            // Try external indexer transcript caches (Codex/Claude/Gemini) without generation
+            if FeatureFlags.offloadTranscriptBuildInView {
+                if let t = externalCachedTranscript(for: session.id) {
+                    transcript = t
+                    commandRanges = []; userRanges = []; assistantRanges = []; outputRanges = []; errorRanges = []
+                    transcriptCache[key] = t
+                    lastBuildKey = key
+                    performFind(resetIndex: true)
+                    selectedNSRange = nil
+                    updateSelectionToCurrentMatch()
+                    return
+                }
+
+                // Build off-main to avoid UI stalls
+                let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+                Task.detached(priority: prio) {
+                    if mode == .terminal && self.shouldColorize {
+                        let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
+                        await MainActor.run {
+                            self.transcript = built.0
+                            self.commandRanges = built.1
+                            self.userRanges = built.2
+                            self.assistantRanges = []
+                            self.outputRanges = []
+                            self.errorRanges = []
+                            self.findAdditionalRanges()
+                            self.transcriptCache[key] = built.0
+                            self.terminalCommandRangesCache[key] = built.1
+                            self.terminalUserRangesCache[key] = built.2
+                            self.lastBuildKey = key
+                            self.performFind(resetIndex: true)
+                            self.selectedNSRange = nil
+                            self.updateSelectionToCurrentMatch()
+                        }
+                    } else {
+                        let t = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: mode)
+                        await MainActor.run {
+                            self.transcript = t
+                            self.commandRanges = []
+                            self.userRanges = []
+                            self.assistantRanges = []
+                            self.outputRanges = []
+                            self.errorRanges = []
+                            self.transcriptCache[key] = t
+                            self.lastBuildKey = key
+                            self.performFind(resetIndex: true)
+                            self.selectedNSRange = nil
+                            self.updateSelectionToCurrentMatch()
+                        }
+                    }
+                }
+                return
+            }
+
+            // Fallback: synchronous build (legacy behavior)
+            if mode == .terminal && shouldColorize {
+                let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
+                transcript = built.0
+                commandRanges = built.1
+                userRanges = built.2
+                assistantRanges = []
+                outputRanges = []
+                errorRanges = []
+                findAdditionalRanges()
+                transcriptCache[key] = transcript
+                terminalCommandRangesCache[key] = commandRanges
+                terminalUserRangesCache[key] = userRanges
+                lastBuildKey = key
             } else {
-                if let cached = transcriptCache[key] {
-                    transcript = cached
-                    commandRanges = []
-                    userRanges = []
-                    assistantRanges = []
-                    outputRanges = []
-                    errorRanges = []
-                    lastBuildKey = key
-                } else {
-                    transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: mode)
-                    commandRanges = []
-                    userRanges = []
-                    assistantRanges = []
-                    outputRanges = []
-                    errorRanges = []
-                    transcriptCache[key] = transcript
-                    lastBuildKey = key
-                }
+                transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: mode)
+                commandRanges = []
+                userRanges = []
+                assistantRanges = []
+                outputRanges = []
+                errorRanges = []
+                transcriptCache[key] = transcript
+                lastBuildKey = key
             }
         } else {
             // No caching (Claude)
@@ -435,6 +485,18 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 selectedNSRange = NSRange(rr, in: transcript)
             }
         }
+    }
+
+    private func externalCachedTranscript(for id: String) -> String? {
+        // Attempt to read from indexer-level caches (non-generating)
+        if let codex = indexer as? SessionIndexer {
+            return codex.searchTranscriptCache.getCached(id)
+        } else if let claude = indexer as? ClaudeSessionIndexer {
+            return claude.searchTranscriptCache.getCached(id)
+        } else if let gemini = indexer as? GeminiSessionIndexer {
+            return gemini.searchTranscriptCache.getCached(id)
+        }
+        return nil
     }
 
     private func performFind(resetIndex: Bool, direction: Int = 1) {
