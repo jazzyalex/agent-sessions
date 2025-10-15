@@ -435,7 +435,7 @@ private struct ClaudeSearchFiltersView: View {
                     .frame(minWidth: 160)
                     .focused($isSearchFocused)
                     .onSubmit { indexer.applySearch() }
-                    .onChange(of: indexer.queryDraft) { _ in TypingActivity.shared.bump() }
+                    .onChange(of: indexer.queryDraft) { _, _ in TypingActivity.shared.bump() }
 
                 Button(action: { indexer.applySearch() }) {
                     Image(systemName: "magnifyingglass")

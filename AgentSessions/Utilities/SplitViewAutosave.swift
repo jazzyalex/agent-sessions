@@ -229,7 +229,7 @@ private final class SplitFinderView: NSView {
         let isHSplit = split.isVertical
         let axisLen = primaryAxisLength(split)
         guard axisLen > 10 else { return false }
-        var target = clamp(saved, toAxisLength: axisLen, isHSplit: isHSplit)
+        let target = clamp(saved, toAxisLength: axisLen, isHSplit: isHSplit)
         // Avoid redundant set when already close
         let current = primaryPosition(split)
         if abs(current - target) < 0.5 { return true }

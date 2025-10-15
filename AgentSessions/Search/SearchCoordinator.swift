@@ -216,13 +216,15 @@ final class SearchCoordinator: ObservableObject {
                 if FeatureFlags.throttleSearchUIUpdates {
                     let now = DispatchTime.now()
                     if now.uptimeNanoseconds - self.progressThrottleLastFlush.uptimeNanoseconds > 100_000_000 {
+                        let currentIdx = idx
                         await MainActor.run {
-                            if self.runID == newRunID { self.progress.scannedLarge = idx + 1 }
+                            if self.runID == newRunID { self.progress.scannedLarge = currentIdx + 1 }
                             self.progressThrottleLastFlush = now
                         }
                     }
                 } else {
-                    await MainActor.run { if self.runID == newRunID { self.progress.scannedLarge = idx + 1 } }
+                    let currentIdx = idx
+                    await MainActor.run { if self.runID == newRunID { self.progress.scannedLarge = currentIdx + 1 } }
                 }
                 if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
                 idx += 1

@@ -29,7 +29,7 @@ struct SearchFiltersView: View {
                             .frame(minWidth: 220)
                             .focused($isSearchFocused)
                             .onSubmit { indexer.applySearch(); showSearchPopover = false }
-                            .onChange(of: indexer.queryDraft) { _ in TypingActivity.shared.bump() }
+                            .onChange(of: indexer.queryDraft) { _, _ in TypingActivity.shared.bump() }
                         Button("Find") { indexer.applySearch(); showSearchPopover = false }
                             .buttonStyle(.borderedProminent)
                         if !indexer.queryDraft.isEmpty {

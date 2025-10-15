@@ -386,8 +386,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
                 // Build off-main to avoid UI stalls
                 let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+                let shouldColorize = self.shouldColorize
                 Task.detached(priority: prio) {
-                    if mode == .terminal && self.shouldColorize {
+                    if mode == .terminal && shouldColorize {
                         let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
                         await MainActor.run {
                             self.transcript = built.0
