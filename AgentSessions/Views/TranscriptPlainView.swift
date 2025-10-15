@@ -222,23 +222,37 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
             }
 
+            Spacer(minLength: 24)
+
+            // MID: Text size controls (moved next to ID)
+            HStack(spacing: 6) {
+                Button(action: { adjustFont(-1) }) {
+                    HStack(spacing: 2) {
+                        Text("A").font(.system(size: 12, weight: .semibold))
+                        Text("−").font(.system(size: 12, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut("-", modifiers: .command)
+                .help("Decrease text size (⌘−)")
+                .accessibilityLabel("Decrease Text Size")
+
+                Button(action: { adjustFont(1) }) {
+                    HStack(spacing: 2) {
+                        Text("A").font(.system(size: 14, weight: .semibold))
+                        Text("+").font(.system(size: 14, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut("+", modifiers: .command)
+                .help("Increase text size (⌘+)")
+                .accessibilityLabel("Increase Text Size")
+            }
+
             Spacer()
 
-            // === TRAILING GROUP: Text size, Copy, and Find Controls ===
+            // === TRAILING GROUP: Copy and Find Controls ===
             HStack(spacing: 12) {
-                // Text size stepper (clear affordance)
-                Stepper("Text Size", onIncrement: { adjustFont(1) }, onDecrement: { adjustFont(-1) })
-                    .help("Adjust transcript text size")
-                    .accessibilityLabel("Text Size")
-
-                // Keyboard shortcuts for size changes (hidden)
-                Button(action: { adjustFont(-1) }) { EmptyView() }
-                    .keyboardShortcut("-", modifiers: .command)
-                    .hidden()
-                Button(action: { adjustFont(1) }) { EmptyView() }
-                    .keyboardShortcut("+", modifiers: .command)
-                    .hidden()
-
                 // Copy transcript button
                 Button("Copy") { copyAll() }
                     .buttonStyle(.borderless)
