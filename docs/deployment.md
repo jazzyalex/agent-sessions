@@ -3,13 +3,38 @@
 This runbook provides a fully automated deployment process with upfront validation.
 All questions are answered before running the script, which then executes non-interactively.
 
+## Quick Start (2.3.2)
+
+If you’re ready to ship 2.3.2 and have Xcode + notarytool + gh configured on your Mac:
+
+```bash
+# Example for 2.3.2 (adjust TEAM_ID / DEV_ID_APP if needed)
+export VERSION=2.3.2
+export TEAM_ID=24NDRU35WD
+export NOTARY_PROFILE=AgentSessionsNotary
+export DEV_ID_APP="Developer ID Application: Alex M (24NDRU35WD)"
+export UPDATE_CASK=1
+export SKIP_CONFIRM=1
+
+tools/release/deploy-agent-sessions.sh
+```
+
+Outputs:
+- DMG: `dist/AgentSessions-2.3.2.dmg`
+- SHA: `dist/AgentSessions-2.3.2.dmg.sha256`
+- GitHub Release: `v2.3.2` with assets and notes from `docs/CHANGELOG.md`
+- README and docs download links updated to 2.3.2
+- Homebrew cask updated in `jazzyalex/homebrew-agent-sessions`
+
+If any step fails, see “Troubleshooting” below.
+
 ## Pre-flight Checklist
 
 Complete this checklist **before** running the deployment script. Answer all questions and verify all conditions.
 
 ### 1. Version Planning
-- [ ] What version are you releasing? (e.g., 2.2)
-- [ ] Current MARKETING_VERSION in project.pbxproj: _________
+- [ ] What version are you releasing? (e.g., 2.3.2)
+- [ ] Current MARKETING_VERSION in project.pbxproj: 2.3.2 (run grep to confirm)
 - [ ] Confirm version bump is correct (major/minor/patch)
 
 ### 2. Asset Preparation
@@ -40,7 +65,7 @@ Gather these values before running the script:
 
 ```bash
 # Required
-VERSION=2.2                                           # Target version
+VERSION=2.3.2                                         # Target version
 
 # Optional (auto-detected if not set)
 TEAM_ID=24NDRU35WD                                    # Apple Team ID
@@ -57,7 +82,7 @@ SKIP_CONFIRM=1                                        # Skip interactive prompts
 Once pre-flight is complete, run the deployment script with all parameters:
 
 ```bash
-VERSION=2.2 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
+VERSION=2.3.2 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
 ```
 
 ### What the script does automatically:
