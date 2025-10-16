@@ -1,10 +1,10 @@
 import Foundation
 
-enum CommandError: Error, LocalizedError {
+public enum CommandError: Error, LocalizedError {
     case executableNotFound(String)
     case executionFailed(command: [String], exitCode: Int32, stderr: String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case let .executableNotFound(path):
             return "Executable not found at \(path)"
@@ -15,18 +15,19 @@ enum CommandError: Error, LocalizedError {
     }
 }
 
-struct CommandResult {
-    let stdout: String
-    let stderr: String
-    let exitCode: Int32
+public struct CommandResult {
+    public let stdout: String
+    public let stderr: String
+    public let exitCode: Int32
 }
 
-protocol CommandExecuting {
+public protocol CommandExecuting {
     func run(_ command: [String], cwd: URL?) throws -> CommandResult
 }
 
-struct ProcessCommandExecutor: CommandExecuting {
-    func run(_ command: [String], cwd: URL?) throws -> CommandResult {
+public struct ProcessCommandExecutor: CommandExecuting {
+    public init() {}
+    public func run(_ command: [String], cwd: URL?) throws -> CommandResult {
         guard !command.isEmpty else {
             return CommandResult(stdout: "", stderr: "", exitCode: 0)
         }

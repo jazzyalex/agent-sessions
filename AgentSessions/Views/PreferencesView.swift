@@ -11,6 +11,7 @@ struct PreferencesView: View {
     private let initialTabArg: PreferencesTab
     @ObservedObject private var resumeSettings = CodexResumeSettings.shared
     @ObservedObject private var claudeSettings = ClaudeResumeSettings.shared
+    @ObservedObject private var geminiSettings = GeminiCLISettings.shared
     @State private var showingResetConfirm: Bool = false
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     // Menu bar prefs
@@ -52,6 +53,12 @@ struct PreferencesView: View {
     @State private var claudeResolvedPath: String? = nil
     @State private var claudeProbeDebounce: DispatchWorkItem? = nil
     @State private var showClaudeExperimentalWarning: Bool = false
+
+    // Gemini CLI probe state
+    @State private var geminiProbeState: ProbeState = .idle
+    @State private var geminiVersionString: String? = nil
+    @State private var geminiResolvedPath: String? = nil
+    @State private var geminiProbeDebounce: DispatchWorkItem? = nil
 
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
@@ -133,6 +140,8 @@ struct PreferencesView: View {
                 codexCLITab
             case .claudeResume:
                 claudeResumeTab
+            case .geminiCLI:
+                geminiCLITab
             case .about:
                 aboutTab
             }
@@ -514,6 +523,27 @@ struct PreferencesView: View {
                     if let path = resolvedCodexPath {
                         Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     }
+
+                    // Show helpful message if binary not found
+                    if probeState == .failure && probeVersion == nil {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.caption)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Codex CLI not found")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Install via npm: npm install -g @openai/codex-cli")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(8)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+
                     HStack(spacing: 12) {
                         Button("Check Version") { probeCodex() }
                             .buttonStyle(.bordered)
@@ -526,6 +556,7 @@ struct PreferencesView: View {
                         }
                         .buttonStyle(.bordered)
                         .help("Copy the detected Codex binary path to clipboard")
+                        .disabled(resolvedCodexPath == nil)
                         Button("Reveal") {
                             if let p = resolvedCodexPath {
                                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
@@ -533,6 +564,7 @@ struct PreferencesView: View {
                         }
                         .buttonStyle(.bordered)
                         .help("Reveal the detected Codex binary in Finder")
+                        .disabled(resolvedCodexPath == nil)
                     }
                 } else {
                     // Custom mode: text field for override
@@ -642,6 +674,27 @@ struct PreferencesView: View {
                     if let path = claudeResolvedPath {
                         Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     }
+
+                    // Show helpful message if binary not found
+                    if claudeProbeState == .failure && claudeVersionString == nil {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.caption)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Claude CLI not found")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Download from claude.ai/download or install via npm: npm install -g @anthropic/claude-cli")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(8)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+
                     HStack(spacing: 12) {
                         Button("Check Version") { probeClaude() }
                             .buttonStyle(.bordered)
@@ -654,6 +707,7 @@ struct PreferencesView: View {
                         }
                         .buttonStyle(.bordered)
                         .help("Copy the detected Claude CLI path to clipboard")
+                        .disabled(claudeResolvedPath == nil)
                         Button("Reveal") {
                             if let p = claudeResolvedPath {
                                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
@@ -661,6 +715,7 @@ struct PreferencesView: View {
                         }
                         .buttonStyle(.bordered)
                         .help("Reveal the detected Claude CLI binary in Finder")
+                        .disabled(claudeResolvedPath == nil)
                     }
                 } else {
                     // Custom mode: text field for override
@@ -676,6 +731,112 @@ struct PreferencesView: View {
                             .help("Select the Claude CLI binary from the filesystem")
                         Button("Clear") {
                             claudeSettings.setBinaryPath("")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Remove the custom binary override")
+                    }
+                }
+            }
+
+            // Usage Tracking moved to Unified Window tab.
+        }
+    }
+
+    private var geminiCLITab: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Gemini CLI").font(.title2).fontWeight(.semibold)
+
+            // Binary Source
+            VStack(alignment: .leading, spacing: 10) {
+                // Binary source segmented: Auto | Custom
+                labeledRow("Binary Source") {
+                    Picker("", selection: Binding(
+                        get: { geminiSettings.binaryOverride.isEmpty ? 0 : 1 },
+                        set: { idx in
+                            if idx == 0 {
+                                // Auto: clear override
+                                geminiSettings.setBinaryOverride("")
+                                scheduleGeminiProbe()
+                            } else {
+                                // Custom: open file picker
+                                pickGeminiBinary()
+                            }
+                        }
+                    )) {
+                        Text("Auto").tag(0)
+                        Text("Custom").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 220)
+                    .help("Use the auto-detected Gemini CLI or supply a custom path")
+                }
+
+                // Auto row (detected path + version + actions)
+                if geminiSettings.binaryOverride.isEmpty {
+                    HStack {
+                        Text("Detected:").font(.caption)
+                        Text(geminiVersionString ?? "unknown").font(.caption).monospaced()
+                    }
+                    if let path = geminiResolvedPath {
+                        Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+
+                    // Show helpful message if binary not found
+                    if geminiProbeState == .failure && geminiVersionString == nil {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.caption)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Gemini CLI not found")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Install via npm: npm install -g @google/generative-ai-cli")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(8)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+
+                    HStack(spacing: 12) {
+                        Button("Check Version") { probeGemini() }
+                            .buttonStyle(.bordered)
+                            .help("Query the detected Gemini CLI for its version")
+                        Button("Copy Path") {
+                            if let p = geminiResolvedPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(p, forType: .string)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Copy the detected Gemini CLI path to clipboard")
+                        .disabled(geminiResolvedPath == nil)
+                        Button("Reveal") {
+                            if let p = geminiResolvedPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Reveal the detected Gemini CLI binary in Finder")
+                        .disabled(geminiResolvedPath == nil)
+                    }
+                } else {
+                    // Custom mode: text field for override
+                    HStack(spacing: 10) {
+                        TextField("/path/to/gemini", text: Binding(get: { geminiSettings.binaryOverride }, set: { geminiSettings.setBinaryOverride($0) }))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 360)
+                            .onSubmit { scheduleGeminiProbe() }
+                            .onChange(of: geminiSettings.binaryOverride) { _, _ in scheduleGeminiProbe() }
+                            .help("Enter the full path to a custom Gemini CLI binary")
+                        Button("Choose…", action: pickGeminiBinary)
+                            .buttonStyle(.borderedProminent)
+                            .help("Select the Gemini CLI binary from the filesystem")
+                        Button("Clear") {
+                            geminiSettings.setBinaryOverride("")
                         }
                         .buttonStyle(.bordered)
                         .help("Remove the custom binary override")
@@ -921,6 +1082,18 @@ struct PreferencesView: View {
         }
     }
 
+    private func pickGeminiBinary() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                geminiSettings.setBinaryOverride(url.path)
+            }
+        }
+    }
+
     private func validateDefaultDirectory() {
         guard !defaultResumeDirectory.isEmpty else {
             defaultResumeDirectoryValid = true
@@ -970,6 +1143,8 @@ struct PreferencesView: View {
         preferredLaunchMode = .terminal
         resumeSettings.setLaunchMode(.terminal)
 
+        geminiSettings.setBinaryOverride("")
+
         // Reset usage strip preferences
         UserDefaults.standard.set(false, forKey: "ShowClaudeUsageStrip")
         ClaudeUsageModel.shared.setEnabled(false)
@@ -977,6 +1152,7 @@ struct PreferencesView: View {
         // Re-probe after reset
         scheduleCodexProbe()
         scheduleClaudeProbe()
+        scheduleGeminiProbe()
     }
 
     private func closeWindow() {
@@ -1024,6 +1200,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case unified
     case codexCLI
     case claudeResume
+    case geminiCLI
     case about
 
     var id: String { rawValue }
@@ -1035,6 +1212,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .unified: return "Unified Window"
         case .codexCLI: return "Codex CLI"
         case .claudeResume: return "Claude Code"
+        case .geminiCLI: return "Gemini CLI"
         case .about: return "About"
         }
     }
@@ -1046,14 +1224,15 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .unified: return "square.grid.2x2"
         case .codexCLI: return "terminal"
         case .claudeResume: return "chevron.left.slash.chevron.right"
+        case .geminiCLI: return "g.circle"
         case .about: return "info.circle"
         }
     }
 }
 
 private extension PreferencesView {
-    // Sidebar order: General → Codex CLI → Claude Code → Unified Window → Usage Tracking → About
-    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, .unified, .usageTracking, .about] }
+    // Sidebar order: General → Codex CLI → Claude Code → Gemini CLI → Unified Window → Usage Tracking → About
+    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, .geminiCLI, .unified, .usageTracking, .about] }
 }
 
 // MARK: - Probe helpers
@@ -1109,6 +1288,30 @@ private extension PreferencesView {
         }
     }
 
+    func probeGemini() {
+        if geminiProbeState == .probing { return }
+        geminiProbeState = .probing
+        geminiVersionString = nil
+        geminiResolvedPath = nil
+        let override = geminiSettings.binaryOverride.isEmpty ? nil : geminiSettings.binaryOverride
+        DispatchQueue.global(qos: .userInitiated).async {
+            let env = GeminiCLIEnvironment()
+            let result = env.probe(customPath: override)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let res):
+                    self.geminiVersionString = res.versionString
+                    self.geminiResolvedPath = res.binaryURL.path
+                    self.geminiProbeState = .success
+                case .failure:
+                    self.geminiVersionString = nil
+                    self.geminiResolvedPath = nil
+                    self.geminiProbeState = .failure
+                }
+            }
+        }
+    }
+
     // Trigger background probes only when a relevant pane is active
     func maybeProbe(for tab: PreferencesTab) {
         switch tab {
@@ -1116,6 +1319,8 @@ private extension PreferencesView {
             if probeVersion == nil && probeState != .probing { probeCodex() }
         case .claudeResume:
             if claudeVersionString == nil && claudeProbeState != .probing { probeClaude() }
+        case .geminiCLI:
+            if geminiVersionString == nil && geminiProbeState != .probing { probeGemini() }
         case .general, .unified, .about:
             break
         }
@@ -1132,6 +1337,13 @@ private extension PreferencesView {
         claudeProbeDebounce?.cancel()
         let work = DispatchWorkItem { probeClaude() }
         claudeProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleGeminiProbe() {
+        geminiProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeGemini() }
+        geminiProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 }

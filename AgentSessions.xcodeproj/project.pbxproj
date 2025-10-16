@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C124E15F9EF049399D9F4FCA /* GeminiCLISettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */; };
+		79F828CD9CA64FBFA8A436FA /* GeminiCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */; };
 		24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */; };
 
 		09C4E2A7C54B4EA3BF4473C7 /* CodexVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3233D9D6CE429AB0173B04 /* CodexVersion.swift */; };
@@ -103,6 +105,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeminiCLISettings.swift; path = AgentSessions/Services/GeminiCLISettings.swift; sourceTree = SOURCE_ROOT; };
+		27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeminiCLIEnvironment.swift; path = AgentSessions/Services/GeminiCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
 		9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WindowFocusCoordinator.swift; path = AgentSessions/Services/WindowFocusCoordinator.swift; sourceTree = SOURCE_ROOT; };
 
 		001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeSettings.swift; path = AgentSessions/Resume/CodexResumeSettings.swift; sourceTree = SOURCE_ROOT; };
@@ -342,6 +346,8 @@
 				GEM000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift */,
 				GEMH000010000000000000001 /* AgentSessions/Services/GeminiHashResolver.swift */,
 				SRCH000010000000000000001 /* AgentSessions/Search/SearchCoordinator.swift */,
+				3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */,
+				27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -605,6 +611,8 @@
 				7D3211A8042C4D30AE226E0C /* UpdateModels.swift in Sources */,
 		STALE000020000000000000001 /* UsageStaleCheck.swift in Sources */,				24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */,
 				E1DDA78C704848A381A6A426 /* LoadingAnimationView.swift in Sources */,
+				C124E15F9EF049399D9F4FCA /* GeminiCLISettings.swift in Sources */,
+				79F828CD9CA64FBFA8A436FA /* GeminiCLIEnvironment.swift in Sources */,
 );
 			runOnlyForDeploymentPostprocessing = 0;
 		};
