@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.4] - 2025-10-15
+
+### Added
+- Automatic updates via Sparkle 2 framework with EdDSA signature verification
+- "Check for Updates..." button in Preferences > About pane
+- Star column toggle in Preferences to show/hide favorites column and filter button
+
+### Changed
+- App icon in About pane reduced to 85x85 for better visual balance
+
 ## [2.3.2] - 2025-10-15
 
 ### Performance
