@@ -8,7 +8,8 @@ struct AgentSessionsApp: App {
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @StateObject private var geminiIndexer = GeminiSessionIndexer()
-    @StateObject private var updaterController = UpdaterController()
+    @StateObject private var updaterController =
+    UpdaterController()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @State private var statusItemController: StatusItemController? = nil
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
@@ -66,7 +67,9 @@ struct AgentSessionsApp: App {
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 Divider()
-                Button("Check for Updates…", action: updaterController.checkForUpdates)
+                Button("Check for Updates…") {
+                    updaterController.checkForUpdates(nil)
+                }
             }
             CommandGroup(after: .newItem) {
                 Button("Refresh") { unifiedIndexerHolder.unified?.refresh() }.keyboardShortcut("r", modifiers: .command)

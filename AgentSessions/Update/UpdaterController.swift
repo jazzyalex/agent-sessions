@@ -29,26 +29,20 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
 
     // MARK: - Private Properties
 
-    private let controller: SPUStandardUpdaterController
+    private var controller: SPUStandardUpdaterController!
 
     // MARK: - Initialization
 
     override init() {
-        // Initialize Sparkle controller with delegates set to nil initially
-        // (we'll set them after super.init() to avoid escaping self)
-        self.controller = SPUStandardUpdaterController(
-            startingUpdater: true,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        )
-
         super.init()
 
-        // Now that self is fully initialized, set delegates
-        controller.updater.delegate = self
-        if let userDriver = controller.updater.userDriver as? SPUStandardUserDriver {
-            userDriver.delegate = self
-        }
+        // Initialize Sparkle controller with self as delegates
+        // In Sparkle 2.8+, delegates are passed during initialization
+        self.controller = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: self,
+            userDriverDelegate: self
+        )
     }
 
     // MARK: - Public API
