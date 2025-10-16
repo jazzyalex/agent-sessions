@@ -141,8 +141,8 @@ struct PreferencesView: View {
                 codexCLITab
             case .claudeResume:
                 claudeResumeTab
-            // case .geminiCLI:
-            //     geminiCLITab
+            case .geminiCLI:
+                geminiCLITab
             case .about:
                 aboutTab
             }
