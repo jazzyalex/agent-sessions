@@ -76,14 +76,43 @@ codesign --deep --force --options runtime --timestamp \
   "${EXTRA_ENTS[@]}" \
   --sign "$DEV_ID_APP" "$APP"
 
+echo "==> Verifying code signature"
 codesign --verify --deep --strict --verbose=2 "$APP"
+
+# Verify we're using Developer ID, not ad-hoc signing
+SIGNING_AUTHORITY=$(codesign -dv --verbose=4 "$APP" 2>&1 | grep "Authority=Developer ID Application" || true)
+if [[ -z "$SIGNING_AUTHORITY" ]]; then
+  echo "ERROR: App is not signed with Developer ID Application certificate!" >&2
+  echo "This will cause notarization to fail." >&2
+  codesign -dv --verbose=4 "$APP" 2>&1 | grep "Authority=" >&2
+  exit 6
+fi
+echo "✅ Developer ID signature verified: $SIGNING_AUTHORITY"
+
 spctl --assess --verbose=4 "$APP" || echo "Note: spctl assessment fails before notarization (expected)"
 
 echo "==> Creating DMG: $DMG"
 rm -f "$DMG"
 hdiutil create -volname "$VOL" -srcfolder "$APP" -ov -format UDZO "$DMG"
 
-echo "==> Notarizing DMG (this may take a minute)"
+echo "==> Verifying DMG integrity"
+if ! hdiutil verify "$DMG"; then
+  echo "ERROR: DMG verification failed! The DMG is corrupted." >&2
+  echo "This usually means the app bundle was incomplete or damaged." >&2
+  exit 4
+fi
+echo "✅ DMG verification passed"
+
+echo "==> Verifying DMG is a valid disk image"
+FILE_TYPE=$(file "$DMG")
+if [[ ! "$FILE_TYPE" =~ "Macintosh HFS Extended" ]] && [[ ! "$FILE_TYPE" =~ "Apple partition map" ]]; then
+  echo "ERROR: DMG does not appear to be a valid disk image!" >&2
+  echo "File type: $FILE_TYPE" >&2
+  exit 5
+fi
+echo "✅ DMG file type validated"
+
+echo "==> Notarizing DMG (this may take 5-15 minutes)"
 xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 
 echo "==> Stapling and verifying Gatekeeper"

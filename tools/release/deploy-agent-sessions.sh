@@ -135,6 +135,13 @@ else
   if [[ -f "$UPDATES_DIR/appcast.xml" ]]; then
     green "Appcast generated successfully"
 
+    # Fix DMG URLs: Sparkle generates wrong URLs pointing to GitHub Pages
+    # Replace: https://jazzyalex.github.io/agent-sessions/AgentSessions-{VERSION}.dmg
+    # With:    https://github.com/jazzyalex/agent-sessions/releases/download/v{VERSION}/AgentSessions-{VERSION}.dmg
+    sed -i '' -E 's|https://jazzyalex\.github\.io/agent-sessions/AgentSessions-([0-9.]+)\.dmg|https://github.com/jazzyalex/agent-sessions/releases/download/v\1/AgentSessions-\1.dmg|g' \
+      "$UPDATES_DIR/appcast.xml"
+    green "Fixed DMG URLs in appcast to point to GitHub Releases"
+
     # Copy appcast to docs/ for GitHub Pages
     cp "$UPDATES_DIR/appcast.xml" "$REPO_ROOT/docs/appcast.xml"
 

@@ -103,25 +103,43 @@ VERSION=2.3.2 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
    - Auto-detects Developer ID certificate
    - Verifies CHANGELOG.md has version section
 
-2. **Build & Notarize** (5-15 minutes)
+2. **Build & Sign** (2-5 minutes)
    - Builds Release configuration
-   - Code signs with hardened runtime
+   - Code signs with Developer ID Application certificate + hardened runtime
+   - **Verifies signature uses Developer ID (not ad-hoc)**
    - Creates DMG
-   - Submits to Apple notary service
-   - Waits for approval
-   - Staples notarization ticket
 
-3. **Update Documentation**
+3. **DMG Verification** (Critical!)
+   - **Verifies DMG integrity with `hdiutil verify`**
+   - **Validates DMG is a proper disk image format**
+   - Catches corrupted DMGs before notarization (prevents wasted time)
+
+4. **Notarize & Staple** (5-15 minutes)
+   - Submits verified DMG to Apple notary service
+   - Waits for approval
+   - Staples notarization ticket to DMG
+
+5. **Generate Sparkle Appcast** (for auto-updates)
+   - Copies DMG to `dist/updates/` directory
+   - Finds Sparkle `generate_appcast` tool from SPM artifacts
+   - Generates `appcast.xml` with EdDSA signature (reads private key from Keychain)
+   - **Verifies EdDSA private key exists in Keychain (service: "https://sparkle-project.org")**
+   - Fixes DMG URL to point to GitHub Releases (not GitHub Pages)
+   - Copies appcast.xml to docs/ for GitHub Pages
+   - Commits and pushes appcast to main branch
+
+6. **Update Documentation**
    - Updates download links in README.md and docs/index.html
    - Normalizes visible version strings in download button labels and file names
    - Does not inject release notes; README/site remain feature-focused
    - Commits and pushes changes
 
-4. **Update Homebrew Cask**
-   - Updates version and sha256 in local cask
-   - Commits and pushes to homebrew-agent-sessions repo
+7. **Update Homebrew Cask**
+   - Generates cask file with correct version and SHA256
+   - Updates via GitHub API to jazzyalex/homebrew-agent-sessions
+   - Commits directly to main branch
 
-5. **Create GitHub Release**
+8. **Create GitHub Release**
    - Extracts release notes from CHANGELOG.md
    - Creates or updates GitHub Release
    - Uploads DMG and SHA256 checksum
@@ -144,27 +162,42 @@ These checks should be performed automatically by the deployment agent:
 gh release view v{VERSION} --json name,assets | jq '.assets[] | .name'
 # Expected: AgentSessions-{VERSION}.dmg and AgentSessions-{VERSION}.dmg.sha256
 
-# 2. Verify README.md download links and labels point to new version
+# 2. Verify Sparkle appcast.xml published on GitHub Pages
+curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -E "(sparkle:version|sparkle:edSignature|enclosure url)"
+# Expected:
+#   <sparkle:version>1</sparkle:version>
+#   <sparkle:shortVersionString>{VERSION}</sparkle:shortVersionString>
+#   <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v{VERSION}/AgentSessions-{VERSION}.dmg" ... sparkle:edSignature="..."/>
+
+# 3. Verify EdDSA signature is present in appcast
+curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep "sparkle:edSignature" | wc -l
+# Expected: 1 (or more if multiple versions in appcast)
+
+# 4. Verify appcast DMG URL points to GitHub Releases (not GitHub Pages)
+curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep "enclosure url" | grep -v "github.com/jazzyalex/agent-sessions/releases"
+# Expected: no output (all URLs should be GitHub Releases)
+
+# 5. Verify README.md download links and labels point to new version
 grep -E "releases/download/v{VERSION}/AgentSessions-{VERSION}\.dmg|Download Agent Sessions {VERSION}" README.md
-// Should find: AgentSessions-{VERSION}.dmg URL and a visible "Download Agent Sessions {VERSION}" label
+# Should find: AgentSessions-{VERSION}.dmg URL and a visible "Download Agent Sessions {VERSION}" label
 
-# 3. Verify docs/index.html download links and labels point to new version
+# 6. Verify docs/index.html download links and labels point to new version
 grep -E "releases/download/v{VERSION}/AgentSessions-{VERSION}\.dmg|Download Agent Sessions {VERSION}" docs/index.html
-// Should find: AgentSessions-{VERSION}.dmg URL and a visible "Download Agent Sessions {VERSION}" label
+# Should find: AgentSessions-{VERSION}.dmg URL and a visible "Download Agent Sessions {VERSION}" label
 
-# 4. Verify Homebrew cask updated (if local tap exists)
-grep -E "(version|sha256)" /opt/homebrew/Library/Taps/jazzyalex/homebrew-agent-sessions/Casks/agent-sessions.rb | head -2
+# 7. Verify Homebrew cask updated
+curl -s https://raw.githubusercontent.com/jazzyalex/homebrew-agent-sessions/main/Casks/agent-sessions.rb | grep -E "(version|sha256)" | head -2
 # Expected: version "{VERSION}" and matching sha256
 
-# 5. Verify release notes match CHANGELOG.md
+# 8. Verify release notes match CHANGELOG.md
 gh release view v{VERSION} --json body -q '.body' > /tmp/release_notes.txt
 awk '/^## \[{VERSION}\]/,/^## \[/' docs/CHANGELOG.md > /tmp/changelog_section.txt
 diff -u /tmp/changelog_section.txt /tmp/release_notes.txt
 # Expected: no significant differences
 
-# 6. Verify git is clean
+# 9. Verify git is clean
 git status --porcelain
-# Expected: empty output or only .claude/settings.local.json, project.pbxproj, CLAUDE.md
+# Expected: empty output or only .claude/settings.local.json
 ```
 
 **Agent should automatically fix any issues found:**
@@ -203,6 +236,80 @@ git status --porcelain
 
 ## Troubleshooting
 
+### Corrupted DMG (notarytool hangs or fails)
+
+**Symptom**: `xcrun notarytool submit` hangs at "initiating connection" or fails immediately
+
+**Diagnosis**:
+```bash
+# Check if DMG is corrupted
+hdiutil verify dist/AgentSessions-{VERSION}.dmg
+
+# Check file type
+file dist/AgentSessions-{VERSION}.dmg
+# Expected: "...Apple partition map..." or "...Macintosh HFS..."
+# Bad: "zlib compressed data" (corrupted)
+```
+
+**Root Causes**:
+1. App bundle was incomplete when DMG was created
+2. App was signed with ad-hoc certificate instead of Developer ID
+3. Xcode build failed but didn't exit with error code
+
+**Solution**:
+```bash
+# 1. Delete corrupted DMG
+rm dist/AgentSessions-{VERSION}.dmg
+
+# 2. Verify app signature uses Developer ID
+codesign -dv --verbose=4 dist/AgentSessions.app 2>&1 | grep "Authority=Developer ID Application"
+# Must show: Authority=Developer ID Application: Your Name (TEAM_ID)
+
+# 3. If app has wrong signature, re-sign
+codesign --deep --force --verify --verbose --timestamp --options runtime \
+  --sign "Developer ID Application: Alex M (24NDRU35WD)" dist/AgentSessions.app
+
+# 4. Create fresh DMG
+hdiutil create -volname "Agent Sessions" -srcfolder dist/AgentSessions.app \
+  -ov -format UDZO dist/AgentSessions-{VERSION}.dmg
+
+# 5. Verify DMG is valid
+hdiutil verify dist/AgentSessions-{VERSION}.dmg
+
+# 6. Retry notarization
+xcrun notarytool submit dist/AgentSessions-{VERSION}.dmg --keychain-profile AgentSessionsNotary --wait
+```
+
+**Prevention**: The updated build script now includes DMG verification before notarization.
+
+### Sparkle EdDSA signature errors
+
+**Symptom**: Users see "The update is improperly signed and could not be validated"
+
+**Diagnosis**:
+```bash
+# 1. Check if EdDSA private key exists
+security find-generic-password -s "https://sparkle-project.org" -a "ed25519"
+# Should show: keychain: "/Users/.../Library/Keychains/login.keychain-db"
+
+# 2. Verify public key in Info.plist matches
+~/Library/Developer/Xcode/DerivedData/AgentSessions-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys
+# Shows: "A pre-existing signing key was found. This is how it should appear in your Info.plist:"
+
+# 3. Compare with AgentSessions/Info.plist
+grep -A1 "SUPublicEDKey" AgentSessions/Info.plist
+```
+
+**Root Causes**:
+1. Public key in Info.plist doesn't match private key in Keychain
+2. Appcast was signed with different key than what's in Info.plist
+3. Private key was lost/regenerated but Info.plist wasn't updated
+
+**Solution**:
+1. If keys don't match: Update Info.plist with correct public key from `generate_keys`
+2. Regenerate appcast.xml with matching key
+3. Test signature: Download DMG and verify with Sparkle's `sign_update --verify`
+
 ### Notary profile errors
 ```bash
 xcrun notarytool store-credentials AgentSessionsNotary \
@@ -232,9 +339,9 @@ security find-identity -v -p codesigning
 - Common issues: unsigned binaries, incorrect entitlements, missing hardened runtime
 
 ### Homebrew cask not updated
-- Verify local tap exists: `ls /opt/homebrew/Library/Taps/jazzyalex/homebrew-agent-sessions/`
-- Check UPDATE_CASK=1 was set
-- Manually update: Edit `Casks/agent-sessions.rb`, update version/sha256/url
+- Script now uses GitHub API to update cask directly
+- Check: `curl -s https://raw.githubusercontent.com/jazzyalex/homebrew-agent-sessions/main/Casks/agent-sessions.rb | grep version`
+- If wrong: Re-run deploy script with UPDATE_CASK=1
 
 ## Manual Deployment (Alternative)
 
