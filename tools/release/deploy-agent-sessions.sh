@@ -108,6 +108,47 @@ TEAM_ID="$TEAM_ID" NOTARY_PROFILE="$NOTARY_PROFILE" TAG="$TAG" VERSION="$VERSION
 DMG="$REPO_ROOT/dist/${APP_NAME}-${VERSION}.dmg"
 SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
 
+green "==> Generating Sparkle appcast"
+# Sparkle 2: Generate appcast.xml with EdDSA signatures
+UPDATES_DIR="$REPO_ROOT/dist/updates"
+mkdir -p "$UPDATES_DIR"
+
+# Copy DMG to updates directory (Sparkle needs all versions in one place for delta updates)
+cp "$DMG" "$UPDATES_DIR/"
+
+# Find Sparkle generate_appcast tool from SPM artifacts
+SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData \
+  -name "generate_appcast" \
+  -path "*/artifacts/*/Sparkle/bin/*" \
+  2>/dev/null | head -n1)
+
+if [[ -z "$SPARKLE_BIN" ]]; then
+  yellow "WARNING: Sparkle generate_appcast tool not found. Skipping appcast generation."
+  yellow "Ensure Sparkle 2 is added via SPM and the project has been built at least once."
+else
+  green "Found Sparkle tools at: $(dirname "$SPARKLE_BIN")"
+
+  # Generate appcast with EdDSA signatures (private key must be in Keychain)
+  # Sparkle will read the private key from Keychain item "Sparkle"
+  "$SPARKLE_BIN" "$UPDATES_DIR"
+
+  if [[ -f "$UPDATES_DIR/appcast.xml" ]]; then
+    green "Appcast generated successfully"
+
+    # Copy appcast to docs/ for GitHub Pages
+    cp "$UPDATES_DIR/appcast.xml" "$REPO_ROOT/docs/appcast.xml"
+
+    # Commit and push appcast to GitHub Pages
+    git add "$REPO_ROOT/docs/appcast.xml" || true
+    git commit -m "chore(release): update appcast for ${VERSION}" || true
+    git push origin HEAD:main || true
+
+    green "Appcast published to GitHub Pages: https://jazzyalex.github.io/agent-sessions/appcast.xml"
+  else
+    yellow "WARNING: appcast.xml not created. Check Sparkle EdDSA key in Keychain."
+  fi
+fi
+
 green "==> Updating README and website download links"
 sed -i '' -E \
   "s#releases/download/v[0-9.]+/AgentSessions-[0-9.]+\.dmg#releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg#g" \
@@ -238,10 +279,17 @@ green "Done."
 echo
 green "==> Post-deployment reminders"
 echo "1. Verify GitHub Release: https://github.com/jazzyalex/agent-sessions/releases/tag/${TAG}"
-echo "2. Test DMG download and installation on a clean system"
-echo "3. Verify Gatekeeper acceptance: right-click → Open on fresh macOS"
-echo "4. Test Homebrew installation: brew upgrade agent-sessions"
-echo "5. Update marketing materials if needed"
-echo "6. Announce release in relevant channels"
-echo "7. Monitor for installation issues in the first 24 hours"
+echo "2. Verify Sparkle appcast: https://jazzyalex.github.io/agent-sessions/appcast.xml"
+echo "   - Check <sparkle:version> matches ${VERSION}"
+echo "   - Verify <enclosure url> points to correct DMG"
+echo "   - Confirm <sparkle:edSignature> is present"
+echo "3. Test DMG download and installation on a clean system"
+echo "4. Verify Gatekeeper acceptance: right-click → Open on fresh macOS"
+echo "5. Test Homebrew installation: brew upgrade agent-sessions"
+echo "6. Test Sparkle auto-update (if existing version installed):"
+echo "   - defaults delete com.triada.AgentSessions SULastCheckTime"
+echo "   - Launch app and check for update notification"
+echo "7. Update marketing materials if needed"
+echo "8. Announce release in relevant channels"
+echo "9. Monitor for installation issues in the first 24 hours"
 echo

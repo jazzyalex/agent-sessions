@@ -16,5 +16,18 @@
 	<string>Agent Sessions controls Terminal to resume Codex sessions on your behalf.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Sparkle 2 Update Configuration -->
+	<key>SUFeedURL</key>
+	<string>https://jazzyalex.github.io/agent-sessions/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>REPLACE_WITH_BASE64_ED25519_PUBLIC_KEY_FROM_generate_keys</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUShowReleaseNotes</key>
+	<true/>
 </dict>
 </plist>

@@ -1,0 +1,32 @@
+<!--
+  Sparkle 2 Configuration for Info.plist
+  Paste this inside the root <dict> element of AgentSessions/Info.plist
+-->
+
+<!-- Appcast Feed URL (HTTPS required) -->
+<key>SUFeedURL</key>
+<string>https://jazzyalex.github.io/agent-sessions/appcast.xml</string>
+
+<!-- EdDSA Public Key (from generate_keys tool) -->
+<key>SUPublicEDKey</key>
+<string>REPLACE_WITH_YOUR_BASE64_ED25519_PUBLIC_KEY</string>
+
+<!-- Enable automatic background checks (skip first-launch opt-in dialog) -->
+<key>SUEnableAutomaticChecks</key>
+<true/>
+
+<!-- Check for updates every 24 hours (86400 seconds) -->
+<key>SUScheduledCheckInterval</key>
+<integer>86400</integer>
+
+<!-- Prevent silent automatic updates without user consent -->
+<key>SUAutomaticallyUpdate</key>
+<false/>
+
+<!-- Optional: Show release notes in update alert -->
+<key>SUShowReleaseNotes</key>
+<true/>
+
+<!-- Optional: Allow downgrades (useful for rollback scenarios) -->
+<!-- <key>SUAllowsDowngrades</key>
+<true/> -->

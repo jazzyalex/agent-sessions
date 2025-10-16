@@ -106,3 +106,21 @@ No cloud uploads or telemetry — **read‑only by design.**
 # install with Homebrew
 brew tap jazzyalex/agent-sessions
 brew install --cask agent-sessions
+```
+
+### Automatic Updates
+
+Agent Sessions includes **Sparkle 2** for automatic updates:
+- **Background checks**: The app checks for updates every 24 hours (customizable in Settings)
+- **Non-intrusive**: Update notifications only appear when the app is in focus (menu bar friendly)
+- **Secure**: All updates are cryptographically signed (EdDSA) and Apple-notarized
+- **Manual checks**: Use **Help → Check for Updates…** anytime
+
+To manually check for updates:
+```bash
+# Force immediate update check (for testing)
+defaults delete com.triada.AgentSessions SULastCheckTime
+open "/Applications/Agent Sessions.app"
+```
+
+**Note**: The first Sparkle-enabled release (2.4.0+) requires a manual download. All subsequent updates work automatically via in-app prompts.

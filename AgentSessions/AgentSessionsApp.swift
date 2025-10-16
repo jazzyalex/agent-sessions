@@ -8,7 +8,7 @@ struct AgentSessionsApp: App {
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @StateObject private var geminiIndexer = GeminiSessionIndexer()
-    @StateObject private var updateModel = UpdateCheckModel.shared
+    @StateObject private var updaterController = UpdaterController()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @State private var statusItemController: StatusItemController? = nil
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
@@ -22,8 +22,6 @@ struct AgentSessionsApp: App {
     @State private var selectedSessionID: String?
     @State private var selectedEventID: String?
     @State private var focusSearchToggle: Bool = false
-    @State private var showUpdateAlert: Bool = false
-    @State private var updateAlertData: (version: String, releaseURL: String, assetURL: String)? = nil
     // Legacy first-run prompt removed
 
     var body: some Scene {
@@ -44,7 +42,6 @@ struct AgentSessionsApp: App {
                 .onAppear {
                     unifiedIndexerHolder.unified?.refresh()
                     updateUsageModels()
-                    updateModel.checkOnLaunch()
                 }
                 .onChange(of: showUsageStrip) { _, _ in
                     updateUsageModels()
@@ -52,12 +49,6 @@ struct AgentSessionsApp: App {
                 .onChange(of: menuBarEnabled) { _, newValue in
                     statusItemController?.setEnabled(newValue)
                     updateUsageModels()
-                }
-                .onChange(of: updateModel.state) { _, newState in
-                    if case .available(let version, let releaseURL, let assetURL) = newState {
-                        updateAlertData = (version, releaseURL, assetURL)
-                        showUpdateAlert = true
-                    }
                 }
                 .onAppear {
                     if statusItemController == nil {
@@ -67,24 +58,6 @@ struct AgentSessionsApp: App {
                     }
                     statusItemController?.setEnabled(menuBarEnabled)
                 }
-                .alert("Update Available", isPresented: $showUpdateAlert) {
-                    if let data = updateAlertData {
-                        Button("Release Notes") {
-                            updateModel.openURL(data.releaseURL)
-                        }
-                        Button("Download") {
-                            updateModel.openURL(data.assetURL)
-                        }
-                        Button("Skip This Version") {
-                            updateModel.skipVersionForLaunchOnly(data.version)
-                        }
-                        Button("Later", role: .cancel) {}
-                    }
-                } message: {
-                    if let data = updateAlertData {
-                        Text("Version \(data.version) is available for download.")
-                    }
-                }
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -93,7 +66,7 @@ struct AgentSessionsApp: App {
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 Divider()
-                Button("Check for Updates…") { updateModel.checkManually() }
+                Button("Check for Updates…", action: updaterController.checkForUpdates)
             }
             CommandGroup(after: .newItem) {
                 Button("Refresh") { unifiedIndexerHolder.unified?.refresh() }.keyboardShortcut("r", modifiers: .command)
