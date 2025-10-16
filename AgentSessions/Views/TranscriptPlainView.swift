@@ -28,6 +28,7 @@ struct TranscriptPlainView: View {
 struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @ObservedObject var indexer: Indexer
     @EnvironmentObject var focusCoordinator: WindowFocusCoordinator
+    @Environment(\.colorScheme) private var colorScheme
     let sessionID: String?
     let sessionIDExtractor: (Session) -> String?  // Extract ID for clipboard
     let sessionIDLabel: String  // "Codex" or "Claude"
@@ -97,7 +98,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         assistantRanges: shouldColorize ? assistantRanges : [],
                         outputRanges: shouldColorize ? outputRanges : [],
                         errorRanges: shouldColorize ? errorRanges : [],
-                        appAppearanceRaw: appAppearanceRaw
+                        appAppearanceRaw: appAppearanceRaw,
+                        colorScheme: colorScheme
                     )
 
                     // Show animation during lazy load OR full refresh
@@ -670,12 +672,14 @@ private struct PlainTextScrollView: NSViewRepresentable {
     let outputRanges: [NSRange]
     let errorRanges: [NSRange]
     let appAppearanceRaw: String
+    let colorScheme: ColorScheme
 
     class Coordinator {
         var lastWidth: CGFloat = 0
         var lastPaintedHighlights: [NSRange] = []
         var lastPaintedIndex: Int = -1
         var lastAppearanceRaw: String = ""
+        var lastColorScheme: ColorScheme?
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -717,6 +721,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             textView.appearance = nil
         }
         context.coordinator.lastAppearanceRaw = appAppearanceRaw
+        context.coordinator.lastColorScheme = colorScheme
 
         // Set background with proper dark mode support
         let isDark = (textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
@@ -746,6 +751,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         if let tv = nsView.documentView as? NSTextView {
             let textChanged = tv.string != text
             let appearanceChanged = context.coordinator.lastAppearanceRaw != appAppearanceRaw
+            let schemeChanged = context.coordinator.lastColorScheme != colorScheme
 
             // Explicitly set NSView appearance when app appearance changes
             if appearanceChanged {
@@ -771,7 +777,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             }
 
             // Reapply colors when appearance changes (dark/light mode switch)
-            if appearanceChanged {
+            if appearanceChanged || schemeChanged {
                 applySyntaxColors(tv)
             }
 
@@ -802,6 +808,9 @@ private struct PlainTextScrollView: NSViewRepresentable {
             }
 
             applyFindHighlights(tv, coordinator: context.coordinator)
+
+            // Update last seen scheme at the end of the pass
+            context.coordinator.lastColorScheme = colorScheme
         }
     }
 
