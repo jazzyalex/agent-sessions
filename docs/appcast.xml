@@ -1,25 +1,14 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
-        <title>Agent Sessions</title>
-        <link>https://jazzyalex.github.io/agent-sessions/appcast.xml</link>
-        <description>Agent Sessions updates</description>
-        <language>en</language>
+        <title>AgentSessions</title>
         <item>
-            <title>Version 2.3.2</title>
-            <link>https://github.com/jazzyalex/agent-sessions/releases/tag/v2.3.2</link>
-            <sparkle:version>2.3.2</sparkle:version>
-            <sparkle:shortVersionString>2.3.2</sparkle:shortVersionString>
-            <description><![CDATA[
-                <h2>Agent Sessions 2.3.2</h2>
-                <p>Latest stable release with Codex CLI, Claude Code, and Gemini CLI support.</p>
-                <p>Note: This is a pre-Sparkle release. Future updates will be delivered automatically via Sparkle.</p>
-            ]]></description>
-            <pubDate>Sun, 13 Oct 2024 00:00:00 +0000</pubDate>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.3.2/AgentSessions-2.3.2.dmg"
-                       sparkle:edSignature="FfxeiAD96gO90IxoJyk7sgycmYTxYvV8b3xXrAUlLh3mfGtr4tcN+8YgB/l2iN0OBmCD8XTUy1VlkGmdXiJ7Bw=="
-                       length="4206111"
-                       type="application/octet-stream" />
+            <title>2.4</title>
+            <pubDate>Wed, 15 Oct 2025 23:10:08 -0700</pubDate>
+            <sparkle:version>1</sparkle:version>
+            <sparkle:shortVersionString>2.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.4/AgentSessions-2.4.dmg" length="5164686" type="application/octet-stream" sparkle:edSignature="XmP23NNHFbOvQRilXCNicNdLlFSH4hqnQsTWvvONkdAIwFdmz9VxM52Rg52f7vjF27AaAM+NJNqpZ7crfRu6BA=="/>
         </item>
     </channel>
 </rss>
