@@ -141,8 +141,8 @@ struct PreferencesView: View {
                 codexCLITab
             case .claudeResume:
                 claudeResumeTab
-            case .geminiCLI:
-                geminiCLITab
+            // case .geminiCLI:
+            //     geminiCLITab
             case .about:
                 aboutTab
             }
@@ -1191,7 +1191,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Codex CLI → Claude Code → Gemini CLI → Unified Window → Usage Tracking → About
-    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, .geminiCLI, .unified, .usageTracking, .about] }
+    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, /*.geminiCLI,*/ .unified, .usageTracking, .about] }
 }
 
 // MARK: - Probe helpers
