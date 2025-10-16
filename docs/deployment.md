@@ -61,6 +61,11 @@ Complete this checklist **before** running the deployment script. Answer all que
 - [ ] macOS with Xcode CLT installed
 - [ ] Developer ID Application certificate in Keychain
 - [ ] Notary profile configured: `xcrun notarytool history --keychain-profile AgentSessionsNotary`
+- [ ] Sparkle EdDSA private key exists in Keychain:
+  ```bash
+  security find-generic-password -s "Sparkle"
+  # Should show: keychain: "/Users/.../Library/Keychains/login.keychain-db"
+  ```
 - [ ] GitHub CLI authenticated: `gh auth status`
 - [ ] Clean working directory: `git status`
 - [ ] On main branch: `git branch --show-current`
