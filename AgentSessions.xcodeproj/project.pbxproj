@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		53736755F3AD431D8FD488AF /* UpdaterController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF31F563529F4552B7B205FD /* UpdaterController.swift */; };
 		C124E15F9EF049399D9F4FCA /* GeminiCLISettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */; };
 		79F828CD9CA64FBFA8A436FA /* GeminiCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */; };
 		24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */; };
@@ -105,6 +106,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		FF31F563529F4552B7B205FD /* UpdaterController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdaterController.swift; path = AgentSessions/Update/UpdaterController.swift; sourceTree = SOURCE_ROOT; };
 		3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeminiCLISettings.swift; path = AgentSessions/Services/GeminiCLISettings.swift; sourceTree = SOURCE_ROOT; };
 		27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeminiCLIEnvironment.swift; path = AgentSessions/Services/GeminiCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
 		9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WindowFocusCoordinator.swift; path = AgentSessions/Services/WindowFocusCoordinator.swift; sourceTree = SOURCE_ROOT; };
@@ -453,6 +455,9 @@
 			);
 			dependencies = (
 			);
+			packageProductDependencies = (
+				EB98DEE97B824B0BB93F888E /* Sparkle */,
+			);
 			name = AgentSessions;
 			productName = AgentSessions;
 			productReference = B0000010DA0A000100000001 /* AgentSessions.app */;
@@ -506,6 +511,9 @@
 			productRefGroup = B0000010EA0A000100000001 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				C50F51237FD54675B186BCCD /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			targets = (
 				B0000010CA0A000100000001 /* AgentSessions */,
 				B0000010FA0A000100000001 /* AgentSessionsTests */,
@@ -612,7 +620,8 @@
 		STALE000020000000000000001 /* UsageStaleCheck.swift in Sources */,				24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */,
 				E1DDA78C704848A381A6A426 /* LoadingAnimationView.swift in Sources */,
 				C124E15F9EF049399D9F4FCA /* GeminiCLISettings.swift in Sources */,
-				79F828CD9CA64FBFA8A436FA /* GeminiCLIEnvironment.swift in Sources */,
+				79F828CD9CA64FBFA8A436FA /* GeminiCLIEnvironment.swift in Sources */,				53736755F3AD431D8FD488AF /* UpdaterController.swift in Sources */,
+
 );
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -852,5 +861,24 @@
 		};
 /* End XCConfigurationList section */
 	};
+/* Begin XCSwiftPackageProductDependency section */
+		EB98DEE97B824B0BB93F888E /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C50F51237FD54675B186BCCD /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C50F51237FD54675B186BCCD /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 	rootObject = B00000101A0A000100000001 /* Project object */;
 }
