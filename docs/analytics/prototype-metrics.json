@@ -1,0 +1,78 @@
+{
+  "scope1_total_analytics": {
+    "total_sessions": 5,
+    "total_duration_hours": 0.01,
+    "total_tokens": {
+      "input": 0,
+      "output": 0,
+      "cached": 0,
+      "reasoning": 0
+    },
+    "total_messages": 9,
+    "total_tool_calls": 0,
+    "avg_session_duration_minutes": 0.07,
+    "avg_messages_per_session": 1.8,
+    "time_range": {
+      "first": "2025-10-08 23:24:34.159000+00:00",
+      "last": "2025-10-16 07:09:35.734000+00:00",
+      "span_days": 7
+    }
+  },
+  "scope2_by_project": {
+    "Codex-History": {
+      "session_count": 3,
+      "agents_used": {
+        "codex": 3
+      },
+      "total_duration_hours": 0.01,
+      "total_tokens": 0,
+      "avg_session_duration_minutes": 0.12
+    },
+    "alexm": {
+      "session_count": 2,
+      "agents_used": {
+        "codex": 2
+      },
+      "total_duration_hours": 0.0,
+      "total_tokens": 0,
+      "avg_session_duration_minutes": 0.0
+    }
+  },
+  "scope3_inter_agent": {
+    "codex": {
+      "session_count": 5,
+      "avg_session_duration_minutes": 0.07,
+      "avg_messages_per_session": 1.8,
+      "avg_tool_calls_per_session": 0.0,
+      "token_efficiency": {
+        "avg_input_per_session": 0.0,
+        "avg_output_per_session": 0.0,
+        "output_to_input_ratio": 0.0
+      },
+      "avg_response_time_seconds": null
+    }
+  },
+  "scope4_human_performance": {
+    "total_sessions": 5,
+    "completed_sessions": 5,
+    "abandoned_sessions": 0,
+    "completion_rate": 100.0,
+    "avg_user_prompt_length": null,
+    "avg_thinking_time_seconds": null,
+    "peak_productivity_hours": [
+      "00:00 (2 sessions)",
+      "23:00 (2 sessions)",
+      "07:00 (1 sessions)"
+    ],
+    "peak_productivity_days": [
+      "Tuesday (2 sessions)",
+      "Wednesday (2 sessions)",
+      "Thursday (1 sessions)"
+    ],
+    "sessions_by_hour": {
+      "7": 1,
+      "0": 2,
+      "23": 2
+    }
+  }
+}

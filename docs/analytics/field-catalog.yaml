@@ -1,0 +1,1106 @@
+generated_at: '2025-10-16T00:48:07.886490'
+summary:
+  codex_sessions_scanned: 20
+  codex_unique_fields: 73
+  claude_sessions_scanned: 20
+  claude_unique_fields: 16
+  gemini_sessions_scanned: 3
+  gemini_unique_fields: 21
+codex_fields:
+  content:
+    types:
+    - list
+    frequency: 1/20 sessions
+    always_present: false
+    examples:
+    - '[{''type'': ''input_text'', ''text'': ''<environment_context>\n  <cwd>/Users/alexm</cwd>\n  <approval_policy>on-request</approval_policy>\n  <sandbox_mode>workspace-write</sandbox_mode>\n  <network_access>en...'
+  content[].text:
+    types:
+    - str
+    frequency: 1/20 sessions
+    always_present: false
+    examples:
+    - "<environment_context>\n  <cwd>/Users/alexm</cwd>\n  <approval_policy>on-request</approval_policy>\n\
+      \  <sandbox_mode>workspace-write</sandbox_mode>\n  <network_access>enabled</network_access>\n\
+      \  <shell>zsh</..."
+  content[].type:
+    types:
+    - str
+    frequency: 1/20 sessions
+    always_present: false
+    examples:
+    - input_text
+  id:
+    types:
+    - NoneType
+    - str
+    frequency: 2/20 sessions
+    always_present: false
+    examples:
+    - 6b0529bc-cdee-4a28-84b0-db0cd9e7ae76
+    - None
+  instructions:
+    types:
+    - NoneType
+    frequency: 1/20 sessions
+    always_present: false
+    examples:
+    - None
+  payload:
+    types:
+    - dict
+    frequency: 13309/20 sessions
+    always_present: false
+    examples:
+    - '{''id'': ''0199e05f-b927-72b3-a6e7-83c31b7d681f'', ''timestamp'': ''2025-10-14T01:39:53.767Z'',
+      ''cwd'': ''/Users/alexm/Repository/Codex-History'', ''originator'': ''codex_cli_rs'',
+      ''cli_version'': ''0.46.0'', ''instruct...'
+    - '{''type'': ''message'', ''role'': ''user'', ''content'': [{''type'': ''input_text'',
+      ''text'': ''<user_instructions>\n\n# Agent Sessions Agents Playbook\n\n## Required
+      workflow (for humans and agents)\n1) Use Conventi...'
+    - '{''type'': ''message'', ''role'': ''user'', ''content'': [{''type'': ''input_text'',
+      ''text'': ''<environment_context>\n  <cwd>/Users/alexm/Repository/Codex-History</cwd>\n  <approval_policy>on-request</approval_polic...'
+  payload.approval_policy:
+    types:
+    - str
+    frequency: 1923/20 sessions
+    always_present: false
+    examples:
+    - on-request
+    - never
+  payload.arguments:
+    types:
+    - str
+    frequency: 1485/20 sessions
+    always_present: false
+    examples:
+    - '{"plan":[{"status":"in_progress","step":"Scan ~/~.gemini/tmp for sessions"},{"status":"pending","step":"Derive
+      filename pattern"},{"status":"pending","step":"Sample JSON structure (no contents)"},{"st...'
+    - '{"command":["bash","-lc","set -euo pipefail\nROOT=\"$HOME/.gemini/tmp\"\necho
+      \"Root: $ROOT\"\nif [ -d \"$ROOT\" ]; then\n  echo \"Status: exists\"\n  echo
+      \"Most recent 20 session basenames:\"\n  fin...'
+    - '{"command":["bash","-lc","set -euo pipefail\nROOT=\"$HOME/.gemini/tmp\"\necho
+      \"Root: $ROOT\"\nif [ -d \"$ROOT\" ]; then\n  echo \"Status: exists\"\n  TMP=$(mktemp)\n  count=0\n  #
+      Collect up to 1000 ...'
+  payload.call_id:
+    types:
+    - str
+    frequency: 2984/20 sessions
+    always_present: false
+    examples:
+    - call_Ejf76hmQmpFq42D1AD8Hlzf5
+    - call_KiBEKWqNOW0thZVXegYeyZlr
+    - call_Z4ilF4TXVgonPnU5wMwkA4uG
+  payload.cli_version:
+    types:
+    - str
+    frequency: 19/20 sessions
+    always_present: false
+    examples:
+    - 0.46.0
+    - 0.45.0
+    - 0.42.0
+  payload.content:
+    types:
+    - list
+    - NoneType
+    frequency: 1911/20 sessions
+    always_present: false
+    examples:
+    - '[{''type'': ''input_text'', ''text'': ''<user_instructions>\n\n# Agent Sessions
+      Agents Playbook\n\n## Required workflow (for humans and agents)\n1) Use Conventional
+      Commits for every commit.\n2) Add trailers...'
+    - '[{''type'': ''input_text'', ''text'': ''<environment_context>\n  <cwd>/Users/alexm/Repository/Codex-History</cwd>\n  <approval_policy>on-request</approval_policy>\n  <sandbox_mode>workspace-write</sandbox_mo...'
+    - '[{''type'': ''input_text'', ''text'': ''> <user_instructions>\n\n# Agent Sessions
+      Agents Playbook\n\n## Required workflow (for humans and agents)\n1) Use Conventional
+      Commits for every commit.\n2) Add traile...'
+  payload.content[].image_url:
+    types:
+    - str
+    frequency: 24/20 sessions
+    always_present: false
+    examples:
+    - data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAf4AAABGCAYAAAAtgfaJAAAKuWlDQ1BJQ0MgUHJvZmlsZQAASImVlwdUU+kSgP97bzoJBAIRkBJ6E6QIBJASQgug9GojJAECIcaQoGJDZHEF14KKCJYFXaUo2ChiQyzYFkUFuwuyCKjrYsEGyrvAIezuO+...
+    - data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACigAAAJSCAYAAABTd99nAAAKuWlDQ1BJQ0MgUHJvZmlsZQAASImVlwdUU+kSgP97bzoJBAIRkBJ6E6QIBJASQgug9GojJAECIcaQoGJDZHEF14KKCJYFXaUo2ChiQyzYFkUFuwuyCKjrYsEGyrvAIezuO+...
+    - data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAA+gAAADkCAYAAAALiQ4CAAAKuWlDQ1BJQ0MgUHJvZmlsZQAASImVlwdUU+kSgP97bzoJBAIRkBJ6E6QIBJASQgug9GojJAECIcaQoGJDZHEF14KKCJYFXaUo2ChiQyzYFkUFuwuyCKjrYsEGyrvAIezuO+...
+  payload.content[].text:
+    types:
+    - str
+    frequency: 819/20 sessions
+    always_present: false
+    examples:
+    - "<user_instructions>\n\n# Agent Sessions Agents Playbook\n\n## Required workflow\
+      \ (for humans and agents)\n1) Use Conventional Commits for every commit.\n2)\
+      \ Add trailers to the commit:\n   - Tool: Cursor|Codex..."
+    - "<environment_context>\n  <cwd>/Users/alexm/Repository/Codex-History</cwd>\n\
+      \  <approval_policy>on-request</approval_policy>\n  <sandbox_mode>workspace-write</sandbox_mode>\n\
+      \  <network_access>restricted</ne..."
+    - "> <user_instructions>\n\n# Agent Sessions Agents Playbook\n\n## Required workflow\
+      \ (for humans and agents)\n1) Use Conventional Commits for every commit.\n2)\
+      \ Add trailers to the commit:\n   - Tool: Cursor|Cod..."
+  payload.content[].type:
+    types:
+    - str
+    frequency: 843/20 sessions
+    always_present: false
+    examples:
+    - input_text
+    - output_text
+    - input_image
+  payload.cwd:
+    types:
+    - str
+    frequency: 1942/20 sessions
+    always_present: false
+    examples:
+    - /Users/alexm/Repository/Codex-History
+    - /Users/alexm
+    - /Users/alexm/Repository/Triada
+  payload.effort:
+    types:
+    - str
+    frequency: 1915/20 sessions
+    always_present: false
+    examples:
+    - high
+    - medium
+    - low
+  payload.encrypted_content:
+    types:
+    - str
+    frequency: 1091/20 sessions
+    always_present: false
+    examples:
+    - gAAAAABo7aonue5OeoiMcz-gwTlPaIbGXthdNELgF9D3GETGoVKb4MLJRByMWL-R52KCRvdiXiWy294JAOSHDdDISEUi9kfalHTxPTsqFkBS6SBrU1Cb0x5igmh0nbWYthHGiE0x19ih4WH_oB7her8IpOfImDQkq4PUCIV5IPh1yxhoOTy_ziMpoThtRzeBIdXcU2EL...
+    - gAAAAABo7aounVOOUkwXjWJN84UoB5M_298mgOL9F_ldvaUYyc3_Ixg05GXngHEg0suK8g-Yr4if7Hg3_JCxrqElhi2mPH3YiTIH0LObibbwFLKpFKzzW7_6MhZAJmopcJhpyoZ700Gfzn5YTTU1e9BcF486EXxOsy0F_JBc0yjWJ2B_SGITckql3l-9xVNUTusnjaoA...
+    - gAAAAABo7ao2B9lUMLjWPM__-3touGLkUOxfQzPRRLHAWtsmaAGt9tfxPRiib_XdqQzhJczNFY7SvBueXoXYQ89s2O3E5gF3sWNvbZXVEh1p53XA_8rooCVQn-7nznUM5PdI6iqdAedkVu306fzgwhxET0Y96rnE5X9XQ405rDKTwISIItF3RwgYfOFHFPZHGUapGnUK...
+  payload.git:
+    types:
+    - dict
+    frequency: 12/20 sessions
+    always_present: false
+    examples:
+    - '{''commit_hash'': ''5def06b8fc34b130ea3412a5f258886a0432d16b'', ''branch'':
+      ''Gemini-support'', ''repository_url'': ''https://github.com/jazzyalex/agent-sessions.git''}'
+    - '{''commit_hash'': ''2da90c4f56c3af7d31a6966ee0c51ad6a0a91b1a'', ''branch'':
+      ''main'', ''repository_url'': ''https://github.com/jazzyalex/agent-sessions.git''}'
+    - '{''commit_hash'': ''5def06b8fc34b130ea3412a5f258886a0432d16b'', ''branch'':
+      ''main'', ''repository_url'': ''https://github.com/jazzyalex/agent-sessions.git''}'
+  payload.git.branch:
+    types:
+    - str
+    frequency: 12/20 sessions
+    always_present: false
+    examples:
+    - Gemini-support
+    - main
+    - feature/kickstart-setup
+  payload.git.commit_hash:
+    types:
+    - str
+    frequency: 12/20 sessions
+    always_present: false
+    examples:
+    - 5def06b8fc34b130ea3412a5f258886a0432d16b
+    - 2da90c4f56c3af7d31a6966ee0c51ad6a0a91b1a
+    - 1730876a372cd90561d7715d01e32ac417c109e0
+  payload.git.repository_url:
+    types:
+    - str
+    frequency: 12/20 sessions
+    always_present: false
+    examples:
+    - https://github.com/jazzyalex/agent-sessions.git
+    - https://github.com/jazzyalex/Triada.git
+  payload.id:
+    types:
+    - str
+    frequency: 19/20 sessions
+    always_present: false
+    examples:
+    - 0199e05f-b927-72b3-a6e7-83c31b7d681f
+    - 0199e5d3-139a-7ba0-918c-9c26d9367b56
+    - 0199e01d-4abf-7d03-928f-56729d82b6e7
+  payload.images:
+    types:
+    - list
+    frequency: 23/20 sessions
+    always_present: false
+    examples:
+    - '[''data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAf4AAABGCAYAAAAtgfaJAAAKuWlDQ1BJQ0MgUHJvZmlsZQAASImVlwdUU+kSgP97bzoJBAIRkBJ6E6QIBJASQgug9GojJAECIcaQoGJDZHEF14KKCJYFXaUo2ChiQyzYFkUFuwuyCKjrYsEGyrvAIezu...'
+    - '[''data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACigAAAJSCAYAAABTd99nAAAKuWlDQ1BJQ0MgUHJvZmlsZQAASImVlwdUU+kSgP97bzoJBAIRkBJ6E6QIBJASQgug9GojJAECIcaQoGJDZHEF14KKCJYFXaUo2ChiQyzYFkUFuwuyCKjrYsEGyrvAIezu...'
+    - '[''data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAA+gAAADkCAYAAAALiQ4CAAAKuWlDQ1BJQ0MgUHJvZmlsZQAASImVlwdUU+kSgP97bzoJBAIRkBJ6E6QIBJASQgug9GojJAECIcaQoGJDZHEF14KKCJYFXaUo2ChiQyzYFkUFuwuyCKjrYsEGyrvAIezu...'
+  payload.info:
+    types:
+    - NoneType
+    - dict
+    frequency: 3704/20 sessions
+    always_present: false
+    examples:
+    - None
+    - '{''total_token_usage'': {''input_tokens'': 17240, ''cached_input_tokens'':
+      5888, ''output_tokens'': 2177, ''reasoning_output_tokens'': 2048, ''total_tokens'':
+      19417}, ''last_token_usage'': {''input_tokens'': 17240, ''...'
+    - '{''total_token_usage'': {''input_tokens'': 36718, ''cached_input_tokens'':
+      25216, ''output_tokens'': 2398, ''reasoning_output_tokens'': 2048, ''total_tokens'':
+      39116}, ''last_token_usage'': {''input_tokens'': 19478, ...'
+  payload.info.last_token_usage:
+    types:
+    - dict
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '{''input_tokens'': 17240, ''cached_input_tokens'': 5888, ''output_tokens'':
+      2177, ''reasoning_output_tokens'': 2048, ''total_tokens'': 19417}'
+    - '{''input_tokens'': 19478, ''cached_input_tokens'': 19328, ''output_tokens'':
+      221, ''reasoning_output_tokens'': 0, ''total_tokens'': 19699}'
+    - '{''input_tokens'': 19722, ''cached_input_tokens'': 19456, ''output_tokens'':
+      434, ''reasoning_output_tokens'': 64, ''total_tokens'': 20156}'
+  payload.info.last_token_usage.cached_input_tokens:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '5888'
+    - '19328'
+    - '19456'
+  payload.info.last_token_usage.input_tokens:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '17240'
+    - '19478'
+    - '19722'
+  payload.info.last_token_usage.output_tokens:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '2177'
+    - '221'
+    - '434'
+  payload.info.last_token_usage.reasoning_output_tokens:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '2048'
+    - '0'
+    - '64'
+  payload.info.last_token_usage.total_tokens:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '19417'
+    - '19699'
+    - '20156'
+  payload.info.model_context_window:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '272000'
+  payload.info.total_token_usage:
+    types:
+    - dict
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '{''input_tokens'': 17240, ''cached_input_tokens'': 5888, ''output_tokens'':
+      2177, ''reasoning_output_tokens'': 2048, ''total_tokens'': 19417}'
+    - '{''input_tokens'': 36718, ''cached_input_tokens'': 25216, ''output_tokens'':
+      2398, ''reasoning_output_tokens'': 2048, ''total_tokens'': 39116}'
+    - '{''input_tokens'': 56440, ''cached_input_tokens'': 44672, ''output_tokens'':
+      2832, ''reasoning_output_tokens'': 2112, ''total_tokens'': 59272}'
+  payload.info.total_token_usage.cached_input_tokens:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '5888'
+    - '25216'
+    - '44672'
+  payload.info.total_token_usage.input_tokens:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '17240'
+    - '36718'
+    - '56440'
+  payload.info.total_token_usage.output_tokens:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '2177'
+    - '2398'
+    - '2832'
+  payload.info.total_token_usage.reasoning_output_tokens:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '2048'
+    - '2112'
+    - '2240'
+  payload.info.total_token_usage.total_tokens:
+    types:
+    - int
+    frequency: 3684/20 sessions
+    always_present: false
+    examples:
+    - '19417'
+    - '39116'
+    - '59272'
+  payload.input:
+    types:
+    - str
+    frequency: 7/20 sessions
+    always_present: false
+    examples:
+    - "*** Begin Patch\n*** Update File: docs/index.html\n@@\n     .btn.secondary\
+      \ {\n       background: white;\n       border: 1px solid #d0d7de;\n       color:\
+      \ #2f81f7;\n     }\n+\n+    .button-row {\n+      display:..."
+    - '*** Begin Patch
+
+      *** Update File: .gitignore
+
+      @@
+
+      -
+
+      -# cc-sessions runtime files
+
+      -sessions/sessions-state.json
+
+      -sessions/transcripts/
+
+      -sessions/.archived/
+
+      *** End Patch'
+    - '*** Begin Patch
+
+      *** Update File: .claude/settings.json
+
+      @@
+
+      -{
+
+      -  "hooks": {
+
+      -    "UserPromptSubmit": [
+
+      -      {
+
+      -        "hooks": [
+
+      -          {
+
+      -            "type": "command",
+
+      -            "command": ...'
+  payload.instructions:
+    types:
+    - NoneType
+    - str
+    frequency: 19/20 sessions
+    always_present: false
+    examples:
+    - "# Agent Sessions Agents Playbook\n\n## Required workflow (for humans and agents)\n\
+      1) Use Conventional Commits for every commit.\n2) Add trailers to the commit:\n\
+      \   - Tool: Cursor|Codex|Xcode|Manual|Claude|..."
+    - None
+    - "# Triada Agents Playbook\n\n## Required workflow (for humans and agents)\n\
+      1) Use Conventional Commits for every commit.\n2) Add trailers to the commit:\n\
+      \   - Tool: Cursor|Codex|Xcode|Manual|Claude|Figma\n  ..."
+  payload.kind:
+    types:
+    - str
+    frequency: 387/20 sessions
+    always_present: false
+    examples:
+    - plain
+  payload.message:
+    types:
+    - str
+    frequency: 792/20 sessions
+    always_present: false
+    examples:
+    - "> <user_instructions>\n\n# Agent Sessions Agents Playbook\n\n## Required workflow\
+      \ (for humans and agents)\n1) Use Conventional Commits for every commit.\n2)\
+      \ Add trailers to the commit:\n   - Tool: Cursor|Cod..."
+    - I’ll continue in Plan Mode by re-scanning ~/.gemini/tmp for filenames and JSON
+      shapes (structure only), then grep the repo for provider/source protocols to
+      mirror.
+    - 'Here’s the Plan Mode update with concrete findings from your system and a crisp
+      implementation plan. No code changes yet.
+
+
+      **Context and Goals**
+
+      - Add “Gemini (Ephemeral)” as a read-only provider alon...'
+  payload.model:
+    types:
+    - str
+    frequency: 1923/20 sessions
+    always_present: false
+    examples:
+    - gpt-5
+    - gpt-5-codex
+  payload.name:
+    types:
+    - str
+    frequency: 1492/20 sessions
+    always_present: false
+    examples:
+    - update_plan
+    - shell
+    - apply_patch
+  payload.originator:
+    types:
+    - str
+    frequency: 19/20 sessions
+    always_present: false
+    examples:
+    - codex_cli_rs
+  payload.output:
+    types:
+    - str
+    frequency: 1492/20 sessions
+    always_present: false
+    examples:
+    - Plan updated
+    - 'failed in sandbox: xargs: sysconf(_SC_ARG_MAX) failed
+
+      '
+    - '{"output":"Root: /Users/alexm/.gemini/tmp\nStatus: exists\nMost recent 20 session
+      basenames:\nsession-2025-10-13T23-54-55fcd497.json\nsession-2025-10-09T06-21-1d129016.json\n—
+      Sample parent directorie...'
+  payload.rate_limits:
+    types:
+    - dict
+    frequency: 3704/20 sessions
+    always_present: false
+    examples:
+    - '{''primary'': {''used_percent'': 7.0, ''window_minutes'': 299, ''resets_in_seconds'':
+      13661}, ''secondary'': {''used_percent'': 4.0, ''window_minutes'': 10079, ''resets_in_seconds'':
+      165457}}'
+    - '{''primary'': {''used_percent'': 8.0, ''window_minutes'': 299, ''resets_in_seconds'':
+      13622}, ''secondary'': {''used_percent'': 4.0, ''window_minutes'': 10079, ''resets_in_seconds'':
+      165418}}'
+    - '{''primary'': {''used_percent'': 8.0, ''window_minutes'': 299, ''resets_in_seconds'':
+      13618}, ''secondary'': {''used_percent'': 4.0, ''window_minutes'': 10079, ''resets_in_seconds'':
+      165414}}'
+  payload.rate_limits.primary:
+    types:
+    - dict
+    frequency: 3704/20 sessions
+    always_present: false
+    examples:
+    - '{''used_percent'': 7.0, ''window_minutes'': 299, ''resets_in_seconds'': 13661}'
+    - '{''used_percent'': 8.0, ''window_minutes'': 299, ''resets_in_seconds'': 13622}'
+    - '{''used_percent'': 8.0, ''window_minutes'': 299, ''resets_in_seconds'': 13618}'
+  payload.rate_limits.primary.resets_in_seconds:
+    types:
+    - int
+    frequency: 3704/20 sessions
+    always_present: false
+    examples:
+    - '13661'
+    - '13622'
+    - '13618'
+  payload.rate_limits.primary.used_percent:
+    types:
+    - float
+    frequency: 3704/20 sessions
+    always_present: false
+    examples:
+    - '7.0'
+    - '8.0'
+    - '9.0'
+  payload.rate_limits.primary.window_minutes:
+    types:
+    - int
+    frequency: 3704/20 sessions
+    always_present: false
+    examples:
+    - '299'
+  payload.rate_limits.secondary:
+    types:
+    - dict
+    frequency: 3704/20 sessions
+    always_present: false
+    examples:
+    - '{''used_percent'': 4.0, ''window_minutes'': 10079, ''resets_in_seconds'': 165457}'
+    - '{''used_percent'': 4.0, ''window_minutes'': 10079, ''resets_in_seconds'': 165418}'
+    - '{''used_percent'': 4.0, ''window_minutes'': 10079, ''resets_in_seconds'': 165414}'
+  payload.rate_limits.secondary.resets_in_seconds:
+    types:
+    - int
+    frequency: 3704/20 sessions
+    always_present: false
+    examples:
+    - '165457'
+    - '165418'
+    - '165414'
+  payload.rate_limits.secondary.used_percent:
+    types:
+    - float
+    frequency: 3704/20 sessions
+    always_present: false
+    examples:
+    - '4.0'
+    - '5.0'
+    - '6.0'
+  payload.rate_limits.secondary.window_minutes:
+    types:
+    - int
+    frequency: 3704/20 sessions
+    always_present: false
+    examples:
+    - '10079'
+  payload.reason:
+    types:
+    - str
+    frequency: 61/20 sessions
+    always_present: false
+    examples:
+    - interrupted
+  payload.role:
+    types:
+    - str
+    frequency: 820/20 sessions
+    always_present: false
+    examples:
+    - user
+    - assistant
+  payload.sandbox_policy:
+    types:
+    - dict
+    frequency: 1923/20 sessions
+    always_present: false
+    examples:
+    - '{''mode'': ''workspace-write'', ''network_access'': False, ''exclude_tmpdir_env_var'':
+      False, ''exclude_slash_tmp'': False}'
+    - '{''mode'': ''read-only''}'
+    - '{''mode'': ''workspace-write'', ''network_access'': True, ''exclude_tmpdir_env_var'':
+      False, ''exclude_slash_tmp'': False}'
+  payload.sandbox_policy.exclude_slash_tmp:
+    types:
+    - bool
+    frequency: 1730/20 sessions
+    always_present: false
+    examples:
+    - 'False'
+  payload.sandbox_policy.exclude_tmpdir_env_var:
+    types:
+    - bool
+    frequency: 1730/20 sessions
+    always_present: false
+    examples:
+    - 'False'
+  payload.sandbox_policy.mode:
+    types:
+    - str
+    frequency: 1923/20 sessions
+    always_present: false
+    examples:
+    - workspace-write
+    - read-only
+    - danger-full-access
+  payload.sandbox_policy.network_access:
+    types:
+    - bool
+    frequency: 1730/20 sessions
+    always_present: false
+    examples:
+    - 'False'
+    - 'True'
+  payload.source:
+    types:
+    - str
+    frequency: 17/20 sessions
+    always_present: false
+    examples:
+    - cli
+  payload.status:
+    types:
+    - str
+    frequency: 7/20 sessions
+    always_present: false
+    examples:
+    - completed
+  payload.summary:
+    types:
+    - list
+    - str
+    frequency: 3014/20 sessions
+    always_present: false
+    examples:
+    - auto
+    - '[{''type'': ''summary_text'', ''text'': "**Analyzing code variations**\n\nI
+      noticed that the print statement for ''top_keys'' includes ''messages'' and
+      possibly ''meta''. The ''content'' field is present, but not ''...'
+    - '[]'
+  payload.summary[].text:
+    types:
+    - str
+    frequency: 1851/20 sessions
+    always_present: false
+    examples:
+    - '**Analyzing code variations**
+
+
+      I noticed that the print statement for ''top_keys'' includes ''messages'' and
+      possibly ''meta''. The ''content'' field is present, but not ''parts''. This
+      is a significant differe...'
+    - '**Checking definitions in repo**
+
+
+      I need to revisit the ''Codex-History'' repo without outputs to locate those
+      definitions. The remote origin is ''agent-sessions'', and its path is ''/Users/alexm/Repositor...'
+    - '**Planning structured scan**
+
+
+      I’m planning to run a structured scan again to get actual outputs. First, I’ll
+      execute a shell command to list 30 session files and identify the derived patterns.
+      Then I’...'
+  payload.summary[].type:
+    types:
+    - str
+    frequency: 1851/20 sessions
+    always_present: false
+    examples:
+    - summary_text
+  payload.text:
+    types:
+    - str
+    frequency: 1915/20 sessions
+    always_present: false
+    examples:
+    - '**Analyzing code variations**
+
+
+      I noticed that the print statement for ''top_keys'' includes ''messages'' and
+      possibly ''meta''. The ''content'' field is present, but not ''parts''. This
+      is a significant differe...'
+    - '**Checking definitions in repo**
+
+
+      I need to revisit the ''Codex-History'' repo without outputs to locate those
+      definitions. The remote origin is ''agent-sessions'', and its path is ''/Users/alexm/Repositor...'
+    - '**Planning structured scan**
+
+
+      I’m planning to run a structured scan again to get actual outputs. First, I’ll
+      execute a shell command to list 30 session files and identify the derived patterns.
+      Then I’...'
+  payload.timestamp:
+    types:
+    - str
+    frequency: 19/20 sessions
+    always_present: false
+    examples:
+    - '2025-10-14T01:39:53.767Z'
+    - '2025-10-15T03:03:59.642Z'
+    - '2025-10-14T00:27:20.127Z'
+  payload.type:
+    types:
+    - str
+    frequency: 11362/20 sessions
+    always_present: false
+    examples:
+    - message
+    - user_message
+    - token_count
+  record_type:
+    types:
+    - str
+    frequency: 1/20 sessions
+    always_present: false
+    examples:
+    - state
+  role:
+    types:
+    - str
+    frequency: 1/20 sessions
+    always_present: false
+    examples:
+    - user
+  timestamp:
+    types:
+    - str
+    frequency: 13310/20 sessions
+    always_present: false
+    examples:
+    - '2025-10-14T01:39:53.788Z'
+    - '2025-10-14T01:40:16.793Z'
+    - '2025-10-14T01:40:17.299Z'
+  type:
+    types:
+    - str
+    frequency: 13310/20 sessions
+    always_present: false
+    examples:
+    - session_meta
+    - response_item
+    - event_msg
+claude_fields:
+  cwd:
+    types:
+    - str
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - /Users/alexm
+    - /Users/alexm/Repository/Codex-History
+  gitBranch:
+    types:
+    - str
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - ''
+    - Claude-support
+  isMeta:
+    types:
+    - bool
+    frequency: 5/20 sessions
+    always_present: false
+    examples:
+    - 'True'
+  isSidechain:
+    types:
+    - bool
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - 'False'
+  leafUuid:
+    types:
+    - str
+    frequency: 31/20 sessions
+    always_present: false
+    examples:
+    - e9835d3a-a626-4911-9511-78b8c14a8fe3
+    - 8485dac6-f56a-48a8-80b3-6cc7cf3b3dc5
+    - 68c753b4-99e5-48f4-95f9-1da649ea273a
+  message:
+    types:
+    - dict
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - '{''role'': ''user'', ''content'': ''Caveat: The messages below were generated
+      by the user while running local commands. DO NOT respond to these messages or
+      otherwise consider them in your response unless the...'
+    - '{''role'': ''user'', ''content'': ''Unknown slash command: usage''}'
+  message.content:
+    types:
+    - str
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - 'Caveat: The messages below were generated by the user while running local commands.
+      DO NOT respond to these messages or otherwise consider them in your response
+      unless the user explicitly asks you to.'
+    - 'Unknown slash command: usage'
+  message.role:
+    types:
+    - str
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - user
+  parentUuid:
+    types:
+    - NoneType
+    - str
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - None
+    - e8b3d0cd-f8c8-4ee8-ae99-30d8added072
+    - da6f600f-d4fb-4344-aeda-0508dd7b7a11
+  sessionId:
+    types:
+    - str
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - 4ce78a01-60e7-456e-8d07-cd2cc381d79f
+    - 560e6c1e-69c9-426c-be75-91f1e9538bba
+    - c222db4b-9fcb-4da0-bebe-4aa88adf08c4
+  summary:
+    types:
+    - str
+    frequency: 31/20 sessions
+    always_present: false
+    examples:
+    - Troubleshooting Unknown Slash Command Error
+    - Local Command Execution and Screen Clearing
+    - Rclone Backup Script Development and Configuration
+  timestamp:
+    types:
+    - str
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - '2025-10-03T01:27:10.848Z'
+    - '2025-10-03T00:44:44.580Z'
+    - '2025-10-03T00:38:10.229Z'
+  type:
+    types:
+    - str
+    frequency: 41/20 sessions
+    always_present: false
+    examples:
+    - summary
+    - user
+  userType:
+    types:
+    - str
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - external
+  uuid:
+    types:
+    - str
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - e8b3d0cd-f8c8-4ee8-ae99-30d8added072
+    - e9835d3a-a626-4911-9511-78b8c14a8fe3
+    - da6f600f-d4fb-4344-aeda-0508dd7b7a11
+  version:
+    types:
+    - str
+    frequency: 10/20 sessions
+    always_present: false
+    examples:
+    - 2.0.5
+gemini_fields:
+  lastUpdated:
+    types:
+    - str
+    frequency: 3/3 sessions
+    always_present: false
+    examples:
+    - '2025-10-09T06:24:30.723Z'
+    - '2025-10-16T01:55:38.644Z'
+    - '2025-10-14T00:05:16.742Z'
+  messages:
+    types:
+    - list
+    frequency: 3/3 sessions
+    always_present: false
+    examples:
+    - '[{''id'': ''afd3a4ed-7295-4013-9b9a-473fb21f836f'', ''timestamp'': ''2025-10-09T06:23:55.857Z'',
+      ''type'': ''user'', ''content'': ''plan mode. zero edits or write access allowed.
+      all tools only read only. web search...'
+    - '[{''id'': ''7a2dfc6b-90cc-4e5f-98c0-35e775753bad'', ''timestamp'': ''2025-10-15T20:57:17.322Z'',
+      ''type'': ''user'', ''content'': ''read agents.md to follow rules''}, {''id'':
+      ''e7f03726-ea61-49c9-9d73-337169cb1b4c'', ''t...'
+    - '[{''id'': ''1e46fd92-99fa-4af3-87b6-37c0cd05cd0a'', ''timestamp'': ''2025-10-13T23:57:41.738Z'',
+      ''type'': ''user'', ''content'': ''analyze codebase and see how loading/parsing/searching/indexing
+      permofmance can be ...'
+  messages[].content:
+    types:
+    - str
+    frequency: 15/3 sessions
+    always_present: false
+    examples:
+    - plan mode. zero edits or write access allowed. all tools only read only. web
+      search is allowed.   analyze codebase , especially new highlight feature UI
+    - 'Okay, entering read-only planning mode. I will analyze the codebase, focusing
+      on the new highlight feature UI, without making any changes.
+
+
+      First, I''ll examine the contents of the `Triada/Highlights/`...'
+    - 'Okay, I see the files in the `Triada/Highlights/` directory. To understand
+      the UI, I''ll read the contents of what appear to be the most relevant UI-related
+      files: `HighlightModeButton.swift`, `Floatin...'
+  messages[].id:
+    types:
+    - str
+    frequency: 15/3 sessions
+    always_present: false
+    examples:
+    - afd3a4ed-7295-4013-9b9a-473fb21f836f
+    - fa3f0175-e4e2-4405-998f-72e2d5241995
+    - f9495be2-c1dd-40ba-8677-c076c8d2851f
+  messages[].model:
+    types:
+    - str
+    frequency: 7/3 sessions
+    always_present: false
+    examples:
+    - gemini-2.5-pro
+  messages[].thoughts:
+    types:
+    - list
+    frequency: 7/3 sessions
+    always_present: false
+    examples:
+    - '[{''subject'': ''Analyzing the Codebase'', ''description'': ''I\''m focusing
+      on the "new highlight feature UI," as requested. My initial scan of the file
+      list revealed a `Triada/Highlights` directory, which s...'
+    - '[{''subject'': ''Investigating the Code'', ''description'': "I''ve started
+      reading the files in `Triada/Highlights`. Right now, I''m focusing on understanding
+      the UI, and I''ve begun with `BrushCursor.swift`, ...'
+    - '[{''subject'': ''Evaluating the UI Components'', ''description'': "I''ve reviewed
+      `HighlightModeButton.swift`, `FloatingPaletteStrip.swift`, and `PaintCaptureOverlay.swift`.
+      I''m now analyzing the highlight f...'
+  messages[].thoughts[].description:
+    types:
+    - str
+    frequency: 24/3 sessions
+    always_present: false
+    examples:
+    - I'm focusing on the "new highlight feature UI," as requested. My initial scan
+      of the file list revealed a `Triada/Highlights` directory, which seems promising.
+      I'll begin by listing the files within t...
+    - I've listed the files within `Triada/Highlights`. Now, I'm moving on to reading
+      their contents. I expect to identify UI components and how they interact to
+      display highlighted content. This should giv...
+    - I've started reading the files in `Triada/Highlights`. Right now, I'm focusing
+      on understanding the UI, and I've begun with `BrushCursor.swift`, as expected.
+      I'm also looking at `DayGridMap.swift` for...
+  messages[].thoughts[].subject:
+    types:
+    - str
+    frequency: 24/3 sessions
+    always_present: false
+    examples:
+    - Analyzing the Codebase
+    - Enumerating Directory Contents
+    - Investigating the Code
+  messages[].thoughts[].timestamp:
+    types:
+    - str
+    frequency: 24/3 sessions
+    always_present: false
+    examples:
+    - '2025-10-09T06:23:58.660Z'
+    - '2025-10-09T06:23:59.956Z'
+    - '2025-10-09T06:24:02.822Z'
+  messages[].timestamp:
+    types:
+    - str
+    frequency: 15/3 sessions
+    always_present: false
+    examples:
+    - '2025-10-09T06:23:55.857Z'
+    - '2025-10-09T06:23:59.969Z'
+    - '2025-10-09T06:24:04.948Z'
+  messages[].tokens:
+    types:
+    - dict
+    frequency: 7/3 sessions
+    always_present: false
+    examples:
+    - '{''input'': 8375, ''output'': 79, ''cached'': 0, ''thoughts'': 160, ''tool'':
+      0, ''total'': 8614}'
+    - '{''input'': 8521, ''output'': 146, ''cached'': 0, ''thoughts'': 211, ''tool'':
+      0, ''total'': 8878}'
+    - '{''input'': 11992, ''output'': 832, ''cached'': 8166, ''thoughts'': 1283, ''tool'':
+      0, ''total'': 14107}'
+  messages[].tokens.cached:
+    types:
+    - int
+    frequency: 7/3 sessions
+    always_present: false
+    examples:
+    - '0'
+    - '8166'
+    - '16853'
+  messages[].tokens.input:
+    types:
+    - int
+    frequency: 7/3 sessions
+    always_present: false
+    examples:
+    - '8375'
+    - '8521'
+    - '11992'
+  messages[].tokens.output:
+    types:
+    - int
+    frequency: 7/3 sessions
+    always_present: false
+    examples:
+    - '79'
+    - '146'
+    - '832'
+  messages[].tokens.thoughts:
+    types:
+    - int
+    frequency: 7/3 sessions
+    always_present: false
+    examples:
+    - '160'
+    - '211'
+    - '1283'
+  messages[].tokens.tool:
+    types:
+    - int
+    frequency: 7/3 sessions
+    always_present: false
+    examples:
+    - '0'
+  messages[].tokens.total:
+    types:
+    - int
+    frequency: 7/3 sessions
+    always_present: false
+    examples:
+    - '8614'
+    - '8878'
+    - '14107'
+  messages[].type:
+    types:
+    - str
+    frequency: 15/3 sessions
+    always_present: false
+    examples:
+    - user
+    - gemini
+  projectHash:
+    types:
+    - str
+    frequency: 3/3 sessions
+    always_present: false
+    examples:
+    - 3d333da47869377b0d17226bcb6ebfca7cffeafe3d810959c7eab1b11ecaef82
+    - 205016864bd110904e9ad8314192344ab398d043e779da15bedbb9ee9be00da2
+  sessionId:
+    types:
+    - str
+    frequency: 3/3 sessions
+    always_present: false
+    examples:
+    - 1d129016-caf8-4790-bc0d-899e1133e923
+    - 55fcd497-5ab6-4f22-8b16-7cb9a94bd0bd
+  startTime:
+    types:
+    - str
+    frequency: 3/3 sessions
+    always_present: false
+    examples:
+    - '2025-10-09T06:23:55.856Z'
+    - '2025-10-15T20:57:17.321Z'
+    - '2025-10-13T23:57:41.738Z'
