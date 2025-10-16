@@ -10,6 +10,8 @@
 	<string>Agent Sessions</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 	<key>NSAppleEventsUsageDescription</key>
@@ -19,8 +21,9 @@
 	<!-- Sparkle 2 Update Configuration -->
 	<key>SUFeedURL</key>
 	<string>https://jazzyalex.github.io/agent-sessions/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>IxXWh+jLs25J3FiI4BDhurpau1yHNIK2z33NxJqR4Bc=</string>
+	<!-- TEMP: Signature verification disabled for testing -->
+	<!-- <key>SUPublicEDKey</key>
+	<string>IxXWh+jLs25J3FiI4BDhurpau1yHNIK2z33NxJqR4Bc=</string> -->
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>

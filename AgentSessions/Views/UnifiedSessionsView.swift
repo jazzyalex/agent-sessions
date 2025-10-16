@@ -12,6 +12,7 @@ struct UnifiedSessionsView: View {
     @ObservedObject var geminiIndexer: GeminiSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
+    @EnvironmentObject var updaterController: UpdaterController
 
     let layoutMode: LayoutMode
     let onToggleLayout: () -> Void
@@ -21,6 +22,7 @@ struct UnifiedSessionsView: View {
     @State private var sortOrder: [KeyPathComparator<Session>] = []
     @State private var cachedRows: [Session] = []
     @AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
+    @AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
     @AppStorage("UnifiedShowCodexStrip") private var showCodexStrip: Bool = false
     @AppStorage("UnifiedShowClaudeStrip") private var showClaudeStrip: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
@@ -142,7 +144,8 @@ struct UnifiedSessionsView: View {
                     Label("Favorites", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
                 }
                 .toggleStyle(.button)
-                .help("Show only favorited sessions")
+                .disabled(!showStarColumn)
+                .help(showStarColumn ? "Show only favorited sessions" : "Enable star column in Preferences to use favorites")
                 .accessibilityLabel("Favorites Only")
             }
             ToolbarItem(placement: .automatic) {
@@ -176,7 +179,7 @@ struct UnifiedSessionsView: View {
                     .help("Toggle between vertical and horizontal layout modes (⌘L)")
             }
             ToolbarItem(placement: .automatic) {
-                Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, initialTab: .general) }) { Image(systemName: "gear") }
+                Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController, initialTab: .general) }) { Image(systemName: "gear") }
                     .keyboardShortcut(",", modifiers: .command)
                     .help("Open preferences for appearance, indexing, and agents (⌘,)")
             }
@@ -232,14 +235,16 @@ struct UnifiedSessionsView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(!stripMonochrome ? sourceAccent(s) : .secondary)
                     Spacer(minLength: 4)
-                    Button(action: { unified.toggleFavorite(s.id) }) {
-                        Image(systemName: s.isFavorite ? "star.fill" : "star")
-                            .imageScale(.medium)
-                            .foregroundStyle(.primary)
+                    if showStarColumn {
+                        Button(action: { unified.toggleFavorite(s.id) }) {
+                            Image(systemName: s.isFavorite ? "star.fill" : "star")
+                                .imageScale(.medium)
+                                .foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                        .accessibilityLabel(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
                     }
-                    .buttonStyle(.plain)
-                    .help(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
-                    .accessibilityLabel(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
                 }
             }
             .width(min: showSourceColumn ? 90 : 0, ideal: showSourceColumn ? 100 : 0, max: showSourceColumn ? 120 : 0)

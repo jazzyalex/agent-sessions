@@ -111,7 +111,9 @@ struct ClaudeSessionsView: View {
             }
             ToolbarItem(placement: .automatic) {
                 Button(action: {
-                    PreferencesWindowController.shared.show(indexer: codexIndexer, initialTab: .general)
+                    if let updater = UpdaterController.shared {
+                        PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updater, initialTab: .general)
+                    }
                 }) {
                     Image(systemName: "gear")
                 }

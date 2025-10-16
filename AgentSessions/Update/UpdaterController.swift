@@ -21,6 +21,11 @@ import Sparkle
 @MainActor
 final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
 
+    // MARK: - Shared Instance
+
+    /// Shared instance for app-wide access (set by App during initialization)
+    static weak var shared: UpdaterController?
+
     // MARK: - Published State
 
     /// Indicates whether a gentle reminder should be shown (update available but app was in background).
@@ -37,12 +42,31 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
         super.init()
 
         // Initialize Sparkle controller with self as delegates
-        // In Sparkle 2.8+, delegates are passed during initialization
+        // Use startingUpdater: false to avoid early initialization errors
         self.controller = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: false,
             updaterDelegate: self,
             userDriverDelegate: self
         )
+
+        // Delay starting the updater to avoid launch errors
+        // This makes the updater ready for manual checks while avoiding early errors
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self = self else { return }
+
+            // Start the updater (required when startingUpdater: false)
+            do {
+                try self.controller.updater.start()
+                print("Updater started successfully")
+
+                // Schedule background check after updater is started
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                    self.controller.updater.checkForUpdatesInBackground()
+                }
+            } catch {
+                print("Failed to start updater - \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - Public API
@@ -57,6 +81,7 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     ///
     /// - Parameter sender: The menu item or button that triggered the action
     @objc func checkForUpdates(_ sender: Any?) {
+        print("UpdaterController: Manual check for updates triggered")
         controller.checkForUpdates(sender)
     }
 
@@ -64,7 +89,7 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
 
     /// Enables gentle reminder support for menu bar apps.
     /// When true, Sparkle won't show update alerts immediately during background checks.
-    var supportsGentleScheduledUpdateReminders: Bool {
+    nonisolated var supportsGentleScheduledUpdateReminders: Bool {
         true
     }
 
@@ -75,7 +100,7 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     ///   - update: The available update
     ///   - immediateFocus: Whether the app is currently in focus
     /// - Returns: true to show Sparkle UI immediately, false to defer to gentle reminder
-    func standardUserDriverShouldHandleShowingScheduledUpdate(
+    nonisolated func standardUserDriverShouldHandleShowingScheduledUpdate(
         _ update: SUAppcastItem,
         andInImmediateFocus immediateFocus: Bool
     ) -> Bool {
@@ -91,74 +116,81 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     ///   - handleShowingUpdate: Whether Sparkle will show its UI
     ///   - update: The available update
     ///   - state: Current update state
-    func standardUserDriverWillHandleShowingUpdate(
+    nonisolated func standardUserDriverWillHandleShowingUpdate(
         _ handleShowingUpdate: Bool,
         forUpdate update: SUAppcastItem,
         state: SPUUserUpdateState
     ) {
-        guard !handleShowingUpdate else {
-            // Sparkle is showing UI, clear any gentle reminder
-            hasGentleReminder = false
-            return
+        Task { @MainActor in
+            guard !handleShowingUpdate else {
+                // Sparkle is showing UI, clear any gentle reminder
+                hasGentleReminder = false
+                return
+            }
+
+            // Sparkle is NOT showing UI (app was in background)
+            // Activate gentle reminder so we can show a subtle indicator
+            hasGentleReminder = true
+
+            // Optional: Post a user notification
+            // postUpdateNotification(for: update)
         }
-
-        // Sparkle is NOT showing UI (app was in background)
-        // Activate gentle reminder so we can show a subtle indicator
-        hasGentleReminder = true
-
-        // Optional: Post a user notification
-        // postUpdateNotification(for: update)
     }
 
     /// Called when the user focuses the updater (clicks menu item or badge).
     /// Clear the gentle reminder since Sparkle will now show its UI.
     ///
     /// - Parameter update: The available update
-    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
-        hasGentleReminder = false
+    nonisolated func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        Task { @MainActor in
+            hasGentleReminder = false
+        }
     }
 
     /// Called when the update session finishes (user installed, skipped, or dismissed).
     /// Clear the gentle reminder.
-    func standardUserDriverWillFinishUpdateSession() {
-        hasGentleReminder = false
+    nonisolated func standardUserDriverWillFinishUpdateSession() {
+        Task { @MainActor in
+            hasGentleReminder = false
+        }
     }
 
     // MARK: - SPUUpdaterDelegate (Optional Customization)
 
-    /// Called before Sparkle checks for updates.
+    /// Called before updater checks for updates.
     /// Useful for logging or analytics.
-    func updaterWillCheckForUpdates(_ updater: SPUUpdater) {
-        print("Sparkle: Checking for updates...")
+    nonisolated func updaterMayCheck(forUpdates updater: SPUUpdater) -> Bool {
+        print("Checking for updates...")
+        return true
     }
 
-    /// Called after Sparkle finishes checking for updates.
+    /// Called after updater finishes checking for updates.
     ///
     /// - Parameters:
     ///   - updater: The updater
     ///   - error: Error if check failed, nil if successful
-    func updaterDidFinishCheckingForUpdates(_ updater: SPUUpdater, error: Error?) {
+    nonisolated func updaterDidFinishCheckingForUpdates(_ updater: SPUUpdater, error: Error?) {
         if let error = error {
-            print("Sparkle: Update check failed - \(error.localizedDescription)")
+            print("Update check failed - \(error.localizedDescription)")
         } else {
-            print("Sparkle: Update check completed")
+            print("Update check completed")
         }
     }
 
-    /// Called when Sparkle finds a valid update.
+    /// Called when updater finds a valid update.
     ///
     /// - Parameters:
     ///   - updater: The updater
     ///   - item: The update item
-    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
-        print("Sparkle: Update available - \(item.displayVersionString)")
+    nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        print("Update available - \(item.displayVersionString)")
     }
 
-    /// Called when Sparkle determines the user is on the latest version.
+    /// Called when updater determines the user is on the latest version.
     ///
     /// - Parameter updater: The updater
-    func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
-        print("Sparkle: Already up to date")
+    nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        print("Already up to date")
     }
 
     // MARK: - Helper Methods (Optional)

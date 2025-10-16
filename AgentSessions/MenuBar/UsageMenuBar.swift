@@ -243,14 +243,20 @@ struct UsageMenuBarMenuContent: View {
             }
             Toggle("Show in-app usage strip", isOn: $showUsageStrip)
             Divider()
-            Button("Open Preferences…") { PreferencesWindowController.shared.show(indexer: indexer, initialTab: .usageTracking) }
+            Button("Open Preferences…") {
+                if let updater = UpdaterController.shared {
+                    PreferencesWindowController.shared.show(indexer: indexer, updaterController: updater, initialTab: .usageTracking)
+                }
+            }
         }
         .padding(8)
         .frame(minWidth: 360)
     }
 
     private func openPreferencesUsage() {
-        PreferencesWindowController.shared.show(indexer: indexer, initialTab: .usageTracking)
+        if let updater = UpdaterController.shared {
+            PreferencesWindowController.shared.show(indexer: indexer, updaterController: updater, initialTab: .usageTracking)
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
 

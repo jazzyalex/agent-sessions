@@ -8,9 +8,11 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
     private var hostingController: NSHostingController<AnyView>?
 
     func show(indexer: SessionIndexer,
+              updaterController: UpdaterController,
               initialTab: PreferencesTab = .general) {
         let root = PreferencesView(initialTab: initialTab)
             .environmentObject(indexer)
+            .environmentObject(updaterController)
         let wrapped = AnyView(root)
 
         if let win = window, let hosting = hostingController {

@@ -8,8 +8,11 @@ struct AgentSessionsApp: App {
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @StateObject private var geminiIndexer = GeminiSessionIndexer()
-    @StateObject private var updaterController =
-    UpdaterController()
+    @StateObject private var updaterController = {
+        let controller = UpdaterController()
+        UpdaterController.shared = controller
+        return controller
+    }()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @State private var statusItemController: StatusItemController? = nil
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
@@ -39,6 +42,7 @@ struct AgentSessionsApp: App {
                                 })
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
+                .environmentObject(updaterController)
                 .background(WindowAutosave(name: "MainWindow"))
                 .onAppear {
                     unifiedIndexerHolder.unified?.refresh()
@@ -63,7 +67,7 @@ struct AgentSessionsApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Agent Sessions") {
-                    PreferencesWindowController.shared.show(indexer: indexer, initialTab: .about)
+                    PreferencesWindowController.shared.show(indexer: indexer, updaterController: updaterController, initialTab: .about)
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 Divider()
@@ -75,7 +79,7 @@ struct AgentSessionsApp: App {
                 Button("Refresh") { unifiedIndexerHolder.unified?.refresh() }.keyboardShortcut("r", modifiers: .command)
                 Button("Find in Transcript") { /* unified find focuses handled in view */ }.keyboardShortcut("f", modifiers: .command).disabled(true)
             }
-            CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer) }.keyboardShortcut(",", modifiers: .command) }
+            CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer, updaterController: updaterController) }.keyboardShortcut(",", modifiers: .command) }
             // View menu with Favorites Only toggle (stateful)
             CommandMenu("View") {
                 // Bind through UserDefaults so it persists; also forward to unified when it changes

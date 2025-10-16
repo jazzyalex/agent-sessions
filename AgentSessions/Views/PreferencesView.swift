@@ -5,6 +5,7 @@ private let labelColumnWidth: CGFloat = 170
 
 struct PreferencesView: View {
     @EnvironmentObject var indexer: SessionIndexer
+    @EnvironmentObject var updaterController: UpdaterController
     @State private var selectedTab: PreferencesTab?
     // Persist last-selected tab for smoother navigation across launches
     @AppStorage("PreferencesLastSelectedTab") private var lastSelectedTabRaw: String = PreferencesTab.general.rawValue
@@ -292,6 +293,11 @@ struct PreferencesView: View {
                         .help("Show or hide message counts in the Sessions list")
                     Toggle("Modified date", isOn: $indexer.showModifiedColumn)
                         .help("Show or hide the modified date column")
+                    Toggle("Star in column", isOn: Binding(
+                        get: { UserDefaults.standard.object(forKey: "UnifiedShowStarColumn") as? Bool ?? true },
+                        set: { UserDefaults.standard.set($0, forKey: "UnifiedShowStarColumn") }
+                    ))
+                    .help("Show or hide the favorite star button in the CLI Agent column")
                 }
                 // Micro-header for filters
                 Text("Filters")
@@ -860,9 +866,9 @@ struct PreferencesView: View {
                 if let appIcon = NSImage(named: NSImage.applicationIconName) {
                     Image(nsImage: appIcon)
                         .resizable()
-                        .frame(width: 128, height: 128)
-                        .cornerRadius(16)
-                        .shadow(radius: 4)
+                        .frame(width: 85, height: 85)
+                        .cornerRadius(11)
+                        .shadow(radius: 3)
                 }
                 Spacer()
             }
@@ -912,74 +918,27 @@ struct PreferencesView: View {
 
             sectionHeader("Updates")
             VStack(alignment: .leading, spacing: 12) {
-                // Update status
-                switch UpdateCheckModel.shared.state {
-                case .idle:
-                    Text("Updates have not been checked yet")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Text("Agent Sessions uses automatic updates to keep you up to date with the latest features and bug fixes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                case .checking:
+                if updaterController.hasGentleReminder {
                     HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Checking for updates...")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                case .available(let version, let releaseURL, let assetURL):
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Version \(version) is available")
-                            .font(.headline)
-                            .foregroundStyle(.green)
-
-                        HStack(spacing: 8) {
-                            Button("Release Notes") {
-                                UpdateCheckModel.shared.openURL(releaseURL)
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Open release notes in your browser")
-
-                            Button("Download") {
-                                UpdateCheckModel.shared.openURL(assetURL)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .help("Download the latest version")
-
-                            Button("Skip Launch Dialog") {
-                                UpdateCheckModel.shared.skipVersionForLaunchOnly(version)
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Don't show update dialog on launch for this version")
-                        }
-                    }
-
-                case .upToDate:
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("You're up to date")
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundStyle(.blue)
+                        Text("An update is available")
                             .font(.subheadline)
-                    }
-
-                case .error(let message):
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                        Text("Error: \(message)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.blue)
                     }
                 }
 
                 Divider()
 
-                Button("Check for Updates") {
-                    UpdateCheckModel.shared.checkManually()
+                Button("Check for Updates...") {
+                    updaterController.checkForUpdates(nil)
                 }
                 .buttonStyle(.bordered)
-                .help("Manually check for new versions")
+                .help("Check for new versions and install updates")
             }
 
             Spacer()

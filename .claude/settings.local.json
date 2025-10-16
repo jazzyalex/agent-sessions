@@ -119,7 +119,17 @@
       "Bash(pip install:*)",
       "Bash(python:*)",
       "Bash(DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib python generate_assets.py)",
-      "WebFetch(domain:commons.wikimedia.org)"
+      "WebFetch(domain:commons.wikimedia.org)",
+      "Bash(gemini:*)",
+      "Bash(swift:*)",
+      "Bash(/Users/alexm/Library/Developer/Xcode/DerivedData/AgentSessions-gwsclzavdbgeubaxduodxdziqbpo/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys)",
+      "Bash(security dump-keychain:*)",
+      "Bash(/Users/alexm/Library/Developer/Xcode/DerivedData/AgentSessions-gwsclzavdbgeubaxduodxdziqbpo/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update:*)",
+      "Bash(/usr/libexec/PlistBuddy:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(killall:*)",
+      "Bash(~/Library/Developer/Xcode/DerivedData/AgentSessions-gwsclzavdbgeubaxduodxdziqbpo/Build/Products/Debug/AgentSessions.app/Contents/MacOS/AgentSessions)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []
