@@ -7,6 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		6C959E13B3E34DB886484076 /* AnalyticsData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52343E9958A54E9987227D4A /* AnalyticsData.swift */; };
+		D7F1E4B0917E4B5B9044E08D /* AnalyticsDateRange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A1B977F038F41EDA841A08C /* AnalyticsDateRange.swift */; };
+		D22D5596AE304723BFB6B490 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D16E742E5604163A332C366 /* AnalyticsService.swift */; };
+		64888E382DCD41289C115461 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43373461163E432CB25162BC /* AnalyticsView.swift */; };
+		7DFB34C2A8424B979CF51CAB /* AnalyticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */; };
+		BF169B05FC63470E9B57D885 /* StatsCardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */; };
+		0607E3C9601249EB88184B34 /* SessionsChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CF78727ECB14792AD0BA9B5 /* SessionsChartView.swift */; };
+		18A5856CDE654957BE6AF163 /* AgentBreakdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */; };
+		C0DA70FF08934B0990583766 /* TimeOfDayHeatmapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */; };
+		A58656799124497ABF30B977 /* AnalyticsColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46836E5B412F42D6B157696B /* AnalyticsColors.swift */; };
+		73847F36998344AAB1C1D7D7 /* AnalyticsDesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138C30E0F474484AAA4DCED9 /* AnalyticsDesignTokens.swift */; };
+
 		09C4E2A7C54B4EA3BF4473C7 /* CodexVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3233D9D6CE429AB0173B04 /* CodexVersion.swift */; };
 		1AB05D2296DC475580CB52EF /* CodexResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */; };
 		1D0AD620E3E044DB875B125B /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B86A8EFF02D440EADEB98F0 /* UpdateChecker.swift */; };
@@ -104,6 +116,18 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		52343E9958A54E9987227D4A /* AnalyticsData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsData.swift; sourceTree = "<group>"; };
+		8A1B977F038F41EDA841A08C /* AnalyticsDateRange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsDateRange.swift; sourceTree = "<group>"; };
+		6D16E742E5604163A332C366 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
+		43373461163E432CB25162BC /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
+		474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsWindowController.swift; sourceTree = "<group>"; };
+		06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsCardsView.swift; sourceTree = "<group>"; };
+		4CF78727ECB14792AD0BA9B5 /* SessionsChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsChartView.swift; sourceTree = "<group>"; };
+		8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentBreakdownView.swift; sourceTree = "<group>"; };
+		9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeOfDayHeatmapView.swift; sourceTree = "<group>"; };
+		46836E5B412F42D6B157696B /* AnalyticsColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsColors.swift; sourceTree = "<group>"; };
+		138C30E0F474484AAA4DCED9 /* AnalyticsDesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsDesignTokens.swift; sourceTree = "<group>"; };
+
 		001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeSettings.swift; path = AgentSessions/Resume/CodexResumeSettings.swift; sourceTree = SOURCE_ROOT; };
 		16EEA49AD2C64DCF8BDC1241 /* SemanticVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SemanticVersion.swift; path = AgentSessions/Update/SemanticVersion.swift; sourceTree = SOURCE_ROOT; };
 		27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeminiCLIEnvironment.swift; path = AgentSessions/Services/GeminiCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
@@ -218,6 +242,57 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0FF63C2F73D54446A78670EE /* Analytics */ = {
+			isa = PBXGroup;
+			children = (
+				E4D5B62C423841098D8F8889 /* Models */,
+				0BC8114940FE4C7E8D36AE14 /* Services */,
+				1A3AAACD042D43C081439AB9 /* Views */,
+				107B0D1FA6AA4508B77668B4 /* Utilities */,
+			);
+			path = Analytics;
+			sourceTree = "<group>";
+		};
+		E4D5B62C423841098D8F8889 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				52343E9958A54E9987227D4A /* AnalyticsData.swift */,
+				8A1B977F038F41EDA841A08C /* AnalyticsDateRange.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		0BC8114940FE4C7E8D36AE14 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				6D16E742E5604163A332C366 /* AnalyticsService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		1A3AAACD042D43C081439AB9 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				43373461163E432CB25162BC /* AnalyticsView.swift */,
+				474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */,
+				06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */,
+				4CF78727ECB14792AD0BA9B5 /* SessionsChartView.swift */,
+				8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */,
+				9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		107B0D1FA6AA4508B77668B4 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				46836E5B412F42D6B157696B /* AnalyticsColors.swift */,
+				138C30E0F474484AAA4DCED9 /* AnalyticsDesignTokens.swift */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
+
 		193183E356AF4718A7B9CB7F /* Resume */ = {
 			isa = PBXGroup;
 			children = (
@@ -290,6 +365,7 @@
 				CLC000030000000000000001 /* ClaudeStatus */,
 				CLC000040000000000000001 /* Resources */,
 				B00000112A0A000100000001 /* AgentSessionsApp.swift */,
+				0FF63C2F73D54446A78670EE /* Analytics */,
 			);
 			path = AgentSessions;
 			sourceTree = SOURCE_ROOT;
@@ -636,7 +712,18 @@
 				C124E15F9EF049399D9F4FCA /* GeminiCLISettings.swift in Sources */,
 				79F828CD9CA64FBFA8A436FA /* GeminiCLIEnvironment.swift in Sources */,
 				53736755F3AD431D8FD488AF /* UpdaterController.swift in Sources */,
-			);
+							6C959E13B3E34DB886484076 /* AnalyticsData.swift in Sources */,
+				D7F1E4B0917E4B5B9044E08D /* AnalyticsDateRange.swift in Sources */,
+				D22D5596AE304723BFB6B490 /* AnalyticsService.swift in Sources */,
+				64888E382DCD41289C115461 /* AnalyticsView.swift in Sources */,
+				7DFB34C2A8424B979CF51CAB /* AnalyticsWindowController.swift in Sources */,
+				BF169B05FC63470E9B57D885 /* StatsCardsView.swift in Sources */,
+				0607E3C9601249EB88184B34 /* SessionsChartView.swift in Sources */,
+				18A5856CDE654957BE6AF163 /* AgentBreakdownView.swift in Sources */,
+				C0DA70FF08934B0990583766 /* TimeOfDayHeatmapView.swift in Sources */,
+				A58656799124497ABF30B977 /* AnalyticsColors.swift in Sources */,
+				73847F36998344AAB1C1D7D7 /* AnalyticsDesignTokens.swift in Sources */,
+);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B00000132A0A000100000001 /* Sources */ = {

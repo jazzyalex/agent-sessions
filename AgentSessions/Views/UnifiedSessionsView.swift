@@ -148,6 +148,10 @@ struct UnifiedSessionsView: View {
                 .help(showStarColumn ? "Show only favorited sessions" : "Enable star column in Preferences to use favorites")
                 .accessibilityLabel("Favorites Only")
             }
+            // Analytics button
+            ToolbarItem(placement: .automatic) {
+                AnalyticsButtonView()
+            }
             ToolbarItem(placement: .automatic) {
                 Button(action: { if let s = selectedSession { resume(s) } }) {
                     Label("Resume", systemImage: "play.circle")
@@ -942,4 +946,25 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
         if tf.placeholderString != placeholder { tf.placeholderString = placeholder }
         // Don't rely on isFirstResponder binding - already set in makeNSView
     }
+}
+
+// MARK: - Analytics Button
+
+private struct AnalyticsButtonView: View {
+    // Access via app-level notification instead of environment
+    var body: some View {
+        Button(action: {
+            NotificationCenter.default.post(name: .toggleAnalytics, object: nil)
+        }) {
+            Label("Analytics", systemImage: "chart.bar.xaxis")
+        }
+        .buttonStyle(.bordered)
+        .keyboardShortcut("k", modifiers: .command)
+        .help("View usage analytics (⌘K)")
+    }
+}
+
+// Notification for Analytics toggle
+private extension Notification.Name {
+    static let toggleAnalytics = Notification.Name("ToggleAnalyticsWindow")
 }

@@ -22,7 +22,7 @@ struct PreferencesView: View {
     @AppStorage("StripShowResetTime") private var stripShowResetTime: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochromeGlobal: Bool = false
     @AppStorage("HideZeroMessageSessions") private var hideZeroMessageSessionsPref: Bool = true
-    @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = false
+    @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = true
     @AppStorage("UsagePollingInterval") private var usagePollingInterval: Int = 120 // seconds (default 2 min)
 
     init(initialTab: PreferencesTab = .general) {

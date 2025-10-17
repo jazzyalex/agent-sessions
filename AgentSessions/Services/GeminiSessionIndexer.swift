@@ -71,7 +71,7 @@ final class GeminiSessionIndexer: ObservableObject {
                 var results = FilterEngine.filterSessions(all, filters: filters)
                 // Mirror default prefs behavior for message count filters
                 let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
-                let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? false
+                let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? true
                 if hideZero { results = results.filter { $0.messageCount > 0 } }
                 if hideLow { results = results.filter { $0.messageCount > 2 } }
                 return results
@@ -160,7 +160,7 @@ final class GeminiSessionIndexer: ObservableObject {
         let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
         var results = FilterEngine.filterSessions(allSessions, filters: filters)
         let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
-        let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? false
+        let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? true
         if hideZero { results = results.filter { $0.messageCount > 0 } }
         if hideLow { results = results.filter { $0.messageCount > 2 } }
         DispatchQueue.main.async { self.sessions = results }
@@ -225,6 +225,52 @@ final class GeminiSessionIndexer: ObservableObject {
                 }
             }
         }
+    }
+
+    // Parse all lightweight sessions (for Analytics or full-index use cases)
+    func parseAllSessionsFull(progress: @escaping (Int, Int) -> Void) async {
+        let lightweightSessions = allSessions.filter { $0.events.isEmpty }
+        guard !lightweightSessions.isEmpty else {
+            print("ℹ️ No lightweight Gemini sessions to parse")
+            return
+        }
+
+        print("🔍 Starting full parse of \(lightweightSessions.count) lightweight Gemini sessions")
+
+        for (index, session) in lightweightSessions.enumerated() {
+            guard let url = URL(string: "file://\(session.filePath)") else { continue }
+
+            // Report progress on main thread
+            await MainActor.run {
+                progress(index + 1, lightweightSessions.count)
+            }
+
+            // Parse on background thread
+            let fullSession = await Task.detached(priority: .userInitiated) {
+                return GeminiSessionParser.parseFileFull(at: url)
+            }.value
+
+            // Update allSessions on main thread
+            if let fullSession = fullSession {
+                await MainActor.run {
+                    if let idx = self.allSessions.firstIndex(where: { $0.id == session.id }) {
+                        self.allSessions[idx] = fullSession
+                        self.unreadableSessionIDs.remove(session.id)
+
+                        // Update transcript cache
+                        let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
+                        let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
+                            session: fullSession,
+                            filters: filters,
+                            mode: .normal
+                        )
+                        self.transcriptCache.set(fullSession.id, transcript: transcript)
+                    }
+                }
+            }
+        }
+
+        print("✅ Completed parsing \(lightweightSessions.count) lightweight Gemini sessions")
     }
 
     // Update an existing session after full parse (used by SearchCoordinator)

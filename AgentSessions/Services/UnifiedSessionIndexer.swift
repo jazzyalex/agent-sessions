@@ -68,7 +68,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @AppStorage("HideZeroMessageSessions") private var hideZeroMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }
     }
-    @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = false {
+    @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }
     }
 

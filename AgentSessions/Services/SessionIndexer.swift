@@ -129,7 +129,7 @@ final class SessionIndexer: ObservableObject {
     @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }
     }
-    @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = false {
+    @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }
     }
     @AppStorage("SelectedKindsRaw") private var selectedKindsRaw: String = ""
@@ -346,6 +346,56 @@ final class SessionIndexer: ObservableObject {
                 }
             }
         }
+    }
+
+    // Parse all lightweight sessions (for Analytics or full-index use cases)
+    func parseAllSessionsFull(progress: @escaping (Int, Int) -> Void) async {
+        let lightweightSessions = allSessions.filter { $0.events.isEmpty }
+        guard !lightweightSessions.isEmpty else {
+            print("ℹ️ No lightweight sessions to parse")
+            return
+        }
+
+        print("🔍 Starting full parse of \(lightweightSessions.count) lightweight Codex sessions")
+
+        for (index, session) in lightweightSessions.enumerated() {
+            let url = URL(fileURLWithPath: session.filePath)
+
+            // Report progress on main thread
+            await MainActor.run {
+                progress(index + 1, lightweightSessions.count)
+            }
+
+            // Parse on background thread
+            let fullSession = await Task.detached(priority: .userInitiated) {
+                return self.parseFileFull(at: url)
+            }.value
+
+            // Update allSessions on main thread
+            if let fullSession = fullSession {
+                await MainActor.run {
+                    if let idx = self.allSessions.firstIndex(where: { $0.id == session.id }) {
+                        var updated = self.allSessions
+                        updated[idx] = fullSession
+                        self.allSessions = updated
+
+                        // Update transcript cache
+                        let cache = self.transcriptCache
+                        Task.detached(priority: .utility) {
+                            let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
+                            let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
+                                session: fullSession,
+                                filters: filters,
+                                mode: .normal
+                            )
+                            cache.set(fullSession.id, transcript: transcript)
+                        }
+                    }
+                }
+            }
+        }
+
+        print("✅ Completed parsing \(lightweightSessions.count) lightweight Codex sessions")
     }
 
     // Trigger recompute of filtered sessions using current filters (debounced and off main thread).

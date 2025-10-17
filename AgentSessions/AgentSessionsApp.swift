@@ -28,6 +28,10 @@ struct AgentSessionsApp: App {
     @State private var focusSearchToggle: Bool = false
     // Legacy first-run prompt removed
 
+    // Analytics
+    @State private var analyticsService: AnalyticsService?
+    @State private var analyticsWindowController: AnalyticsWindowController?
+
     var body: some Scene {
         // Default unified window
         WindowGroup("Agent Sessions") {
@@ -47,6 +51,7 @@ struct AgentSessionsApp: App {
                 .onAppear {
                     unifiedIndexerHolder.unified?.refresh()
                     updateUsageModels()
+                    setupAnalytics()
                 }
                 .onChange(of: showUsageStrip) { _, _ in
                     updateUsageModels()
@@ -133,6 +138,33 @@ extension AgentSessionsApp {
         // Claude usage must be explicitly allowed via "Activate Claude usage"
         let claudeExperimental = d.bool(forKey: "ShowClaudeUsageStrip")
         claudeUsageModel.setEnabled(claudeExperimental)
+    }
+
+    private func setupAnalytics() {
+        guard analyticsService == nil else { return }
+
+        // Create analytics service with indexers
+        let service = AnalyticsService(
+            codexIndexer: indexer,
+            claudeIndexer: claudeIndexer,
+            geminiIndexer: geminiIndexer
+        )
+        analyticsService = service
+
+        // Create window controller
+        let controller = AnalyticsWindowController(service: service)
+        analyticsWindowController = controller
+
+        // Observe toggle notifications
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("ToggleAnalyticsWindow"),
+            object: nil,
+            queue: .main
+        ) { [weak controller] _ in
+            Task { @MainActor in
+                controller?.toggle()
+            }
+        }
     }
 }
 // (Legacy ContentView and FirstRunPrompt removed)

@@ -298,10 +298,10 @@ VStack(spacing: 0) {
   - All Time: Monthly aggregation
 - Y-Axis: Session count, auto-scaling
 - Grid Lines: Horizontal only, `.quaternary` color
-- Colors: 
-  - Codex: `.blue` (primary accent)
-  - Claude: `.orange` (secondary accent)
-  - Gemini: `.green` (tertiary)
+- Colors:
+  - Codex: `.blue` (system blue)
+  - Claude: `Color(red: 204/255, green: 121/255, blue: 90/255)` (terracotta)
+  - Gemini: `.teal` (system teal)
 - Bar Width: Auto-calculated, 2pt spacing
 - Corner Radius: 4pt on bars
 - Animation: `.easeInOut` on data changes
@@ -335,7 +335,8 @@ Chart(data) { item in
 }
 .chartForegroundStyleScale([
     "Codex": .blue,
-    "Claude": .orange
+    "Claude": Color(red: 204/255, green: 121/255, blue: 90/255),
+    "Gemini": .teal
 ])
 .chartXAxis {
     AxisMarks(values: .automatic) { _ in
@@ -549,8 +550,8 @@ Total:            ~696pt (fits in 700pt min height)
 
 ### Accent Colors (Agent Identity)
 - **Codex:** `Color.blue` (system blue)
-- **Claude:** `Color.orange` (system orange)
-- **Gemini:** `Color.green` (system green)
+- **Claude:** `Color(red: 204/255, green: 121/255, blue: 90/255)` (terracotta)
+- **Gemini:** `Color.teal` (system teal)
 - **All/Mixed:** `Color.accentColor` (user's preference)
 
 ### Status Colors
@@ -763,8 +764,8 @@ enum AnalyticsDesign {
     
     // Colors
     static let codexColor = Color.blue
-    static let claudeColor = Color.orange
-    static let geminiColor = Color.green
+    static let claudeColor = Color(red: 204/255, green: 121/255, blue: 90/255)
+    static let geminiColor = Color.teal
     
     // Auto-refresh
     static let refreshInterval: TimeInterval = 300 // 5 minutes
