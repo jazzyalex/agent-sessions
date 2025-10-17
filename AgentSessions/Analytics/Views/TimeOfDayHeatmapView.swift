@@ -22,7 +22,7 @@ struct TimeOfDayHeatmapView: View {
                 // Most Active label - placed below grid with clear separation
                 if let mostActive = mostActive {
                     Text("Most Active: \(mostActive)")
-                        .font(.caption)
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .lineLimit(1)
@@ -39,15 +39,15 @@ struct TimeOfDayHeatmapView: View {
 
     private var heatmap: some View {
         GeometryReader { geometry in
-            let dayLabelWidth: CGFloat = 24
-            let cellSpacing: CGFloat = 3
+            let dayLabelWidth: CGFloat = 28
+            let cellSpacing: CGFloat = 4
             let totalSpacingX = cellSpacing * 7 // 7 gaps between 8 columns
             let availableWidth = geometry.size.width - dayLabelWidth - totalSpacingX
 
             // Constrain cell size by BOTH width and height so the grid never
             // overflows its container (which previously caused the label to
             // visually overlap the bottom rows).
-            let hourLabelHeight: CGFloat = 12 // approx caption2 height
+            let hourLabelHeight: CGFloat = 14 // approx caption2/footnote height
             let rowCount: CGFloat = 7
             let totalSpacingY = cellSpacing * (rowCount) // 6 gaps + 1 between header and first row
             let availableHeight = max(0, geometry.size.height - hourLabelHeight - totalSpacingY)
