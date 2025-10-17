@@ -4,8 +4,8 @@ import SwiftUI
 /// Based on analytics-design-guide.md specifications
 enum AnalyticsDesign {
     // MARK: - Window
-    static let defaultSize = CGSize(width: 900, height: 650)
-    static let minimumSize = CGSize(width: 700, height: 500)
+    static let defaultSize = CGSize(width: 1100, height: 860)
+    static let minimumSize = CGSize(width: 1100, height: 860)
 
     // MARK: - Spacing
     static let windowPadding: CGFloat = 20
@@ -17,7 +17,8 @@ enum AnalyticsDesign {
     static let headerHeight: CGFloat = 60
     static let statsCardHeight: CGFloat = 100
     static let primaryChartHeight: CGFloat = 280
-    static let secondaryCardHeight: CGFloat = 270
+    static let secondaryCardHeight: CGFloat = 300
+    static let heatmapGridHeight: CGFloat = 210
 
     // MARK: - Corner Radius
     static let cardCornerRadius: CGFloat = 10

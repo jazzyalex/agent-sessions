@@ -132,6 +132,7 @@ struct AnalyticsView: View {
                 }
                 .frame(height: AnalyticsDesign.secondaryCardHeight)
                 .padding(.horizontal, AnalyticsDesign.windowPadding)
+                .padding(.top, AnalyticsDesign.sectionSpacing)
                 .padding(.bottom, AnalyticsDesign.sectionSpacing)
             }
             .padding(.top, AnalyticsDesign.sectionSpacing)
