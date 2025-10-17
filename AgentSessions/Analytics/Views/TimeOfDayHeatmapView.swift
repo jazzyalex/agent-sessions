@@ -8,26 +8,27 @@ struct TimeOfDayHeatmapView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Time of Day")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
+            Text("Time of Day")
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .padding(.bottom, 12)
 
-                if cells.isEmpty {
-                    emptyState
-                } else {
-                    heatmap
+            if cells.isEmpty {
+                emptyState
+            } else {
+                // Heatmap grid
+                heatmap
+
+                Spacer()
+
+                // Most Active label - completely separate from grid
+                if let mostActive = mostActive {
+                    Text("Most Active: \(mostActive)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 12)
                 }
-            }
-
-            Spacer()
-
-            // Most Active label at bottom
-            if !cells.isEmpty, let mostActive = mostActive {
-                Text("Most Active: \(mostActive)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(height: AnalyticsDesign.secondaryCardHeight)
@@ -84,6 +85,7 @@ struct TimeOfDayHeatmapView: View {
                 }
             }
         }
+        .frame(height: 180) // Constrain to just fit the grid
     }
 
     private var emptyState: some View {

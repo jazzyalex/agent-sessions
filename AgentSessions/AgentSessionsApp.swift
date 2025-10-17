@@ -160,9 +160,9 @@ extension AgentSessionsApp {
             forName: Notification.Name("ToggleAnalyticsWindow"),
             object: nil,
             queue: .main
-        ) { [weak controller] _ in
+        ) { _ in
             Task { @MainActor in
-                controller?.toggle()
+                controller.toggle()
             }
         }
     }
