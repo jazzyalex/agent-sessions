@@ -79,3 +79,30 @@ Exiting Plan Mode happens automatically when a subsequent prompt does not meet t
   - Avoid creating extra rows for single toggles when they can fit as a third column in an existing row.
   - Test at the app’s default Preferences window size to ensure all controls are reachable without resizing.
 - If you add, move, or rename Swift files (app or tests), update AgentSessions.xcodeproj so new files are included in the correct targets; otherwise the build will fail.
+
+## UI Design Language (HIG‑Aligned)
+
+Use a consistent spacing scale and system colors. Do not hard‑code ad‑hoc paddings or margins in new views. When fixing UI, prefer adjusting shared tokens over one‑off values.
+
+Spacing and sizing tokens (Swift):
+- Window edge padding: `AnalyticsDesign.windowPadding = 20`
+- Section spacing (between stacked cards/sections): `AnalyticsDesign.sectionSpacing = 16`
+- Card spacing (between cards in a row): `AnalyticsDesign.cardSpacing = 12`
+- Card internal padding: `AnalyticsDesign.cardPadding = 16`
+- Corner radii: use the tokens defined alongside the feature (e.g., `AnalyticsDesign.cardCornerRadius`)
+
+General rules:
+- Apply `windowPadding` on both sides for all top‑level sections within a window. Sections should not set bespoke left/right paddings.
+- Vertical rhythm comes from the parent stack’s `sectionSpacing`; avoid adding extra `padding(.top)` between adjacent sections unless there is a design reason shared across the product. Prefer updating the shared token instead.
+- Labels or secondary text that describe a visualization must sit outside the plotting area with clear separation (e.g., footnote or caption under a heatmap). Do not overlay labels on the plot area.
+- Use dynamic system colors and semantics (`controlBackgroundColor`, `labelColor`, etc.) so appearance follows Light/Dark and accessibility contrast preferences.
+- If a feature’s layout requires a specific geometry to avoid crowding, prefer a fixed or minimum window size rather than shrinking content. Stable card sizes reduce layout churn when users resize windows.
+- Follow Apple HIG for hierarchy: concise headers (`.headline`), body for key values, `caption`/`footnote` for supportive text. Maintain consistent typographic scale across cards.
+
+Review checklist for PRs that touch UI:
+- Edges and gutters match `windowPadding`.
+- Vertical spacing between sections equals `sectionSpacing`.
+- Card‑to‑card spacing in a row equals `cardSpacing`.
+- Internal padding within cards equals `cardPadding`.
+- Labels are not overlapping charts or interactive regions; they have dedicated space.
+- Appearance adapts correctly to Light/Dark and high‑contrast settings.
