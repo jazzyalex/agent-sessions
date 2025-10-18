@@ -41,13 +41,13 @@ final class AnalyticsService: ObservableObject {
         allSessions.append(contentsOf: claudeIndexer.allSessions)
         allSessions.append(contentsOf: geminiIndexer.allSessions)
 
-        // Apply filters
+        // Apply filters for current period
         let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter)
 
-        // Calculate metrics
-        let summary = calculateSummary(sessions: filtered, dateRange: dateRange)
+        // Calculate metrics (summary uses agent-filtered current + previous periods)
+        let summary = calculateSummary(allSessions: allSessions, dateRange: dateRange, agentFilter: agentFilter)
         let timeSeries = calculateTimeSeries(sessions: filtered, dateRange: dateRange)
-        let agentBreakdown = calculateAgentBreakdown(sessions: filtered)
+        let agentBreakdown = calculateAgentBreakdown(sessions: filtered, dateRange: dateRange)
         let heatmap = calculateHeatmap(sessions: filtered)
         let mostActive = calculateMostActiveTime(sessions: filtered)
 
@@ -149,9 +149,19 @@ final class AnalyticsService: ObservableObject {
 
             // Date range filter
             if let startDate = dateRange.startDate() {
-                // Use session start time, or end time, or modified time
-                let sessionDate = session.startTime ?? session.endTime ?? session.modifiedAt
-                return sessionDate >= startDate
+                if !session.events.isEmpty {
+                    // Include session if ANY event (or fallback timestamp) is on/after the range start.
+                    // This fixes "Today" showing zero when sessions started earlier but had activity today.
+                    for ev in session.events {
+                        let eDate = ev.timestamp ?? session.endTime ?? session.startTime ?? session.modifiedAt
+                        if eDate >= startDate { return true }
+                    }
+                    return false
+                } else {
+                    // Lightweight session: fall back to coarse timestamps
+                    let coarse = session.endTime ?? session.startTime ?? session.modifiedAt
+                    return coarse >= startDate
+                }
             }
 
             return true
@@ -173,38 +183,40 @@ final class AnalyticsService: ObservableObject {
 
     // MARK: - Summary Calculations
 
-    private func calculateSummary(sessions: [Session], dateRange: AnalyticsDateRange) -> AnalyticsSummary {
-        let sessionCount = sessions.count
+    private func calculateSummary(allSessions: [Session], dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) -> AnalyticsSummary {
+        // Compute bounds for current and previous periods
+        let now = Date()
+        let currentBounds = dateBounds(for: dateRange, now: now)
+        let current = filterSessionsWithinBounds(allSessions, bounds: currentBounds, agentFilter: agentFilter)
 
-        // Calculate message count (sum of messageCount from each session)
-        let messageCount = sessions.reduce(0) { $0 + $1.messageCount }
+        let previousBounds = previousPeriodBounds(for: dateRange, now: now)
+        let previous = filterSessionsWithinBounds(allSessions, bounds: previousBounds, agentFilter: agentFilter)
 
-        // Calculate command/tool count (count tool_call events)
-        let commandCount = sessions.reduce(0) { total, session in
+        let sessionCount = current.count
+
+        // Message count (sum of messageCount from each session in current bounds)
+        let messageCount = current.reduce(0) { $0 + $1.messageCount }
+
+        // Tool/command count
+        let commandCount = current.reduce(0) { total, session in
             total + session.events.filter { $0.kind == .tool_call }.count
         }
 
-        // Calculate active time (sum of session durations)
-        let activeTime = sessions.reduce(0.0) { total, session in
-            guard let start = session.startTime, let end = session.endTime else { return total }
-            return total + end.timeIntervalSince(start)
+        // Active time clipped to current bounds
+        let activeTime = current.reduce(0.0) { total, session in
+            total + clippedDuration(for: session, within: currentBounds)
         }
 
-        // Calculate changes vs previous period
-        let previousSessions = getPreviousPeriodSessions(sessions: sessions, dateRange: dateRange)
-        let sessionsChange = calculatePercentageChange(current: sessionCount, previous: previousSessions.count)
-
-        let prevMessageCount = previousSessions.reduce(0) { $0 + $1.messageCount }
+        // Previous period deltas
+        let sessionsChange = calculatePercentageChange(current: sessionCount, previous: previous.count)
+        let prevMessageCount = previous.reduce(0) { $0 + $1.messageCount }
         let messagesChange = calculatePercentageChange(current: messageCount, previous: prevMessageCount)
-
-        let prevCommandCount = previousSessions.reduce(0) { total, session in
+        let prevCommandCount = previous.reduce(0) { total, session in
             total + session.events.filter { $0.kind == .tool_call }.count
         }
         let commandsChange = calculatePercentageChange(current: commandCount, previous: prevCommandCount)
-
-        let prevActiveTime = previousSessions.reduce(0.0) { total, session in
-            guard let start = session.startTime, let end = session.endTime else { return total }
-            return total + end.timeIntervalSince(start)
+        let prevActiveTime = previous.reduce(0.0) { total, session in
+            total + clippedDuration(for: session, within: previousBounds)
         }
         let activeTimeChange = calculatePercentageChange(current: activeTime, previous: prevActiveTime)
 
@@ -220,25 +232,14 @@ final class AnalyticsService: ObservableObject {
         )
     }
 
-    private func getPreviousPeriodSessions(sessions: [Session], dateRange: AnalyticsDateRange) -> [Session] {
-        // Get sessions from the previous period of the same length
+    private func getPreviousPeriodSessions(agentFilteredAllSessions: [Session], dateRange: AnalyticsDateRange) -> [Session] {
+        // Sessions from the previous period of the same length, event-aware
         guard let startDate = dateRange.startDate() else { return [] }
-
         let now = Date()
         let periodLength = now.timeIntervalSince(startDate)
         let previousStart = startDate.addingTimeInterval(-periodLength)
         let previousEnd = startDate
-
-        // Get all sessions and filter to previous period
-        var allSessions: [Session] = []
-        allSessions.append(contentsOf: codexIndexer.allSessions)
-        allSessions.append(contentsOf: claudeIndexer.allSessions)
-        allSessions.append(contentsOf: geminiIndexer.allSessions)
-
-        return allSessions.filter { session in
-            let sessionDate = session.startTime ?? session.endTime ?? session.modifiedAt
-            return sessionDate >= previousStart && sessionDate < previousEnd
-        }
+        return filterSessionsWithinBounds(agentFilteredAllSessions, bounds: (start: previousStart, end: previousEnd), agentFilter: .all)
     }
 
     private func calculatePercentageChange(current: Int, previous: Int) -> Double? {
@@ -251,38 +252,112 @@ final class AnalyticsService: ObservableObject {
         return (current - previous) / previous * 100.0
     }
 
+    // MARK: - Date bounds helpers
+    private func dateBounds(for range: AnalyticsDateRange, now: Date = Date()) -> (start: Date?, end: Date?) {
+        switch range {
+        case .allTime, .custom:
+            return (start: range.startDate(relativeTo: now), end: nil)
+        default:
+            return (start: range.startDate(relativeTo: now), end: now)
+        }
+    }
+
+    private func previousPeriodBounds(for range: AnalyticsDateRange, now: Date = Date()) -> (start: Date?, end: Date?) {
+        guard let start = range.startDate(relativeTo: now) else { return (nil, nil) }
+        let length = now.timeIntervalSince(start)
+        let prevStart = start.addingTimeInterval(-length)
+        let prevEnd = start
+        return (start: prevStart, end: prevEnd)
+    }
+
+    private func isWithin(_ date: Date, bounds: (start: Date?, end: Date?)) -> Bool {
+        if let s = bounds.start, date < s { return false }
+        if let e = bounds.end, date >= e { return false } // end exclusive
+        return true
+    }
+
+    private func filterSessionsWithinBounds(_ sessions: [Session],
+                                            bounds: (start: Date?, end: Date?),
+                                            agentFilter: AnalyticsAgentFilter) -> [Session] {
+        return sessions.filter { session in
+            guard agentFilter.matches(session.source) else { return false }
+            if !session.events.isEmpty {
+                for ev in session.events {
+                    let d = ev.timestamp ?? session.endTime ?? session.startTime ?? session.modifiedAt
+                    if isWithin(d, bounds: bounds) { return true }
+                }
+                return false
+            } else {
+                let d = session.endTime ?? session.startTime ?? session.modifiedAt
+                return isWithin(d, bounds: bounds)
+            }
+        }
+    }
+
+    private func clippedDuration(for session: Session, within bounds: (start: Date?, end: Date?)) -> TimeInterval {
+        // Establish session start/end from best available data
+        var sStart: Date?
+        var sEnd: Date?
+        if !session.events.isEmpty {
+            let times = session.events.compactMap { $0.timestamp }
+            if let minT = times.min() { sStart = minT }
+            if let maxT = times.max() { sEnd = maxT }
+        }
+        sStart = sStart ?? session.startTime ?? session.modifiedAt
+        sEnd = sEnd ?? session.endTime ?? Date()
+        guard let start = sStart, let end = sEnd, end > start else { return 0 }
+
+        let lower = bounds.start ?? .distantPast
+        let upper = bounds.end ?? .distantFuture
+        let a = max(start, lower)
+        let b = min(end, upper)
+        if b <= a { return 0 }
+        return b.timeIntervalSince(a)
+    }
+
     // MARK: - Time Series
 
     private func calculateTimeSeries(sessions: [Session], dateRange: AnalyticsDateRange) -> [AnalyticsTimeSeriesPoint] {
         let calendar = Calendar.current
         let granularity = dateRange.aggregationGranularity
 
-        // Group sessions by date bucket and agent
+        // Group activity by date bucket and agent. Prefer event timestamps when available
+        // so that long‑running sessions contribute to the correct day/hour (e.g., Today).
         var buckets: [String: [SessionSource: Int]] = [:]
+        let startBound = dateRange.startDate()
 
-        for session in sessions {
-            let sessionDate = session.startTime ?? session.endTime ?? session.modifiedAt
-
-            // Truncate to granularity
-            let bucketDate: Date
+        func bucket(_ date: Date) -> Date {
             switch granularity {
             case .day:
-                bucketDate = calendar.startOfDay(for: sessionDate)
+                return calendar.startOfDay(for: date)
             case .weekOfYear:
-                let weekStart = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: sessionDate))!
-                bucketDate = weekStart
+                return calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date))!
             case .month:
-                let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: sessionDate))!
-                bucketDate = monthStart
+                return calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
+            case .hour:
+                return calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: date))!
             default:
-                bucketDate = calendar.startOfDay(for: sessionDate)
+                return calendar.startOfDay(for: date)
             }
+        }
 
-            let key = bucketDate.ISO8601Format()
-            if buckets[key] == nil {
-                buckets[key] = [:]
+        for session in sessions {
+            if !session.events.isEmpty, let startBound = startBound {
+                for ev in session.events {
+                    let eDate = ev.timestamp ?? session.endTime ?? session.startTime ?? session.modifiedAt
+                    guard eDate >= startBound else { continue }
+                    let bucketDate = bucket(eDate)
+                    let key = bucketDate.ISO8601Format()
+                    if buckets[key] == nil { buckets[key] = [:] }
+                    buckets[key]?[session.source, default: 0] += 1
+                }
+            } else {
+                let sessionDate = session.startTime ?? session.endTime ?? session.modifiedAt
+                let bucketDate = bucket(sessionDate)
+                let key = bucketDate.ISO8601Format()
+                if buckets[key] == nil { buckets[key] = [:] }
+                buckets[key]?[session.source, default: 0] += 1
             }
-            buckets[key]?[session.source, default: 0] += 1
         }
 
         // Convert to time series points
@@ -304,21 +379,18 @@ final class AnalyticsService: ObservableObject {
 
     // MARK: - Agent Breakdown
 
-    private func calculateAgentBreakdown(sessions: [Session]) -> [AnalyticsAgentBreakdown] {
+    private func calculateAgentBreakdown(sessions: [Session], dateRange: AnalyticsDateRange) -> [AnalyticsAgentBreakdown] {
         let totalCount = sessions.count
         guard totalCount > 0 else { return [] }
 
         // Group by agent
         var byAgent: [SessionSource: (count: Int, duration: TimeInterval)] = [:]
 
+        let bounds = dateBounds(for: dateRange)
+
         for session in sessions {
             let source = session.source
-            let duration: TimeInterval
-            if let start = session.startTime, let end = session.endTime {
-                duration = end.timeIntervalSince(start)
-            } else {
-                duration = 0
-            }
+            let duration: TimeInterval = clippedDuration(for: session, within: bounds)
 
             if byAgent[source] == nil {
                 byAgent[source] = (count: 0, duration: 0)
@@ -446,7 +518,7 @@ final class AnalyticsService: ObservableObject {
         codexIndexer.$allSessions
             .combineLatest(claudeIndexer.$allSessions, geminiIndexer.$allSessions)
             .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { _ in
                 // Auto-refresh will be triggered by the view when needed
             }
             .store(in: &cancellables)

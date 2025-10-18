@@ -4,7 +4,6 @@ import SwiftUI
 struct AnalyticsView: View {
     @ObservedObject var service: AnalyticsService
 
-    @State private var selectedView: AnalyticsViewTab = .total
     @State private var dateRange: AnalyticsDateRange = .last7Days
     @State private var agentFilter: AnalyticsAgentFilter = .all
     @State private var isRefreshing: Bool = false
@@ -30,8 +29,8 @@ struct AnalyticsView: View {
             service.ensureSessionsFullyParsed()
             refreshData()
         }
-        .onChange(of: dateRange) { _ in refreshData() }
-        .onChange(of: agentFilter) { _ in refreshData() }
+        .onChange(of: dateRange) { _, _ in refreshData() }
+        .onChange(of: agentFilter) { _, _ in refreshData() }
         .onChange(of: service.isParsingSessions) { _, isParsing in
             // Refresh analytics when parsing completes
             if !isParsing {
@@ -44,17 +43,6 @@ struct AnalyticsView: View {
 
     private var header: some View {
         HStack {
-            // Navigation tabs (for future: Total | Projects | Agents)
-            Picker("View", selection: $selectedView) {
-                Text("Total").tag(AnalyticsViewTab.total)
-                // Future tabs:
-                // Text("Projects").tag(AnalyticsViewTab.projects)
-                // Text("Agents").tag(AnalyticsViewTab.agents)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 200)
-
             Spacer()
 
             // Date range picker
@@ -92,17 +80,7 @@ struct AnalyticsView: View {
 
     // MARK: - Content
 
-    @ViewBuilder
-    private var content: some View {
-        switch selectedView {
-        case .total:
-            totalView
-        case .projects:
-            placeholderView(icon: "folder", text: "Projects view coming soon")
-        case .agents:
-            placeholderView(icon: "cpu", text: "Agents view coming soon")
-        }
-    }
+    private var content: some View { totalView }
 
     private var totalView: some View {
         ScrollView {
@@ -236,12 +214,7 @@ struct AnalyticsView: View {
     }
 }
 
-/// Tab options for analytics view
-enum AnalyticsViewTab: String, CaseIterable {
-    case total = "Total"
-    case projects = "Projects"
-    case agents = "Agents"
-}
+// (Tab options removed; single Total view)
 
 // MARK: - Previews
 

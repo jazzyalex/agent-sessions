@@ -108,6 +108,8 @@ struct SessionsChartView: View {
             return .weekOfYear
         case .month:
             return .month
+        case .hour:
+            return .hour
         default:
             return .day
         }
@@ -115,6 +117,8 @@ struct SessionsChartView: View {
 
     private var xAxisFormat: Date.FormatStyle {
         switch dateRange {
+        case .today:
+            return .dateTime.hour()
         case .last7Days:
             return .dateTime.weekday(.abbreviated)
         case .last30Days:

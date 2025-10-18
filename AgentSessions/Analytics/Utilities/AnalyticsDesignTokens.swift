@@ -18,7 +18,8 @@ enum AnalyticsDesign {
     static let statsCardHeight: CGFloat = 100
     static let primaryChartHeight: CGFloat = 280
     static let secondaryCardHeight: CGFloat = 300
-    static let heatmapGridHeight: CGFloat = 230
+    static let heatmapGridHeight: CGFloat = 240
+    static let heatmapTitleReserve: CGFloat = 160
 
     // MARK: - Corner Radius
     static let cardCornerRadius: CGFloat = 10

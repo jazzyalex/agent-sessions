@@ -16,18 +16,27 @@ struct TimeOfDayHeatmapView: View {
             if cells.isEmpty {
                 emptyState
             } else {
-                // Heatmap grid
-                heatmap
+                GeometryReader { g in
+                    let reserve = AnalyticsDesign.heatmapTitleReserve
+                    let gridWidth = max(0, g.size.width - reserve)
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Heatmap grid placed to the right of the title area
+                        heatmap
+                            .frame(width: gridWidth, alignment: .leading)
+                            .padding(.leading, reserve)
 
-                // Most Active label - placed below grid with clear separation
-                if let mostActive = mostActive {
-                    Text("Most Active: \(mostActive)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .padding(.top, 12)
+                        // Most Active label centered relative to the grid, not the whole card
+                        if let mostActive = mostActive {
+                            Text("Most Active: \(mostActive)")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(width: gridWidth, alignment: .center)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .padding(.top, 12)
+                                .padding(.leading, reserve)
+                        }
+                    }
                 }
             }
         }

@@ -2,6 +2,7 @@ import Foundation
 
 /// Date range options for analytics filtering
 enum AnalyticsDateRange: String, CaseIterable, Identifiable {
+    case today = "Today"
     case last7Days = "Last 7 Days"
     case last30Days = "Last 30 Days"
     case last90Days = "Last 90 Days"
@@ -14,6 +15,8 @@ enum AnalyticsDateRange: String, CaseIterable, Identifiable {
     func startDate(relativeTo now: Date = Date()) -> Date? {
         let calendar = Calendar.current
         switch self {
+        case .today:
+            return calendar.startOfDay(for: now)
         case .last7Days:
             return calendar.date(byAdding: .day, value: -7, to: now)
         case .last30Days:
@@ -30,6 +33,8 @@ enum AnalyticsDateRange: String, CaseIterable, Identifiable {
     /// Get aggregation granularity for this range (for charts)
     var aggregationGranularity: Calendar.Component {
         switch self {
+        case .today:
+            return .hour
         case .last7Days, .last30Days:
             return .day
         case .last90Days:
