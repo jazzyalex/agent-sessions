@@ -42,7 +42,7 @@ struct AnalyticsView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 8) {
             Spacer()
 
             // Date range picker
@@ -52,6 +52,7 @@ struct AnalyticsView: View {
                 }
             }
             .pickerStyle(.menu)
+            .labelsHidden()
             .frame(width: 180)
 
             // Agent filter picker
@@ -61,6 +62,7 @@ struct AnalyticsView: View {
                 }
             }
             .pickerStyle(.menu)
+            .labelsHidden()
             .frame(width: 140)
 
             // Refresh button
@@ -75,7 +77,10 @@ struct AnalyticsView: View {
         .padding(.horizontal, AnalyticsDesign.windowPadding)
         .padding(.vertical, 12)
         .frame(height: AnalyticsDesign.headerHeight)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color(nsColor: NSColor(red: 0.98, green: 0.98, blue: 0.98, alpha: 1.0))) // #fafafa
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
     }
 
     // MARK: - Content

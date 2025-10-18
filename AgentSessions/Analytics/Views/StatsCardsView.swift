@@ -7,28 +7,28 @@ struct StatsCardsView: View {
     var body: some View {
         HStack(spacing: AnalyticsDesign.cardSpacing) {
             StatsCard(
-                icon: "square.stack.3d.up",
+                icon: "square.stack.3d.up.fill",
                 label: "Sessions",
                 value: "\(summary.sessions)",
                 change: AnalyticsSummary.formatChange(summary.sessionsChange)
             )
 
             StatsCard(
-                icon: "bubble.left.and.bubble.right",
+                icon: "bubble.left.and.bubble.right.fill",
                 label: "Messages",
                 value: "\(summary.messages)",
                 change: AnalyticsSummary.formatChange(summary.messagesChange)
             )
 
             StatsCard(
-                icon: "terminal",
+                icon: "terminal.fill",
                 label: "Commands",
                 value: "\(summary.commands)",
                 change: AnalyticsSummary.formatChange(summary.commandsChange)
             )
 
             StatsCard(
-                icon: "clock",
+                icon: "clock.fill",
                 label: "Session Duration",
                 value: summary.activeTimeFormatted,
                 change: AnalyticsSummary.formatChange(summary.activeTimeChange)
@@ -48,40 +48,45 @@ private struct StatsCard: View {
     @State private var isHovered: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Icon + Label
+        VStack(alignment: .leading, spacing: 0) {
+            // Icon + Label (18pt from top)
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.caption)
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
 
-                Text(label)
+                Text(label.uppercased())
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .padding(.top, 18)
 
             Spacer()
 
-            // Value
+            // Value (centered vertically)
             Text(value)
-                .font(.title)
+                .font(.system(size: 36))
                 .fontWeight(.regular)
                 .foregroundStyle(.primary)
 
-            // Change indicator
+            Spacer()
+
+            // Change indicator (12pt from bottom)
             if let change = change {
                 Text(change)
                     .font(.caption2)
                     .fontWeight(.medium)
                     .foregroundStyle(changeColor(for: change))
+                    .padding(.bottom, 12)
             } else {
                 // Placeholder to maintain spacing
                 Text(" ")
                     .font(.caption2)
+                    .padding(.bottom, 12)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(AnalyticsDesign.cardPadding)
+        .padding(.horizontal, 16)
         .background(Color(nsColor: .quaternarySystemFill))
         .clipShape(RoundedRectangle(cornerRadius: AnalyticsDesign.cardCornerRadius))
         .scaleEffect(isHovered ? 1.02 : 1.0)
