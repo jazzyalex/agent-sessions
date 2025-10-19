@@ -3,6 +3,7 @@ import SwiftUI
 /// Main analytics view with header, stats, charts, and insights
 struct AnalyticsView: View {
     @ObservedObject var service: AnalyticsService
+    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     @State private var dateRange: AnalyticsDateRange = .last7Days
     @State private var agentFilter: AnalyticsAgentFilter = .all
@@ -37,6 +38,7 @@ struct AnalyticsView: View {
                 refreshData()
             }
         }
+        .preferredColorScheme((AppAppearance(rawValue: appAppearanceRaw) ?? .system).colorScheme)
     }
 
     // MARK: - Header
