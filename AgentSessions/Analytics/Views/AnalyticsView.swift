@@ -77,7 +77,7 @@ struct AnalyticsView: View {
         .padding(.horizontal, AnalyticsDesign.windowPadding)
         .padding(.vertical, 12)
         .frame(height: AnalyticsDesign.headerHeight)
-        .background(Color(nsColor: NSColor(red: 0.98, green: 0.98, blue: 0.98, alpha: 1.0))) // #fafafa
+        .background(Color(nsColor: .controlBackgroundColor))
         .overlay(alignment: .bottom) {
             Divider()
         }
