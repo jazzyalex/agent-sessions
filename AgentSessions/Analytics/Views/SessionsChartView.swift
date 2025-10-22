@@ -40,7 +40,7 @@ struct SessionsChartView: View {
             }
         }
         .padding(AnalyticsDesign.cardPadding)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color("CardBackground"))
         .clipShape(RoundedRectangle(cornerRadius: AnalyticsDesign.cardCornerRadius))
     }
 
@@ -63,14 +63,14 @@ struct SessionsChartView: View {
         .chartXAxis {
             AxisMarks(values: .automatic) { _ in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
-                    .foregroundStyle(Color(nsColor: .quaternaryLabelColor))
+                    .foregroundStyle(Color("AxisGridline"))
                 AxisValueLabel(format: xAxisFormat)
             }
         }
         .chartYAxis {
             AxisMarks(position: .leading) { value in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
-                    .foregroundStyle(Color(nsColor: .quaternaryLabelColor))
+                    .foregroundStyle(Color("AxisGridline"))
                 AxisValueLabel()
             }
         }

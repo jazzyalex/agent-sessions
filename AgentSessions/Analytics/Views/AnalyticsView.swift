@@ -38,7 +38,14 @@ struct AnalyticsView: View {
                 refreshData()
             }
         }
-        .preferredColorScheme((AppAppearance(rawValue: appAppearanceRaw) ?? .system).colorScheme)
+        // Apply preferredColorScheme only for explicit Light/Dark modes
+        // For System mode, omit the modifier entirely to avoid SwiftUI's buggy nil-handling
+        .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .light) {
+            $0.preferredColorScheme(.light)
+        }
+        .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .dark) {
+            $0.preferredColorScheme(.dark)
+        }
     }
 
     // MARK: - Header
@@ -79,7 +86,7 @@ struct AnalyticsView: View {
         .padding(.horizontal, AnalyticsDesign.windowPadding)
         .padding(.vertical, 12)
         .frame(height: AnalyticsDesign.headerHeight)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color("CardBackground"))
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -186,7 +193,7 @@ struct AnalyticsView: View {
             .frame(width: 280)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(Color("CardBackground"))
                     .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
             )
         }
@@ -217,6 +224,21 @@ struct AnalyticsView: View {
             try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
 
             isRefreshing = false
+        }
+    }
+}
+
+// MARK: - View Extension for Conditional Modifiers
+
+extension View {
+    /// Apply a view modifier conditionally
+    @ViewBuilder
+    func applyIf<Content: View>(_ condition: Bool,
+                                _ transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
         }
     }
 }
