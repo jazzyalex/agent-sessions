@@ -87,3 +87,21 @@ Validation Tips
 Rollback Strategy
 - All changes are controlled via `FeatureFlags`. Toggle any flag to revert to prior behavior without code removal.
 
+## Open Issue: Energy Spikes During Search/Refresh
+
+- **Observed**: Energy Diagnostics reports “Very High” impact and 15–24 wakes/sec while a foreground search or manual refresh is running. Battery menu may surface the “Using Significant Energy” warning briefly, though the app remains responsive and beachballs do not appear.
+- **Repro**: Launch AgentSessions with a large corpus (≈1.7k sessions), trigger a unified search (e.g., `dmg`) or run `Cmd + R` refresh immediately afterward. Inspect Activity Monitor → Energy or Instruments → Energy Log.
+- **Root Causes (current hypothesis)**:
+  - Sequential parsing of large sessions during the search “large” phase.
+  - Transcript generation when cached data is missing.
+  - Concurrent background work (provider refresh, analytics refresh) overlapping with the user-initiated search.
+- **Impact**: Perceived energy usage may concern battery-sensitive users even though responsiveness is acceptable.
+- **Status**: Non-blocking; monitor user feedback. Revisit during indexing/search roadmap (FTS, auto-refresh) or sooner if complaints increase.
+
+### Quick Mitigations Worth Considering
+
+1. **Pause background refresh while a search is active** — gate provider/analytics refresh tasks until search completes to avoid overlapping heavy work.
+2. **Battery-optimized search mode** — optional preference that lengthens cooperative yields and defers large-file parsing unless the user opens the session, reducing short-term wake spikes.
+3. **Adaptive debounce** — increase unified search’s debounce interval automatically when the dataset is large to cut redundant launches and associated parsing.
+
+These items require modest effort and can be scheduled independently of the larger analytics roadmap.
