@@ -91,37 +91,27 @@ final class SearchCoordinator: ObservableObject {
             if includeGemini { set.insert(.gemini) }
             return set
         }()
-        // Launch orchestration
         
+        // Flip running state immediately for early user feedback
+        Task { @MainActor [weak self] in
+            guard let self, self.runID == newRunID else { return }
+            self.isRunning = true
+            self.results = []
+            self.progress = .init() // phase .idle → spinner shows without counts
+        }
+
+        // Launch orchestration
         let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
         currentTask = Task.detached(priority: prio) { [weak self, newRunID] in
             guard let self else { return }
-
-            // Build candidate set and partition inside the task (async-friendly)
-            let threshold = 10 * 1024 * 1024
-            var candidates = all.filter { allowed.contains($0.source) }
-            do {
-                let db = try IndexDB()
-                if try await db.isEmpty() == false {
-                    let model = filters.model
-                    let repo = filters.repoName
-                    let df = filters.dateFrom
-                    let dt = filters.dateTo
-                    let sourceStrings = allowed.map { $0.rawValue }
-                    let ids = try await db.prefilterSessionIDs(sources: sourceStrings, model: model, repoSubstr: repo, dateFrom: df, dateTo: dt)
-                    if !ids.isEmpty {
-                        let allowedSet = Set(ids)
-                        candidates = candidates.filter { allowedSet.contains($0.id) }
-                    }
-                }
-            } catch {
-                // Non-fatal: fall back to in-memory candidates
-            }
+            // Restore pre-index candidate building: all allowed sessions, no DB/hybrid tiers
+            let threshold = FeatureFlags.searchSmallSizeBytes
+            let candidates = all.filter { allowed.contains($0.source) }
 
             var nonLarge: [Session] = []
             var large: [Session] = []
             nonLarge.reserveCapacity(candidates.count)
-            large.reserveCapacity(candidates.count / 2)
+            large.reserveCapacity(max(1, candidates.count / 2))
             for s in candidates {
                 let size = Self.sizeBytes(for: s)
                 if size >= threshold { large.append(s) } else { nonLarge.append(s) }
@@ -133,8 +123,6 @@ final class SearchCoordinator: ObservableObject {
             let largeCount = large.count
             await MainActor.run {
                 guard self.runID == newRunID else { return }
-                self.isRunning = true
-                self.results = []
                 self.progress = .init(phase: .small, scannedSmall: 0, totalSmall: nonLargeCount, scannedLarge: 0, totalLarge: largeCount)
             }
 
@@ -142,11 +130,11 @@ final class SearchCoordinator: ObservableObject {
             let batchSize = 64
             var seen = Set<String>()
             for start in stride(from: 0, to: nonLarge.count, by: batchSize) {
-                if Task.isCancelled { await self.finishCanceled(); return }
+                if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
                 let end = min(start + batchSize, nonLarge.count)
                 let batch = Array(nonLarge[start..<end])
                 let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold)
-                if Task.isCancelled { await self.finishCanceled(); return }
+                if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
                 // Filter out duplicates before entering MainActor
                 let newHits = hits.filter { !seen.contains($0.id) }
@@ -168,7 +156,7 @@ final class SearchCoordinator: ObservableObject {
                 if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
             }
 
-            if Task.isCancelled { await self.finishCanceled(); return }
+            if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
             // Phase 2: large sequential
             await MainActor.run { if self.runID == newRunID { self.progress.phase = .large } }
@@ -184,22 +172,16 @@ final class SearchCoordinator: ObservableObject {
                 }
 
                 let s = large[idx]
-                if Task.isCancelled { await self.finishCanceled(); return }
+                if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
                 if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
-                    if Task.isCancelled { await self.finishCanceled(); return }
+                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
-                    // Persist parsed session in canonical allSessions (fixes message count reversion bug)
-                    // This ensures message counts remain visible even after search is cleared
-                    await MainActor.run {
-                        if parsed.source == .codex {
-                            self.codexIndexer.updateSession(parsed)
-                            print("📊 Search updated Codex session: \(parsed.id.prefix(8)) → \(parsed.messageCount) msgs")
-                        } else if parsed.source == .claude {
-                            self.claudeIndexer.updateSession(parsed)
-                            print("📊 Search updated Claude session: \(parsed.id.prefix(8)) → \(parsed.messageCount) msgs")
-                        } else {
-                            self.geminiIndexer.updateSession(parsed)
-                            print("📊 Search updated Gemini session: \(parsed.id.prefix(8)) → \(parsed.messageCount) msgs")
+                    // Optionally persist parsed session back to indexers for accuracy outside search
+                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
+                        await MainActor.run {
+                            if parsed.source == .codex { self.codexIndexer.updateSession(parsed) }
+                            else if parsed.source == .claude { self.claudeIndexer.updateSession(parsed) }
+                            else { self.geminiIndexer.updateSession(parsed) }
                         }
                     }
 
@@ -256,7 +238,7 @@ final class SearchCoordinator: ObservableObject {
                 }
             }
 
-            if Task.isCancelled { await self.finishCanceled(); return }
+            if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
             await MainActor.run {
                 guard self.runID == newRunID else { return }
                 self.isRunning = false
@@ -265,11 +247,13 @@ final class SearchCoordinator: ObservableObject {
         }
     }
 
-    private func finishCanceled() async {
+    private func finishCanceled(runID expected: UUID) async {
         await MainActor.run {
-            self.isRunning = false
-            self.wasCanceled = true
-            self.progress.phase = .idle
+            if self.runID == expected {
+                self.isRunning = false
+                self.wasCanceled = true
+                self.progress.phase = .idle
+            }
         }
     }
 
@@ -283,15 +267,11 @@ final class SearchCoordinator: ObservableObject {
                 let size = Self.sizeBytes(for: s)
                 if size < threshold, let parsed = await parseFullIfNeeded(session: s, threshold: threshold) {
                     s = parsed
-
-                    // Persist parsed session in canonical allSessions (same as Phase 2)
-                    await MainActor.run {
-                        if parsed.source == .codex {
-                            self.codexIndexer.updateSession(parsed)
-                        } else if parsed.source == .claude {
-                            self.claudeIndexer.updateSession(parsed)
-                        } else {
-                            self.geminiIndexer.updateSession(parsed)
+                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
+                        await MainActor.run {
+                            if parsed.source == .codex { self.codexIndexer.updateSession(parsed) }
+                            else if parsed.source == .claude { self.claudeIndexer.updateSession(parsed) }
+                            else { self.geminiIndexer.updateSession(parsed) }
                         }
                     }
                 }
