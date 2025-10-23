@@ -103,6 +103,13 @@
 		SUPT000020000000000000001 /* AgentSessions/Support/TypingActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = SUPT000010000000000000001 /* AgentSessions/Support/TypingActivity.swift */; };
 		UTILS00002000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTILS00001000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift */; };
 		UTILW00002000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTILW00001000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift */; };
+// Added by Indexing feature
+		IDXDB000020000000000001 /* DB.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDXDB000010000000000001 /* AgentSessions/Indexing/DB.swift */; };
+		IDXIX000020000000000001 /* AnalyticsIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDXIX000010000000000001 /* AgentSessions/Indexing/AnalyticsIndexer.swift */; };
+		ANREP000020000000000001 /* AnalyticsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANREP000010000000000001 /* AgentSessions/Analytics/Repositories/AnalyticsRepository.swift */; };
+		IDXTEST00002000000000001 /* AnalyticsIndexerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDXTEST00001000000000001 /* AgentSessionsTests/Indexing/AnalyticsIndexerTests.swift */; };
+		SESMETA0002000000000001 /* SessionMetaRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = SESMETA0001000000000001 /* AgentSessions/Indexing/SessionMetaRepository.swift */; };
+		DBSTEST00002000000000001 /* DBSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBSTEST00001000000000001 /* AgentSessionsTests/Indexing/DBSmokeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -222,6 +229,13 @@
 		SUPT000010000000000000001 /* AgentSessions/Support/TypingActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/TypingActivity.swift; sourceTree = SOURCE_ROOT; };
 		UTILS00001000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/SplitViewAutosave.swift; sourceTree = SOURCE_ROOT; };
 		UTILW00001000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/WindowAutosave.swift; sourceTree = SOURCE_ROOT; };
+		// Added by Indexing feature
+		IDXDB000010000000000001 /* AgentSessions/Indexing/DB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Indexing/DB.swift; sourceTree = SOURCE_ROOT; };
+		IDXIX000010000000000001 /* AgentSessions/Indexing/AnalyticsIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Indexing/AnalyticsIndexer.swift; sourceTree = SOURCE_ROOT; };
+		ANREP000010000000000001 /* AgentSessions/Analytics/Repositories/AnalyticsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Analytics/Repositories/AnalyticsRepository.swift; sourceTree = SOURCE_ROOT; };
+		IDXTEST00001000000000001 /* AgentSessionsTests/Indexing/AnalyticsIndexerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Indexing/AnalyticsIndexerTests.swift; sourceTree = SOURCE_ROOT; };
+		SESMETA0001000000000001 /* AgentSessions/Indexing/SessionMetaRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Indexing/SessionMetaRepository.swift; sourceTree = SOURCE_ROOT; };
+		DBSTEST00001000000000001 /* AgentSessionsTests/Indexing/DBSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Indexing/DBSmokeTests.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -266,8 +280,17 @@
 			isa = PBXGroup;
 			children = (
 				6D16E742E5604163A332C366 /* AnalyticsService.swift */,
+				ANREPGRP0001000000000001 /* Repositories */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		ANREPGRP0001000000000001 /* Repositories */ = {
+			isa = PBXGroup;
+			children = (
+				ANREP000010000000000001 /* AgentSessions/Analytics/Repositories/AnalyticsRepository.swift */,
+			);
+			path = Repositories;
 			sourceTree = "<group>";
 		};
 		1A3AAACD042D43C081439AB9 /* Views */ = {
@@ -381,6 +404,8 @@
 				F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */,
 				8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */,
 				GEMT000010000000000000001 /* AgentSessionsTests/GeminiParserTests.swift */,
+				IDXTEST00001000000000001 /* AgentSessionsTests/Indexing/AnalyticsIndexerTests.swift */,
+				DBSTEST00001000000000001 /* AgentSessionsTests/Indexing/DBSmokeTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -431,8 +456,19 @@
 				SRCH000010000000000000001 /* AgentSessions/Search/SearchCoordinator.swift */,
 				3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */,
 				27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */,
+				IDXGRP000010000000000001 /* Indexing */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		IDXGRP000010000000000001 /* Indexing */ = {
+			isa = PBXGroup;
+			children = (
+				IDXDB000010000000000001 /* AgentSessions/Indexing/DB.swift */,
+				IDXIX000010000000000001 /* AgentSessions/Indexing/AnalyticsIndexer.swift */,
+				SESMETA0001000000000001 /* AgentSessions/Indexing/SessionMetaRepository.swift */,
+			);
+			path = Indexing;
 			sourceTree = "<group>";
 		};
 		B0000012CA0A000100000001 /* Utilities */ = {
@@ -723,7 +759,11 @@
 				C0DA70FF08934B0990583766 /* TimeOfDayHeatmapView.swift in Sources */,
 				A58656799124497ABF30B977 /* AnalyticsColors.swift in Sources */,
 				73847F36998344AAB1C1D7D7 /* AnalyticsDesignTokens.swift in Sources */,
-);
+				IDXDB000020000000000001 /* DB.swift in Sources */,
+				IDXIX000020000000000001 /* AnalyticsIndexer.swift in Sources */,
+				ANREP000020000000000001 /* AnalyticsRepository.swift in Sources */,
+				SESMETA0002000000000001 /* SessionMetaRepository.swift in Sources */,
+				);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B00000132A0A000100000001 /* Sources */ = {
@@ -735,6 +775,8 @@
 				B000001C2A0A000100000078 /* SessionTitleTests.swift in Sources */,
 				F7079DCFE7E6447F920DBF84 /* CodexResumeTests.swift in Sources */,
 				580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */,
+				IDXTEST00002000000000001 /* AnalyticsIndexerTests.swift in Sources */,
+				DBSTEST00002000000000001 /* DBSmokeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

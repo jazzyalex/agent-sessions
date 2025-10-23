@@ -91,29 +91,46 @@ final class SearchCoordinator: ObservableObject {
             if includeGemini { set.insert(.gemini) }
             return set
         }()
-        let candidates = all.filter { allowed.contains($0.source) }
-
-        // Partition
-        let threshold = 10 * 1024 * 1024
-        var nonLarge: [Session] = []
-        var large: [Session] = []
-        nonLarge.reserveCapacity(candidates.count)
-        large.reserveCapacity(candidates.count / 2)
-        for s in candidates {
-            let size = Self.sizeBytes(for: s)
-            if size >= threshold { large.append(s) } else { nonLarge.append(s) }
-        }
-        nonLarge.sort { $0.modifiedAt > $1.modifiedAt }
-        large.sort { $0.modifiedAt > $1.modifiedAt }
-
         // Launch orchestration
-        // Capture counts to avoid capturing mutable arrays
-        let nonLargeCount = nonLarge.count
-        let largeCount = large.count
-
+        
         let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
         currentTask = Task.detached(priority: prio) { [weak self, newRunID] in
             guard let self else { return }
+
+            // Build candidate set and partition inside the task (async-friendly)
+            let threshold = 10 * 1024 * 1024
+            var candidates = all.filter { allowed.contains($0.source) }
+            do {
+                let db = try IndexDB()
+                if try await db.isEmpty() == false {
+                    let model = filters.model
+                    let repo = filters.repoName
+                    let df = filters.dateFrom
+                    let dt = filters.dateTo
+                    let sourceStrings = allowed.map { $0.rawValue }
+                    let ids = try await db.prefilterSessionIDs(sources: sourceStrings, model: model, repoSubstr: repo, dateFrom: df, dateTo: dt)
+                    if !ids.isEmpty {
+                        let allowedSet = Set(ids)
+                        candidates = candidates.filter { allowedSet.contains($0.id) }
+                    }
+                }
+            } catch {
+                // Non-fatal: fall back to in-memory candidates
+            }
+
+            var nonLarge: [Session] = []
+            var large: [Session] = []
+            nonLarge.reserveCapacity(candidates.count)
+            large.reserveCapacity(candidates.count / 2)
+            for s in candidates {
+                let size = Self.sizeBytes(for: s)
+                if size >= threshold { large.append(s) } else { nonLarge.append(s) }
+            }
+            nonLarge.sort { $0.modifiedAt > $1.modifiedAt }
+            large.sort { $0.modifiedAt > $1.modifiedAt }
+
+            let nonLargeCount = nonLarge.count
+            let largeCount = large.count
             await MainActor.run {
                 guard self.runID == newRunID else { return }
                 self.isRunning = true

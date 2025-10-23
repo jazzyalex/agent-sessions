@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Parser for Claude Code session format
 final class ClaudeSessionParser {
@@ -384,8 +385,9 @@ final class ClaudeSessionParser {
     }
 
     private static func hash(path: String) -> String {
-        // Simple hash for consistency
-        return String(path.hashValue)
+        // Stable, deterministic ID based on file path (hex SHA-256)
+        let d = SHA256.hash(data: Data(path.utf8))
+        return d.map { String(format: "%02x", $0) }.joined()
     }
 
     private static func isValidPath(_ path: String) -> Bool {

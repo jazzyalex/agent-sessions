@@ -124,6 +124,24 @@ final class ClaudeSessionIndexer: ObservableObject {
 
         let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
         ioQueue.async {
+            // Fast path: hydrate from SQLite index if available (bridge async)
+            var indexed: [Session]? = nil
+            let sema = DispatchSemaphore(value: 0)
+            Task.detached(priority: .utility) {
+                indexed = try? await self.hydrateFromIndexDBIfAvailable()
+                sema.signal()
+            }
+            sema.wait()
+            if let sessions = indexed {
+                DispatchQueue.main.async {
+                    self.allSessions = sessions
+                    self.isIndexing = false
+                    self.filesProcessed = sessions.count
+                    self.totalFiles = sessions.count
+                    self.progressText = "Loaded \(sessions.count) from index"
+                }
+                return
+            }
             let files = self.discovery.discoverSessionFiles()
 
             print("📁 Found \(files.count) Claude Code session files")
@@ -171,6 +189,15 @@ final class ClaudeSessionIndexer: ObservableObject {
                 }
             }
         }
+    }
+
+    private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {
+        let db = try IndexDB()
+        if try await db.isEmpty() { return nil }
+        let repo = SessionMetaRepository(db: db)
+        let list = try await repo.fetchSessions(for: .claude)
+        let sorted = list.sorted { $0.modifiedAt > $1.modifiedAt }
+        return sorted
     }
 
     func applySearch() {

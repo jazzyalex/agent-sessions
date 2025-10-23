@@ -26,7 +26,7 @@ struct AgentBreakdownView: View {
         }
         .frame(height: AnalyticsDesign.secondaryCardHeight)
         .padding(AnalyticsDesign.cardPadding)
-        .background(Color(nsColor: .quaternarySystemFill))
+        .background(Color("CardBackground"))
         .clipShape(RoundedRectangle(cornerRadius: AnalyticsDesign.cardCornerRadius))
     }
 
@@ -69,7 +69,7 @@ private struct AgentRow: View {
                 ZStack(alignment: .leading) {
                     // Background
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(Color(nsColor: .quaternaryLabelColor))
+                        .fill(Color("AxisGridline"))
                         .frame(height: 8)
 
                     // Progress

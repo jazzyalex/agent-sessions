@@ -68,13 +68,29 @@ struct SessionsListView: View {
 
             // Msgs
             TableColumn("Msgs", value: \Session.messageCount) { s in
-                Text(messageDisplay(for: s))
+                Text(String(s.messageCount))
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
             }
             .width(
                 min: indexer.showMsgsColumn ? 64 : 0,
                 ideal: indexer.showMsgsColumn ? 64 : 0,
                 max: indexer.showMsgsColumn ? 80 : 0
+            )
+
+            // Size
+            TableColumn("Size") { s in
+                let display: String = {
+                    if let b = s.fileSizeBytes { return formattedSize(b) }
+                    return "—"
+                }()
+                Text(display)
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .width(
+                min: indexer.showSizeColumn ? 72 : 0,
+                ideal: indexer.showSizeColumn ? 80 : 0,
+                max: indexer.showSizeColumn ? 100 : 0
             )
 
         }

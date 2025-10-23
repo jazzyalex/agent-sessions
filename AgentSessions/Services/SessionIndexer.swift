@@ -141,6 +141,7 @@ final class SessionIndexer: ObservableObject {
     @AppStorage("ShowMsgsColumn") var showMsgsColumn: Bool = true
     @AppStorage("ShowProjectColumn") var showProjectColumn: Bool = true
     @AppStorage("ShowTitleColumn") var showTitleColumn: Bool = true
+    @AppStorage("ShowSizeColumn") var showSizeColumn: Bool = true
     // Persist active project filter
     @AppStorage("ProjectFilter") private var projectFilterStored: String = ""
 
@@ -455,6 +456,24 @@ final class SessionIndexer: ObservableObject {
         let fm = FileManager.default
         let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
         ioQueue.async {
+            // Fast path: hydrate from SQLite index if available (bridge async)
+            var indexed: [Session]? = nil
+            let sema = DispatchSemaphore(value: 0)
+            Task.detached(priority: .utility) {
+                indexed = try? await self.hydrateFromIndexDBIfAvailable()
+                sema.signal()
+            }
+            sema.wait()
+            if let sessions = indexed {
+                DispatchQueue.main.async {
+                    self.allSessions = sessions
+                    self.isIndexing = false
+                    self.filesProcessed = sessions.count
+                    self.totalFiles = sessions.count
+                    self.progressText = "Loaded \(sessions.count) from index"
+                }
+                return
+            }
             // Check if directory exists and is accessible
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
@@ -546,6 +565,15 @@ final class SessionIndexer: ObservableObject {
                 }
             }
         }
+    }
+
+    private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {
+        let db = try IndexDB()
+        if try await db.isEmpty() { return nil }
+        let repo = SessionMetaRepository(db: db)
+        let list = try await repo.fetchSessions(for: .codex)
+        let sorted = list.sorted { $0.modifiedAt > $1.modifiedAt }
+        return sorted
     }
 
     // MARK: - Parsing

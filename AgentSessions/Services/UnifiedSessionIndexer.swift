@@ -200,6 +200,18 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     func refresh() {
+        // Kick off background analytics indexing refresh (non-blocking)
+        Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
+            do {
+                let db = try IndexDB()
+                let indexer = AnalyticsIndexer(db: db)
+                await indexer.refresh()
+            } catch {
+                // Silent failure: indexing is additive and optional for core UX
+                print("[Indexing] Refresh failed: \(error)")
+            }
+        }
+
         // Sequential refresh: Codex → Claude → Gemini, gated by source toggles
         // This stabilizes resolver seeding and avoids UI churn from parallel updates.
         struct Step { let enabled: Bool; let start: () -> Void; let busy: () -> Bool }

@@ -87,7 +87,7 @@ private struct StatsCard: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 16)
-        .background(Color(nsColor: .quaternarySystemFill))
+        .background(Color("CardBackground"))
         .clipShape(RoundedRectangle(cornerRadius: AnalyticsDesign.cardCornerRadius))
         .scaleEffect(isHovered ? 1.02 : 1.0)
         .animation(.easeOut(duration: AnalyticsDesign.hoverDuration), value: isHovered)

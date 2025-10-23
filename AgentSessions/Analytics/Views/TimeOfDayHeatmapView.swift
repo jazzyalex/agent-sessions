@@ -42,7 +42,7 @@ struct TimeOfDayHeatmapView: View {
         }
         .frame(height: AnalyticsDesign.secondaryCardHeight)
         .padding(AnalyticsDesign.cardPadding)
-        .background(Color(nsColor: .quaternarySystemFill))
+        .background(Color("CardBackground"))
         .clipShape(RoundedRectangle(cornerRadius: AnalyticsDesign.cardCornerRadius))
     }
 
@@ -135,7 +135,7 @@ private struct HeatmapCell: View {
     private var cellColor: Color {
         switch level {
         case .none:
-            return Color(nsColor: .quaternaryLabelColor)
+            return Color("HeatmapCellEmpty")
         case .low:
             return Color.agentCodex.opacity(0.3)
         case .medium:

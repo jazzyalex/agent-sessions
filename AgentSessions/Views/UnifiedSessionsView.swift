@@ -23,6 +23,7 @@ struct UnifiedSessionsView: View {
     @State private var cachedRows: [Session] = []
     @AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
     @AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
+    @AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
     @AppStorage("UnifiedShowCodexStrip") private var showCodexStrip: Bool = false
     @AppStorage("UnifiedShowClaudeStrip") private var showClaudeStrip: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
@@ -286,10 +287,22 @@ struct UnifiedSessionsView: View {
             .width(min: 120, ideal: 160, max: 240)
 
             TableColumn("Msgs", value: \Session.messageCount) { s in
-                Text(unifiedMessageDisplay(for: s))
+                Text(String(s.messageCount))
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
             }
             .width(min: 64, ideal: 64, max: 80)
+
+            // File size column
+            TableColumn("Size") { s in
+                let display: String = {
+                    if let b = s.fileSizeBytes { return formattedSize(b) }
+                    return "—"
+                }()
+                Text(display)
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: showSizeColumn ? 72 : 0, ideal: showSizeColumn ? 80 : 0, max: showSizeColumn ? 100 : 0)
 
             // Removed separate Refresh column to avoid churn
         }

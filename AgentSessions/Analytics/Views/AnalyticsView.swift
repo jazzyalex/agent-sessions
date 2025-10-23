@@ -26,8 +26,8 @@ struct AnalyticsView: View {
             }
         }
         .onAppear {
-            // Trigger full parsing for accurate analytics
-            service.ensureSessionsFullyParsed()
+            // Do not parse all sessions here; indexing provides precomputed metrics (next phase).
+            // Keep UI responsive and avoid heavy work on appear.
             refreshData()
         }
         .onChange(of: dateRange) { _, _ in refreshData() }

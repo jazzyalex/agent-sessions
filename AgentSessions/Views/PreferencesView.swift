@@ -293,11 +293,18 @@ struct PreferencesView: View {
                         .help("Show or hide message counts in the Sessions list")
                     Toggle("Modified date", isOn: $indexer.showModifiedColumn)
                         .help("Show or hide the modified date column")
+                    Toggle("Size column", isOn: $indexer.showSizeColumn)
+                        .help("Show or hide the file size column in the Sessions list")
                     Toggle("Star in column", isOn: Binding(
                         get: { UserDefaults.standard.object(forKey: "UnifiedShowStarColumn") as? Bool ?? true },
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowStarColumn") }
                     ))
                     .help("Show or hide the favorite star button in the CLI Agent column")
+                    Toggle("Size column (Unified)", isOn: Binding(
+                        get: { UserDefaults.standard.object(forKey: "UnifiedShowSizeColumn") as? Bool ?? true },
+                        set: { UserDefaults.standard.set($0, forKey: "UnifiedShowSizeColumn") }
+                    ))
+                    .help("Show or hide the file size column in the Unified list")
                 }
                 // Micro-header for filters
                 Text("Filters")
