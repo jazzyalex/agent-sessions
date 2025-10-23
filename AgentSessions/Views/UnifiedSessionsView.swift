@@ -641,7 +641,7 @@ struct UnifiedSessionsView: View {
     private func progressLineText(_ p: SearchCoordinator.Progress) -> String {
         switch p.phase {
         case .idle:
-            return ""
+            return "Searching…"
         case .small:
             return "Scanning small… \(p.scannedSmall)/\(p.totalSmall)"
         case .large:
