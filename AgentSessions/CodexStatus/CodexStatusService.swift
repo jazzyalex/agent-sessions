@@ -512,8 +512,9 @@ actor CodexStatusService {
 
     private func parseTokenCountTail(url: URL) -> RateLimitSummary? {
         guard let lines = tailLines(url: url, maxBytes: 512 * 1024) else { return nil }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        // Note: Codex logs may emit timestamps with or without fractional seconds,
+        // or as numeric epoch values. Be lenient here so we always capture the
+        // latest token_count event time for stale gating.
         for raw in lines.reversed() {
             guard let data = raw.data(using: .utf8) else { continue }
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
@@ -522,12 +523,11 @@ actor CodexStatusService {
             guard (payload["type"] as? String) == "token_count" else { continue }
 
             var createdAt: Date? = nil
-            // Try created_at first (preferred field name)
-            if let s = obj["created_at"] as? String { createdAt = iso.date(from: s) }
-            if createdAt == nil, let s = payload["created_at"] as? String { createdAt = iso.date(from: s) }
-            // Fallback to timestamp field (Codex uses this)
-            if createdAt == nil, let s = obj["timestamp"] as? String { createdAt = iso.date(from: s) }
-            if createdAt == nil, let s = payload["timestamp"] as? String { createdAt = iso.date(from: s) }
+            // Try created_at first (preferred field name), then generic timestamp.
+            if createdAt == nil, let any = obj["created_at"] { createdAt = decodeFlexibleDate(any) }
+            if createdAt == nil, let any = payload["created_at"] { createdAt = decodeFlexibleDate(any) }
+            if createdAt == nil, let any = obj["timestamp"] { createdAt = decodeFlexibleDate(any) }
+            if createdAt == nil, let any = payload["timestamp"] { createdAt = decodeFlexibleDate(any) }
 
             guard let created = createdAt else {
                 // Skip events without timestamps - cannot determine staleness accurately
@@ -538,23 +538,116 @@ actor CodexStatusService {
             guard created <= Date() else { continue }
 
             guard let rate = payload["rate_limits"] as? [String: Any] else { continue }
+            // New format: captured_at anchors relative deltas; prefer it over event timestamp
+            let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? created
+
             let primary = rate["primary"] as? [String: Any]
             let secondary = rate["secondary"] as? [String: Any]
 
-            let five = decodeWindow(primary, created: created)
-            let week = decodeWindow(secondary, created: created)
-            let stale = Date().timeIntervalSince(created) > 3 * 60
-            return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: created, stale: stale, sourceFile: url)
+            let five = decodeWindow(primary, created: created, capturedAt: capturedAt)
+            let week = decodeWindow(secondary, created: created, capturedAt: capturedAt)
+            let base = capturedAt
+            let stale = Date().timeIntervalSince(base) > 3 * 60
+            return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
         }
         return nil
     }
 
-    private func decodeWindow(_ dict: [String: Any]?, created: Date) -> RateLimitWindow {
+    // MARK: - Flexible date decoding for Codex logs
+
+    private func decodeFlexibleDate(_ any: Any?) -> Date? {
+        guard let any = any else { return nil }
+        // Numeric epoch seconds/millis/micros
+        if let d = any as? Double { return Date(timeIntervalSince1970: normalizeEpochSeconds(d)) }
+        if let i = any as? Int { return Date(timeIntervalSince1970: normalizeEpochSeconds(Double(i))) }
+        if let s = any as? String {
+            // Digits-only string → numeric epoch
+            if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: s)),
+               let val = Double(s) {
+                return Date(timeIntervalSince1970: normalizeEpochSeconds(val))
+            }
+            // ISO8601 with or without fractional seconds
+            let iso1 = ISO8601DateFormatter(); iso1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = iso1.date(from: s) { return d }
+            let iso2 = ISO8601DateFormatter(); iso2.formatOptions = [.withInternetDateTime]
+            if let d = iso2.date(from: s) { return d }
+            // Common textual fallbacks
+            let fmts = [
+                "yyyy-MM-dd HH:mm:ssZZZZZ",
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy/MM/dd HH:mm:ssZZZZZ",
+                "yyyy/MM/dd HH:mm:ss"
+            ]
+            let df = DateFormatter(); df.locale = Locale(identifier: "en_US_POSIX")
+            for f in fmts { df.dateFormat = f; if let d = df.date(from: s) { return d } }
+        }
+        return nil
+    }
+
+    private func normalizeEpochSeconds(_ value: Double) -> Double {
+        // Heuristic: >1e14 → microseconds; >1e11 → milliseconds; else seconds
+        if value > 1e14 { return value / 1_000_000 }
+        if value > 1e11 { return value / 1_000 }
+        return value
+    }
+
+    private func decodeWindow(_ dict: [String: Any]?, created: Date, capturedAt: Date?) -> RateLimitWindow {
         guard let dict else { return RateLimitWindow(usedPercent: nil, resetAt: nil, windowMinutes: nil) }
-        let used = (dict["used_percent"] as? Double).map { Int(($0).rounded()) }
-        let resets = (dict["resets_in_seconds"] as? Double) ?? (dict["resets_in_seconds"] as? NSNumber)?.doubleValue
+        var used: Int?
+        if let d = dict["used_percent"] as? Double { used = Int(d.rounded()) }
+        else if let i = dict["used_percent"] as? Int { used = max(0, min(100, i)) }
+        else if let n = dict["used_percent"] as? NSNumber { used = Int(truncating: n) }
+
+        var resetsVal: Double?
+        if let d = dict["resets_in_seconds"] as? Double { resetsVal = d }
+        else if let i = dict["resets_in_seconds"] as? Int { resetsVal = Double(i) }
+        else if let n = dict["resets_in_seconds"] as? NSNumber { resetsVal = n.doubleValue }
+
         let minutes = dict["window_minutes"] as? Int
-        let resetAt = resets.map { created.addingTimeInterval($0) }
+
+        var resetAt: Date?
+        if let delta = resetsVal {
+            // New semantics: delta is relative to capturedAt when present
+            let base = capturedAt ?? created
+            resetAt = base.addingTimeInterval(delta)
+        }
+
+        // New format uses absolute epoch under various keys (resets_at / reset_at / resetsAt)
+        if resetAt == nil {
+            let absoluteKeys = [
+                "resets_at",
+                "reset_at",
+                "resetsAt",
+                "resetAt",
+                "resets_at_ms",
+                "reset_at_ms"
+            ]
+            for key in absoluteKeys {
+                guard let value = dict[key] else { continue }
+                if key.hasSuffix("_ms") {
+                    if let num = value as? Double {
+                        resetAt = Date(timeIntervalSince1970: normalizeEpochSeconds(num))
+                        break
+                    }
+                    if let num = value as? Int {
+                        resetAt = Date(timeIntervalSince1970: normalizeEpochSeconds(Double(num)))
+                        break
+                    }
+                    if let num = value as? NSNumber {
+                        resetAt = Date(timeIntervalSince1970: normalizeEpochSeconds(num.doubleValue))
+                        break
+                    }
+                    if let s = value as? String, let num = Double(s) {
+                        resetAt = Date(timeIntervalSince1970: normalizeEpochSeconds(num))
+                        break
+                    }
+                } else if let date = decodeFlexibleDate(value) {
+                    resetAt = date
+                    break
+                }
+            }
+        }
+
         return RateLimitWindow(usedPercent: used, resetAt: resetAt, windowMinutes: minutes)
     }
 
