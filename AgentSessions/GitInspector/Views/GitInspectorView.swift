@@ -120,11 +120,9 @@ struct GitInspectorView: View {
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    if let t = current.queriedAt {
-                        Text("Checked " + RelativeDateTimeFormatter().localizedString(for: t, relativeTo: Date()))
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
-                    }
+                    Text("Checked " + current.relativeTimeDescription)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
                 }
                 CurrentSection(status: current, onRefresh: refreshStatus)
                 Divider()
