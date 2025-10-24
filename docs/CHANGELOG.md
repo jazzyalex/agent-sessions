@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Indexing: SQLite rollups index with per-session daily splits and incremental Refresh. Background indexing runs at utility priority and updates only changed session files. (No UI changes yet.)
+- Git Inspector (feature-flagged): Adds “Show Git Context” to the Unified Sessions context menu for Codex sessions; opens a non-blocking inspector window with current and historical git context.
 
 ## [2.4] - 2025-10-15
 

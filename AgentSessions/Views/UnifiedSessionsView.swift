@@ -346,6 +346,12 @@ struct UnifiedSessionsView: View {
                 Button("Reveal Session Log") { revealSessionFile(s) }
                     .keyboardShortcut("l", modifiers: [.command, .option])
                     .help("Show session log file in Finder (⌥⌘L)")
+                // Git Context Inspector (Codex only, feature-flagged)
+                if isGitInspectorEnabled, s.source == .codex {
+                    Divider()
+                    Button("Show Git Context") { showGitInspector(s) }
+                        .help("Show historical and current git context with safety analysis")
+                }
                 if let name = s.repoName, !name.isEmpty {
                     Divider()
                     Button("Filter by Project: \(name)") { unified.projectFilter = name; unified.recomputeNow() }
@@ -420,6 +426,21 @@ struct UnifiedSessionsView: View {
                 // Reset the flag on the next runloop to ensure onChange handlers have observed it
                 DispatchQueue.main.async { isAutoSelectingFromSearch = false }
             }
+        }
+    }
+
+    // MARK: - Git Inspector Integration (Unified View)
+    private var isGitInspectorEnabled: Bool {
+        let flagEnabled = UserDefaults.standard.bool(forKey: "EnableGitInspector")
+        if flagEnabled { return true }
+        if let env = ProcessInfo.processInfo.environment["AGENTSESSIONS_FEATURES"], env.contains("gitInspector") { return true }
+        return false
+    }
+
+    private func showGitInspector(_ session: Session) {
+        GitInspectorWindowController.shared.show(for: session) { resumed in
+            // Reuse existing resume pipeline for Codex/Claude as appropriate
+            self.resume(resumed)
         }
     }
 
