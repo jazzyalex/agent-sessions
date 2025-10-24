@@ -8,6 +8,9 @@ All notable changes to this project will be documented in this file.
 - Indexing: SQLite rollups index with per-session daily splits and incremental Refresh. Background indexing runs at utility priority and updates only changed session files. (No UI changes yet.)
 - Git Inspector (feature-flagged): Adds “Show Git Context” to the Unified Sessions context menu for Codex sessions; opens a non-blocking inspector window with current and historical git context.
 
+### Fixed
+- Usage (Codex): Reset times no longer show “Stale data” when recent `token_count` events are present. Now anchors `resets_in_seconds` to `rate_limits.captured_at` and accepts absolute `resets_at`/`reset_at` fields (including `*_ms`), with flexible timestamp parsing for old/new JSON formats.
+
 ## [2.4] - 2025-10-15
 
 ### Added
