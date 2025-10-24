@@ -10,27 +10,35 @@ struct GitInspectorView: View {
     @State private var safetyCheck: GitSafetyCheck?
     @State private var isLoadingCurrent = false
     @State private var errorMessage: String?
+    @State private var expandHistorical: Bool = true
+    @State private var expandSafety: Bool = false
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                // Header
-                headerView
-
-                // Content
-                if let error = errorMessage {
-                    errorView(error)
-                } else {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 16) {
+                    headerView
                     contentView
                 }
+                .padding(20)
             }
-            .padding(28)
+            Divider()
+            // Footer actions: always visible; outside scrolling content
+            VStack(spacing: 12) {
+                ButtonActionsView(
+                    session: session,
+                    currentStatus: currentStatus,
+                    safetyCheck: safetyCheck,
+                    onRefresh: refreshStatus,
+                    onResume: { onResume(session) }
+                )
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+            }
+            .background(Color(nsColor: .underPageBackgroundColor))
         }
-        .frame(minWidth: 680, idealWidth: 680, maxWidth: 800, minHeight: 400, idealHeight: 600, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
-        .task {
-            await loadData()
-        }
+        .task { await loadData() }
     }
 
     // MARK: - Header
@@ -74,40 +82,44 @@ struct GitInspectorView: View {
     private var contentView: some View {
         // Show whichever data is available, prioritizing historical+current combined when possible
         if let historical = historicalContext {
-            // Historical Section (with subtle source indicator)
-            HistoricalSection(context: historical)
-                
-            // Divider
-            comparisonDivider
-                
+            // Snapshot (collapsible by default when identical to current)
+            VStack(alignment: .leading, spacing: 8) {
+                DisclosureGroup(isExpanded: $expandHistorical) {
+                    HistoricalSection(context: historical)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "camera.fill").foregroundStyle(.blue)
+                        Text("SNAPSHOT AT SESSION START").font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary)
+                        if let c = currentStatus, isIdentical(historical: historical, current: c) {
+                            Spacer(); Image(systemName: "checkmark.circle.fill").foregroundStyle(.green); Text("Same").font(.system(size: 11)).foregroundStyle(.green)
+                        }
+                    }
+                }
+            }
+            .padding(0)
+
             // Current Section
             if isLoadingCurrent {
                 loadingView
             } else if let current = currentStatus {
                 CurrentSection(status: current, onRefresh: refreshStatus)
-
-                // Divider
-                comparisonDivider
-
-                // Safety Section
+                // Safety (collapsible when status is safe)
                 if let safety = safetyCheck {
-                    SafetySection(check: safety)
+                    VStack(alignment: .leading, spacing: 8) {
+                        DisclosureGroup(isExpanded: $expandSafety) {
+                            SafetySection(check: safety)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "bolt.fill").foregroundStyle(.yellow)
+                                Text("RESUME SAFETY CHECK").font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary)
+                                if safety.status == .safe { Spacer(); Image(systemName: "checkmark.circle.fill").foregroundStyle(.green); Text("Safe").font(.system(size: 11)).foregroundStyle(.green) }
+                            }
+                        }
+                    }
                 }
             } else {
                 currentUnavailableView
             }
-
-            // Divider
-            Divider()
-
-            // Actions
-            ButtonActionsView(
-                session: session,
-                currentStatus: currentStatus,
-                safetyCheck: safetyCheck,
-                onRefresh: refreshStatus,
-                onResume: { onResume(session) }
-            )
 
         } else if isLoadingCurrent {
             loadingView
@@ -256,7 +268,35 @@ struct GitInspectorView: View {
         // Compute safety check if we have both historical and current
         if let historical = historicalContext, let current = currentStatus {
             safetyCheck = GitSafetyAnalyzer.analyze(historical: historical, current: current)
+            // Configure collapsible defaults on main thread
+            await MainActor.run {
+                // Snapshot collapsed if identical; else expanded
+                expandHistorical = !isIdentical(historical: historical, current: current)
+                // Safety expanded when not safe
+                expandSafety = (safetyCheck?.status ?? .unknown) != .safe
+            }
+        } else {
+            await MainActor.run {
+                // Without both, prefer expanded current and collapsed others
+                expandHistorical = false
+                expandSafety = false
+            }
         }
+    }
+
+    // MARK: - Helpers
+    private func isIdentical(historical: HistoricalGitContext, current: CurrentGitStatus) -> Bool {
+        if let hb = historical.branch, let cb = current.branch, hb == cb,
+           let hc = historical.commitHash, let cc = current.commitHash, hc == cc,
+           current.isDirty == false {
+            return true
+        }
+        return false
+    }
+
+    private func isHistoricalExpandedDefault(historical: HistoricalGitContext, current: CurrentGitStatus?) -> Bool {
+        guard let c = current else { return true }
+        return !isIdentical(historical: historical, current: c)
     }
 
     private func refreshStatus() async {

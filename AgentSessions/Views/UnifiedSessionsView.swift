@@ -346,8 +346,8 @@ struct UnifiedSessionsView: View {
                 Button("Reveal Session Log") { revealSessionFile(s) }
                     .keyboardShortcut("l", modifiers: [.command, .option])
                     .help("Show session log file in Finder (⌥⌘L)")
-                // Git Context Inspector (Codex only, feature-flagged)
-                if isGitInspectorEnabled, s.source == .codex {
+                // Git Context Inspector (Codex + Claude; feature-flagged)
+                if isGitInspectorEnabled, (s.source == .codex || s.source == .claude) {
                     Divider()
                     Button("Show Git Context") { showGitInspector(s) }
                         .help("Show historical and current git context with safety analysis")
