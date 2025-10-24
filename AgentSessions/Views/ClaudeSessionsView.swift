@@ -337,6 +337,16 @@ private struct ClaudeSessionsListView: View {
         cachedRows = indexer.sessions.sorted(using: sortOrder)
     }
 
+    // MARK: - Git Inspector (Claude current-only)
+    private var isGitInspectorEnabled: Bool {
+        let flag = UserDefaults.standard.bool(forKey: "EnableGitInspector")
+        if flag { return true }
+        if let env = ProcessInfo.processInfo.environment["AGENTSESSIONS_FEATURES"], env.contains("gitInspector") { return true }
+        return false
+    }
+
+    
+
     // Match time formatter used elsewhere so absolute-time mode looks consistent
     private func absoluteTimeClaude(_ date: Date?) -> String {
         guard let date else { return "" }
@@ -365,6 +375,22 @@ private struct ClaudeSessionsListView: View {
                 openWorkingDirectory(session)
             }
             .disabled(session.cwd == nil || session.cwd?.isEmpty == true)
+
+            // Reveal session log
+            Button("Reveal Session Log") {
+                let url = URL(fileURLWithPath: session.filePath)
+                if FileManager.default.fileExists(atPath: url.path) {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+            }
+
+            // Git Inspector for Claude (current-only)
+            if isGitInspectorEnabled {
+                Divider()
+                Button("Show Git Context") {
+                    GitInspectorWindowController.shared.show(for: session) { _ in onResume?(session) }
+                }
+            }
 
             if let name = session.repoName, !name.isEmpty {
                 Divider()
