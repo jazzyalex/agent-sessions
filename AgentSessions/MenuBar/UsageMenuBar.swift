@@ -4,7 +4,7 @@ import AppKit
 struct UsageMenuBarLabel: View {
     @EnvironmentObject var codexStatus: CodexUsageModel
     @EnvironmentObject var claudeStatus: ClaudeUsageModel
-    @EnvironmentObject var rateLimitStore: RateLimitStore
+    @EnvironmentObject var capStore: CapPressureStore
     @AppStorage("MenuBarScope") private var scopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var styleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("MenuBarSource") private var sourceRaw: String = MenuBarSource.codex.rawValue
@@ -16,11 +16,10 @@ struct UsageMenuBarLabel: View {
         let source = MenuBarSource(rawValue: sourceRaw) ?? .codex
         let claudeEnabled = UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip")
 
-        // Optional rate-limit badge when tight
-        let tightBadge: Text = {
-            if rateLimitStore.state.isTight, let sec = rateLimitStore.state.remainingSeconds {
-                let m = max(1, Int(ceil(Double(sec) / 60.0)))
-                return Text(" RL \(m)m")
+        // Optional Cap ETA badge when under pressure
+        let capBadge: Text = {
+            if capStore.state.severity != .none, let m = capStore.state.eta?.minutesToCap {
+                return Text(" Cap \(max(1, Int(ceil(m))))m")
             }
             return Text("")
         }()
@@ -28,7 +27,7 @@ struct UsageMenuBarLabel: View {
         let text: Text = {
             switch source {
             case .codex:
-                return renderSource(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefix: "CX") + tightBadge
+                return renderSource(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefix: "CX") + capBadge
             case .claude:
                 if claudeEnabled {
                     return renderSource(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefix: "CL")
@@ -39,9 +38,9 @@ struct UsageMenuBarLabel: View {
                 let codex = renderSource(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefix: "CX")
                 if claudeEnabled {
                     let claude = renderSource(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefix: "CL")
-                    return codex + tightBadge + Text(" │ ") + claude
+                    return codex + capBadge + Text(" │ ") + claude
                 } else {
-                    return codex + tightBadge
+                    return codex + capBadge
                 }
             }
         }()
