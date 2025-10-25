@@ -16,6 +16,11 @@ struct CodexUsageSnapshot: Equatable {
     var accountLine: String? = nil
     var modelLine: String? = nil
     var eventTimestamp: Date? = nil
+    // New: surfaced usage (latest turn or snapshot)
+    var lastInputTokens: Int? = nil
+    var lastCachedInputTokens: Int? = nil
+    var lastOutputTokens: Int? = nil
+    var lastTotalTokens: Int? = nil
 }
 
 @MainActor
@@ -32,6 +37,11 @@ final class CodexUsageModel: ObservableObject {
     @Published var lastUpdate: Date? = nil
     @Published var lastEventTimestamp: Date? = nil
     @Published var cliUnavailable: Bool = false
+    // New: surfaced usage (latest turn)
+    @Published var lastInputTokens: Int? = nil
+    @Published var lastCachedInputTokens: Int? = nil
+    @Published var lastOutputTokens: Int? = nil
+    @Published var lastTotalTokens: Int? = nil
 
     private var service: CodexStatusService?
     private var isEnabled: Bool = false
@@ -112,6 +122,10 @@ final class CodexUsageModel: ObservableObject {
         modelLine = s.modelLine
         lastUpdate = Date()
         lastEventTimestamp = s.eventTimestamp
+        lastInputTokens = s.lastInputTokens
+        lastCachedInputTokens = s.lastCachedInputTokens
+        lastOutputTokens = s.lastOutputTokens
+        lastTotalTokens = s.lastTotalTokens
     }
 
     private func clampPercent(_ v: Int) -> Int { max(0, min(100, v)) }
@@ -520,6 +534,8 @@ actor CodexStatusService {
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             guard (obj["type"] as? String) == "event_msg" else { continue }
             guard let payload = obj["payload"] as? [String: Any] else { continue }
+            // Surface latest usage totals from new or legacy shapes
+            extractUsageIfPresent(from: payload)
             guard (payload["type"] as? String) == "token_count" else { continue }
 
             var createdAt: Date? = nil
@@ -548,8 +564,55 @@ actor CodexStatusService {
             let week = decodeWindow(secondary, created: created, capturedAt: capturedAt)
             let base = capturedAt
             let stale = Date().timeIntervalSince(base) > 3 * 60
+            // Update rate-limit tight store
+            RateLimitStore.shared.update(primaryReset: five.resetAt, secondaryReset: week.resetAt)
             return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
         }
+        return nil
+    }
+
+    // MARK: - Usage extraction (new + legacy)
+
+    private func extractUsageIfPresent(from payload: [String: Any]) {
+        // New model: turn.completed with usage {...}
+        if let kind = payload["type"] as? String, kind == "turn.completed" || kind == "turn_completed" {
+            if let usage = payload["usage"] as? [String: Any] {
+                var s = snapshot
+                s.lastInputTokens = intValue(usage["input_tokens"]) ?? s.lastInputTokens
+                s.lastCachedInputTokens = intValue(usage["cached_input_tokens"]) ?? s.lastCachedInputTokens
+                s.lastOutputTokens = intValue(usage["output_tokens"]) ?? s.lastOutputTokens
+                if let i = s.lastInputTokens, let o = s.lastOutputTokens {
+                    s.lastTotalTokens = i + o
+                } else {
+                    s.lastTotalTokens = intValue(usage["total_tokens"]) ?? s.lastTotalTokens
+                }
+                snapshot = s
+                updateHandler(snapshot)
+                return
+            }
+        }
+        // Legacy path: token_count.info.last_token_usage {...}
+        if let kind = payload["type"] as? String, kind == "token_count" {
+            if let info = payload["info"] as? [String: Any] {
+                if let last = info["last_token_usage"] as? [String: Any] {
+                    var s = snapshot
+                    s.lastInputTokens = intValue(last["input_tokens"]) ?? s.lastInputTokens
+                    s.lastCachedInputTokens = intValue(last["cached_input_tokens"]) ?? s.lastCachedInputTokens
+                    s.lastOutputTokens = intValue(last["output_tokens"]) ?? s.lastOutputTokens
+                    s.lastTotalTokens = intValue(last["total_tokens"]) ?? ((s.lastInputTokens ?? 0) + (s.lastOutputTokens ?? 0))
+                    snapshot = s
+                    updateHandler(snapshot)
+                }
+            }
+        }
+    }
+
+    private func intValue(_ any: Any?) -> Int? {
+        guard let any else { return nil }
+        if let i = any as? Int { return i }
+        if let d = any as? Double { return Int(d.rounded()) }
+        if let n = any as? NSNumber { return n.intValue }
+        if let s = any as? String, let v = Double(s) { return Int(v.rounded()) }
         return nil
     }
 
