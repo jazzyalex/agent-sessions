@@ -83,10 +83,9 @@ struct AnalyticsView: View {
             .help("Refresh analytics")
             .disabled(isRefreshing)
         }
-        .padding(.horizontal, AnalyticsDesign.windowPadding)
+        .padding(.horizontal, 24)
         .padding(.vertical, 12)
-        .frame(height: AnalyticsDesign.headerHeight)
-        .background(Color("CardBackground"))
+        .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -98,10 +97,10 @@ struct AnalyticsView: View {
 
     private var totalView: some View {
         ScrollView {
-            VStack(spacing: AnalyticsDesign.sectionSpacing) {
+            VStack(spacing: AnalyticsDesign.windowPadding) {  // 24pt between sections
                 // Stats cards
                 StatsCardsView(summary: service.snapshot.summary)
-                    .padding(.horizontal, AnalyticsDesign.windowPadding)
+                    .frame(height: AnalyticsDesign.statsCardHeight)
 
                 // Primary chart
                 SessionsChartView(
@@ -109,10 +108,9 @@ struct AnalyticsView: View {
                     dateRange: dateRange
                 )
                 .frame(height: AnalyticsDesign.primaryChartHeight)
-                .padding(.horizontal, AnalyticsDesign.windowPadding)
 
                 // Secondary insights (2-column grid)
-                HStack(alignment: .top, spacing: AnalyticsDesign.cardSpacing) {
+                HStack(alignment: .top, spacing: AnalyticsDesign.windowPadding) {
                     AgentBreakdownView(breakdown: service.snapshot.agentBreakdown)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -123,11 +121,12 @@ struct AnalyticsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .frame(height: AnalyticsDesign.secondaryCardHeight)
-                .padding(.horizontal, AnalyticsDesign.windowPadding)
-                .padding(.bottom, AnalyticsDesign.sectionSpacing)
             }
-            .padding(.top, AnalyticsDesign.sectionSpacing)
+            .padding(.horizontal, AnalyticsDesign.windowPadding)  // 24pt left/right
+            .padding(.top, AnalyticsDesign.windowPadding)         // 24pt top
+            .padding(.bottom, AnalyticsDesign.windowPadding)      // 24pt bottom
         }
+        .background(Color.analyticsBackground)
     }
 
     // MARK: - States
