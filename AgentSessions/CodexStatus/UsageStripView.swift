@@ -48,7 +48,6 @@ struct UsageStripView: View {
         } else {
             parts.append("Codex: Not yet updated")
         }
-
         parts.append("Double-click to refresh now")
 
         return parts.joined(separator: "\n")

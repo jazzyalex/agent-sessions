@@ -7,7 +7,6 @@ struct AgentSessionsApp: App {
     @StateObject private var claudeIndexer = ClaudeSessionIndexer()
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
-    @StateObject private var capStore = CapPressureStore.shared
     @StateObject private var geminiIndexer = GeminiSessionIndexer()
     @StateObject private var updaterController = {
         let controller = UpdaterController()
@@ -47,7 +46,7 @@ struct AgentSessionsApp: App {
                                 })
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
-                .environmentObject(capStore)
+                
                 .environmentObject(updaterController)
                 .background(WindowAutosave(name: "MainWindow"))
                 .onAppear {

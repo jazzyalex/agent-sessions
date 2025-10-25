@@ -13,7 +13,6 @@ struct UnifiedSessionsView: View {
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @EnvironmentObject var updaterController: UpdaterController
-    @EnvironmentObject var capStore: CapPressureStore
 
     let layoutMode: LayoutMode
     let onToggleLayout: () -> Void
@@ -59,10 +58,7 @@ struct UnifiedSessionsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Cap ETA banner under toolbar
-            if capStore.state.severity != .none {
-                CapStrip().environmentObject(capStore)
-            }
+            // Cap ETA banner disabled (calculations retained; UI disabled)
             if layoutMode == .vertical {
                 HSplitView {
                     listPane
