@@ -56,7 +56,7 @@ public struct HistoricalGitContext: Equatable {
         if let clean = wasClean {
             return clean ? "Clean" : "Had uncommitted changes"
         }
-        return "Unknown"
+        return "Not captured"
     }
 
     /// Relative time description (e.g., "2 hours ago")

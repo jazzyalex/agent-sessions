@@ -34,7 +34,64 @@ Suggested build steps
   - A 1–2 bullet note in `docs/summaries/YYYY-MM.md`.
 
 ## Xcode Project Hygiene
-- When adding/moving/renaming Swift files (app or tests), ensure they are added to `AgentSessions.xcodeproj` with both a `PBXFileReference` and a `PBXBuildFile` in the correct target. Missing entries will break builds with “Cannot find … in scope”.
+- When adding/moving/renaming Swift files (app or tests), ensure they are added to `AgentSessions.xcodeproj` with both a `PBXFileReference` and a `PBXBuildFile` in the correct target. Missing entries will break builds with "Cannot find … in scope".
+
+## Adding New Swift Files to Xcode Project
+When creating new Swift files, use the tested Ruby script to add them to the Xcode project:
+
+**Prerequisites**
+```bash
+gem install xcodeproj
+```
+
+**Script Location**
+`scripts/xcode_add_file.rb` - Adds a Swift file to a target with proper PBXFileReference and PBXBuildFile entries.
+
+**Usage Examples**
+
+Add file to main app target under GitInspector group:
+```bash
+./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessions \
+  AgentSessions/GitInspector/Models/InspectorKeys.swift \
+  AgentSessions/GitInspector/Models
+```
+
+Add file to test target:
+```bash
+./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessionsTests \
+  AgentSessionsTests/GitInspectorViewModelTests.swift \
+  AgentSessionsTests
+```
+
+Add multiple files (example from GitInspector):
+```bash
+./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessions \
+  AgentSessions/GitInspector/Utilities/ColorExtensions.swift \
+  AgentSessions/GitInspector/Utilities
+
+./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessions \
+  AgentSessions/GitInspector/Views/StatusHeroSection.swift \
+  AgentSessions/GitInspector/Views
+```
+
+**Verification**
+Always build after adding files to verify they're properly integrated:
+```bash
+xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions \
+  -configuration Debug -destination 'platform=macOS' build
+```
+
+**CRITICAL: After ANY modification to project.pbxproj**
+If you modify `AgentSessions.xcodeproj/project.pbxproj` directly (NOT using the Ruby script):
+1. **ALWAYS** resolve package dependencies first:
+   ```bash
+   xcodebuild -resolvePackageDependencies -project AgentSessions.xcodeproj -scheme AgentSessions
+   ```
+2. **THEN** verify the build succeeds:
+   ```bash
+   xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build
+   ```
+3. If package resolution fails or reports "Missing package product", the project.pbxproj was corrupted. Restore from git and use the Ruby script instead.
 
 ## UI/UX Rules (HIG‑Aligned)
 - If content may exceed the window height, place the main content in a vertical `ScrollView` and keep footer/action controls outside the scroll region so actions remain visible.

@@ -7,77 +7,76 @@ import AppKit
 class GitInspectorWindowController: NSObject, NSWindowDelegate {
     static let shared = GitInspectorWindowController()
 
-    private var window: NSWindow?
-    private var hostingController: NSHostingController<GitInspectorWindowWrapper>?
-    private var currentSessionID: String?
+    private struct WindowRecord {
+        let window: NSWindow
+        let host: NSHostingController<GitInspectorWindowWrapper>
+    }
+    private var windows: [String: WindowRecord] = [:] // keyed by SessionKey.rawValue
 
     /// Show the Git Inspector window for a specific session
     /// - Parameters:
     ///   - session: The session to inspect
     ///   - onResume: Callback when user clicks Resume button
     func show(for session: Session, onResume: @escaping (Session) -> Void) {
-        // If window exists and session hasn't changed, just bring to front
-        if let existingWindow = window, currentSessionID == session.id {
-            existingWindow.makeKeyAndOrderFront(nil)
+        let key = SessionKey(session).rawValue
+
+        if let rec = windows[key] {
+            rec.window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        // Update current session
-        currentSessionID = session.id
-
-        // Create or update content
+        // Create new window for this session key
         let contentView = GitInspectorWindowWrapper(
             session: session,
             onResume: { [weak self] sess in
                 onResume(sess)
-                self?.window?.close()
+                // Close only this session window
+                self?.windows[key]?.window.close()
+                self?.windows.removeValue(forKey: key)
             }
         )
 
-        if let existingWindow = window, let hostingController = hostingController {
-            // Update existing window content
-            hostingController.rootView = contentView
-            existingWindow.title = "Git Context: \(session.title.prefix(40))"
-            existingWindow.makeKeyAndOrderFront(nil)
-        } else {
-            // Create new window
-            hostingController = NSHostingController(rootView: contentView)
+        let host = NSHostingController(rootView: contentView)
 
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
-                styleMask: [.titled, .closable, .resizable],
-                backing: .buffered,
-                defer: false
-            )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 850, height: 800),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
 
-            window.title = "Git Context: \(session.title.prefix(40))"
-            window.contentViewController = hostingController
-            window.delegate = self
-            window.center()
-            window.setFrameAutosaveName("GitInspectorWindow")
-            window.isReleasedWhenClosed = false
-            // Minimum size for usability on small displays
-            window.minSize = NSSize(width: 700, height: 500)
-            // Initial content size; user’s later resizing persists via autosave
-            window.setContentSize(NSSize(width: 900, height: 700))
-            window.makeKeyAndOrderFront(nil)
+        window.title = "Git Context"
+        window.contentViewController = host
+        window.delegate = self
+        window.center()
+        window.setFrameAutosaveName("GitInspectorWindow.\(key)")
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 700, height: 600)
+        window.maxSize = NSSize(width: 1000, height: 1200)
+        window.setContentSize(NSSize(width: 850, height: 800))
 
-            self.window = window
-        }
+        // CRITICAL: Ensure window follows system appearance
+        window.appearance = nil
 
+        window.makeKeyAndOrderFront(nil)
+
+        windows[key] = WindowRecord(window: window, host: host)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Close the Git Inspector window
+    /// Close all Git Inspector windows
     func close() {
-        window?.close()
+        for (_, rec) in windows { rec.window.close() }
+        windows.removeAll()
     }
 
     // MARK: - NSWindowDelegate
     func windowWillClose(_ notification: Notification) {
-        currentSessionID = nil
-        // Keep window and controller alive for reuse
+        // Clean up closed windows
+        if let win = notification.object as? NSWindow {
+            windows = windows.filter { $0.value.window != win }
+        }
     }
 }
 
@@ -86,8 +85,19 @@ struct GitInspectorWindowWrapper: View {
     let session: Session
     let onResume: (Session) -> Void
 
+    // Observe system appearance changes to force SwiftUI re-evaluation
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var appearanceToggle: Bool = false
+
     var body: some View {
         GitInspectorView(session: session, onResume: onResume)
-            .frame(minWidth: 680, idealWidth: 680, minHeight: 600, idealHeight: 800)
+            // Force a distinct identity so SwiftUI state never bleeds across sessions
+            .id(SessionKey(session).rawValue)
+            .frame(minWidth: 700, idealWidth: 850, maxWidth: 1000, minHeight: 600, idealHeight: 800, maxHeight: 1200)
+            // Force re-render when color scheme changes
+            .onChange(of: colorScheme) { _, _ in
+                appearanceToggle.toggle()
+            }
+            .id("\(SessionKey(session).rawValue)-\(appearanceToggle)")
     }
 }

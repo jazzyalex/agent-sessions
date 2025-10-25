@@ -217,11 +217,27 @@ struct SessionsListView: View {
         rows.first(where: { $0.id == id }) ?? indexer.sessions.first(where: { $0.id == id })
     }
 
+    // MARK: - Git Inspector Integration
+    private var isGitInspectorEnabled: Bool {
+        let flagEnabled = UserDefaults.standard.bool(forKey: "EnableGitInspector")
+        let envEnabled = ProcessInfo.processInfo.environment["AGENTSESSIONS_FEATURES"]?.contains("gitInspector") == true
+        print("🔍 GitInspector: flag=\(flagEnabled), env=\(envEnabled)")
+        return flagEnabled || envEnabled
+    }
+
+    private func showGitInspector(_ session: Session) {
+        GitInspectorWindowController.shared.show(for: session) { sessionToResume in
+            onLaunchTerminal(sessionToResume)
+        }
+    }
+
     @ViewBuilder
     private func contextMenuContent(for selectedIDs: Set<String>) -> some View {
+        let _ = print("🔍 Context menu building for \(selectedIDs.count) selections")
         if selectedIDs.count == 1,
            let id = selectedIDs.first,
            let session = session(for: id) {
+            let _ = print("🔍 Single session: id=\(id), source=\(session.source), flagEnabled=\(isGitInspectorEnabled)")
             Button("Resume in Codex CLI") {
                 tableSelection = [id]
                 selection = id
@@ -241,6 +257,19 @@ struct SessionsListView: View {
                 revealSession(session)
             }
             .help("Show the raw session log file in Finder")
+
+            // Git Context Inspector (Codex only, feature-flagged)
+            if isGitInspectorEnabled && session.source == .codex {
+                Divider()
+                Button("Show Git Context") {
+                    print("👆 Git Context clicked for session: \(session.id)")
+                    tableSelection = [id]
+                    selection = id
+                    showGitInspector(session)
+                }
+                .help("Show historical and current git context with safety analysis")
+            }
+
             if let name = session.repoName, !name.isEmpty {
                 Divider()
                 Button("Filter by Project: \(name)") {

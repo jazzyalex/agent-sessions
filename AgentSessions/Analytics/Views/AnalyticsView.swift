@@ -97,10 +97,9 @@ struct AnalyticsView: View {
 
     private var totalView: some View {
         ScrollView {
-            VStack(spacing: AnalyticsDesign.windowPadding) {  // 24pt between sections
+            VStack(spacing: AnalyticsDesign.sectionSpacing) {
                 // Stats cards
                 StatsCardsView(summary: service.snapshot.summary)
-                    .frame(height: AnalyticsDesign.statsCardHeight)
 
                 // Primary chart
                 SessionsChartView(
@@ -109,22 +108,20 @@ struct AnalyticsView: View {
                 )
                 .frame(height: AnalyticsDesign.primaryChartHeight)
 
-                // Secondary insights (2-column grid)
-                HStack(alignment: .top, spacing: AnalyticsDesign.windowPadding) {
+                // Secondary insights (2-column grid) - lock to same height
+                HStack(alignment: .top, spacing: AnalyticsDesign.bottomGridSpacing) {
                     AgentBreakdownView(breakdown: service.snapshot.agentBreakdown)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                     TimeOfDayHeatmapView(
                         cells: service.snapshot.heatmapCells,
                         mostActive: service.snapshot.mostActiveTimeRange
                     )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 .frame(height: AnalyticsDesign.secondaryCardHeight)
             }
-            .padding(.horizontal, AnalyticsDesign.windowPadding)  // 24pt left/right
-            .padding(.top, AnalyticsDesign.windowPadding)         // 24pt top
-            .padding(.bottom, AnalyticsDesign.windowPadding)      // 24pt bottom
+            .padding(AnalyticsDesign.windowPadding)  // Single source of outer padding
         }
         .background(Color.analyticsBackground)
     }

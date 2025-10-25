@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Git Context Inspector - Unified View</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #e5e5e7;
+            padding: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        
+        .inspector-window {
+            width: 680px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.15);
+            overflow: hidden;
+        }
+        
+        .window-chrome {
+            background: #f5f5f7;
+            padding: 12px 16px;
+            border-bottom: 1px solid #d1d1d6;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .window-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .window-button {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        
+        .window-button.red { background: #ff5f56; }
+        .window-button.yellow { background: #ffbd2e; }
+        .window-button.green { background: #27c93f; }
+        
+        .window-title {
+            font-size: 13px;
+            font-weight: 600;
+            flex: 1;
+            text-align: center;
+            margin-right: 44px;
+            color: #1d1d1f;
+        }
+        
+        .inspector-content {
+            padding: 28px;
+        }
+        
+        .inspector-header {
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #f5f5f7;
+        }
+        
+        .inspector-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #1d1d1f;
+        }
+        
+        .inspector-meta {
+            font-size: 13px;
+            color: #6e6e73;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .session-agent {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 7px;
+            border-radius: 4px;
+            background: #ff950015;
+            color: #ff9500;
+            text-transform: uppercase;
+        }
+        
+        .inspector-section {
+            margin-bottom: 20px;
+        }
+        
+        .section-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            padding: 6px 10px;
+            border-radius: 5px;
+        }
+        
+        .badge-historical {
+            background: #007aff15;
+            color: #007aff;
+        }
+        
+        .badge-current {
+            background: #34c75915;
+            color: #34c759;
+        }
+        
+        .badge-safety {
+            background: #ff950015;
+            color: #ff9500;
+        }
+        
+        .info-box {
+            background: #f9f9f9;
+            border: 1px solid #e5e5e7;
+            border-radius: 8px;
+            padding: 14px;
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+        
+        .info-row:last-child {
+            margin-bottom: 0;
+        }
+        
+        .info-label {
+            color: #6e6e73;
+            font-weight: 500;
+        }
+        
+        .info-value {
+            font-weight: 600;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 12px;
+            color: #1d1d1f;
+        }
+        
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .status-same {
+            background: #34c75915;
+            color: #34c759;
+        }
+        
+        .status-warning {
+            background: #ff950015;
+            color: #ff9500;
+        }
+        
+        .comparison-divider {
+            margin: 20px 0;
+            border: none;
+            border-top: 2px dashed #e5e5e7;
+            position: relative;
+        }
+        
+        .comparison-divider::after {
+            content: '↓';
+            position: absolute;
+            left: 50%;
+            top: -11px;
+            transform: translateX(-50%);
+            background: white;
+            padding: 0 10px;
+            font-size: 18px;
+            color: #6e6e73;
+        }
+        
+        .file-list {
+            margin-top: 10px;
+            background: white;
+            border: 1px solid #e5e5e7;
+            border-radius: 6px;
+            padding: 10px;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+        
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px;
+            font-size: 11px;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+        }
+        
+        .file-status {
+            width: 16px;
+            font-weight: 700;
+        }
+        
+        .file-status.modified { color: #ff9500; }
+        .file-status.added { color: #34c759; }
+        
+        .safety-box {
+            background: #fff8e6;
+            border: 2px solid #ff9500;
+            border-radius: 10px;
+            padding: 16px;
+        }
+        
+        .safety-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        
+        .safety-status {
+            font-size: 16px;
+            font-weight: 700;
+            color: #ff9500;
+        }
+        
+        .safety-icon {
+            font-size: 24px;
+        }
+        
+        .safety-checks {
+            margin-bottom: 14px;
+        }
+        
+        .check-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        
+        .check-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .check-icon {
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        
+        .recommendation-box {
+            background: white;
+            border-radius: 6px;
+            padding: 12px;
+        }
+        
+        .recommendation-title {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #6e6e73;
+            margin-bottom: 6px;
+        }
+        
+        .recommendation-text {
+            font-size: 12px;
+            line-height: 1.5;
+            color: #1d1d1f;
+        }
+        
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 20px;
+        }
+        
+        .action-btn {
+            padding: 10px 14px;
+            border-radius: 6px;
+            border: 1px solid #d1d1d6;
+            background: white;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+            color: #1d1d1f;
+        }
+        
+        .action-btn:hover {
+            background: #f5f5f7;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .action-btn.danger {
+            background: #ff3b30;
+            color: white;
+            border-color: #ff3b30;
+        }
+        
+        .action-btn.danger:hover {
+            background: #d72c1f;
+        }
+    </style>
+</head>
+<body>
+    <div class="inspector-window">
+        <div class="window-chrome">
+            <div class="window-buttons">
+                <div class="window-button red"></div>
+                <div class="window-button yellow"></div>
+                <div class="window-button green"></div>
+            </div>
+            <div class="window-title">Git Context Inspector</div>
+        </div>
+        
+        <div class="inspector-content">
+            <div class="inspector-header">
+                <div class="inspector-title">analyze codebase for optimization</div>
+                <div class="inspector-meta">
+                    <span class="session-agent">Claude Code</span>
+                    <span>•</span>
+                    <span>529 messages</span>
+                    <span>•</span>
+                    <span>Created 2 hours ago</span>
+                </div>
+            </div>
+            
+            <!-- Historical Section -->
+            <div class="inspector-section">
+                <div class="section-badge badge-historical">
+                    <span>📸</span>
+                    <span>Snapshot at Session Start</span>
+                </div>
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Branch</span>
+                        <span class="info-value">feature/perf-improvements</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Commit</span>
+                        <span class="info-value">2f8a9c1 "feat: improve indexing"</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Working Tree</span>
+                        <span class="info-value" style="color: #34c759;">✓ Clean</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Behind Origin</span>
+                        <span class="info-value">↓ 2 commits</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="comparison-divider"></div>
+            
+            <!-- Current Section -->
+            <div class="inspector-section">
+                <div class="section-badge badge-current">
+                    <span>🔴</span>
+                    <span>Current State (Live)</span>
+                </div>
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Branch</span>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span class="info-value">feature/perf-improvements</span>
+                            <span class="status-indicator status-same">✓ Same</span>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Commit</span>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span class="info-value">2f8a9c1</span>
+                            <span class="status-indicator status-same">✓ No new</span>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Working Tree</span>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span class="info-value" style="color: #ff9500;">⚠️ Dirty (3 files)</span>
+                            <span class="status-indicator status-warning">Changed</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- File List -->
+                <div class="file-list">
+                    <div class="file-item">
+                        <span class="file-status modified">M</span>
+                        <span>Sources/Session/SessionIndexer.swift</span>
+                    </div>
+                    <div class="file-item">
+                        <span class="file-status modified">M</span>
+                        <span>Sources/Models/Session.swift</span>
+                    </div>
+                    <div class="file-item">
+                        <span class="file-status added">A</span>
+                        <span>Tests/SessionTests.swift</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="comparison-divider"></div>
+            
+            <!-- Safety Check Section -->
+            <div class="inspector-section">
+                <div class="section-badge badge-safety">
+                    <span>⚡️</span>
+                    <span>Resume Safety Check</span>
+                </div>
+                <div class="safety-box">
+                    <div class="safety-header">
+                        <span class="safety-icon">⚠️</span>
+                        <span class="safety-status">CAUTION</span>
+                    </div>
+                    
+                    <div class="safety-checks">
+                        <div class="check-item">
+                            <span class="check-icon" style="color: #34c759;">✓</span>
+                            <span>Branch unchanged (still on feature/perf-improvements)</span>
+                        </div>
+                        <div class="check-item">
+                            <span class="check-icon" style="color: #34c759;">✓</span>
+                            <span>No new commits since session start</span>
+                        </div>
+                        <div class="check-item">
+                            <span class="check-icon" style="color: #ff9500;">⚠️</span>
+                            <span>3 uncommitted changes detected in working tree</span>
+                        </div>
+                    </div>
+                    
+                    <div class="recommendation-box">
+                        <div class="recommendation-title">💡 Recommendation</div>
+                        <div class="recommendation-text">
+                            Review uncommitted changes before resuming. The agent may conflict with your work. Consider committing or stashing changes first.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Actions -->
+            <div class="actions-grid">
+                <button class="action-btn">📋 View Changes</button>
+                <button class="action-btn">📂 Open Directory</button>
+                <button class="action-btn">🌿 Copy Branch</button>
+                <button class="action-btn">🔄 Refresh Status</button>
+                <button class="action-btn">📊 Git Status</button>
+                <button class="action-btn danger">⚠️ Resume Anyway</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
