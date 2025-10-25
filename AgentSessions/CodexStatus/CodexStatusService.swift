@@ -564,19 +564,21 @@ actor CodexStatusService {
             let week = decodeWindow(secondary, created: created, capturedAt: capturedAt)
             let base = capturedAt
             let stale = Date().timeIntervalSince(base) > 3 * 60
-            // Update CapPressure snapshots
-            CapPressureStore.shared.updateWindow(window: .primary,
-                                                 capturedAt: base,
-                                                 usedPercent: primary?["used_percent"] as? Double ?? (primary?["usedPercent"] as? Double),
-                                                 resetsAt: five.resetAt,
-                                                 remainingTokens: (primary?["remaining_tokens"] as? Double) ?? (primary?["remainingTokens"] as? Double),
-                                                 capacityTokens: (primary?["window_capacity_tokens"] as? Double) ?? (primary?["capacityTokens"] as? Double) ?? (primary?["windowCapacityTokens"] as? Double))
-            CapPressureStore.shared.updateWindow(window: .secondary,
-                                                 capturedAt: base,
-                                                 usedPercent: secondary?["used_percent"] as? Double ?? (secondary?["usedPercent"] as? Double),
-                                                 resetsAt: week.resetAt,
-                                                 remainingTokens: (secondary?["remaining_tokens"] as? Double) ?? (secondary?["remainingTokens"] as? Double),
-                                                 capacityTokens: (secondary?["window_capacity_tokens"] as? Double) ?? (secondary?["capacityTokens"] as? Double) ?? (secondary?["windowCapacityTokens"] as? Double))
+            // Update CapPressure snapshots on the main actor
+            Task { @MainActor in
+                CapPressureStore.shared.updateWindow(window: .primary,
+                                                     capturedAt: base,
+                                                     usedPercent: primary?["used_percent"] as? Double ?? (primary?["usedPercent"] as? Double),
+                                                     resetsAt: five.resetAt,
+                                                     remainingTokens: (primary?["remaining_tokens"] as? Double) ?? (primary?["remainingTokens"] as? Double),
+                                                     capacityTokens: (primary?["window_capacity_tokens"] as? Double) ?? (primary?["capacityTokens"] as? Double) ?? (primary?["windowCapacityTokens"] as? Double))
+                CapPressureStore.shared.updateWindow(window: .secondary,
+                                                     capturedAt: base,
+                                                     usedPercent: secondary?["used_percent"] as? Double ?? (secondary?["usedPercent"] as? Double),
+                                                     resetsAt: week.resetAt,
+                                                     remainingTokens: (secondary?["remaining_tokens"] as? Double) ?? (secondary?["remainingTokens"] as? Double),
+                                                     capacityTokens: (secondary?["window_capacity_tokens"] as? Double) ?? (secondary?["capacityTokens"] as? Double) ?? (secondary?["windowCapacityTokens"] as? Double))
+            }
             return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
         }
         return nil
@@ -600,7 +602,9 @@ actor CodexStatusService {
                 snapshot = s
                 updateHandler(snapshot)
                 if let i = s.lastInputTokens, let c = s.lastCachedInputTokens, let o = s.lastOutputTokens {
-                    CapPressureStore.shared.recordUsageSample(input: i, cached: c, output: o, at: createdAt)
+                    Task { @MainActor in
+                        CapPressureStore.shared.recordUsageSample(input: i, cached: c, output: o, at: createdAt)
+                    }
                 }
                 return
             }
@@ -617,7 +621,9 @@ actor CodexStatusService {
                     snapshot = s
                     updateHandler(snapshot)
                     if let i = s.lastInputTokens, let c = s.lastCachedInputTokens, let o = s.lastOutputTokens {
-                        CapPressureStore.shared.recordUsageSample(input: i, cached: c, output: o, at: createdAt)
+                        Task { @MainActor in
+                            CapPressureStore.shared.recordUsageSample(input: i, cached: c, output: o, at: createdAt)
+                        }
                     }
                 }
             }
