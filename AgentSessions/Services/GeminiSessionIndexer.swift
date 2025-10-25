@@ -104,6 +104,11 @@ final class GeminiSessionIndexer: ObservableObject {
             let sema = DispatchSemaphore(value: 0)
             Task.detached(priority: .utility) {
                 indexed = try? await self.hydrateFromIndexDBIfAvailable()
+                if (indexed?.isEmpty ?? true) {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    let retry = try? await self.hydrateFromIndexDBIfAvailable()
+                    if let r = retry, !r.isEmpty { indexed = r }
+                }
                 sema.signal()
             }
             sema.wait()
@@ -114,9 +119,15 @@ final class GeminiSessionIndexer: ObservableObject {
                     self.filesProcessed = sessions.count
                     self.totalFiles = sessions.count
                     self.progressText = "Loaded \(sessions.count) from index"
+                    #if DEBUG
+                    print("[Launch] Hydrated Gemini sessions from DB: count=\(sessions.count)")
+                    #endif
                 }
                 return
             }
+            #if DEBUG
+            print("[Launch] DB hydration returned nil for Gemini – falling back to filesystem scan")
+            #endif
             let files = self.discovery.discoverSessionFiles()
             DispatchQueue.main.async {
                 self.totalFiles = files.count
@@ -170,10 +181,11 @@ final class GeminiSessionIndexer: ObservableObject {
     }
 
     private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {
+        // Hydrate from session_meta without rollups gating.
         let db = try IndexDB()
-        if try await db.isEmpty() { return nil }
         let repo = SessionMetaRepository(db: db)
         let list = try await repo.fetchSessions(for: .gemini)
+        guard !list.isEmpty else { return nil }
         return list.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 

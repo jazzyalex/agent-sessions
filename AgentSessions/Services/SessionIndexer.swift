@@ -460,7 +460,14 @@ final class SessionIndexer: ObservableObject {
             var indexed: [Session]? = nil
             let sema = DispatchSemaphore(value: 0)
             Task.detached(priority: .utility) {
+                // Try immediate hydration, then a brief grace retry to catch
+                // the AnalyticsIndexer writing session_meta at launch.
                 indexed = try? await self.hydrateFromIndexDBIfAvailable()
+                if (indexed?.isEmpty ?? true) {
+                    try? await Task.sleep(nanoseconds: 250_000_000) // 250ms
+                    let retry = try? await self.hydrateFromIndexDBIfAvailable()
+                    if let r = retry, !r.isEmpty { indexed = r }
+                }
                 sema.signal()
             }
             sema.wait()
@@ -471,9 +478,15 @@ final class SessionIndexer: ObservableObject {
                     self.filesProcessed = sessions.count
                     self.totalFiles = sessions.count
                     self.progressText = "Loaded \(sessions.count) from index"
+                    #if DEBUG
+                    print("[Launch] Hydrated Codex sessions from DB: count=\(sessions.count)")
+                    #endif
                 }
                 return
             }
+            #if DEBUG
+            print("[Launch] DB hydration returned nil for Codex – falling back to filesystem scan")
+            #endif
             // Check if directory exists and is accessible
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
@@ -568,12 +581,13 @@ final class SessionIndexer: ObservableObject {
     }
 
     private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {
+        // Try to hydrate directly from session_meta. Do not gate on rollups presence.
+        // This avoids a cold-start full scan when the DB has meta rows but rollups are still empty.
         let db = try IndexDB()
-        if try await db.isEmpty() { return nil }
         let repo = SessionMetaRepository(db: db)
         let list = try await repo.fetchSessions(for: .codex)
-        let sorted = list.sorted { $0.modifiedAt > $1.modifiedAt }
-        return sorted
+        guard !list.isEmpty else { return nil }
+        return list.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
     // MARK: - Parsing

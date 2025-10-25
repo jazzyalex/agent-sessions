@@ -129,6 +129,11 @@ final class ClaudeSessionIndexer: ObservableObject {
             let sema = DispatchSemaphore(value: 0)
             Task.detached(priority: .utility) {
                 indexed = try? await self.hydrateFromIndexDBIfAvailable()
+                if (indexed?.isEmpty ?? true) {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    let retry = try? await self.hydrateFromIndexDBIfAvailable()
+                    if let r = retry, !r.isEmpty { indexed = r }
+                }
                 sema.signal()
             }
             sema.wait()
@@ -139,9 +144,15 @@ final class ClaudeSessionIndexer: ObservableObject {
                     self.filesProcessed = sessions.count
                     self.totalFiles = sessions.count
                     self.progressText = "Loaded \(sessions.count) from index"
+                    #if DEBUG
+                    print("[Launch] Hydrated Claude sessions from DB: count=\(sessions.count)")
+                    #endif
                 }
                 return
             }
+            #if DEBUG
+            print("[Launch] DB hydration returned nil for Claude – falling back to filesystem scan")
+            #endif
             let files = self.discovery.discoverSessionFiles()
 
             print("📁 Found \(files.count) Claude Code session files")
@@ -192,12 +203,12 @@ final class ClaudeSessionIndexer: ObservableObject {
     }
 
     private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {
+        // Hydrate from session_meta without requiring rollups to exist yet.
         let db = try IndexDB()
-        if try await db.isEmpty() { return nil }
         let repo = SessionMetaRepository(db: db)
         let list = try await repo.fetchSessions(for: .claude)
-        let sorted = list.sorted { $0.modifiedAt > $1.modifiedAt }
-        return sorted
+        guard !list.isEmpty else { return nil }
+        return list.sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
     func applySearch() {
