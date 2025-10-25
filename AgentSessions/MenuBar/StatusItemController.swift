@@ -38,6 +38,7 @@ final class StatusItemController: NSObject {
             let labelView = UsageMenuBarLabel()
                 .environmentObject(codexStatus)
                 .environmentObject(claudeStatus)
+                .environmentObject(RateLimitStore.shared)
             let hv = NSHostingView(rootView: AnyView(labelView))
             hv.translatesAutoresizingMaskIntoConstraints = false
             button.addSubview(hv)
