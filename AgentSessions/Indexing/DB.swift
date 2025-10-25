@@ -23,6 +23,9 @@ actor IndexDB {
         }
         // Apply pragmas and bootstrap schema using local db pointer (allowed during init)
         try Self.applyPragmas(db)
+        #if DEBUG
+        print("[IndexDB] Opened at: \(dbURL.path)")
+        #endif
         try Self.bootstrap(db)
         handle = db
     }
