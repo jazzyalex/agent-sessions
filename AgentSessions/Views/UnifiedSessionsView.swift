@@ -13,6 +13,7 @@ struct UnifiedSessionsView: View {
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @EnvironmentObject var updaterController: UpdaterController
+    @EnvironmentObject var rateLimitStore: RateLimitStore
 
     let layoutMode: LayoutMode
     let onToggleLayout: () -> Void
@@ -58,6 +59,13 @@ struct UnifiedSessionsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Rate-limit strip (sticky banner under toolbar)
+            if rateLimitStore.state.isTight, let remaining = rateLimitStore.state.remainingSeconds {
+                RateLimitStrip(remainingSeconds: remaining,
+                               window: rateLimitStore.state.window,
+                               resetAt: rateLimitStore.state.resetAt,
+                               recent429: rateLimitStore.state.recent429Count)
+            }
             if layoutMode == .vertical {
                 HSplitView {
                     listPane
@@ -105,90 +113,7 @@ struct UnifiedSessionsView: View {
         }
         // Honor app-wide theme selection from Preferences → General
         .preferredColorScheme((AppAppearance(rawValue: appAppearanceRaw) ?? .system).colorScheme)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 2) {
-                    Toggle(isOn: $unified.includeCodex) {
-                        Text("Codex")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.blue : .primary))
-                            .fixedSize()
-                    }
-                    .toggleStyle(.button)
-                    .help("Show or hide Codex sessions in the list (⌘1)")
-                    .keyboardShortcut("1", modifiers: .command)
-
-                    Toggle(isOn: $unified.includeClaude) {
-                        Text("Claude")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary))
-                            .fixedSize()
-                    }
-                    .toggleStyle(.button)
-                    .help("Show or hide Claude sessions in the list (⌘2)")
-                    .keyboardShortcut("2", modifiers: .command)
-
-                    Toggle(isOn: $unified.includeGemini) {
-                        Text("Gemini")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeGemini ? Color.teal : .primary))
-                            .fixedSize()
-                    }
-                    .toggleStyle(.button)
-                    .help("Show or hide Gemini sessions in the list (⌘3)")
-                    .keyboardShortcut("3", modifiers: .command)
-                }
-            }
-            ToolbarItem(placement: .automatic) {
-                UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator)
-            }
-            // Compact Favorites filter toggle
-            ToolbarItem(placement: .automatic) {
-                Toggle(isOn: $unified.showFavoritesOnly) {
-                    Label("Favorites", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
-                }
-                .toggleStyle(.button)
-                .disabled(!showStarColumn)
-                .help(showStarColumn ? "Show only favorited sessions" : "Enable star column in Preferences to use favorites")
-                .accessibilityLabel("Favorites Only")
-            }
-            // Analytics button
-            ToolbarItem(placement: .automatic) {
-                AnalyticsButtonView()
-            }
-            ToolbarItem(placement: .automatic) {
-                Button(action: { if let s = selectedSession { resume(s) } }) {
-                    Label("Resume", systemImage: "play.circle")
-                }
-                .keyboardShortcut("r", modifiers: [.command, .control])
-                .disabled(selectedSession == nil || selectedSession?.source == .gemini)
-                .help("Resume the selected session in its original CLI (⌃⌘R)")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button(action: { if let s = selectedSession { openDir(s) } }) { Label("Open Working Directory", systemImage: "folder") }
-                    .keyboardShortcut("o", modifiers: [.command, .shift])
-                    .disabled(selectedSession == nil)
-                    .help("Reveal the selected session's working directory in Finder (⌘⇧O)")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button(action: {
-                    // Don't clear selection - let the transcript view show loading animation
-                    unified.refresh()
-                }) {
-                    if unified.isIndexing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
-                }
-                    .keyboardShortcut("r", modifiers: .command)
-                    .help("Re-run the session indexer to discover new logs (⌘R)")
-            }
-            ToolbarItem(placement: .automatic) { Divider() }
-            ToolbarItem(placement: .automatic) {
-                Button(action: { onToggleLayout() }) { Image(systemName: layoutMode == .vertical ? "rectangle.split.1x2" : "rectangle.split.2x1") }
-                    .keyboardShortcut("l", modifiers: .command)
-                    .help("Toggle between vertical and horizontal layout modes (⌘L)")
-            }
-            ToolbarItem(placement: .automatic) {
-                Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController, initialTab: .general) }) { Image(systemName: "gear") }
-                    .keyboardShortcut(",", modifiers: .command)
-                    .help("Open preferences for appearance, indexing, and agents (⌘,)")
-            }
-        }
+        .toolbar { toolbarContent }
         .onAppear {
             if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }
             updateCachedRows()
@@ -512,6 +437,95 @@ struct UnifiedSessionsView: View {
         .simultaneousGesture(TapGesture().onEnded {
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         })
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            HStack(spacing: 2) {
+                Toggle(isOn: $unified.includeCodex) {
+                    Text("Codex")
+                        .foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.blue : .primary))
+                        .fixedSize()
+                }
+                .toggleStyle(.button)
+                .help("Show or hide Codex sessions in the list (⌘1)")
+                .keyboardShortcut("1", modifiers: .command)
+
+                Toggle(isOn: $unified.includeClaude) {
+                    Text("Claude")
+                        .foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary))
+                        .fixedSize()
+                }
+                .toggleStyle(.button)
+                .help("Show or hide Claude sessions in the list (⌘2)")
+                .keyboardShortcut("2", modifiers: .command)
+
+                Toggle(isOn: $unified.includeGemini) {
+                    Text("Gemini")
+                        .foregroundStyle(stripMonochrome ? .primary : (unified.includeGemini ? Color.teal : .primary))
+                        .fixedSize()
+                }
+                .toggleStyle(.button)
+                .help("Show or hide Gemini sessions in the list (⌘3)")
+                .keyboardShortcut("3", modifiers: .command)
+            }
+        }
+        ToolbarItem(placement: .automatic) {
+            UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator)
+        }
+        ToolbarItem(placement: .automatic) {
+            Toggle(isOn: $unified.showFavoritesOnly) {
+                Label("Favorites", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
+            }
+            .toggleStyle(.button)
+            .disabled(!showStarColumn)
+            .help(showStarColumn ? "Show only favorited sessions" : "Enable star column in Preferences to use favorites")
+        }
+        ToolbarItem(placement: .automatic) {
+            AnalyticsButtonView()
+        }
+        ToolbarItem(placement: .automatic) {
+            Button(action: { if let s = selectedSession { resume(s) } }) {
+                Label("Resume", systemImage: "play.circle")
+            }
+            .keyboardShortcut("r", modifiers: [.command, .control])
+            .disabled(selectedSession == nil || selectedSession?.source == .gemini)
+            .help("Resume the selected session in its original CLI (⌃⌘R)")
+        }
+        ToolbarItem(placement: .automatic) {
+            Button(action: { if let s = selectedSession { openDir(s) } }) { Label("Open Working Directory", systemImage: "folder") }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+                .disabled(selectedSession == nil)
+                .help("Reveal the selected session's working directory in Finder (⌘⇧O)")
+        }
+        ToolbarItem(placement: .automatic) {
+            Button(action: { if let s = selectedSession { showGitInspector(s) } }) { Label("Git Context", systemImage: "clock.arrow.circlepath") }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(selectedSession == nil)
+                .help("Show historical and current git context with safety analysis (⌘⇧G)")
+        }
+        ToolbarItem(placement: .automatic) {
+            Button(action: { unified.refresh() }) {
+                if unified.isIndexing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+            }
+                .keyboardShortcut("r", modifiers: .command)
+                .help("Re-run the session indexer to discover new logs (⌘R)")
+        }
+        ToolbarItem(placement: .automatic) {
+            Button(action: { onToggleLayout() }) {
+                Image(systemName: layoutMode == .vertical ? "rectangle.split.1x2" : "rectangle.split.2x1")
+            }
+            .keyboardShortcut("l", modifiers: .command)
+            .help("Toggle between vertical and horizontal layout modes (⌘L)")
+        }
+        ToolbarItem(placement: .automatic) {
+            Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController) }) {
+                Image(systemName: "gear")
+            }
+            .keyboardShortcut(",", modifiers: .command)
+            .help("Open preferences for appearance, indexing, and agents (⌘,)")
+        }
     }
 
     private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
