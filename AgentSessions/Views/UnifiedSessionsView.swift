@@ -13,7 +13,7 @@ struct UnifiedSessionsView: View {
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @EnvironmentObject var updaterController: UpdaterController
-    @EnvironmentObject var rateLimitStore: RateLimitStore
+    @EnvironmentObject var capStore: CapPressureStore
 
     let layoutMode: LayoutMode
     let onToggleLayout: () -> Void
@@ -59,12 +59,9 @@ struct UnifiedSessionsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Rate-limit strip (sticky banner under toolbar)
-            if rateLimitStore.state.isTight, let remaining = rateLimitStore.state.remainingSeconds {
-                RateLimitStrip(remainingSeconds: remaining,
-                               window: rateLimitStore.state.window,
-                               resetAt: rateLimitStore.state.resetAt,
-                               recent429: rateLimitStore.state.recent429Count)
+            // Cap ETA banner under toolbar
+            if capStore.state.severity != .none {
+                CapStrip().environmentObject(capStore)
             }
             if layoutMode == .vertical {
                 HSplitView {

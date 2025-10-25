@@ -133,15 +133,15 @@ final class CodexUsageModel: ObservableObject {
 
 // MARK: - Rate-limit models (log probe)
 
-struct RateLimitWindow {
+struct RateLimitWindowInfo {
     var usedPercent: Int?
     var resetAt: Date?
     var windowMinutes: Int?
 }
 
 struct RateLimitSummary {
-    var fiveHour: RateLimitWindow
-    var weekly: RateLimitWindow
+    var fiveHour: RateLimitWindowInfo
+    var weekly: RateLimitWindowInfo
     var eventTimestamp: Date?
     var stale: Bool
     var sourceFile: URL?
@@ -484,8 +484,8 @@ actor CodexStatusService {
             if let summary = parseTokenCountTail(url: url) { return summary }
         }
         return RateLimitSummary(
-            fiveHour: RateLimitWindow(usedPercent: nil, resetAt: nil, windowMinutes: nil),
-            weekly: RateLimitWindow(usedPercent: nil, resetAt: nil, windowMinutes: nil),
+            fiveHour: RateLimitWindowInfo(usedPercent: nil, resetAt: nil, windowMinutes: nil),
+            weekly: RateLimitWindowInfo(usedPercent: nil, resetAt: nil, windowMinutes: nil),
             eventTimestamp: nil,
             stale: true,
             sourceFile: nil
@@ -535,7 +535,7 @@ actor CodexStatusService {
             guard (obj["type"] as? String) == "event_msg" else { continue }
             guard let payload = obj["payload"] as? [String: Any] else { continue }
             // Surface latest usage totals from new or legacy shapes
-            extractUsageIfPresent(from: payload)
+            extractUsageIfPresent(from: payload, createdAt: decodeFlexibleDate(obj["created_at"]) ?? decodeFlexibleDate(payload["created_at"]) ?? decodeFlexibleDate(obj["timestamp"]) ?? decodeFlexibleDate(payload["timestamp"]) ?? Date())
             guard (payload["type"] as? String) == "token_count" else { continue }
 
             var createdAt: Date? = nil
@@ -564,8 +564,19 @@ actor CodexStatusService {
             let week = decodeWindow(secondary, created: created, capturedAt: capturedAt)
             let base = capturedAt
             let stale = Date().timeIntervalSince(base) > 3 * 60
-            // Update rate-limit tight store
-            RateLimitStore.shared.update(primaryReset: five.resetAt, secondaryReset: week.resetAt)
+            // Update CapPressure snapshots
+            CapPressureStore.shared.updateWindow(window: .primary,
+                                                 capturedAt: base,
+                                                 usedPercent: primary?["used_percent"] as? Double ?? (primary?["usedPercent"] as? Double),
+                                                 resetsAt: five.resetAt,
+                                                 remainingTokens: (primary?["remaining_tokens"] as? Double) ?? (primary?["remainingTokens"] as? Double),
+                                                 capacityTokens: (primary?["window_capacity_tokens"] as? Double) ?? (primary?["capacityTokens"] as? Double) ?? (primary?["windowCapacityTokens"] as? Double))
+            CapPressureStore.shared.updateWindow(window: .secondary,
+                                                 capturedAt: base,
+                                                 usedPercent: secondary?["used_percent"] as? Double ?? (secondary?["usedPercent"] as? Double),
+                                                 resetsAt: week.resetAt,
+                                                 remainingTokens: (secondary?["remaining_tokens"] as? Double) ?? (secondary?["remainingTokens"] as? Double),
+                                                 capacityTokens: (secondary?["window_capacity_tokens"] as? Double) ?? (secondary?["capacityTokens"] as? Double) ?? (secondary?["windowCapacityTokens"] as? Double))
             return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
         }
         return nil
@@ -573,7 +584,7 @@ actor CodexStatusService {
 
     // MARK: - Usage extraction (new + legacy)
 
-    private func extractUsageIfPresent(from payload: [String: Any]) {
+    private func extractUsageIfPresent(from payload: [String: Any], createdAt: Date) {
         // New model: turn.completed with usage {...}
         if let kind = payload["type"] as? String, kind == "turn.completed" || kind == "turn_completed" {
             if let usage = payload["usage"] as? [String: Any] {
@@ -588,6 +599,9 @@ actor CodexStatusService {
                 }
                 snapshot = s
                 updateHandler(snapshot)
+                if let i = s.lastInputTokens, let c = s.lastCachedInputTokens, let o = s.lastOutputTokens {
+                    CapPressureStore.shared.recordUsageSample(input: i, cached: c, output: o, at: createdAt)
+                }
                 return
             }
         }
@@ -602,6 +616,9 @@ actor CodexStatusService {
                     s.lastTotalTokens = intValue(last["total_tokens"]) ?? ((s.lastInputTokens ?? 0) + (s.lastOutputTokens ?? 0))
                     snapshot = s
                     updateHandler(snapshot)
+                    if let i = s.lastInputTokens, let c = s.lastCachedInputTokens, let o = s.lastOutputTokens {
+                        CapPressureStore.shared.recordUsageSample(input: i, cached: c, output: o, at: createdAt)
+                    }
                 }
             }
         }
@@ -654,8 +671,8 @@ actor CodexStatusService {
         return value
     }
 
-    private func decodeWindow(_ dict: [String: Any]?, created: Date, capturedAt: Date?) -> RateLimitWindow {
-        guard let dict else { return RateLimitWindow(usedPercent: nil, resetAt: nil, windowMinutes: nil) }
+    private func decodeWindow(_ dict: [String: Any]?, created: Date, capturedAt: Date?) -> RateLimitWindowInfo {
+        guard let dict else { return RateLimitWindowInfo(usedPercent: nil, resetAt: nil, windowMinutes: nil) }
         var used: Int?
         if let d = dict["used_percent"] as? Double { used = Int(d.rounded()) }
         else if let i = dict["used_percent"] as? Int { used = max(0, min(100, i)) }
@@ -711,7 +728,7 @@ actor CodexStatusService {
             }
         }
 
-        return RateLimitWindow(usedPercent: used, resetAt: resetAt, windowMinutes: minutes)
+        return RateLimitWindowInfo(usedPercent: used, resetAt: resetAt, windowMinutes: minutes)
     }
 
     private func tailLines(url: URL, maxBytes: Int) -> [String]? {
