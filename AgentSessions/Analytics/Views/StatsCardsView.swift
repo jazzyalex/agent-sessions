@@ -3,15 +3,19 @@ import SwiftUI
 /// Displays the 4 summary stat cards at the top of analytics
 struct StatsCardsView: View {
     let summary: AnalyticsSummary
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        HStack(spacing: AnalyticsDesign.cardSpacing) {
+        HStack(spacing: AnalyticsDesign.metricsCardSpacing) {
             StatsCard(
                 icon: "square.stack.3d.up.fill",
                 label: "Sessions",
                 value: "\(summary.sessions)",
                 change: AnalyticsSummary.formatChange(summary.sessionsChange)
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(AnalyticsDesign.statsCardPadding)
+            .analyticsCard(padding: 0, colorScheme: colorScheme)
 
             StatsCard(
                 icon: "bubble.left.and.bubble.right.fill",
@@ -19,6 +23,9 @@ struct StatsCardsView: View {
                 value: "\(summary.messages)",
                 change: AnalyticsSummary.formatChange(summary.messagesChange)
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(AnalyticsDesign.statsCardPadding)
+            .analyticsCard(padding: 0, colorScheme: colorScheme)
 
             StatsCard(
                 icon: "terminal.fill",
@@ -26,6 +33,9 @@ struct StatsCardsView: View {
                 value: "\(summary.commands)",
                 change: AnalyticsSummary.formatChange(summary.commandsChange)
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(AnalyticsDesign.statsCardPadding)
+            .analyticsCard(padding: 0, colorScheme: colorScheme)
 
             StatsCard(
                 icon: "clock.fill",
@@ -33,6 +43,9 @@ struct StatsCardsView: View {
                 value: summary.activeTimeFormatted,
                 change: AnalyticsSummary.formatChange(summary.activeTimeChange)
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(AnalyticsDesign.statsCardPadding)
+            .analyticsCard(padding: 0, colorScheme: colorScheme)
         }
         .frame(height: AnalyticsDesign.statsCardHeight)
     }
@@ -45,55 +58,38 @@ private struct StatsCard: View {
     let value: String
     let change: String?
 
-    @State private var isHovered: Bool = false
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Icon + Label (18pt from top)
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            // Icon + Label
+            HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 14))
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
 
-                Text(label.uppercased())
-                    .font(.caption)
+                Text(label)
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .tracking(0.5)
+                    .textCase(.uppercase)
             }
-            .padding(.top, 18)
-
-            Spacer()
 
             // Value (centered vertically)
             Text(value)
-                .font(.system(size: 36))
-                .fontWeight(.regular)
+                .font(.system(size: 36, weight: .bold))
                 .foregroundStyle(.primary)
-
-            Spacer()
 
             // Change indicator (12pt from bottom)
             if let change = change {
                 Text(change)
-                    .font(.caption2)
-                    .fontWeight(.medium)
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(changeColor(for: change))
-                    .padding(.bottom, 12)
             } else {
                 // Placeholder to maintain spacing
                 Text(" ")
-                    .font(.caption2)
-                    .padding(.bottom, 12)
+                    .font(.system(size: 13))
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 16)
-        .background(Color("CardBackground"))
-        .clipShape(RoundedRectangle(cornerRadius: AnalyticsDesign.cardCornerRadius))
-        .scaleEffect(isHovered ? 1.02 : 1.0)
-        .animation(.easeOut(duration: AnalyticsDesign.hoverDuration), value: isHovered)
-        .onHover { hovering in
-            isHovered = hovering
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(label): \(value)\(change != nil ? ", \(change!)" : "")")
     }
@@ -101,6 +97,8 @@ private struct StatsCard: View {
     private func changeColor(for change: String) -> Color {
         if change.contains("+") {
             return .green
+        } else if change.contains("-") {
+            return .red
         } else {
             return .secondary
         }

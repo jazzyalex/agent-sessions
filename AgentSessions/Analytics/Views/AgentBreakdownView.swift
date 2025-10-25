@@ -4,11 +4,13 @@ import SwiftUI
 struct AgentBreakdownView: View {
     let breakdown: [AnalyticsAgentBreakdown]
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Header
             Text("By Agent")
-                .font(.headline)
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.primary)
 
             if breakdown.isEmpty {
@@ -24,10 +26,7 @@ struct AgentBreakdownView: View {
 
             Spacer()
         }
-        .frame(height: AnalyticsDesign.secondaryCardHeight)
-        .padding(AnalyticsDesign.cardPadding)
-        .background(Color("CardBackground"))
-        .clipShape(RoundedRectangle(cornerRadius: AnalyticsDesign.cardCornerRadius))
+        .analyticsCard(padding: AnalyticsDesign.cardPadding, colorScheme: colorScheme)
     }
 
     private var emptyState: some View {
@@ -49,42 +48,35 @@ private struct AgentRow: View {
     let agent: AnalyticsAgentBreakdown
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Agent name + percentage
-            HStack {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(agent.agent.displayName)
-                    .font(.body)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
 
-                Spacer()
-
-                Text("\(Int(agent.percentage))%")
-                    .font(.body)
+                Text(agent.detailsFormatted)
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Progress bar
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    // Background
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(Color("AxisGridline"))
-                        .frame(height: 8)
-
-                    // Progress
+                        .fill(Color(nsColor: .systemGray).opacity(0.35))
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color.agentColor(for: agent.agent))
-                        .frame(width: geometry.size.width * (agent.percentage / 100.0), height: 8)
+                        .frame(width: max(0, geometry.size.width * (agent.percentage / 100.0)))
                         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: agent.percentage)
                 }
             }
             .frame(height: 8)
+            .frame(maxWidth: .infinity)
 
-            // Details (sessions • duration)
-            Text(agent.detailsFormatted)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            Text("\(Int(agent.percentage))%")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 45, alignment: .trailing)
+                .foregroundStyle(.secondary)
         }
     }
 }

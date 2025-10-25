@@ -6,26 +6,28 @@ struct SessionsChartView: View {
     let data: [AnalyticsTimeSeriesPoint]
     let dateRange: AnalyticsDateRange
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             // Header
             HStack {
                 Text("Sessions Over Time")
-                    .font(.headline)
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.primary)
 
                 Spacer()
 
                 // Legend
-                HStack(spacing: 16) {
+                HStack(spacing: 20) {
                     ForEach(uniqueAgents, id: \.self) { agent in
-                        HStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             Circle()
                                 .fill(Color.agentColor(for: agent))
-                                .frame(width: 8, height: 8)
+                                .frame(width: 10, height: 10)
 
                             Text(agent)
-                                .font(.caption)
+                                .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -39,9 +41,7 @@ struct SessionsChartView: View {
                 chart
             }
         }
-        .padding(AnalyticsDesign.cardPadding)
-        .background(Color("CardBackground"))
-        .clipShape(RoundedRectangle(cornerRadius: AnalyticsDesign.cardCornerRadius))
+        .analyticsCard(padding: AnalyticsDesign.cardPadding, colorScheme: colorScheme)
     }
 
     private var chart: some View {
@@ -74,7 +74,7 @@ struct SessionsChartView: View {
                 AxisValueLabel()
             }
         }
-        .frame(height: AnalyticsDesign.primaryChartHeight - 60) // Subtract header height
+        .frame(minHeight: 200, maxHeight: .infinity)
         .animation(.easeInOut(duration: AnalyticsDesign.chartDuration), value: data)
     }
 
@@ -92,7 +92,7 @@ struct SessionsChartView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
-        .frame(height: AnalyticsDesign.primaryChartHeight - 60)
+        .frame(minHeight: 200, maxHeight: .infinity)
         .frame(maxWidth: .infinity)
     }
 
