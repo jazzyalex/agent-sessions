@@ -6,18 +6,19 @@ struct CurrentSection: View {
     let onRefresh: () async -> Void
 
     @State private var isRefreshing = false
-    @State private var showCount: Int = 5
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             // Section header
             HStack(spacing: 8) {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 8, height: 8)
-                Text("CURRENT STATE (LIVE)")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.secondary)
+                Text("🔴")
+                    .font(.system(size: 18))
+                Text("CURRENT STATE")
+                    .font(.system(size: 13, weight: .bold))
+                    .textCase(.uppercase)
+                    .kerning(0.5)
+                    .foregroundColor(.secondary)
 
                 Spacer()
 
@@ -29,9 +30,10 @@ struct CurrentSection: View {
                 }
 
                 Text("Last checked: \(status.relativeTimeDescription)")
-                    .font(.system(size: 10))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
+            .padding(.bottom, 4)
 
             // Content box
             VStack(alignment: .leading, spacing: 12) {
@@ -71,33 +73,26 @@ struct CurrentSection: View {
                                 .foregroundStyle(.orange)
                         }
 
-                        // List dirty files
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(status.dirtyFiles.prefix(showCount)) { file in
-                                HStack(spacing: 6) {
-                                    Text(file.icon)
-                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        .foregroundStyle(colorForChange(file.changeType))
-                                        .frame(width: 16)
+                        // List dirty files (scrollable)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(status.dirtyFiles) { file in
+                                    HStack(spacing: 6) {
+                                        Text(file.icon)
+                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            .foregroundStyle(colorForChange(file.changeType))
+                                            .frame(width: 16)
 
-                                    Text(file.path)
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
+                                        Text(file.path)
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.leading, 108)
                                 }
-                                .padding(.leading, 108)
-                            }
-
-                            if status.dirtyFiles.count > showCount {
-                                Button(action: { withAnimation { showCount = min(status.dirtyFiles.count, showCount + 20) } }) {
-                                    Text("Show \(min(20, status.dirtyFiles.count - showCount)) more files…")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.tertiary)
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.leading, 124)
                             }
                         }
+                        .frame(maxHeight: 180)
                     }
                 } else {
                     InfoRow(label: "Working Tree", value: "Clean")
@@ -106,17 +101,17 @@ struct CurrentSection: View {
 
                 // Tracking status
                 if let tracking = status.trackingDescription {
-                    InfoRow(label: "Behind Origin", value: tracking)
+                    InfoRow(label: "Remote Tracking", value: tracking)
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(16)
+            .padding(20)
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(colorScheme == .dark ? Color(hex: "#1c1c1e") : Color(hex: "#f9f9f9"))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(colorScheme == .dark ? Color(hex: "#38383a") : Color(hex: "#e5e5e7"), lineWidth: 1)
                     )
             )
         }

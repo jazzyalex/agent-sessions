@@ -10,21 +10,22 @@ struct GitInspectorView: View {
     @State private var safetyCheck: GitSafetyCheck?
     @State private var isLoadingCurrent = false
     @State private var errorMessage: String?
-    @State private var expandHistorical: Bool = true
-    @State private var expandSafety: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 28) {
                     headerView
                     contentView
                 }
-                .padding(20)
+                .padding(32)
             }
-            Divider()
-            // Footer actions: always visible; outside scrolling content
-            VStack(spacing: 12) {
+
+            // Actions section - fixed at bottom
+            VStack(spacing: 0) {
+                Divider()
+                    .padding(.bottom, 28)
+
                 ButtonActionsView(
                     session: session,
                     currentStatus: currentStatus,
@@ -32,10 +33,10 @@ struct GitInspectorView: View {
                     onRefresh: refreshStatus,
                     onResume: { onResume(session) }
                 )
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 32)
+                .padding(.bottom, 28)
             }
-            .background(Color(nsColor: .underPageBackgroundColor))
+            .background(Color(nsColor: .windowBackgroundColor))
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .task { await loadData() }
@@ -45,15 +46,16 @@ struct GitInspectorView: View {
     private var headerView: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(session.title)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 22, weight: .semibold))
                 .lineLimit(2)
+                .truncationMode(.tail)
 
             HStack(spacing: 10) {
                 // Agent badge
                 Text(session.source.rawValue.uppercased())
                     .font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
                     .background(Color.orange.opacity(0.15))
                     .foregroundStyle(.orange)
                     .cornerRadius(4)
@@ -68,55 +70,39 @@ struct GitInspectorView: View {
                 Text("•")
                     .foregroundStyle(.secondary)
 
-                Text(session.modifiedRelative)
+                Text("Created \(session.modifiedRelative)")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+
+                Text("•")
+                    .foregroundStyle(.secondary)
+
+                Text(projectName(session))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
-
-            Divider()
         }
+        .padding(.bottom, 4)
     }
 
     // MARK: - Content Views
     @ViewBuilder
     private var contentView: some View {
-        // Show whichever data is available, prioritizing historical+current combined when possible
+        // New layout: Historical Snapshot → Status Hero → Current State
         if let historical = historicalContext {
-            // Snapshot (collapsible by default when identical to current)
-            VStack(alignment: .leading, spacing: 8) {
-                DisclosureGroup(isExpanded: $expandHistorical) {
-                    HistoricalSection(context: historical)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "camera.fill").foregroundStyle(.blue)
-                        Text("SNAPSHOT AT SESSION START").font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary)
-                        if let c = currentStatus, isIdentical(historical: historical, current: c) {
-                            Spacer(); Image(systemName: "checkmark.circle.fill").foregroundStyle(.green); Text("Same").font(.system(size: 11)).foregroundStyle(.green)
-                        }
-                    }
-                }
-            }
-            .padding(0)
-
-            // Current Section
             if isLoadingCurrent {
                 loadingView
             } else if let current = currentStatus {
-                CurrentSection(status: current, onRefresh: refreshStatus)
-                // Safety (collapsible when status is safe)
+                // Historical Section (shown first as context)
+                HistoricalSection(context: historical)
+
+                // Status Hero (safety check - second)
                 if let safety = safetyCheck {
-                    VStack(alignment: .leading, spacing: 8) {
-                        DisclosureGroup(isExpanded: $expandSafety) {
-                            SafetySection(check: safety)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "bolt.fill").foregroundStyle(.yellow)
-                                Text("RESUME SAFETY CHECK").font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary)
-                                if safety.status == .safe { Spacer(); Image(systemName: "checkmark.circle.fill").foregroundStyle(.green); Text("Safe").font(.system(size: 11)).foregroundStyle(.green) }
-                            }
-                        }
-                    }
+                    StatusHeroSection(check: safety)
                 }
+
+                // Current Section (last)
+                CurrentSection(status: current, onRefresh: refreshStatus)
             } else {
                 currentUnavailableView
             }
@@ -268,37 +254,10 @@ struct GitInspectorView: View {
         // Compute safety check if we have both historical and current
         if let historical = historicalContext, let current = currentStatus {
             safetyCheck = GitSafetyAnalyzer.analyze(historical: historical, current: current)
-            // Configure collapsible defaults on main thread
-            await MainActor.run {
-                // Snapshot collapsed if identical; else expanded
-                expandHistorical = !isIdentical(historical: historical, current: current)
-                // Safety expanded when not safe
-                expandSafety = (safetyCheck?.status ?? .unknown) != .safe
-            }
-        } else {
-            await MainActor.run {
-                // Without both, prefer expanded current and collapsed others
-                expandHistorical = false
-                expandSafety = false
-            }
         }
     }
 
     // MARK: - Helpers
-    private func isIdentical(historical: HistoricalGitContext, current: CurrentGitStatus) -> Bool {
-        if let hb = historical.branch, let cb = current.branch, hb == cb,
-           let hc = historical.commitHash, let cc = current.commitHash, hc == cc,
-           current.isDirty == false {
-            return true
-        }
-        return false
-    }
-
-    private func isHistoricalExpandedDefault(historical: HistoricalGitContext, current: CurrentGitStatus?) -> Bool {
-        guard let c = current else { return true }
-        return !isIdentical(historical: historical, current: c)
-    }
-
     private func refreshStatus() async {
         guard let cwd = session.cwd else {
             return
@@ -307,6 +266,13 @@ struct GitInspectorView: View {
         // Invalidate cache and re-query
         await GitStatusCache.shared.invalidate(for: cwd)
         await loadCurrentStatus()
+    }
+
+    private func projectName(_ session: Session) -> String {
+        // Precedence: session.repoName -> cwd lastPathComponent -> Unknown Project
+        if let name = session.repoName, !name.isEmpty { return name }
+        if let cwd = session.cwd { return URL(fileURLWithPath: cwd).lastPathComponent }
+        return "Unknown Project"
     }
 }
 

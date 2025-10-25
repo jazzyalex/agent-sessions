@@ -9,6 +9,8 @@ enum AnalyticsDesign {
 
     // MARK: - Spacing
     static let windowPadding: CGFloat = 24  // Universal spacing between all elements
+    static let sectionSpacing: CGFloat = 24  // Spacing between sections
+    static let bottomGridSpacing: CGFloat = 24  // Spacing between bottom cards
     static let metricsCardSpacing: CGFloat = 16
     static let statsCardPadding: CGFloat = 20
     static let cardPadding: CGFloat = 24

@@ -25,6 +25,7 @@ private struct WindowSnapshot {
     let capturedAt: Date
     let usedPercent: Double?
     let resetsAt: Date?
+    let windowMinutes: Int?
     let remainingTokens: Double?
     let capacityTokens: Double?
 }
@@ -64,8 +65,8 @@ final class CapPressureStore: ObservableObject {
         recompute(now: ts)
     }
 
-    func updateWindow(window: RateLimitWindow, capturedAt: Date, usedPercent: Double?, resetsAt: Date?, remainingTokens: Double?, capacityTokens: Double?) {
-        let snap = WindowSnapshot(capturedAt: capturedAt, usedPercent: usedPercent, resetsAt: resetsAt, remainingTokens: remainingTokens, capacityTokens: capacityTokens)
+    func updateWindow(window: RateLimitWindow, capturedAt: Date, usedPercent: Double?, resetsAt: Date?, windowMinutes: Int?, remainingTokens: Double?, capacityTokens: Double?) {
+        let snap = WindowSnapshot(capturedAt: capturedAt, usedPercent: usedPercent, resetsAt: resetsAt, windowMinutes: windowMinutes, remainingTokens: remainingTokens, capacityTokens: capacityTokens)
         var arr = snapshots[window] ?? []
         arr.append(snap)
         // keep last 6
@@ -138,21 +139,35 @@ final class CapPressureStore: ObservableObject {
     }
 
     private func etaByPercentSlope(window: RateLimitWindow) -> (Double, PressureReason)? {
-        guard let snaps = snapshots[window], snaps.count >= 2 else { return nil }
-        // Average over last deltas with valid usedPercent
-        var pairs: [(Double, Double)] = [] // minutes, deltaPercent
-        for i in 1..<snaps.count {
-            let a = snaps[i-1], b = snaps[i]
-            guard let pa = a.usedPercent, let pb = b.usedPercent else { continue }
-            let dt = max(1.0/60.0, b.capturedAt.timeIntervalSince(a.capturedAt) / 60.0)
-            pairs.append((dt, pb - pa))
+        guard let snaps = snapshots[window] else { return nil }
+        if snaps.count >= 2 {
+            // Average over last deltas with valid usedPercent
+            var pairs: [(Double, Double)] = [] // minutes, deltaPercent
+            for i in 1..<snaps.count {
+                let a = snaps[i-1], b = snaps[i]
+                guard let pa = a.usedPercent, let pb = b.usedPercent else { continue }
+                let dt = max(1.0/60.0, b.capturedAt.timeIntervalSince(a.capturedAt) / 60.0)
+                pairs.append((dt, pb - pa))
+            }
+            guard !pairs.isEmpty, let last = snaps.last, let pNow = last.usedPercent else { return nil }
+            let slope = pairs.map { $0.1 / $0.0 }.reduce(0, +) / Double(pairs.count) // percent points per min
+            let eps = 1e-3
+            let rate = max(slope, eps)
+            let remPct = max(0, 100.0 - pNow)
+            return (remPct / rate, .percentSlope)
         }
-        guard !pairs.isEmpty, let last = snaps.last, let pNow = last.usedPercent else { return nil }
-        let slope = pairs.map { $0.1 / $0.0 }.reduce(0, +) / Double(pairs.count) // percent points per min
-        let eps = 1e-3
-        let rate = max(slope, eps)
-        let remPct = max(0, 100.0 - pNow)
-        return (remPct / rate, .percentSlope)
+        // Single snapshot fallback using window semantics when available
+        if let last = snaps.last, let pNow = last.usedPercent, let wmin = last.windowMinutes, let rz = last.resetsAt {
+            let elapsed = Double(wmin) - max(0, rz.timeIntervalSince(last.capturedAt) / 60.0)
+            if elapsed > 1.0/60.0 {
+                let slope = pNow / elapsed
+                let eps = 1e-3
+                let rate = max(slope, eps)
+                let remPct = max(0, 100.0 - pNow)
+                return (remPct / rate, .percentSlope)
+            }
+        }
+        return nil
     }
 
     private func trim429(now: Date, windowMins: Double = 10) {
@@ -160,4 +175,3 @@ final class CapPressureStore: ObservableObject {
         recent429.removeAll { $0 < cutoff }
     }
 }
-

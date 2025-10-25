@@ -20,7 +20,17 @@ public struct GitSafetyCheck: Equatable {
         case warning    // Different branch or new commits - potentially dangerous
         case unknown    // Can't determine (missing data)
 
-        /// Icon for this status
+        /// Icon emoji for this status
+        public var iconEmoji: String {
+            switch self {
+            case .safe: return "✅"
+            case .caution: return "📊"
+            case .warning: return "⚠️"
+            case .unknown: return "❓"
+            }
+        }
+
+        /// System icon for this status
         public var icon: String {
             switch self {
             case .safe: return "checkmark.circle.fill"
@@ -40,7 +50,27 @@ public struct GitSafetyCheck: Equatable {
             }
         }
 
-        /// Title for this status
+        /// Badge text for status (uppercase short label)
+        public var badgeText: String {
+            switch self {
+            case .safe: return "All Clear"
+            case .caution: return "Changes Detected"
+            case .warning: return "Conflict Risk"
+            case .unknown: return "Unknown"
+            }
+        }
+
+        /// Display title for status (main heading)
+        public var displayTitle: String {
+            switch self {
+            case .safe: return "Safe to Resume"
+            case .caution: return "Session Has Evolved"
+            case .warning: return "Major Changes Detected"
+            case .unknown: return "Unable to Verify"
+            }
+        }
+
+        /// Title for this status (old API, kept for compatibility)
         public var title: String {
             switch self {
             case .safe: return "SAFE"

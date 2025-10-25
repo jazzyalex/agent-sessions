@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unified Git Inspector - Historical + Live Comparison</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f7;
+            padding: 40px 20px;
+            color: #1d1d1f;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            font-size: 48px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+        
+        .subtitle {
+            text-align: center;
+            font-size: 21px;
+            color: #6e6e73;
+            margin-bottom: 60px;
+        }
+        
+        .comparison-banner {
+            background: linear-gradient(135deg, #007aff 0%, #5856d6 100%);
+            color: white;
+            padding: 32px;
+            border-radius: 12px;
+            margin-bottom: 40px;
+            text-align: center;
+        }
+        
+        .comparison-banner h2 {
+            font-size: 32px;
+            margin-bottom: 12px;
+        }
+        
+        .comparison-banner p {
+            font-size: 18px;
+            opacity: 0.95;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 60px;
+        }
+        
+        .feature-card {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+        
+        .feature-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        .feature-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .feature-desc {
+            font-size: 14px;
+            color: #6e6e73;
+            line-height: 1.5;
+        }
+        
+        .mockup-section {
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 32px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        }
+        
+        .section-header {
+            margin-bottom: 24px;
+        }
+        
+        .section-title {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .section-desc {
+            font-size: 16px;
+            color: #6e6e73;
+        }
+        
+        .mockup-preview {
+            border: 1px solid #e5e5e7;
+            border-radius: 8px;
+            overflow: hidden;
+            background: white;
+        }
+        
+        .window-chrome {
+            background: #f5f5f7;
+            padding: 12px 16px;
+            border-bottom: 1px solid #e5e5e7;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .window-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .window-button {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        
+        .window-button.red { background: #ff5f56; }
+        .window-button.yellow { background: #ffbd2e; }
+        .window-button.green { background: #27c93f; }
+        
+        .window-title {
+            font-size: 13px;
+            font-weight: 500;
+            flex: 1;
+            text-align: center;
+            margin-right: 44px;
+        }
+        
+        .inspector-content {
+            padding: 32px;
+            max-height: 700px;
+            overflow-y: auto;
+        }
+        
+        .inspector-header {
+            margin-bottom: 32px;
+            padding-bottom: 24px;
+            border-bottom: 2px solid #f5f5f7;
+        }
+        
+        .inspector-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        
+        .inspector-meta {
+            font-size: 14px;
+            color: #6e6e73;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .session-agent {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        
+        .agent-claude {
+            background: #ff950015;
+            color: #ff9500;
+        }
+        
+        .inspector-section {
+            margin-bottom: 32px;
+        }
+        
+        .section-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
+        
+        .badge-historical {
+            background: #007aff15;
+            color: #007aff;
+        }
+        
+        .badge-current {
+            background: #34c75915;
+            color: #34c759;
+        }
+        
+        .badge-safety {
+            background: #ff950015;
+            color: #ff9500;
+        }
+        
+        .info-box {
+            background: #f9f9f9;
+            border: 1px solid #e5e5e7;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        
+        .info-row:last-child {
+            margin-bottom: 0;
+        }
+        
+        .info-label {
+            color: #6e6e73;
+            font-weight: 500;
+        }
+        
+        .info-value {
+            font-weight: 600;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 13px;
+        }
+        
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .status-same {
+            background: #34c75915;
+            color: #34c759;
+        }
+        
+        .status-changed {
+            background: #ff3b3015;
+            color: #ff3b30;
+        }
+        
+        .status-warning {
+            background: #ff950015;
+            color: #ff9500;
+        }
+        
+        .comparison-divider {
+            margin: 32px 0;
+            border: none;
+            border-top: 2px dashed #e5e5e7;
+            position: relative;
+        }
+        
+        .comparison-divider::after {
+            content: '↓';
+            position: absolute;
+            left: 50%;
+            top: -12px;
+            transform: translateX(-50%);
+            background: #f5f5f7;
+            padding: 0 12px;
+            font-size: 20px;
+            color: #6e6e73;
+        }
+        
+        .file-list {
+            margin-top: 12px;
+            background: white;
+            border: 1px solid #e5e5e7;
+            border-radius: 8px;
+            padding: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px;
+            font-size: 13px;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+        
+        .file-status {
+            width: 20px;
+            font-weight: 700;
+        }
+        
+        .file-status.modified { color: #ff9500; }
+        .file-status.added { color: #34c759; }
+        
+        .safety-box {
+            background: #fff8e6;
+            border: 2px solid #ff9500;
+            border-radius: 12px;
+            padding: 24px;
+        }
+        
+        .safety-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .safety-status {
+            font-size: 20px;
+            font-weight: 700;
+            color: #ff9500;
+        }
+        
+        .safety-icon {
+            font-size: 32px;
+        }
+        
+        .safety-checks {
+            margin-bottom: 20px;
+        }
+        
+        .check-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .check-icon {
+            font-size: 18px;
+        }
+        
+        .recommendation-box {
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+        
+        .recommendation-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #6e6e73;
+            margin-bottom: 8px;
+        }
+        
+        .recommendation-text {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #1d1d1f;
+        }
+        
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 24px;
+        }
+        
+        .action-btn {
+            padding: 14px 20px;
+            border-radius: 8px;
+            border: 1px solid #e5e5e7;
+            background: white;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+        }
+        
+        .action-btn:hover {
+            background: #f5f5f7;
+            transform: translateY(-1px);
+        }
+        
+        .action-btn.primary {
+            background: #007aff;
+            color: white;
+            border-color: #007aff;
+        }
+        
+        .action-btn.primary:hover {
+            background: #0051d5;
+        }
+        
+        .action-btn.danger {
+            background: #ff3b30;
+            color: white;
+            border-color: #ff3b30;
+        }
+        
+        .action-btn.danger:hover {
+            background: #d72c1f;
+        }
+        
+        .value-prop {
+            background: linear-gradient(135deg, #34c759 0%, #30d158 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 12px;
+            margin-top: 40px;
+            text-align: center;
+        }
+        
+        .value-prop h2 {
+            font-size: 32px;
+            margin-bottom: 20px;
+        }
+        
+        .value-prop p {
+            font-size: 18px;
+            line-height: 1.6;
+            opacity: 0.95;
+        }
+        
+        .comparison-table {
+            margin-top: 40px;
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        }
+        
+        .comparison-table h3 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th {
+            text-align: left;
+            padding: 16px;
+            background: #f9f9f9;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #6e6e73;
+            border-bottom: 2px solid #e5e5e7;
+        }
+        
+        td {
+            padding: 16px;
+            border-bottom: 1px solid #f5f5f7;
+            font-size: 14px;
+        }
+        
+        tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .yes { color: #34c759; font-weight: 600; }
+        .no { color: #ff3b30; font-weight: 600; }
+        .partial { color: #ff9500; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Unified Git Inspector</h1>
+        <p class="subtitle">Historical Snapshot + Live State + Safety Comparison</p>
+        
+        <div class="comparison-banner">
+            <h2>🎯 One Feature, Three Questions Answered</h2>
+            <p>What was the git context? What is it now? Is it safe to resume?</p>
+        </div>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">📸</div>
+                <div class="feature-title">Historical Context</div>
+                <div class="feature-desc">See the exact git state when the session was created (from session file, instant)</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔴</div>
+                <div class="feature-title">Current State</div>
+                <div class="feature-desc">Live git status showing what changed since session start (~50ms local queries)</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡️</div>
+                <div class="feature-title">Safety Check</div>
+                <div class="feature-desc">Intelligent comparison with recommendations on whether it's safe to resume</div>
+            </div>
+        </div>
+        
+        <!-- Main Inspector Mockup -->
+        <div class="mockup-section">
+            <div class="section-header">
+                <div class="section-title">Inspector Window</div>
+                <div class="section-desc">Unified view showing historical snapshot, current state, and safety analysis</div>
+            </div>
+            
+            <div class="mockup-preview">
+                <div class="window-chrome">
+                    <div class="window-buttons">
+                        <div class="window-button red"></div>
+                        <div class="window-button yellow"></div>
+                        <div class="window-button green"></div>
+                    </div>
+                    <div class="window-title">Git Context Inspector</div>
+                </div>
+                
+                <div class="inspector-content">
+                    <div class="inspector-header">
+                        <div class="inspector-title">analyze codebase for optimization</div>
+                        <div class="inspector-meta">
+                            <span class="session-agent agent-claude">Claude Code</span>
+                            <span>•</span>
+                            <span>529 messages</span>
+                            <span>•</span>
+                            <span>Created 2 hours ago</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Historical Section -->
+                    <div class="inspector-section">
+                        <div class="section-badge badge-historical">
+                            <span>📸</span>
+                            <span>Snapshot at Session Start</span>
+                        </div>
+                        <div class="info-box">
+                            <div class="info-row">
+                                <span class="info-label">Branch</span>
+                                <span class="info-value">feature/perf-improvements</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Commit</span>
+                                <span class="info-value">2f8a9c1 "feat: improve indexing"</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Working Tree</span>
+                                <span class="info-value" style="color: #34c759;">✓ Clean</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Behind Origin</span>
+                                <span class="info-value">↓ 2 commits</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Timestamp</span>
+                                <span class="info-value">2 hours ago (4:23 PM)</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="comparison-divider"></div>
+                    
+                    <!-- Current Section -->
+                    <div class="inspector-section">
+                        <div class="section-badge badge-current">
+                            <span>🔴</span>
+                            <span>Current State (Live)</span>
+                        </div>
+                        <div class="info-box">
+                            <div class="info-row">
+                                <span class="info-label">Branch</span>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span class="info-value">feature/perf-improvements</span>
+                                    <span class="status-indicator status-same">✓ Same</span>
+                                </div>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Commit</span>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span class="info-value">2f8a9c1</span>
+                                    <span class="status-indicator status-same">✓ No new commits</span>
+                                </div>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Working Tree</span>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span class="info-value" style="color: #ff9500;">⚠️ Dirty (3 files)</span>
+                                    <span class="status-indicator status-warning">⚠️ Changed</span>
+                                </div>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Behind Origin</span>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span class="info-value">↓ 2 commits</span>
+                                    <span style="font-size: 11px; color: #6e6e73;">(cached 45m ago)</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- File List -->
+                        <div class="file-list">
+                            <div class="file-item">
+                                <span class="file-status modified">M</span>
+                                <span>Sources/Session/SessionIndexer.swift</span>
+                            </div>
+                            <div class="file-item">
+                                <span class="file-status modified">M</span>
+                                <span>Sources/Models/Session.swift</span>
+                            </div>
+                            <div class="file-item">
+                                <span class="file-status added">A</span>
+                                <span>Tests/SessionTests.swift</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="comparison-divider"></div>
+                    
+                    <!-- Safety Check Section -->
+                    <div class="inspector-section">
+                        <div class="section-badge badge-safety">
+                            <span>⚡️</span>
+                            <span>Resume Safety Check</span>
+                        </div>
+                        <div class="safety-box">
+                            <div class="safety-header">
+                                <span class="safety-icon">⚠️</span>
+                                <span class="safety-status">CAUTION</span>
+                            </div>
+                            
+                            <div class="safety-checks">
+                                <div class="check-item">
+                                    <span class="check-icon" style="color: #34c759;">✓</span>
+                                    <span>Branch unchanged (still on feature/perf-improvements)</span>
+                                </div>
+                                <div class="check-item">
+                                    <span class="check-icon" style="color: #34c759;">✓</span>
+                                    <span>No new commits since session start</span>
+                                </div>
+                                <div class="check-item">
+                                    <span class="check-icon" style="color: #ff9500;">⚠️</span>
+                                    <span>3 uncommitted changes detected in working tree</span>
+                                </div>
+                            </div>
+                            
+                            <div class="recommendation-box">
+                                <div class="recommendation-title">💡 Recommendation</div>
+                                <div class="recommendation-text">
+                                    Review uncommitted changes before resuming. The agent may conflict with your work in SessionIndexer.swift and Session.swift. Consider committing or stashing changes first.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Actions -->
+                    <div class="inspector-section">
+                        <div class="actions-grid">
+                            <button class="action-btn">📋 View Changes</button>
+                            <button class="action-btn">📂 Open Directory</button>
+                            <button class="action-btn">🌿 Copy Branch</button>
+                            <button class="action-btn">🔄 Refresh Status</button>
+                            <button class="action-btn">📊 Git Status</button>
+                            <button class="action-btn danger">⚠️ Resume Anyway</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Value Proposition -->
+        <div class="value-prop">
+            <h2>Why This Beats Two Separate Features</h2>
+            <p>
+                Instead of showing EITHER historical OR current git state, we show BOTH with intelligent comparison.
+                This gives users the complete picture: what was the context, what changed, and whether it's safe to resume.
+                Single source of truth, no confusion, higher value.
+            </p>
+        </div>
+        
+        <!-- Comparison Table -->
+        <div class="comparison-table">
+            <h3>Feature Comparison: Separate vs Unified</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Capability</th>
+                        <th>Historical Only<br>(Claude Code)</th>
+                        <th>Live Only<br>(Your Proposal)</th>
+                        <th>Unified<br>(Recommended)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Show session git context</strong></td>
+                        <td class="yes">✓ Yes</td>
+                        <td class="no">✗ No</td>
+                        <td class="yes">✓ Yes</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Show current git state</strong></td>
+                        <td class="no">✗ No</td>
+                        <td class="yes">✓ Yes</td>
+                        <td class="yes">✓ Yes</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Compare historical vs current</strong></td>
+                        <td class="no">✗ No</td>
+                        <td class="no">✗ No</td>
+                        <td class="yes">✓ Yes</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Safety recommendations</strong></td>
+                        <td class="no">✗ No</td>
+                        <td class="partial">~ Partial</td>
+                        <td class="yes">✓ Yes</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Works for old sessions</strong></td>
+                        <td class="yes">✓ Yes</td>
+                        <td class="no">✗ No</td>
+                        <td class="yes">✓ Yes</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Zero overhead option</strong></td>
+                        <td class="yes">✓ Yes</td>
+                        <td class="no">✗ No</td>
+                        <td class="yes">✓ Yes (tooltip)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Answers "What changed?"</strong></td>
+                        <td class="no">✗ No</td>
+                        <td class="no">✗ No</td>
+                        <td class="yes">✓ Yes</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Single source of truth</strong></td>
+                        <td class="no">✗ Confusing</td>
+                        <td class="no">✗ Confusing</td>
+                        <td class="yes">✓ Clear</td>
+                    </tr>
+                    <tr style="background: #f9f9f9; font-weight: 600;">
+                        <td><strong>Overall Value</strong></td>
+                        <td class="partial">5/10</td>
+                        <td class="partial">6/10</td>
+                        <td class="yes">10/10</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

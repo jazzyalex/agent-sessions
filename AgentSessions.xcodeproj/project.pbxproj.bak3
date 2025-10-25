@@ -7,19 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		6C959E13B3E34DB886484076 /* AnalyticsData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52343E9958A54E9987227D4A /* AnalyticsData.swift */; };
-		D7F1E4B0917E4B5B9044E08D /* AnalyticsDateRange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A1B977F038F41EDA841A08C /* AnalyticsDateRange.swift */; };
-		D22D5596AE304723BFB6B490 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D16E742E5604163A332C366 /* AnalyticsService.swift */; };
-		64888E382DCD41289C115461 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43373461163E432CB25162BC /* AnalyticsView.swift */; };
-		7DFB34C2A8424B979CF51CAB /* AnalyticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */; };
-		BF169B05FC63470E9B57D885 /* StatsCardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */; };
 		0607E3C9601249EB88184B34 /* SessionsChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CF78727ECB14792AD0BA9B5 /* SessionsChartView.swift */; };
-		18A5856CDE654957BE6AF163 /* AgentBreakdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */; };
-		C0DA70FF08934B0990583766 /* TimeOfDayHeatmapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */; };
-		A58656799124497ABF30B977 /* AnalyticsColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46836E5B412F42D6B157696B /* AnalyticsColors.swift */; };
-		73847F36998344AAB1C1D7D7 /* AnalyticsDesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138C30E0F474484AAA4DCED9 /* AnalyticsDesignTokens.swift */; };
-
 		09C4E2A7C54B4EA3BF4473C7 /* CodexVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3233D9D6CE429AB0173B04 /* CodexVersion.swift */; };
+		18A5856CDE654957BE6AF163 /* AgentBreakdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */; };
 		1AB05D2296DC475580CB52EF /* CodexResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */; };
 		1D0AD620E3E044DB875B125B /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B86A8EFF02D440EADEB98F0 /* UpdateChecker.swift */; };
 		24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */; };
@@ -27,16 +17,23 @@
 		53736755F3AD431D8FD488AF /* UpdaterController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF31F563529F4552B7B205FD /* UpdaterController.swift */; };
 		5731AD7A25CF4B4DAA9BDF27 /* UpdateDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = B903187D9D8D4EDF9FAB0BBA /* UpdateDefaults.swift */; };
 		580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */; };
+		64888E382DCD41289C115461 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43373461163E432CB25162BC /* AnalyticsView.swift */; };
+		6C959E13B3E34DB886484076 /* AnalyticsData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52343E9958A54E9987227D4A /* AnalyticsData.swift */; };
 		72A02C3B7A1D43F39A01FE89 /* TranscriptCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF1EEA498EA54B428BC1AEA8 /* TranscriptCache.swift */; };
+		73847F36998344AAB1C1D7D7 /* AnalyticsDesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 138C30E0F474484AAA4DCED9 /* AnalyticsDesignTokens.swift */; };
 		79F828CD9CA64FBFA8A436FA /* GeminiCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */; };
 		7D3211A8042C4D30AE226E0C /* UpdateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43F39BE67C6349D1B76115C9 /* UpdateModels.swift */; };
 		7DEC6F1AF64D4A61B0B11AFD /* UpdateCheckModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B29B924375946728A9EC1BF /* UpdateCheckModel.swift */; };
+		7DFB34C2A8424B979CF51CAB /* AnalyticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */; };
 		7E6B9F3E2F8E4C05A0E9B6D1 /* UsageMenuBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */; };
 		8302EEE664744FA8A3606F34 /* SemanticVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16EEA49AD2C64DCF8BDC1241 /* SemanticVersion.swift */; };
 		8DC56A2B614B4E77A1030420 /* CodexCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D641BFBD310B4157871F120F /* CodexCLIEnvironment.swift */; };
 		98F981841A99410B940D88EE /* CodexLaunchMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979E7E3D0E14477885B20675 /* CodexLaunchMode.swift */; };
+		9FE5EAD8651B8BC590B43AE0 /* StatusHeroSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A4B660B4183A3748594DF8A /* StatusHeroSection.swift */; };
 		A1B2C3D4E5F60708AA55BB66 /* MenuBarPrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60708AA55BB65 /* MenuBarPrefs.swift */; };
+		A58656799124497ABF30B977 /* AnalyticsColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46836E5B412F42D6B157696B /* AnalyticsColors.swift */; };
 		A8B49E614242407C854A3463 /* CodexResumeLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD535A048F4C41ECA4435F9A /* CodexResumeLauncher.swift */; };
+		ANREP000020000000000001 /* AnalyticsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANREP000010000000000001 /* AnalyticsRepository.swift */; };
 		B000001C2A0A000100000001 /* AgentSessionsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000112A0A000100000001 /* AgentSessionsApp.swift */; };
 		B000001C2A0A000100000002 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000113A0A000100000001 /* Session.swift */; };
 		B000001C2A0A000100000003 /* SessionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000114A0A000100000001 /* SessionEvent.swift */; };
@@ -61,55 +58,74 @@
 		B000001C2A0A000100000078 /* SessionTitleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000179A0A000100000001 /* SessionTitleTests.swift */; };
 		B000001C2A0A000100000079 /* LayoutMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000017BA0A000100000001 /* LayoutMode.swift */; };
 		B0000SSS2A0A000100000001 /* SessionSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000SSS4A0A000100000002 /* SessionSource.swift */; };
+		BF169B05FC63470E9B57D885 /* StatsCardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */; };
 		C0D3E5A1700A000000000001 /* CodexStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000001 /* CodexStatusService.swift */; };
 		C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000002 /* UsageStripView.swift */; };
+		C0DA70FF08934B0990583766 /* TimeOfDayHeatmapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */; };
 		C124E15F9EF049399D9F4FCA /* GeminiCLISettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */; };
 		C1273C054B784C768C90331B /* CommandExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37006C856FBE4448A658887B /* CommandExecutor.swift */; };
 		C38DF9D24E03404EAF70BAF2 /* GitHubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD4071F08354BC681A6E5D9 /* GitHubClient.swift */; };
-		CFB900010000000000000001 /* AgentSessions/Services/SessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000001 /* AgentSessions/Services/SessionDiscovery.swift */; };
-		CFB900010000000000000002 /* AgentSessions/Services/TranscriptRenderMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000002 /* AgentSessions/Services/TranscriptRenderMode.swift */; };
-		CFB900010000000000000003 /* AgentSessions/Services/ClaudeSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000003 /* AgentSessions/Services/ClaudeSessionParser.swift */; };
-		CFB900010000000000000004 /* AgentSessions/Services/ClaudeSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000004 /* AgentSessions/Services/ClaudeSessionIndexer.swift */; };
-		CFB900010000000000000005 /* AgentSessions/Views/ClaudeSessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000005 /* AgentSessions/Views/ClaudeSessionsView.swift */; };
-		CFB900010000000000000010 /* AgentSessions/ClaudeResume/ClaudeFeatureFlag.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000010 /* AgentSessions/ClaudeResume/ClaudeFeatureFlag.swift */; };
-		CFB900010000000000000011 /* AgentSessions/ClaudeResume/ClaudeCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000011 /* AgentSessions/ClaudeResume/ClaudeCLIEnvironment.swift */; };
-		CFB900010000000000000012 /* AgentSessions/ClaudeResume/ClaudeResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000012 /* AgentSessions/ClaudeResume/ClaudeResumeCommandBuilder.swift */; };
-		CFB900010000000000000013 /* AgentSessions/ClaudeResume/ClaudeTerminalLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000013 /* AgentSessions/ClaudeResume/ClaudeTerminalLauncher.swift */; };
-		CFB900010000000000000014 /* AgentSessions/ClaudeResume/ClaudeResumeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000014 /* AgentSessions/ClaudeResume/ClaudeResumeTypes.swift */; };
-		CFB900010000000000000015 /* AgentSessions/ClaudeResume/ClaudeResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000015 /* AgentSessions/ClaudeResume/ClaudeResumeCoordinator.swift */; };
-		CFB900010000000000000016 /* AgentSessions/ClaudeResume/ClaudeResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000016 /* AgentSessions/ClaudeResume/ClaudeResumeSettings.swift */; };
-		CFB900010000000000000017 /* AgentSessions/ClaudeResume/ClaudeITermLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000017 /* AgentSessions/ClaudeResume/ClaudeITermLauncher.swift */; };
-		CFU000020000000000000001 /* AgentSessions/Services/UnifiedSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFU000010000000000000001 /* AgentSessions/Services/UnifiedSessionIndexer.swift */; };
-		CFU000020000000000000002 /* AgentSessions/Views/UnifiedSessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFU000010000000000000002 /* AgentSessions/Views/UnifiedSessionsView.swift */; };
-		CLC000010000000000000001 /* AgentSessions/ClaudeStatus/ClaudeUsageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000001 /* AgentSessions/ClaudeStatus/ClaudeUsageModel.swift */; };
-		CLC000010000000000000002 /* AgentSessions/ClaudeStatus/ClaudeStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000002 /* AgentSessions/ClaudeStatus/ClaudeStatusService.swift */; };
-		CLC000010000000000000003 /* AgentSessions/Resources/claude_usage_capture.sh in Resources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000003 /* AgentSessions/Resources/claude_usage_capture.sh */; };
-		CLC000010000000000000004 /* AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000004 /* AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift */; };
+		CFB900010000000000000001 /* SessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000001 /* SessionDiscovery.swift */; };
+		CFB900010000000000000002 /* TranscriptRenderMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000002 /* TranscriptRenderMode.swift */; };
+		CFB900010000000000000003 /* ClaudeSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000003 /* ClaudeSessionParser.swift */; };
+		CFB900010000000000000004 /* ClaudeSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000004 /* ClaudeSessionIndexer.swift */; };
+		CFB900010000000000000005 /* ClaudeSessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000005 /* ClaudeSessionsView.swift */; };
+		CFB900010000000000000010 /* ClaudeFeatureFlag.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000010 /* ClaudeFeatureFlag.swift */; };
+		CFB900010000000000000011 /* ClaudeCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000011 /* ClaudeCLIEnvironment.swift */; };
+		CFB900010000000000000012 /* ClaudeResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000012 /* ClaudeResumeCommandBuilder.swift */; };
+		CFB900010000000000000013 /* ClaudeTerminalLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000013 /* ClaudeTerminalLauncher.swift */; };
+		CFB900010000000000000014 /* ClaudeResumeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000014 /* ClaudeResumeTypes.swift */; };
+		CFB900010000000000000015 /* ClaudeResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000015 /* ClaudeResumeCoordinator.swift */; };
+		CFB900010000000000000016 /* ClaudeResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000016 /* ClaudeResumeSettings.swift */; };
+		CFB900010000000000000017 /* ClaudeITermLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000017 /* ClaudeITermLauncher.swift */; };
+		CFU000020000000000000001 /* UnifiedSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFU000010000000000000001 /* UnifiedSessionIndexer.swift */; };
+		CFU000020000000000000002 /* UnifiedSessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFU000010000000000000002 /* UnifiedSessionsView.swift */; };
+		CLC000010000000000000001 /* ClaudeUsageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000001 /* ClaudeUsageModel.swift */; };
+		CLC000010000000000000002 /* ClaudeStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000002 /* ClaudeStatusService.swift */; };
+		CLC000010000000000000003 /* claude_usage_capture.sh in Resources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000003 /* claude_usage_capture.sh */; };
+		CLC000010000000000000004 /* ClaudeUsageStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000004 /* ClaudeUsageStripView.swift */; };
+		D0B0AC3DFBD31FA07FE14EA8 /* ColorExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924F17AD700936A779630365 /* ColorExtensions.swift */; };
 		D1E2F3A4B5C647E8F9A0B1C2 /* ResumeHealthCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */; };
+		D22D5596AE304723BFB6B490 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D16E742E5604163A332C366 /* AnalyticsService.swift */; };
+		D7F1E4B0917E4B5B9044E08D /* AnalyticsDateRange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A1B977F038F41EDA841A08C /* AnalyticsDateRange.swift */; };
 		DAC510E5A5804B0C865935FC /* CodexResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46DF05EC4F8049DA9AF9E5CD /* CodexResumeCoordinator.swift */; };
+		DBSTEST00002000000000001 /* DBSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBSTEST00001000000000001 /* DBSmokeTests.swift */; };
 		DE0381FB79864EDCA2C58B03 /* CodexResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABCAEC00B184A1F871509E5 /* CodexResumeCommandBuilder.swift */; };
 		E1DDA78C704848A381A6A426 /* LoadingAnimationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F188663773714C61A568F7AA /* LoadingAnimationView.swift */; };
 		F7079DCFE7E6447F920DBF84 /* CodexResumeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */; };
-		GEMB000010000000000000001 /* AgentSessions/Services/GeminiSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000001 /* AgentSessions/Services/GeminiSessionDiscovery.swift */; };
-		GEMB000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift */; };
-		GEMB000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift */; };
-		GEMH000020000000000000001 /* AgentSessions/Services/GeminiHashResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEMH000010000000000000001 /* AgentSessions/Services/GeminiHashResolver.swift */; };
-		GEMV000020000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEMV000010000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift */; };
-		MB000020000000000000001 /* AgentSessions/MenuBar/StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = MB000010000000000000001 /* AgentSessions/MenuBar/StatusItemController.swift */; };
-		MB000020000000000000002 /* AgentSessions/MenuBar/SettingsUpdateProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = MB000010000000000000002 /* AgentSessions/MenuBar/SettingsUpdateProxy.swift */; };
-		SRCH000020000000000000001 /* AgentSessions/Search/SearchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRCH000010000000000000001 /* AgentSessions/Search/SearchCoordinator.swift */; };
+		GEMB000010000000000000001 /* GeminiSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000001 /* GeminiSessionDiscovery.swift */; };
+		GEMB000010000000000000002 /* GeminiSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000002 /* GeminiSessionIndexer.swift */; };
+		GEMB000010000000000000003 /* GeminiSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEM000010000000000000003 /* GeminiSessionParser.swift */; };
+		GEMH000020000000000000001 /* GeminiHashResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEMH000010000000000000001 /* GeminiHashResolver.swift */; };
+		GEMV000020000000000000001 /* GeminiTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GEMV000010000000000000001 /* GeminiTranscriptView.swift */; };
+		GITI0011000000000000000 /* CurrentGitStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0012000000000000000 /* CurrentGitStatus.swift */; };
+		GITI0021000000000000000 /* GitFileStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0022000000000000000 /* GitFileStatus.swift */; };
+		GITI0031000000000000000 /* GitSafetyCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0032000000000000000 /* GitSafetyCheck.swift */; };
+		GITI0041000000000000000 /* HistoricalGitContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0042000000000000000 /* HistoricalGitContext.swift */; };
+		GITI0051000000000000000 /* GitContextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0052000000000000000 /* GitContextExtractor.swift */; };
+		GITI0061000000000000000 /* GitSafetyAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0062000000000000000 /* GitSafetyAnalyzer.swift */; };
+		GITI0071000000000000000 /* GitStatusCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0072000000000000000 /* GitStatusCache.swift */; };
+		GITI0081000000000000000 /* GitCommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0082000000000000000 /* GitCommandRunner.swift */; };
+		GITI0091000000000000000 /* GitInspectorWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0092000000000000000 /* GitInspectorWindowController.swift */; };
+		GITI0101000000000000000 /* ButtonActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0102000000000000000 /* ButtonActionsView.swift */; };
+		GITI0111000000000000000 /* CurrentSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0112000000000000000 /* CurrentSection.swift */; };
+		GITI0121000000000000000 /* GitInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0122000000000000000 /* GitInspectorView.swift */; };
+		GITI0131000000000000000 /* HistoricalSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0132000000000000000 /* HistoricalSection.swift */; };
+		GITI0141000000000000000 /* SafetySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0142000000000000000 /* SafetySection.swift */; };
+		GITI0151000000000000000 /* InspectorKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0152000000000000000 /* InspectorKeys.swift */; };
+		GITI0161000000000000000 /* CollapsedStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = GITI0162000000000000000 /* CollapsedStateStore.swift */; };
+		IDXDB000020000000000001 /* DB.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDXDB000010000000000001 /* DB.swift */; };
+		IDXIX000020000000000001 /* AnalyticsIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDXIX000010000000000001 /* AnalyticsIndexer.swift */; };
+		IDXTEST00002000000000001 /* AnalyticsIndexerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDXTEST00001000000000001 /* AnalyticsIndexerTests.swift */; };
+		MB000020000000000000001 /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = MB000010000000000000001 /* StatusItemController.swift */; };
+		MB000020000000000000002 /* SettingsUpdateProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = MB000010000000000000002 /* SettingsUpdateProxy.swift */; };
+		SESMETA0002000000000001 /* SessionMetaRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = SESMETA0001000000000001 /* SessionMetaRepository.swift */; };
+		SRCH000020000000000000001 /* SearchCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRCH000010000000000000001 /* SearchCoordinator.swift */; };
 		STALE000020000000000000001 /* UsageStaleCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = STALE000010000000000000001 /* UsageStaleCheck.swift */; };
-		SUPF000020000000000000001 /* AgentSessions/Support/FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = SUPF000010000000000000001 /* AgentSessions/Support/FeatureFlags.swift */; };
-		SUPT000020000000000000001 /* AgentSessions/Support/TypingActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = SUPT000010000000000000001 /* AgentSessions/Support/TypingActivity.swift */; };
-		UTILS00002000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTILS00001000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift */; };
-		UTILW00002000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTILW00001000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift */; };
-// Added by Indexing feature
-		IDXDB000020000000000001 /* DB.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDXDB000010000000000001 /* AgentSessions/Indexing/DB.swift */; };
-		IDXIX000020000000000001 /* AnalyticsIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDXIX000010000000000001 /* AgentSessions/Indexing/AnalyticsIndexer.swift */; };
-		ANREP000020000000000001 /* AnalyticsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANREP000010000000000001 /* AgentSessions/Analytics/Repositories/AnalyticsRepository.swift */; };
-		IDXTEST00002000000000001 /* AnalyticsIndexerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = IDXTEST00001000000000001 /* AgentSessionsTests/Indexing/AnalyticsIndexerTests.swift */; };
-		SESMETA0002000000000001 /* SessionMetaRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = SESMETA0001000000000001 /* AgentSessions/Indexing/SessionMetaRepository.swift */; };
-		DBSTEST00002000000000001 /* DBSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBSTEST00001000000000001 /* AgentSessionsTests/Indexing/DBSmokeTests.swift */; };
+		SUPF000020000000000000001 /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = SUPF000010000000000000001 /* FeatureFlags.swift */; };
+		SUPT000020000000000000001 /* TypingActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = SUPT000010000000000000001 /* TypingActivity.swift */; };
+		UTILS00002000000000000001 /* SplitViewAutosave.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTILS00001000000000000001 /* SplitViewAutosave.swift */; };
+		UTILW00002000000000000001 /* WindowAutosave.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTILW00001000000000000001 /* WindowAutosave.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -123,34 +139,36 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		52343E9958A54E9987227D4A /* AnalyticsData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsData.swift; sourceTree = "<group>"; };
-		8A1B977F038F41EDA841A08C /* AnalyticsDateRange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsDateRange.swift; sourceTree = "<group>"; };
-		6D16E742E5604163A332C366 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
-		43373461163E432CB25162BC /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
-		474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsWindowController.swift; sourceTree = "<group>"; };
-		06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsCardsView.swift; sourceTree = "<group>"; };
-		4CF78727ECB14792AD0BA9B5 /* SessionsChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsChartView.swift; sourceTree = "<group>"; };
-		8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentBreakdownView.swift; sourceTree = "<group>"; };
-		9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeOfDayHeatmapView.swift; sourceTree = "<group>"; };
-		46836E5B412F42D6B157696B /* AnalyticsColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsColors.swift; sourceTree = "<group>"; };
-		138C30E0F474484AAA4DCED9 /* AnalyticsDesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsDesignTokens.swift; sourceTree = "<group>"; };
-
 		001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeSettings.swift; path = AgentSessions/Resume/CodexResumeSettings.swift; sourceTree = SOURCE_ROOT; };
+		06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsCardsView.swift; sourceTree = "<group>"; };
+		138C30E0F474484AAA4DCED9 /* AnalyticsDesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsDesignTokens.swift; sourceTree = "<group>"; };
 		16EEA49AD2C64DCF8BDC1241 /* SemanticVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SemanticVersion.swift; path = AgentSessions/Update/SemanticVersion.swift; sourceTree = SOURCE_ROOT; };
 		27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeminiCLIEnvironment.swift; path = AgentSessions/Services/GeminiCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
 		3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeminiCLISettings.swift; path = AgentSessions/Services/GeminiCLISettings.swift; sourceTree = SOURCE_ROOT; };
 		37006C856FBE4448A658887B /* CommandExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CommandExecutor.swift; path = AgentSessions/Resume/CommandExecutor.swift; sourceTree = SOURCE_ROOT; };
+		43373461163E432CB25162BC /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		43F39BE67C6349D1B76115C9 /* UpdateModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateModels.swift; path = AgentSessions/Update/UpdateModels.swift; sourceTree = SOURCE_ROOT; };
+		46836E5B412F42D6B157696B /* AnalyticsColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsColors.swift; sourceTree = "<group>"; };
 		46DF05EC4F8049DA9AF9E5CD /* CodexResumeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCoordinator.swift; path = AgentSessions/Resume/CodexResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
+		474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsWindowController.swift; sourceTree = "<group>"; };
+		4CF78727ECB14792AD0BA9B5 /* SessionsChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsChartView.swift; sourceTree = "<group>"; };
+		52343E9958A54E9987227D4A /* AnalyticsData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsData.swift; sourceTree = "<group>"; };
 		5ABCAEC00B184A1F871509E5 /* CodexResumeCommandBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCommandBuilder.swift; path = AgentSessions/Resume/CodexResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
 		6B29B924375946728A9EC1BF /* UpdateCheckModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateCheckModel.swift; path = AgentSessions/Update/UpdateCheckModel.swift; sourceTree = SOURCE_ROOT; };
+		6D16E742E5604163A332C366 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
 		7E8EFD200FFA4B90BCCF3434 /* CodexResumeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeSheet.swift; path = AgentSessions/Resume/CodexResumeSheet.swift; sourceTree = SOURCE_ROOT; };
+		8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentBreakdownView.swift; sourceTree = "<group>"; };
+		8A1B977F038F41EDA841A08C /* AnalyticsDateRange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsDateRange.swift; sourceTree = "<group>"; };
+		8A4B660B4183A3748594DF8A /* StatusHeroSection.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = StatusHeroSection.swift; path = AgentSessions/GitInspector/Views/StatusHeroSection.swift; sourceTree = "<group>"; };
 		8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateCheckerTests.swift; path = AgentSessionsTests/UpdateCheckerTests.swift; sourceTree = SOURCE_ROOT; };
 		9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WindowFocusCoordinator.swift; path = AgentSessions/Services/WindowFocusCoordinator.swift; sourceTree = SOURCE_ROOT; };
+		924F17AD700936A779630365 /* ColorExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Utilities/ColorExtensions.swift; sourceTree = SOURCE_ROOT; };
 		979E7E3D0E14477885B20675 /* CodexLaunchMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexLaunchMode.swift; path = AgentSessions/Resume/CodexLaunchMode.swift; sourceTree = SOURCE_ROOT; };
 		9B86A8EFF02D440EADEB98F0 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateChecker.swift; path = AgentSessions/Update/UpdateChecker.swift; sourceTree = SOURCE_ROOT; };
+		9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeOfDayHeatmapView.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60708AA55BB65 /* MenuBarPrefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MenuBarPrefs.swift; path = AgentSessions/CodexStatus/MenuBarPrefs.swift; sourceTree = SOURCE_ROOT; };
 		A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeTests.swift; path = AgentSessionsTests/CodexResumeTests.swift; sourceTree = SOURCE_ROOT; };
+		ANREP000010000000000001 /* AnalyticsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Analytics/Repositories/AnalyticsRepository.swift; sourceTree = SOURCE_ROOT; };
 		B0000010DA0A000100000001 /* AgentSessions.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentSessions.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B00000110A0A000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B00000112A0A000100000001 /* AgentSessionsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentSessionsApp.swift; path = AgentSessions/AgentSessionsApp.swift; sourceTree = SOURCE_ROOT; };
@@ -187,26 +205,27 @@
 		C0D3E5A1700F000000000001 /* CodexStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexStatusService.swift; path = AgentSessions/CodexStatus/CodexStatusService.swift; sourceTree = SOURCE_ROOT; };
 		C0D3E5A1700F000000000002 /* UsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStripView.swift; path = AgentSessions/CodexStatus/UsageStripView.swift; sourceTree = SOURCE_ROOT; };
 		C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ResumeHealthCheck.swift; path = AgentSessions/Resume/ResumeHealthCheck.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000001 /* AgentSessions/Services/SessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000002 /* AgentSessions/Services/TranscriptRenderMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/TranscriptRenderMode.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000003 /* AgentSessions/Services/ClaudeSessionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ClaudeSessionParser.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000004 /* AgentSessions/Services/ClaudeSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ClaudeSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000005 /* AgentSessions/Views/ClaudeSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/ClaudeSessionsView.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000010 /* AgentSessions/ClaudeResume/ClaudeFeatureFlag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeFeatureFlag.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000011 /* AgentSessions/ClaudeResume/ClaudeCLIEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000012 /* AgentSessions/ClaudeResume/ClaudeResumeCommandBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000013 /* AgentSessions/ClaudeResume/ClaudeTerminalLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000014 /* AgentSessions/ClaudeResume/ClaudeResumeTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeTypes.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000015 /* AgentSessions/ClaudeResume/ClaudeResumeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000016 /* AgentSessions/ClaudeResume/ClaudeResumeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeSettings.swift; sourceTree = SOURCE_ROOT; };
-		CFA900010000000000000017 /* AgentSessions/ClaudeResume/ClaudeITermLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeITermLauncher.swift; sourceTree = SOURCE_ROOT; };
-		CFU000010000000000000001 /* AgentSessions/Services/UnifiedSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/UnifiedSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
-		CFU000010000000000000002 /* AgentSessions/Views/UnifiedSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/UnifiedSessionsView.swift; sourceTree = SOURCE_ROOT; };
-		CLC000020000000000000001 /* AgentSessions/ClaudeStatus/ClaudeUsageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageModel.swift; sourceTree = SOURCE_ROOT; };
-		CLC000020000000000000002 /* AgentSessions/ClaudeStatus/ClaudeStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeStatusService.swift; sourceTree = SOURCE_ROOT; };
-		CLC000020000000000000003 /* AgentSessions/Resources/claude_usage_capture.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = AgentSessions/Resources/claude_usage_capture.sh; sourceTree = SOURCE_ROOT; };
-		CLC000020000000000000004 /* AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000001 /* SessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000002 /* TranscriptRenderMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/TranscriptRenderMode.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000003 /* ClaudeSessionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ClaudeSessionParser.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000004 /* ClaudeSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ClaudeSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000005 /* ClaudeSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/ClaudeSessionsView.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000010 /* ClaudeFeatureFlag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeFeatureFlag.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000011 /* ClaudeCLIEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000012 /* ClaudeResumeCommandBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000013 /* ClaudeTerminalLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000014 /* ClaudeResumeTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeTypes.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000015 /* ClaudeResumeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000016 /* ClaudeResumeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeResumeSettings.swift; sourceTree = SOURCE_ROOT; };
+		CFA900010000000000000017 /* ClaudeITermLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeITermLauncher.swift; sourceTree = SOURCE_ROOT; };
+		CFU000010000000000000001 /* UnifiedSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/UnifiedSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		CFU000010000000000000002 /* UnifiedSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/UnifiedSessionsView.swift; sourceTree = SOURCE_ROOT; };
+		CLC000020000000000000001 /* ClaudeUsageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageModel.swift; sourceTree = SOURCE_ROOT; };
+		CLC000020000000000000002 /* ClaudeStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeStatusService.swift; sourceTree = SOURCE_ROOT; };
+		CLC000020000000000000003 /* claude_usage_capture.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = AgentSessions/Resources/claude_usage_capture.sh; sourceTree = SOURCE_ROOT; };
+		CLC000020000000000000004 /* ClaudeUsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift; sourceTree = SOURCE_ROOT; };
 		D641BFBD310B4157871F120F /* CodexCLIEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexCLIEnvironment.swift; path = AgentSessions/Resume/CodexCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
+		DBSTEST00001000000000001 /* DBSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Indexing/DBSmokeTests.swift; sourceTree = SOURCE_ROOT; };
 		DD535A048F4C41ECA4435F9A /* CodexResumeLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeLauncher.swift; path = AgentSessions/Resume/CodexResumeLauncher.swift; sourceTree = SOURCE_ROOT; };
 		DE3233D9D6CE429AB0173B04 /* CodexVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexVersion.swift; path = AgentSessions/Resume/CodexVersion.swift; sourceTree = SOURCE_ROOT; };
 		DF1EEA498EA54B428BC1AEA8 /* TranscriptCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptCache.swift; sourceTree = "<group>"; };
@@ -215,27 +234,40 @@
 		F188663773714C61A568F7AA /* LoadingAnimationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LoadingAnimationView.swift; path = AgentSessions/Views/LoadingAnimationView.swift; sourceTree = SOURCE_ROOT; };
 		F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCoordinatorTests.swift; path = AgentSessionsTests/CodexResumeCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
 		FF31F563529F4552B7B205FD /* UpdaterController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdaterController.swift; path = AgentSessions/Update/UpdaterController.swift; sourceTree = SOURCE_ROOT; };
-		GEM000010000000000000001 /* AgentSessions/Services/GeminiSessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
-		GEM000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
-		GEM000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionParser.swift; sourceTree = SOURCE_ROOT; };
-		GEMH000010000000000000001 /* AgentSessions/Services/GeminiHashResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiHashResolver.swift; sourceTree = SOURCE_ROOT; };
-		GEMT000010000000000000001 /* AgentSessionsTests/GeminiParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/GeminiParserTests.swift; sourceTree = SOURCE_ROOT; };
-		GEMV000010000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/GeminiTranscriptView.swift; sourceTree = SOURCE_ROOT; };
-		MB000010000000000000001 /* AgentSessions/MenuBar/StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/MenuBar/StatusItemController.swift; sourceTree = SOURCE_ROOT; };
-		MB000010000000000000002 /* AgentSessions/MenuBar/SettingsUpdateProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/MenuBar/SettingsUpdateProxy.swift; sourceTree = SOURCE_ROOT; };
-		SRCH000010000000000000001 /* AgentSessions/Search/SearchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Search/SearchCoordinator.swift; sourceTree = SOURCE_ROOT; };
+		GEM000010000000000000001 /* GeminiSessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
+		GEM000010000000000000002 /* GeminiSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		GEM000010000000000000003 /* GeminiSessionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionParser.swift; sourceTree = SOURCE_ROOT; };
+		GEMH000010000000000000001 /* GeminiHashResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiHashResolver.swift; sourceTree = SOURCE_ROOT; };
+		GEMT000010000000000000001 /* GeminiParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/GeminiParserTests.swift; sourceTree = SOURCE_ROOT; };
+		GEMV000010000000000000001 /* GeminiTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/GeminiTranscriptView.swift; sourceTree = SOURCE_ROOT; };
+		GITI0012000000000000000 /* CurrentGitStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Models/CurrentGitStatus.swift; sourceTree = SOURCE_ROOT; };
+		GITI0022000000000000000 /* GitFileStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Models/GitFileStatus.swift; sourceTree = SOURCE_ROOT; };
+		GITI0032000000000000000 /* GitSafetyCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Models/GitSafetyCheck.swift; sourceTree = SOURCE_ROOT; };
+		GITI0042000000000000000 /* HistoricalGitContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Models/HistoricalGitContext.swift; sourceTree = SOURCE_ROOT; };
+		GITI0052000000000000000 /* GitContextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Services/GitContextExtractor.swift; sourceTree = SOURCE_ROOT; };
+		GITI0062000000000000000 /* GitSafetyAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Services/GitSafetyAnalyzer.swift; sourceTree = SOURCE_ROOT; };
+		GITI0072000000000000000 /* GitStatusCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Services/GitStatusCache.swift; sourceTree = SOURCE_ROOT; };
+		GITI0082000000000000000 /* GitCommandRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Utilities/GitCommandRunner.swift; sourceTree = SOURCE_ROOT; };
+		GITI0092000000000000000 /* GitInspectorWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Utilities/GitInspectorWindowController.swift; sourceTree = SOURCE_ROOT; };
+		GITI0102000000000000000 /* ButtonActionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Views/ButtonActionsView.swift; sourceTree = SOURCE_ROOT; };
+		GITI0112000000000000000 /* CurrentSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Views/CurrentSection.swift; sourceTree = SOURCE_ROOT; };
+		GITI0122000000000000000 /* GitInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Views/GitInspectorView.swift; sourceTree = SOURCE_ROOT; };
+		GITI0132000000000000000 /* HistoricalSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Views/HistoricalSection.swift; sourceTree = SOURCE_ROOT; };
+		GITI0142000000000000000 /* SafetySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Views/SafetySection.swift; sourceTree = SOURCE_ROOT; };
+		GITI0152000000000000000 /* InspectorKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Models/InspectorKeys.swift; sourceTree = SOURCE_ROOT; };
+		GITI0162000000000000000 /* CollapsedStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Services/CollapsedStateStore.swift; sourceTree = SOURCE_ROOT; };
+		IDXDB000010000000000001 /* DB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Indexing/DB.swift; sourceTree = SOURCE_ROOT; };
+		IDXIX000010000000000001 /* AnalyticsIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Indexing/AnalyticsIndexer.swift; sourceTree = SOURCE_ROOT; };
+		IDXTEST00001000000000001 /* AnalyticsIndexerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Indexing/AnalyticsIndexerTests.swift; sourceTree = SOURCE_ROOT; };
+		MB000010000000000000001 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/MenuBar/StatusItemController.swift; sourceTree = SOURCE_ROOT; };
+		MB000010000000000000002 /* SettingsUpdateProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/MenuBar/SettingsUpdateProxy.swift; sourceTree = SOURCE_ROOT; };
+		SESMETA0001000000000001 /* SessionMetaRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Indexing/SessionMetaRepository.swift; sourceTree = SOURCE_ROOT; };
+		SRCH000010000000000000001 /* SearchCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Search/SearchCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		STALE000010000000000000001 /* UsageStaleCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStaleCheck.swift; path = AgentSessions/CodexStatus/UsageStaleCheck.swift; sourceTree = SOURCE_ROOT; };
-		SUPF000010000000000000001 /* AgentSessions/Support/FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/FeatureFlags.swift; sourceTree = SOURCE_ROOT; };
-		SUPT000010000000000000001 /* AgentSessions/Support/TypingActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/TypingActivity.swift; sourceTree = SOURCE_ROOT; };
-		UTILS00001000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/SplitViewAutosave.swift; sourceTree = SOURCE_ROOT; };
-		UTILW00001000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/WindowAutosave.swift; sourceTree = SOURCE_ROOT; };
-		// Added by Indexing feature
-		IDXDB000010000000000001 /* AgentSessions/Indexing/DB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Indexing/DB.swift; sourceTree = SOURCE_ROOT; };
-		IDXIX000010000000000001 /* AgentSessions/Indexing/AnalyticsIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Indexing/AnalyticsIndexer.swift; sourceTree = SOURCE_ROOT; };
-		ANREP000010000000000001 /* AgentSessions/Analytics/Repositories/AnalyticsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Analytics/Repositories/AnalyticsRepository.swift; sourceTree = SOURCE_ROOT; };
-		IDXTEST00001000000000001 /* AgentSessionsTests/Indexing/AnalyticsIndexerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Indexing/AnalyticsIndexerTests.swift; sourceTree = SOURCE_ROOT; };
-		SESMETA0001000000000001 /* AgentSessions/Indexing/SessionMetaRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Indexing/SessionMetaRepository.swift; sourceTree = SOURCE_ROOT; };
-		DBSTEST00001000000000001 /* AgentSessionsTests/Indexing/DBSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Indexing/DBSmokeTests.swift; sourceTree = SOURCE_ROOT; };
+		SUPF000010000000000000001 /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/FeatureFlags.swift; sourceTree = SOURCE_ROOT; };
+		SUPT000010000000000000001 /* TypingActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/TypingActivity.swift; sourceTree = SOURCE_ROOT; };
+		UTILS00001000000000000001 /* SplitViewAutosave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/SplitViewAutosave.swift; sourceTree = SOURCE_ROOT; };
+		UTILW00001000000000000001 /* WindowAutosave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/WindowAutosave.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -256,6 +288,15 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0BC8114940FE4C7E8D36AE14 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				6D16E742E5604163A332C366 /* AnalyticsService.swift */,
+				ANREPGRP0001000000000001 /* Repositories */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
 		0FF63C2F73D54446A78670EE /* Analytics */ = {
 			isa = PBXGroup;
 			children = (
@@ -267,45 +308,6 @@
 			path = Analytics;
 			sourceTree = "<group>";
 		};
-		E4D5B62C423841098D8F8889 /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				52343E9958A54E9987227D4A /* AnalyticsData.swift */,
-				8A1B977F038F41EDA841A08C /* AnalyticsDateRange.swift */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
-		0BC8114940FE4C7E8D36AE14 /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				6D16E742E5604163A332C366 /* AnalyticsService.swift */,
-				ANREPGRP0001000000000001 /* Repositories */,
-			);
-			path = Services;
-			sourceTree = "<group>";
-		};
-		ANREPGRP0001000000000001 /* Repositories */ = {
-			isa = PBXGroup;
-			children = (
-				ANREP000010000000000001 /* AgentSessions/Analytics/Repositories/AnalyticsRepository.swift */,
-			);
-			path = Repositories;
-			sourceTree = "<group>";
-		};
-		1A3AAACD042D43C081439AB9 /* Views */ = {
-			isa = PBXGroup;
-			children = (
-				43373461163E432CB25162BC /* AnalyticsView.swift */,
-				474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */,
-				06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */,
-				4CF78727ECB14792AD0BA9B5 /* SessionsChartView.swift */,
-				8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */,
-				9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */,
-			);
-			path = Views;
-			sourceTree = "<group>";
-		};
 		107B0D1FA6AA4508B77668B4 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
@@ -315,7 +317,6 @@
 			path = Utilities;
 			sourceTree = "<group>";
 		};
-
 		193183E356AF4718A7B9CB7F /* Resume */ = {
 			isa = PBXGroup;
 			children = (
@@ -333,6 +334,35 @@
 			path = Resume;
 			sourceTree = "<group>";
 		};
+		1A3AAACD042D43C081439AB9 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				43373461163E432CB25162BC /* AnalyticsView.swift */,
+				474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */,
+				06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */,
+				4CF78727ECB14792AD0BA9B5 /* SessionsChartView.swift */,
+				8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */,
+				9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		24A6D7BDE7C9C4B64F0270FC /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				924F17AD700936A779630365 /* ColorExtensions.swift */,
+			);
+			name = Utilities;
+			sourceTree = "<group>";
+		};
+		3A3E3C477D90E9B6F39B36A7 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				8A4B660B4183A3748594DF8A /* StatusHeroSection.swift */,
+			);
+			name = Views;
+			sourceTree = "<group>";
+		};
 		3A769EA92EA08FFE008A7EC2 /* Recovered References */ = {
 			isa = PBXGroup;
 			children = (
@@ -345,8 +375,27 @@
 				STALE000010000000000000001 /* UsageStaleCheck.swift */,
 				9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */,
 				FF31F563529F4552B7B205FD /* UpdaterController.swift */,
+				GITI0152000000000000000 /* InspectorKeys.swift */,
+				GITI0162000000000000000 /* CollapsedStateStore.swift */,
 			);
 			name = "Recovered References";
+			sourceTree = "<group>";
+		};
+		9E929827D7D01DF4706E5987 /* GitInspector */ = {
+			isa = PBXGroup;
+			children = (
+				24A6D7BDE7C9C4B64F0270FC /* Utilities */,
+				3A3E3C477D90E9B6F39B36A7 /* Views */,
+			);
+			name = GitInspector;
+			sourceTree = "<group>";
+		};
+		ANREPGRP0001000000000001 /* Repositories */ = {
+			isa = PBXGroup;
+			children = (
+				ANREP000010000000000001 /* AnalyticsRepository.swift */,
+			);
+			path = Repositories;
 			sourceTree = "<group>";
 		};
 		B00000102A0A000100000001 = {
@@ -389,6 +438,7 @@
 				CLC000040000000000000001 /* Resources */,
 				B00000112A0A000100000001 /* AgentSessionsApp.swift */,
 				0FF63C2F73D54446A78670EE /* Analytics */,
+				9E929827D7D01DF4706E5987 /* GitInspector */,
 			);
 			path = AgentSessions;
 			sourceTree = SOURCE_ROOT;
@@ -403,9 +453,9 @@
 				A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */,
 				F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */,
 				8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */,
-				GEMT000010000000000000001 /* AgentSessionsTests/GeminiParserTests.swift */,
-				IDXTEST00001000000000001 /* AgentSessionsTests/Indexing/AnalyticsIndexerTests.swift */,
-				DBSTEST00001000000000001 /* AgentSessionsTests/Indexing/DBSmokeTests.swift */,
+				GEMT000010000000000000001 /* GeminiParserTests.swift */,
+				IDXTEST00001000000000001 /* AnalyticsIndexerTests.swift */,
+				DBSTEST00001000000000001 /* DBSmokeTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -444,31 +494,21 @@
 				B00000171A0A000100000001 /* SessionTranscriptBuilder.swift */,
 				B00000178A0A000100000001 /* AppAppearance.swift */,
 				B0000017BA0A000100000001 /* LayoutMode.swift */,
-				CFA900010000000000000001 /* AgentSessions/Services/SessionDiscovery.swift */,
-				CFA900010000000000000002 /* AgentSessions/Services/TranscriptRenderMode.swift */,
-				CFA900010000000000000003 /* AgentSessions/Services/ClaudeSessionParser.swift */,
-				CFA900010000000000000004 /* AgentSessions/Services/ClaudeSessionIndexer.swift */,
-				CFU000010000000000000001 /* AgentSessions/Services/UnifiedSessionIndexer.swift */,
-				GEM000010000000000000001 /* AgentSessions/Services/GeminiSessionDiscovery.swift */,
-				GEM000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift */,
-				GEM000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift */,
-				GEMH000010000000000000001 /* AgentSessions/Services/GeminiHashResolver.swift */,
-				SRCH000010000000000000001 /* AgentSessions/Search/SearchCoordinator.swift */,
+				CFA900010000000000000001 /* SessionDiscovery.swift */,
+				CFA900010000000000000002 /* TranscriptRenderMode.swift */,
+				CFA900010000000000000003 /* ClaudeSessionParser.swift */,
+				CFA900010000000000000004 /* ClaudeSessionIndexer.swift */,
+				CFU000010000000000000001 /* UnifiedSessionIndexer.swift */,
+				GEM000010000000000000001 /* GeminiSessionDiscovery.swift */,
+				GEM000010000000000000002 /* GeminiSessionIndexer.swift */,
+				GEM000010000000000000003 /* GeminiSessionParser.swift */,
+				GEMH000010000000000000001 /* GeminiHashResolver.swift */,
+				SRCH000010000000000000001 /* SearchCoordinator.swift */,
 				3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */,
 				27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */,
 				IDXGRP000010000000000001 /* Indexing */,
 			);
 			path = Services;
-			sourceTree = "<group>";
-		};
-		IDXGRP000010000000000001 /* Indexing */ = {
-			isa = PBXGroup;
-			children = (
-				IDXDB000010000000000001 /* AgentSessions/Indexing/DB.swift */,
-				IDXIX000010000000000001 /* AgentSessions/Indexing/AnalyticsIndexer.swift */,
-				SESMETA0001000000000001 /* AgentSessions/Indexing/SessionMetaRepository.swift */,
-			);
-			path = Indexing;
 			sourceTree = "<group>";
 		};
 		B0000012CA0A000100000001 /* Utilities */ = {
@@ -478,8 +518,8 @@
 				B0000011CA0A000100000001 /* PrettyJSON.swift */,
 				B00000176A0A000100000001 /* PreferencesWindowController.swift */,
 				B00000177A0A000100000001 /* FlowLayout.swift */,
-				UTILW00001000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift */,
-				UTILS00001000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift */,
+				UTILW00001000000000000001 /* WindowAutosave.swift */,
+				UTILS00001000000000000001 /* SplitViewAutosave.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -494,9 +534,9 @@
 				B00000118A0A000100000001 /* EventInspectorView.swift */,
 				B00000119A0A000100000001 /* SearchFiltersView.swift */,
 				B0000011AA0A000100000001 /* PreferencesView.swift */,
-				CFA900010000000000000005 /* AgentSessions/Views/ClaudeSessionsView.swift */,
-				CFU000010000000000000002 /* AgentSessions/Views/UnifiedSessionsView.swift */,
-				GEMV000010000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift */,
+				CFA900010000000000000005 /* ClaudeSessionsView.swift */,
+				CFU000010000000000000002 /* UnifiedSessionsView.swift */,
+				GEMV000010000000000000001 /* GeminiTranscriptView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -518,8 +558,8 @@
 				C0D3E5A1700F000000000002 /* UsageStripView.swift */,
 				A1B2C3D4E5F60708AA55BB65 /* MenuBarPrefs.swift */,
 				E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */,
-				MB000010000000000000001 /* AgentSessions/MenuBar/StatusItemController.swift */,
-				MB000010000000000000002 /* AgentSessions/MenuBar/SettingsUpdateProxy.swift */,
+				MB000010000000000000001 /* StatusItemController.swift */,
+				MB000010000000000000002 /* SettingsUpdateProxy.swift */,
 			);
 			path = CodexStatus;
 			sourceTree = "<group>";
@@ -527,14 +567,14 @@
 		CFA90001000000000000000A /* ClaudeResume */ = {
 			isa = PBXGroup;
 			children = (
-				CFA900010000000000000010 /* AgentSessions/ClaudeResume/ClaudeFeatureFlag.swift */,
-				CFA900010000000000000011 /* AgentSessions/ClaudeResume/ClaudeCLIEnvironment.swift */,
-				CFA900010000000000000012 /* AgentSessions/ClaudeResume/ClaudeResumeCommandBuilder.swift */,
-				CFA900010000000000000013 /* AgentSessions/ClaudeResume/ClaudeTerminalLauncher.swift */,
-				CFA900010000000000000014 /* AgentSessions/ClaudeResume/ClaudeResumeTypes.swift */,
-				CFA900010000000000000015 /* AgentSessions/ClaudeResume/ClaudeResumeCoordinator.swift */,
-				CFA900010000000000000016 /* AgentSessions/ClaudeResume/ClaudeResumeSettings.swift */,
-				CFA900010000000000000017 /* AgentSessions/ClaudeResume/ClaudeITermLauncher.swift */,
+				CFA900010000000000000010 /* ClaudeFeatureFlag.swift */,
+				CFA900010000000000000011 /* ClaudeCLIEnvironment.swift */,
+				CFA900010000000000000012 /* ClaudeResumeCommandBuilder.swift */,
+				CFA900010000000000000013 /* ClaudeTerminalLauncher.swift */,
+				CFA900010000000000000014 /* ClaudeResumeTypes.swift */,
+				CFA900010000000000000015 /* ClaudeResumeCoordinator.swift */,
+				CFA900010000000000000016 /* ClaudeResumeSettings.swift */,
+				CFA900010000000000000017 /* ClaudeITermLauncher.swift */,
 			);
 			path = ClaudeResume;
 			sourceTree = "<group>";
@@ -542,9 +582,9 @@
 		CLC000030000000000000001 /* ClaudeStatus */ = {
 			isa = PBXGroup;
 			children = (
-				CLC000020000000000000001 /* AgentSessions/ClaudeStatus/ClaudeUsageModel.swift */,
-				CLC000020000000000000002 /* AgentSessions/ClaudeStatus/ClaudeStatusService.swift */,
-				CLC000020000000000000004 /* AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift */,
+				CLC000020000000000000001 /* ClaudeUsageModel.swift */,
+				CLC000020000000000000002 /* ClaudeStatusService.swift */,
+				CLC000020000000000000004 /* ClaudeUsageStripView.swift */,
 			);
 			path = ClaudeStatus;
 			sourceTree = "<group>";
@@ -552,16 +592,35 @@
 		CLC000040000000000000001 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				CLC000020000000000000003 /* AgentSessions/Resources/claude_usage_capture.sh */,
+				CLC000020000000000000003 /* claude_usage_capture.sh */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		E4D5B62C423841098D8F8889 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				52343E9958A54E9987227D4A /* AnalyticsData.swift */,
+				8A1B977F038F41EDA841A08C /* AnalyticsDateRange.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		IDXGRP000010000000000001 /* Indexing */ = {
+			isa = PBXGroup;
+			children = (
+				IDXDB000010000000000001 /* DB.swift */,
+				IDXIX000010000000000001 /* AnalyticsIndexer.swift */,
+				SESMETA0001000000000001 /* SessionMetaRepository.swift */,
+			);
+			path = Indexing;
 			sourceTree = "<group>";
 		};
 		SUPG000010000000000000001 /* Support */ = {
 			isa = PBXGroup;
 			children = (
-				SUPF000010000000000000001 /* AgentSessions/Support/FeatureFlags.swift */,
-				SUPT000010000000000000001 /* AgentSessions/Support/TypingActivity.swift */,
+				SUPF000010000000000000001 /* FeatureFlags.swift */,
+				SUPT000010000000000000001 /* TypingActivity.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -653,7 +712,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B000001C2A0A00010000000C /* Assets.xcassets in Resources */,
-				CLC000010000000000000003 /* AgentSessions/Resources/claude_usage_capture.sh in Resources */,
+				CLC000010000000000000003 /* claude_usage_capture.sh in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -706,36 +765,36 @@
 				C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */,
 				7E6B9F3E2F8E4C05A0E9B6D1 /* UsageMenuBar.swift in Sources */,
 				A1B2C3D4E5F60708AA55BB66 /* MenuBarPrefs.swift in Sources */,
-				CFB900010000000000000001 /* AgentSessions/Services/SessionDiscovery.swift in Sources */,
-				CFB900010000000000000002 /* AgentSessions/Services/TranscriptRenderMode.swift in Sources */,
-				CFB900010000000000000003 /* AgentSessions/Services/ClaudeSessionParser.swift in Sources */,
-				CFB900010000000000000004 /* AgentSessions/Services/ClaudeSessionIndexer.swift in Sources */,
-				CFB900010000000000000005 /* AgentSessions/Views/ClaudeSessionsView.swift in Sources */,
-				CFB900010000000000000010 /* AgentSessions/ClaudeResume/ClaudeFeatureFlag.swift in Sources */,
-				CFB900010000000000000011 /* AgentSessions/ClaudeResume/ClaudeCLIEnvironment.swift in Sources */,
-				CFB900010000000000000012 /* AgentSessions/ClaudeResume/ClaudeResumeCommandBuilder.swift in Sources */,
-				CFB900010000000000000013 /* AgentSessions/ClaudeResume/ClaudeTerminalLauncher.swift in Sources */,
-				CFB900010000000000000014 /* AgentSessions/ClaudeResume/ClaudeResumeTypes.swift in Sources */,
-				CFB900010000000000000015 /* AgentSessions/ClaudeResume/ClaudeResumeCoordinator.swift in Sources */,
-				CFB900010000000000000016 /* AgentSessions/ClaudeResume/ClaudeResumeSettings.swift in Sources */,
-				CFB900010000000000000017 /* AgentSessions/ClaudeResume/ClaudeITermLauncher.swift in Sources */,
-				CFU000020000000000000001 /* AgentSessions/Services/UnifiedSessionIndexer.swift in Sources */,
-				GEMB000010000000000000001 /* AgentSessions/Services/GeminiSessionDiscovery.swift in Sources */,
-				GEMB000010000000000000002 /* AgentSessions/Services/GeminiSessionIndexer.swift in Sources */,
-				GEMB000010000000000000003 /* AgentSessions/Services/GeminiSessionParser.swift in Sources */,
-				GEMH000020000000000000001 /* AgentSessions/Services/GeminiHashResolver.swift in Sources */,
-				CFU000020000000000000002 /* AgentSessions/Views/UnifiedSessionsView.swift in Sources */,
-				GEMV000020000000000000001 /* AgentSessions/Views/GeminiTranscriptView.swift in Sources */,
-				UTILW00002000000000000001 /* AgentSessions/Utilities/WindowAutosave.swift in Sources */,
-				UTILS00002000000000000001 /* AgentSessions/Utilities/SplitViewAutosave.swift in Sources */,
-				CLC000010000000000000001 /* AgentSessions/ClaudeStatus/ClaudeUsageModel.swift in Sources */,
-				CLC000010000000000000002 /* AgentSessions/ClaudeStatus/ClaudeStatusService.swift in Sources */,
-				CLC000010000000000000004 /* AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift in Sources */,
-				MB000020000000000000001 /* AgentSessions/MenuBar/StatusItemController.swift in Sources */,
-				MB000020000000000000002 /* AgentSessions/MenuBar/SettingsUpdateProxy.swift in Sources */,
-				SRCH000020000000000000001 /* AgentSessions/Search/SearchCoordinator.swift in Sources */,
-				SUPF000020000000000000001 /* AgentSessions/Support/FeatureFlags.swift in Sources */,
-				SUPT000020000000000000001 /* AgentSessions/Support/TypingActivity.swift in Sources */,
+				CFB900010000000000000001 /* SessionDiscovery.swift in Sources */,
+				CFB900010000000000000002 /* TranscriptRenderMode.swift in Sources */,
+				CFB900010000000000000003 /* ClaudeSessionParser.swift in Sources */,
+				CFB900010000000000000004 /* ClaudeSessionIndexer.swift in Sources */,
+				CFB900010000000000000005 /* ClaudeSessionsView.swift in Sources */,
+				CFB900010000000000000010 /* ClaudeFeatureFlag.swift in Sources */,
+				CFB900010000000000000011 /* ClaudeCLIEnvironment.swift in Sources */,
+				CFB900010000000000000012 /* ClaudeResumeCommandBuilder.swift in Sources */,
+				CFB900010000000000000013 /* ClaudeTerminalLauncher.swift in Sources */,
+				CFB900010000000000000014 /* ClaudeResumeTypes.swift in Sources */,
+				CFB900010000000000000015 /* ClaudeResumeCoordinator.swift in Sources */,
+				CFB900010000000000000016 /* ClaudeResumeSettings.swift in Sources */,
+				CFB900010000000000000017 /* ClaudeITermLauncher.swift in Sources */,
+				CFU000020000000000000001 /* UnifiedSessionIndexer.swift in Sources */,
+				GEMB000010000000000000001 /* GeminiSessionDiscovery.swift in Sources */,
+				GEMB000010000000000000002 /* GeminiSessionIndexer.swift in Sources */,
+				GEMB000010000000000000003 /* GeminiSessionParser.swift in Sources */,
+				GEMH000020000000000000001 /* GeminiHashResolver.swift in Sources */,
+				CFU000020000000000000002 /* UnifiedSessionsView.swift in Sources */,
+				GEMV000020000000000000001 /* GeminiTranscriptView.swift in Sources */,
+				UTILW00002000000000000001 /* WindowAutosave.swift in Sources */,
+				UTILS00002000000000000001 /* SplitViewAutosave.swift in Sources */,
+				CLC000010000000000000001 /* ClaudeUsageModel.swift in Sources */,
+				CLC000010000000000000002 /* ClaudeStatusService.swift in Sources */,
+				CLC000010000000000000004 /* ClaudeUsageStripView.swift in Sources */,
+				MB000020000000000000001 /* StatusItemController.swift in Sources */,
+				MB000020000000000000002 /* SettingsUpdateProxy.swift in Sources */,
+				SRCH000020000000000000001 /* SearchCoordinator.swift in Sources */,
+				SUPF000020000000000000001 /* FeatureFlags.swift in Sources */,
+				SUPT000020000000000000001 /* TypingActivity.swift in Sources */,
 				C38DF9D24E03404EAF70BAF2 /* GitHubClient.swift in Sources */,
 				8302EEE664744FA8A3606F34 /* SemanticVersion.swift in Sources */,
 				1D0AD620E3E044DB875B125B /* UpdateChecker.swift in Sources */,
@@ -748,7 +807,7 @@
 				C124E15F9EF049399D9F4FCA /* GeminiCLISettings.swift in Sources */,
 				79F828CD9CA64FBFA8A436FA /* GeminiCLIEnvironment.swift in Sources */,
 				53736755F3AD431D8FD488AF /* UpdaterController.swift in Sources */,
-							6C959E13B3E34DB886484076 /* AnalyticsData.swift in Sources */,
+				6C959E13B3E34DB886484076 /* AnalyticsData.swift in Sources */,
 				D7F1E4B0917E4B5B9044E08D /* AnalyticsDateRange.swift in Sources */,
 				D22D5596AE304723BFB6B490 /* AnalyticsService.swift in Sources */,
 				64888E382DCD41289C115461 /* AnalyticsView.swift in Sources */,
@@ -763,7 +822,25 @@
 				IDXIX000020000000000001 /* AnalyticsIndexer.swift in Sources */,
 				ANREP000020000000000001 /* AnalyticsRepository.swift in Sources */,
 				SESMETA0002000000000001 /* SessionMetaRepository.swift in Sources */,
-				);
+				GITI0011000000000000000 /* CurrentGitStatus.swift in Sources */,
+				GITI0021000000000000000 /* GitFileStatus.swift in Sources */,
+				GITI0031000000000000000 /* GitSafetyCheck.swift in Sources */,
+				GITI0041000000000000000 /* HistoricalGitContext.swift in Sources */,
+				GITI0051000000000000000 /* GitContextExtractor.swift in Sources */,
+				GITI0061000000000000000 /* GitSafetyAnalyzer.swift in Sources */,
+				GITI0071000000000000000 /* GitStatusCache.swift in Sources */,
+				GITI0081000000000000000 /* GitCommandRunner.swift in Sources */,
+				GITI0091000000000000000 /* GitInspectorWindowController.swift in Sources */,
+				GITI0101000000000000000 /* ButtonActionsView.swift in Sources */,
+				GITI0111000000000000000 /* CurrentSection.swift in Sources */,
+				GITI0121000000000000000 /* GitInspectorView.swift in Sources */,
+				GITI0131000000000000000 /* HistoricalSection.swift in Sources */,
+				GITI0141000000000000000 /* SafetySection.swift in Sources */,
+				GITI0151000000000000000 /* InspectorKeys.swift in Sources */,
+				GITI0161000000000000000 /* CollapsedStateStore.swift in Sources */,
+				D0B0AC3DFBD31FA07FE14EA8 /* ColorExtensions.swift in Sources */,
+				9FE5EAD8651B8BC590B43AE0 /* StatusHeroSection.swift in Sources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B00000132A0A000100000001 /* Sources */ = {
@@ -1005,14 +1082,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCSwiftPackageProductDependency section */
-		DB2E108A587C47918E9BC53D /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 3A769EAA2EA090A2008A7EC2 /* XCRemoteSwiftPackageReference "Sparkle" */;
-			productName = Sparkle;
-		};
-/* End XCSwiftPackageProductDependency section */
-
 /* Begin XCRemoteSwiftPackageReference section */
 		3A769EAA2EA090A2008A7EC2 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -1023,6 +1092,14 @@
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DB2E108A587C47918E9BC53D /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3A769EAA2EA090A2008A7EC2 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = B00000101A0A000100000001 /* Project object */;
 }

@@ -6,14 +6,18 @@ struct StatsCardsView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        HStack(spacing: AnalyticsDesign.metricsCardSpacing) {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: AnalyticsDesign.metricsCardSpacing),
+                           count: 4)
+
+        LazyVGrid(columns: columns,
+                  alignment: .leading,
+                  spacing: AnalyticsDesign.metricsCardSpacing) {
             StatsCard(
                 icon: "square.stack.3d.up.fill",
                 label: "Sessions",
                 value: "\(summary.sessions)",
                 change: AnalyticsSummary.formatChange(summary.sessionsChange)
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
 
@@ -23,7 +27,6 @@ struct StatsCardsView: View {
                 value: "\(summary.messages)",
                 change: AnalyticsSummary.formatChange(summary.messagesChange)
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
 
@@ -33,7 +36,6 @@ struct StatsCardsView: View {
                 value: "\(summary.commands)",
                 change: AnalyticsSummary.formatChange(summary.commandsChange)
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
 
@@ -43,11 +45,11 @@ struct StatsCardsView: View {
                 value: summary.activeTimeFormatted,
                 change: AnalyticsSummary.formatChange(summary.activeTimeChange)
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
         }
-        .frame(height: AnalyticsDesign.statsCardHeight)
+        .fixedSize(horizontal: false, vertical: true)  // Grid tells the real height
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

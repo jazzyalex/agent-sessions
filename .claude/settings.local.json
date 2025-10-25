@@ -129,7 +129,14 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(killall:*)",
       "Bash(~/Library/Developer/Xcode/DerivedData/AgentSessions-gwsclzavdbgeubaxduodxdziqbpo/Build/Products/Debug/AgentSessions.app/Contents/MacOS/AgentSessions)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(fold:*)",
+      "Bash(paste:*)",
+      "Bash(/tmp/careful_patch.sh)",
+      "Bash(gem list:*)",
+      "Bash(defaults write:*)",
+      "Bash(./scripts/xcode_add_file.rb:*)",
+      "Bash(gem install:*)"
     ],
     "deny": [],
     "ask": []

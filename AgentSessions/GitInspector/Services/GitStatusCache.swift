@@ -1,12 +1,13 @@
 import Foundation
 
 /// Caches live git status queries to avoid redundant shell commands
-/// Cache lifetime: 60 seconds
+/// Cache lifetime: 10 seconds (soft TTL)
 actor GitStatusCache {
     static let shared = GitStatusCache()
 
+    /// Keyed by canonical repo root path
     private var cache: [String: CachedStatus] = [:]
-    private let cacheLifetime: TimeInterval = 60.0
+    private let cacheLifetime: TimeInterval = 10.0
     private let commandRunner = GitCommandRunner()
 
     private struct CachedStatus {
@@ -19,27 +20,31 @@ actor GitStatusCache {
     }
 
     /// Get current git status for a working directory
-    /// - Parameter cwd: Working directory path
+    /// - Parameter cwd: Any path within the repository (we normalize to repo root)
     /// - Returns: Current git status, or nil if not a git repository
     func getStatus(for cwd: String) async -> CurrentGitStatus? {
+        // Normalize key to repository root if possible
+        let key = await canonicalRepoRoot(for: cwd) ?? cwd
+
         // Check cache first
-        if let cached = cache[cwd], !cached.isStale {
+        if let cached = cache[key], !cached.isStale {
             return cached.status
         }
 
         // Query git and cache result
-        guard let status = await queryGit(cwd: cwd) else {
+        guard let status = await queryGit(cwd: key) else {
             return nil
         }
 
-        cache[cwd] = CachedStatus(status: status, timestamp: Date())
+        cache[key] = CachedStatus(status: status, timestamp: Date())
         return status
     }
 
     /// Invalidate cache for a specific directory
     /// Forces next getStatus() call to re-query git
-    func invalidate(for cwd: String) {
-        cache.removeValue(forKey: cwd)
+    func invalidate(for cwd: String) async {
+        let key = await canonicalRepoRoot(for: cwd) ?? cwd
+        cache.removeValue(forKey: key)
     }
 
     /// Clear all cached statuses
@@ -135,5 +140,10 @@ actor GitStatusCache {
         let ahead = Int(parts[1])
 
         return (behind, ahead)
+    }
+
+    /// Resolve canonical repository root path for a given directory using git
+    private func canonicalRepoRoot(for path: String) async -> String? {
+        await commandRunner.runGit(["rev-parse", "--show-toplevel"], in: path)
     }
 }
