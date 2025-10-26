@@ -15,7 +15,7 @@ struct StatsCardsView: View {
             StatsCard(
                 icon: "square.stack.3d.up.fill",
                 label: "Sessions",
-                value: "\(summary.sessions)",
+                value: AnalyticsSummary.formatNumber(summary.sessions),
                 change: AnalyticsSummary.formatChange(summary.sessionsChange)
             )
             .padding(AnalyticsDesign.statsCardPadding)
@@ -24,7 +24,7 @@ struct StatsCardsView: View {
             StatsCard(
                 icon: "bubble.left.and.bubble.right.fill",
                 label: "Messages",
-                value: "\(summary.messages)",
+                value: AnalyticsSummary.formatNumber(summary.messages),
                 change: AnalyticsSummary.formatChange(summary.messagesChange)
             )
             .padding(AnalyticsDesign.statsCardPadding)
@@ -32,8 +32,8 @@ struct StatsCardsView: View {
 
             StatsCard(
                 icon: "terminal.fill",
-                label: "Commands",
-                value: "\(summary.commands)",
+                label: "Tools",
+                value: AnalyticsSummary.formatNumber(summary.commands),
                 change: AnalyticsSummary.formatChange(summary.commandsChange)
             )
             .padding(AnalyticsDesign.statsCardPadding)

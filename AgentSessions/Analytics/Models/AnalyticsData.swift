@@ -22,16 +22,64 @@ struct AnalyticsSummary: Equatable {
     /// Change vs previous period
     let activeTimeChange: Double?
 
-    /// Formatted active time string (e.g., "8h 23m")
+    /// Formatted active time string with intelligent unit selection
+    /// Examples: "42m", "8h 23m", "2d 5h", "3mo 12d", "1y 2mo"
     var activeTimeFormatted: String {
-        let hours = Int(activeTimeSeconds) / 3600
-        let minutes = (Int(activeTimeSeconds) % 3600) / 60
+        Self.formatDuration(activeTimeSeconds)
+    }
 
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        } else {
-            return "\(minutes)m"
+    /// Smart duration formatter with year/month/day/hour/minute support
+    static func formatDuration(_ seconds: TimeInterval) -> String {
+        let totalSeconds = Int(seconds)
+
+        let years = totalSeconds / 31_536_000  // 365 days
+        let months = (totalSeconds % 31_536_000) / 2_592_000  // 30 days
+        let days = (totalSeconds % 2_592_000) / 86400
+        let hours = (totalSeconds % 86400) / 3600
+        let minutes = (totalSeconds % 3600) / 60
+
+        // >= 365 days: "1y 2mo" (omit days)
+        if years > 0 {
+            if months > 0 {
+                return "\(years)y \(months)mo"
+            }
+            return "\(years)y"
         }
+
+        // >= 30 days: "2mo 5d" (omit hours)
+        if months > 0 {
+            if days > 0 {
+                return "\(months)mo \(days)d"
+            }
+            return "\(months)mo"
+        }
+
+        // >= 48 hours: "3d 12h" (omit minutes)
+        if days >= 2 {
+            if hours > 0 {
+                return "\(days)d \(hours)h"
+            }
+            return "\(days)d"
+        }
+
+        // >= 24 hours: "1d 5h" (show day + hours)
+        if days > 0 {
+            if hours > 0 {
+                return "\(days)d \(hours)h"
+            }
+            return "\(days)d"
+        }
+
+        // >= 1 hour: "8h 23m"
+        if hours > 0 {
+            if minutes > 0 {
+                return "\(hours)h \(minutes)m"
+            }
+            return "\(hours)h"
+        }
+
+        // < 1 hour: "42m"
+        return "\(minutes)m"
     }
 
     /// Format a percentage change for display
@@ -41,6 +89,15 @@ struct AnalyticsSummary: Equatable {
         let sign = change >= 0 ? "+" : ""
         let arrow = change >= 0 ? "↗" : "↘"
         return "\(sign)\(Int(change))% \(arrow)"
+    }
+
+    /// Format integer with locale-appropriate thousands separator
+    /// Examples: "1,234" (US), "1.234" (DE), "1 234" (FR)
+    static func formatNumber(_ number: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        return formatter.string(from: NSNumber(value: number)) ?? "\(number)"
     }
 }
 
@@ -61,16 +118,9 @@ struct AnalyticsAgentBreakdown: Identifiable, Equatable {
 
     var id: String { agent.rawValue }
 
-    /// Formatted duration string
+    /// Formatted duration string with intelligent unit selection
     var durationFormatted: String {
-        let hours = Int(durationSeconds) / 3600
-        let minutes = (Int(durationSeconds) % 3600) / 60
-
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        } else {
-            return "\(minutes)m"
-        }
+        AnalyticsSummary.formatDuration(durationSeconds)
     }
 
     /// Secondary info string (e.g., "52 sessions • 5h 12m")
