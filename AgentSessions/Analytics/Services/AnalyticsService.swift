@@ -298,7 +298,9 @@ final class AnalyticsService: ObservableObject {
                 }
                 return false
             } else {
-                let d = session.endTime ?? session.startTime ?? session.modifiedAt
+                // For lightweight sessions, use modifiedAt (file modification time)
+                // This accurately reflects most recent activity (new messages added today)
+                let d = session.modifiedAt
                 return isWithin(d, bounds: bounds)
             }
         }
