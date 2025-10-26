@@ -20,6 +20,7 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
+            .help("Number of unique conversation sessions (excluding empty and low-message sessions)")
 
             StatsCard(
                 icon: "bubble.left.and.bubble.right.fill",
@@ -29,15 +30,17 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
+            .help("Total messages exchanged across all sessions in this period")
 
             StatsCard(
                 icon: "terminal.fill",
-                label: "Tools",
+                label: "Tool Calls",
                 value: AnalyticsSummary.formatNumber(summary.commands),
                 change: AnalyticsSummary.formatChange(summary.commandsChange)
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
+            .help("Number of tool executions (Read, Edit, Bash, WebFetch, etc.) performed by AI agents")
 
             StatsCard(
                 icon: "clock.fill",
@@ -47,6 +50,7 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
+            .help("Total active time across all sessions in this period")
         }
         .fixedSize(horizontal: false, vertical: true)  // Grid tells the real height
         .frame(maxWidth: .infinity, alignment: .leading)
