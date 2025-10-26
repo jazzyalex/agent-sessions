@@ -279,8 +279,18 @@ final class AnalyticsService: ObservableObject {
     private func filterSessionsWithinBounds(_ sessions: [Session],
                                             bounds: (start: Date?, end: Date?),
                                             agentFilter: AnalyticsAgentFilter) -> [Session] {
+        // Apply message count filters (same as Sessions List)
+        let hideZero = UserDefaults.standard.bool(forKey: "HideZeroMessageSessions")
+        let hideLow = UserDefaults.standard.bool(forKey: "HideLowMessageSessions")
+
         return sessions.filter { session in
             guard agentFilter.matches(session.source) else { return false }
+
+            // Apply message count filters
+            if hideZero && session.messageCount == 0 { return false }
+            if hideLow && session.messageCount > 0 && session.messageCount <= 2 { return false }
+
+            // Apply date bounds
             if !session.events.isEmpty {
                 for ev in session.events {
                     let d = ev.timestamp ?? session.endTime ?? session.startTime ?? session.modifiedAt
