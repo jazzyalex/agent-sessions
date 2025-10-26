@@ -8,7 +8,8 @@ Primary source of truth
 
 Key reminders for Claude Code contributions
 - Follow Conventional Commits and include trailers (Tool, Model, Why when applicable).
-- Do not auto‑commit. Only commit after explicit "commit".
+- **NEVER commit or push without explicit user request.** Only run `git commit` or `git push` when user says "commit" or "push".
+- You may advise the user to commit/push, but do not execute these commands proactively.
 - When touching UI, use the shared spacing tokens and HIG guidance defined in `agents.md`.
 - If you add or rename Swift files, use `scripts/xcode_add_file.rb` to add them to the project (see `agents.md` → "Adding New Swift Files to Xcode Project").
 
