@@ -197,9 +197,11 @@ final class AnalyticsService: ObservableObject {
         // Message count (sum of messageCount from each session in current bounds)
         let messageCount = current.reduce(0) { $0 + $1.messageCount }
 
-        // Tool/command count
+        // Tool/command count – approximate per-event timestamps when missing by
+        // borrowing the nearest neighbor timestamp within the same session.
+        // This prevents undated tool calls from inheriting the whole session date.
         let commandCount = current.reduce(0) { total, session in
-            total + session.events.filter { $0.kind == .tool_call }.count
+            total + self.countToolCalls(in: session, within: currentBounds)
         }
 
         // Active time clipped to current bounds
@@ -212,7 +214,7 @@ final class AnalyticsService: ObservableObject {
         let prevMessageCount = previous.reduce(0) { $0 + $1.messageCount }
         let messagesChange = calculatePercentageChange(current: messageCount, previous: prevMessageCount)
         let prevCommandCount = previous.reduce(0) { total, session in
-            total + session.events.filter { $0.kind == .tool_call }.count
+            total + self.countToolCalls(in: session, within: previousBounds)
         }
         let commandsChange = calculatePercentageChange(current: commandCount, previous: prevCommandCount)
         let prevActiveTime = previous.reduce(0.0) { total, session in
@@ -333,10 +335,13 @@ final class AnalyticsService: ObservableObject {
         let calendar = Calendar.current
         let granularity = dateRange.aggregationGranularity
 
-        // Group activity by date bucket and agent. Prefer event timestamps when available
-        // so that long‑running sessions contribute to the correct day/hour (e.g., Today).
+        // Group sessions by a single representative date per session (not per-event).
+        // Representative date preference:
+        // 1) latest event timestamp within bounds, if any
+        // 2) else session.endTime, else startTime, else modifiedAt (if within bounds)
+        // This avoids inflating counts by the number of events in a session and fixes the 90‑day spike.
         var buckets: [String: [SessionSource: Int]] = [:]
-        let startBound = dateRange.startDate()
+        let bounds = dateBounds(for: dateRange)
 
         func bucket(_ date: Date) -> Date {
             switch granularity {
@@ -354,22 +359,21 @@ final class AnalyticsService: ObservableObject {
         }
 
         for session in sessions {
-            if !session.events.isEmpty, let startBound = startBound {
-                for ev in session.events {
-                    let eDate = ev.timestamp ?? session.endTime ?? session.startTime ?? session.modifiedAt
-                    guard eDate >= startBound else { continue }
-                    let bucketDate = bucket(eDate)
-                    let key = bucketDate.ISO8601Format()
-                    if buckets[key] == nil { buckets[key] = [:] }
-                    buckets[key]?[session.source, default: 0] += 1
-                }
-            } else {
-                let sessionDate = session.startTime ?? session.endTime ?? session.modifiedAt
-                let bucketDate = bucket(sessionDate)
-                let key = bucketDate.ISO8601Format()
-                if buckets[key] == nil { buckets[key] = [:] }
-                buckets[key]?[session.source, default: 0] += 1
+            var repDate: Date? = nil
+            if !session.events.isEmpty {
+                // latest event within bounds
+                let inRange = session.events.compactMap { $0.timestamp }.filter { isWithin($0, bounds: bounds) }
+                repDate = inRange.max()
             }
+            if repDate == nil {
+                let fallback = session.endTime ?? session.startTime ?? session.modifiedAt
+                repDate = isWithin(fallback, bounds: bounds) ? fallback : nil
+            }
+            guard let date = repDate else { continue }
+            let bucketDate = bucket(date)
+            let key = bucketDate.ISO8601Format()
+            if buckets[key] == nil { buckets[key] = [:] }
+            buckets[key]?[session.source, default: 0] += 1
         }
 
         // Convert to time series points
@@ -387,6 +391,35 @@ final class AnalyticsService: ObservableObject {
         }
 
         return points.sorted { $0.date < $1.date }
+    }
+
+    /// Count tool_call events for a session within bounds.
+    /// Policy: only use the event's own timestamp; if missing, borrow the previous
+    /// known timestamp within the same session. Do NOT borrow from future events
+    /// (avoids laundering old events into "today").
+    private func countToolCalls(in session: Session, within bounds: (start: Date?, end: Date?)) -> Int {
+        let events = session.events
+        guard !events.isEmpty else { return 0 }
+
+        let n = events.count
+        var prevTS = Array<Date?>(repeating: nil, count: n)
+
+        // Left-to-right: previous known timestamp
+        var last: Date? = nil
+        for i in 0..<n {
+            prevTS[i] = last
+            if let t = events[i].timestamp { last = t }
+        }
+
+        var count = 0
+        for i in 0..<n {
+            let e = events[i]
+            guard e.kind == .tool_call else { continue }
+            // Prefer event ts; else previous only (no forward fill)
+            let ts = e.timestamp ?? prevTS[i]
+            if let ts, isWithin(ts, bounds: bounds) { count += 1 }
+        }
+        return count
     }
 
     // MARK: - Agent Breakdown
