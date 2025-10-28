@@ -137,10 +137,14 @@ actor AnalyticsIndexer {
         // Prefer event-aware buckets for messages/commands and duration; fall back to span split
         let events = session.events
         if !events.isEmpty {
-            // Group events by local day string
+            // Previous-only fill for missing timestamps:
+            // assign an event to the most recent known timestamp's day; do not look ahead.
             var buckets: [String: (msgs: Int, cmds: Int, tmin: Date, tmax: Date)] = [:]
+            var lastTS: Date? = nil
             for e in events {
-                guard let t = e.timestamp else { continue }
+                if let t = e.timestamp { lastTS = t }
+                let tEff = e.timestamp ?? lastTS
+                guard let t = tEff else { continue }
                 let day = Self.dayString(t)
                 let isMsg = (e.kind != .meta)
                 let isCmd = (e.kind == .tool_call)
