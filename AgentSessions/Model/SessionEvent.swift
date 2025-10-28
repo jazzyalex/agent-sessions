@@ -29,7 +29,7 @@ extension SessionEventKind {
     static func from(role: String?, type: String?) -> SessionEventKind {
         if let t = type?.lowercased() {
             switch t {
-            case "tool_call", "tool-call", "toolcall", "function_call": return .tool_call
+            case "tool_call", "tool-call", "toolcall", "tool_use", "tool-use", "function_call": return .tool_call
             case "tool_result", "tool-result", "toolresult", "function_result": return .tool_result
             case "error", "err": return .error
             case "meta", "system", "environment_context", "environment-context", "env_context": return .meta
