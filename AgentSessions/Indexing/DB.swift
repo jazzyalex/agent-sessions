@@ -261,6 +261,122 @@ actor IndexDB {
         return ids
     }
 
+    // MARK: - Analytics rollup queries
+    func countDistinctSessions(sources: [String], dayStart: String?, dayEnd: String?) throws -> Int {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let s = dayStart { clauses.append("day >= ?"); binds.append(s) }
+        if let e = dayEnd { clauses.append("day <= ?"); binds.append(e) }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = "SELECT COUNT(DISTINCT session_id) FROM session_days\(whereSQL);"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db))) }
+        defer { sqlite3_finalize(stmt) }
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+        if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int64(stmt, 0)) }
+        return 0
+    }
+
+    func sumRollups(sources: [String], dayStart: String?, dayEnd: String?) throws -> (Int, Int, TimeInterval) {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let s = dayStart { clauses.append("day >= ?"); binds.append(s) }
+        if let e = dayEnd { clauses.append("day <= ?"); binds.append(e) }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = "SELECT COALESCE(SUM(messages),0), COALESCE(SUM(commands),0), COALESCE(SUM(duration_sec),0.0) FROM rollups_daily\(whereSQL);"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db))) }
+        defer { sqlite3_finalize(stmt) }
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            let m = Int(sqlite3_column_int64(stmt, 0))
+            let c = Int(sqlite3_column_int64(stmt, 1))
+            let d = sqlite3_column_double(stmt, 2)
+            return (m, c, d)
+        }
+        return (0, 0, 0)
+    }
+
+    func distinctSessionsBySource(sources: [String], dayStart: String?, dayEnd: String?) throws -> [String: Int] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let s = dayStart { clauses.append("day >= ?"); binds.append(s) }
+        if let e = dayEnd { clauses.append("day <= ?"); binds.append(e) }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = "SELECT source, COUNT(DISTINCT session_id) FROM session_days\(whereSQL) GROUP BY source;"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db))) }
+        defer { sqlite3_finalize(stmt) }
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+        var out: [String: Int] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let src = String(cString: sqlite3_column_text(stmt, 0))
+            let cnt = Int(sqlite3_column_int64(stmt, 1))
+            out[src] = cnt
+        }
+        return out
+    }
+
+    func durationBySource(sources: [String], dayStart: String?, dayEnd: String?) throws -> [String: TimeInterval] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let s = dayStart { clauses.append("day >= ?"); binds.append(s) }
+        if let e = dayEnd { clauses.append("day <= ?"); binds.append(e) }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = "SELECT source, COALESCE(SUM(duration_sec),0.0) FROM rollups_daily\(whereSQL) GROUP BY source;"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db))) }
+        defer { sqlite3_finalize(stmt) }
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+        var out: [String: TimeInterval] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let src = String(cString: sqlite3_column_text(stmt, 0))
+            let dur = sqlite3_column_double(stmt, 1)
+            out[src] = dur
+        }
+        return out
+    }
+
     // Detect legacy unstable IDs (e.g., Swift hashValue) for a given source
     func hasUnstableIDs(for source: String) throws -> Bool {
         guard let db = handle else { throw DBError.openFailed("db closed") }

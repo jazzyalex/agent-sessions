@@ -18,6 +18,7 @@ final class AnalyticsService: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var parsingTask: Task<Void, Never>?
+    private let repository: AnalyticsRepository?
 
     init(codexIndexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
@@ -25,13 +26,18 @@ final class AnalyticsService: ObservableObject {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
+        if let db = try? IndexDB() {
+            self.repository = AnalyticsRepository(db: db)
+        } else {
+            self.repository = nil
+        }
 
         // Observe indexer changes for auto-refresh
         setupObservers()
     }
 
     /// Calculate analytics for given filters
-    func calculate(dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) {
+    func calculate(dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) async {
         isLoading = true
         defer { isLoading = false }
 
@@ -44,10 +50,10 @@ final class AnalyticsService: ObservableObject {
         // Apply filters for current period
         let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter)
 
-        // Calculate metrics (summary uses agent-filtered current + previous periods)
-        let summary = calculateSummary(allSessions: allSessions, dateRange: dateRange, agentFilter: agentFilter)
+        // Calculate metrics (prefer DB-backed where possible)
+        let summary = await calculateSummaryFastOrFallback(allSessions: allSessions, dateRange: dateRange, agentFilter: agentFilter)
         let timeSeries = calculateTimeSeries(sessions: filtered, dateRange: dateRange)
-        let agentBreakdown = calculateAgentBreakdown(sessions: filtered, dateRange: dateRange)
+        let agentBreakdown = await calculateAgentBreakdownFastOrFallback(dateRange: dateRange, agentFilter: agentFilter, fallbackSessions: filtered)
         let heatmap = calculateHeatmap(sessions: filtered)
         let mostActive = calculateMostActiveTime(sessions: filtered)
 
@@ -183,7 +189,37 @@ final class AnalyticsService: ObservableObject {
 
     // MARK: - Summary Calculations
 
-    private func calculateSummary(allSessions: [Session], dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) -> AnalyticsSummary {
+    private func calculateSummaryFastOrFallback(allSessions: [Session], dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) async -> AnalyticsSummary {
+        if let repo = repository, await repo.isReady() {
+            let (startDay, endDay) = dayBounds(for: dateRange)
+            let sources = sourcesFor(agentFilter)
+            let cur = await repo.summary(sources: sources, dayStart: startDay, dayEnd: endDay)
+
+            let prevB = previousPeriodBounds(for: dateRange)
+            let prevStart = prevB.start.map { dayString($0) }
+            let prevEnd = prevB.end.map { dayString($0.addingTimeInterval(-1)) }
+            let prev = await repo.summary(sources: sources, dayStart: prevStart, dayEnd: prevEnd)
+
+            let sessionsChange = calculatePercentageChange(current: cur.sessionsDistinct, previous: prev.sessionsDistinct)
+            let messagesChange = calculatePercentageChange(current: cur.messages, previous: prev.messages)
+            let commandsChange = calculatePercentageChange(current: cur.commands, previous: prev.commands)
+            let activeTimeChange = calculatePercentageChange(current: cur.durationSeconds, previous: prev.durationSeconds)
+
+            return AnalyticsSummary(
+                sessions: cur.sessionsDistinct,
+                sessionsChange: sessionsChange,
+                messages: cur.messages,
+                messagesChange: messagesChange,
+                commands: cur.commands,
+                commandsChange: commandsChange,
+                activeTimeSeconds: cur.durationSeconds,
+                activeTimeChange: activeTimeChange
+            )
+        }
+        return calculateSummaryFallback(allSessions: allSessions, dateRange: dateRange, agentFilter: agentFilter)
+    }
+
+    private func calculateSummaryFallback(allSessions: [Session], dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) -> AnalyticsSummary {
         // Compute bounds for current and previous periods
         let now = Date()
         let currentBounds = dateBounds(for: dateRange, now: now)
@@ -270,6 +306,31 @@ final class AnalyticsService: ObservableObject {
         let prevStart = start.addingTimeInterval(-length)
         let prevEnd = start
         return (start: prevStart, end: prevEnd)
+    }
+
+    private func dayBounds(for range: AnalyticsDateRange, now: Date = Date()) -> (String?, String?) {
+        let b = dateBounds(for: range, now: now)
+        let startDay = b.start.map { dayString($0) }
+        // end is exclusive; convert to inclusive day by stepping back 1 second
+        let endDay = b.end.map { dayString($0.addingTimeInterval(-1)) }
+        return (startDay, endDay)
+    }
+
+    private func dayString(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
+
+    private func sourcesFor(_ filter: AnalyticsAgentFilter) -> [String] {
+        switch filter {
+        case .all: return [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue]
+        case .codexOnly: return [SessionSource.codex.rawValue]
+        case .claudeOnly: return [SessionSource.claude.rawValue]
+        case .geminiOnly: return [SessionSource.gemini.rawValue]
+        }
     }
 
     private func isWithin(_ date: Date, bounds: (start: Date?, end: Date?)) -> Bool {
@@ -458,6 +519,23 @@ final class AnalyticsService: ObservableObject {
 
         // Sort by count descending
         return breakdowns.sorted { $0.sessionCount > $1.sessionCount }
+    }
+
+    private func calculateAgentBreakdownFastOrFallback(dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter, fallbackSessions: [Session]) async -> [AnalyticsAgentBreakdown] {
+        if let repo = repository, await repo.isReady(), agentFilter == .all {
+            let (startDay, endDay) = dayBounds(for: dateRange)
+            let slices = await repo.breakdownByAgent(sources: sourcesFor(.all), dayStart: startDay, dayEnd: endDay)
+            let total = max(1, slices.reduce(0) { $0 + $1.sessionsDistinct })
+            return slices.map { s in
+                AnalyticsAgentBreakdown(
+                    agent: SessionSource(rawValue: s.source) ?? .codex,
+                    sessionCount: s.sessionsDistinct,
+                    percentage: (Double(s.sessionsDistinct) / Double(total)) * 100.0,
+                    durationSeconds: s.durationSeconds
+                )
+            }.sorted { $0.sessionCount > $1.sessionCount }
+        }
+        return calculateAgentBreakdown(sessions: fallbackSessions, dateRange: dateRange)
     }
 
     // MARK: - Heatmap

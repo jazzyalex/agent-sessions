@@ -214,7 +214,7 @@ struct AnalyticsView: View {
         isRefreshing = true
 
         Task {
-            service.calculate(dateRange: dateRange, agentFilter: agentFilter)
+            await service.calculate(dateRange: dateRange, agentFilter: agentFilter)
 
             // Simulate brief delay for animation
             try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
