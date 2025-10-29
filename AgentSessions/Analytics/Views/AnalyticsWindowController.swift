@@ -83,10 +83,11 @@ final class AnalyticsWindowController: NSObject, NSWindowDelegate {
         self.window = window
         self.isShown = true
 
-        // Kick off background parsing of lightweight sessions so event-based
-        // metrics (e.g., Tool Calls) are accurate across date ranges.
-        Task { @MainActor in
-            service.ensureSessionsFullyParsed()
+        // Skip background parsing when Tool Calls are disabled to keep UI snappy.
+        if !FeatureFlags.disableToolCallsCard {
+            Task { @MainActor in
+                service.ensureSessionsFullyParsed()
+            }
         }
     }
 

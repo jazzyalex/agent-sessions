@@ -35,8 +35,8 @@ struct StatsCardsView: View {
             StatsCard(
                 icon: "terminal.fill",
                 label: "Tool Calls",
-                value: AnalyticsSummary.formatNumber(summary.commands),
-                change: AnalyticsSummary.formatChange(summary.commandsChange)
+                value: FeatureFlags.disableToolCallsCard ? "—" : AnalyticsSummary.formatNumber(summary.commands),
+                change: FeatureFlags.disableToolCallsCard ? nil : AnalyticsSummary.formatChange(summary.commandsChange)
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)

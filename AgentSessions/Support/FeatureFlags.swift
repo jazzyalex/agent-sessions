@@ -20,4 +20,7 @@ enum FeatureFlags {
     // Avoid pushing parsed session updates back to indexers during an active
     // search to reduce MainActor churn and improve responsiveness.
     static let disableSessionUpdatesDuringSearch = true
+
+    // Analytics: disable Tool Calls computation to keep UI fast
+    static let disableToolCallsCard = true
 }
