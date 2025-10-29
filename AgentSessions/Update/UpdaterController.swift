@@ -34,12 +34,15 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
 
     // MARK: - Private Properties
 
-    private var controller: SPUStandardUpdaterController!
+    private var controller: SPUStandardUpdaterController?
 
     // MARK: - Initialization
 
     override init() {
         super.init()
+
+        // Skip initializing Sparkle when running tests to avoid timeouts and dialogs
+        guard !AppRuntime.isRunningTests else { return }
 
         // Initialize Sparkle controller with self as delegates
         // Use startingUpdater: false to avoid early initialization errors
@@ -50,18 +53,13 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
         )
 
         // Delay starting the updater to avoid launch errors
-        // This makes the updater ready for manual checks while avoiding early errors
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self = self else { return }
-
-            // Start the updater (required when startingUpdater: false)
+            guard let self = self, let controller = self.controller else { return }
             do {
-                try self.controller.updater.start()
-                print("Updater started successfully")
-
-                // Schedule background check after updater is started
+                try controller.updater.start()
+                // Background check later
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
-                    self.controller.updater.checkForUpdatesInBackground()
+                    controller.updater.checkForUpdatesInBackground()
                 }
             } catch {
                 print("Failed to start updater - \(error.localizedDescription)")
@@ -72,9 +70,7 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     // MARK: - Public API
 
     /// Exposes the underlying SPUUpdater for advanced use cases.
-    var updater: SPUUpdater {
-        controller.updater
-    }
+    var updater: SPUUpdater? { controller?.updater }
 
     /// Triggers a manual update check (ignores scheduled interval).
     /// Wired to "Check for Updates…" menu item.
@@ -82,7 +78,7 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     /// - Parameter sender: The menu item or button that triggered the action
     @objc func checkForUpdates(_ sender: Any?) {
         print("UpdaterController: Manual check for updates triggered")
-        controller.checkForUpdates(sender)
+        controller?.checkForUpdates(sender)
     }
 
     // MARK: - SPUStandardUserDriverDelegate (Gentle Reminders)
