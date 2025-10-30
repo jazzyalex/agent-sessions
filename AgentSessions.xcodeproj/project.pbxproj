@@ -1035,7 +1035,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				CLANG_ENABLE_OBJC_ARC = YES;
 				CODE_SIGNING_ALLOWED = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1049,6 +1048,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.triada.AgentSessionsTests;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.9;
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentSessions.app/Contents/MacOS/AgentSessions";
 			};
 			name = Debug;
@@ -1057,7 +1057,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				CLANG_ENABLE_OBJC_ARC = YES;
 				CODE_SIGNING_ALLOWED = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1070,6 +1069,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.triada.AgentSessionsTests;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.9;
+				BUNDLE_LOADER = "$(TEST_HOST)";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentSessions.app/Contents/MacOS/AgentSessions";
 			};
 			name = Release;
