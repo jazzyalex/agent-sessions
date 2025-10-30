@@ -40,8 +40,21 @@ actor AnalyticsRepository {
     }
 
     /// Average session duration for given sources between inclusive day bounds.
+    /// Respects HideZeroMessageSessions / HideLowMessageSessions preferences so analytics
+    /// matches the Sessions list filtering policy.
     func avgSessionLength(sources: [String], dayStart: String?, dayEnd: String?) async -> TimeInterval {
-        (try? await db.avgSessionDuration(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? 0
+        let d = UserDefaults.standard
+        let hideZero = d.object(forKey: "HideZeroMessageSessions") == nil ? true : d.bool(forKey: "HideZeroMessageSessions")
+        let hideLow  = d.object(forKey: "HideLowMessageSessions")  == nil ? true : d.bool(forKey: "HideLowMessageSessions")
+        // Determine minimum messages required per session across the selected period
+        // - hideLow: exclude sessions with <= 2 messages → min = 3
+        // - else if hideZero: exclude sessions with 0 messages → min = 1
+        // - else: include all → min = 0
+        let minMessages = hideLow ? 3 : (hideZero ? 1 : 0)
+        if minMessages > 0 {
+            return (try? await db.avgSessionDurationFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0
+        } else {
+            return (try? await db.avgSessionDuration(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? 0
+        }
     }
 }
-

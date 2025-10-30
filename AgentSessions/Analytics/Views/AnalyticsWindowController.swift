@@ -52,7 +52,9 @@ final class AnalyticsWindowController: NSObject, NSWindowDelegate {
         // Create hosting view (type-erased) and observe appearance changes directly from AppKit
         let hostingView = AppearanceHostingView(rootView: AnyView(contentView))
         hostingView.onAppearanceChanged = { [weak self] in
-            self?.handleEffectiveAppearanceChange()
+            Task { @MainActor in
+                self?.handleEffectiveAppearanceChange()
+            }
         }
         self.hostingView = hostingView
 
@@ -97,12 +99,16 @@ final class AnalyticsWindowController: NSObject, NSWindowDelegate {
         // Appearance changes are observed via hostingView.viewDidChangeEffectiveAppearance
         // Also observe the system-wide theme toggle as a fallback on some macOS versions
         distributedObserver = DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main) { [weak self] _ in
-            self?.handleEffectiveAppearanceChange()
+            Task { @MainActor in
+                self?.handleEffectiveAppearanceChange()
+            }
         }
 
         // Observe in-app preference changes for AppAppearance and refresh immediately
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.handleAppearancePreferenceChange()
+            Task { @MainActor in
+                self?.handleAppearancePreferenceChange()
+            }
         }
     }
 
