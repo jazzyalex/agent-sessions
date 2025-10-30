@@ -51,7 +51,9 @@ struct ClaudeSessionsView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .preferredColorScheme(indexer.appAppearance.colorScheme)
+        // Apply preferredColorScheme only for explicit Light/Dark; omit for System to inherit.
+        .applyIf(indexer.appAppearance == .light) { $0.preferredColorScheme(.light) }
+        .applyIf(indexer.appAppearance == .dark) { $0.preferredColorScheme(.dark) }
         .onChange(of: selection) { _, newID in
             // Lazy load if needed
             if let id = newID, let session = indexer.allSessions.first(where: { $0.id == id }),

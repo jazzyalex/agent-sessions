@@ -104,8 +104,10 @@ struct UnifiedSessionsView: View {
                 .background(.thickMaterial)
             }
         }
-        // Honor app-wide theme selection from Preferences → General
-        .preferredColorScheme((AppAppearance(rawValue: appAppearanceRaw) ?? .system).colorScheme)
+        // Honor app-wide theme selection from Preferences → General.
+        // Apply preferredColorScheme only for explicit Light/Dark; omit for System to inherit.
+        .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .light) { $0.preferredColorScheme(.light) }
+        .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .dark) { $0.preferredColorScheme(.dark) }
         .toolbar { toolbarContent }
         .onAppear {
             if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }

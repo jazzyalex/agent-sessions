@@ -79,14 +79,16 @@ final class ClaudeSessionParser {
             return nil
         }
 
-        // Fallback session ID from filename
-        if sessionID == nil {
-            sessionID = url.deletingPathExtension().lastPathComponent
+        // Prefer stable logical session ID from file; fallback to filename/path hash
+        let stableID: String
+        if let sid = sessionID, !sid.isEmpty {
+            stableID = hash(path: "claude-session:\\(sid)")
+        } else {
+            // Fallback session ID from filename/path
+            stableID = hash(path: url.path)
         }
-
-        let id = hash(path: url.path)  // Always use file path for unique ID
         return Session(
-            id: id,
+            id: stableID,
             source: .claude,
             startTime: tmin,
             endTime: tmax,
@@ -268,13 +270,16 @@ final class ClaudeSessionParser {
         let avgLineLen = max(256, headBytesRead / max(newlineCount, 1))
         let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
 
-        // Fallback session ID from filename
-        if sessionID == nil {
-            sessionID = url.deletingPathExtension().lastPathComponent
+        // Prefer stable logical session ID from file; fallback to filename/path hash
+        let stableID: String
+        if let sid = sessionID, !sid.isEmpty {
+            stableID = hash(path: "claude-session:\\(sid)")
+        } else {
+            stableID = hash(path: url.path)
         }
 
-        // Extract title from sample events
-        let tempSession = Session(id: hash(path: url.path),
+        // Extract title from sample events (use temp session with same stable ID to ensure consistency)
+        let tempSession = Session(id: stableID,
                                    source: .claude,
                                    startTime: tmin,
                                    endTime: tmax,
@@ -289,8 +294,7 @@ final class ClaudeSessionParser {
         let title = tempSession.title
 
         // Create final lightweight session with empty events
-        let id = hash(path: url.path)
-        return Session(id: id,
+        return Session(id: stableID,
                        source: .claude,
                        startTime: tmin ?? mtime,
                        endTime: tmax ?? mtime,

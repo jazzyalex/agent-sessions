@@ -54,8 +54,14 @@ final class GeminiSessionParser {
         if tmin == nil { tmin = (attrs[.creationDate] as? Date) ?? mtime }
         if tmax == nil { tmax = mtime }
 
-        let id = sha256(path: url.path)
-        return Session(id: id,
+        // Prefer stable logical session ID from file when present
+        let stableID: String
+        if let sid = meta.sessionID, !sid.isEmpty {
+            stableID = sha256(path: "gemini-session:\\(sid)")
+        } else {
+            stableID = sha256(path: url.path)
+        }
+        return Session(id: stableID,
                        source: .gemini,
                        startTime: tmin,
                        endTime: tmax,
@@ -188,8 +194,14 @@ final class GeminiSessionParser {
         // If still no cwd, try resolver again
         if !cwdLockedByResolver, cwd == nil, let hash = folderHash, let mapped = GeminiHashResolver.shared.resolve(hash) { cwd = validateCwd(mapped) }
 
-        let id = sha256(path: url.path)
-        return Session(id: id,
+        // Prefer stable logical session ID from file when present
+        let stableID: String
+        if let sid = meta.sessionID, !sid.isEmpty {
+            stableID = sha256(path: "gemini-session:\\(sid)")
+        } else {
+            stableID = sha256(path: url.path)
+        }
+        return Session(id: stableID,
                        source: .gemini,
                        startTime: tmin,
                        endTime: tmax ?? tmin,
@@ -211,6 +223,7 @@ final class GeminiSessionParser {
         var lastUpdated: Any? = nil
         var firstTS: Any? = nil
         var lastTS: Any? = nil
+        var sessionID: String? = nil
     }
 
     private static func extractItemsAndMeta(from any: Any) -> ([Any]?, Meta) {
@@ -227,6 +240,7 @@ final class GeminiSessionParser {
             meta.model = dict["model"] as? String
             meta.startTime = dict["startTime"] ?? dict["start_time"]
             meta.lastUpdated = dict["lastUpdated"] ?? dict["last_updated"]
+            meta.sessionID = (dict["sessionId"] as? String) ?? (dict["session_id"] as? String) ?? (dict["id"] as? String)
             if let arr = messages { meta.firstTS = timestampOf(item: arr.first); meta.lastTS = timestampOf(item: arr.last) }
             return (messages, meta)
         }

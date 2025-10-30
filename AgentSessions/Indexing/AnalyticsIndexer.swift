@@ -25,13 +25,16 @@ actor AnalyticsIndexer {
 
     // MARK: - Core
     private func indexAll(incremental: Bool) async {
-        // One-time migration: if legacy unstable IDs are detected for Claude, purge Claude data
-        do {
-            if try await db.hasUnstableIDs(for: SessionSource.claude.rawValue) {
-                try await db.purgeSource(SessionSource.claude.rawValue)
-            }
-        } catch {
-            // Non-fatal; continue indexing
+        // One-time migration: switch Claude sessions to stable logical IDs based on in-file sessionId.
+        // Purge old Claude rows (which used path-hash IDs) once, then rebuild.
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "ClaudeStableIDsMigratedV2") == nil || defaults.bool(forKey: "ClaudeStableIDsMigratedV2") == false {
+            do { try await db.purgeSource(SessionSource.claude.rawValue) } catch { /* non-fatal */ }
+            defaults.set(true, forKey: "ClaudeStableIDsMigratedV2")
+        }
+        if defaults.object(forKey: "GeminiStableIDsMigratedV1") == nil || defaults.bool(forKey: "GeminiStableIDsMigratedV1") == false {
+            do { try await db.purgeSource(SessionSource.gemini.rawValue) } catch { /* non-fatal */ }
+            defaults.set(true, forKey: "GeminiStableIDsMigratedV1")
         }
 
         let sources: [(String, () -> [URL])] = [

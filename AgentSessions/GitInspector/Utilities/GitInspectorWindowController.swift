@@ -7,11 +7,7 @@ import AppKit
 class GitInspectorWindowController: NSObject, NSWindowDelegate {
     static let shared = GitInspectorWindowController()
 
-    private struct WindowRecord {
-        let window: NSWindow
-        let host: NSHostingController<GitInspectorWindowWrapper>
-    }
-    private var windows: [String: WindowRecord] = [:] // keyed by SessionKey.rawValue
+    private var windows: [String: NSWindow] = [:] // keyed by SessionKey.rawValue
 
     /// Show the Git Inspector window for a specific session
     /// - Parameters:
@@ -20,8 +16,8 @@ class GitInspectorWindowController: NSObject, NSWindowDelegate {
     func show(for session: Session, onResume: @escaping (Session) -> Void) {
         let key = SessionKey(session).rawValue
 
-        if let rec = windows[key] {
-            rec.window.makeKeyAndOrderFront(nil)
+        if let window = windows[key] {
+            window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
@@ -32,12 +28,13 @@ class GitInspectorWindowController: NSObject, NSWindowDelegate {
             onResume: { [weak self] sess in
                 onResume(sess)
                 // Close only this session window
-                self?.windows[key]?.window.close()
+                self?.windows[key]?.close()
                 self?.windows.removeValue(forKey: key)
             }
         )
 
-        let host = NSHostingController(rootView: contentView)
+        // Use NSHostingView directly like Analytics window does
+        let hostingView = NSHostingView(rootView: contentView)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 850, height: 800),
@@ -47,7 +44,7 @@ class GitInspectorWindowController: NSObject, NSWindowDelegate {
         )
 
         window.title = "Git Context"
-        window.contentViewController = host
+        window.contentView = hostingView
         window.delegate = self
         window.center()
         window.setFrameAutosaveName("GitInspectorWindow.\(key)")
@@ -56,18 +53,17 @@ class GitInspectorWindowController: NSObject, NSWindowDelegate {
         window.maxSize = NSSize(width: 1000, height: 1200)
         window.setContentSize(NSSize(width: 850, height: 800))
 
-        // CRITICAL: Ensure window follows system appearance
+        // Let window follow system appearance naturally
         window.appearance = nil
 
         window.makeKeyAndOrderFront(nil)
-
-        windows[key] = WindowRecord(window: window, host: host)
+        windows[key] = window
         NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Close all Git Inspector windows
     func close() {
-        for (_, rec) in windows { rec.window.close() }
+        for (_, window) in windows { window.close() }
         windows.removeAll()
     }
 
@@ -75,29 +71,36 @@ class GitInspectorWindowController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         // Clean up closed windows
         if let win = notification.object as? NSWindow {
-            windows = windows.filter { $0.value.window != win }
+            windows = windows.filter { $0.value != win }
         }
     }
 }
 
-/// Wrapper view for the Git Inspector that works with NSHostingController
+/// Wrapper view for the Git Inspector that works with NSHostingView
 struct GitInspectorWindowWrapper: View {
     let session: Session
     let onResume: (Session) -> Void
-
-    // Observe system appearance changes to force SwiftUI re-evaluation
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var appearanceToggle: Bool = false
+    // Track the app-wide appearance preference
+    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     var body: some View {
-        GitInspectorView(session: session, onResume: onResume)
+        // Base content
+        let content = GitInspectorView(session: session, onResume: onResume)
             // Force a distinct identity so SwiftUI state never bleeds across sessions
             .id(SessionKey(session).rawValue)
             .frame(minWidth: 700, idealWidth: 850, maxWidth: 1000, minHeight: 600, idealHeight: 800, maxHeight: 1200)
-            // Force re-render when color scheme changes
-            .onChange(of: colorScheme) { _, _ in
-                appearanceToggle.toggle()
+
+        // Apply preferredColorScheme only for explicit Light/Dark modes.
+        // For System mode, omit the modifier entirely to avoid SwiftUI bugs when passing nil.
+        let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
+        Group {
+            switch appAppearance {
+            case .light: content.preferredColorScheme(.light)
+            case .dark:  content.preferredColorScheme(.dark)
+            case .system: content
             }
-            .id("\(SessionKey(session).rawValue)-\(appearanceToggle)")
+        }
     }
 }
+
+// Local helper is intentionally minimal to avoid cross-file coupling.
