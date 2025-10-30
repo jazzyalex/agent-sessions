@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Git Context Inspector now responds to Light/Dark/System theme changes immediately; removed reliance on passing a nil preferredColorScheme which could leave the window stuck after switching to System.
 - Analytics window now immediately follows System appearance changes even when not key; listens for effective appearance changes and refreshes its SwiftUI root.
 - Analytics: Claude sessions now use a stable logical ID derived from the file’s `sessionId`, preventing one logical session from being split across many files. This normalizes avg session length vs Codex.
- - Analytics: Gemini sessions also switch to a stable logical ID from `sessionId` when present; added a one-time database rebuild for Gemini.
+- Analytics: Gemini sessions also switch to a stable logical ID from `sessionId` when present; added a one-time database rebuild for Gemini.
+ - Analytics: Sessions and Messages totals now honor “Hide zero/low message sessions” prefs (DB path), matching the Sessions list.
 
 ## [2.0.0] - 2025-10-04
 
