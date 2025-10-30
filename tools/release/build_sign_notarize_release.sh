@@ -105,7 +105,7 @@ echo "✅ DMG verification passed"
 
 echo "==> Verifying DMG is a valid disk image"
 FILE_TYPE=$(file "$DMG")
-if [[ ! "$FILE_TYPE" =~ "Macintosh HFS Extended" ]] && [[ ! "$FILE_TYPE" =~ "Apple partition map" ]]; then
+if [[ ! "$FILE_TYPE" =~ "Macintosh HFS Extended" ]] && [[ ! "$FILE_TYPE" =~ "Apple partition map" ]] && [[ ! "$FILE_TYPE" =~ "zlib compressed data" ]]; then
   echo "ERROR: DMG does not appear to be a valid disk image!" >&2
   echo "File type: $FILE_TYPE" >&2
   exit 5
