@@ -52,6 +52,12 @@ Local-first, open source, and built for terminal vibe warriors.
 
   <p style="margin:0 0 15px 0;"><em>Menu bar usage tracking with 5-hour and weekly percentages</em></p>
   <img src="docs/assets/screenshot-menubar.png" alt="Menu bar usage tracking with 5-hour and weekly percentages" width="50%" style="max-width:480px;border-radius:8px;margin:5px auto;display:block;"/>
+
+  <p style="margin:0 0 0px 0;"><em>Analytics dashboard with session trends and agent breakdown (Dark Mode)</em></p>
+  <img src="docs/assets/analytics-dark.png" alt="Analytics dashboard with session trends and agent breakdown (Dark Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
+
+  <p style="margin:0 0 15px 0;"><em>Git Context Inspector showing repository state and historical diffs (Light Mode)</em></p>
+  <img src="docs/assets/git-context-light.png" alt="Git Context Inspector showing repository state and historical diffs (Light Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px auto;display:block;"/>
 </div>
 
 ---
@@ -70,8 +76,25 @@ Reopen any Codex or Claude session in Terminal/iTerm with one click — or just 
 When `/resume` falls short, browse visually, copy the fragment, and drop it into a new terminal or ChatGPT.
 
 ### Dual Usage Tracking
-Independent 5-hour and weekly limits for Codex and Claude.  
+Independent 5-hour and weekly limits for Codex and Claude.
 A color-coded **menu-bar indicator** (or in-app strip) shows live percentages and reset times so you never get surprised mid-session.
+
+### Advanced Analytics
+Visualize your AI coding patterns with comprehensive analytics:
+- **Session trends**: Track daily/weekly session counts and message volume over time
+- **Agent breakdown**: Compare Codex CLI vs Claude Code usage patterns
+- **Time-of-day heatmap**: Discover when you're most productive with AI tools
+- **Key metrics**: Average session length, total messages, and usage distribution
+
+Access via **Window → Analytics** or the toolbar analytics icon.
+
+### Git Context Inspector (Codex CLI)
+Deep-dive into the git context of any Codex session:
+- **Repository state**: See branch, commit, and working tree status at session time
+- **Historical diffs**: Review exact code changes that were visible to Codex
+- **Context timeline**: Understand what git context influenced each session
+
+Right-click any Codex session → **Show Git Context** to open the inspector.
 
 ### Local, Private & Safe
 All processing runs on your Mac.  
