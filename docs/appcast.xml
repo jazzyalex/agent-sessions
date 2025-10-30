@@ -4,11 +4,11 @@
         <title>AgentSessions</title>
         <item>
             <title>2.5</title>
-            <pubDate>Thu, 30 Oct 2025 14:41:46 -0700</pubDate>
-            <sparkle:version>1</sparkle:version>
+            <pubDate>Thu, 30 Oct 2025 14:50:50 -0700</pubDate>
+            <sparkle:version>2</sparkle:version>
             <sparkle:shortVersionString>2.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5/AgentSessions-2.5.dmg" length="6065298" type="application/octet-stream" sparkle:edSignature="56hOIxTUNo2kDXl3pJyXkW1AW0dwqdZUJMsQOYigI/ggY8Igg2nufdRw4Tn7MThKD+WNZDlKgyXm5/oETsnYBA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5/AgentSessions-2.5.dmg" length="6065245" type="application/octet-stream" sparkle:edSignature="nsAJD1xOQEVGBhCwBITbyhPY1XjTx20p5ePtQBbofghowriUUx1Np2AGqqR/uEZ9y4Wwd833bc3RuhKepVV2AA=="/>
         </item>
     </channel>
 </rss>
