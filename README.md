@@ -56,21 +56,6 @@ Local-first, open source, and built for terminal vibe warriors.
 
 ---
 
-## What's New in 2.3
-
-- Gemini CLI:
-  - Indexes `~/.gemini/tmp/**/session-*.json` (and common variants)
-  - Lists and opens transcripts in the existing viewer (no writes, no resume)
-  - Unified search and source toggle alongside Codex/Claude
-- Favorites (★):
-  - Inline star on each row + context menu Add/Remove
-  - Toolbar “Favorites” toggle filters list (AND with search)
-  - Persisted in UserDefaults; zero schema changes
-- UI polish and fixes:
-  - Transcript vs Terminal parity across providers
-  - Persistent window/split positions; toolbar spacing adjustments
-  - “Refresh preview” affordance for stale Gemini files
-
 ## Core Features
 
 ### Unified Interface v2
