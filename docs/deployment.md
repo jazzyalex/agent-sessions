@@ -41,6 +41,12 @@ Complete this checklist **before** running the deployment script. Answer all que
 ### 1. Version Planning
 - [ ] What version are you releasing? (e.g., 2.3.2)
 - [ ] Current MARKETING_VERSION in project.pbxproj: 2.3.2 (run grep to confirm)
+- [ ] **CRITICAL: Increment CURRENT_PROJECT_VERSION (build number) for Sparkle updates:**
+  ```bash
+  grep "CURRENT_PROJECT_VERSION" AgentSessions.xcodeproj/project.pbxproj
+  # Must be higher than previous release (e.g., 1 → 2, 2 → 3)
+  # Sparkle compares build numbers, not marketing versions!
+  ```
 - [ ] Confirm version bump is correct (major/minor/patch)
 
 ### 2. Asset Preparation
@@ -309,6 +315,87 @@ grep -A1 "SUPublicEDKey" AgentSessions/Info.plist
 1. If keys don't match: Update Info.plist with correct public key from `generate_keys`
 2. Regenerate appcast.xml with matching key
 3. Test signature: Download DMG and verify with Sparkle's `sign_update --verify`
+
+### Sparkle auto-update not detecting new version
+
+**Symptom**: App says "You're up to date" when a newer version exists in the appcast
+
+**Diagnosis**:
+```bash
+# 1. Check build numbers (NOT marketing versions!)
+# Old version:
+plutil -p "/Applications/Agent Sessions.app/Contents/Info.plist" | grep CFBundleVersion
+# New version in release:
+curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep "sparkle:version"
+
+# 2. Sparkle compares build numbers, not marketing versions!
+# If both have CFBundleVersion=1, Sparkle thinks they're the same
+```
+
+**Root Cause**:
+Sparkle uses `CFBundleVersion` (build number), not `CFBundleShortVersionString` (marketing version) for version comparison. If you release 2.5 with build number "1" and the previous 2.4 also had build number "1", Sparkle won't detect an update.
+
+**Solution**:
+```bash
+# 1. Increment CURRENT_PROJECT_VERSION in project.pbxproj
+grep -n "CURRENT_PROJECT_VERSION" AgentSessions.xcodeproj/project.pbxproj
+# Update from 1 → 2 (or N → N+1) in BOTH Debug and Release configurations
+
+# 2. Rebuild the app
+tools/release/build_sign_notarize_release.sh
+
+# 3. Verify new build number
+plutil -p dist/AgentSessions.app/Contents/Info.plist | grep CFBundleVersion
+# Should show: "CFBundleVersion" => "2" (or N+1)
+
+# 4. Regenerate appcast
+rm -rf dist/updates && mkdir dist/updates
+cp dist/AgentSessions-{VERSION}.dmg dist/updates/
+~/Library/Developer/Xcode/DerivedData/AgentSessions-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast dist/updates/
+
+# 5. Verify appcast has new build number
+grep "sparkle:version" dist/updates/appcast.xml
+# Should show: <sparkle:version>2</sparkle:version>
+
+# 6. Update docs/appcast.xml and push
+cp dist/updates/appcast.xml docs/appcast.xml
+# Fix DMG URL to GitHub Releases, then commit and push
+```
+
+**Prevention**: Always increment `CURRENT_PROJECT_VERSION` for each release (even patch releases).
+
+### Sparkle update window shows spinning wheel forever
+
+**Symptom**: Update is detected, window opens, but shows indefinite spinning wheel during download
+
+**Diagnosis**:
+```bash
+# Check if release notes are present in appcast
+curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -A5 "description"
+# If empty or missing, Sparkle may hang when SUShowReleaseNotes=1
+```
+
+**Root Cause**:
+When `SUShowReleaseNotes` is enabled in Info.plist but the appcast has no `<description>` element, Sparkle may hang waiting for release notes content.
+
+**Solution**:
+```bash
+# Add release notes to appcast.xml item:
+<description><![CDATA[
+    <h2>What's New in {VERSION}</h2>
+    <ul>
+        <li><strong>Feature:</strong> Description</li>
+        <li><strong>Fixed:</strong> Bug description</li>
+    </ul>
+]]></description>
+
+# Commit and push appcast
+git add docs/appcast.xml
+git commit -m "Add release notes to appcast for {VERSION}"
+git push
+```
+
+**Prevention**: The deployment script should automatically add release notes from CHANGELOG.md to the appcast.
 
 ### Notary profile errors
 ```bash
