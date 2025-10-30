@@ -377,6 +377,41 @@ actor IndexDB {
         return out
     }
 
+    func avgSessionDuration(sources: [String], dayStart: String?, dayEnd: String?) throws -> TimeInterval {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let s = dayStart { clauses.append("day >= ?"); binds.append(s) }
+        if let e = dayEnd { clauses.append("day <= ?"); binds.append(e) }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        // Calculate total duration per session, then average across sessions
+        let sql = """
+        SELECT COALESCE(AVG(session_duration), 0.0)
+        FROM (
+            SELECT session_id, SUM(duration_sec) as session_duration
+            FROM session_days\(whereSQL)
+            GROUP BY session_id
+        )
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db))) }
+        defer { sqlite3_finalize(stmt) }
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return sqlite3_column_double(stmt, 0)
+        }
+        return 0.0
+    }
+
     // Detect legacy unstable IDs (e.g., Swift hashValue) for a given source
     func hasUnstableIDs(for source: String) throws -> Bool {
         guard let db = handle else { throw DBError.openFailed("db closed") }
