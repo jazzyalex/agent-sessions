@@ -12,88 +12,83 @@ struct TimeOfDayHeatmapView: View {
     private let cols = 8  // 12a-9p buckets
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
             Text("Time of Day")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.primary)
+                .padding(.bottom, 16)
 
             if cells.isEmpty {
                 emptyState
             } else {
-                GeometryReader { geo in
-                    let pad = CGFloat(0)  // Inner padding already handled by analyticsCard
-                    let hoursLabelHeight: CGFloat = 16  // Caption line above grid
-                    let daysLabelWidth: CGFloat = 22    // Caption column left of grid
-                    let footerHeight: CGFloat = mostActive == nil ? 0 : 24
+                // Main heatmap content
+                VStack(spacing: 0) {
+                    // Hour labels row
+                    HStack(spacing: 0) {
+                        // Empty corner space for day labels column
+                        Color.clear
+                            .frame(width: 24, height: 20)
 
-                    let availW = geo.size.width - pad*2 - daysLabelWidth
-                    let availH = geo.size.height - pad*2 - hoursLabelHeight - footerHeight
-
-                    let cellW = floor(availW / CGFloat(cols))
-                    let cellH = floor(availH / CGFloat(rows))
-                    let cell = max(10, min(cellW, cellH))  // Clamp to something usable
-
-                    let gridW = cell * CGFloat(cols)
-                    let gridH = cell * CGFloat(rows)
-
-                    // Center the matrix vertically within the available height
-                    let x0 = pad + daysLabelWidth
-                    let y0 = pad + hoursLabelHeight + (availH - gridH) / 2
-
-                    ZStack(alignment: .topLeading) {
-                        // Hour captions
-                        HStack(spacing: 0) {
+                        // Hour labels
+                        HStack(spacing: 2) {
                             ForEach(0..<cols, id: \.self) { c in
                                 Text(AnalyticsHeatmapCell.hourLabels[c])
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
-                                    .frame(width: cell, height: hoursLabelHeight, alignment: .center)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 20)
                             }
                         }
-                        .frame(width: gridW)
-                        .offset(x: x0, y: pad)
+                    }
 
-                        // Day captions
-                        VStack(spacing: 0) {
+                    // Heatmap grid with day labels
+                    HStack(spacing: 0) {
+                        // Day labels column
+                        VStack(spacing: 2) {
                             ForEach(0..<rows, id: \.self) { r in
                                 Text(["M", "T", "W", "T", "F", "S", "S"][r])
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
-                                    .frame(width: daysLabelWidth, height: cell, alignment: .trailing)
+                                    .frame(width: 24)
+                                    .frame(maxHeight: .infinity, alignment: .center)
                             }
                         }
-                        .offset(x: pad, y: y0)
 
-                        // Cells - draw all grid positions
-                        ForEach(0..<(rows * cols), id: \.self) { index in
-                            let row = index / cols
-                            let col = index % cols
-                            let heatCell = cells.first { $0.day == row && $0.hourBucket == col }
-                            let level = heatCell?.activityLevel ?? .none
+                        // Heatmap cells grid
+                        VStack(spacing: 2) {
+                            ForEach(0..<rows, id: \.self) { row in
+                                HStack(spacing: 2) {
+                                    ForEach(0..<cols, id: \.self) { col in
+                                        let heatCell = cells.first { $0.day == row && $0.hourBucket == col }
+                                        let level = heatCell?.activityLevel ?? .none
 
-                            RoundedRectangle(cornerRadius: AnalyticsDesign.heatmapCellCornerRadius)
-                                .fill(cellColor(for: level))
-                                .frame(width: cell - 3, height: cell - 3)
-                                .position(x: x0 + cell * (CGFloat(col) + 0.5),
-                                         y: y0 + cell * (CGFloat(row) + 0.5))
+                                        RoundedRectangle(cornerRadius: AnalyticsDesign.heatmapCellCornerRadius)
+                                            .fill(cellColor(for: level))
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    }
+                                }
+                            }
                         }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    // Most Active footer
+                    if let mostActive = mostActive {
+                        HStack {
+                            Spacer()
+                            Text("Most Active: \(mostActive)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.top, 12)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .analyticsCard(padding: AnalyticsDesign.cardPadding, colorScheme: colorScheme)
-        .overlay(alignment: .bottomLeading) {
-            if let mostActive = mostActive {
-                Text("Most Active: \(mostActive)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
-                    .padding(AnalyticsDesign.cardPadding)
-            }
-        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
