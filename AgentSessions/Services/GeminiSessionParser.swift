@@ -54,14 +54,8 @@ final class GeminiSessionParser {
         if tmin == nil { tmin = (attrs[.creationDate] as? Date) ?? mtime }
         if tmax == nil { tmax = mtime }
 
-        // Prefer stable logical session ID from file when present
-        let stableID: String
-        if let sid = meta.sessionID, !sid.isEmpty {
-            stableID = sha256(path: "gemini-session:\\(sid)")
-        } else {
-            stableID = sha256(path: url.path)
-        }
-        return Session(id: stableID,
+        // Use per-file stable ID for UI list consistency
+        return Session(id: sha256(path: url.path),
                        source: .gemini,
                        startTime: tmin,
                        endTime: tmax,
@@ -194,14 +188,7 @@ final class GeminiSessionParser {
         // If still no cwd, try resolver again
         if !cwdLockedByResolver, cwd == nil, let hash = folderHash, let mapped = GeminiHashResolver.shared.resolve(hash) { cwd = validateCwd(mapped) }
 
-        // Prefer stable logical session ID from file when present
-        let stableID: String
-        if let sid = meta.sessionID, !sid.isEmpty {
-            stableID = sha256(path: "gemini-session:\\(sid)")
-        } else {
-            stableID = sha256(path: url.path)
-        }
-        return Session(id: stableID,
+        return Session(id: sha256(path: url.path),
                        source: .gemini,
                        startTime: tmin,
                        endTime: tmax ?? tmin,

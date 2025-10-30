@@ -27,15 +27,7 @@ actor AnalyticsIndexer {
     private func indexAll(incremental: Bool) async {
         // One-time migration: switch Claude sessions to stable logical IDs based on in-file sessionId.
         // Purge old Claude rows (which used path-hash IDs) once, then rebuild.
-        let defaults = UserDefaults.standard
-        if defaults.object(forKey: "ClaudeStableIDsMigratedV2") == nil || defaults.bool(forKey: "ClaudeStableIDsMigratedV2") == false {
-            do { try await db.purgeSource(SessionSource.claude.rawValue) } catch { /* non-fatal */ }
-            defaults.set(true, forKey: "ClaudeStableIDsMigratedV2")
-        }
-        if defaults.object(forKey: "GeminiStableIDsMigratedV1") == nil || defaults.bool(forKey: "GeminiStableIDsMigratedV1") == false {
-            do { try await db.purgeSource(SessionSource.gemini.rawValue) } catch { /* non-fatal */ }
-            defaults.set(true, forKey: "GeminiStableIDsMigratedV1")
-        }
+        // No destructive purges at startup; rely on refresh to reconcile
 
         let sources: [(String, () -> [URL])] = [
             ("codex", { self.codex.discoverSessionFiles() }),
