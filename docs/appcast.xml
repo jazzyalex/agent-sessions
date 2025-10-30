@@ -5,6 +5,15 @@
         <item>
             <title>2.5</title>
             <pubDate>Thu, 30 Oct 2025 14:50:50 -0700</pubDate>
+            <description><![CDATA[
+                <h2>What's New in 2.5</h2>
+                <ul>
+                    <li><strong>Advanced Analytics:</strong> Visualize AI coding patterns with session trends, agent breakdown, and time-of-day heatmap</li>
+                    <li><strong>Git Context Inspector:</strong> View repository state and historical diffs for Codex sessions</li>
+                    <li><strong>Performance:</strong> SQLite indexing for improved background performance</li>
+                    <li><strong>Fixes:</strong> Theme updates, usage tracking improvements, filtering fixes</li>
+                </ul>
+            ]]></description>
             <sparkle:version>2</sparkle:version>
             <sparkle:shortVersionString>2.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
