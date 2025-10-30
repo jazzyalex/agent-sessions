@@ -110,8 +110,8 @@ final class ClaudeSessionParser {
         var toolOutput: String?
 
         // Determine role and extract content based on type
-        switch eventType {
-        case "user":
+        switch eventType?.lowercased() {
+        case "user", "user_input", "user-input", "input", "prompt", "chat_input", "chat-input", "human":
             role = "user"
             // Extract from nested message.content
             if let message = obj["message"] as? [String: Any] {
@@ -122,7 +122,7 @@ final class ClaudeSessionParser {
                 text = extractContent(from: obj)
             }
 
-        case "assistant", "response":
+        case "assistant", "response", "assistant_message", "assistant-message", "assistant_response", "assistant-response", "completion":
             role = "assistant"
             if let message = obj["message"] as? [String: Any] {
                 text = extractContent(from: message)
@@ -149,18 +149,27 @@ final class ClaudeSessionParser {
             }
 
         default:
-            // Meta events: summary, file-history-snapshot, etc.
-            role = "meta"
-            if let summary = obj["summary"] as? String {
-                text = summary
+            // Try to infer from explicit role/sender
+            if let explicitRole = (obj["role"] as? String) ?? (obj["sender"] as? String) {
+                let lower = explicitRole.lowercased()
+                if lower == "user" || lower == "human" { role = "user" }
+                else if lower == "assistant" || lower == "model" { role = "assistant" }
+            }
+            // If still unknown, treat as assistant when it has conversational content
+            if role == nil {
+                if let message = obj["message"] as? [String: Any], let c = extractContent(from: message), !c.isEmpty {
+                    role = "assistant"; text = c
+                } else if let c = extractContent(from: obj), !c.isEmpty {
+                    role = "assistant"; text = c
+                } else {
+                    role = "meta"
+                }
             }
         }
 
-        // Determine if this is a meta event based on type, not isMeta flag
-        // Claude Code marks many user messages as isMeta, so we need better logic
-        let isMetaEvent = eventType == "summary" ||
-                          eventType == "file-history-snapshot" ||
-                          eventType == "meta"
+        // Determine if this is a meta event based on type, not naive flags
+        let et = eventType?.lowercased()
+        let isMetaEvent = (et == "summary" || et == "file-history-snapshot" || et == "meta") && (role == nil || role == "meta")
 
         let kind = SessionEventKind.from(role: role, type: eventType)
 
