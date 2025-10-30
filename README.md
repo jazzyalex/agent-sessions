@@ -62,6 +62,19 @@ Local-first, open source, and built for terminal vibe warriors.
 
 ---
 
+## What's New in 2.5
+
+### 🚀 Massive Performance Improvements
+SQLite-backed indexing brings **dramatically faster** session loading and filtering. Background indexing runs at utility priority, updating only changed session files. No more waiting—browse thousands of sessions instantly.
+
+### 📊 Analytics Dashboard (v1)
+Visualize your AI coding patterns with comprehensive analytics. Track session trends, compare agent usage, discover your most productive hours with time-of-day heatmaps, and view key metrics—all in a dedicated analytics window.
+
+### 🔍 Git Context Inspector
+Deep-dive into the git context of any Codex session. See repository state, branch info, and historical diffs—understand exactly what code changes were visible to Codex during each session. Right-click any Codex session → **Show Git Context**.
+
+---
+
 ## Core Features
 
 ### Unified Interface v2
