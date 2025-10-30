@@ -20,9 +20,23 @@ actor AnalyticsRepository {
 
     /// Aggregate summary for given sources between inclusive day bounds (YYYY-MM-DD local).
     func summary(sources: [String], dayStart: String?, dayEnd: String?) async -> Summary {
-        let sessions = (try? await db.countDistinctSessions(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? 0
-        let roll = (try? await db.sumRollups(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? (0, 0, 0.0)
-        return Summary(sessionsDistinct: sessions, messages: roll.0, commands: roll.1, durationSeconds: roll.2)
+        // Respect message-count filters for sessions/messages totals
+        let d = UserDefaults.standard
+        let hideZero = d.object(forKey: "HideZeroMessageSessions") == nil ? true : d.bool(forKey: "HideZeroMessageSessions")
+        let hideLow  = d.object(forKey: "HideLowMessageSessions")  == nil ? true : d.bool(forKey: "HideLowMessageSessions")
+        let minMessages = hideLow ? 3 : (hideZero ? 1 : 0)
+
+        if minMessages > 0 {
+            let sessions = (try? await db.countDistinctSessionsFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0
+            let messages = (try? await db.sumMessagesFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0
+            // For now, keep commands and duration from rollups (unfiltered) to avoid heavy queries
+            let roll = (try? await db.sumRollups(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? (0, 0, 0.0)
+            return Summary(sessionsDistinct: sessions, messages: messages, commands: roll.1, durationSeconds: roll.2)
+        } else {
+            let sessions = (try? await db.countDistinctSessions(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? 0
+            let roll = (try? await db.sumRollups(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? (0, 0, 0.0)
+            return Summary(sessionsDistinct: sessions, messages: roll.0, commands: roll.1, durationSeconds: roll.2)
+        }
     }
 
     struct AgentSlice { let source: String; let sessionsDistinct: Int; let durationSeconds: TimeInterval }
