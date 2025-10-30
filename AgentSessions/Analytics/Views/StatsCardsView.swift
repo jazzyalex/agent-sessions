@@ -33,18 +33,18 @@ struct StatsCardsView: View {
             .help("Total messages exchanged across all sessions in this period")
 
             StatsCard(
-                icon: "terminal.fill",
-                label: "Tool Calls",
-                value: FeatureFlags.disableToolCallsCard ? "—" : AnalyticsSummary.formatNumber(summary.commands),
-                change: FeatureFlags.disableToolCallsCard ? nil : AnalyticsSummary.formatChange(summary.commandsChange)
+                icon: "clock.fill",
+                label: "Avg Session Length",
+                value: summary.avgSessionLengthFormatted,
+                change: AnalyticsSummary.formatChange(summary.avgSessionLengthChange)
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
-            .help("Number of tool executions (Read, Edit, Bash, WebFetch, etc.) performed by AI agents")
+            .help("Average duration per session (from first to last message)")
 
             StatsCard(
-                icon: "clock.fill",
-                label: "Session Duration",
+                icon: "timer",
+                label: "Total Duration",
                 value: summary.activeTimeFormatted,
                 change: AnalyticsSummary.formatChange(summary.activeTimeChange)
             )
@@ -122,7 +122,9 @@ private struct StatsCard: View {
         commands: 198,
         commandsChange: -3,
         activeTimeSeconds: 30180, // 8h 23m
-        activeTimeChange: 15
+        activeTimeChange: 15,
+        avgSessionLengthSeconds: 1260, // 21m average
+        avgSessionLengthChange: 5
     ))
     .padding()
     .frame(height: 140)

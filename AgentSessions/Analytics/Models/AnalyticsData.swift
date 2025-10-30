@@ -22,10 +22,20 @@ struct AnalyticsSummary: Equatable {
     /// Change vs previous period
     let activeTimeChange: Double?
 
+    /// Average session length (seconds)
+    let avgSessionLengthSeconds: TimeInterval
+    /// Change vs previous period
+    let avgSessionLengthChange: Double?
+
     /// Formatted active time string with intelligent unit selection
     /// Examples: "42m", "8h 23m", "2d 5h", "3mo 12d", "1y 2mo"
     var activeTimeFormatted: String {
         Self.formatDuration(activeTimeSeconds)
+    }
+
+    /// Formatted average session length string
+    var avgSessionLengthFormatted: String {
+        Self.formatDuration(avgSessionLengthSeconds)
     }
 
     /// Smart duration formatter with year/month/day/hour/minute support
@@ -192,7 +202,8 @@ struct AnalyticsSnapshot: Equatable {
             sessions: 0, sessionsChange: nil,
             messages: 0, messagesChange: nil,
             commands: 0, commandsChange: nil,
-            activeTimeSeconds: 0, activeTimeChange: nil
+            activeTimeSeconds: 0, activeTimeChange: nil,
+            avgSessionLengthSeconds: 0, avgSessionLengthChange: nil
         ),
         timeSeriesData: [],
         agentBreakdown: [],

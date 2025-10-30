@@ -82,13 +82,6 @@ final class AnalyticsWindowController: NSObject, NSWindowDelegate {
 
         self.window = window
         self.isShown = true
-
-        // Skip background parsing when Tool Calls are disabled to keep UI snappy.
-        if !FeatureFlags.disableToolCallsCard {
-            Task { @MainActor in
-                service.ensureSessionsFullyParsed()
-            }
-        }
     }
 
     // MARK: - NSWindowDelegate

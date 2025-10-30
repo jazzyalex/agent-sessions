@@ -38,5 +38,10 @@ actor AnalyticsRepository {
         }
         return out
     }
+
+    /// Average session duration for given sources between inclusive day bounds.
+    func avgSessionLength(sources: [String], dayStart: String?, dayEnd: String?) async -> TimeInterval {
+        (try? await db.avgSessionDuration(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? 0
+    }
 }
 

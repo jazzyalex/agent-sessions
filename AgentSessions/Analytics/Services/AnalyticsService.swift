@@ -190,95 +190,42 @@ final class AnalyticsService: ObservableObject {
     // MARK: - Summary Calculations
 
     private func calculateSummaryFastOrFallback(allSessions: [Session], dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) async -> AnalyticsSummary {
-        if FeatureFlags.disableToolCallsCard {
-            // Use DB for sessions/messages/duration only; set Tool Calls empty
-            if let repo = repository, await repo.isReady() {
-                let (startDay, endDay) = dayBounds(for: dateRange)
-                let sources = sourcesFor(agentFilter)
-                let cur = await repo.summary(sources: sources, dayStart: startDay, dayEnd: endDay)
-
-                let prevB = previousPeriodBounds(for: dateRange)
-                let prevStart = prevB.start.map { dayString($0) }
-                let prevEnd = prevB.end.map { dayString($0.addingTimeInterval(-1)) }
-                let prev = await repo.summary(sources: sources, dayStart: prevStart, dayEnd: prevEnd)
-
-                let sessionsChange = calculatePercentageChange(current: cur.sessionsDistinct, previous: prev.sessionsDistinct)
-                let messagesChange = calculatePercentageChange(current: cur.messages, previous: prev.messages)
-                let activeTimeChange = calculatePercentageChange(current: cur.durationSeconds, previous: prev.durationSeconds)
-
-                return AnalyticsSummary(
-                    sessions: cur.sessionsDistinct,
-                    sessionsChange: sessionsChange,
-                    messages: cur.messages,
-                    messagesChange: messagesChange,
-                    commands: 0,
-                    commandsChange: nil,
-                    activeTimeSeconds: cur.durationSeconds,
-                    activeTimeChange: activeTimeChange
-                )
-            }
-        } else if let repo = repository, await repo.isReady() {
+        // Use DB for sessions/messages/duration/avg session length; skip commands for performance
+        if let repo = repository, await repo.isReady() {
             let (startDay, endDay) = dayBounds(for: dateRange)
             let sources = sourcesFor(agentFilter)
             let cur = await repo.summary(sources: sources, dayStart: startDay, dayEnd: endDay)
+            let curAvgSessionLength = await repo.avgSessionLength(sources: sources, dayStart: startDay, dayEnd: endDay)
 
             let prevB = previousPeriodBounds(for: dateRange)
             let prevStart = prevB.start.map { dayString($0) }
             let prevEnd = prevB.end.map { dayString($0.addingTimeInterval(-1)) }
             let prev = await repo.summary(sources: sources, dayStart: prevStart, dayEnd: prevEnd)
+            let prevAvgSessionLength = await repo.avgSessionLength(sources: sources, dayStart: prevStart, dayEnd: prevEnd)
 
             let sessionsChange = calculatePercentageChange(current: cur.sessionsDistinct, previous: prev.sessionsDistinct)
             let messagesChange = calculatePercentageChange(current: cur.messages, previous: prev.messages)
-            let commandsChange = calculatePercentageChange(current: cur.commands, previous: prev.commands)
             let activeTimeChange = calculatePercentageChange(current: cur.durationSeconds, previous: prev.durationSeconds)
+            let avgSessionLengthChange = calculatePercentageChange(current: curAvgSessionLength, previous: prevAvgSessionLength)
 
             return AnalyticsSummary(
                 sessions: cur.sessionsDistinct,
                 sessionsChange: sessionsChange,
                 messages: cur.messages,
                 messagesChange: messagesChange,
-                commands: cur.commands,
-                commandsChange: commandsChange,
+                commands: 0,
+                commandsChange: nil,
                 activeTimeSeconds: cur.durationSeconds,
-                activeTimeChange: activeTimeChange
+                activeTimeChange: activeTimeChange,
+                avgSessionLengthSeconds: curAvgSessionLength,
+                avgSessionLengthChange: avgSessionLengthChange
             )
         }
         return calculateSummaryFallback(allSessions: allSessions, dateRange: dateRange, agentFilter: agentFilter)
     }
 
     private func calculateSummaryFallback(allSessions: [Session], dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) -> AnalyticsSummary {
-        if FeatureFlags.disableToolCallsCard {
-            // Fast path: skip tool call counting entirely
-            let now = Date()
-            let currentBounds = dateBounds(for: dateRange, now: now)
-            let current = filterSessionsWithinBounds(allSessions, bounds: currentBounds, agentFilter: agentFilter)
-
-            let previousBounds = previousPeriodBounds(for: dateRange, now: now)
-            let previous = filterSessionsWithinBounds(allSessions, bounds: previousBounds, agentFilter: agentFilter)
-
-            let sessionCount = current.count
-            let messageCount = current.reduce(0) { $0 + $1.messageCount }
-            let activeTime = current.reduce(0.0) { total, session in total + clippedDuration(for: session, within: currentBounds) }
-
-            let sessionsChange = calculatePercentageChange(current: sessionCount, previous: previous.count)
-            let prevMessageCount = previous.reduce(0) { $0 + $1.messageCount }
-            let messagesChange = calculatePercentageChange(current: messageCount, previous: prevMessageCount)
-            let prevActiveTime = previous.reduce(0.0) { total, session in total + clippedDuration(for: session, within: previousBounds) }
-            let activeTimeChange = calculatePercentageChange(current: activeTime, previous: prevActiveTime)
-
-            return AnalyticsSummary(
-                sessions: sessionCount,
-                sessionsChange: sessionsChange,
-                messages: messageCount,
-                messagesChange: messagesChange,
-                commands: 0,
-                commandsChange: nil,
-                activeTimeSeconds: activeTime,
-                activeTimeChange: activeTimeChange
-            )
-        }
-
-        // Compute bounds for current and previous periods
+        // Skip tool call counting for performance
         let now = Date()
         let currentBounds = dateBounds(for: dateRange, now: now)
         let current = filterSessionsWithinBounds(allSessions, bounds: currentBounds, agentFilter: agentFilter)
@@ -287,44 +234,31 @@ final class AnalyticsService: ObservableObject {
         let previous = filterSessionsWithinBounds(allSessions, bounds: previousBounds, agentFilter: agentFilter)
 
         let sessionCount = current.count
-
-        // Message count (sum of messageCount from each session in current bounds)
         let messageCount = current.reduce(0) { $0 + $1.messageCount }
+        let activeTime = current.reduce(0.0) { total, session in total + clippedDuration(for: session, within: currentBounds) }
 
-        // Tool/command count – approximate per-event timestamps when missing by
-        // borrowing the nearest neighbor timestamp within the same session.
-        // This prevents undated tool calls from inheriting the whole session date.
-        let commandCount = current.reduce(0) { total, session in
-            total + self.countToolCalls(in: session, within: currentBounds)
-        }
+        // Calculate average session length (total duration / session count)
+        let avgSessionLength = sessionCount > 0 ? activeTime / Double(sessionCount) : 0
 
-        // Active time clipped to current bounds
-        let activeTime = current.reduce(0.0) { total, session in
-            total + clippedDuration(for: session, within: currentBounds)
-        }
-
-        // Previous period deltas
         let sessionsChange = calculatePercentageChange(current: sessionCount, previous: previous.count)
         let prevMessageCount = previous.reduce(0) { $0 + $1.messageCount }
         let messagesChange = calculatePercentageChange(current: messageCount, previous: prevMessageCount)
-        let prevCommandCount = previous.reduce(0) { total, session in
-            total + self.countToolCalls(in: session, within: previousBounds)
-        }
-        let commandsChange = calculatePercentageChange(current: commandCount, previous: prevCommandCount)
-        let prevActiveTime = previous.reduce(0.0) { total, session in
-            total + clippedDuration(for: session, within: previousBounds)
-        }
+        let prevActiveTime = previous.reduce(0.0) { total, session in total + clippedDuration(for: session, within: previousBounds) }
         let activeTimeChange = calculatePercentageChange(current: activeTime, previous: prevActiveTime)
+        let prevAvgSessionLength = previous.count > 0 ? prevActiveTime / Double(previous.count) : 0
+        let avgSessionLengthChange = calculatePercentageChange(current: avgSessionLength, previous: prevAvgSessionLength)
 
         return AnalyticsSummary(
             sessions: sessionCount,
             sessionsChange: sessionsChange,
             messages: messageCount,
             messagesChange: messagesChange,
-            commands: commandCount,
-            commandsChange: commandsChange,
+            commands: 0,
+            commandsChange: nil,
             activeTimeSeconds: activeTime,
-            activeTimeChange: activeTimeChange
+            activeTimeChange: activeTimeChange,
+            avgSessionLengthSeconds: avgSessionLength,
+            avgSessionLengthChange: avgSessionLengthChange
         )
     }
 
