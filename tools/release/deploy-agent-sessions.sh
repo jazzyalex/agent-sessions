@@ -87,6 +87,17 @@ if [[ -f "docs/CHANGELOG.md" ]]; then
   fi
 fi
 
+# Build number validation (critical for Sparkle auto-updates)
+CURR_BUILD=$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\).*/\1/p' AgentSessions.xcodeproj/project.pbxproj | head -n1)
+if [[ -n "$CURR_BUILD" ]]; then
+  echo "Current build number: $CURR_BUILD"
+  yellow "REMINDER: Sparkle uses build numbers (CFBundleVersion), not marketing versions, for update detection."
+  yellow "If previous release also had build number $CURR_BUILD, users won't see an update!"
+  yellow "Increment CURRENT_PROJECT_VERSION in project.pbxproj before releasing."
+else
+  yellow "WARNING: Could not detect CURRENT_PROJECT_VERSION from project.pbxproj"
+fi
+
 # Skip confirmation if SKIP_CONFIRM=1
 if [[ "${SKIP_CONFIRM}" != "1" ]]; then
   read -r -p "Proceed with build/sign/notarize now? [y/N] " go
@@ -141,6 +152,25 @@ else
     sed -i '' -E 's|https://jazzyalex\.github\.io/agent-sessions/AgentSessions-([0-9.]+)\.dmg|https://github.com/jazzyalex/agent-sessions/releases/download/v\1/AgentSessions-\1.dmg|g' \
       "$UPDATES_DIR/appcast.xml"
     green "Fixed DMG URLs in appcast to point to GitHub Releases"
+
+    # Add release notes from CHANGELOG.md to prevent Sparkle UI hang
+    if [[ -f "docs/CHANGELOG.md" ]]; then
+      NOTES=$(sed -n "/^## \[${VERSION}\]/,/^## \[/{ /^## \[${VERSION}\]/d; /^## \[/d; p; }" docs/CHANGELOG.md | \
+        sed 's/^### \(.*\)/<strong>\1<\/strong>/g; s/^- \(.*\)/<li>\1<\/li>/g')
+
+      if [[ -n "$NOTES" ]]; then
+        # Insert description element after pubDate
+        sed -i '' "/<pubDate>/a\\
+\\            <description><![CDATA[\\
+\\                <h2>What's New in ${VERSION}</h2>\\
+${NOTES}\\
+\\            ]]></description>
+" "$UPDATES_DIR/appcast.xml"
+        green "Added release notes from CHANGELOG.md to appcast"
+      else
+        yellow "WARNING: No release notes found for ${VERSION} in CHANGELOG.md"
+      fi
+    fi
 
     # Copy appcast to docs/ for GitHub Pages
     cp "$UPDATES_DIR/appcast.xml" "$REPO_ROOT/docs/appcast.xml"
