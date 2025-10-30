@@ -173,15 +173,35 @@ struct ButtonActionsView: View {
 
 /// Secondary button style for action buttons
 struct ActionButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) var colorScheme
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(configuration.isPressed ? Color(hex: "#f5f5f7") : .white)
-            .foregroundColor(.primary)
+            .background(
+                configuration.isPressed ? pressedBackgroundColor : normalBackgroundColor
+            )
+            .foregroundColor(textColor)
             .cornerRadius(8)
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(hex: "#d1d1d6"), lineWidth: 1)
+                    .stroke(borderColor, lineWidth: 1)
             )
+    }
+
+    private var normalBackgroundColor: Color {
+        colorScheme == .dark ? Color(hex: "#2c2c2e") : Color.white
+    }
+
+    private var pressedBackgroundColor: Color {
+        colorScheme == .dark ? Color(hex: "#3a3a3c") : Color(hex: "#f5f5f7")
+    }
+
+    private var textColor: Color {
+        colorScheme == .dark ? Color.white : Color.black
+    }
+
+    private var borderColor: Color {
+        colorScheme == .dark ? Color(hex: "#48484a") : Color(hex: "#d1d1d6")
     }
 }
 
