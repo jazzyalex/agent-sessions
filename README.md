@@ -73,6 +73,9 @@ Visualize your AI coding patterns with comprehensive analytics. Track session tr
 ### 🔍 Git Context Inspector
 Deep-dive into the git context of any Codex session. See repository state, branch info, and historical diffs—understand exactly what code changes were visible to Codex during each session. Right-click any Codex session → **Show Git Context**.
 
+### ⏱️ Updated Usage Tracking
+Usage limit tracking and reset times now properly support Codex 0.50+ session format changes. No more "Stale data" warnings—accurate usage tracking with flexible timestamp parsing for both old and new session formats.
+
 ---
 
 ## Core Features
