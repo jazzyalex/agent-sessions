@@ -205,6 +205,7 @@ final class AnalyticsService: ObservableObject {
 
             let sessionsChange = calculatePercentageChange(current: cur.sessionsDistinct, previous: prev.sessionsDistinct)
             let messagesChange = calculatePercentageChange(current: cur.messages, previous: prev.messages)
+            let commandsChange = calculatePercentageChange(current: cur.commands, previous: prev.commands)
             let activeTimeChange = calculatePercentageChange(current: cur.durationSeconds, previous: prev.durationSeconds)
             let avgSessionLengthChange = calculatePercentageChange(current: curAvgSessionLength, previous: prevAvgSessionLength)
 
@@ -213,8 +214,8 @@ final class AnalyticsService: ObservableObject {
                 sessionsChange: sessionsChange,
                 messages: cur.messages,
                 messagesChange: messagesChange,
-                commands: 0,
-                commandsChange: nil,
+                commands: cur.commands,
+                commandsChange: commandsChange,
                 activeTimeSeconds: cur.durationSeconds,
                 activeTimeChange: activeTimeChange,
                 avgSessionLengthSeconds: curAvgSessionLength,

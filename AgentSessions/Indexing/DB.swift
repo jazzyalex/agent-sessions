@@ -355,6 +355,74 @@ actor IndexDB {
         return 0
     }
 
+    /// Sum of duration across sessions that meet a minimum messages threshold.
+    func sumDurationFiltered(sources: [String], dayStart: String?, dayEnd: String?, minMessages: Int) throws -> TimeInterval {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let s = dayStart { clauses.append("day >= ?"); binds.append(s) }
+        if let e = dayEnd { clauses.append("day <= ?"); binds.append(e) }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = """
+        SELECT COALESCE(SUM(dur), 0.0) FROM (
+            SELECT session_id, SUM(duration_sec) AS dur, SUM(messages) AS msgs
+            FROM session_days\(whereSQL)
+            GROUP BY session_id
+            HAVING msgs >= ?
+        )
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db))) }
+        defer { sqlite3_finalize(stmt) }
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+        sqlite3_bind_int(stmt, idx, Int32(minMessages))
+        if sqlite3_step(stmt) == SQLITE_ROW { return sqlite3_column_double(stmt, 0) }
+        return 0.0
+    }
+
+    /// Sum of commands across sessions that meet a minimum messages threshold.
+    func sumCommandsFiltered(sources: [String], dayStart: String?, dayEnd: String?, minMessages: Int) throws -> Int {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let s = dayStart { clauses.append("day >= ?"); binds.append(s) }
+        if let e = dayEnd { clauses.append("day <= ?"); binds.append(e) }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = """
+        SELECT COALESCE(SUM(cmds), 0) FROM (
+            SELECT session_id, SUM(commands) AS cmds, SUM(messages) AS msgs
+            FROM session_days\(whereSQL)
+            GROUP BY session_id
+            HAVING msgs >= ?
+        )
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db))) }
+        defer { sqlite3_finalize(stmt) }
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+        sqlite3_bind_int(stmt, idx, Int32(minMessages))
+        if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int64(stmt, 0)) }
+        return 0
+    }
+
     func sumRollups(sources: [String], dayStart: String?, dayEnd: String?) throws -> (Int, Int, TimeInterval) {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []

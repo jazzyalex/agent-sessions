@@ -29,9 +29,9 @@ actor AnalyticsRepository {
         if minMessages > 0 {
             let sessions = (try? await db.countDistinctSessionsFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0
             let messages = (try? await db.sumMessagesFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0
-            // For now, keep commands and duration from rollups (unfiltered) to avoid heavy queries
-            let roll = (try? await db.sumRollups(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? (0, 0, 0.0)
-            return Summary(sessionsDistinct: sessions, messages: messages, commands: roll.1, durationSeconds: roll.2)
+            let commands = (try? await db.sumCommandsFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0
+            let duration = (try? await db.sumDurationFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0.0
+            return Summary(sessionsDistinct: sessions, messages: messages, commands: commands, durationSeconds: duration)
         } else {
             let sessions = (try? await db.countDistinctSessions(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? 0
             let roll = (try? await db.sumRollups(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? (0, 0, 0.0)
