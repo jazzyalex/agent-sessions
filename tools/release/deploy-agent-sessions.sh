@@ -154,22 +154,73 @@ else
     green "Fixed DMG URLs in appcast to point to GitHub Releases"
 
     # Add release notes from CHANGELOG.md to prevent Sparkle UI hang
+    # CRITICAL: Sparkle UI will hang without release notes!
     if [[ -f "docs/CHANGELOG.md" ]]; then
-      NOTES=$(sed -n "/^## \[${VERSION}\]/,/^## \[/{ /^## \[${VERSION}\]/d; /^## \[/d; p; }" docs/CHANGELOG.md | \
-        sed 's/^### \(.*\)/<strong>\1<\/strong>/g; s/^- \(.*\)/<li>\1<\/li>/g')
+      # Patch version rule: A.B.C includes both [A.B] and [A.B.C] release notes
+      # Example: 2.5.1 includes notes from both [2.5] and [2.5.1]
+      NOTES=""
+      if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+)\.([0-9]+)$ ]]; then
+        # Patch version (A.B.C) - include parent version notes
+        PARENT_VERSION="${BASH_REMATCH[1]}"
+        yellow "Patch version detected: ${VERSION} - including notes from ${PARENT_VERSION}"
+
+        # Extract parent version notes
+        PARENT_NOTES=$(sed -n "/^## \[${PARENT_VERSION}\]/,/^## \[/{ /^## \[${PARENT_VERSION}\]/d; /^## \[/d; p; }" docs/CHANGELOG.md 2>/dev/null || true)
+        # Extract patch version notes
+        PATCH_NOTES=$(sed -n "/^## \[${VERSION}\]/,/^## \[/{ /^## \[${VERSION}\]/d; /^## \[/d; p; }" docs/CHANGELOG.md 2>/dev/null || true)
+
+        # Combine notes (patch notes first, then parent if patch is empty)
+        if [[ -n "$PATCH_NOTES" ]]; then
+          NOTES="$PATCH_NOTES"
+        elif [[ -n "$PARENT_NOTES" ]]; then
+          NOTES="$PARENT_NOTES"
+        fi
+      else
+        # Major/minor version (A.B) - extract only this version
+        NOTES=$(sed -n "/^## \[${VERSION}\]/,/^## \[/{ /^## \[${VERSION}\]/d; /^## \[/d; p; }" docs/CHANGELOG.md 2>/dev/null || true)
+      fi
 
       if [[ -n "$NOTES" ]]; then
-        # Insert description element after pubDate
-        sed -i '' "/<pubDate>/a\\
-\\            <description><![CDATA[\\
-\\                <h2>What's New in ${VERSION}</h2>\\
-${NOTES}\\
-\\            ]]></description>
-" "$UPDATES_DIR/appcast.xml"
+        # Convert markdown to HTML
+        NOTES_HTML=$(echo "$NOTES" | sed 's/^### \(.*\)/<h3>\1<\/h3>/g; s/^- \(.*\)/<p>\1<\/p>/g')
+
+        # Use Python to insert description (most reliable for XML manipulation)
+        python3 << PYEOF
+import re
+
+# Read appcast
+with open("$UPDATES_DIR/appcast.xml", "r") as f:
+    content = f.read()
+
+# Create description element
+description = """            <description><![CDATA[
+                <h2>What's New in ${VERSION}</h2>
+${NOTES_HTML}
+            ]]></description>"""
+
+# Insert after pubDate
+content = re.sub(
+    r'(<pubDate>.*?</pubDate>)',
+    r'\1\n' + description,
+    content,
+    flags=re.DOTALL
+)
+
+# Write back
+with open("$UPDATES_DIR/appcast.xml", "w") as f:
+    f.write(content)
+PYEOF
+
         green "Added release notes from CHANGELOG.md to appcast"
       else
-        yellow "WARNING: No release notes found for ${VERSION} in CHANGELOG.md"
+        red "ERROR: No release notes found for ${VERSION} in CHANGELOG.md"
+        red "Sparkle UI will HANG without release notes! Add notes and re-run."
+        exit 1
       fi
+    else
+      red "ERROR: docs/CHANGELOG.md not found"
+      red "Sparkle UI will HANG without release notes!"
+      exit 1
     fi
 
     # Copy appcast to docs/ for GitHub Pages
