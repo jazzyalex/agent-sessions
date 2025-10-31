@@ -247,6 +247,28 @@ sed -i '' -E \
   "s#releases/download/v[0-9.]+/AgentSessions-[0-9.]+\.dmg#releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg#g" \
   "$REPO_ROOT/docs/index.html"
 
+# Ensure visible version strings in buttons and file names also updated
+sed -i '' -E \
+  "s/Download Agent Sessions [0-9.]+/Download Agent Sessions ${VERSION}/g" \
+  "$REPO_ROOT/README.md" "$REPO_ROOT/docs/index.html"
+sed -i '' -E \
+  "s/AgentSessions-[0-9.]+\\.dmg/AgentSessions-${VERSION}.dmg/g" \
+  "$REPO_ROOT/README.md" "$REPO_ROOT/docs/index.html"
+
+# Validate links and labels; fail hard if mismatch
+EXPECTED_URL="releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg"
+EXPECTED_LABEL="Download Agent Sessions ${VERSION}"
+for f in "$REPO_ROOT/README.md" "$REPO_ROOT/docs/index.html"; do
+  if ! grep -q "$EXPECTED_URL" "$f"; then
+    red "ERROR: $f does not contain expected download URL: $EXPECTED_URL"
+    exit 1
+  fi
+  if ! grep -q "$EXPECTED_LABEL" "$f"; then
+    red "ERROR: $f does not contain expected label: $EXPECTED_LABEL"
+    exit 1
+  fi
+done
+
 git add README.md docs/index.html
 if ! git diff --staged --quiet; then
   git commit -m "docs: update download links for ${VERSION}"
@@ -255,18 +277,7 @@ else
   yellow "No README/docs link changes to commit."
 fi
 
-# Ensure visible version strings in buttons and file names also updated (no release notes)
-sed -i '' -E \
-  "s/Download Agent Sessions [0-9.]+/Download Agent Sessions ${VERSION}/g" \
-  "$REPO_ROOT/README.md" "$REPO_ROOT/docs/index.html"
-sed -i '' -E \
-  "s/AgentSessions-[0-9.]+\\.dmg/AgentSessions-${VERSION}.dmg/g" \
-  "$REPO_ROOT/README.md"
-if ! git diff --quiet README.md docs/index.html; then
-  git add README.md docs/index.html
-  git commit -m "docs: normalize visible version labels to ${VERSION}"
-  git push origin HEAD:main
-fi
+# (labels/filenames normalized and validated above)
 
 # Always update the tap via GitHub API (no local clone required)
 if [[ "${UPDATE_CASK}" == "1" ]]; then
