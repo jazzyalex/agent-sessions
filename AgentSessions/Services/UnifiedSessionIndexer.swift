@@ -302,8 +302,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Optional quick filter: sessions with commands (tool calls)
         if hasCommandsOnly {
             results = results.filter { s in
-                // Only Codex supports tool calls filter; exclude other sources
-                guard s.source == .codex else { return false }
+                if s.source != .codex { return true } // keep non‑Codex sessions
                 if !s.events.isEmpty {
                     return s.events.contains { $0.kind == .tool_call }
                 } else {
