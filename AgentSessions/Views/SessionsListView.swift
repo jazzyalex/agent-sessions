@@ -13,6 +13,13 @@ struct SessionsListView: View {
 
     @State private var cachedRows: [Session] = []
 
+    // Column visibility via @AppStorage so changes propagate immediately
+    @AppStorage("ShowTitleColumn") private var showTitleColumn: Bool = true
+    @AppStorage("ShowModifiedColumn") private var showModifiedColumn: Bool = true
+    @AppStorage("ShowProjectColumn") private var showProjectColumn: Bool = true
+    @AppStorage("ShowMsgsColumn") private var showMsgsColumn: Bool = true
+    @AppStorage("ShowSizeColumn") private var showSizeColumn: Bool = true
+
     private var rows: [Session] { cachedRows }
 
     var body: some View {
@@ -25,9 +32,9 @@ struct SessionsListView: View {
                     .truncationMode(.tail)
             }
             .width(
-                min: indexer.showTitleColumn ? 160 : 0,
-                ideal: indexer.showTitleColumn ? 320 : 0,
-                max: indexer.showTitleColumn ? 2000 : 0
+                min: showTitleColumn ? 160 : 0,
+                ideal: showTitleColumn ? 320 : 0,
+                max: showTitleColumn ? 2000 : 0
             )
 
             // Date (renamed from Modified)
@@ -41,9 +48,9 @@ struct SessionsListView: View {
                     .help(helpText)
             }
             .width(
-                min: indexer.showModifiedColumn ? 120 : 0,
-                ideal: indexer.showModifiedColumn ? 120 : 0,
-                max: indexer.showModifiedColumn ? 140 : 0
+                min: showModifiedColumn ? 120 : 0,
+                ideal: showModifiedColumn ? 120 : 0,
+                max: showModifiedColumn ? 140 : 0
             )
 
             // Project
@@ -61,9 +68,9 @@ struct SessionsListView: View {
                     }
             }
             .width(
-                min: indexer.showProjectColumn ? 120 : 0,
-                ideal: indexer.showProjectColumn ? 160 : 0,
-                max: indexer.showProjectColumn ? 240 : 0
+                min: showProjectColumn ? 120 : 0,
+                ideal: showProjectColumn ? 160 : 0,
+                max: showProjectColumn ? 240 : 0
             )
 
             // Msgs
@@ -72,9 +79,9 @@ struct SessionsListView: View {
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
             }
             .width(
-                min: indexer.showMsgsColumn ? 64 : 0,
-                ideal: indexer.showMsgsColumn ? 64 : 0,
-                max: indexer.showMsgsColumn ? 80 : 0
+                min: showMsgsColumn ? 64 : 0,
+                ideal: showMsgsColumn ? 64 : 0,
+                max: showMsgsColumn ? 80 : 0
             )
 
             // Size
@@ -88,9 +95,9 @@ struct SessionsListView: View {
                     .foregroundStyle(.secondary)
             }
             .width(
-                min: indexer.showSizeColumn ? 72 : 0,
-                ideal: indexer.showSizeColumn ? 80 : 0,
-                max: indexer.showSizeColumn ? 100 : 0
+                min: showSizeColumn ? 72 : 0,
+                ideal: showSizeColumn ? 80 : 0,
+                max: showSizeColumn ? 100 : 0
             )
 
         }
