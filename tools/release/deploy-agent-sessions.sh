@@ -340,6 +340,14 @@ CASK
       -f content="$B64" \
       -f branch=main >/dev/null
   fi
+
+  # Validate cask update via API (avoids raw cache)
+  CASK_BODY=$(gh api -H "Accept: application/vnd.github+json" \
+    "/repos/${CASK_REPO}/contents/${CASK_PATH}" --jq .content | tr -d '\n' | base64 --decode)
+  if ! printf "%s" "$CASK_BODY" | grep -q "version \"${VERSION}\""; then
+    red "ERROR: Homebrew cask did not update to version ${VERSION}"
+    exit 1
+  fi
 fi
 
 green "==> Creating or updating GitHub Release"
