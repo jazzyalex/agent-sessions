@@ -470,13 +470,6 @@ struct UnifiedSessionsView: View {
             UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator)
         }
         ToolbarItem(placement: .automatic) {
-            Toggle(isOn: $unified.hasCommandsOnly) {
-                Text("Has Commands")
-            }
-            .toggleStyle(.button)
-            .help("Show only sessions that include tool/command executions")
-        }
-        ToolbarItem(placement: .automatic) {
             Toggle(isOn: $unified.showFavoritesOnly) {
                 Label("Favorites", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
             }
