@@ -46,7 +46,7 @@ struct AgentSessionsApp: App {
                                 })
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
-                
+                .environmentObject(indexer.columnVisibility)
                 .environmentObject(updaterController)
                 .background(WindowAutosave(name: "MainWindow"))
                 .onAppear {
