@@ -177,7 +177,9 @@ struct UnifiedSessionsView: View {
             TableColumn("Session", value: \Session.title) { s in
                 SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
             }
-            .width(min: 160, ideal: 320, max: 2000)
+            .width(min: codexIndexer.showTitleColumn ? 160 : 0,
+                   ideal: codexIndexer.showTitleColumn ? 320 : 0,
+                   max: codexIndexer.showTitleColumn ? 2000 : 0)
 
             TableColumn("Date", value: \Session.modifiedAt) { s in
                 let display = SessionIndexer.ModifiedDisplay(rawValue: modifiedDisplayRaw) ?? .relative
@@ -188,7 +190,9 @@ struct UnifiedSessionsView: View {
                     .foregroundStyle(.secondary)
                     .help(helpText)
             }
-            .width(min: 120, ideal: 120, max: 140)
+            .width(min: codexIndexer.showModifiedColumn ? 120 : 0,
+                   ideal: codexIndexer.showModifiedColumn ? 120 : 0,
+                   max: codexIndexer.showModifiedColumn ? 140 : 0)
 
             TableColumn("Project", value: \Session.repoDisplay) { s in
                 let display: String = {
@@ -204,13 +208,17 @@ struct UnifiedSessionsView: View {
                         if let name = s.repoName { unified.projectFilter = name; unified.recomputeNow() }
                     }
             }
-            .width(min: 120, ideal: 160, max: 240)
+            .width(min: codexIndexer.showProjectColumn ? 120 : 0,
+                   ideal: codexIndexer.showProjectColumn ? 160 : 0,
+                   max: codexIndexer.showProjectColumn ? 240 : 0)
 
             TableColumn("Msgs", value: \Session.messageCount) { s in
                 Text(String(s.messageCount))
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
             }
-            .width(min: 64, ideal: 64, max: 80)
+            .width(min: codexIndexer.showMsgsColumn ? 64 : 0,
+                   ideal: codexIndexer.showMsgsColumn ? 64 : 0,
+                   max: codexIndexer.showMsgsColumn ? 80 : 0)
 
             // File size column
             TableColumn("Size") { s in
