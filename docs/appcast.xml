@@ -3,21 +3,12 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.5</title>
-            <pubDate>Thu, 30 Oct 2025 14:50:50 -0700</pubDate>
-            <description><![CDATA[
-                <h2>What's New in 2.5</h2>
-                <ul>
-                    <li><strong>Advanced Analytics:</strong> Visualize AI coding patterns with session trends, agent breakdown, and time-of-day heatmap</li>
-                    <li><strong>Git Context Inspector:</strong> View repository state and historical diffs for Codex sessions</li>
-                    <li><strong>Performance:</strong> SQLite indexing for improved background performance</li>
-                    <li><strong>Fixes:</strong> Theme updates, usage tracking improvements, filtering fixes</li>
-                </ul>
-            ]]></description>
-            <sparkle:version>2</sparkle:version>
-            <sparkle:shortVersionString>2.5</sparkle:shortVersionString>
+            <title>2.5.1</title>
+            <pubDate>Fri, 31 Oct 2025 11:45:30 -0700</pubDate>
+            <sparkle:version>3</sparkle:version>
+            <sparkle:shortVersionString>2.5.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5/AgentSessions-2.5.dmg" length="6065245" type="application/octet-stream" sparkle:edSignature="nsAJD1xOQEVGBhCwBITbyhPY1XjTx20p5ePtQBbofghowriUUx1Np2AGqqR/uEZ9y4Wwd833bc3RuhKepVV2AA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.1/AgentSessions-2.5.1.dmg" length="6069153" type="application/octet-stream" sparkle:edSignature="shx2ZDowLp0knLi4ZJMd64sz8iySzW0SFtqKAEARziurZwmh+jPTUItjllZ8Bx/qfTDnNAHcmLvMn2Nn5yoJAg=="/>
         </item>
     </channel>
 </rss>
