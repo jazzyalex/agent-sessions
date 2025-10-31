@@ -140,6 +140,7 @@ VERSION=2.5.1 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
 6. **Update Documentation**
    - Updates download links in README.md and docs/index.html
    - Normalizes visible version strings in download button labels and file names
+   - Validates that both files contain the expected `{VERSION}` URL and label; fails hard if mismatched
    - Does not inject release notes; README/site remain feature-focused
    - Commits and pushes changes
 
@@ -198,8 +199,11 @@ grep -E "releases/download/v{VERSION}/AgentSessions-{VERSION}\.dmg|Download Agen
 grep -E "releases/download/v{VERSION}/AgentSessions-{VERSION}\.dmg|Download Agent Sessions {VERSION}" docs/index.html
 # Should find: AgentSessions-{VERSION}.dmg URL and a visible "Download Agent Sessions {VERSION}" label
 
-# 8. Verify Homebrew cask updated
-curl -s https://raw.githubusercontent.com/jazzyalex/homebrew-agent-sessions/main/Casks/agent-sessions.rb | grep -E "(version|sha256)" | head -2
+# 8. Verify Homebrew cask updated (API avoids raw cache)
+gh api -H "Accept: application/vnd.github+json" \
+  "/repos/jazzyalex/homebrew-agent-sessions/contents/Casks/agent-sessions.rb" \
+  --jq '.content' | tr -d '\n' | base64 --decode | \
+  grep -E "(version \"{VERSION}\"|sha256 )"
 # Expected: version "{VERSION}" and matching sha256
 
 # 9. Verify release notes match CHANGELOG.md
