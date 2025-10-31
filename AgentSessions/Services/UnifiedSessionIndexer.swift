@@ -30,7 +30,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var selectedModel: String? = nil
     @Published var selectedKinds: Set<SessionEventKind> = Set(SessionEventKind.allCases)
     @Published var projectFilter: String? = nil
-    @Published var hasCommandsOnly: Bool = false { didSet { recomputeNow() } }
+    @Published var hasCommandsOnly: Bool = UserDefaults.standard.bool(forKey: "UnifiedHasCommandsOnly") {
+        didSet {
+            UserDefaults.standard.set(hasCommandsOnly, forKey: "UnifiedHasCommandsOnly")
+            recomputeNow()
+        }
+    }
 
     // Source filters (persisted with @Published for Combine compatibility)
     @Published var includeCodex: Bool = UserDefaults.standard.object(forKey: "IncludeCodexSessions") as? Bool ?? true {
@@ -91,6 +96,12 @@ final class UnifiedSessionIndexer: ObservableObject {
         self.codex = codexIndexer
         self.claude = claudeIndexer
         self.gemini = geminiIndexer
+        // Observe UserDefaults changes to sync external toggles (Preferences) to this model
+        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            let v = UserDefaults.standard.bool(forKey: "UnifiedHasCommandsOnly")
+            if v != self.hasCommandsOnly { self.hasCommandsOnly = v }
+        }
 
         // Merge underlying allSessions whenever any changes
         Publishers.CombineLatest3(codex.$allSessions, claude.$allSessions, gemini.$allSessions)
@@ -291,6 +302,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Optional quick filter: sessions with commands (tool calls)
         if hasCommandsOnly {
             results = results.filter { s in
+                // Only Codex supports tool calls filter; exclude other sources
+                guard s.source == .codex else { return false }
                 if !s.events.isEmpty {
                     return s.events.contains { $0.kind == .tool_call }
                 } else {
@@ -298,6 +311,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 }
             }
         }
+
 
         // Favorites-only filter (AND with text search)
         if showFavoritesOnly { results = results.filter { $0.isFavorite } }

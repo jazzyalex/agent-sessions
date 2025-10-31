@@ -293,18 +293,16 @@ struct PreferencesView: View {
                         .help("Show or hide message counts in the Sessions list")
                     Toggle("Modified date", isOn: $indexer.showModifiedColumn)
                         .help("Show or hide the modified date column")
-                    Toggle("Size column", isOn: $indexer.showSizeColumn)
-                        .help("Show or hide the file size column in the Sessions list")
+                    Toggle("Size column", isOn: Binding(
+                        get: { UserDefaults.standard.object(forKey: "UnifiedShowSizeColumn") as? Bool ?? true },
+                        set: { UserDefaults.standard.set($0, forKey: "UnifiedShowSizeColumn") }
+                    ))
+                    .help("Show or hide the file size column in the Unified list")
                     Toggle("Star in column", isOn: Binding(
                         get: { UserDefaults.standard.object(forKey: "UnifiedShowStarColumn") as? Bool ?? true },
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowStarColumn") }
                     ))
                     .help("Show or hide the favorite star button in the CLI Agent column")
-                    Toggle("Size column (Unified)", isOn: Binding(
-                        get: { UserDefaults.standard.object(forKey: "UnifiedShowSizeColumn") as? Bool ?? true },
-                        set: { UserDefaults.standard.set($0, forKey: "UnifiedShowSizeColumn") }
-                    ))
-                    .help("Show or hide the file size column in the Unified list")
                 }
                 // Micro-header for filters
                 Text("Filters")
@@ -317,6 +315,11 @@ struct PreferencesView: View {
                     Toggle("1–2 messages", isOn: $hideLowMessageSessionsPref)
                         .onChange(of: hideLowMessageSessionsPref) { _, _ in indexer.recomputeNow() }
                         .help("Hide sessions with only one or two messages")
+                    Toggle("Tool calls (Codex only)", isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: "UnifiedHasCommandsOnly") },
+                        set: { UserDefaults.standard.set($0, forKey: "UnifiedHasCommandsOnly") }
+                    ))
+                    .help("Show only Codex sessions that contain recorded tool/command calls. Claude and Gemini are excluded when enabled.")
                 }
 
                 Divider()
