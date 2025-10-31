@@ -194,22 +194,22 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .controlSize(.regular)
             .frame(width: 200)
             .accessibilityLabel("View Style")
-            .help("Switch between Transcript and Terminal view (⌘⇧T). Terminal colors: cyan=user, green=assistant, magenta=command, dim=[out] output, red=error.")
+            .help("Switch between Transcript and Terminal view (⌘⇧T). Terminal colors: blue=user, gray=assistant, green=command, dim green=[out] output, red=error.")
             .padding(.leading, 12)
 
             Button(action: { showLegendPopover.toggle() }) {
-                Image(systemName: "questionmark.circle")
+                Image(systemName: "info.circle")
             }
             .buttonStyle(.borderless)
             .help("Show Terminal color legend")
             .popover(isPresented: $showLegendPopover, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Terminal Legend").font(.system(size: 13, weight: .semibold))
-                    Text("> user: cyan")
-                    Text("[assistant]: green")
-                    Text("› tool: … : magenta")
-                    Text("[out] … : dim")
-                    Text("! error … : red")
+                    HStack(spacing: 6) { Text("> user") .foregroundStyle(.blue) }
+                    HStack(spacing: 6) { Text("[assistant]") .foregroundStyle(.secondary) }
+                    HStack(spacing: 6) { Text("› tool: …") .foregroundStyle(.green) }
+                    HStack(spacing: 6) { Text("[out] …") .foregroundStyle(Color.green.opacity(0.6)) }
+                    HStack(spacing: 6) { Text("! error …") .foregroundStyle(.red) }
                 }
                 .padding(10)
                 .frame(width: 220)
