@@ -49,6 +49,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var assistantRanges: [NSRange] = []
     @State private var outputRanges: [NSRange] = []
     @State private var errorRanges: [NSRange] = []
+    @State private var hasCommands: Bool = false
+    @State private var showLegendPopover: Bool = false
 
     // Toggles (view-scoped)
     @State private var showTimestamps: Bool = false
@@ -192,8 +194,26 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .controlSize(.regular)
             .frame(width: 200)
             .accessibilityLabel("View Style")
-            .help("Switch between Transcript and Terminal view (⌘⇧T)")
+            .help("Switch between Transcript and Terminal view (⌘⇧T). Terminal colors: cyan=user, green=assistant, magenta=command, dim=[out] output, red=error.")
             .padding(.leading, 12)
+
+            Button(action: { showLegendPopover.toggle() }) {
+                Image(systemName: "questionmark.circle")
+            }
+            .buttonStyle(.borderless)
+            .help("Show Terminal color legend")
+            .popover(isPresented: $showLegendPopover, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Terminal Legend").font(.system(size: 13, weight: .semibold))
+                    Text("> user: cyan")
+                    Text("[assistant]: green")
+                    Text("› tool: … : magenta")
+                    Text("[out] … : dim")
+                    Text("! error … : red")
+                }
+                .padding(10)
+                .frame(width: 220)
+            }
 
             // System flexible space pushes trailing group to the right
             Spacer()
@@ -361,9 +381,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 if mode == .terminal && shouldColorize {
                     commandRanges = terminalCommandRangesCache[key] ?? []
                     userRanges = terminalUserRangesCache[key] ?? []
+                    hasCommands = !(commandRanges.isEmpty)
                     findAdditionalRanges()
                 } else {
                     commandRanges = []; userRanges = []; assistantRanges = []; outputRanges = []; errorRanges = []
+                    hasCommands = session.events.contains { $0.kind == .tool_call }
                 }
                 lastBuildKey = key
                 // Reset find state
@@ -378,6 +400,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 if let t = externalCachedTranscript(for: session.id) {
                     transcript = t
                     commandRanges = []; userRanges = []; assistantRanges = []; outputRanges = []; errorRanges = []
+                    hasCommands = session.events.contains { $0.kind == .tool_call }
                     transcriptCache[key] = t
                     lastBuildKey = key
                     performFind(resetIndex: true)
@@ -399,6 +422,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.assistantRanges = []
                             self.outputRanges = []
                             self.errorRanges = []
+                            self.hasCommands = !built.1.isEmpty
                             self.findAdditionalRanges()
                             self.transcriptCache[key] = built.0
                             self.terminalCommandRangesCache[key] = built.1
@@ -417,6 +441,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.assistantRanges = []
                             self.outputRanges = []
                             self.errorRanges = []
+                            self.hasCommands = session.events.contains { $0.kind == .tool_call }
                             self.transcriptCache[key] = t
                             self.lastBuildKey = key
                             self.performFind(resetIndex: true)
@@ -462,6 +487,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 assistantRanges = []
                 outputRanges = []
                 errorRanges = []
+                hasCommands = !built.1.isEmpty
                 findAdditionalRanges()
             } else {
                 transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: mode)
@@ -470,6 +496,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 assistantRanges = []
                 outputRanges = []
                 errorRanges = []
+                hasCommands = session.events.contains { $0.kind == .tool_call }
             }
         }
 

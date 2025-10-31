@@ -470,6 +470,13 @@ struct UnifiedSessionsView: View {
             UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator)
         }
         ToolbarItem(placement: .automatic) {
+            Toggle(isOn: $unified.hasCommandsOnly) {
+                Text("Has Commands")
+            }
+            .toggleStyle(.button)
+            .help("Show only sessions that include tool/command executions")
+        }
+        ToolbarItem(placement: .automatic) {
             Toggle(isOn: $unified.showFavoritesOnly) {
                 Label("Favorites", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
             }
@@ -480,21 +487,19 @@ struct UnifiedSessionsView: View {
         ToolbarItem(placement: .automatic) {
             AnalyticsButtonView()
         }
-        ToolbarItem(placement: .automatic) {
+        ToolbarItemGroup(placement: .automatic) {
             Button(action: { if let s = selectedSession { resume(s) } }) {
                 Label("Resume", systemImage: "play.circle")
             }
             .keyboardShortcut("r", modifiers: [.command, .control])
             .disabled(selectedSession == nil || selectedSession?.source == .gemini)
             .help("Resume the selected session in its original CLI (⌃⌘R)")
-        }
-        ToolbarItem(placement: .automatic) {
+
             Button(action: { if let s = selectedSession { openDir(s) } }) { Label("Open Working Directory", systemImage: "folder") }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(selectedSession == nil)
                 .help("Reveal the selected session's working directory in Finder (⌘⇧O)")
-        }
-        ToolbarItem(placement: .automatic) {
+
             Button(action: { if let s = selectedSession { showGitInspector(s) } }) { Label("Git Context", systemImage: "clock.arrow.circlepath") }
                 .keyboardShortcut("g", modifiers: [.command, .shift])
                 .disabled(selectedSession == nil)
