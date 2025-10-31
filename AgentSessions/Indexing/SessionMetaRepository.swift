@@ -26,7 +26,35 @@ actor SessionMetaRepository {
                 repoName: r.repo,
                 lightweightTitle: r.title
             )
-            out.append(session)
+            // Augment with commands count from DB for lightweight filtering
+            var enriched = session
+            // Note: we avoid changing hashing; only attach metadata
+            enriched = Session(id: session.id,
+                               source: session.source,
+                               startTime: session.startTime,
+                               endTime: session.endTime,
+                               model: session.model,
+                               filePath: session.filePath,
+                               fileSizeBytes: session.fileSizeBytes,
+                               eventCount: session.eventCount,
+                               events: session.events,
+                               cwd: session.lightweightCwd,
+                               repoName: r.repo,
+                               lightweightTitle: session.lightweightTitle)
+            // Reconstruct with lightweightCommands via Codable? Simpler: extend Session with helper? Keep minimal by using a factory below.
+            out.append(Session(id: enriched.id,
+                               source: enriched.source,
+                               startTime: enriched.startTime,
+                               endTime: enriched.endTime,
+                               model: enriched.model,
+                               filePath: enriched.filePath,
+                               fileSizeBytes: enriched.fileSizeBytes,
+                               eventCount: enriched.eventCount,
+                               events: enriched.events,
+                               cwd: enriched.lightweightCwd,
+                               repoName: r.repo,
+                               lightweightTitle: enriched.lightweightTitle,
+                               lightweightCommands: r.commands))
         }
         return out
     }

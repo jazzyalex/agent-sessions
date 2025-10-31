@@ -30,6 +30,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var selectedModel: String? = nil
     @Published var selectedKinds: Set<SessionEventKind> = Set(SessionEventKind.allCases)
     @Published var projectFilter: String? = nil
+    @Published var hasCommandsOnly: Bool = false { didSet { recomputeNow() } }
 
     // Source filters (persisted with @Published for Combine compatibility)
     @Published var includeCodex: Bool = UserDefaults.standard.object(forKey: "IncludeCodexSessions") as? Bool ?? true {
@@ -286,6 +287,17 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Apply FilterEngine (query, date, model, kinds, project, path)
         let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
         var results = FilterEngine.filterSessions(base, filters: filters)
+
+        // Optional quick filter: sessions with commands (tool calls)
+        if hasCommandsOnly {
+            results = results.filter { s in
+                if !s.events.isEmpty {
+                    return s.events.contains { $0.kind == .tool_call }
+                } else {
+                    return (s.lightweightCommands ?? 0) > 0
+                }
+            }
+        }
 
         // Favorites-only filter (AND with text search)
         if showFavoritesOnly { results = results.filter { $0.isFavorite } }

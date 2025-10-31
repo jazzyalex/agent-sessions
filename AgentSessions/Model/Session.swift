@@ -10,6 +10,8 @@ public struct Session: Identifiable, Equatable, Codable {
     public let fileSizeBytes: Int?
     public let eventCount: Int
     public let events: [SessionEvent]
+    // Lightweight commands count from DB (when events are not loaded)
+    public let lightweightCommands: Int?
 
     // Lightweight session metadata (when events is empty)
     public let lightweightCwd: String?
@@ -39,6 +41,7 @@ public struct Session: Identifiable, Equatable, Codable {
         self.events = events
         self.lightweightCwd = nil
         self.lightweightTitle = nil
+        self.lightweightCommands = nil
         self.isFavorite = false
     }
 
@@ -54,7 +57,8 @@ public struct Session: Identifiable, Equatable, Codable {
                 events: [SessionEvent],
                 cwd: String?,
                 repoName: String?,
-                lightweightTitle: String?) {
+                lightweightTitle: String?,
+                lightweightCommands: Int? = nil) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -66,6 +70,7 @@ public struct Session: Identifiable, Equatable, Codable {
         self.events = events
         self.lightweightCwd = cwd
         self.lightweightTitle = lightweightTitle
+        self.lightweightCommands = lightweightCommands
         self.isFavorite = false
     }
 
@@ -81,6 +86,7 @@ public struct Session: Identifiable, Equatable, Codable {
         case events
         case lightweightCwd
         case lightweightTitle
+        case lightweightCommands
         // isFavorite intentionally excluded (runtime only)
     }
 
