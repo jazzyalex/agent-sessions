@@ -148,38 +148,15 @@ struct UnifiedSessionsView: View {
     private var listPane: some View {
         ZStack(alignment: .bottom) {
         Table(cachedRows, selection: $tableSelection, sortOrder: $sortOrder) {
-            // Favorite column appears first; toggleable via prefs
-            TableColumn("★") { s in
-                Button(action: { unified.toggleFavorite(s.id) }) {
-                    Image(systemName: s.isFavorite ? "star.fill" : "star")
-                        .imageScale(.medium)
-                        .foregroundStyle(.primary)
-                }
-                .buttonStyle(.plain)
-                .help(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
-                .accessibilityLabel(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+            if showStarColumn {
+                TableColumn("★") { cellFavorite(for: $0) }
+                    .width(min: 36, ideal: 40, max: 44)
             }
-            .width(min: showStarColumn ? 36 : 0,
-                   ideal: showStarColumn ? 40 : 0,
-                   max: showStarColumn ? 44 : 0)
 
-            // CLI Agent source column
-            TableColumn("CLI Agent", value: \Session.sourceKey) { s in
-                let label: String = {
-                    switch s.source {
-                    case .codex: return "Codex"
-                    case .claude: return "Claude"
-                    case .gemini: return "Gemini"
-                    }
-                }()
-                HStack(spacing: 6) {
-                    Text(label)
-                        .font(.system(size: 12))
-                        .foregroundStyle(!stripMonochrome ? sourceAccent(s) : .secondary)
-                    Spacer(minLength: 4)
-                }
-            }
-            .width(min: showSourceColumn ? 90 : 0, ideal: showSourceColumn ? 100 : 0, max: showSourceColumn ? 120 : 0)
+            TableColumn("CLI Agent", value: \Session.sourceKey) { cellSource(for: $0) }
+                .width(min: showSourceColumn ? 90 : 0,
+                       ideal: showSourceColumn ? 100 : 0,
+                       max: showSourceColumn ? 120 : 0)
 
             TableColumn("Session", value: \Session.title) { s in
                 SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
@@ -584,6 +561,34 @@ struct UnifiedSessionsView: View {
         columnLayoutID = UUID()
         updateCachedRows()
         updateSelectionBridge()
+    }
+
+    @ViewBuilder
+    private func cellFavorite(for session: Session) -> some View {
+        Button(action: { unified.toggleFavorite(session.id) }) {
+            Image(systemName: session.isFavorite ? "star.fill" : "star")
+                .imageScale(.medium)
+                .foregroundStyle(.primary)
+        }
+        .buttonStyle(.plain)
+        .help(session.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+        .accessibilityLabel(session.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+    }
+
+    @ViewBuilder
+    private func cellSource(for session: Session) -> some View {
+        let label: String
+        switch session.source {
+        case .codex: label = "Codex"
+        case .claude: label = "Claude"
+        case .gemini: label = "Gemini"
+        }
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(!stripMonochrome ? sourceAccent(session) : .secondary)
+            Spacer(minLength: 4)
+        }
     }
 
     private func openDir(_ s: Session) {
