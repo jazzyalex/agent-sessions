@@ -104,6 +104,26 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         colorScheme: colorScheme
                     )
 
+                    // Inline notice for sessions without commands when in Terminal mode
+                    if shouldColorize && !hasCommands {
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle")
+                            Text("No commands recorded; Terminal matches Transcript")
+                        }
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color(nsColor: .textBackgroundColor).opacity(0.9))
+                                .shadow(radius: 1)
+                        )
+                        .padding([.top, .leading], 8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .allowsHitTesting(false)
+                    }
+
                     // Show animation during lazy load OR full refresh
                     if shouldShowLoadingAnimation {
                         LoadingAnimationView(
