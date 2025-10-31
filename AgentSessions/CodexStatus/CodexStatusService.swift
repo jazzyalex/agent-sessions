@@ -20,6 +20,7 @@ struct CodexUsageSnapshot: Equatable {
     var lastInputTokens: Int? = nil
     var lastCachedInputTokens: Int? = nil
     var lastOutputTokens: Int? = nil
+    var lastReasoningOutputTokens: Int? = nil
     var lastTotalTokens: Int? = nil
 }
 
@@ -41,6 +42,7 @@ final class CodexUsageModel: ObservableObject {
     @Published var lastInputTokens: Int? = nil
     @Published var lastCachedInputTokens: Int? = nil
     @Published var lastOutputTokens: Int? = nil
+    @Published var lastReasoningOutputTokens: Int? = nil
     @Published var lastTotalTokens: Int? = nil
 
     private var service: CodexStatusService?
@@ -125,6 +127,7 @@ final class CodexUsageModel: ObservableObject {
         lastInputTokens = s.lastInputTokens
         lastCachedInputTokens = s.lastCachedInputTokens
         lastOutputTokens = s.lastOutputTokens
+        lastReasoningOutputTokens = s.lastReasoningOutputTokens
         lastTotalTokens = s.lastTotalTokens
     }
 
@@ -580,6 +583,7 @@ actor CodexStatusService {
                 s.lastInputTokens = intValue(usage["input_tokens"]) ?? s.lastInputTokens
                 s.lastCachedInputTokens = intValue(usage["cached_input_tokens"]) ?? s.lastCachedInputTokens
                 s.lastOutputTokens = intValue(usage["output_tokens"]) ?? s.lastOutputTokens
+                s.lastReasoningOutputTokens = intValue(usage["reasoning_output_tokens"]) ?? s.lastReasoningOutputTokens
                 if let i = s.lastInputTokens, let o = s.lastOutputTokens {
                     s.lastTotalTokens = i + o
                 } else {
@@ -599,6 +603,7 @@ actor CodexStatusService {
                     s.lastInputTokens = intValue(last["input_tokens"]) ?? s.lastInputTokens
                     s.lastCachedInputTokens = intValue(last["cached_input_tokens"]) ?? s.lastCachedInputTokens
                     s.lastOutputTokens = intValue(last["output_tokens"]) ?? s.lastOutputTokens
+                    s.lastReasoningOutputTokens = intValue(last["reasoning_output_tokens"]) ?? s.lastReasoningOutputTokens
                     s.lastTotalTokens = intValue(last["total_tokens"]) ?? ((s.lastInputTokens ?? 0) + (s.lastOutputTokens ?? 0))
                     snapshot = s
                     updateHandler(snapshot)

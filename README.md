@@ -62,6 +62,19 @@ Local-first, open source, and built for terminal vibe warriors.
 
 ---
 
+## What's New in 2.5.1
+
+### 🔧 Codex 0.51-0.53 Compatibility
+Full support for the latest Codex session formats, including `turn.completed.usage` structure, `reasoning_output_tokens` for extended thinking models, and absolute rate-limit reset times. Backward compatible with all older Codex versions.
+
+### 📊 Enhanced Token Breakdown
+Hover over usage metrics to see detailed token breakdown: "input (non-cached) + cached + output + reasoning". Cached tokens are clearly labeled to help you understand what's being reused from conversation history.
+
+### ✅ Rock-solid Parser
+Gracefully handles format variations including `info: null` edge cases and ignores unknown event types (like `raw_item`) without crashing. Comprehensive test coverage for all Codex format generations.
+
+---
+
 ## What's New in 2.5
 
 ### 🚀 Massive Performance Improvements

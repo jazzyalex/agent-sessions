@@ -1,0 +1,3 @@
+{"timestamp":"2025-10-30T11:00:00.000Z","type":"session_meta","payload":{"id":"test-usage-session","timestamp":"2025-10-30T11:00:00.000Z","cwd":"/tmp/test","originator":"codex_cli_rs","cli_version":"0.51.0","source":"cli"}}
+{"timestamp":"2025-10-30T11:00:05.000Z","type":"event_msg","payload":{"type":"turn.completed","usage":{"input_tokens":1420,"cached_input_tokens":380,"output_tokens":910}}}
+{"timestamp":"2025-10-30T11:00:15.000Z","type":"event_msg","payload":{"type":"turn.completed","usage":{"input_tokens":2840,"cached_input_tokens":1420,"output_tokens":1520,"total_tokens":4360}}}
