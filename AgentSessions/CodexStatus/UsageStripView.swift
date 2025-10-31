@@ -48,6 +48,26 @@ struct UsageStripView: View {
         } else {
             parts.append("Codex: Not yet updated")
         }
+
+        // Add token breakdown if available
+        if let input = codexStatus.lastInputTokens,
+           let cached = codexStatus.lastCachedInputTokens,
+           let output = codexStatus.lastOutputTokens {
+            let nonCached = max(0, input - cached)
+            var tokenLine = "Last turn: \(nonCached) input"
+            if cached > 0 {
+                tokenLine += " + \(cached) cached"
+            }
+            tokenLine += " + \(output) output"
+            if let reasoning = codexStatus.lastReasoningOutputTokens, reasoning > 0 {
+                tokenLine += " + \(reasoning) reasoning"
+            }
+            parts.append(tokenLine)
+            if cached > 0 {
+                parts.append("(Cached tokens are reused from conversation history)")
+            }
+        }
+
         parts.append("Double-click to refresh now")
 
         return parts.joined(separator: "\n")

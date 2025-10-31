@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.1] - 2025-10-31
+
+### Added
+- Codex 0.51-0.53 compatibility: Full support for `turn.completed.usage` structure, `reasoning_output_tokens`, and absolute rate-limit reset times
+- Usage tooltip: Token breakdown now displays "input (non-cached) + cached + output + reasoning" on hover
+- Test fixtures for Codex format evolution (0.50 legacy through 0.53)
+
+### Changed
+- Rate limit parsing: Absolute `resets_at`/`reset_at` timestamps (epoch or ISO8601) now preferred over relative calculations
+- Token tracking: Added `lastReasoningOutputTokens` field to usage snapshots for extended thinking models
+
+### Fixed
+- Backward compatibility: Gracefully handles `info: null` in `token_count` events from older Codex versions
+- Parser resilience: Ignores unknown event types (e.g., `raw_item`) without crashing
+
 ## [2.5] - 2025-10-30
 
 ### Added
