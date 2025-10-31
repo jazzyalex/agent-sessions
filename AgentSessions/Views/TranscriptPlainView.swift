@@ -214,7 +214,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .controlSize(.regular)
             .frame(width: 200)
             .accessibilityLabel("View Style")
-            .help("Switch between Transcript and Terminal view (⌘⇧T). Terminal colors: blue=user, gray=assistant, green=command, dim green=[out] output, red=error.")
+            .help("Switch between Transcript and Terminal view (⌘⇧T). Terminal colors: blue=user, gray=assistant, orange=command, teal=[out] output, red=error.")
             .padding(.leading, 12)
 
             Button(action: { showLegendPopover.toggle() }) {
@@ -225,11 +225,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .popover(isPresented: $showLegendPopover, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Terminal Legend").font(.system(size: 13, weight: .semibold))
-                    HStack(spacing: 6) { Text("> user") .foregroundStyle(.blue) }
-                    HStack(spacing: 6) { Text("[assistant]") .foregroundStyle(.secondary) }
-                    HStack(spacing: 6) { Text("› tool: …") .foregroundStyle(.green) }
-                    HStack(spacing: 6) { Text("[out] …") .foregroundStyle(Color.green.opacity(0.6)) }
-                    HStack(spacing: 6) { Text("! error …") .foregroundStyle(.red) }
+                    HStack(spacing: 6) { Text("> user").foregroundStyle(.blue) }
+                    HStack(spacing: 6) { Text("[assistant]").foregroundStyle(.secondary) }
+                    HStack(spacing: 6) { Text("› tool: …").foregroundStyle(.orange) }
+                    HStack(spacing: 6) { Text("[out] …").foregroundStyle(.teal) }
+                    HStack(spacing: 6) { Text("! error …").foregroundStyle(.red) }
                 }
                 .padding(10)
                 .frame(width: 220)
@@ -880,18 +880,18 @@ private struct PlainTextScrollView: NSViewRepresentable {
         let baseColor = isDarkMode ? NSColor(white: 0.92, alpha: 1.0) : NSColor.labelColor
         textStorage.addAttribute(.foregroundColor, value: baseColor, range: full)
 
-        // Command colorization (foreground)
+        // Command colorization (foreground) – orange for high distinction
         if !commandRanges.isEmpty {
             let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
             let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-            let baseGreen = NSColor.systemGreen
-            let green: NSColor = {
-                if isDark || increaseContrast { return baseGreen }
-                return baseGreen.withAlphaComponent(0.88)
+            let baseOrange = NSColor.systemOrange
+            let orange: NSColor = {
+                if isDark || increaseContrast { return baseOrange }
+                return baseOrange.withAlphaComponent(0.95)
             }()
             for r in commandRanges {
                 if NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: green, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: orange, range: r)
                 }
             }
         }
@@ -925,18 +925,18 @@ private struct PlainTextScrollView: NSViewRepresentable {
                 }
             }
         }
-        // Tool output colorization (dimmed green)
+        // Tool output colorization (teal/cyan family for contrast with orange)
         if !outputRanges.isEmpty {
             let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
             let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-            let baseGreen = NSColor.systemGreen
-            let dimmedGreen: NSColor = {
-                if isDark || increaseContrast { return baseGreen.withAlphaComponent(0.6) }
-                return baseGreen.withAlphaComponent(0.5)
+            let baseTeal = NSColor.systemTeal
+            let teal: NSColor = {
+                if isDark || increaseContrast { return baseTeal }
+                return baseTeal.withAlphaComponent(0.90)
             }()
             for r in outputRanges {
                 if NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: dimmedGreen, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: teal, range: r)
                 }
             }
         }
