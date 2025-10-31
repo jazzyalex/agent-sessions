@@ -3,13 +3,13 @@
 This runbook provides a fully automated deployment process with upfront validation.
 All questions are answered before running the script, which then executes non-interactively.
 
-## Quick Start (2.3.2)
+## Quick Start (2.5.1)
 
-If you’re ready to ship 2.3.2 and have Xcode + notarytool + gh configured on your Mac:
+If you’re ready to ship 2.5.1 and have Xcode + notarytool + gh configured on your Mac:
 
 ```bash
-# Example for 2.3.2 (adjust TEAM_ID / DEV_ID_APP if needed)
-export VERSION=2.3.2
+# Example for 2.5.1 (adjust TEAM_ID / DEV_ID_APP if needed)
+export VERSION=2.5.1
 export TEAM_ID=24NDRU35WD
 export NOTARY_PROFILE=AgentSessionsNotary
 export DEV_ID_APP="Developer ID Application: Alex M (24NDRU35WD)"
@@ -20,10 +20,10 @@ tools/release/deploy-agent-sessions.sh
 ```
 
 Outputs:
-- DMG: `dist/AgentSessions-2.3.2.dmg`
-- SHA: `dist/AgentSessions-2.3.2.dmg.sha256`
-- GitHub Release: `v2.3.2` with assets and notes from `docs/CHANGELOG.md`
-- README and docs download links updated to 2.3.2
+- DMG: `dist/AgentSessions-2.5.1.dmg`
+- SHA: `dist/AgentSessions-2.5.1.dmg.sha256`
+- GitHub Release: `v2.5.1` with assets and notes from `docs/CHANGELOG.md`
+- README and docs download links updated to 2.5.1
 - Homebrew cask updated in `jazzyalex/homebrew-agent-sessions`
 
 If any step fails, see “Troubleshooting” below.
@@ -39,8 +39,8 @@ If any step fails, see “Troubleshooting” below.
 Complete this checklist **before** running the deployment script. Answer all questions and verify all conditions.
 
 ### 1. Version Planning
-- [ ] What version are you releasing? (e.g., 2.3.2)
-- [ ] Current MARKETING_VERSION in project.pbxproj: 2.3.2 (run grep to confirm)
+- [ ] What version are you releasing? (e.g., 2.5.1)
+- [ ] Current MARKETING_VERSION in project.pbxproj: 2.5.1 (run grep to confirm)
 - [ ] **CRITICAL: Increment CURRENT_PROJECT_VERSION (build number) for Sparkle updates:**
   ```bash
   grep "CURRENT_PROJECT_VERSION" AgentSessions.xcodeproj/project.pbxproj
@@ -82,7 +82,7 @@ Gather these values before running the script:
 
 ```bash
 # Required
-VERSION=2.3.2                                         # Target version
+VERSION=2.5.1                                         # Target version
 
 # Optional (auto-detected if not set)
 TEAM_ID=24NDRU35WD                                    # Apple Team ID
@@ -99,7 +99,7 @@ SKIP_CONFIRM=1                                        # Skip interactive prompts
 Once pre-flight is complete, run the deployment script with all parameters:
 
 ```bash
-VERSION=2.3.2 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
+VERSION=2.5.1 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
 ```
 
 ### What the script does automatically:
@@ -131,6 +131,9 @@ VERSION=2.3.2 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
    - Generates `appcast.xml` with EdDSA signature (reads private key from Keychain)
    - **Verifies EdDSA private key exists in Keychain (service: "https://sparkle-project.org")**
    - Fixes DMG URL to point to GitHub Releases (not GitHub Pages)
+   - Inserts release notes into a `<description><![CDATA[...]]></description>` element using Python (robust with CDATA)
+     - Patch version rule: When releasing `A.B.C`, the script aggregates `[A.B.C]` and `[A.B]` sections (patch first, then minor). Fails if neither exist
+     - Fails hard with a clear error if no notes found (prevents Sparkle UI hang)
    - Copies appcast.xml to docs/ for GitHub Pages
    - Commits and pushes appcast to main branch
 
@@ -175,27 +178,31 @@ curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -E "(spark
 #   <sparkle:shortVersionString>{VERSION}</sparkle:shortVersionString>
 #   <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v{VERSION}/AgentSessions-{VERSION}.dmg" ... sparkle:edSignature="..."/>
 
-# 3. Verify EdDSA signature is present in appcast
+# 3. Verify `<description>` (release notes) is present for the latest item
+curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -A2 "<title>2.5.1" | grep -n "<description>"
+# Expected: a `<description><![CDATA[` block immediately after `<pubDate>`
+
+# 4. Verify EdDSA signature is present in appcast
 curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep "sparkle:edSignature" | wc -l
 # Expected: 1 (or more if multiple versions in appcast)
 
-# 4. Verify appcast DMG URL points to GitHub Releases (not GitHub Pages)
+# 5. Verify appcast DMG URL points to GitHub Releases (not GitHub Pages)
 curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep "enclosure url" | grep -v "github.com/jazzyalex/agent-sessions/releases"
 # Expected: no output (all URLs should be GitHub Releases)
 
-# 5. Verify README.md download links and labels point to new version
+# 6. Verify README.md download links and labels point to new version
 grep -E "releases/download/v{VERSION}/AgentSessions-{VERSION}\.dmg|Download Agent Sessions {VERSION}" README.md
 # Should find: AgentSessions-{VERSION}.dmg URL and a visible "Download Agent Sessions {VERSION}" label
 
-# 6. Verify docs/index.html download links and labels point to new version
+# 7. Verify docs/index.html download links and labels point to new version
 grep -E "releases/download/v{VERSION}/AgentSessions-{VERSION}\.dmg|Download Agent Sessions {VERSION}" docs/index.html
 # Should find: AgentSessions-{VERSION}.dmg URL and a visible "Download Agent Sessions {VERSION}" label
 
-# 7. Verify Homebrew cask updated
+# 8. Verify Homebrew cask updated
 curl -s https://raw.githubusercontent.com/jazzyalex/homebrew-agent-sessions/main/Casks/agent-sessions.rb | grep -E "(version|sha256)" | head -2
 # Expected: version "{VERSION}" and matching sha256
 
-# 8. Verify release notes match CHANGELOG.md
+# 9. Verify release notes match CHANGELOG.md
 gh release view v{VERSION} --json body -q '.body' > /tmp/release_notes.txt
 awk '/^## \[{VERSION}\]/,/^## \[/' docs/CHANGELOG.md > /tmp/changelog_section.txt
 diff -u /tmp/changelog_section.txt /tmp/release_notes.txt
@@ -395,7 +402,7 @@ git commit -m "Add release notes to appcast for {VERSION}"
 git push
 ```
 
-**Prevention**: The deployment script should automatically add release notes from CHANGELOG.md to the appcast.
+**Prevention**: The deployment script automatically adds release notes from CHANGELOG.md to the appcast using Python (robust with CDATA) and fails hard if missing. This prevents the Sparkle UI from hanging due to an empty `<description>`.
 
 ### Notary profile errors
 ```bash

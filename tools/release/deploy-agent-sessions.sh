@@ -156,8 +156,8 @@ else
     # Add release notes from CHANGELOG.md to prevent Sparkle UI hang
     # CRITICAL: Sparkle UI will hang without release notes!
     if [[ -f "docs/CHANGELOG.md" ]]; then
-      # Patch version rule: A.B.C includes both [A.B] and [A.B.C] release notes
-      # Example: 2.5.1 includes notes from both [2.5] and [2.5.1]
+      # Patch version rule: Aggregate [A.B.C] and [A.B] notes
+      # Example: 2.5.1 will include [2.5.1] first, then [2.5]
       NOTES=""
       if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+)\.([0-9]+)$ ]]; then
         # Patch version (A.B.C) - include parent version notes
@@ -169,11 +169,9 @@ else
         # Extract patch version notes
         PATCH_NOTES=$(sed -n "/^## \[${VERSION}\]/,/^## \[/{ /^## \[${VERSION}\]/d; /^## \[/d; p; }" docs/CHANGELOG.md 2>/dev/null || true)
 
-        # Combine notes (patch notes first, then parent if patch is empty)
-        if [[ -n "$PATCH_NOTES" ]]; then
-          NOTES="$PATCH_NOTES"
-        elif [[ -n "$PARENT_NOTES" ]]; then
-          NOTES="$PARENT_NOTES"
+        # Combine notes: patch notes first, then parent notes if present
+        if [[ -n "$PATCH_NOTES" || -n "$PARENT_NOTES" ]]; then
+          NOTES="${PATCH_NOTES}${PATCH_NOTES:+\n}${PARENT_NOTES}"
         fi
       else
         # Major/minor version (A.B) - extract only this version
@@ -226,10 +224,14 @@ PYEOF
     # Copy appcast to docs/ for GitHub Pages
     cp "$UPDATES_DIR/appcast.xml" "$REPO_ROOT/docs/appcast.xml"
 
-    # Commit and push appcast to GitHub Pages
-    git add "$REPO_ROOT/docs/appcast.xml" || true
-    git commit -m "chore(release): update appcast for ${VERSION}" || true
-    git push origin HEAD:main || true
+    # Commit and push appcast to GitHub Pages (fail hard if push fails)
+    git add "$REPO_ROOT/docs/appcast.xml"
+    if ! git diff --staged --quiet; then
+      git commit -m "chore(release): update appcast for ${VERSION}"
+      git push origin HEAD:main
+    else
+      yellow "No appcast changes to commit."
+    fi
 
     green "Appcast published to GitHub Pages: https://jazzyalex.github.io/agent-sessions/appcast.xml"
   else
@@ -245,9 +247,13 @@ sed -i '' -E \
   "s#releases/download/v[0-9.]+/AgentSessions-[0-9.]+\.dmg#releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg#g" \
   "$REPO_ROOT/docs/index.html"
 
-git add README.md docs/index.html || true
-git commit -m "docs: update download links for ${VERSION}" || true
-git push origin HEAD:main || true
+git add README.md docs/index.html
+if ! git diff --staged --quiet; then
+  git commit -m "docs: update download links for ${VERSION}"
+  git push origin HEAD:main
+else
+  yellow "No README/docs link changes to commit."
+fi
 
 # Ensure visible version strings in buttons and file names also updated (no release notes)
 sed -i '' -E \
@@ -256,11 +262,11 @@ sed -i '' -E \
 sed -i '' -E \
   "s/AgentSessions-[0-9.]+\\.dmg/AgentSessions-${VERSION}.dmg/g" \
   "$REPO_ROOT/README.md"
-git diff --quiet README.md docs/index.html || {
-  git add README.md docs/index.html || true
-  git commit -m "docs: normalize visible version labels to ${VERSION}" || true
-  git push origin HEAD:main || true
-}
+if ! git diff --quiet README.md docs/index.html; then
+  git add README.md docs/index.html
+  git commit -m "docs: normalize visible version labels to ${VERSION}"
+  git push origin HEAD:main
+fi
 
 # Always update the tap via GitHub API (no local clone required)
 if [[ "${UPDATE_CASK}" == "1" ]]; then
