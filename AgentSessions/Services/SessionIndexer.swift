@@ -137,11 +137,7 @@ final class SessionIndexer: ObservableObject {
     @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = ModifiedDisplay.relative.rawValue
     @AppStorage("TranscriptRenderMode") private var renderModeRaw: String = TranscriptRenderMode.normal.rawValue
     // Column visibility/order prefs
-    @AppStorage("ShowModifiedColumn") var showModifiedColumn: Bool = true
-    @AppStorage("ShowMsgsColumn") var showMsgsColumn: Bool = true
-    @AppStorage("ShowProjectColumn") var showProjectColumn: Bool = true
-    @AppStorage("ShowTitleColumn") var showTitleColumn: Bool = true
-    @AppStorage("ShowSizeColumn") var showSizeColumn: Bool = true
+    let columnVisibility: ColumnVisibilityStore
     // Persist active project filter
     @AppStorage("ProjectFilter") private var projectFilterStored: String = ""
 
@@ -168,7 +164,11 @@ final class SessionIndexer: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var recomputeDebouncer: DispatchWorkItem? = nil
 
-    init() {
+    init(columnVisibility: ColumnVisibilityStore = ColumnVisibilityStore()) {
+        self.columnVisibility = columnVisibility
+        columnVisibility.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
         // Load persisted project filter
         if !projectFilterStored.isEmpty { projectFilter = projectFilterStored }
         // Debounced computed sessions

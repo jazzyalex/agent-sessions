@@ -6,6 +6,7 @@ private let labelColumnWidth: CGFloat = 170
 struct PreferencesView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @EnvironmentObject var updaterController: UpdaterController
+    @EnvironmentObject var columnVisibility: ColumnVisibilityStore
     @State private var selectedTab: PreferencesTab?
     // Persist last-selected tab for smoother navigation across launches
     @AppStorage("PreferencesLastSelectedTab") private var lastSelectedTabRaw: String = PreferencesTab.general.rawValue
@@ -277,9 +278,9 @@ struct PreferencesView: View {
                 Divider()
                 // First row: three columns to reduce height
                 HStack(spacing: 16) {
-                    Toggle("Session titles", isOn: $indexer.showTitleColumn)
+                    Toggle("Session titles", isOn: $columnVisibility.showTitleColumn)
                         .help("Show or hide the Session title column in the Sessions list")
-                    Toggle("Project names", isOn: $indexer.showProjectColumn)
+                    Toggle("Project names", isOn: $columnVisibility.showProjectColumn)
                         .help("Show or hide the Project column in the Sessions list")
                     Toggle("Source column", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: "UnifiedShowSourceColumn") },
@@ -289,9 +290,9 @@ struct PreferencesView: View {
                 }
                 // Second row: remaining columns
                 HStack(spacing: 16) {
-                    Toggle("Message counts", isOn: $indexer.showMsgsColumn)
+                    Toggle("Message counts", isOn: $columnVisibility.showMsgsColumn)
                         .help("Show or hide message counts in the Sessions list")
-                    Toggle("Modified date", isOn: $indexer.showModifiedColumn)
+                    Toggle("Modified date", isOn: $columnVisibility.showModifiedColumn)
                         .help("Show or hide the modified date column")
                     Toggle("Size column", isOn: Binding(
                         get: { UserDefaults.standard.object(forKey: "UnifiedShowSizeColumn") as? Bool ?? true },
@@ -1097,10 +1098,7 @@ struct PreferencesView: View {
         modifiedDisplay = .relative
         indexer.setModifiedDisplay(.relative)
 
-        indexer.showTitleColumn = true
-        indexer.showProjectColumn = true
-        indexer.showMsgsColumn = true
-        indexer.showModifiedColumn = true
+        columnVisibility.restoreDefaults()
 
         codexBinaryOverride = ""
         resumeSettings.setBinaryOverride("")

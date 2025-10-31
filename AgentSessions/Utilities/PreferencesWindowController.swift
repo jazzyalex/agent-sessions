@@ -12,6 +12,7 @@ final class PreferencesWindowController: NSObject, NSWindowDelegate {
               initialTab: PreferencesTab = .general) {
         let root = PreferencesView(initialTab: initialTab)
             .environmentObject(indexer)
+            .environmentObject(indexer.columnVisibility)
             .environmentObject(updaterController)
         let wrapped = AnyView(root)
 

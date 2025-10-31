@@ -13,6 +13,7 @@ struct UnifiedSessionsView: View {
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @EnvironmentObject var updaterController: UpdaterController
+    @EnvironmentObject var columnVisibility: ColumnVisibilityStore
 
     let layoutMode: LayoutMode
     let onToggleLayout: () -> Void
@@ -21,14 +22,10 @@ struct UnifiedSessionsView: View {
     @State private var tableSelection: Set<String> = []
     @State private var sortOrder: [KeyPathComparator<Session>] = []
     @State private var cachedRows: [Session] = []
+    @State private var columnLayoutID: UUID = UUID()
     @AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
     @AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
     @AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
-    // Column visibility toggles (direct @AppStorage ensures SwiftUI updates immediately)
-    @AppStorage("ShowTitleColumn") private var showTitleColumn: Bool = true
-    @AppStorage("ShowProjectColumn") private var showProjectColumn: Bool = true
-    @AppStorage("ShowMsgsColumn") private var showMsgsColumn: Bool = true
-    @AppStorage("ShowModifiedColumn") private var showModifiedColumn: Bool = true
     @AppStorage("UnifiedShowCodexStrip") private var showCodexStrip: Bool = false
     @AppStorage("UnifiedShowClaudeStrip") private var showClaudeStrip: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
@@ -151,7 +148,22 @@ struct UnifiedSessionsView: View {
     private var listPane: some View {
         ZStack(alignment: .bottom) {
         Table(cachedRows, selection: $tableSelection, sortOrder: $sortOrder) {
-            // Always include CLI Agent column; collapse width when hidden to avoid type-check complexity
+            // Favorite column appears first; toggleable via prefs
+            TableColumn("★") { s in
+                Button(action: { unified.toggleFavorite(s.id) }) {
+                    Image(systemName: s.isFavorite ? "star.fill" : "star")
+                        .imageScale(.medium)
+                        .foregroundStyle(.primary)
+                }
+                .buttonStyle(.plain)
+                .help(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+                .accessibilityLabel(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+            }
+            .width(min: showStarColumn ? 36 : 0,
+                   ideal: showStarColumn ? 40 : 0,
+                   max: showStarColumn ? 44 : 0)
+
+            // CLI Agent source column
             TableColumn("CLI Agent", value: \Session.sourceKey) { s in
                 let label: String = {
                     switch s.source {
@@ -165,16 +177,6 @@ struct UnifiedSessionsView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(!stripMonochrome ? sourceAccent(s) : .secondary)
                     Spacer(minLength: 4)
-                    if showStarColumn {
-                        Button(action: { unified.toggleFavorite(s.id) }) {
-                            Image(systemName: s.isFavorite ? "star.fill" : "star")
-                                .imageScale(.medium)
-                                .foregroundStyle(.primary)
-                        }
-                        .buttonStyle(.plain)
-                        .help(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
-                        .accessibilityLabel(s.isFavorite ? "Remove from Favorites" : "Add to Favorites")
-                    }
                 }
             }
             .width(min: showSourceColumn ? 90 : 0, ideal: showSourceColumn ? 100 : 0, max: showSourceColumn ? 120 : 0)
@@ -182,9 +184,9 @@ struct UnifiedSessionsView: View {
             TableColumn("Session", value: \Session.title) { s in
                 SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
             }
-            .width(min: showTitleColumn ? 160 : 0,
-                   ideal: showTitleColumn ? 320 : 0,
-                   max: showTitleColumn ? 2000 : 0)
+            .width(min: columnVisibility.showTitleColumn ? 160 : 0,
+                   ideal: columnVisibility.showTitleColumn ? 320 : 0,
+                   max: columnVisibility.showTitleColumn ? 2000 : 0)
 
             TableColumn("Date", value: \Session.modifiedAt) { s in
                 let display = SessionIndexer.ModifiedDisplay(rawValue: modifiedDisplayRaw) ?? .relative
@@ -195,9 +197,9 @@ struct UnifiedSessionsView: View {
                     .foregroundStyle(.secondary)
                     .help(helpText)
             }
-            .width(min: showModifiedColumn ? 120 : 0,
-                   ideal: showModifiedColumn ? 120 : 0,
-                   max: showModifiedColumn ? 140 : 0)
+            .width(min: columnVisibility.showModifiedColumn ? 120 : 0,
+                   ideal: columnVisibility.showModifiedColumn ? 120 : 0,
+                   max: columnVisibility.showModifiedColumn ? 140 : 0)
 
             TableColumn("Project", value: \Session.repoDisplay) { s in
                 let display: String = {
@@ -213,17 +215,17 @@ struct UnifiedSessionsView: View {
                         if let name = s.repoName { unified.projectFilter = name; unified.recomputeNow() }
                     }
             }
-            .width(min: showProjectColumn ? 120 : 0,
-                   ideal: showProjectColumn ? 160 : 0,
-                   max: showProjectColumn ? 240 : 0)
+            .width(min: columnVisibility.showProjectColumn ? 120 : 0,
+                   ideal: columnVisibility.showProjectColumn ? 160 : 0,
+                   max: columnVisibility.showProjectColumn ? 240 : 0)
 
             TableColumn("Msgs", value: \Session.messageCount) { s in
                 Text(String(s.messageCount))
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
             }
-            .width(min: showMsgsColumn ? 64 : 0,
-                   ideal: showMsgsColumn ? 64 : 0,
-                   max: showMsgsColumn ? 80 : 0)
+            .width(min: columnVisibility.showMsgsColumn ? 64 : 0,
+                   ideal: columnVisibility.showMsgsColumn ? 64 : 0,
+                   max: columnVisibility.showMsgsColumn ? 80 : 0)
 
             // File size column
             TableColumn("Size") { s in
@@ -239,11 +241,13 @@ struct UnifiedSessionsView: View {
 
             // Removed separate Refresh column to avoid churn
         }
+        .id(columnLayoutID)
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .environment(\.defaultMinListRowHeight, 22)
         .simultaneousGesture(TapGesture().onEnded {
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         })
+        .id(columnVisibility.changeToken)
         }
         // Bottom overlay to avoid changing intrinsic size of the list pane
         .overlay(alignment: .bottom) {
@@ -343,6 +347,10 @@ struct UnifiedSessionsView: View {
             updateSelectionBridge()
             updateCachedRows()
         }
+        .onChange(of: columnVisibility.changeToken) { _, _ in refreshColumnLayout() }
+        .onChange(of: showSourceColumn) { _, _ in refreshColumnLayout() }
+        .onChange(of: showSizeColumn) { _, _ in refreshColumnLayout() }
+        .onChange(of: showStarColumn) { _, _ in refreshColumnLayout() }
         .onChange(of: searchCoordinator.results) { _, _ in
             updateCachedRows()
             // If we have search results but no valid selection (none selected or selected not in results),
@@ -570,6 +578,12 @@ struct UnifiedSessionsView: View {
             selection = cachedRows.first?.id
             tableSelection = selection.map { [$0] } ?? []
         }
+    }
+
+    private func refreshColumnLayout() {
+        columnLayoutID = UUID()
+        updateCachedRows()
+        updateSelectionBridge()
     }
 
     private func openDir(_ s: Session) {
