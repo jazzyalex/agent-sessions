@@ -433,7 +433,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
                 let shouldColorize = self.shouldColorize
                 Task.detached(priority: prio) {
-                    if mode == .terminal && shouldColorize {
+                    let sessionHasCommands = session.events.contains { $0.kind == .tool_call }
+                    if mode == .terminal && shouldColorize && sessionHasCommands {
                         let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
                         await MainActor.run {
                             self.transcript = built.0
@@ -442,7 +443,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.assistantRanges = []
                             self.outputRanges = []
                             self.errorRanges = []
-                            self.hasCommands = !built.1.isEmpty
+                            self.hasCommands = true
                             self.findAdditionalRanges()
                             self.transcriptCache[key] = built.0
                             self.terminalCommandRangesCache[key] = built.1
@@ -453,7 +454,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.updateSelectionToCurrentMatch()
                         }
                     } else {
-                        let t = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: mode)
+                        let t = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal)
                         await MainActor.run {
                             self.transcript = t
                             self.commandRanges = []
@@ -461,7 +462,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.assistantRanges = []
                             self.outputRanges = []
                             self.errorRanges = []
-                            self.hasCommands = session.events.contains { $0.kind == .tool_call }
+                            self.hasCommands = sessionHasCommands
                             self.transcriptCache[key] = t
                             self.lastBuildKey = key
                             self.performFind(resetIndex: true)
@@ -474,7 +475,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
 
             // Fallback: synchronous build (legacy behavior)
-            if mode == .terminal && shouldColorize {
+            let sessionHasCommands = session.events.contains { $0.kind == .tool_call }
+            if mode == .terminal && shouldColorize && sessionHasCommands {
                 let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
                 transcript = built.0
                 commandRanges = built.1
@@ -488,7 +490,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 terminalUserRangesCache[key] = userRanges
                 lastBuildKey = key
             } else {
-                transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: mode)
+                transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal)
                 commandRanges = []
                 userRanges = []
                 assistantRanges = []
@@ -499,7 +501,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
         } else {
             // No caching (Claude)
-            if mode == .terminal && shouldColorize {
+            let sessionHasCommands2 = session.events.contains { $0.kind == .tool_call }
+            if mode == .terminal && shouldColorize && sessionHasCommands2 {
                 let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
                 transcript = built.0
                 commandRanges = built.1
@@ -507,16 +510,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 assistantRanges = []
                 outputRanges = []
                 errorRanges = []
-                hasCommands = !built.1.isEmpty
+                hasCommands = true
                 findAdditionalRanges()
             } else {
-                transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: mode)
+                transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal)
                 commandRanges = []
                 userRanges = []
                 assistantRanges = []
                 outputRanges = []
                 errorRanges = []
-                hasCommands = session.events.contains { $0.kind == .tool_call }
+                hasCommands = sessionHasCommands2
             }
         }
 

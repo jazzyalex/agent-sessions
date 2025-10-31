@@ -298,7 +298,7 @@ struct PreferencesView: View {
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowSizeColumn") }
                     ))
                     .help("Show or hide the file size column in the Unified list")
-                    Toggle("Star in column", isOn: Binding(
+                    Toggle("Favorite (star)", isOn: Binding(
                         get: { UserDefaults.standard.object(forKey: "UnifiedShowStarColumn") as? Bool ?? true },
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowStarColumn") }
                     ))
@@ -306,6 +306,7 @@ struct PreferencesView: View {
                 }
                 // Micro-header for filters
                 Text("Filters")
+                    .padding(.top, 8)
                     .font(.subheadline)
                 Divider()
                 HStack(spacing: 16) {
