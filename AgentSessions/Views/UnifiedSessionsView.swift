@@ -24,6 +24,11 @@ struct UnifiedSessionsView: View {
     @AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
     @AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
     @AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
+    // Column visibility toggles (direct @AppStorage ensures SwiftUI updates immediately)
+    @AppStorage("ShowTitleColumn") private var showTitleColumn: Bool = true
+    @AppStorage("ShowProjectColumn") private var showProjectColumn: Bool = true
+    @AppStorage("ShowMsgsColumn") private var showMsgsColumn: Bool = true
+    @AppStorage("ShowModifiedColumn") private var showModifiedColumn: Bool = true
     @AppStorage("UnifiedShowCodexStrip") private var showCodexStrip: Bool = false
     @AppStorage("UnifiedShowClaudeStrip") private var showClaudeStrip: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
@@ -177,9 +182,9 @@ struct UnifiedSessionsView: View {
             TableColumn("Session", value: \Session.title) { s in
                 SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
             }
-            .width(min: codexIndexer.showTitleColumn ? 160 : 0,
-                   ideal: codexIndexer.showTitleColumn ? 320 : 0,
-                   max: codexIndexer.showTitleColumn ? 2000 : 0)
+            .width(min: showTitleColumn ? 160 : 0,
+                   ideal: showTitleColumn ? 320 : 0,
+                   max: showTitleColumn ? 2000 : 0)
 
             TableColumn("Date", value: \Session.modifiedAt) { s in
                 let display = SessionIndexer.ModifiedDisplay(rawValue: modifiedDisplayRaw) ?? .relative
@@ -190,9 +195,9 @@ struct UnifiedSessionsView: View {
                     .foregroundStyle(.secondary)
                     .help(helpText)
             }
-            .width(min: codexIndexer.showModifiedColumn ? 120 : 0,
-                   ideal: codexIndexer.showModifiedColumn ? 120 : 0,
-                   max: codexIndexer.showModifiedColumn ? 140 : 0)
+            .width(min: showModifiedColumn ? 120 : 0,
+                   ideal: showModifiedColumn ? 120 : 0,
+                   max: showModifiedColumn ? 140 : 0)
 
             TableColumn("Project", value: \Session.repoDisplay) { s in
                 let display: String = {
@@ -208,17 +213,17 @@ struct UnifiedSessionsView: View {
                         if let name = s.repoName { unified.projectFilter = name; unified.recomputeNow() }
                     }
             }
-            .width(min: codexIndexer.showProjectColumn ? 120 : 0,
-                   ideal: codexIndexer.showProjectColumn ? 160 : 0,
-                   max: codexIndexer.showProjectColumn ? 240 : 0)
+            .width(min: showProjectColumn ? 120 : 0,
+                   ideal: showProjectColumn ? 160 : 0,
+                   max: showProjectColumn ? 240 : 0)
 
             TableColumn("Msgs", value: \Session.messageCount) { s in
                 Text(String(s.messageCount))
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
             }
-            .width(min: codexIndexer.showMsgsColumn ? 64 : 0,
-                   ideal: codexIndexer.showMsgsColumn ? 64 : 0,
-                   max: codexIndexer.showMsgsColumn ? 80 : 0)
+            .width(min: showMsgsColumn ? 64 : 0,
+                   ideal: showMsgsColumn ? 64 : 0,
+                   max: showMsgsColumn ? 80 : 0)
 
             // File size column
             TableColumn("Size") { s in
