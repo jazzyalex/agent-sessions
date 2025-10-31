@@ -1,0 +1,5 @@
+{"timestamp":"2025-10-30T10:00:00.000Z","type":"session_meta","payload":{"id":"test-legacy-session","timestamp":"2025-10-30T10:00:00.000Z","cwd":"/tmp/test","originator":"codex_cli_rs","cli_version":"0.50.0","source":"cli"}}
+{"timestamp":"2025-10-30T10:00:01.000Z","type":"event_msg","payload":{"type":"turn.completed","message":"ok"}}
+{"timestamp":"2025-10-30T10:00:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"prompt":1420,"completion":910}}}
+{"timestamp":"2025-10-30T10:00:10.000Z","type":"event_msg","payload":{"type":"turn.completed","message":"ok"}}
+{"timestamp":"2025-10-30T10:00:11.000Z","type":"event_msg","payload":{"type":"token_count","info":null}}

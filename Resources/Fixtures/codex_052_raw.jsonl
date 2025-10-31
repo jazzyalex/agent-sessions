@@ -1,0 +1,6 @@
+{"timestamp":"2025-10-30T12:00:00.000Z","type":"session_meta","payload":{"id":"test-raw-session","timestamp":"2025-10-30T12:00:00.000Z","cwd":"/tmp/test","originator":"codex_cli_rs","cli_version":"0.52.0","source":"cli"}}
+{"timestamp":"2025-10-30T12:00:01.000Z","type":"event_msg","payload":{"type":"codex/event/raw_item","payload":{"kind":"stream_chunk"}}}
+{"timestamp":"2025-10-30T12:00:02.000Z","type":"event_msg","payload":{"type":"codex/event/raw_item","payload":{"kind":"thinking"}}}
+{"timestamp":"2025-10-30T12:00:05.000Z","type":"event_msg","payload":{"type":"turn.completed","usage":{"input_tokens":980,"cached_input_tokens":0,"output_tokens":640}}}
+{"timestamp":"2025-10-30T12:00:10.000Z","type":"event_msg","payload":{"type":"codex/event/raw_item","payload":{"kind":"stream_end"}}}
+{"timestamp":"2025-10-30T12:00:11.000Z","type":"event_msg","payload":{"type":"turn.completed","usage":{"input_tokens":1620,"cached_input_tokens":980,"output_tokens":240}}}
