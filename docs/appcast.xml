@@ -5,6 +5,17 @@
         <item>
             <title>2.5.1</title>
             <pubDate>Fri, 31 Oct 2025 11:45:30 -0700</pubDate>
+            <description><![CDATA[
+                <h2>What's New in 2.5.1</h2>
+                <h3>🔧 Codex 0.51-0.53 Compatibility</h3>
+                <p>Full support for the latest Codex session formats, including <code>turn.completed.usage</code> structure, <code>reasoning_output_tokens</code> for extended thinking models, and absolute rate-limit reset times. Backward compatible with all older Codex versions.</p>
+                
+                <h3>📊 Enhanced Token Breakdown</h3>
+                <p>Hover over usage metrics to see detailed token breakdown: "input (non-cached) + cached + output + reasoning". Cached tokens are clearly labeled to help you understand what's being reused from conversation history.</p>
+                
+                <h3>✅ Rock-solid Parser</h3>
+                <p>Gracefully handles format variations including <code>info: null</code> edge cases and ignores unknown event types (like <code>raw_item</code>) without crashing. Comprehensive test coverage for all Codex format generations.</p>
+            ]]></description>
             <sparkle:version>3</sparkle:version>
             <sparkle:shortVersionString>2.5.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
