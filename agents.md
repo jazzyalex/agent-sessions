@@ -33,6 +33,14 @@ Suggested build steps
   - A bullet under `[Unreleased]` in `docs/CHANGELOG.md`.
   - A 1–2 bullet note in `docs/summaries/YYYY-MM.md`.
 
+## Documentation Style
+- **Never use emoji** in user-facing documentation, including:
+  - README.md
+  - GitHub release notes
+  - CHANGELOG.md
+  - Other user-facing documentation
+- Use clear, concise language without emoji decoration.
+
 ## Xcode Project Hygiene
 - When adding/moving/renaming Swift files (app or tests), ensure they are added to `AgentSessions.xcodeproj` with both a `PBXFileReference` and a `PBXBuildFile` in the correct target. Missing entries will break builds with "Cannot find … in scope".
 
