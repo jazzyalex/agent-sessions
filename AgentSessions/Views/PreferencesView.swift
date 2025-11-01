@@ -55,6 +55,10 @@ struct PreferencesView: View {
     @State private var claudeResolvedPath: String? = nil
     @State private var claudeProbeDebounce: DispatchWorkItem? = nil
     @State private var showClaudeExperimentalWarning: Bool = false
+    // Claude Sessions directory override
+    @State private var claudePath: String = ""
+    @State private var claudePathValid: Bool = true
+    @State private var claudePathDebounce: DispatchWorkItem? = nil
 
     // Gemini CLI probe state
     @State private var geminiProbeState: ProbeState = .idle
@@ -756,6 +760,45 @@ struct PreferencesView: View {
                 }
             }
 
+            // Sessions Directory (Claude)
+            sectionHeader("Sessions Directory")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    TextField("Custom path (optional)", text: $claudePath)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 360)
+                        .onSubmit {
+                            validateClaudePath()
+                            commitClaudePathIfValid()
+                        }
+                        .onChange(of: claudePath) { _, _ in
+                            validateClaudePath()
+                            claudePathDebounce?.cancel()
+                            let work = DispatchWorkItem { commitClaudePathIfValid() }
+                            claudePathDebounce = work
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                        }
+                        .help("Override the Claude sessions directory. Leave blank to use the default location")
+
+                    Button(action: pickClaudeFolder) {
+                        Label("Choose…", systemImage: "folder")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Browse for a directory to store Claude session logs")
+                }
+
+                if !claudePathValid {
+                    Label("Path must point to an existing folder", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                Text("Default: ~/.claude")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
             // Usage Tracking moved to Unified Window tab.
         }
     }
@@ -962,6 +1005,10 @@ struct PreferencesView: View {
     private func loadCurrentSettings() {
         codexPath = indexer.sessionsRootOverride
         validateCodexPath()
+        // Load Claude sessions override from defaults
+        let cp = UserDefaults.standard.string(forKey: "ClaudeSessionsRootOverride") ?? ""
+        claudePath = cp
+        validateClaudePath()
         appearance = indexer.appAppearance
         modifiedDisplay = indexer.modifiedDisplay
         codexBinaryOverride = resumeSettings.binaryOverride
@@ -1003,6 +1050,38 @@ struct PreferencesView: View {
                 codexPath = url.path
                 validateCodexPath()
                 commitCodexPathIfValid()
+            }
+        }
+    }
+
+    private func validateClaudePath() {
+        guard !claudePath.isEmpty else {
+            claudePathValid = true
+            return
+        }
+        var isDir: ObjCBool = false
+        claudePathValid = FileManager.default.fileExists(atPath: claudePath, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    private func commitClaudePathIfValid() {
+        guard claudePathValid else { return }
+        let current = UserDefaults.standard.string(forKey: "ClaudeSessionsRootOverride") ?? ""
+        if current != claudePath {
+            UserDefaults.standard.set(claudePath, forKey: "ClaudeSessionsRootOverride")
+            // ClaudeSessionIndexer listens to UserDefaults changes and triggers its own refresh
+        }
+    }
+
+    private func pickClaudeFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                claudePath = url.path
+                validateClaudePath()
+                commitClaudePathIfValid()
             }
         }
     }

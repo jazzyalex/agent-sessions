@@ -63,12 +63,16 @@ final class ClaudeSessionIndexer: ObservableObject {
         AppAppearance(rawValue: appAppearanceRaw) ?? .system
     }
 
-    private let discovery: ClaudeSessionDiscovery
+    private var discovery: ClaudeSessionDiscovery
+    private var lastSessionsRootOverride: String = ""
     private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
 
     init() {
-        self.discovery = ClaudeSessionDiscovery()
+        // Initialize discovery with current override (if any)
+        let initialOverride = UserDefaults.standard.string(forKey: "ClaudeSessionsRootOverride") ?? ""
+        self.discovery = ClaudeSessionDiscovery(customRoot: initialOverride.isEmpty ? nil : initialOverride)
+        self.lastSessionsRootOverride = initialOverride
 
         // Debounced filtering
         let inputs = Publishers.CombineLatest4(
@@ -101,7 +105,17 @@ final class ClaudeSessionIndexer: ObservableObject {
 
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.recomputeNow() }
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                // React to Sessions root override changes from Preferences
+                let current = UserDefaults.standard.string(forKey: "ClaudeSessionsRootOverride") ?? ""
+                if current != self.lastSessionsRootOverride {
+                    self.lastSessionsRootOverride = current
+                    self.discovery = ClaudeSessionDiscovery(customRoot: current.isEmpty ? nil : current)
+                    self.refresh()
+                }
+                self.recomputeNow()
+            }
             .store(in: &cancellables)
     }
 
