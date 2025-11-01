@@ -3,23 +3,33 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.5.1</title>
-            <pubDate>Fri, 31 Oct 2025 11:45:30 -0700</pubDate>
+            <title>2.5.2</title>
+            <pubDate>Sat, 01 Nov 2025 11:52:07 -0700</pubDate>
             <description><![CDATA[
-                <h2>What's New in 2.5.1</h2>
-                <h3>🔧 Codex 0.51-0.53 Compatibility</h3>
-                <p>Full support for the latest Codex session formats, including <code>turn.completed.usage</code> structure, <code>reasoning_output_tokens</code> for extended thinking models, and absolute rate-limit reset times. Backward compatible with all older Codex versions.</p>
-                
-                <h3>📊 Enhanced Token Breakdown</h3>
-                <p>Hover over usage metrics to see detailed token breakdown: "input (non-cached) + cached + output + reasoning". Cached tokens are clearly labeled to help you understand what's being reused from conversation history.</p>
-                
-                <h3>✅ Rock-solid Parser</h3>
-                <p>Gracefully handles format variations including <code>info: null</code> edge cases and ignores unknown event types (like <code>raw_item</code>) without crashing. Comprehensive test coverage for all Codex format generations.</p>
+                <h2>What's New in 2.5.2</h2>
+
+<h3>Fixed</h3>
+<p>Analytics: Session counts now match Sessions List by properly applying filter defaults (HideZeroMessageSessions and HideLowMessageSessions both default to true). Previously Analytics counted all sessions including noise (0-2 messages), inflating counts by up to 79%.</p>
+<p>Analytics: Simplified UserDefaults reading in AnalyticsRepository to use consistent pattern with AnalyticsService.</p>
+
+<h3>Added</h3>
+<p>Diagnostic script: `scripts/analyze_sessions.py` to audit session files and identify noise patterns across Codex CLI, Claude Code, and Gemini CLI.
+</p>
+<h3>Added</h3>
+<p>Indexing: SQLite rollups index with per-session daily splits and incremental Refresh. Background indexing runs at utility priority and updates only changed session files.</p>
+<p>Git Inspector (feature-flagged): Adds "Show Git Context" to the Unified Sessions context menu for Codex sessions; opens a non-blocking inspector window with current and historical git context.</p>
+<p>Advanced Analytics: Visualize AI coding patterns with session trends, agent breakdown, time-of-day heatmap, and key metrics via Window → Analytics.</p>
+
+<h3>Fixed</h3>
+<p>Usage (Codex): Reset times no longer show "Stale data" when recent `token_count` events are present. Now anchors `resets_in_seconds` to `rate_limits.captured_at` and accepts absolute `resets_at`/`reset_at` fields (including `*_ms`), with flexible timestamp parsing for old/new JSON formats.</p>
+<p>Analytics/Git Inspector: System theme updates immediately; stable session IDs for Claude/Gemini; aligned window theme handling.</p>
+<p>Sessions/Messages totals: Respect HideZeroMessageSessions/HideLowMessageSessions preferences in dashboard cards.</p>
+<p>Avg Session Length: Exclude noise sessions when preferences hide zero/low message sessions.</p>
             ]]></description>
-            <sparkle:version>3</sparkle:version>
-            <sparkle:shortVersionString>2.5.1</sparkle:shortVersionString>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>2.5.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.1/AgentSessions-2.5.1.dmg" length="6069153" type="application/octet-stream" sparkle:edSignature="shx2ZDowLp0knLi4ZJMd64sz8iySzW0SFtqKAEARziurZwmh+jPTUItjllZ8Bx/qfTDnNAHcmLvMn2Nn5yoJAg=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.2/AgentSessions-2.5.2.dmg" length="6168718" type="application/octet-stream" sparkle:edSignature="WNubq/fa9+YHN6RS6TqhYDACRI5a1dBV7fV1+pWYhPxhuLJPk1r0XcSdWwzSfkS/cg9DPs4vv5Kl/mh1bRQXCA=="/>
         </item>
     </channel>
 </rss>
