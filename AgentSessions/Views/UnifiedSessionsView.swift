@@ -146,12 +146,16 @@ struct UnifiedSessionsView: View {
     }
 
     private var listPane: some View {
-        ZStack(alignment: .bottom) {
+        let showTitle = columnVisibility.showTitleColumn
+        let showModified = columnVisibility.showModifiedColumn
+        let showProject = columnVisibility.showProjectColumn
+        let showMsgs = columnVisibility.showMsgsColumn
+        return ZStack(alignment: .bottom) {
         Table(cachedRows, selection: $tableSelection, sortOrder: $sortOrder) {
-            if showStarColumn {
-                TableColumn("★") { cellFavorite(for: $0) }
-                    .width(min: 36, ideal: 40, max: 44)
-            }
+            TableColumn("★") { cellFavorite(for: $0) }
+                .width(min: showStarColumn ? 36 : 0,
+                       ideal: showStarColumn ? 40 : 0,
+                       max: showStarColumn ? 44 : 0)
 
             TableColumn("CLI Agent", value: \Session.sourceKey) { cellSource(for: $0) }
                 .width(min: showSourceColumn ? 90 : 0,
@@ -161,9 +165,9 @@ struct UnifiedSessionsView: View {
             TableColumn("Session", value: \Session.title) { s in
                 SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
             }
-            .width(min: columnVisibility.showTitleColumn ? 160 : 0,
-                   ideal: columnVisibility.showTitleColumn ? 320 : 0,
-                   max: columnVisibility.showTitleColumn ? 2000 : 0)
+            .width(min: showTitle ? 160 : 0,
+                   ideal: showTitle ? 320 : 0,
+                   max: showTitle ? 2000 : 0)
 
             TableColumn("Date", value: \Session.modifiedAt) { s in
                 let display = SessionIndexer.ModifiedDisplay(rawValue: modifiedDisplayRaw) ?? .relative
@@ -174,9 +178,9 @@ struct UnifiedSessionsView: View {
                     .foregroundStyle(.secondary)
                     .help(helpText)
             }
-            .width(min: columnVisibility.showModifiedColumn ? 120 : 0,
-                   ideal: columnVisibility.showModifiedColumn ? 120 : 0,
-                   max: columnVisibility.showModifiedColumn ? 140 : 0)
+            .width(min: showModified ? 120 : 0,
+                   ideal: showModified ? 120 : 0,
+                   max: showModified ? 140 : 0)
 
             TableColumn("Project", value: \Session.repoDisplay) { s in
                 let display: String = {
@@ -192,17 +196,17 @@ struct UnifiedSessionsView: View {
                         if let name = s.repoName { unified.projectFilter = name; unified.recomputeNow() }
                     }
             }
-            .width(min: columnVisibility.showProjectColumn ? 120 : 0,
-                   ideal: columnVisibility.showProjectColumn ? 160 : 0,
-                   max: columnVisibility.showProjectColumn ? 240 : 0)
+            .width(min: showProject ? 120 : 0,
+                   ideal: showProject ? 160 : 0,
+                   max: showProject ? 240 : 0)
 
             TableColumn("Msgs", value: \Session.messageCount) { s in
                 Text(String(s.messageCount))
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
             }
-            .width(min: columnVisibility.showMsgsColumn ? 64 : 0,
-                   ideal: columnVisibility.showMsgsColumn ? 64 : 0,
-                   max: columnVisibility.showMsgsColumn ? 80 : 0)
+            .width(min: showMsgs ? 64 : 0,
+                   ideal: showMsgs ? 64 : 0,
+                   max: showMsgs ? 80 : 0)
 
             // File size column
             TableColumn("Size") { s in
@@ -224,7 +228,6 @@ struct UnifiedSessionsView: View {
         .simultaneousGesture(TapGesture().onEnded {
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         })
-        .id(columnVisibility.changeToken)
         }
         // Bottom overlay to avoid changing intrinsic size of the list pane
         .overlay(alignment: .bottom) {
@@ -565,17 +568,20 @@ struct UnifiedSessionsView: View {
 
     @ViewBuilder
     private func cellFavorite(for session: Session) -> some View {
-        Button(action: { unified.toggleFavorite(session.id) }) {
-            Image(systemName: session.isFavorite ? "star.fill" : "star")
-                .imageScale(.medium)
-                .foregroundStyle(.primary)
+        if showStarColumn {
+            Button(action: { unified.toggleFavorite(session.id) }) {
+                Image(systemName: session.isFavorite ? "star.fill" : "star")
+                    .imageScale(.medium)
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+            .help(session.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+            .accessibilityLabel(session.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+        } else {
+            EmptyView()
         }
-        .buttonStyle(.plain)
-        .help(session.isFavorite ? "Remove from Favorites" : "Add to Favorites")
-        .accessibilityLabel(session.isFavorite ? "Remove from Favorites" : "Add to Favorites")
     }
 
-    @ViewBuilder
     private func cellSource(for session: Session) -> some View {
         let label: String
         switch session.source {
@@ -583,7 +589,7 @@ struct UnifiedSessionsView: View {
         case .claude: label = "Claude"
         case .gemini: label = "Gemini"
         }
-        HStack(spacing: 6) {
+        return HStack(spacing: 6) {
             Text(label)
                 .font(.system(size: 12))
                 .foregroundStyle(!stripMonochrome ? sourceAccent(session) : .secondary)
