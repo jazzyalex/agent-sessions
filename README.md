@@ -64,29 +64,22 @@ Local-first, open source, and built for terminal vibe warriors.
 
 ## What's New in 2.5.1
 
-### 🔧 Codex 0.51-0.53 Compatibility
-Full support for the latest Codex session formats, including `turn.completed.usage` structure, `reasoning_output_tokens` for extended thinking models, and absolute rate-limit reset times. Backward compatible with all older Codex versions.
-
-### 📊 Enhanced Token Breakdown
-Hover over usage metrics to see detailed token breakdown: "input (non-cached) + cached + output + reasoning". Cached tokens are clearly labeled to help you understand what's being reused from conversation history.
-
-### ✅ Rock-solid Parser
-Gracefully handles format variations including `info: null` edge cases and ignores unknown event types (like `raw_item`) without crashing. Comprehensive test coverage for all Codex format generations.
+**Codex 0.51-0.53 compatibility** with full support for latest session formats including reasoning tokens • **Enhanced token breakdown** tooltips showing cached vs non-cached usage • **Rock-solid parser** handling all format variations and edge cases.
 
 ---
 
 ## What's New in 2.5
 
-### 🚀 Massive Performance Improvements
+### Massive Performance Improvements
 SQLite-backed indexing brings **dramatically faster** session loading and filtering. Background indexing runs at utility priority, updating only changed session files. No more waiting—browse thousands of sessions instantly.
 
-### 📊 Analytics Dashboard (v1)
+### Analytics Dashboard (v1)
 Visualize your AI coding patterns with comprehensive analytics. Track session trends, compare agent usage, discover your most productive hours with time-of-day heatmaps, and view key metrics—all in a dedicated analytics window.
 
-### 🔍 Git Context Inspector
+### Git Context Inspector
 Deep-dive into the git context of any Codex session. See repository state, branch info, and historical diffs—understand exactly what code changes were visible to Codex during each session. Right-click any Codex session → **Show Git Context**.
 
-### ⏱️ Updated Usage Tracking
+### Updated Usage Tracking
 Usage limit tracking and reset times now properly support Codex 0.50+ session format changes. No more "Stale data" warnings—accurate usage tracking with flexible timestamp parsing for both old and new session formats.
 
 ---
