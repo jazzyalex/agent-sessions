@@ -62,9 +62,9 @@ Local-first, open source, and built for terminal vibe warriors.
 
 ---
 
-## What's New in 2.5.1
+## What's New in 2.5.2
 
-**Codex 0.51-0.53 compatibility** with full support for latest session formats including reasoning tokens • **Enhanced token breakdown** tooltips showing cached vs non-cached usage • **Rock-solid parser** handling all format variations and edge cases.
+**Analytics filtering fix** reducing noise by 79% (now matches Sessions List defaults) • **Diagnostic script** for session analysis.
 
 ---
 
