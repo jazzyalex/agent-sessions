@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Preferences → Claude Code: Sessions Directory override to choose a custom Claude sessions root. The Claude indexer honors this path and refreshes automatically when changed. Defaults to `~/.claude` when unset.
+
 ## [2.5.1] - 2025-10-31
 
 ### Added
