@@ -174,8 +174,9 @@ final class AnalyticsService: ObservableObject {
         }
 
         // Apply message count filters (same as Sessions List)
-        let hideZero = UserDefaults.standard.bool(forKey: "HideZeroMessageSessions")
-        let hideLow = UserDefaults.standard.bool(forKey: "HideLowMessageSessions")
+        // Use same defaults as @AppStorage in Sessions List views (both default to true)
+        let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
+        let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? true
 
         if hideZero {
             filtered = filtered.filter { $0.messageCount > 0 }
@@ -336,8 +337,9 @@ final class AnalyticsService: ObservableObject {
                                             bounds: (start: Date?, end: Date?),
                                             agentFilter: AnalyticsAgentFilter) -> [Session] {
         // Apply message count filters (same as Sessions List)
-        let hideZero = UserDefaults.standard.bool(forKey: "HideZeroMessageSessions")
-        let hideLow = UserDefaults.standard.bool(forKey: "HideLowMessageSessions")
+        // Use same defaults as @AppStorage in Sessions List views (both default to true)
+        let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
+        let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? true
 
         return sessions.filter { session in
             guard agentFilter.matches(session.source) else { return false }
