@@ -22,8 +22,8 @@ actor AnalyticsRepository {
     func summary(sources: [String], dayStart: String?, dayEnd: String?) async -> Summary {
         // Respect message-count filters for sessions/messages totals
         let d = UserDefaults.standard
-        let hideZero = d.object(forKey: "HideZeroMessageSessions") == nil ? true : d.bool(forKey: "HideZeroMessageSessions")
-        let hideLow  = d.object(forKey: "HideLowMessageSessions")  == nil ? true : d.bool(forKey: "HideLowMessageSessions")
+        let hideZero = d.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
+        let hideLow  = d.object(forKey: "HideLowMessageSessions") as? Bool ?? true
         let minMessages = hideLow ? 3 : (hideZero ? 1 : 0)
 
         if minMessages > 0 {
@@ -58,8 +58,8 @@ actor AnalyticsRepository {
     /// matches the Sessions list filtering policy.
     func avgSessionLength(sources: [String], dayStart: String?, dayEnd: String?) async -> TimeInterval {
         let d = UserDefaults.standard
-        let hideZero = d.object(forKey: "HideZeroMessageSessions") == nil ? true : d.bool(forKey: "HideZeroMessageSessions")
-        let hideLow  = d.object(forKey: "HideLowMessageSessions")  == nil ? true : d.bool(forKey: "HideLowMessageSessions")
+        let hideZero = d.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
+        let hideLow  = d.object(forKey: "HideLowMessageSessions") as? Bool ?? true
         // Determine minimum messages required per session across the selected period
         // - hideLow: exclude sessions with <= 2 messages → min = 3
         // - else if hideZero: exclude sessions with 0 messages → min = 1
