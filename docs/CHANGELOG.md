@@ -7,6 +7,11 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Preferences → Claude Code: Sessions Directory override to choose a custom Claude sessions root. The Claude indexer honors this path and refreshes automatically when changed. Defaults to `~/.claude` when unset.
 
+## [2.5.3] - 2025-11-03
+
+### Fixed
+- Release packaging: v2.5.2 tag pointed to wrong commit, missing project filter feature. This release includes all intended 2.5.2 changes.
+
 ## [2.5.2] - 2025-11-02
 
 ### Added
