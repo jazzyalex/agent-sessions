@@ -70,3 +70,28 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
         }
     }
 }
+
+/// Project filter options for analytics
+enum AnalyticsProjectFilter: Equatable, Hashable {
+    case all
+    case specific(String) // repo name
+
+    var displayName: String {
+        switch self {
+        case .all:
+            return "All Projects"
+        case .specific(let name):
+            return name
+        }
+    }
+
+    /// Check if a session's repo matches this filter
+    func matches(_ repoName: String?) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .specific(let name):
+            return repoName == name
+        }
+    }
+}
