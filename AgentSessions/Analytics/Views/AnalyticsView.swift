@@ -7,6 +7,8 @@ struct AnalyticsView: View {
 
     @State private var dateRange: AnalyticsDateRange = .last7Days
     @State private var agentFilter: AnalyticsAgentFilter = .all
+    @State private var projectFilter: AnalyticsProjectFilter = .all
+    @State private var availableProjects: [String] = []
     @State private var isRefreshing: Bool = false
 
     var body: some View {
@@ -26,12 +28,15 @@ struct AnalyticsView: View {
             }
         }
         .onAppear {
+            // Load available projects
+            availableProjects = service.getAvailableProjects()
             // Do not parse all sessions here; indexing provides precomputed metrics (next phase).
             // Keep UI responsive and avoid heavy work on appear.
             refreshData()
         }
         .onChange(of: dateRange) { _, _ in refreshData() }
         .onChange(of: agentFilter) { _, _ in refreshData() }
+        .onChange(of: projectFilter) { _, _ in refreshData() }
         .onChange(of: service.isParsingSessions) { _, isParsing in
             // Refresh analytics when parsing completes
             if !isParsing {
@@ -73,6 +78,17 @@ struct AnalyticsView: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .frame(width: 140)
+
+            // Project filter picker
+            Picker("Project", selection: $projectFilter) {
+                Text("All Projects").tag(AnalyticsProjectFilter.all)
+                ForEach(availableProjects, id: \.self) { project in
+                    Text(project).tag(AnalyticsProjectFilter.specific(project))
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(width: 200)
 
             // Refresh button
             Button(action: { withAnimation { refreshData() } }) {
@@ -214,7 +230,7 @@ struct AnalyticsView: View {
         isRefreshing = true
 
         Task {
-            await service.calculate(dateRange: dateRange, agentFilter: agentFilter)
+            await service.calculate(dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
 
             // Simulate brief delay for animation
             try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s

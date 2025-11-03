@@ -37,7 +37,7 @@ final class AnalyticsService: ObservableObject {
     }
 
     /// Calculate analytics for given filters
-    func calculate(dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) async {
+    func calculate(dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter, projectFilter: AnalyticsProjectFilter) async {
         isLoading = true
         defer { isLoading = false }
 
@@ -48,12 +48,12 @@ final class AnalyticsService: ObservableObject {
         allSessions.append(contentsOf: geminiIndexer.allSessions)
 
         // Apply filters for current period
-        let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter)
+        let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
 
         // Calculate metrics (prefer DB-backed where possible)
-        let summary = await calculateSummaryFastOrFallback(allSessions: allSessions, dateRange: dateRange, agentFilter: agentFilter)
+        let summary = await calculateSummaryFastOrFallback(allSessions: allSessions, dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
         let timeSeries = calculateTimeSeries(sessions: filtered, dateRange: dateRange)
-        let agentBreakdown = await calculateAgentBreakdownFastOrFallback(dateRange: dateRange, agentFilter: agentFilter, fallbackSessions: filtered)
+        let agentBreakdown = await calculateAgentBreakdownFastOrFallback(dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter, fallbackSessions: filtered)
         let heatmap = calculateHeatmap(sessions: filtered)
         let mostActive = calculateMostActiveTime(sessions: filtered)
 
@@ -65,6 +65,39 @@ final class AnalyticsService: ObservableObject {
             mostActiveTimeRange: mostActive,
             lastUpdated: Date()
         )
+    }
+
+    /// Get list of available project names sorted by session count
+    func getAvailableProjects() -> [String] {
+        // Gather all sessions
+        var allSessions: [Session] = []
+        allSessions.append(contentsOf: codexIndexer.allSessions)
+        allSessions.append(contentsOf: claudeIndexer.allSessions)
+        allSessions.append(contentsOf: geminiIndexer.allSessions)
+
+        // Apply message count filters (same as Sessions List)
+        let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
+        let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? true
+
+        var filtered = allSessions
+        if hideZero {
+            filtered = filtered.filter { $0.messageCount > 0 }
+        }
+        if hideLow {
+            filtered = filtered.filter { $0.messageCount > 2 }
+        }
+
+        // Group by repoName and count sessions
+        var projectCounts: [String: Int] = [:]
+        for session in filtered {
+            // Skip sessions with no project
+            guard let projectName = session.repoName else { continue }
+            projectCounts[projectName, default: 0] += 1
+        }
+
+        // Sort by session count descending
+        let sortedProjects = projectCounts.sorted { $0.value > $1.value }
+        return sortedProjects.map { $0.key }
     }
 
     /// Ensure all sessions are fully parsed for accurate analytics
@@ -148,10 +181,14 @@ final class AnalyticsService: ObservableObject {
 
     private func filterSessions(_ sessions: [Session],
                                 dateRange: AnalyticsDateRange,
-                                agentFilter: AnalyticsAgentFilter) -> [Session] {
+                                agentFilter: AnalyticsAgentFilter,
+                                projectFilter: AnalyticsProjectFilter) -> [Session] {
         var filtered = sessions.filter { session in
             // Agent filter
             guard agentFilter.matches(session.source) else { return false }
+
+            // Project filter
+            guard projectFilter.matches(session.repoName) else { return false }
 
             // Date range filter
             if let startDate = dateRange.startDate() {
@@ -190,9 +227,11 @@ final class AnalyticsService: ObservableObject {
 
     // MARK: - Summary Calculations
 
-    private func calculateSummaryFastOrFallback(allSessions: [Session], dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) async -> AnalyticsSummary {
+    private func calculateSummaryFastOrFallback(allSessions: [Session], dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter, projectFilter: AnalyticsProjectFilter) async -> AnalyticsSummary {
         // Use DB for sessions/messages/duration/avg session length; skip commands for performance
-        if let repo = repository, await repo.isReady() {
+        // Note: DB path currently only supports agent filtering, not project filtering
+        // When project filter is active, use fallback path
+        if projectFilter == .all, let repo = repository, await repo.isReady() {
             let (startDay, endDay) = dayBounds(for: dateRange)
             let sources = sourcesFor(agentFilter)
             let cur = await repo.summary(sources: sources, dayStart: startDay, dayEnd: endDay)
@@ -223,17 +262,17 @@ final class AnalyticsService: ObservableObject {
                 avgSessionLengthChange: avgSessionLengthChange
             )
         }
-        return calculateSummaryFallback(allSessions: allSessions, dateRange: dateRange, agentFilter: agentFilter)
+        return calculateSummaryFallback(allSessions: allSessions, dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
     }
 
-    private func calculateSummaryFallback(allSessions: [Session], dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter) -> AnalyticsSummary {
+    private func calculateSummaryFallback(allSessions: [Session], dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter, projectFilter: AnalyticsProjectFilter) -> AnalyticsSummary {
         // Skip tool call counting for performance
         let now = Date()
         let currentBounds = dateBounds(for: dateRange, now: now)
-        let current = filterSessionsWithinBounds(allSessions, bounds: currentBounds, agentFilter: agentFilter)
+        let current = filterSessionsWithinBounds(allSessions, bounds: currentBounds, agentFilter: agentFilter, projectFilter: projectFilter)
 
         let previousBounds = previousPeriodBounds(for: dateRange, now: now)
-        let previous = filterSessionsWithinBounds(allSessions, bounds: previousBounds, agentFilter: agentFilter)
+        let previous = filterSessionsWithinBounds(allSessions, bounds: previousBounds, agentFilter: agentFilter, projectFilter: projectFilter)
 
         let sessionCount = current.count
         let messageCount = current.reduce(0) { $0 + $1.messageCount }
@@ -271,7 +310,7 @@ final class AnalyticsService: ObservableObject {
         let periodLength = now.timeIntervalSince(startDate)
         let previousStart = startDate.addingTimeInterval(-periodLength)
         let previousEnd = startDate
-        return filterSessionsWithinBounds(agentFilteredAllSessions, bounds: (start: previousStart, end: previousEnd), agentFilter: .all)
+        return filterSessionsWithinBounds(agentFilteredAllSessions, bounds: (start: previousStart, end: previousEnd), agentFilter: .all, projectFilter: .all)
     }
 
     private func calculatePercentageChange(current: Int, previous: Int) -> Double? {
@@ -335,7 +374,8 @@ final class AnalyticsService: ObservableObject {
 
     private func filterSessionsWithinBounds(_ sessions: [Session],
                                             bounds: (start: Date?, end: Date?),
-                                            agentFilter: AnalyticsAgentFilter) -> [Session] {
+                                            agentFilter: AnalyticsAgentFilter,
+                                            projectFilter: AnalyticsProjectFilter) -> [Session] {
         // Apply message count filters (same as Sessions List)
         // Use same defaults as @AppStorage in Sessions List views (both default to true)
         let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
@@ -343,6 +383,7 @@ final class AnalyticsService: ObservableObject {
 
         return sessions.filter { session in
             guard agentFilter.matches(session.source) else { return false }
+            guard projectFilter.matches(session.repoName) else { return false }
 
             // Apply message count filters
             if hideZero && session.messageCount == 0 { return false }
@@ -516,8 +557,9 @@ final class AnalyticsService: ObservableObject {
         return breakdowns.sorted { $0.sessionCount > $1.sessionCount }
     }
 
-    private func calculateAgentBreakdownFastOrFallback(dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter, fallbackSessions: [Session]) async -> [AnalyticsAgentBreakdown] {
-        if let repo = repository, await repo.isReady(), agentFilter == .all {
+    private func calculateAgentBreakdownFastOrFallback(dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter, projectFilter: AnalyticsProjectFilter, fallbackSessions: [Session]) async -> [AnalyticsAgentBreakdown] {
+        // DB path only supports agent filtering, not project filtering
+        if projectFilter == .all, let repo = repository, await repo.isReady(), agentFilter == .all {
             let (startDay, endDay) = dayBounds(for: dateRange)
             let slices = await repo.breakdownByAgent(sources: sourcesFor(.all), dayStart: startDay, dayEnd: endDay)
             let total = max(1, slices.reduce(0) { $0 + $1.sessionsDistinct })
