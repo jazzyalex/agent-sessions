@@ -7,14 +7,15 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Preferences → Claude Code: Sessions Directory override to choose a custom Claude sessions root. The Claude indexer honors this path and refreshes automatically when changed. Defaults to `~/.claude` when unset.
 
-## [2.5.2] - 2025-11-01
+## [2.5.2] - 2025-11-02
+
+### Added
+- Analytics: Project filter dropdown in Analytics window header to drill down into per-project metrics (sessions, messages, duration, time series, agent breakdown, heatmap). Works alongside existing date range and agent filters.
 
 ### Fixed
 - Analytics: Session counts now match Sessions List by properly applying filter defaults (HideZeroMessageSessions and HideLowMessageSessions both default to true). Previously Analytics counted all sessions including noise (0-2 messages), inflating counts by up to 79%.
 - Analytics: Simplified UserDefaults reading in AnalyticsRepository to use consistent pattern with AnalyticsService.
-
-### Added
-- Diagnostic script: `scripts/analyze_sessions.py` to audit session files and identify noise patterns across Codex CLI, Claude Code, and Gemini CLI.
+- Analytics: Project filter list now excludes projects with only empty/low-message sessions, matching Sessions List behavior.
 
 ## [2.5.1] - 2025-10-31
 
