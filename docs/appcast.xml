@@ -4,16 +4,17 @@
         <title>AgentSessions</title>
         <item>
             <title>2.5.2</title>
-            <pubDate>Sat, 01 Nov 2025 11:52:07 -0700</pubDate>
+            <pubDate>Mon, 03 Nov 2025 10:13:13 -0800</pubDate>
             <description><![CDATA[
                 <h2>What's New in 2.5.2</h2>
+
+<h3>Added</h3>
+<p>Analytics: Project filter dropdown in Analytics window header to drill down into per-project metrics (sessions, messages, duration, time series, agent breakdown, heatmap). Works alongside existing date range and agent filters.</p>
 
 <h3>Fixed</h3>
 <p>Analytics: Session counts now match Sessions List by properly applying filter defaults (HideZeroMessageSessions and HideLowMessageSessions both default to true). Previously Analytics counted all sessions including noise (0-2 messages), inflating counts by up to 79%.</p>
 <p>Analytics: Simplified UserDefaults reading in AnalyticsRepository to use consistent pattern with AnalyticsService.</p>
-
-<h3>Added</h3>
-<p>Diagnostic script: `scripts/analyze_sessions.py` to audit session files and identify noise patterns across Codex CLI, Claude Code, and Gemini CLI.
+<p>Analytics: Project filter list now excludes projects with only empty/low-message sessions, matching Sessions List behavior.
 </p>
 <h3>Added</h3>
 <p>Indexing: SQLite rollups index with per-session daily splits and incremental Refresh. Background indexing runs at utility priority and updates only changed session files.</p>
@@ -29,7 +30,7 @@
             <sparkle:version>4</sparkle:version>
             <sparkle:shortVersionString>2.5.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.2/AgentSessions-2.5.2.dmg" length="6168718" type="application/octet-stream" sparkle:edSignature="WNubq/fa9+YHN6RS6TqhYDACRI5a1dBV7fV1+pWYhPxhuLJPk1r0XcSdWwzSfkS/cg9DPs4vv5Kl/mh1bRQXCA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.2/AgentSessions-2.5.2.dmg" length="6188318" type="application/octet-stream" sparkle:edSignature="8TmZZouMuvzhhRoxlh8JDhaweFoqtOrGbwhPOL0iqQB66VZsHqk5f0678u6K/6HNuIkp4fAxxgR+f2dG28GOBw=="/>
         </item>
     </channel>
 </rss>
