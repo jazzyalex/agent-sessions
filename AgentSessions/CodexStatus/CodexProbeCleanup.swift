@@ -2,6 +2,7 @@ import Foundation
 
 /// Safety-checked deletion of Codex probe sessions from ~/.codex/sessions.
 enum CodexProbeCleanup {
+    static let didRunCleanupNotification = Notification.Name("CodexProbeCleanupDidRun")
     private enum Keys { static let cleanupMode = "CodexProbeCleanupMode" }
     enum CleanupMode: String { case none, auto }
     enum ResultStatus { case success(Int), disabled(String), notFound(String), unsafe(String), ioError(String) }
@@ -14,15 +15,21 @@ enum CodexProbeCleanup {
 
     @discardableResult
     static func cleanupNowIfAuto() -> ResultStatus {
-        guard cleanupMode() == .auto else { return .disabled("Cleanup mode is not auto") }
-        return cleanupNowUserInitiated()
+        let res: ResultStatus
+        if cleanupMode() == .auto {
+            res = cleanupNowUserInitiated()
+        } else {
+            res = .disabled("Cleanup mode is not auto")
+        }
+        post(res, mode: "auto")
+        return res
     }
 
     static func cleanupNowUserInitiated() -> ResultStatus {
         let root = sessionsRoot()
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
-            return .notFound("Sessions directory not found")
+            let r: ResultStatus = .notFound("Sessions directory not found"); post(r, mode: "manual"); return r
         }
         // Scan recent days to keep things fast
         let candidates = findCandidateFiles(root: root, daysBack: 7, limit: 64)
@@ -30,12 +37,12 @@ enum CodexProbeCleanup {
         for url in candidates {
             if isProbeFile(url: url) { deletions.append(url) }
         }
-        guard !deletions.isEmpty else { return .notFound("No probe sessions found") }
+        guard !deletions.isEmpty else { let r: ResultStatus = .notFound("No probe sessions found"); post(r, mode: "manual"); return r }
         var deleted = 0
         for url in deletions {
-            do { try FileManager.default.removeItem(at: url); deleted += 1 } catch { return .ioError(error.localizedDescription) }
+            do { try FileManager.default.removeItem(at: url); deleted += 1 } catch { let r: ResultStatus = .ioError(error.localizedDescription); post(r, mode: "manual"); return r }
         }
-        return .success(deleted)
+        let r: ResultStatus = .success(deleted); post(r, mode: "manual"); return r
     }
 
     // MARK: - Helpers
@@ -126,5 +133,16 @@ enum CodexProbeCleanup {
     private static func normalize(_ path: String) -> String {
         (path as NSString).expandingTildeInPath.replacingOccurrences(of: "//", with: "/")
     }
-}
 
+    private static func post(_ status: ResultStatus, mode: String) {
+        var info: [String: Any] = ["mode": mode]
+        switch status {
+        case .success(let n): info["status"] = "success"; info["deleted"] = n
+        case .disabled: info["status"] = "disabled"
+        case .notFound(let s): info["status"] = "not_found"; info["message"] = s
+        case .unsafe(let s): info["status"] = "unsafe"; info["message"] = s
+        case .ioError(let s): info["status"] = "io_error"; info["message"] = s
+        }
+        NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+    }
+}
