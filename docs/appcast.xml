@@ -3,13 +3,14 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.5.3</title>
-            <pubDate>Mon, 03 Nov 2025 10:43:22 -0800</pubDate>
+            <title>2.5.4</title>
+            <pubDate>Mon, 03 Nov 2025 16:57:30 -0800</pubDate>
             <description><![CDATA[
-                <h2>What's New in 2.5.3</h2>
+                <h2>What's New in 2.5.4</h2>
 
 <h3>Fixed</h3>
-<p>Release packaging: v2.5.2 tag pointed to wrong commit, missing project filter feature. This release includes all intended 2.5.2 changes.
+<p>Sessions: Manual refresh now scans filesystem for new session files even when loading from database cache. Previously, the refresh button would load cached sessions and skip filesystem scan, causing new VSCode Codex sessions to remain invisible until background indexer ran.</p>
+<p>UI: Progress indicator now remains visible throughout entire refresh operation, including transcript processing phase. Previously, the spinner would disappear prematurely while heavy transcript cache generation continued in background, leaving users with unresponsive UI and no feedback.
 </p>
 <h3>Added</h3>
 <p>Indexing: SQLite rollups index with per-session daily splits and incremental Refresh. Background indexing runs at utility priority and updates only changed session files.</p>
@@ -22,10 +23,10 @@
 <p>Sessions/Messages totals: Respect HideZeroMessageSessions/HideLowMessageSessions preferences in dashboard cards.</p>
 <p>Avg Session Length: Exclude noise sessions when preferences hide zero/low message sessions.</p>
             ]]></description>
-            <sparkle:version>5</sparkle:version>
-            <sparkle:shortVersionString>2.5.3</sparkle:shortVersionString>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>2.5.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.3/AgentSessions-2.5.3.dmg" length="6188254" type="application/octet-stream" sparkle:edSignature="6y7d4YHcB1lCZvlGM9Q2liFmQRANGdzcwzxJE+TsPOyqPVLFCBw8E/4sZ1OXL2colRQuTtVLrq19/W71XWEiAw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.4/AgentSessions-2.5.4.dmg" length="6214368" type="application/octet-stream" sparkle:edSignature="YfpJhT7o+aHPUAzzVrRCHpZ2TiPOESQIGLYcAZxO4nNkjJ3FfIw0SoUadO9VdP/uaUSFcH91TxSL5+sZB4QcDA=="/>
         </item>
     </channel>
 </rss>
