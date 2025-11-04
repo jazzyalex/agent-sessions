@@ -7,6 +7,12 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Preferences → Claude Code: Sessions Directory override to choose a custom Claude sessions root. The Claude indexer honors this path and refreshes automatically when changed. Defaults to `~/.claude` when unset.
 
+## [2.5.4] - 2025-11-03
+
+### Fixed
+- Sessions: Manual refresh now scans filesystem for new session files even when loading from database cache. Previously, the refresh button would load cached sessions and skip filesystem scan, causing new VSCode Codex sessions to remain invisible until background indexer ran.
+- UI: Progress indicator now remains visible throughout entire refresh operation, including transcript processing phase. Previously, the spinner would disappear prematurely while heavy transcript cache generation continued in background, leaving users with unresponsive UI and no feedback.
+
 ## [2.5.3] - 2025-11-03
 
 ### Fixed
