@@ -19,6 +19,7 @@ Package.resolved
 *.log
 lint-report.json
 lint-xcode.txt
+build.bundle/
 
 # Local build artifacts
 /dist/

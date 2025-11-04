@@ -4,7 +4,7 @@ import SwiftUI
 import IOKit.ps
 #endif
 
-// ILLUSTRATIVE: Minimal model + service for Codex /status usage parsing.
+// ILLUSTRATIVE: Minimal model + service for Codex usage parsing with optional CLI /status probe.
 
 // Snapshot of parsed values from Codex /status or banner
 struct CodexUsageSnapshot: Equatable {
@@ -176,6 +176,7 @@ actor CodexStatusService {
     private var visible: Bool = false
     private var backoffSeconds: UInt64 = 1
     private var refresherTask: Task<Void, Never>?
+    private var lastStatusProbe: Date? = nil
 
     init(updateHandler: @escaping @Sendable (CodexUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (Bool) -> Void) {
@@ -213,7 +214,7 @@ actor CodexStatusService {
     }
 
     func refreshNow() {
-        Task { await self.refreshTick() }
+        Task { await self.refreshTick(userInitiated: true) }
     }
 
     // MARK: - Core
@@ -400,7 +401,7 @@ actor CodexStatusService {
         return nil
     }
 
-    private func refreshTick() async {
+    private func refreshTick(userInitiated: Bool = false) async {
         // Log-probe path: scan latest JSONL for token_count rate_limits
         let root = sessionsRoot()
         var isDir: ObjCBool = false
@@ -422,6 +423,79 @@ actor CodexStatusService {
             snapshot = s
             updateHandler(snapshot)
         }
+
+        // Optional: run a one-shot tmux /status probe when stale or on manual refresh
+        await maybeProbeStatusViaTMUX(userInitiated: userInitiated)
+    }
+
+    // MARK: - Optional tmux /status probe
+    private func maybeProbeStatusViaTMUX(userInitiated: Bool) async {
+        let now = Date()
+        let allowAuto = UserDefaults.standard.bool(forKey: "CodexAllowStatusProbe")
+        if !userInitiated {
+            guard allowAuto else { return }
+            guard visible else { return }
+            let stale5h = isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
+            let staleWeek = isResetInfoStale(kind: "week", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
+            guard stale5h || staleWeek else { return }
+            if let last = lastStatusProbe, now.timeIntervalSince(last) < 600 { return }
+        }
+
+        guard let tmuxSnap = await runCodexStatusViaTMUX() else { return }
+        lastStatusProbe = now
+        var merged = snapshot
+        if tmuxSnap.fiveHourPercent > 0 { merged.fiveHourPercent = clampPercent(tmuxSnap.fiveHourPercent) }
+        if !tmuxSnap.fiveHourResetText.isEmpty { merged.fiveHourResetText = tmuxSnap.fiveHourResetText }
+        if tmuxSnap.weekPercent > 0 { merged.weekPercent = clampPercent(tmuxSnap.weekPercent) }
+        if !tmuxSnap.weekResetText.isEmpty { merged.weekResetText = tmuxSnap.weekResetText }
+        merged.eventTimestamp = now
+        snapshot = merged
+        updateHandler(merged)
+        _ = CodexProbeCleanup.cleanupNowIfAuto()
+    }
+
+    private func runCodexStatusViaTMUX() async -> CodexUsageSnapshot? {
+        guard let scriptURL = Bundle.main.url(forResource: "codex_status_capture", withExtension: "sh") else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [scriptURL.path]
+
+        var env = ProcessInfo.processInfo.environment
+        // Provide WORKDIR to funnel probe sessions
+        let workDir = CodexProbeConfig.probeWorkingDirectory()
+        try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
+        env["WORKDIR"] = workDir
+        env["MODEL"] = "gpt-5-mini"
+        // Resolve codex binary if possible
+        let envResolver = CodexCLIEnvironment()
+        if let bin = envResolver.resolveBinary(customPath: nil) { env["CODEX_BIN"] = bin.path }
+
+        process.environment = env
+        let out = Pipe(); let err = Pipe()
+        process.standardOutput = out; process.standardError = err
+        do { try process.run() } catch { return nil }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        guard let json = String(data: data, encoding: .utf8) else { return nil }
+        return parseStatusJSON(json)
+    }
+
+    private func parseStatusJSON(_ json: String) -> CodexUsageSnapshot? {
+        guard let data = json.data(using: .utf8) else { return nil }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let ok = obj["ok"] as? Bool, !ok { return nil }
+        var s = CodexUsageSnapshot()
+        if let fh = obj["five_hour"] as? [String: Any] {
+            if let p = fh["pct_used"] as? Int { s.fiveHourPercent = p }
+            if let r = fh["resets"] as? String { s.fiveHourResetText = r }
+        }
+        if let wk = obj["weekly"] as? [String: Any] {
+            if let p = wk["pct_used"] as? Int { s.weekPercent = p }
+            if let r = wk["resets"] as? String { s.weekResetText = r }
+        }
+        s.eventTimestamp = Date()
+        return s
     }
 
     private func nextInterval() -> UInt64 {
