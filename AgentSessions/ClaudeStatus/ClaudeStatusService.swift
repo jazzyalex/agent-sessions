@@ -83,6 +83,8 @@ actor ClaudeStatusService {
             if let parsed = parseUsageJSON(json) {
                 snapshot = parsed
                 updateHandler(snapshot)
+                // Auto-cleanup the probe project immediately after a successful probe
+                _ = ClaudeProbeProject.cleanupNowIfAuto()
             } else {
                 print("ClaudeStatusService: Failed to parse JSON: \(json)")
             }
@@ -103,15 +105,14 @@ actor ClaudeStatusService {
 
         // Set environment for script
         var env = ProcessInfo.processInfo.environment
-        // Use isolated temp directory to prevent Claude from scanning user folders
-        let tempBase = NSTemporaryDirectory()
-        let workDir = (tempBase as NSString).appendingPathComponent("AgentSessions-claude-usage")
+        // Use stable probe working directory so Claude maps all probes to one project
+        let workDir = ClaudeProbeConfig.probeWorkingDirectory()
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
         env["WORKDIR"] = workDir
         env["MODEL"] = "sonnet"
         env["TIMEOUT_SECS"] = "10"
         env["SLEEP_BOOT"] = "0.4"
-        env["SLEEP_AFTER_USAGE"] = "1.2"
+        env["SLEEP_AFTER_USAGE"] = "2.0"
 
         // Use real HOME for auth credentials (temp WORKDIR prevents file access prompts)
         // No CLAUDE_HOME override - let it use real ~/.claude/ with credentials

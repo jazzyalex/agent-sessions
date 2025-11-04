@@ -69,6 +69,8 @@ actor AnalyticsIndexer {
 
         // Parse fully on a background task
         guard let session = await parseSession(url: url, source: source) else { return }
+        // Skip Agent Sessions' Claude probe sessions to keep analytics clean
+        if source == "claude" && ClaudeProbeConfig.isProbeSession(session) { return }
         let messages = session.events.filter { $0.kind != .meta }.count
         let commands = session.events.filter { $0.kind == .tool_call }.count
         let start = session.startTime ?? session.events.compactMap { $0.timestamp }.min() ?? Date(timeIntervalSince1970: TimeInterval(mtime))

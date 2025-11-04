@@ -22,7 +22,7 @@ set -euo pipefail
 MODEL="${MODEL:-sonnet}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-10}"
 SLEEP_BOOT="${SLEEP_BOOT:-0.4}"
-SLEEP_AFTER_USAGE="${SLEEP_AFTER_USAGE:-1.2}"
+SLEEP_AFTER_USAGE="${SLEEP_AFTER_USAGE:-2.0}"
 WORKDIR="${WORKDIR:-$(pwd)}"
 
 # Unique label to avoid interference
@@ -161,6 +161,17 @@ fi
 # Send /usage command and navigate to Usage tab
 # ============================================================================
 
+###############################################################################
+# Send a one-line chat marker to identify this as an Agent Sessions probe
+###############################################################################
+"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "[AS_USAGE_PROBE v1] usage probe" 2>/dev/null
+sleep 0.2
+"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
+sleep 0.6
+
+###############################################################################
+# Open /usage and navigate to the Usage section
+###############################################################################
 # Send /usage
 "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "/" 2>/dev/null
 sleep 0.2
@@ -168,47 +179,119 @@ sleep 0.2
 sleep 0.3
 "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
 
-# Wait for settings dialog to open
+## Wait for settings dialog to open, then try to land on Usage tab
 sleep "$SLEEP_AFTER_USAGE"
 
-# Tab to Usage section (Status [default] -> Config -> Usage = 2 tabs)
-"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Tab 2>/dev/null
-sleep 0.3
-"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Tab 2>/dev/null
-sleep 0.3
-"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Tab 2>/dev/null
-sleep 0.5
+# Tab to Usage section (layout varies; send a few Tabs defensively)
+for i in 1 2 3 4; do
+  "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Tab 2>/dev/null
+  sleep 0.25
+done
 
+###############################################################################
+# Capture and robustly parse the Usage screen
+###############################################################################
 # Capture the usage screen
-usage_output=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -300 2>/dev/null || echo "")
+capture_usage() {
+  "$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -300 2>/dev/null || echo ""
+}
+
+usage_output=$(capture_usage)
+
+# If we don't see the anchors, try to re-open /usage a couple of times
+ensure_usage_visible() {
+  tries=0
+  while [ $tries -lt 3 ]; do
+    if echo "$usage_output" | grep -q "Current session"; then
+      return 0
+    fi
+    # Re-open /usage to force navigation
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Escape 2>/dev/null || true
+    sleep 0.2
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "/" 2>/dev/null
+    sleep 0.2
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "usage" 2>/dev/null
+    sleep 0.2
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
+    sleep "$SLEEP_AFTER_USAGE"
+    usage_output=$(capture_usage)
+    tries=$((tries+1))
+  done
+}
+
+ensure_usage_visible
 
 # ============================================================================
 # Parse usage output
 # ============================================================================
 
-# Extract Current session
-session_pct=$(echo "$usage_output" | grep -A2 "Current session" | grep "% used" | sed -E 's/.*[^0-9]([0-9]+)% used.*/\1/' || echo "")
-session_resets=$(echo "$usage_output" | grep -A2 "Current session" | grep "Resets" | sed 's/.*Resets *//' | xargs || echo "")
+extract_pct_and_reset() {
+  local anchor="$1"; shift
+  # Capture the anchor line + next 3 lines into a small block
+  local block
+  block=$(echo "$usage_output" | awk -v a="$anchor" '
+    BEGIN{c=0}
+    {
+      if (index($0,a)>0) { c=4 }
+      if (c>0) { print; c-- }
+    }
+  ')
+  # Extract first percentage number preceding the literal "used"
+  local pct
+  pct=$(echo "$block" | awk '
+    /% used/ {
+      if (match($0, /[0-9]+/)) { print substr($0, RSTART, RLENGTH); exit }
+    }
+  ')
+  # Extract text after "Resets"
+  local resets
+  resets=$(echo "$block" | awk '
+    /Resets/ { sub(/^.*Resets[ ]*/, ""); print; exit }
+  ')
+  echo "$pct" "$resets"
+}
 
-# Extract Current week (all models)
-week_all_pct=$(echo "$usage_output" | grep -A2 "Current week (all models)" | grep "% used" | sed -E 's/.*[^0-9]([0-9]+)% used.*/\1/' || echo "")
-week_all_resets=$(echo "$usage_output" | grep -A2 "Current week (all models)" | grep "Resets" | sed 's/.*Resets *//' | xargs || echo "")
+read session_pct session_resets < <(extract_pct_and_reset "Current session")
 
-# Extract Current week (Opus) - may not exist
-if echo "$usage_output" | grep -q "Current week (Opus)"; then
-    week_opus_pct=$(echo "$usage_output" | grep -A2 "Current week (Opus)" | grep "% used" | sed -E 's/.*[^0-9]([0-9]+)% used.*/\1/' || echo "")
-    week_opus_resets=$(echo "$usage_output" | grep -A2 "Current week (Opus)" | grep "Resets" | sed 's/.*Resets *//' | xargs || echo "")
-    week_opus_json="{\"pct_used\": $week_opus_pct, \"resets\": \"$week_opus_resets\"}"
+# Allow variations in label casing and punctuation for weekly all models
+week_anchor=$(echo "$usage_output" | awk 'BEGIN{IGNORECASE=1} /Current week \(all models\)|Current week \(all-models\)|Current week/ {print; exit}')
+if [ -n "$week_anchor" ]; then
+  read week_all_pct week_all_resets < <(extract_pct_and_reset "Current week")
 else
-    week_opus_json="null"
+  week_all_pct=""; week_all_resets=""
+fi
+
+# Opus weekly (optional)
+if echo "$usage_output" | grep -q "Current week (Opus)"; then
+  read week_opus_pct week_opus_resets < <(extract_pct_and_reset "Current week (Opus)")
+  week_opus_json="{\"pct_used\": ${week_opus_pct:-0}, \"resets\": \"${week_opus_resets}\"}"
+else
+  week_opus_json="null"
 fi
 
 # Validate we got data
 if [ -z "$session_pct" ] || [ -z "$week_all_pct" ]; then
+    # One more attempt: re-open /usage and recapture once
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Escape 2>/dev/null || true
+    sleep 0.2
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "/" 2>/dev/null
+    sleep 0.2
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "usage" 2>/dev/null
+    sleep 0.2
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
+    sleep "$SLEEP_AFTER_USAGE"
+    usage_output=$(capture_usage)
+    read session_pct session_resets < <(extract_pct_and_reset "Current session")
+    read week_all_pct week_all_resets < <(extract_pct_and_reset "Current week")
+fi
+
+if [ -z "$session_pct" ] || [ -z "$week_all_pct" ]; then
+    if [ "${CLAUDE_TUI_DEBUG:-0}" != "0" ]; then
+        debug_file="$(mktemp -t claude_usage_pane)"
+        echo "$usage_output" > "$debug_file"
+        echo "DEBUG pane saved to $debug_file" >&2
+    fi
     echo "$(error_json parsing_failed 'Failed to extract usage data from TUI')"
-    echo "ERROR: Failed to parse usage data" >&2
-    echo "Captured output:" >&2
-    echo "$usage_output" >&2
     exit 16
 fi
 
