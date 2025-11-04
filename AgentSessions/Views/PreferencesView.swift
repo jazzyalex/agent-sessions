@@ -18,6 +18,10 @@ struct PreferencesView: View {
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     // Codex auto-probe pref (secondary tmux-based /status probe when stale)
     @AppStorage("CodexAllowStatusProbe") private var codexAllowStatusProbe: Bool = false
+    // Codex probe cleanup prefs
+    @AppStorage("CodexProbeCleanupMode") private var codexProbeCleanupMode: String = "none" // none | auto
+    @State private var showConfirmCodexAutoDelete: Bool = false
+    @State private var showConfirmCodexDeleteNow: Bool = false
     // Claude Probe cleanup prefs
     @AppStorage("ClaudeProbeCleanupMode") private var claudeProbeCleanupMode: String = "none" // none | auto
     @State private var showConfirmAutoDelete: Bool = false
@@ -376,13 +380,59 @@ struct PreferencesView: View {
                         .help("Force Codex to refresh now. Runs the log refresh and a one-shot /status probe.")
                 }
                 .padding(.top, 2)
-                
+
                 HStack(spacing: 0) {
                     Text("Note: primary Codex tracking remains the JSONL log parser; /status is a secondary source.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                
+
+                // Codex probe cleanup (mirrors Claude behavior)
+                sectionHeader("Codex Status Probe Sessions")
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("", selection: Binding(
+                        get: { codexProbeCleanupMode },
+                        set: { newVal in
+                            if newVal == "auto" {
+                                showConfirmCodexAutoDelete = true
+                            } else {
+                                codexProbeCleanupMode = "none"
+                                CodexProbeCleanup.setCleanupMode(.none)
+                            }
+                        }
+                    )) {
+                        Text("No delete").tag("none")
+                        Text("Auto-delete after each probe").foregroundStyle(.red).tag("auto")
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 440)
+
+                    HStack(spacing: 12) {
+                        Button("Delete Codex system probe sessions") { showConfirmCodexDeleteNow = true }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.red)
+                    }
+                }
+                .alert("Enable Automatic Cleanup?", isPresented: $showConfirmCodexAutoDelete) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Enable", role: .destructive) {
+                        codexProbeCleanupMode = "auto"
+                        CodexProbeCleanup.setCleanupMode(.auto)
+                        showCleanupFlash("Codex auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
+                    }
+                } message: {
+                    Text("After each status probe, Agent Sessions will delete only Codex probe sessions once safety checks verify they contain only probe markers.")
+                }
+                .alert("Delete Codex Probe Sessions Now?", isPresented: $showConfirmCodexDeleteNow) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Delete", role: .destructive) {
+                        let res = CodexProbeCleanup.cleanupNowUserInitiated()
+                        handleCodexCleanupResult(res)
+                    }
+                } message: {
+                    Text("This removes only Codex probe sessions after validation. If any session doesn’t look like a probe, nothing is deleted.")
+                }
+
                 HStack { EmptyView() }
                     .frame(height: 4)
                 
@@ -471,6 +521,20 @@ struct PreferencesView: View {
                 Text("Source: Codex, Claude, or Both. Style: Bars or numbers. Scope: 5h, weekly, or both.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: CodexProbeCleanup.didRunCleanupNotification)) { note in
+                if let info = note.userInfo as? [String: Any], let status = info["status"] as? String {
+                    switch status {
+                    case "success":
+                        if let n = info["deleted"] as? Int { showCleanupFlash("Deleted \(n) Codex probe file(s).", color: .green) }
+                        else { showCleanupFlash("Deleted Codex probe sessions.", color: .green) }
+                    case "not_found": showCleanupFlash("No Codex probe sessions to delete.", color: .secondary)
+                    case "unsafe": showCleanupFlash("Skipped: Codex sessions contained non-probe content.", color: .orange)
+                    case "io_error": showCleanupFlash("Failed to delete Codex probe sessions.", color: .red)
+                    case "disabled": break
+                    default: break
+                    }
+                }
             }
         }
     }
@@ -918,6 +982,15 @@ struct PreferencesView: View {
         case .notFound: showCleanupFlash("No probe project to delete.", color: .secondary)
         case .unsafe: showCleanupFlash("Skipped: project contained non-probe sessions.", color: .orange)
         case .ioError: showCleanupFlash("Failed to delete probe project.", color: .red)
+        case .disabled: break
+        }
+    }
+    private func handleCodexCleanupResult(_ res: CodexProbeCleanup.ResultStatus) {
+        switch res {
+        case .success(let n): showCleanupFlash("Deleted \(n) Codex probe file(s).", color: .green)
+        case .notFound(let s): showCleanupFlash(s, color: .secondary)
+        case .unsafe(let s): showCleanupFlash(s, color: .orange)
+        case .ioError(let s): showCleanupFlash(s, color: .red)
         case .disabled: break
         }
     }
