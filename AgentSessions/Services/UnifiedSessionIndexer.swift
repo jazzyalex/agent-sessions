@@ -63,6 +63,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     // Indexing state aggregation
     @Published private(set) var isIndexing: Bool = false
+    @Published private(set) var isProcessingTranscripts: Bool = false
     @Published private(set) var indexingError: String? = nil
     @Published var showFavoritesOnly: Bool = UserDefaults.standard.bool(forKey: "ShowFavoritesOnly") {
         didSet {
@@ -122,6 +123,11 @@ final class UnifiedSessionIndexer: ObservableObject {
         Publishers.CombineLatest3(codex.$isIndexing, claude.$isIndexing, gemini.$isIndexing)
             .map { $0 || $1 || $2 }
             .assign(to: &$isIndexing)
+
+        // isProcessingTranscripts reflects any indexer processing transcripts
+        Publishers.CombineLatest3(codex.$isProcessingTranscripts, claude.$isProcessingTranscripts, gemini.$isProcessingTranscripts)
+            .map { $0 || $1 || $2 }
+            .assign(to: &$isProcessingTranscripts)
 
         // Forward errors (preference order codex → claude → gemini)
         Publishers.CombineLatest3(codex.$indexingError, claude.$indexingError, gemini.$indexingError)

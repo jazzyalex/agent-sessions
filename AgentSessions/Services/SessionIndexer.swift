@@ -71,6 +71,7 @@ final class SessionIndexer: ObservableObject {
     @Published private(set) var sessions: [Session] = []
 
     @Published var isIndexing: Bool = false
+    @Published var isProcessingTranscripts: Bool = false
     @Published var progressText: String = ""
     @Published var filesProcessed: Int = 0
     @Published var totalFiles: Int = 0
@@ -447,6 +448,7 @@ final class SessionIndexer: ObservableObject {
         print("\n🔄 INDEXING START: root=\(root.path)")
 
         isIndexing = true
+        isProcessingTranscripts = false
         progressText = "Scanning…"
         filesProcessed = 0
         totalFiles = 0
@@ -554,10 +556,16 @@ final class SessionIndexer: ObservableObject {
                     print("✅ INDEXING DONE: total=\(allParsedSessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
                 }
 
-                // Start background transcript indexing for accurate search (non-blocking)
+                // Start background transcript indexing for accurate search
+                self.isProcessingTranscripts = true
+                self.progressText = "Processing transcripts..."
                 let cache = self.transcriptCache
                 Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
                     await cache.generateAndCache(sessions: sortedSessions)
+                    await MainActor.run {
+                        self.isProcessingTranscripts = false
+                        self.progressText = "Ready"
+                    }
                 }
 
                 // Show lightweight sessions details (only for newly parsed ones)
