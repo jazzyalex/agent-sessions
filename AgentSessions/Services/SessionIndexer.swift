@@ -545,6 +545,7 @@ final class SessionIndexer: ObservableObject {
             // Merge existing sessions with newly parsed ones
             let allParsedSessions = existingSessions + newSessions
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
+                .filter { !CodexProbeConfig.isProbeSession($0) }
             DispatchQueue.main.async {
                 self.allSessions = sortedSessions
                 self.isIndexing = false
