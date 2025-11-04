@@ -16,6 +16,8 @@ struct PreferencesView: View {
     @ObservedObject private var geminiSettings = GeminiCLISettings.shared
     @State private var showingResetConfirm: Bool = false
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
+    // Codex auto-probe pref (secondary tmux-based /status probe when stale)
+    @AppStorage("CodexAllowStatusProbe") private var codexAllowStatusProbe: Bool = false
     // Claude Probe cleanup prefs
     @AppStorage("ClaudeProbeCleanupMode") private var claudeProbeCleanupMode: String = "none" // none | auto
     @State private var showConfirmAutoDelete: Bool = false
@@ -366,11 +368,30 @@ struct PreferencesView: View {
                     ), help: "Show the Claude usage strip at the bottom of the Unified window")
                 }
                 HStack(spacing: 12) {
+                    Toggle("Allow auto Codex /status probe when stale", isOn: $codexAllowStatusProbe)
+                        .toggleStyle(.checkbox)
+                        .help("When Codex limits look stale and the strip or menu bar is visible, ask Codex CLI (/status) via tmux for a fresh update.")
+                    Button(action: { CodexUsageModel.shared.refreshNow() }) { Text("Refresh Codex now").underline() }
+                        .buttonStyle(.plain)
+                        .help("Force Codex to refresh now. Runs the log refresh and a one-shot /status probe.")
+                }
+                .padding(.top, 2)
+                
+                HStack(spacing: 0) {
+                    Text("Note: primary Codex tracking remains the JSONL log parser; /status is a secondary source.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                HStack { EmptyView() }
+                    .frame(height: 4)
+                
+                HStack(spacing: 12) {
                     Toggle("Activate Claude usage", isOn: Binding(
-                        get: { UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") },
-                        set: { newValue in
-                            if newValue {
-                                showClaudeExperimentalWarning = true
+                    get: { UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") },
+                    set: { newValue in
+                        if newValue {
+                            showClaudeExperimentalWarning = true
                             } else {
                                 UserDefaults.standard.set(false, forKey: "ShowClaudeUsageStrip")
                                 ClaudeUsageModel.shared.setEnabled(false)
