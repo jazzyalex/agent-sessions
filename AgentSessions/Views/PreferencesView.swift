@@ -16,6 +16,12 @@ struct PreferencesView: View {
     @ObservedObject private var geminiSettings = GeminiCLISettings.shared
     @State private var showingResetConfirm: Bool = false
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
+    // Claude Probe cleanup prefs
+    @AppStorage("ClaudeProbeCleanupMode") private var claudeProbeCleanupMode: String = "none" // none | auto
+    @State private var showConfirmAutoDelete: Bool = false
+    @State private var showConfirmDeleteNow: Bool = false
+    @State private var cleanupFlashText: String? = nil
+    @State private var cleanupFlashColor: Color = .secondary
     // Menu bar prefs
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -800,6 +806,98 @@ struct PreferencesView: View {
             }
 
             // Usage Tracking moved to Unified Window tab.
+
+            // -----------------------------------------------------------------
+            // Probe Sessions Cleanup
+            sectionHeader("Claude Usage Probe Sessions")
+            VStack(alignment: .leading, spacing: 12) {
+                // Radio group selection for cleanup mode
+                Picker("", selection: Binding(
+                    get: { claudeProbeCleanupMode },
+                    set: { newVal in
+                        if newVal == "auto" {
+                            showConfirmAutoDelete = true
+                        } else {
+                            claudeProbeCleanupMode = "none"
+                            ClaudeProbeProject.setCleanupMode(.none)
+                        }
+                    }
+                )) {
+                    Text("No delete").tag("none")
+                    Text("Auto-delete after each probe").foregroundStyle(.red).tag("auto")
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 440)
+
+                HStack(spacing: 12) {
+                    Button("Delete Agent Sessions system probe sessions") {
+                        showConfirmDeleteNow = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                }
+
+                if let flash = cleanupFlashText {
+                    Text(flash)
+                        .font(.caption)
+                        .foregroundStyle(cleanupFlashColor)
+                        .transition(.opacity)
+                }
+
+                Text("These controls only delete the dedicated Agent Sessions probe project; normal Claude projects are never touched.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .alert("Enable Automatic Cleanup?", isPresented: $showConfirmAutoDelete) {
+                Button("Cancel", role: .cancel) {}
+                Button("Enable", role: .destructive) {
+                    claudeProbeCleanupMode = "auto"
+                    ClaudeProbeProject.setCleanupMode(.auto)
+                    // brief acknowledgement
+                    showCleanupFlash("Auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
+                }
+            } message: {
+                Text("After each usage probe, Agent Sessions will delete only the dedicated probe project under ~/.claude/projects once safety checks verify it contains only probe sessions.")
+            }
+            .alert("Delete System Probe Sessions Now?", isPresented: $showConfirmDeleteNow) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    let res = ClaudeProbeProject.cleanupNowUserInitiated()
+                    handleCleanupResult(res, manual: true)
+                }
+            } message: {
+                Text("This removes only the Agent Sessions probe project after validation. If any session doesn’t look like a probe, nothing is deleted.")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ClaudeProbeProject.didRunCleanupNotification)) { note in
+                if let info = note.userInfo as? [String: Any], let status = info["status"] as? String {
+                    switch status {
+                    case "success": showCleanupFlash("Deleted probe project.", color: .green)
+                    case "not_found": showCleanupFlash("No probe project to delete.", color: .secondary)
+                    case "unsafe": showCleanupFlash("Skipped: project contained non-probe sessions.", color: .orange)
+                    case "io_error": showCleanupFlash("Failed to delete probe project.", color: .red)
+                    case "disabled": break
+                    default: break
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Cleanup flash helpers
+    private func showCleanupFlash(_ text: String, color: Color) {
+        cleanupFlashText = text
+        cleanupFlashColor = color
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+            withAnimation { cleanupFlashText = nil }
+        }
+    }
+    private func handleCleanupResult(_ res: ClaudeProbeProject.ResultStatus, manual: Bool) {
+        switch res {
+        case .success: showCleanupFlash("Deleted probe project.", color: .green)
+        case .notFound: showCleanupFlash("No probe project to delete.", color: .secondary)
+        case .unsafe: showCleanupFlash("Skipped: project contained non-probe sessions.", color: .orange)
+        case .ioError: showCleanupFlash("Failed to delete probe project.", color: .red)
+        case .disabled: break
         }
     }
 

@@ -86,6 +86,7 @@ struct AgentSessionsApp: App {
                     }
                     statusItemController?.setEnabled(menuBarEnabled)
                 }
+                // Immediate cleanup happens after each probe; no app-exit cleanup required.
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -185,5 +186,6 @@ extension AgentSessionsApp {
             }
         }
     }
+
 }
 // (Legacy ContentView and FirstRunPrompt removed)

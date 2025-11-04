@@ -8,15 +8,15 @@
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "B0000010CA0A000100000001"
-               BuildableName = "AgentSessions.app"
-               BlueprintName = "AgentSessions"
+               BlueprintIdentifier = "9E29F9AF3D49DDA01A884CB7"
+               BuildableName = "AgentSessionsLogicTests.xctest"
+               BlueprintName = "AgentSessionsLogicTests"
                ReferencedContainer = "container:AgentSessions.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -27,15 +27,6 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
-      <MacroExpansion>
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "B0000010CA0A000100000001"
-            BuildableName = "AgentSessions.app"
-            BlueprintName = "AgentSessions"
-            ReferencedContainer = "container:AgentSessions.xcodeproj">
-         </BuildableReference>
-      </MacroExpansion>
       <Testables>
          <TestableReference
             skipped = "NO">
@@ -44,16 +35,6 @@
                BlueprintIdentifier = "9E29F9AF3D49DDA01A884CB7"
                BuildableName = "AgentSessionsLogicTests.xctest"
                BlueprintName = "AgentSessionsLogicTests"
-               ReferencedContainer = "container:AgentSessions.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "B0000010FA0A000100000001"
-               BuildableName = "AgentSessionsTests.xctest"
-               BlueprintName = "AgentSessionsTests"
                ReferencedContainer = "container:AgentSessions.xcodeproj">
             </BuildableReference>
          </TestableReference>
@@ -69,16 +50,6 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES">
-      <BuildableProductRunnable
-         runnableDebuggingMode = "0">
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "B0000010CA0A000100000001"
-            BuildableName = "AgentSessions.app"
-            BlueprintName = "AgentSessions"
-            ReferencedContainer = "container:AgentSessions.xcodeproj">
-         </BuildableReference>
-      </BuildableProductRunnable>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -86,16 +57,6 @@
       savedToolIdentifier = ""
       useCustomWorkingDirectory = "NO"
       debugDocumentVersioning = "YES">
-      <BuildableProductRunnable
-         runnableDebuggingMode = "0">
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "B0000010CA0A000100000001"
-            BuildableName = "AgentSessions.app"
-            BlueprintName = "AgentSessions"
-            ReferencedContainer = "container:AgentSessions.xcodeproj">
-         </BuildableReference>
-      </BuildableProductRunnable>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

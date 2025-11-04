@@ -183,7 +183,10 @@ final class ClaudeSessionIndexer: ObservableObject {
 
             for (i, url) in files.enumerated() {
                 if let session = ClaudeSessionParser.parseFile(at: url) {
-                    sessions.append(session)
+                    // Extra guard: hide Agent Sessions' Claude probe sessions
+                    if !ClaudeProbeConfig.isProbeSession(session) {
+                        sessions.append(session)
+                    }
                 }
 
                 if FeatureFlags.throttleIndexingUIUpdates {
