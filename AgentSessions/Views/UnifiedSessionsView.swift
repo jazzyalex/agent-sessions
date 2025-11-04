@@ -418,7 +418,7 @@ struct UnifiedSessionsView: View {
                     .background(Color(nsColor: .textBackgroundColor))
                 }
             } else {
-                if unified.isIndexing {
+                if unified.isIndexing || unified.isProcessingTranscripts {
                     LoadingAnimationView(
                         codexColor: .blue,
                         claudeColor: Color(red: 204/255, green: 121/255, blue: 90/255)
@@ -501,7 +501,11 @@ struct UnifiedSessionsView: View {
         }
         ToolbarItem(placement: .automatic) {
             Button(action: { unified.refresh() }) {
-                if unified.isIndexing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+                if unified.isIndexing || unified.isProcessingTranscripts {
+                    ProgressView()
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
             }
                 .keyboardShortcut("r", modifiers: .command)
                 .help("Re-run the session indexer to discover new logs (⌘R)")

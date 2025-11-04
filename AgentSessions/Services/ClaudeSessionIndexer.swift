@@ -24,6 +24,7 @@ final class ClaudeSessionIndexer: ObservableObject {
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
+    @Published var isProcessingTranscripts: Bool = false
     @Published var progressText: String = ""
     @Published var filesProcessed: Int = 0
     @Published var totalFiles: Int = 0
@@ -130,6 +131,7 @@ final class ClaudeSessionIndexer: ObservableObject {
         print("\n🔵 CLAUDE INDEXING START: root=\(root.path)")
 
         isIndexing = true
+        isProcessingTranscripts = false
         progressText = "Scanning…"
         filesProcessed = 0
         totalFiles = 0
@@ -207,10 +209,16 @@ final class ClaudeSessionIndexer: ObservableObject {
                 self.isIndexing = false
                 print("✅ CLAUDE INDEXING DONE: total=\(sessions.count)")
 
-                // Start background transcript indexing for accurate search (non-blocking)
+                // Start background transcript indexing for accurate search
+                self.isProcessingTranscripts = true
+                self.progressText = "Processing transcripts..."
                 let cache = self.transcriptCache
                 Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
                     await cache.generateAndCache(sessions: sortedSessions)
+                    await MainActor.run {
+                        self.isProcessingTranscripts = false
+                        self.progressText = "Ready"
+                    }
                 }
             }
         }
