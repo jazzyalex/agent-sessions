@@ -44,10 +44,22 @@ fi
 # Launch codex in detached tmux
 "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" \
   "cd '$WORKDIR' && env TERM=xterm-256color '$CODEX_CMD' -m $MODEL"
+"$TMUX_CMD" -L "$LABEL" set-option -t "$SESSION" history-limit 5000 2>/dev/null || true
 
-"$TMUX_CMD" -L "$LABEL" resize-pane -t "$SESSION:0.0" -x 120 -y 32
+"$TMUX_CMD" -L "$LABEL" resize-pane -t "$SESSION:0.0" -x 132 -y 48
 
 sleep 0.8
+
+wait_for_prompt() {
+  local tries=0
+  while [ $tries -lt 40 ]; do
+    sleep 0.2
+    local p=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -200 2>/dev/null || echo "")
+    if echo "$p" | grep -q "^› "; then return 0; fi
+    tries=$((tries+1))
+  done
+  return 1
+}
 
 # Handle initial one-time prompts (approval screen etc.)
 iterations=0
@@ -68,18 +80,34 @@ while [ $iterations -lt $max_iterations ]; do
 done
 
 # Send marker then /status
+wait_for_prompt || true
 "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "[AS_CX_PROBE v1] usage probe" Enter 2>/dev/null
-sleep 0.6
+sleep 0.8
 
 ensure_status() {
   # Try up to 8 times to render /status fully
   for _ in 1 2 3 4 5 6 7 8; do
+    wait_for_prompt || true
     "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "/status" Enter 2>/dev/null
     # Wait for the page to fully render; check multiple times
     for __ in 1 2 3 4 5 6 7 8 9 10; do
       sleep "$SLEEP_AFTER_STATUS"
       pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -2000 2>/dev/null || echo "")
       # Succeed if we see at least the 5h limit; weekly may or may not be present in some views
+      if echo "$pane" | grep -qi "5h limit:"; then return 0; fi
+    done
+    # Try to scroll down to reveal the usage bars
+    for __ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Down 2>/dev/null
+      sleep 0.15
+      pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -2000 2>/dev/null || echo "")
+      if echo "$pane" | grep -qi "5h limit:"; then return 0; fi
+    done
+    # Page down a few times, then check again
+    for __ in 1 2 3 4; do
+      "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" PageDown 2>/dev/null || true
+      sleep 0.25
+      pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -2000 2>/dev/null || echo "")
       if echo "$pane" | grep -qi "5h limit:"; then return 0; fi
     done
   done
