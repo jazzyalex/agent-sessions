@@ -12,7 +12,7 @@
 #
 set -euo pipefail
 
-MODEL="${MODEL:-gpt-5-mini}"
+MODEL="${MODEL:-gpt-5}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-10}"
 SLEEP_AFTER_STATUS="${SLEEP_AFTER_STATUS:-2.0}"
 WORKDIR="${WORKDIR:-$(pwd)}"
@@ -49,14 +49,46 @@ fi
 
 sleep 0.8
 
+# Handle initial one-time prompts (approval screen etc.)
+iterations=0
+max_iterations=$((TIMEOUT_SECS * 10 / 4))
+while [ $iterations -lt $max_iterations ]; do
+  sleep 0.25
+  iterations=$((iterations+1))
+  pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p 2>/dev/null || echo "")
+  if echo "$pane" | grep -qi "Press enter to continue"; then
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
+    sleep 0.6
+    continue
+  fi
+  # Once header is visible, proceed
+  if echo "$pane" | grep -qi "OpenAI Codex (v"; then
+    break
+  fi
+done
+
 # Send marker then /status
 "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "[AS_CX_PROBE v1] usage probe" Enter 2>/dev/null
-sleep 0.5
-"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "/status" Enter 2>/dev/null
-sleep "$SLEEP_AFTER_STATUS"
+sleep 0.6
 
-capture() { "$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -300 2>/dev/null || echo ""; }
-pane=$(capture)
+ensure_status() {
+  # Try up to 8 times to render /status fully
+  for _ in 1 2 3 4 5 6 7 8; do
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "/status" Enter 2>/dev/null
+    # Wait for the page to fully render; check multiple times
+    for __ in 1 2 3 4 5 6 7 8 9 10; do
+      sleep "$SLEEP_AFTER_STATUS"
+      pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -2000 2>/dev/null || echo "")
+      # Succeed if we see at least the 5h limit; weekly may or may not be present in some views
+      if echo "$pane" | grep -qi "5h limit:"; then return 0; fi
+    done
+  done
+  return 1
+}
+
+if ! ensure_status; then
+  pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -500 2>/dev/null || echo "")
+fi
 
 # Extract helper: returns "<pct> <resets>"
 extract() {
@@ -67,10 +99,10 @@ extract() {
   echo "$pct" "$resets"
 }
 
-read p5 r5 < <(extract "5h")
-read pw rw < <(extract "week")
+read p5 r5 < <(extract "5h limit:")
+read pw rw < <(extract "weekly limit:")
 
-if [[ -z "$p5" || -z "$pw" ]]; then
+if [[ -z "$p5" && -z "$pw" ]]; then
   if [[ "${CODEX_TUI_DEBUG:-0}" != "0" ]]; then f=$(mktemp -t codex_status_pane); echo "$pane" > "$f"; echo "DEBUG pane saved to $f" >&2; fi
   echo "$(error_json parsing_failed 'Failed to extract /status')"; exit 16
 fi
@@ -84,4 +116,3 @@ cat <<EOF
 EOF
 
 exit 0
-
