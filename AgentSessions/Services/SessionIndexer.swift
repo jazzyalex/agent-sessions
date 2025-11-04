@@ -471,21 +471,17 @@ final class SessionIndexer: ObservableObject {
                 sema.signal()
             }
             sema.wait()
-            if let sessions = indexed {
-                DispatchQueue.main.async {
-                    self.allSessions = sessions
-                    self.isIndexing = false
-                    self.filesProcessed = sessions.count
-                    self.totalFiles = sessions.count
-                    self.progressText = "Loaded \(sessions.count) from index"
-                    #if DEBUG
-                    print("[Launch] Hydrated Codex sessions from DB: count=\(sessions.count)")
-                    #endif
-                }
-                return
-            }
+
+            // NEW: Even if we have indexed sessions, scan for NEW files and parse them
+            let existingSessions = indexed ?? []
+            let existingPaths = Set(existingSessions.map { $0.filePath })
+
             #if DEBUG
-            print("[Launch] DB hydration returned nil for Codex – falling back to filesystem scan")
+            if !existingSessions.isEmpty {
+                print("[Launch] Hydrated \(existingSessions.count) Codex sessions from DB, now scanning for new files...")
+            } else {
+                print("[Launch] DB hydration returned nil for Codex – scanning all files")
+            }
             #endif
             // Check if directory exists and is accessible
             var isDir: ObjCBool = false
@@ -507,20 +503,26 @@ final class SessionIndexer: ObservableObject {
                 }
             }
 
-            print("📁 Found \(found.count) session files")
+            // Filter out files that are already indexed
+            let newFiles = found.filter { !existingPaths.contains($0.path) }
 
-            let sortedFiles = found.sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
+            print("📁 Found \(found.count) total files, \(newFiles.count) are new (not in DB)")
+
+            let sortedFiles = newFiles.sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
             DispatchQueue.main.async {
-                self.totalFiles = sortedFiles.count
-                self.hasEmptyDirectory = sortedFiles.isEmpty
+                self.totalFiles = existingSessions.count + sortedFiles.count
+                self.hasEmptyDirectory = found.isEmpty
+                if !existingSessions.isEmpty {
+                    self.progressText = "Scanning \(sortedFiles.count) new files..."
+                }
             }
 
-            var sessions: [Session] = []
-            sessions.reserveCapacity(sortedFiles.count)
+            var newSessions: [Session] = []
+            newSessions.reserveCapacity(sortedFiles.count)
 
             for (i, url) in sortedFiles.enumerated() {
                 if let session = self.parseFile(at: url) {
-                    sessions.append(session)
+                    newSessions.append(session)
                 }
                 // Update progress counter but don't replace allSessions yet (causes flicker)
                 if FeatureFlags.throttleIndexingUIUpdates {
@@ -538,15 +540,19 @@ final class SessionIndexer: ObservableObject {
                 }
             }
 
-            // Update allSessions only once at the end
-            let sortedSessions = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
+            // Merge existing sessions with newly parsed ones
+            let allParsedSessions = existingSessions + newSessions
+            let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
             DispatchQueue.main.async {
                 self.allSessions = sortedSessions
                 self.isIndexing = false
-                let lightCount = sessions.filter { $0.events.isEmpty }.count
-                let heavyCount = sessions.count - lightCount
-                let lightSessions = sessions.filter { $0.events.isEmpty }
-                print("✅ INDEXING DONE: total=\(sessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
+                let lightCount = newSessions.filter { $0.events.isEmpty }.count
+                let heavyCount = newSessions.count - lightCount
+                if !existingSessions.isEmpty {
+                    print("✅ INDEXING DONE: total=\(allParsedSessions.count) (existing=\(existingSessions.count), new=\(newSessions.count), new_lightweight=\(lightCount), new_fullParse=\(heavyCount))")
+                } else {
+                    print("✅ INDEXING DONE: total=\(allParsedSessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
+                }
 
                 // Start background transcript indexing for accurate search (non-blocking)
                 let cache = self.transcriptCache
@@ -554,7 +560,8 @@ final class SessionIndexer: ObservableObject {
                     await cache.generateAndCache(sessions: sortedSessions)
                 }
 
-                // Show lightweight sessions details
+                // Show lightweight sessions details (only for newly parsed ones)
+                let lightSessions = newSessions.filter { $0.events.isEmpty }
                 for s in lightSessions {
                     print("  💡 Lightweight: \(s.filePath.components(separatedBy: "/").last ?? "?") msgCount=\(s.messageCount)")
                 }
