@@ -28,6 +28,8 @@ struct PreferencesView: View {
     @AppStorage("ClaudeUsageEnabled") private var claudeUsageEnabled: Bool = false
     // Claude Probe cleanup prefs
     @AppStorage("ClaudeProbeCleanupMode") private var claudeProbeCleanupMode: String = "none" // none | auto
+    // Debug: show probe sessions in lists
+    @AppStorage("ShowSystemProbeSessions") private var showSystemProbeSessions: Bool = false
     @State private var showConfirmAutoDelete: Bool = false
     @State private var showConfirmDeleteNow: Bool = false
     @State private var cleanupFlashText: String? = nil
@@ -438,6 +440,11 @@ struct PreferencesView: View {
             Text("Runs short, terminal-based probes in dedicated working folders to refresh usage limits. Cleanup only removes validated probe sessions; normal projects are never touched.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            // Debug visibility
+            Toggle("Show system probe sessions for debugging", isOn: $showSystemProbeSessions)
+                .toggleStyle(.switch)
+                .help("Reveal probe sessions in the Sessions list. Leave OFF for normal use to avoid noise.")
 
             // Claude subsection
             sectionHeader("Claude")

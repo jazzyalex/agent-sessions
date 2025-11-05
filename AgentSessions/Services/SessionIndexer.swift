@@ -164,6 +164,7 @@ final class SessionIndexer: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var recomputeDebouncer: DispatchWorkItem? = nil
+    private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
 
     init(columnVisibility: ColumnVisibilityStore = ColumnVisibilityStore()) {
         self.columnVisibility = columnVisibility
@@ -216,6 +217,19 @@ final class SessionIndexer: ObservableObject {
             }
             .removeDuplicates()
             .sink { [weak self] raw in self?.selectedKindsRaw = raw }
+            .store(in: &cancellables)
+
+        // Observe probe-visibility toggle and refresh index when it changes
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                let show = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
+                if show != self.lastShowSystemProbeSessions {
+                    self.lastShowSystemProbeSessions = show
+                    self.refresh()
+                }
+            }
             .store(in: &cancellables)
 
         // Persist project filter to AppStorage whenever it changes
@@ -544,8 +558,9 @@ final class SessionIndexer: ObservableObject {
 
             // Merge existing sessions with newly parsed ones
             let allParsedSessions = existingSessions + newSessions
+            let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
-                .filter { !CodexProbeConfig.isProbeSession($0) }
+                .filter { hideProbes ? !CodexProbeConfig.isProbeSession($0) : true }
             DispatchQueue.main.async {
                 self.allSessions = sortedSessions
                 self.isIndexing = false
