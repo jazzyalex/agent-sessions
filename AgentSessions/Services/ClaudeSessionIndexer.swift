@@ -68,6 +68,7 @@ final class ClaudeSessionIndexer: ObservableObject {
     private var lastSessionsRootOverride: String = ""
     private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
+    private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
 
     init() {
         // Initialize discovery with current override (if any)
@@ -113,6 +114,11 @@ final class ClaudeSessionIndexer: ObservableObject {
                 if current != self.lastSessionsRootOverride {
                     self.lastSessionsRootOverride = current
                     self.discovery = ClaudeSessionDiscovery(customRoot: current.isEmpty ? nil : current)
+                    self.refresh()
+                }
+                let show = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
+                if show != self.lastShowSystemProbeSessions {
+                    self.lastShowSystemProbeSessions = show
                     self.refresh()
                 }
                 self.recomputeNow()
@@ -183,8 +189,11 @@ final class ClaudeSessionIndexer: ObservableObject {
 
             for (i, url) in files.enumerated() {
                 if let session = ClaudeSessionParser.parseFile(at: url) {
-                    // Extra guard: hide Agent Sessions' Claude probe sessions
-                    if !ClaudeProbeConfig.isProbeSession(session) {
+                    // Extra guard: hide Agent Sessions' Claude probe sessions when not showing system probes
+                    let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
+                    if hideProbes {
+                        if !ClaudeProbeConfig.isProbeSession(session) { sessions.append(session) }
+                    } else {
                         sessions.append(session)
                     }
                 }
