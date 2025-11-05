@@ -70,7 +70,7 @@ enum CodexProbeCleanup {
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue {
                 if let items = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) {
-                    for u in items where u.lastPathComponent.hasPrefix("rollout-") && u.pathExtension.lowercased() == "jsonl" {
+                    for u in items where u.pathExtension.lowercased() == "jsonl" {
                         urls.append(u)
                     }
                 }
@@ -143,6 +143,12 @@ enum CodexProbeCleanup {
         case .unsafe(let s): info["status"] = "unsafe"; info["message"] = s
         case .ioError(let s): info["status"] = "io_error"; info["message"] = s
         }
-        NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+        if Thread.isMainThread {
+            NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+        } else {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+            }
+        }
     }
 }

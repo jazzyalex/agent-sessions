@@ -21,6 +21,8 @@ struct AgentSessionsApp: App {
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.vertical.rawValue
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
+    @AppStorage("CodexUsageEnabled") private var codexUsageEnabledPref: Bool = false
+    @AppStorage("ClaudeUsageEnabled") private var claudeUsageEnabledPref: Bool = false
     @AppStorage("ShowClaudeUsageStrip") private var showClaudeUsageStrip: Bool = false
     @AppStorage("UnifiedLegacyNoticeShown") private var unifiedNoticeShown: Bool = false
     @State private var selectedSessionID: String?
@@ -71,6 +73,12 @@ struct AgentSessionsApp: App {
                     setupAnalytics()
                 }
                 .onChange(of: showUsageStrip) { _, _ in
+                    updateUsageModels()
+                }
+                .onChange(of: codexUsageEnabledPref) { _, _ in
+                    updateUsageModels()
+                }
+                .onChange(of: claudeUsageEnabledPref) { _, _ in
                     updateUsageModels()
                 }
                 .onChange(of: menuBarEnabled) { _, newValue in
@@ -150,13 +158,28 @@ private struct FavoritesOnlyToggle: View {
 extension AgentSessionsApp {
     private func updateUsageModels() {
         let d = UserDefaults.standard
-        // Codex usage model is independent of Claude experimental flag
-        let codexOn = menuBarEnabled || showUsageStrip
-        codexUsageModel.setEnabled(codexOn)
+        // Migration defaults on first run of new toggles
+        let codexEnabled: Bool = {
+            if d.object(forKey: "CodexUsageEnabled") == nil {
+                // default to previous implicit behavior: on when either strip or menu bar shown
+                let def = menuBarEnabled || showUsageStrip
+                d.set(def, forKey: "CodexUsageEnabled")
+                return def
+            }
+            return d.bool(forKey: "CodexUsageEnabled")
+        }()
+        codexUsageModel.setEnabled(codexEnabled)
 
-        // Claude usage must be explicitly allowed via "Activate Claude usage"
-        let claudeExperimental = d.bool(forKey: "ShowClaudeUsageStrip")
-        claudeUsageModel.setEnabled(claudeExperimental)
+        let claudeEnabled: Bool = {
+            if d.object(forKey: "ClaudeUsageEnabled") == nil {
+                // default to previous behavior tied to ShowClaudeUsageStrip
+                let def = d.bool(forKey: "ShowClaudeUsageStrip")
+                d.set(def, forKey: "ClaudeUsageEnabled")
+                return def
+            }
+            return d.bool(forKey: "ClaudeUsageEnabled")
+        }()
+        claudeUsageModel.setEnabled(claudeEnabled)
     }
 
     private func setupAnalytics() {

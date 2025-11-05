@@ -26,8 +26,14 @@ func isResetInfoStale(kind: String, source: UsageTrackingSource, lastUpdate: Dat
     let timestamp: Date?
     switch source {
     case .codex:
-        // For Codex, use event timestamp (when the token_count event occurred)
-        timestamp = eventTimestamp
+        // For Codex, prefer the freshest of eventTimestamp (from logs) and
+        // lastUpdate (from a successful refresh like CLI /status). This avoids
+        // showing stale when one source lags the other.
+        if let ev = eventTimestamp, let lu = lastUpdate {
+            timestamp = max(ev, lu)
+        } else {
+            timestamp = eventTimestamp ?? lastUpdate
+        }
     case .claude:
         // For Claude, use last poll time (when we got fresh data)
         timestamp = lastUpdate

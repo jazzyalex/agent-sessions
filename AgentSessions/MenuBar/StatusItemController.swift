@@ -94,7 +94,7 @@ final class StatusItemController: NSObject {
             menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText), action: #selector(openPreferences)))
             menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText), action: #selector(openPreferences)))
         }
-        let claudeEnabled = UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip")
+        let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
         if source == .both && claudeEnabled { menu.addItem(NSMenuItem.separator()) }
         if (source == .claude || source == .both) && claudeEnabled {
             menu.addItem(makeTitleItem("Claude"))

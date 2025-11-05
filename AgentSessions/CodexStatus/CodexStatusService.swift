@@ -83,8 +83,21 @@ final class CodexUsageModel: ObservableObject {
     }
 
     func refreshNow() {
-        Task.detached { [weak self] in
-            await self?.service?.refreshNow()
+        Task { [weak self] in
+            guard let self = self else { return }
+            if let svc = self.service {
+                await svc.refreshNow()
+                return
+            }
+            // On-demand one-shot refresh even when tracking is disabled
+            let handler: @Sendable (CodexUsageSnapshot) -> Void = { snapshot in
+                Task { @MainActor in self.apply(snapshot) }
+            }
+            let availability: @Sendable (Bool) -> Void = { unavailable in
+                Task { @MainActor in self.cliUnavailable = unavailable }
+            }
+            let svc = CodexStatusService(updateHandler: handler, availabilityHandler: availability)
+            await svc.refreshNow()
         }
     }
 
@@ -221,10 +234,7 @@ actor CodexStatusService {
 
     private func ensureProcessPrimed() async {
         if process?.isRunning == true { return }
-        await launchREPL(preferredModel: "gpt-5-nano")
-        if process?.isRunning != true {
-            await launchREPL(preferredModel: "gpt-5-mini")
-        }
+        await launchREPL()
         if process?.isRunning == true {
             backoffSeconds = 1
             availabilityHandler(false)
@@ -234,12 +244,12 @@ actor CodexStatusService {
         }
     }
 
-    private func launchREPL(preferredModel: String) async {
+    private func launchREPL() async {
         if state == .starting || state == .running { return }
         state = .starting
 
         // Build a bash -lc command to use user's login shell PATH
-        let command = "codex -m \(preferredModel)"
+        let command = "codex"
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         proc.arguments = ["bash", "-lc", command]
@@ -465,7 +475,7 @@ actor CodexStatusService {
         let workDir = CodexProbeConfig.probeWorkingDirectory()
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
         env["WORKDIR"] = workDir
-        env["MODEL"] = "gpt-5-mini"
+        // Do not force a model; use user's current Codex defaults to avoid disrupting sessions
         // Resolve codex binary if possible
         let envResolver = CodexCLIEnvironment()
         if let bin = envResolver.resolveBinary(customPath: nil) { env["CODEX_BIN"] = bin.path }
@@ -500,7 +510,7 @@ actor CodexStatusService {
 
     private func nextInterval() -> UInt64 {
         // Read user preference for polling interval (default 120s = 2 min)
-        let userInterval = UInt64(UserDefaults.standard.object(forKey: "UsagePollingInterval") as? Int ?? 120)
+        let userInterval = UInt64(UserDefaults.standard.object(forKey: "UsagePollingInterval") as? Int ?? 300)
 
         // Energy optimization: Stop polling entirely when nothing is visible
         // (menu bar and strips both hidden)
@@ -585,7 +595,7 @@ actor CodexStatusService {
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue {
                 if let items = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey], options: [.skipsHiddenFiles]) {
-                    for u in items where u.lastPathComponent.hasPrefix("rollout-") && u.pathExtension.lowercased() == "jsonl" {
+                    for u in items where u.pathExtension.lowercased() == "jsonl" {
                         urls.append(u)
                     }
                 }
@@ -603,46 +613,52 @@ actor CodexStatusService {
 
     private func parseTokenCountTail(url: URL) -> RateLimitSummary? {
         guard let lines = tailLines(url: url, maxBytes: 512 * 1024) else { return nil }
-        // Note: Codex logs may emit timestamps with or without fractional seconds,
-        // or as numeric epoch values. Be lenient here so we always capture the
-        // latest token_count event time for stale gating.
+        // Walk most-recent → older. Accept both legacy token_count and new turn.completed payloads
         for raw in lines.reversed() {
             guard let data = raw.data(using: .utf8) else { continue }
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             guard (obj["type"] as? String) == "event_msg" else { continue }
             guard let payload = obj["payload"] as? [String: Any] else { continue }
-            // Surface latest usage totals from new or legacy shapes
-            extractUsageIfPresent(from: payload, createdAt: decodeFlexibleDate(obj["created_at"]) ?? decodeFlexibleDate(payload["created_at"]) ?? decodeFlexibleDate(obj["timestamp"]) ?? decodeFlexibleDate(payload["timestamp"]) ?? Date())
-            guard (payload["type"] as? String) == "token_count" else { continue }
 
-            var createdAt: Date? = nil
-            // Try created_at first (preferred field name), then generic timestamp.
-            if createdAt == nil, let any = obj["created_at"] { createdAt = decodeFlexibleDate(any) }
-            if createdAt == nil, let any = payload["created_at"] { createdAt = decodeFlexibleDate(any) }
-            if createdAt == nil, let any = obj["timestamp"] { createdAt = decodeFlexibleDate(any) }
-            if createdAt == nil, let any = payload["timestamp"] { createdAt = decodeFlexibleDate(any) }
+            // Establish a createdAt for this event early (best-effort)
+            let createdAt = decodeFlexibleDate(obj["created_at"]) ??
+                            decodeFlexibleDate(payload["created_at"]) ??
+                            decodeFlexibleDate(obj["timestamp"]) ??
+                            decodeFlexibleDate(payload["timestamp"]) ??
+                            Date()
 
-            guard let created = createdAt else {
-                // Skip events without timestamps - cannot determine staleness accurately
-                continue
+            // Surface usage tokens if present (new or legacy forms)
+            extractUsageIfPresent(from: payload, createdAt: createdAt)
+
+            // Prefer any payload that contains rate_limits, regardless of type label
+            if let rate = payload["rate_limits"] as? [String: Any] {
+                // New format: captured_at anchors relative deltas; prefer it over event timestamp
+                let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? createdAt
+                // Clamp future timestamps (clock skew protection)
+                if capturedAt > Date() { continue }
+
+                let primary = rate["primary"] as? [String: Any]
+                let secondary = rate["secondary"] as? [String: Any]
+                let five = decodeWindow(primary, created: createdAt, capturedAt: capturedAt)
+                let week = decodeWindow(secondary, created: createdAt, capturedAt: capturedAt)
+                let base = capturedAt
+                let stale = Date().timeIntervalSince(base) > 3 * 60
+                return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
             }
 
-            // Additional safety: reject future timestamps (clock skew protection)
-            guard created <= Date() else { continue }
-
-            guard let rate = payload["rate_limits"] as? [String: Any] else { continue }
-            // New format: captured_at anchors relative deltas; prefer it over event timestamp
-            let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? created
-
-            let primary = rate["primary"] as? [String: Any]
-            let secondary = rate["secondary"] as? [String: Any]
-
-            let five = decodeWindow(primary, created: created, capturedAt: capturedAt)
-            let week = decodeWindow(secondary, created: created, capturedAt: capturedAt)
-            let base = capturedAt
-            let stale = Date().timeIntervalSince(base) > 3 * 60
-            // CapPressure updates disabled; analytics will consume logs directly later.
-            return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
+            // Legacy: specifically labeled token_count with rate_limits
+            if (payload["type"] as? String) == "token_count",
+               let rate = payload["rate_limits"] as? [String: Any] {
+                let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? createdAt
+                if capturedAt > Date() { continue }
+                let primary = rate["primary"] as? [String: Any]
+                let secondary = rate["secondary"] as? [String: Any]
+                let five = decodeWindow(primary, created: createdAt, capturedAt: capturedAt)
+                let week = decodeWindow(secondary, created: createdAt, capturedAt: capturedAt)
+                let base = capturedAt
+                let stale = Date().timeIntervalSince(base) > 3 * 60
+                return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
+            }
         }
         return nil
     }

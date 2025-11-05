@@ -12,10 +12,16 @@
 #
 set -euo pipefail
 
-MODEL="${MODEL:-gpt-5}"
+# Note: Do not force a model by default; Codex may reject some flags
+# under certain account types. If you really need to pin a model,
+# export MODEL=... before invoking this script.
+MODEL="${MODEL:-}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-10}"
-SLEEP_AFTER_STATUS="${SLEEP_AFTER_STATUS:-2.0}"
+SLEEP_AFTER_STATUS="${SLEEP_AFTER_STATUS:-3.0}"
 WORKDIR="${WORKDIR:-$(pwd)}"
+# Extra timings tuned from interactive experiments
+WAIT_AFTER_MSG="${WAIT_AFTER_MSG:-10}"
+THINK_WAIT="${THINK_WAIT:-0.5}"
 
 LABEL="as-cx-$$"
 SESSION="status"
@@ -42,8 +48,12 @@ else
 fi
 
 # Launch codex in detached tmux
-"$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" \
-  "cd '$WORKDIR' && env TERM=xterm-256color '$CODEX_CMD' -m $MODEL"
+if [[ -n "$MODEL" ]]; then
+  CMD="cd '$WORKDIR' && env TERM=xterm-256color '$CODEX_CMD' -m $MODEL"
+else
+  CMD="cd '$WORKDIR' && env TERM=xterm-256color '$CODEX_CMD'"
+fi
+"$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" "$CMD"
 "$TMUX_CMD" -L "$LABEL" set-option -t "$SESSION" history-limit 5000 2>/dev/null || true
 
 "$TMUX_CMD" -L "$LABEL" resize-pane -t "$SESSION:0.0" -x 132 -y 48
@@ -79,37 +89,56 @@ while [ $iterations -lt $max_iterations ]; do
   fi
 done
 
-# Send marker then /status
+# Send a minimal non-reasoning marker that settles quickly, then wait
 wait_for_prompt || true
-"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "[AS_CX_PROBE v1] usage probe" Enter 2>/dev/null
-sleep 0.8
+MARKER_MSG="Protocol test [AS_CX_PROBE v1]. just reply Ok"
+"$TMUX_CMD" -L "$LABEL" send-keys -l -t "$SESSION:0.0" "$MARKER_MSG" 2>/dev/null || true
+sleep "$THINK_WAIT"
+"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null || true
+sleep "$WAIT_AFTER_MSG"
+
+# Ensure prompt is ready and the cursor is at column 1 before typing /status
+wait_for_prompt || true
+"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" C-u Home 2>/dev/null || true
+sleep "$THINK_WAIT"
 
 ensure_status() {
-  # Try up to 8 times to render /status fully
-  for _ in 1 2 3 4 5 6 7 8; do
-    wait_for_prompt || true
-    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "/status" Enter 2>/dev/null
-    # Wait for the page to fully render; check multiple times
-    for __ in 1 2 3 4 5 6 7 8 9 10; do
-      sleep "$SLEEP_AFTER_STATUS"
-      pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -2000 2>/dev/null || echo "")
-      # Succeed if we see at least the 5h limit; weekly may or may not be present in some views
-      if echo "$pane" | grep -qi "5h limit:"; then return 0; fi
-    done
-    # Try to scroll down to reveal the usage bars
-    for __ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-      "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Down 2>/dev/null
-      sleep 0.15
-      pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -2000 2>/dev/null || echo "")
-      if echo "$pane" | grep -qi "5h limit:"; then return 0; fi
-    done
-    # Page down a few times, then check again
-    for __ in 1 2 3 4; do
-      "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" PageDown 2>/dev/null || true
-      sleep 0.25
-      pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -2000 2>/dev/null || echo "")
-      if echo "$pane" | grep -qi "5h limit:"; then return 0; fi
-    done
+  # Single /status attempt typed char-by-char to guarantee column-1 command
+  for c in / s t a t u s; do
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "$c" 2>/dev/null || true
+    sleep 0.15
+  done
+  sleep "$THINK_WAIT"
+  "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null || true
+
+  # Wait for the page to fully render; check multiple times
+  for __ in 1 2 3 4 5 6 7 8 9 10; do
+    sleep "$SLEEP_AFTER_STATUS"
+    pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -J -t "$SESSION:0.0" -p -S -4000 2>/dev/null || echo "")
+    # Succeed if we see at least the 5h limit; weekly may or may not be present in some views
+    if echo "$pane" | grep -Ei "5[ -]?h[[:space:]]+limit:" >/dev/null; then return 0; fi
+    if echo "$pane" | grep -Ei "weekly[[:space:]]+limit:"   >/dev/null; then return 0; fi
+  done
+  # Try to scroll down to reveal the usage bars
+  for __ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Down 2>/dev/null
+    sleep 0.15
+    pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -J -t "$SESSION:0.0" -p -S -4000 2>/dev/null || echo "")
+    if echo "$pane" | grep -Ei "5[ -]?h[[:space:]]+limit:" >/dev/null; then return 0; fi
+  done
+  # Page down a few times, then check again
+  for __ in 1 2 3 4; do
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" PageDown 2>/dev/null || true
+    sleep 0.25
+    pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -J -t "$SESSION:0.0" -p -S -4000 2>/dev/null || echo "")
+    if echo "$pane" | grep -Ei "5[ -]?h[[:space:]]+limit:" >/dev/null; then return 0; fi
+  done
+  # Space (common pager-like scroll)
+  for __ in 1 2 3; do
+    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Space 2>/dev/null || true
+    sleep 0.3
+    pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -J -t "$SESSION:0.0" -p -S -4000 2>/dev/null || echo "")
+    if echo "$pane" | grep -Ei "5[ -]?h[[:space:]]+limit:" >/dev/null; then return 0; fi
   done
   return 1
 }
@@ -123,11 +152,13 @@ extract() {
   local anchor="$1"
   local block=$(echo "$pane" | awk -v a="$anchor" 'BEGIN{c=0} { if (index(tolower($0),tolower(a))>0) {c=4} if (c>0){print; c--} }')
   local pct=$(echo "$block" | awk '/% used/{ if (match($0, /[0-9]+/)) { print substr($0,RSTART,RLENGTH); exit }}')
-  local resets=$(echo "$block" | awk '/[Rr]esets/{ sub(/^.*[Rr]esets[ ]*/, ""); print; exit }')
+  local resets=$(echo "$block" | awk '/[Rr]esets/{ sub(/^.*[Rr]esets[[:space:]]*/, ""); sub(/[[:space:]]*│.*/, ""); sub(/[[:space:]]*\)$/, ""); sub(/[[:space:]]*$/, ""); print; exit }')
   echo "$pct" "$resets"
 }
 
 read p5 r5 < <(extract "5h limit:")
+if [[ -z "$p5" ]]; then read p5 r5 < <(extract "5 h limit:"); fi
+if [[ -z "$p5" ]]; then read p5 r5 < <(extract "5-hour limit:"); fi
 read pw rw < <(extract "weekly limit:")
 
 if [[ -z "$p5" && -z "$pw" ]]; then
