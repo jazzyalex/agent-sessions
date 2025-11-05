@@ -16,12 +16,16 @@ struct PreferencesView: View {
     @ObservedObject private var geminiSettings = GeminiCLISettings.shared
     @State private var showingResetConfirm: Bool = false
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
+    // Codex tracking master toggle
+    @AppStorage("CodexUsageEnabled") private var codexUsageEnabled: Bool = false
     // Codex auto-probe pref (secondary tmux-based /status probe when stale)
     @AppStorage("CodexAllowStatusProbe") private var codexAllowStatusProbe: Bool = false
     // Codex probe cleanup prefs
     @AppStorage("CodexProbeCleanupMode") private var codexProbeCleanupMode: String = "none" // none | auto
     @State private var showConfirmCodexAutoDelete: Bool = false
     @State private var showConfirmCodexDeleteNow: Bool = false
+    // Claude tracking master toggle
+    @AppStorage("ClaudeUsageEnabled") private var claudeUsageEnabled: Bool = false
     // Claude Probe cleanup prefs
     @AppStorage("ClaudeProbeCleanupMode") private var claudeProbeCleanupMode: String = "none" // none | auto
     @State private var showConfirmAutoDelete: Bool = false
@@ -36,7 +40,7 @@ struct PreferencesView: View {
     @AppStorage("StripMonochromeMeters") private var stripMonochromeGlobal: Bool = false
     @AppStorage("HideZeroMessageSessions") private var hideZeroMessageSessionsPref: Bool = true
     @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = true
-    @AppStorage("UsagePollingInterval") private var usagePollingInterval: Int = 120 // seconds (default 2 min)
+    @AppStorage("UsagePollingInterval") private var usagePollingInterval: Int = 300 // seconds (default 5 min)
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
@@ -152,6 +156,10 @@ struct PreferencesView: View {
                 generalTab
             case .usageTracking:
                 usageTrackingTab
+            case .usageProbes:
+                usageProbesTab
+            case .menuBar:
+                menuBarTab
             case .unified:
                 unifiedTab
             case .codexCLI:
@@ -359,111 +367,53 @@ struct PreferencesView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            // Top section: usage strips (no explicit section header; pane title is sufficient)
+            // Sources + strips
+            sectionHeader("Usage Sources")
             VStack(alignment: .leading, spacing: 12) {
+                // Codex
                 HStack(spacing: 16) {
-                    toggleRow("Codex strip", isOn: Binding(
+                    toggleRow("Enable Codex tracking", isOn: $codexUsageEnabled, help: "Turn Codex usage tracking on or off (independent of strip/menu bar)")
+                    Button("Refresh Codex now") { CodexUsageModel.shared.refreshNow() }
+                        .buttonStyle(.bordered)
+                        .disabled(!codexUsageEnabled)
+                }
+                HStack(spacing: 16) {
+                    toggleRow("Show Codex strip", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: "UnifiedShowCodexStrip") },
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowCodexStrip") }
                     ), help: "Show the Codex usage strip at the bottom of the Unified window")
-                    toggleRow("Claude strip", isOn: Binding(
+                    .disabled(!codexUsageEnabled)
+                }
+
+                Divider().padding(.vertical, 4)
+
+                // Claude
+                HStack(spacing: 16) {
+                    toggleRow("Enable Claude tracking", isOn: $claudeUsageEnabled, help: "Turn Claude usage tracking on or off (independent of strip/menu bar)")
+                    Button("Refresh Claude now") { ClaudeUsageModel.shared.refreshNow() }
+                        .buttonStyle(.bordered)
+                        .disabled(!claudeUsageEnabled)
+                }
+                HStack(spacing: 16) {
+                    toggleRow("Show Claude strip", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: "UnifiedShowClaudeStrip") },
                         set: { UserDefaults.standard.set($0, forKey: "UnifiedShowClaudeStrip") }
                     ), help: "Show the Claude usage strip at the bottom of the Unified window")
+                    .disabled(!claudeUsageEnabled)
                 }
-                HStack(spacing: 12) {
-                    Toggle("Allow auto Codex /status probe when stale", isOn: $codexAllowStatusProbe)
-                        .toggleStyle(.checkbox)
-                        .help("When Codex limits look stale and the strip or menu bar is visible, ask Codex CLI (/status) via tmux for a fresh update.")
-                    Button(action: { CodexUsageModel.shared.refreshNow() }) { Text("Refresh Codex now").underline() }
-                        .buttonStyle(.plain)
-                        .help("Force Codex to refresh now. Runs the log refresh and a one-shot /status probe.")
-                }
-                .padding(.top, 2)
+            }
 
-                HStack(spacing: 0) {
-                    Text("Note: primary Codex tracking remains the JSONL log parser; /status is a secondary source.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                // Codex probe cleanup (mirrors Claude behavior)
-                sectionHeader("Codex Status Probe Sessions")
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker("", selection: Binding(
-                        get: { codexProbeCleanupMode },
-                        set: { newVal in
-                            if newVal == "auto" {
-                                showConfirmCodexAutoDelete = true
-                            } else {
-                                codexProbeCleanupMode = "none"
-                                CodexProbeCleanup.setCleanupMode(.none)
-                            }
-                        }
-                    )) {
-                        Text("No delete").tag("none")
-                        Text("Auto-delete after each probe").foregroundStyle(.red).tag("auto")
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 440)
-
-                    HStack(spacing: 12) {
-                        Button("Delete Codex system probe sessions") { showConfirmCodexDeleteNow = true }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.red)
-                    }
-                }
-                .alert("Enable Automatic Cleanup?", isPresented: $showConfirmCodexAutoDelete) {
-                    Button("Cancel", role: .cancel) {}
-                    Button("Enable", role: .destructive) {
-                        codexProbeCleanupMode = "auto"
-                        CodexProbeCleanup.setCleanupMode(.auto)
-                        showCleanupFlash("Codex auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
-                    }
-                } message: {
-                    Text("After each status probe, Agent Sessions will delete only Codex probe sessions once safety checks verify they contain only probe markers.")
-                }
-                .alert("Delete Codex Probe Sessions Now?", isPresented: $showConfirmCodexDeleteNow) {
-                    Button("Cancel", role: .cancel) {}
-                    Button("Delete", role: .destructive) {
-                        let res = CodexProbeCleanup.cleanupNowUserInitiated()
-                        handleCodexCleanupResult(res)
-                    }
-                } message: {
-                    Text("This removes only Codex probe sessions after validation. If any session doesn’t look like a probe, nothing is deleted.")
-                }
-
-                HStack { EmptyView() }
-                    .frame(height: 4)
-                
-                HStack(spacing: 12) {
-                    Toggle("Activate Claude usage", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") },
-                    set: { newValue in
-                        if newValue {
-                            showClaudeExperimentalWarning = true
-                            } else {
-                                UserDefaults.standard.set(false, forKey: "ShowClaudeUsageStrip")
-                                ClaudeUsageModel.shared.setEnabled(false)
-                            }
-                        }
-                    ))
-                    .toggleStyle(.checkbox)
-                    .help("Enable periodic Claude CLI checks to show usage data (requires tmux)")
-                    Button(action: { ClaudeUsageModel.shared.refreshNow() }) { Text("Refresh Now").underline() }
-                        .buttonStyle(.plain)
-                        .disabled(!UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip"))
-                        .help("Force a usage refresh immediately when Claude tracking is enabled")
-                }
+            // Strip options
+            sectionHeader("Strip Options")
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 16) {
                     toggleRow("Show reset times", isOn: $stripShowResetTime, help: "Display the usage reset timestamp next to each meter")
                 }
-                Divider()
                 labeledRow("Refresh Interval") {
                     Picker("", selection: $usagePollingInterval) {
                         Text("1 minute").tag(60)
-                        Text("2 minutes").tag(120)
-                        Text("10 minutes").tag(600)
+                        Text("5 minutes").tag(300)
+                        Text("15 minutes").tag(900)
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 360)
@@ -474,66 +424,149 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // Menu Bar section
-            sectionHeader("Menu Bar")
+            // Menu Bar controls moved to the Menu Bar pane
+        }
+    }
+
+    // New separate pane for terminal probes and cleanup
+    private var usageProbesTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Usage Probes")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Runs short, terminal-based probes in dedicated working folders to refresh usage limits. Cleanup only removes validated probe sessions; normal projects are never touched.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // Claude subsection
+            sectionHeader("Claude")
             VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Show menu bar usage", isOn: $menuBarEnabled, help: "Add a menu bar item that displays usage meters")
-
-                labeledRow("Source") {
-                    Picker("Source", selection: Binding(
-                        get: { UserDefaults.standard.string(forKey: "MenuBarSource") ?? MenuBarSource.codex.rawValue },
-                        set: { UserDefaults.standard.set($0, forKey: "MenuBarSource") }
-                    )) {
-                        ForEach(MenuBarSource.allCases) { s in
-                            Text(s.title).tag(s.rawValue)
+                Picker("", selection: Binding(
+                    get: { claudeProbeCleanupMode },
+                    set: { newVal in
+                        if newVal == "auto" {
+                            showConfirmAutoDelete = true
+                        } else {
+                            claudeProbeCleanupMode = "none"
+                            ClaudeProbeProject.setCleanupMode(.none)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .disabled(!menuBarEnabled)
-                    .frame(maxWidth: 360)
-                    .help("Choose which agent usage the menu bar item displays")
+                )) {
+                    Text("No delete").tag("none")
+                    Text("Auto-delete after each probe").foregroundStyle(.red).tag("auto")
                 }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 440)
 
-                labeledRow("Scope") {
-                    Picker("Scope", selection: $menuBarScopeRaw) {
-                        ForEach(MenuBarScope.allCases) { s in
-                            Text(s.title).tag(s.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!menuBarEnabled)
-                    .frame(maxWidth: 360)
-                    .help("Select whether the menu bar shows 5-hour, weekly, or both usage windows")
+                HStack(spacing: 12) {
+                    Button("Delete Claude probe sessions now") { showConfirmDeleteNow = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
                 }
-
-                labeledRow("Style") {
-                    Picker("Style", selection: $menuBarStyleRaw) {
-                        ForEach(MenuBarStyleKind.allCases) { k in
-                            Text(k.title).tag(k.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!menuBarEnabled)
-                    .frame(maxWidth: 360)
-                    .help("Switch between bar graphs and numeric usage in the menu bar")
+            }
+            .alert("Enable Automatic Cleanup?", isPresented: $showConfirmAutoDelete) {
+                Button("Cancel", role: .cancel) {}
+                Button("Enable", role: .destructive) {
+                    claudeProbeCleanupMode = "auto"
+                    ClaudeProbeProject.setCleanupMode(.auto)
+                    showCleanupFlash("Claude auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
                 }
+            } message: {
+                Text("After each usage probe, only the dedicated Claude probe project is deleted once safety checks verify it contains only probe sessions.")
+            }
+            .alert("Delete Claude Probe Sessions Now?", isPresented: $showConfirmDeleteNow) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    let res = ClaudeProbeProject.cleanupNowUserInitiated()
+                    handleCleanupResult(res, manual: true)
+                }
+            } message: {
+                Text("Removes only the Agent Sessions Claude probe project after validation. If any session doesn’t look like a probe, nothing is deleted.")
+            }
 
-                Text("Source: Codex, Claude, or Both. Style: Bars or numbers. Scope: 5h, weekly, or both.")
+            // Codex subsection
+            sectionHeader("Codex")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Toggle("Allow auto /status probe when stale", isOn: $codexAllowStatusProbe)
+                        .toggleStyle(.checkbox)
+                        .help("When Codex limits look stale and the strip or menu bar is visible, ask Codex CLI (/status) via tmux for a fresh update.")
+                    Button(action: { CodexUsageModel.shared.refreshNow() }) { Text("Refresh Codex now").underline() }
+                        .buttonStyle(.plain)
+                        .help("Force Codex to refresh now. Runs the log refresh and a one-shot /status probe.")
+                }
+                Text("Primary tracking remains the JSONL log parser; /status is a secondary source.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: CodexProbeCleanup.didRunCleanupNotification)) { note in
-                if let info = note.userInfo as? [String: Any], let status = info["status"] as? String {
-                    switch status {
-                    case "success":
-                        if let n = info["deleted"] as? Int { showCleanupFlash("Deleted \(n) Codex probe file(s).", color: .green) }
-                        else { showCleanupFlash("Deleted Codex probe sessions.", color: .green) }
-                    case "not_found": showCleanupFlash("No Codex probe sessions to delete.", color: .secondary)
-                    case "unsafe": showCleanupFlash("Skipped: Codex sessions contained non-probe content.", color: .orange)
-                    case "io_error": showCleanupFlash("Failed to delete Codex probe sessions.", color: .red)
-                    case "disabled": break
-                    default: break
+
+                Picker("", selection: Binding(
+                    get: { codexProbeCleanupMode },
+                    set: { newVal in
+                        if newVal == "auto" {
+                            showConfirmCodexAutoDelete = true
+                        } else {
+                            codexProbeCleanupMode = "none"
+                            CodexProbeCleanup.setCleanupMode(.none)
+                        }
                     }
+                )) {
+                    Text("No delete").tag("none")
+                    Text("Auto-delete after each probe").foregroundStyle(.red).tag("auto")
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 440)
+
+                HStack(spacing: 12) {
+                    Button("Delete Codex probe sessions now") { showConfirmCodexDeleteNow = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                }
+            }
+            .alert("Enable Automatic Cleanup?", isPresented: $showConfirmCodexAutoDelete) {
+                Button("Cancel", role: .cancel) {}
+                Button("Enable", role: .destructive) {
+                    codexProbeCleanupMode = "auto"
+                    CodexProbeCleanup.setCleanupMode(.auto)
+                    showCleanupFlash("Codex auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
+                }
+            } message: {
+                Text("After each status probe, only Codex probe sessions are deleted once safety checks verify they contain only probe markers.")
+            }
+            .alert("Delete Codex Probe Sessions Now?", isPresented: $showConfirmCodexDeleteNow) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    let res = CodexProbeCleanup.cleanupNowUserInitiated()
+                    handleCodexCleanupResult(res)
+                }
+            } message: {
+                Text("Removes only Codex probe sessions after validation. If any session doesn’t look like a probe, nothing is deleted.")
+            }
+
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CodexProbeCleanup.didRunCleanupNotification)) { note in
+            if let info = note.userInfo as? [String: Any], let status = info["status"] as? String {
+                switch status {
+                case "success":
+                    if let n = info["deleted"] as? Int { showCleanupFlash("Deleted \(n) Codex probe file(s).", color: .green) }
+                    else { showCleanupFlash("Deleted Codex probe sessions.", color: .green) }
+                case "not_found": showCleanupFlash("No Codex probe sessions to delete.", color: .secondary)
+                case "unsafe": showCleanupFlash("Skipped: Codex sessions contained non-probe content.", color: .orange)
+                case "io_error": showCleanupFlash("Failed to delete Codex probe sessions.", color: .red)
+                case "disabled": break
+                default: break
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ClaudeProbeProject.didRunCleanupNotification)) { note in
+            if let info = note.userInfo as? [String: Any], let status = info["status"] as? String {
+                switch status {
+                case "success": showCleanupFlash("Deleted Claude probe project.", color: .green)
+                case "not_found": showCleanupFlash("No Claude probe project to delete.", color: .secondary)
+                case "unsafe": showCleanupFlash("Skipped: Claude project contained non-probe sessions.", color: .orange)
+                case "io_error": showCleanupFlash("Failed to delete Claude probe project.", color: .red)
+                case "disabled": break
+                default: break
                 }
             }
         }
@@ -892,79 +925,7 @@ struct PreferencesView: View {
 
             // Usage Tracking moved to Unified Window tab.
 
-            // -----------------------------------------------------------------
-            // Probe Sessions Cleanup
-            sectionHeader("Claude Usage Probe Sessions")
-            VStack(alignment: .leading, spacing: 12) {
-                // Radio group selection for cleanup mode
-                Picker("", selection: Binding(
-                    get: { claudeProbeCleanupMode },
-                    set: { newVal in
-                        if newVal == "auto" {
-                            showConfirmAutoDelete = true
-                        } else {
-                            claudeProbeCleanupMode = "none"
-                            ClaudeProbeProject.setCleanupMode(.none)
-                        }
-                    }
-                )) {
-                    Text("No delete").tag("none")
-                    Text("Auto-delete after each probe").foregroundStyle(.red).tag("auto")
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 440)
-
-                HStack(spacing: 12) {
-                    Button("Delete Agent Sessions system probe sessions") {
-                        showConfirmDeleteNow = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                }
-
-                if let flash = cleanupFlashText {
-                    Text(flash)
-                        .font(.caption)
-                        .foregroundStyle(cleanupFlashColor)
-                        .transition(.opacity)
-                }
-
-                Text("These controls only delete the dedicated Agent Sessions probe project; normal Claude projects are never touched.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .alert("Enable Automatic Cleanup?", isPresented: $showConfirmAutoDelete) {
-                Button("Cancel", role: .cancel) {}
-                Button("Enable", role: .destructive) {
-                    claudeProbeCleanupMode = "auto"
-                    ClaudeProbeProject.setCleanupMode(.auto)
-                    // brief acknowledgement
-                    showCleanupFlash("Auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
-                }
-            } message: {
-                Text("After each usage probe, Agent Sessions will delete only the dedicated probe project under ~/.claude/projects once safety checks verify it contains only probe sessions.")
-            }
-            .alert("Delete System Probe Sessions Now?", isPresented: $showConfirmDeleteNow) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
-                    let res = ClaudeProbeProject.cleanupNowUserInitiated()
-                    handleCleanupResult(res, manual: true)
-                }
-            } message: {
-                Text("This removes only the Agent Sessions probe project after validation. If any session doesn’t look like a probe, nothing is deleted.")
-            }
-            .onReceive(NotificationCenter.default.publisher(for: ClaudeProbeProject.didRunCleanupNotification)) { note in
-                if let info = note.userInfo as? [String: Any], let status = info["status"] as? String {
-                    switch status {
-                    case "success": showCleanupFlash("Deleted probe project.", color: .green)
-                    case "not_found": showCleanupFlash("No probe project to delete.", color: .secondary)
-                    case "unsafe": showCleanupFlash("Skipped: project contained non-probe sessions.", color: .orange)
-                    case "io_error": showCleanupFlash("Failed to delete probe project.", color: .red)
-                    case "disabled": break
-                    default: break
-                    }
-                }
-            }
+            // Probe cleanup controls moved to Usage Tracking → Usage Terminal Probes
         }
     }
 
@@ -1436,6 +1397,8 @@ struct PreferencesView: View {
 enum PreferencesTab: String, CaseIterable, Identifiable {
     case general
     case usageTracking
+    case usageProbes
+    case menuBar
     case unified
     case codexCLI
     case claudeResume
@@ -1448,6 +1411,8 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "General"
         case .usageTracking: return "Usage Tracking"
+        case .usageProbes: return "Usage Probes"
+        case .menuBar: return "Menu Bar"
         case .unified: return "Unified Window"
         case .codexCLI: return "Codex CLI"
         case .claudeResume: return "Claude Code"
@@ -1460,6 +1425,8 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .usageTracking: return "chart.bar"
+        case .usageProbes: return "wrench.and.screwdriver"
+        case .menuBar: return "menubar.rectangle"
         case .unified: return "square.grid.2x2"
         case .codexCLI: return "terminal"
         case .claudeResume: return "chevron.left.slash.chevron.right"
@@ -1471,7 +1438,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Codex CLI → Claude Code → Gemini CLI → Unified Window → Usage Tracking → About
-    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, /*.geminiCLI,*/ .unified, .usageTracking, .about] }
+    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, /*.geminiCLI,*/ .unified, .usageTracking, .usageProbes, .menuBar, .about] }
 }
 
 // MARK: - Probe helpers
@@ -1560,7 +1527,7 @@ private extension PreferencesView {
             if claudeVersionString == nil && claudeProbeState != .probing { probeClaude() }
         case .geminiCLI:
             if geminiVersionString == nil && geminiProbeState != .probing { probeGemini() }
-        case .general, .unified, .about:
+        case .menuBar, .usageProbes, .general, .unified, .about:
             break
         }
     }

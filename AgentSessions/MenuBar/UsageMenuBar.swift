@@ -13,7 +13,7 @@ struct UsageMenuBarLabel: View {
         let scope = MenuBarScope(rawValue: scopeRaw) ?? .both
         let style = MenuBarStyleKind(rawValue: styleRaw) ?? .bars
         let source = MenuBarSource(rawValue: sourceRaw) ?? .codex
-        let claudeEnabled = UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip")
+        let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
 
         // No cap badge for now (calculations retained; UI disabled)
 

@@ -104,7 +104,13 @@ enum ClaudeProbeProject {
             "status": status.kind,
             "message": status.message ?? ""
         ]
-        NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+        if Thread.isMainThread {
+            NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+        } else {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+            }
+        }
     }
 
     // MARK: - Discovery

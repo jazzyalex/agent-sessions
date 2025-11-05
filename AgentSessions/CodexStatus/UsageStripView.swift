@@ -14,16 +14,18 @@ struct UsageStripView: View {
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            if let label {
-                Text(label)
-                    .font(.footnote).bold()
-                    .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
-                    .frame(width: labelWidth, alignment: .leading)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                if let label {
+                    Text(label)
+                        .font(.footnote).bold()
+                        .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
+                        .frame(width: labelWidth, alignment: .leading)
+                }
+                UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
+                UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
+                Spacer(minLength: 0)
             }
-            UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
-            UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
         .padding(.top, collapseTop ? 0 : verticalPadding)
@@ -85,7 +87,11 @@ private struct UsageMeter: View {
 
     var body: some View {
         let includeReset = showResetTime
-        let stale = isResetInfoStale(kind: title, source: .codex, lastUpdate: lastUpdate, eventTimestamp: eventTimestamp)
+        // Use eventTimestamp when available; fall back to lastUpdate so the strip
+        // stops showing stale when a recent refresh occurred but no new event timestamp
+        // was recorded (e.g., during CLI /status fallback or format changes).
+        let effectiveEvent = eventTimestamp ?? lastUpdate
+        let stale = isResetInfoStale(kind: title, source: .codex, lastUpdate: lastUpdate, eventTimestamp: effectiveEvent)
         let displayText = (stale || reset.isEmpty)
             ? UsageStaleThresholds.outdatedCopy
             : formattedReset(reset)
@@ -142,3 +148,4 @@ private enum UsageMeterLayout {
         return base + resetComponent + itemSpacing * spacingCount
     }
 }
+
