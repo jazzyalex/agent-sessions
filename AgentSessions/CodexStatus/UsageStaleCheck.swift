@@ -3,8 +3,8 @@ import Foundation
 // MARK: - Constants
 
 enum UsageTrackingSource {
-    case codex  // Passive file scanning - uses event timestamp
-    case claude // Active polling - uses last poll time
+    case codex  // Passive file scanning — staleness tied to event timestamps only
+    case claude // Active polling — staleness tied to last poll time
 }
 
 enum UsageStaleThresholds {
@@ -26,14 +26,11 @@ func isResetInfoStale(kind: String, source: UsageTrackingSource, lastUpdate: Dat
     let timestamp: Date?
     switch source {
     case .codex:
-        // For Codex, prefer the freshest of eventTimestamp (from logs) and
-        // lastUpdate (from a successful refresh like CLI /status). This avoids
-        // showing stale when one source lags the other.
-        if let ev = eventTimestamp, let lu = lastUpdate {
-            timestamp = max(ev, lu)
-        } else {
-            timestamp = eventTimestamp ?? lastUpdate
-        }
+        // IMPORTANT: For Codex, staleness must reflect the age of the
+        // underlying rate-limit data captured in logs (eventTimestamp).
+        // Do NOT smooth with UI refresh times; a recent refresh without a new
+        // event should still appear stale. If no event timestamp, treat as stale.
+        timestamp = eventTimestamp
     case .claude:
         // For Claude, use last poll time (when we got fresh data)
         timestamp = lastUpdate
