@@ -80,7 +80,7 @@ Visualize your AI coding patterns with comprehensive analytics. Track session tr
 Deep-dive into the git context of any Codex session. See repository state, branch info, and historical diffs—understand exactly what code changes were visible to Codex during each session. Right-click any Codex session → **Show Git Context**.
 
 ### Updated Usage Tracking
-Usage limit tracking and reset times now properly support Codex 0.50+ session format changes. No more "Stale data" warnings—accurate usage tracking with flexible timestamp parsing for both old and new session formats.
+Usage limit tracking and reset times now properly support Codex 0.50+ session format changes. The strip and menu show a "Stale data" warning when rate‑limit information is older than the freshness threshold, even if token‑only events or UI refreshes occurred meanwhile. Flexible timestamp parsing handles both old and new session formats.
 
 ---
 
