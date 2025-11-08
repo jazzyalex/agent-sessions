@@ -9,20 +9,21 @@ actor ProbeBudgetManager {
     private var timestamps: [Date] = []
     private let defaultsKey = "UsageProbeRecentTimestamps"
     let maxProbesPerDay = 24
-    let window: TimeInterval = 24 * 60 * 60
+    static let window: TimeInterval = 24 * 60 * 60
 
     init() {
-        // Load persisted timestamps
+        // Load persisted timestamps into a local, then assign once
+        var loaded: [Date] = []
         if let raw = UserDefaults.standard.array(forKey: defaultsKey) as? [Double] {
-            timestamps = raw.map { Date(timeIntervalSince1970: $0) }
+            loaded = raw.map { Date(timeIntervalSince1970: $0) }
         }
-        // Inline prune in init to avoid calling an actor-isolated method before full initialization
         let now = Date()
-        timestamps = timestamps.filter { now.timeIntervalSince($0) <= window }
+        let pruned = loaded.filter { now.timeIntervalSince($0) <= Self.window }
+        timestamps = pruned
     }
 
     private func pruneLocked(now: Date) {
-        timestamps = timestamps.filter { now.timeIntervalSince($0) <= window }
+        timestamps = timestamps.filter { now.timeIntervalSince($0) <= Self.window }
     }
 
     private func persistLocked() {
