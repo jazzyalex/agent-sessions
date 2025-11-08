@@ -234,7 +234,21 @@ struct UsageMenuBarMenuContent: View {
                 NSApp.activate(ignoringOtherApps: true)
                 openWindow(id: "Agent Sessions")
             }
-            Button("Refresh Limits") {
+            // Dynamic label: warn when Claude probes will consume tokens
+            let refreshLabel: some View = {
+                if source == .claude || source == .both {
+                    return AnyView(VStack(alignment: .leading, spacing: 0) {
+                        Text("Refresh Limits")
+                        Text("(consumes Claude's tokens)")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .padding(.leading, 2)
+                    })
+                } else {
+                    return AnyView(Text("Refresh Limits"))
+                }
+            }()
+            Button(action: {
                 switch source {
                 case .codex:
                     codexStatus.refreshNow()
@@ -244,7 +258,7 @@ struct UsageMenuBarMenuContent: View {
                     codexStatus.refreshNow()
                     claudeStatus.refreshNow()
                 }
-            }
+            }) { refreshLabel }
             Toggle("Show in-app usage strip", isOn: $showUsageStrip)
             Divider()
             Button("Open Preferences…") {
