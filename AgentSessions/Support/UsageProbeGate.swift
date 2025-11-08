@@ -16,7 +16,9 @@ actor ProbeBudgetManager {
         if let raw = UserDefaults.standard.array(forKey: defaultsKey) as? [Double] {
             timestamps = raw.map { Date(timeIntervalSince1970: $0) }
         }
-        pruneLocked(now: Date())
+        // Inline prune in init to avoid calling an actor-isolated method before full initialization
+        let now = Date()
+        timestamps = timestamps.filter { now.timeIntervalSince($0) <= window }
     }
 
     private func pruneLocked(now: Date) {
@@ -45,6 +47,7 @@ actor ProbeBudgetManager {
     }
 }
 
+@MainActor
 final class UsageProbeGate: NSObject {
     static let shared = UsageProbeGate()
 

@@ -530,6 +530,11 @@ actor CodexStatusService {
         guard !FeatureFlags.disableCodexProbes else {
             return CodexProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Probes disabled by feature flag")
         }
+        // Respect central probe gate + daily budget, same as Claude
+        if await !UsageProbeGate.shared.canProbeAutomatic() {
+            return CodexProbeDiagnostics(success: false, exitCode: 200, scriptPath: "(suppressed)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Suppressed by gate/budget")
+        }
+        await UsageProbeGate.shared.recordProbeAttempt()
         let (snap, diag) = await runCodexStatusViaTMUXAndCollect()
         if let tmuxSnap = snap {
             var merged = snapshot
