@@ -450,7 +450,7 @@ struct PreferencesView: View {
                 }
                 Text("Claude limit tracking consumes one message per probe and decreases Claude's usage.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.red)
             }
 
             // Strip options (shared)
