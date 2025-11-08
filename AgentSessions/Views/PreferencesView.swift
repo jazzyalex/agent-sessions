@@ -126,6 +126,15 @@ struct PreferencesView: View {
         }
         // Keep UI feeling responsive when switching between panes
         .animation(.easeInOut(duration: 0.12), value: selectedTab)
+        // Keep Codex strip visibility consistent with tracking master toggle.
+        .onChange(of: codexUsageEnabled) { _, newValue in
+            let d = UserDefaults.standard
+            if newValue {
+                d.set(true, forKey: "UnifiedShowCodexStrip")
+            } else {
+                d.set(false, forKey: "UnifiedShowCodexStrip")
+            }
+        }
         // Keep Claude strip visibility consistent with tracking master toggle.
         // When tracking is turned OFF, immediately hide the strip(s).
         // When tracking is turned ON again, turn the strip(s) back ON for visibility.
