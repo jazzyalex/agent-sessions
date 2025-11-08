@@ -49,6 +49,9 @@ actor ProbeBudgetManager {
 }
 
 @MainActor
+enum ProbeAgent { case codex, claude }
+
+@MainActor
 final class UsageProbeGate: NSObject {
     static let shared = UsageProbeGate()
 
@@ -88,12 +91,22 @@ final class UsageProbeGate: NSObject {
         DistributedNotificationCenter.default().removeObserver(self)
     }
 
-    /// Returns true if probes are allowed to run under current UI/visibility rules.
-    func shouldProbe() -> Bool {
+    /// Returns true if probes are allowed to run for the given agent under current UI/visibility rules.
+    func shouldProbe(for agent: ProbeAgent) -> Bool {
+        // Determine if menu bar is effectively showing limits for this agent
         let menuBarEnabled = UserDefaults.standard.bool(forKey: "MenuBarEnabled")
+        let src = (UserDefaults.standard.string(forKey: "MenuBarSource") ?? "codex").lowercased()
+        let menuShowsAgent: Bool = {
+            switch agent {
+            case .codex:
+                return menuBarEnabled && (src == "codex" || src == "both")
+            case .claude:
+                return menuBarEnabled && (src == "claude" || src == "both")
+            }
+        }()
 
         // Rule 1: menu bar off AND main window hidden → suppress
-        if !menuBarEnabled && !isMainWindowVisible {
+        if !menuShowsAgent && !isMainWindowVisible {
             #if DEBUG
             print("[UsageProbeGate] Suppress probe: menu bar off + main window hidden")
             #endif
@@ -112,8 +125,8 @@ final class UsageProbeGate: NSObject {
     }
 
     /// Combined check for automatic probes: gate + daily budget (24 per rolling 24h).
-    func canProbeAutomatic() async -> Bool {
-        guard shouldProbe() else { return false }
+    func canProbeAutomatic(for agent: ProbeAgent) async -> Bool {
+        guard shouldProbe(for: agent) else { return false }
         let ok = await budget.hasQuota()
         if !ok {
             #if DEBUG

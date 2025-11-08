@@ -511,6 +511,15 @@ actor CodexStatusService {
             if let last = lastStatusProbe, now.timeIntervalSince(last) < 600 { return }
         }
 
+        // Central gate + daily budget for both manual and automatic tmux /status probes
+        if await !UsageProbeGate.shared.canProbeAutomatic(for: .codex) {
+            #if DEBUG
+            print("[CodexProbe] Suppressed by gate/budget (maybeProbeStatusViaTMUX)")
+            #endif
+            return
+        }
+        await UsageProbeGate.shared.recordProbeAttempt()
+
         guard let tmuxSnap = await runCodexStatusViaTMUX() else { return }
         lastStatusProbe = now
         var merged = snapshot
@@ -531,7 +540,7 @@ actor CodexStatusService {
             return CodexProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Probes disabled by feature flag")
         }
         // Respect central probe gate + daily budget, same as Claude
-        if await !UsageProbeGate.shared.canProbeAutomatic() {
+        if await !UsageProbeGate.shared.canProbeAutomatic(for: .codex) {
             return CodexProbeDiagnostics(success: false, exitCode: 200, scriptPath: "(suppressed)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Suppressed by gate/budget")
         }
         await UsageProbeGate.shared.recordProbeAttempt()
