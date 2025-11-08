@@ -39,6 +39,9 @@ struct PreferencesView: View {
     @State private var showCodexProbeResult: Bool = false
     @State private var codexProbeMessage: String = ""
     @State private var isCodexHardProbeRunning: Bool = false
+    @State private var showClaudeProbeResult: Bool = false
+    @State private var claudeProbeMessage: String = ""
+    @State private var isClaudeHardProbeRunning: Bool = false
     @State private var cleanupFlashText: String? = nil
     @State private var cleanupFlashColor: Color = .secondary
     // Menu bar prefs
@@ -51,7 +54,7 @@ struct PreferencesView: View {
     @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = true
     // Per-agent polling intervals
     @AppStorage("CodexPollingInterval") private var codexPollingInterval: Int = 300   // 1/5/15 min options, default 5m
-    @AppStorage("ClaudePollingInterval") private var claudePollingInterval: Int = 1800 // 10/30/60 min options, default 30m
+    @AppStorage("ClaudePollingInterval") private var claudePollingInterval: Int = 3600 // 30/60/120 min options, default 60m
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
@@ -449,12 +452,12 @@ struct PreferencesView: View {
                 }
                 labeledRow("Refresh Interval") {
                     Picker("", selection: $claudePollingInterval) {
-                        Text("10 minutes").tag(600)
                         Text("30 minutes").tag(1800)
                         Text("60 minutes").tag(3600)
+                        Text("120 minutes").tag(7200)
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 420)
+                    .frame(maxWidth: 520)
                     .help("How often to refresh Claude usage")
                 }
                 Text("Claude limit tracking consumes one message per probe and decreases Claude's usage.")
@@ -498,6 +501,49 @@ struct PreferencesView: View {
             // Claude subsection
             sectionHeader("Claude")
             VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Button("Run hard Claude /usage probe now") {
+                        isClaudeHardProbeRunning = true
+                        ClaudeUsageModel.shared.hardProbeNowDiagnostics { diag in
+                            isClaudeHardProbeRunning = false
+                            if diag.success {
+                                let m = ClaudeUsageModel.shared
+                                var lines: [String] = []
+                                lines.append("Result: SUCCESS")
+                                lines.append("")
+                                lines.append("Limits")
+                                lines.append("5h:     \(m.sessionPercent)% used (\(m.sessionResetText))")
+                                lines.append("Weekly: \(m.weekAllModelsPercent)% used (\(m.weekAllModelsResetText))")
+                                claudeProbeMessage = lines.joined(separator: "\n")
+                            } else {
+                                var lines: [String] = []
+                                lines.append("Result: FAILED")
+                                lines.append("Exit code: \(diag.exitCode)")
+                                lines.append("Script: \(diag.scriptPath)")
+                                lines.append("WORKDIR: \(diag.workdir)")
+                                lines.append("CLAUDE_BIN: \(diag.claudeBin ?? "<unset>")")
+                                lines.append("TMUX_BIN: \(diag.tmuxBin ?? "<unset>")")
+                                if let t = diag.timeoutSecs { lines.append("TIMEOUT_SECS: \(t)") }
+                                lines.append("")
+                                lines.append("— stdout —")
+                                lines.append(diag.stdout.isEmpty ? "<empty>" : diag.stdout)
+                                lines.append("")
+                                lines.append("— stderr —")
+                                lines.append(diag.stderr.isEmpty ? "<empty>" : diag.stderr)
+                                claudeProbeMessage = lines.joined(separator: "\n")
+                            }
+                            showClaudeProbeResult = true
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Runs a one-off /usage probe (Claude) and shows the result.")
+
+                    if isClaudeHardProbeRunning {
+                        Text("Wait for probe result…")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
                 Picker("", selection: Binding(
                     get: { claudeProbeCleanupMode },
                     set: { newVal in
@@ -520,6 +566,14 @@ struct PreferencesView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
                 }
+            }
+            // Hard-probe result dialog for Claude
+            .alert("Claude /usage Probe", isPresented: $showClaudeProbeResult) {
+                Button("Close", role: .cancel) {}
+            } message: {
+                Text(claudeProbeMessage)
+                    .font(.system(.body, design: .monospaced))
+                    .multilineTextAlignment(.leading)
             }
             .alert("Enable Automatic Cleanup?", isPresented: $showConfirmAutoDelete) {
                 Button("Cancel", role: .cancel) {}
