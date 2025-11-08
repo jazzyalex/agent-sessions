@@ -243,6 +243,17 @@ final class SessionIndexer: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.recomputeNow() }
             .store(in: &cancellables)
+
+        // Refresh Codex sessions when probe cleanup succeeds so removed probe files disappear immediately
+        NotificationCenter.default.publisher(for: CodexProbeCleanup.didRunCleanupNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let self = self else { return }
+                if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
+                    self.refresh()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func applySearch() {
@@ -556,8 +567,11 @@ final class SessionIndexer: ObservableObject {
                 }
             }
 
-            // Merge existing sessions with newly parsed ones
-            let allParsedSessions = existingSessions + newSessions
+            // Merge existing sessions with newly parsed ones, then prune files that no longer exist
+            let fmExists: (Session) -> Bool = { s in
+                FileManager.default.fileExists(atPath: s.filePath)
+            }
+            let allParsedSessions = (existingSessions + newSessions).filter(fmExists)
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 .filter { hideProbes ? !CodexProbeConfig.isProbeSession($0) : true }

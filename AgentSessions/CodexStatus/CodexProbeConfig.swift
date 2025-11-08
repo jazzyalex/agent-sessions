@@ -11,11 +11,12 @@ enum CodexProbeConfig {
             return (override as NSString).expandingTildeInPath
         }
         let home = NSHomeDirectory() as NSString
-        return home.appendingPathComponent("Library/Application Support/AgentSessions/CodexProbeProject")
+        // Use a stable, human-friendly name for easy filtering
+        return home.appendingPathComponent("Library/Application Support/AgentSessions/AgentSessions-codex-usage")
     }
 
     /// Returns true if the given session appears to be a Codex probe session.
-    /// Heuristics (ordered, narrow to avoid false positives):
+    /// Heuristics (ordered, conservative to avoid false positives):
     /// - Source must be `.codex`.
     /// - If lightweight `cwd` matches the Probe WD (normalized), treat as probe.
     /// - Otherwise, treat as probe only when the marker appears in the FIRST user message
@@ -25,6 +26,10 @@ enum CodexProbeConfig {
     static func isProbeSession(_ session: Session) -> Bool {
         guard session.source == .codex else { return false }
         if let cwd = session.lightweightCwd, !cwd.isEmpty {
+            if normalizePath(cwd) == normalizePath(probeWorkingDirectory()) { return true }
+        }
+        // Also check the fully-parsed path when present
+        if let cwd = session.cwd, !cwd.isEmpty {
             if normalizePath(cwd) == normalizePath(probeWorkingDirectory()) { return true }
         }
         // Marker in lightweight title or first user PREVIEW

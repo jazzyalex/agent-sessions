@@ -25,7 +25,8 @@ if [[ -z "${CODEX_CMD}" ]]; then
   exit 14
 fi
 
-WORKDIR="$(mktemp -d)"
+WORKDIR="${WORKDIR:-$HOME/Library/Application Support/AgentSessions/AgentSessions-codex-usage}"
+mkdir -p "$WORKDIR"
 
 # 1) Launch Codex in tmux (detached), roomy pane
 "$TMUX_CMD" -L "$LABEL" new -d -s s "cd '$WORKDIR'; env TERM=xterm-256color '$CODEX_CMD' -m '$MODEL'"
@@ -63,4 +64,3 @@ echo "Attach to inspect:  tmux -L $LABEL attach -t s"
 if [[ "${KEEP_TMUX:-0}" != "1" ]]; then
   "$TMUX_CMD" -L "$LABEL" kill-server >/dev/null 2>&1 || true
 fi
-

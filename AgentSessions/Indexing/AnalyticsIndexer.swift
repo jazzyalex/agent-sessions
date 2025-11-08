@@ -37,6 +37,8 @@ actor AnalyticsIndexer {
 
         for (source, enumerate) in sources {
             let files = enumerate()
+            // Purge previous rows for this source so refresh reflects file deletions as well
+            do { try await db.purgeSource(source) } catch { /* non-fatal */ }
             if files.isEmpty { continue }
             // Bound concurrency to keep CPU/IO modest
             let chunk = 8

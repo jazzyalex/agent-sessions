@@ -40,15 +40,16 @@ enum ClaudeProbeProject {
     /// Performs a one-shot cleanup attempt if all safety checks pass.
     /// Returns a status describing the action taken or the reason for doing nothing.
     static func cleanupIfSafe() -> ResultStatus {
-        var status: ResultStatus
-        defer { postCleanupStatus(status, mode: "auto") }
+        var status: ResultStatus = .notFound("Cleanup not run")
+        var extras: [String: Any] = [:]
+        defer { postCleanupStatus(status, mode: "auto", extra: extras) }
+
         guard cleanupMode() != .none else {
             status = .disabled("Cleanup mode is disabled"); return status
         }
-        guard let projectID = discoverProbeProjectId() else {
+        guard let root = probeProjectDirectory() else {
             status = .notFound("No probe project found; run a probe first"); return status
         }
-        let root = claudeProjectsRoot().appendingPathComponent(projectID)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
             status = .notFound("Probe project directory is missing"); return status
@@ -56,54 +57,96 @@ enum ClaudeProbeProject {
         guard validateProjectContents(projectDir: root) else {
             status = .unsafe("Probe project contains non-probe sessions; deletion skipped"); return status
         }
+        let deletedCount = countProbeSessionFiles(in: root)
         do {
             try FileManager.default.removeItem(at: root)
             status = .success
         } catch {
             status = .ioError("Failed to delete probe project: \(error.localizedDescription)")
         }
+        if deletedCount > 0 { extras["deleted"] = deletedCount }
         return status
     }
 
     /// Convenience: run cleanup only when mode is .auto (used after each probe).
+    /// Uses the same safety + fallback logic as the manual button, but posts with mode "auto".
     @discardableResult
     static func cleanupNowIfAuto() -> ResultStatus {
         guard cleanupMode() == .auto else {
             return .disabled("Cleanup mode is not auto")
         }
-        return cleanupIfSafe()
+        return performCleanup(mode: "auto")
     }
 
-    /// Manual cleanup independent of mode; still performs safety checks.
+    /// Manual cleanup independent of mode; posts with mode "manual".
     static func cleanupNowUserInitiated() -> ResultStatus {
+        return performCleanup(mode: "manual")
+    }
+
+    /// Shared cleanup used by both manual and auto flows. Tries whole-project delete when
+    /// validation passes, otherwise falls back to per-file deletion of validated probe files.
+    private static func performCleanup(mode: String) -> ResultStatus {
         var status: ResultStatus
-        defer { postCleanupStatus(status, mode: "manual") }
-        guard let projectID = discoverProbeProjectId() else {
-            status = .notFound("No probe project found; run a probe first"); return status
+        var extras: [String: Any] = [:]
+
+        if let root = probeProjectDirectory() {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue {
+                if validateProjectContents(projectDir: root) {
+                    let files = listProbeSessionFiles(in: root)
+                    let deletedCount = files.count
+                    if let oldest = files.map({ fileMTime($0) ?? Date.distantFuture }).min(), deletedCount > 0 {
+                        extras["oldest_ts"] = oldest.timeIntervalSince1970
+                    }
+                    do { try FileManager.default.removeItem(at: root); status = .success }
+                    catch { status = .ioError("Failed to delete probe project: \(error.localizedDescription)") }
+                    extras["deleted"] = deletedCount
+                    postCleanupStatus(status, mode: mode, extra: extras)
+                    return status
+                }
+                // Unsafe to remove whole dir; fall through to per-file cleanup
+            }
         }
-        let root = claudeProjectsRoot().appendingPathComponent(projectID)
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
-            status = .notFound("Probe project directory is missing"); return status
+
+        let metas = scanProbeFilesUnderProjectsRoot()
+        let toDelete = metas.filter { $0.isProbe && $0.safe }
+        let skipped = metas.filter { $0.isProbe && !$0.safe }.count
+        var deleted = 0
+        var oldest: Date? = nil
+        for m in toDelete {
+            do {
+                try FileManager.default.removeItem(at: m.url)
+                deleted += 1
+                if let ts = m.mtime { oldest = minDate(oldest, ts) }
+            } catch {
+                status = .ioError("Failed to delete \(m.url.lastPathComponent): \(error.localizedDescription)")
+                extras["deleted"] = deleted
+                extras["skipped"] = skipped + max(0, toDelete.count - deleted)
+                if let ts = oldest { extras["oldest_ts"] = ts.timeIntervalSince1970 }
+                postCleanupStatus(status, mode: mode, extra: extras)
+                return status
+            }
         }
-        guard validateProjectContents(projectDir: root) else {
-            status = .unsafe("Probe project contains non-probe sessions; deletion skipped"); return status
-        }
-        do {
-            try FileManager.default.removeItem(at: root)
+
+        if deleted > 0 {
             status = .success
-        } catch {
-            status = .ioError("Failed to delete probe project: \(error.localizedDescription)")
+            extras["deleted"] = deleted
+            extras["skipped"] = skipped
+            if let ts = oldest { extras["oldest_ts"] = ts.timeIntervalSince1970 }
+        } else {
+            status = .notFound("No probe sessions found")
         }
+        postCleanupStatus(status, mode: mode, extra: extras)
         return status
     }
 
-    private static func postCleanupStatus(_ status: ResultStatus, mode: String) {
-        let info: [String: Any] = [
+    private static func postCleanupStatus(_ status: ResultStatus, mode: String, extra: [String: Any] = [:]) {
+        var info: [String: Any] = [
             "mode": mode,
             "status": status.kind,
             "message": status.message ?? ""
         ]
+        for (k, v) in extra { info[k] = v }
         if Thread.isMainThread {
             NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
         } else {
@@ -148,6 +191,50 @@ enum ClaudeProbeProject {
         return nil
     }
 
+    /// Best-effort resolution of the probe project directory.
+    /// 1) Try cached/discovered id.
+    /// 2) Fallback: scan subdirectories for sessions that match probe WD + marker.
+    private static func probeProjectDirectory() -> URL? {
+        if let id = discoverProbeProjectId() {
+            return claudeProjectsRoot().appendingPathComponent(id)
+        }
+        let root = claudeProjectsRoot()
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { return nil }
+        guard let contents = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else { return nil }
+        let expectedWD = normalizePath(ClaudeProbeConfig.probeWorkingDirectory())
+        for dir in contents {
+            var sub: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: dir.path, isDirectory: &sub), sub.boolValue else { continue }
+            if dirLikelyMatchesProbeWD(dir: dir, expectedWD: expectedWD) && validateProjectContents(projectDir: dir) {
+                // Cache id for faster future checks
+                UserDefaults.standard.set(dir.lastPathComponent, forKey: Keys.cachedProjectID)
+                return dir
+            }
+        }
+        return nil
+    }
+
+    /// Quick check: does this directory contain JSONL files whose cwd/project equals our Probe WD?
+    private static func dirLikelyMatchesProbeWD(dir: URL, expectedWD: String) -> Bool {
+        guard let enumerator = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return false }
+        var seen = 0
+        for case let url as URL in enumerator {
+            let ext = url.pathExtension.lowercased()
+            if ext != "jsonl" && ext != "ndjson" { continue }
+            seen += 1; if seen > 64 { break }
+            guard let fh = try? FileHandle(forReadingFrom: url) else { continue }
+            let data = try? fh.read(upToCount: 128 * 1024); try? fh.close()
+            guard let data, let text = String(data: data, encoding: .utf8) else { continue }
+            for raw in text.split(separator: "\n").prefix(400) {
+                guard let d = String(raw).data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+                if let cwd = obj["cwd"] as? String, normalizePath(cwd) == expectedWD { return true }
+                if let proj = obj["project"] as? String, normalizePath(proj) == expectedWD { return true }
+            }
+        }
+        return false
+    }
+
     private static func extractRootPath(from obj: [String: Any]) -> String? {
         // Try common keys where a root path might be recorded
         let keys = ["rootPath", "root", "cwd", "dir", "path", "workspaceRoot"]
@@ -190,6 +277,94 @@ enum ClaudeProbeProject {
         }
         // If we never saw any user messages at all, fail closed to be safe
         return !firstUserChecked.isEmpty
+    }
+
+    private struct ProbeFileMeta { let url: URL; let isProbe: Bool; let safe: Bool; let mtime: Date? }
+
+    private static func scanProbeFilesUnderProjectsRoot() -> [ProbeFileMeta] {
+        // Prefer scanning only inside the discovered probe project directory for extra safety
+        let root = probeProjectDirectory() ?? claudeProjectsRoot()
+        var results: [ProbeFileMeta] = []
+        guard let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else { return results }
+        for case let url as URL in e {
+            let ext = url.pathExtension.lowercased()
+            if ext != "jsonl" && ext != "ndjson" { continue }
+            let meta = analyzeFile(url: url)
+            results.append(meta)
+        }
+        return results
+    }
+
+    private static func analyzeFile(url: URL) -> ProbeFileMeta {
+        let fh = try? FileHandle(forReadingFrom: url)
+        let data = try? fh?.read(upToCount: 256 * 1024)
+        try? fh?.close()
+        let dataEff = data ?? Data()
+        var sawProbeWD = false
+        var firstUserText: String? = nil
+        var userCount = 0
+        var assistantCount = 0
+        var otherKinds = 0
+        if !dataEff.isEmpty, let text = String(data: dataEff, encoding: .utf8) {
+            for raw in text.split(separator: "\n").prefix(400) {
+                guard let d = String(raw).data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+                if !sawProbeWD {
+                    if let cwd = obj["cwd"] as? String, normalizePath(cwd) == normalizePath(ClaudeProbeConfig.probeWorkingDirectory()) { sawProbeWD = true }
+                    else if let proj = obj["project"] as? String, normalizePath(proj) == normalizePath(ClaudeProbeConfig.probeWorkingDirectory()) { sawProbeWD = true }
+                }
+                if firstUserText == nil, isUserEvent(obj) {
+                    firstUserText = extractText(obj)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                // Count rough event kinds for tiny-session heuristic
+                if let type = (obj["type"] as? String)?.lowercased() {
+                    if ["user","user_input","user-input","input","prompt","chat_input","chat-input","human"].contains(type) { userCount += 1 }
+                    else if ["assistant","response","assistant_message","assistant-message","assistant_response","assistant-response","completion"].contains(type) { assistantCount += 1 }
+                    else { otherKinds += 1 }
+                } else {
+                    // Fallback via role
+                    if let role = (obj["role"] as? String)?.lowercased() {
+                        if role == "user" { userCount += 1 }
+                        else if role == "assistant" { assistantCount += 1 }
+                        else { otherKinds += 1 }
+                    }
+                }
+            }
+        }
+        let projectID = discoverProbeProjectId()
+        let probeDirPrefix = projectID.map { (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects/\($0)") + "/" }
+        let inProbeProject = probeDirPrefix.map { url.path.hasPrefix($0) } ?? false
+
+        // Legacy safety: allow tiny sessions from the Probe WD inside the probe project
+        // that have only user/assistant events (no tools/others) and total <= 5 lines seen.
+        let totalSeen = userCount + assistantCount + otherKinds
+        let safeLegacy = inProbeProject && sawProbeWD && otherKinds == 0 && totalSeen > 0 && totalSeen <= 5
+
+        let safe = (firstUserText?.hasPrefix(ClaudeProbeConfig.markerPrefix) ?? false) || safeLegacy
+        let isProbe = sawProbeWD || safe || inProbeProject
+        let mtime = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        return ProbeFileMeta(url: url, isProbe: isProbe, safe: safe, mtime: mtime)
+    }
+
+    private static func listProbeSessionFiles(in dir: URL) -> [URL] {
+        guard let e = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return [] }
+        var urls: [URL] = []
+        for case let url as URL in e { if ["jsonl","ndjson"].contains(url.pathExtension.lowercased()) { urls.append(url) } }
+        return urls
+    }
+
+    private static func fileMTime(_ url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
+    private static func minDate(_ a: Date?, _ b: Date?) -> Date? {
+        switch (a,b) { case (nil, nil): return nil; case (let x?, nil): return x; case (nil, let y?): return y; case (let x?, let y?): return min(x,y) }
+    }
+
+    private static func countProbeSessionFiles(in dir: URL) -> Int {
+        guard let e = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return 0 }
+        var n = 0
+        for case let url as URL in e { if ["jsonl", "ndjson"].contains(url.pathExtension.lowercased()) { n += 1 } }
+        return n
     }
 
     private static func isUserEvent(_ obj: [String: Any]) -> Bool {

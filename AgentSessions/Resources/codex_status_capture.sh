@@ -39,6 +39,10 @@ else
 fi
 TMUX_CMD="${TMUX_BIN:-tmux}"
 
+# Ensure tmux socket lives in a writable, isolated directory to avoid permission issues
+# Use a short, globally-writable socket base to avoid UNIX socket path limits
+if [[ -z "${TMUX_TMPDIR:-}" ]]; then export TMUX_TMPDIR="/tmp"; fi
+
 # codex CLI check
 CODEX_CMD="${CODEX_BIN:-codex}"
 if [[ -n "${CODEX_BIN:-}" ]]; then
@@ -53,10 +57,22 @@ if [[ -n "$MODEL" ]]; then
 else
   CMD="cd '$WORKDIR' && env TERM=xterm-256color '$CODEX_CMD'"
 fi
+set +e
 "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" "$CMD"
+rc=$?
+if [[ $rc -ne 0 ]]; then
+  # Retry once after a short delay in case tmux server was still initializing
+  sleep 0.3
+  "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" "$CMD"
+  rc=$?
+fi
+set -e
+if [[ $rc -ne 0 ]]; then
+  echo "$(error_json tmux_start_failed "Failed to start tmux session (rc=$rc). TMUX_TMPDIR=$TMUX_TMPDIR")"; exit 1
+fi
 "$TMUX_CMD" -L "$LABEL" set-option -t "$SESSION" history-limit 5000 2>/dev/null || true
 
-"$TMUX_CMD" -L "$LABEL" resize-pane -t "$SESSION:0.0" -x 132 -y 48
+"$TMUX_CMD" -L "$LABEL" resize-pane -t "$SESSION:0.0" -x 132 -y 48 2>/dev/null || true
 
 sleep 0.8
 

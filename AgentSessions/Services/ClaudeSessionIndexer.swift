@@ -124,6 +124,17 @@ final class ClaudeSessionIndexer: ObservableObject {
                 self.recomputeNow()
             }
             .store(in: &cancellables)
+
+        // Refresh when Claude probe cleanup succeeds so removed probe sessions disappear immediately
+        NotificationCenter.default.publisher(for: ClaudeProbeProject.didRunCleanupNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                guard let self = self else { return }
+                if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
+                    self.refresh()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     var canAccessRootDirectory: Bool {
@@ -159,21 +170,16 @@ final class ClaudeSessionIndexer: ObservableObject {
                 sema.signal()
             }
             sema.wait()
-            if let sessions = indexed {
-                DispatchQueue.main.async {
-                    self.allSessions = sessions
-                    self.isIndexing = false
-                    self.filesProcessed = sessions.count
-                    self.totalFiles = sessions.count
-                    self.progressText = "Loaded \(sessions.count) from index"
-                    #if DEBUG
-                    print("[Launch] Hydrated Claude sessions from DB: count=\(sessions.count)")
-                    #endif
-                }
-                return
-            }
+            let fm = FileManager.default
+            let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
+            let existingSessions = (indexed ?? []).filter(exists)
+            let existingPaths = Set(existingSessions.map { $0.filePath })
             #if DEBUG
-            print("[Launch] DB hydration returned nil for Claude – falling back to filesystem scan")
+            if !existingSessions.isEmpty {
+                print("[Launch] Hydrated \(existingSessions.count) Claude sessions from DB (after pruning non-existent), now scanning for new files…")
+            } else {
+                print("[Launch] DB hydration returned nil for Claude – scanning all files")
+            }
             #endif
             let files = self.discovery.discoverSessionFiles()
 
@@ -184,18 +190,13 @@ final class ClaudeSessionIndexer: ObservableObject {
                 self.hasEmptyDirectory = files.isEmpty
             }
 
-            var sessions: [Session] = []
-            sessions.reserveCapacity(files.count)
+            var newSessions: [Session] = []
+            newSessions.reserveCapacity(files.count)
 
             for (i, url) in files.enumerated() {
+                if existingPaths.contains(url.path) { continue }
                 if let session = ClaudeSessionParser.parseFile(at: url) {
-                    // Extra guard: hide Agent Sessions' Claude probe sessions when not showing system probes
-                    let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
-                    if hideProbes {
-                        if !ClaudeProbeConfig.isProbeSession(session) { sessions.append(session) }
-                    } else {
-                        sessions.append(session)
-                    }
+                    newSessions.append(session)
                 }
 
                 if FeatureFlags.throttleIndexingUIUpdates {
@@ -213,13 +214,16 @@ final class ClaudeSessionIndexer: ObservableObject {
                 }
             }
 
-            // Sort by modified time
-            let sortedSessions = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
+            // Merge existing + new, prune non-existent again, and apply probe visibility filter
+            let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
+            let merged = (existingSessions + newSessions).filter(exists)
+            let filtered = merged.filter { hideProbes ? !ClaudeProbeConfig.isProbeSession($0) : true }
+            let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
 
             DispatchQueue.main.async {
                 self.allSessions = sortedSessions
                 self.isIndexing = false
-                print("✅ CLAUDE INDEXING DONE: total=\(sessions.count)")
+                print("✅ CLAUDE INDEXING DONE: total=\(sortedSessions.count) (existing=\(existingSessions.count), new=\(newSessions.count))")
 
                 // Start background transcript indexing for accurate search
                 self.isProcessingTranscripts = true

@@ -31,7 +31,9 @@ if [[ -z "${CODEX_CMD}" ]]; then
   exit 14
 fi
 
-WORKDIR="$(mktemp -d)"
+# Use the same dedicated working directory as the app
+WORKDIR="${WORKDIR:-$HOME/Library/Application Support/AgentSessions/AgentSessions-codex-usage}"
+mkdir -p "$WORKDIR"
 
 # Wait for Codex prompt to appear
 wait_for_prompt() {
