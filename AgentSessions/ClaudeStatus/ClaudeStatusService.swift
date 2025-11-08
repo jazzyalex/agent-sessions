@@ -78,7 +78,7 @@ actor ClaudeStatusService {
     private func refreshTick() async {
         guard tmuxAvailable && claudeAvailable else { return }
         // Central gate + daily budget: suppress when invisible/inactive or budget exhausted
-        if await !UsageProbeGate.shared.canProbeAutomatic() {
+        if await !UsageProbeGate.shared.canProbeAutomatic(for: .claude) {
             #if DEBUG
             print("ClaudeStatusService: probe suppressed (gate or budget)")
             #endif
@@ -112,7 +112,7 @@ actor ClaudeStatusService {
             return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: ClaudeProbeConfig.probeWorkingDirectory(), claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Claude CLI not available")
         }
         // Respect gating + budget for manual runs too
-        if await !UsageProbeGate.shared.canProbeAutomatic() {
+        if await !UsageProbeGate.shared.canProbeAutomatic(for: .claude) {
             return ClaudeProbeDiagnostics(success: false, exitCode: 200, scriptPath: "(suppressed)", workdir: ClaudeProbeConfig.probeWorkingDirectory(), claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Suppressed by gate/budget")
         }
         await UsageProbeGate.shared.recordProbeAttempt()
