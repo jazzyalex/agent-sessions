@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
  - Usage Probes: Codex and Claude cleanup actions once again emit status notifications for disabled/unsafe exits and successfully delete Codex probe sessions that log their working directory inside nested payload data.
  - Usage (Codex): Stale indicator now reflects the age of the last rate‑limit capture only. Recent UI refreshes or token‑only events no longer mask outdated reset times; the strip/menu will show "Stale data" until fresh `rate_limits` arrive.
  - Claude Usage: Added a central probe gate that suppresses `/usage` probes when the menu bar limits are off and the main window isn’t visible, or when the screen is inactive (sleep/screensaver/locked).
+ - Probe Budget: Hard cap of 24 usage probes per rolling 24h window for automatic probing; attempts beyond the budget are suppressed. Budget persists across app restarts.
 
 ## [2.5.4] - 2025-11-03
 
