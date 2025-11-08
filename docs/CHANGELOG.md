@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
  - Preferences → Usage Tracking: Simplified and HIG‑aligned. Added per‑agent master toggles (Enable Codex tracking, Enable Claude tracking) independent of strip/menu bar visibility. Moved all probe controls into the new Usage Probes pane. Reduced vertical scrolling and clarified refresh interval and strip options.
- - Usage Tracking: Separate refresh intervals per agent. Codex offers 1/5/15 minutes (default 5m). Claude offers 10/30/40/60 minutes (default 40m) with a note that each probe consumes one message.
+ - Usage Tracking: Separate refresh intervals per agent. Codex offers 1/5/15 minutes (default 5m). Claude offers 10/30/60 minutes (default 30m) with a note that each probe consumes one message.
 
 ### Fixed
 - Usage Probes: Codex and Claude cleanup actions once again emit status notifications for disabled/unsafe exits and successfully delete Codex probe sessions that log their working directory inside nested payload data.

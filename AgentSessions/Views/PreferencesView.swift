@@ -51,7 +51,7 @@ struct PreferencesView: View {
     @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = true
     // Per-agent polling intervals
     @AppStorage("CodexPollingInterval") private var codexPollingInterval: Int = 300   // 1/5/15 min options, default 5m
-    @AppStorage("ClaudePollingInterval") private var claudePollingInterval: Int = 2400 // 10/30/40/60 min options, default 40m
+    @AppStorage("ClaudePollingInterval") private var claudePollingInterval: Int = 1800 // 10/30/60 min options, default 30m
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
@@ -442,7 +442,6 @@ struct PreferencesView: View {
                     Picker("", selection: $claudePollingInterval) {
                         Text("10 minutes").tag(600)
                         Text("30 minutes").tag(1800)
-                        Text("40 minutes").tag(2400)
                         Text("60 minutes").tag(3600)
                     }
                     .pickerStyle(.segmented)
