@@ -97,6 +97,31 @@ final class ClaudeUsageModel: ObservableObject {
         service = nil
     }
 
+    // Hard-probe entry: run a one-off /usage probe and return diagnostics
+    func hardProbeNowDiagnostics(completion: @escaping (ClaudeProbeDiagnostics) -> Void) {
+        Task { [weak self] in
+            guard let self else { return }
+            if let svc = self.service {
+                let diag = await svc.forceProbeNow()
+                await MainActor.run { completion(diag) }
+                return
+            }
+            let handler: @Sendable (ClaudeUsageSnapshot) -> Void = { snapshot in
+                Task { @MainActor in self.apply(snapshot) }
+            }
+            let availability: @Sendable (ClaudeServiceAvailability) -> Void = { availability in
+                Task { @MainActor in
+                    self.cliUnavailable = availability.cliUnavailable
+                    self.tmuxUnavailable = availability.tmuxUnavailable
+                    self.loginRequired = availability.loginRequired
+                }
+            }
+            let svc = ClaudeStatusService(updateHandler: handler, availabilityHandler: availability)
+            let diag = await svc.forceProbeNow()
+            await MainActor.run { completion(diag) }
+        }
+    }
+
     private func apply(_ s: ClaudeUsageSnapshot) {
         sessionPercent = clampPercent(s.sessionPercent)
         weekAllModelsPercent = clampPercent(s.weekAllModelsPercent)

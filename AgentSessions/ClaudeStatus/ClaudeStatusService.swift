@@ -103,6 +103,66 @@ actor ClaudeStatusService {
         }
     }
 
+    // Hard-probe entry point: force a single /usage probe and return diagnostics.
+    func forceProbeNow() async -> ClaudeProbeDiagnostics {
+        guard tmuxAvailable || checkTmuxAvailable() else {
+            return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: ClaudeProbeConfig.probeWorkingDirectory(), claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "tmux not found")
+        }
+        guard claudeAvailable || checkClaudeAvailable() else {
+            return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: ClaudeProbeConfig.probeWorkingDirectory(), claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Claude CLI not available")
+        }
+        // Respect gating + budget for manual runs too
+        if await !UsageProbeGate.shared.canProbeAutomatic() {
+            return ClaudeProbeDiagnostics(success: false, exitCode: 200, scriptPath: "(suppressed)", workdir: ClaudeProbeConfig.probeWorkingDirectory(), claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Suppressed by gate/budget")
+        }
+        await UsageProbeGate.shared.recordProbeAttempt()
+
+        guard let scriptURL = prepareScript() else {
+            return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(missing)", workdir: ClaudeProbeConfig.probeWorkingDirectory(), claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Script not found in bundle")
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [scriptURL.path]
+
+        var env = ProcessInfo.processInfo.environment
+        let workDir = ClaudeProbeConfig.probeWorkingDirectory()
+        try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
+        env["WORKDIR"] = workDir
+        env["MODEL"] = "sonnet"
+        env["TIMEOUT_SECS"] = "10"
+        env["SLEEP_BOOT"] = "0.4"
+        env["SLEEP_AFTER_USAGE"] = "2.0"
+
+        let claudeEnv = ClaudeCLIEnvironment()
+        let claudeBin = claudeEnv.resolveBinary(customPath: nil)?.path
+        if let claudeBin { env["CLAUDE_BIN"] = claudeBin }
+        let tmuxBin = resolveTmuxPath()
+        if let tmuxBin { env["TMUX_BIN"] = tmuxBin }
+
+        process.environment = env
+        let out = Pipe(); let err = Pipe()
+        process.standardOutput = out; process.standardError = err
+        do {
+            try process.run()
+        } catch {
+            return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: "", stderr: error.localizedDescription)
+        }
+        process.waitUntilExit()
+        let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        if process.terminationStatus == 0 {
+            if let parsed = parseUsageJSON(stdout) {
+                snapshot = parsed
+                updateHandler(snapshot)
+                _ = ClaudeProbeProject.cleanupNowIfAuto()
+            }
+            return ClaudeProbeDiagnostics(success: true, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
+        } else {
+            return ClaudeProbeDiagnostics(success: false, exitCode: process.terminationStatus, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
+        }
+    }
+
     private func executeScript() async throws -> String {
         guard let scriptURL = prepareScript() else {
             throw ClaudeServiceError.scriptNotFound
@@ -342,8 +402,8 @@ actor ClaudeStatusService {
     }
 
     private func nextInterval() -> UInt64 {
-        // Read Claude-specific polling interval (defaults to 1800s = 30 min)
-        let userInterval = UInt64(UserDefaults.standard.object(forKey: "ClaudePollingInterval") as? Int ?? 1800)
+        // Read Claude-specific polling interval (defaults to 3600s = 60 min)
+        let userInterval = UInt64(UserDefaults.standard.object(forKey: "ClaudePollingInterval") as? Int ?? 3600)
 
         // Energy optimization: Stop polling entirely when nothing is visible
         // (menu bar and strips both hidden)
@@ -426,6 +486,18 @@ actor ClaudeStatusService {
         }
         return true
     }
+}
+
+struct ClaudeProbeDiagnostics {
+    let success: Bool
+    let exitCode: Int32
+    let scriptPath: String
+    let workdir: String
+    let claudeBin: String?
+    let tmuxBin: String?
+    let timeoutSecs: String?
+    let stdout: String
+    let stderr: String
 }
 
 enum ClaudeServiceError: Error {
