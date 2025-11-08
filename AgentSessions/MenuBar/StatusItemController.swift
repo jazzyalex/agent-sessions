@@ -123,7 +123,14 @@ final class StatusItemController: NSObject {
 
         menu.addItem(NSMenuItem.separator())
 
-        menu.addItem(makeActionItem(title: "Refresh Limits", action: #selector(refreshLimits)))
+        let refreshTitle: String = {
+            if source == .claude || source == .both {
+                return "Refresh Limits\n  (consumes Claude's tokens)"
+            } else {
+                return "Refresh Limits"
+            }
+        }()
+        menu.addItem(makeActionItem(title: refreshTitle, action: #selector(refreshLimits)))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(makeActionItem(title: "Open Preferences…", action: #selector(openPreferences)))
         menu.addItem(makeActionItem(title: "Hide Menu Bar Usage", action: #selector(hideMenuBar)))
