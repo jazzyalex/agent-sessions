@@ -3,6 +3,7 @@ import Foundation
 /// Safety-checked deletion of Codex probe sessions from ~/.codex/sessions.
 enum CodexProbeCleanup {
     static let didRunCleanupNotification = Notification.Name("CodexProbeCleanupDidRun")
+    private static let probeDirectoryKeys: Set<String> = ["cwd", "project", "working_directory", "workingdirectory", "probe_wd"]
     private enum Keys { static let cleanupMode = "CodexProbeCleanupMode" }
     enum CleanupMode: String { case none, auto }
     enum ResultStatus { case success(Int), disabled(String), notFound(String), unsafe(String), ioError(String) }
@@ -15,34 +16,30 @@ enum CodexProbeCleanup {
 
     @discardableResult
     static func cleanupNowIfAuto() -> ResultStatus {
-        let res: ResultStatus
-        if cleanupMode() == .auto {
-            res = cleanupNowUserInitiated()
-        } else {
-            res = .disabled("Cleanup mode is not auto")
+        if !FeatureFlags.allowCodexProbeDeletion {
+            let status = ResultStatus.disabled("Policy: deletion disabled")
+            post(status, mode: "auto")
+            return status
         }
-        post(res, mode: "auto")
-        return res
+        guard cleanupMode() == .auto else {
+            let status = ResultStatus.disabled("Cleanup mode is not auto")
+            post(status, mode: "auto")
+            return status
+        }
+        let result = performCleanupCore()
+        post(result.status, mode: "auto", extra: result.extra)
+        return result.status
     }
 
     static func cleanupNowUserInitiated() -> ResultStatus {
-        let root = sessionsRoot()
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
-            let r: ResultStatus = .notFound("Sessions directory not found"); post(r, mode: "manual"); return r
+        if !FeatureFlags.allowCodexProbeDeletion {
+            let status = ResultStatus.disabled("Policy: deletion disabled")
+            post(status, mode: "manual")
+            return status
         }
-        // Scan recent days to keep things fast
-        let candidates = findCandidateFiles(root: root, daysBack: 7, limit: 64)
-        var deletions: [URL] = []
-        for url in candidates {
-            if isProbeFile(url: url) { deletions.append(url) }
-        }
-        guard !deletions.isEmpty else { let r: ResultStatus = .notFound("No probe sessions found"); post(r, mode: "manual"); return r }
-        var deleted = 0
-        for url in deletions {
-            do { try FileManager.default.removeItem(at: url); deleted += 1 } catch { let r: ResultStatus = .ioError(error.localizedDescription); post(r, mode: "manual"); return r }
-        }
-        let r: ResultStatus = .success(deleted); post(r, mode: "manual"); return r
+        let result = performCleanupCore()
+        post(result.status, mode: "manual", extra: result.extra)
+        return result.status
     }
 
     // MARK: - Helpers
@@ -87,28 +84,16 @@ enum CodexProbeCleanup {
         let data = try? fh.read(upToCount: 256 * 1024) ?? Data()
         guard let data, !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return false }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map { String($0) }
-        var sawMarker = false
-        var sawProbeWD = false
         let probeWD = CodexProbeConfig.probeWorkingDirectory()
+        let normalizedProbeWD = normalize(probeWD)
         for raw in lines.prefix(400) {
-            guard let jsonData = raw.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { continue }
-            // cwd/project heuristic
-            if !sawProbeWD {
-                if let cwd = obj["cwd"] as? String, normalize(cwd) == normalize(probeWD) { sawProbeWD = true }
-                else if let project = obj["project"] as? String, normalize(project) == normalize(probeWD) { sawProbeWD = true }
+            guard let jsonData = raw.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { continue }
+            if containsProbeWorkingDirectory(in: obj, normalizedProbeWD: normalizedProbeWD) {
+                return true
             }
-            // first user message marker
-            if !sawMarker, isUserEvent(obj) {
-                if let message = extractText(obj), message.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(CodexProbeConfig.markerPrefix) {
-                    sawMarker = true
-                } else {
-                    // First user without marker → not a probe
-                    return false
-                }
-            }
-            if sawMarker && sawProbeWD { return true }
         }
-        return sawMarker || sawProbeWD
+        return false
     }
 
     private static func isUserEvent(_ obj: [String: Any]) -> Bool {
@@ -134,7 +119,41 @@ enum CodexProbeCleanup {
         (path as NSString).expandingTildeInPath.replacingOccurrences(of: "//", with: "/")
     }
 
+    private static func containsProbeWorkingDirectory(in object: [String: Any], normalizedProbeWD: String, depth: Int = 0) -> Bool {
+        if depth > 4 { return false }
+        for (key, value) in object {
+            let loweredKey = key.lowercased()
+            if let candidate = value as? String,
+               probeDirectoryKeys.contains(loweredKey),
+               normalize(candidate) == normalizedProbeWD {
+                return true
+            }
+            if let nested = value as? [String: Any], containsProbeWorkingDirectory(in: nested, normalizedProbeWD: normalizedProbeWD, depth: depth + 1) {
+                return true
+            }
+            if let nestedArray = value as? [[String: Any]] {
+                for element in nestedArray where containsProbeWorkingDirectory(in: element, normalizedProbeWD: normalizedProbeWD, depth: depth + 1) {
+                    return true
+                }
+            } else if let heteroArray = value as? [Any] {
+                for element in heteroArray {
+                    guard let nested = element as? [String: Any] else { continue }
+                    if containsProbeWorkingDirectory(in: nested, normalizedProbeWD: normalizedProbeWD, depth: depth + 1) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    
+
     private static func post(_ status: ResultStatus, mode: String) {
+        post(status, mode: mode, extra: [:])
+    }
+
+    private static func post(_ status: ResultStatus, mode: String, extra: [String: Any]) {
         var info: [String: Any] = ["mode": mode]
         switch status {
         case .success(let n): info["status"] = "success"; info["deleted"] = n
@@ -143,6 +162,8 @@ enum CodexProbeCleanup {
         case .unsafe(let s): info["status"] = "unsafe"; info["message"] = s
         case .ioError(let s): info["status"] = "io_error"; info["message"] = s
         }
+        // Merge in any extras (e.g., skipped, oldest_ts)
+        for (k, v) in extra { info[k] = v }
         if Thread.isMainThread {
             NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
         } else {
@@ -150,5 +171,39 @@ enum CodexProbeCleanup {
                 NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
             }
         }
+    }
+}
+
+// MARK: - Shared cleanup core used by auto and manual
+private extension CodexProbeCleanup {
+    struct CleanupAggregate { let status: ResultStatus; let extra: [String: Any] }
+
+    static func performCleanupCore() -> CleanupAggregate {
+        let root = sessionsRoot()
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
+            return CleanupAggregate(status: .notFound("Sessions directory not found"), extra: [:])
+        }
+        let candidates = findCandidateFiles(root: root, daysBack: 30, limit: 512)
+        var toDelete: [URL] = []
+        var oldest: Date? = nil
+        for url in candidates where isProbeFile(url: url) {
+            toDelete.append(url)
+            let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+            if let mt = rv?.contentModificationDate {
+                if let o = oldest { oldest = min(o, mt) } else { oldest = mt }
+            }
+        }
+        guard !toDelete.isEmpty else {
+            return CleanupAggregate(status: .notFound("No Codex probe sessions found"), extra: [:])
+        }
+        var deleted = 0
+        for url in toDelete {
+            do { try FileManager.default.removeItem(at: url); deleted += 1 }
+            catch { return CleanupAggregate(status: .ioError(error.localizedDescription), extra: ["deleted": deleted]) }
+        }
+        var extra: [String: Any] = ["deleted": deleted]
+        if let ts = oldest?.timeIntervalSince1970 { extra["oldest_ts"] = ts }
+        return CleanupAggregate(status: .success(deleted), extra: extra)
     }
 }

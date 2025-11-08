@@ -1,0 +1,16 @@
+# Legacy Codex tmp probe sessions (file ::: project/cwd)
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T14-20-13-019a50f4-d49c-7b91-85ed-a63ccd1b5d78.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.CVfW1PdH7G
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T12-32-20-019a5092-0fa5-7562-b55f-151f320aff8a.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.EfbIgFFMoJ
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T12-40-54-019a5099-e6a2-7c42-a122-ba7c898e6275.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.Zgtyl3o7zY
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T12-09-25-019a507d-110e-76d0-9ab2-6aeabd49c4c0.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.Dx3CE650bk
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T12-17-36-019a5084-909f-77e0-8900-e60e76429f08.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.6Ec8yKf66I
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T14-22-23-019a50f6-d0ba-7a02-9128-d3f650267acb.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.gPkTsl9y7O
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T13-08-52-019a50b3-7efd-7a32-ac8a-a3350a1aadb4.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.63uRcKfa3H
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T13-07-55-019a50b2-a333-7012-97bd-d6805f8bd9cd.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.27gcu3nDFq
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T13-06-39-019a50b1-78a1-7960-bfb9-33277b153817.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.pDeYHKR35u
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T12-14-09-019a5081-681d-7a11-92ab-dac9e75d5d33.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.U1WXK54ENx
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T13-04-17-019a50af-4dc9-7801-b56b-8ad9ad4c064d.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.jbFWpbssoo
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T13-18-34-019a50bc-6168-74a0-943c-0b681301a6ba.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.jKpGoYE9Jq
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T12-57-37-019a50a9-35a0-7ad1-911b-eff4e6a8dde8.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.zJQed6ROD6
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T13-16-49-019a50ba-c926-7373-a8ef-73588422094d.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.sllY727I2w
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T12-19-29-019a5086-4b9f-7082-b678-60ecf00bf561.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.Wor72WxcZM

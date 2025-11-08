@@ -20,4 +20,12 @@ enum FeatureFlags {
     // Avoid pushing parsed session updates back to indexers during an active
     // search to reduce MainActor churn and improve responsiveness.
     static let disableSessionUpdatesDuringSearch = true
+
+    // Gate Codex tmux-based /status probes (secondary source).
+    // Re-enabled: probes run only when stale (or via explicit hard-probe button).
+    static let disableCodexProbes = false
+
+    // Allow deleting only AS-generated Codex probe sessions (strict project match).
+    // General Codex session deletion remains forbidden by the cleanup gate.
+    static let allowCodexProbeDeletion = true
 }

@@ -215,6 +215,20 @@ final class UnifiedSessionIndexer: ObservableObject {
                 if enabled { self.maybeAutoRefreshGemini() }
             }
             .store(in: &cancellables)
+
+        // When probe cleanups succeed, refresh underlying providers and analytics rollups
+        NotificationCenter.default.addObserver(forName: CodexProbeCleanup.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
+            guard let self = self else { return }
+            if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
+                self.refresh()
+            }
+        }
+        NotificationCenter.default.addObserver(forName: ClaudeProbeProject.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
+            guard let self = self else { return }
+            if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
+                self.refresh()
+            }
+        }
     }
 
     func refresh() {

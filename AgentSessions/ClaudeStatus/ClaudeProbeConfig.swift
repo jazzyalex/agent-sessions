@@ -17,12 +17,23 @@ enum ClaudeProbeConfig {
     }
 
     /// Returns true if the given session appears to be an Agent Sessions probe session.
-    /// Heuristics:
+    /// Heuristics (ordered, conservative to avoid false positives):
     /// - Source must be `.claude`.
-    /// - If lightweight `cwd` matches the Probe WD (normalized), treat as probe.
-    /// - Otherwise, when events are present, the first user message must start with the marker prefix.
+    /// - Path-based: if the file lives inside the discovered probe project under ~/.claude/projects,
+    ///   it is a probe session (fast and definitive when project discovery works).
+    /// - Fast path: if lightweight `cwd` matches the Probe WD, treat as probe.
+    /// - Marker path: when events are present, the first user message must start with the marker prefix.
     static func isProbeSession(_ session: Session) -> Bool {
         guard session.source == .claude else { return false }
+
+        // 1) Path-based classification via discovered probe project id
+        if let projectID = ClaudeProbeProject.discoverProbeProjectId(), !projectID.isEmpty {
+            let root = (NSHomeDirectory() as NSString)
+                .appendingPathComponent(".claude/projects/\(projectID)")
+            if session.filePath.hasPrefix(root + "/") || session.filePath == root {
+                return true
+            }
+        }
 
         // Fast path: cwd match for lightweight sessions
         if let cwd = session.lightweightCwd, !cwd.isEmpty {

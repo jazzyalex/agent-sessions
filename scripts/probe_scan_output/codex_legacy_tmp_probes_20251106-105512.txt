@@ -1,0 +1,3 @@
+# Legacy Codex tmp probe sessions (file ::: project/cwd)
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T13-18-34-019a50bc-6168-74a0-943c-0b681301a6ba.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.jKpGoYE9Jq
+/Users/alexm/.codex/sessions/2025/11/04/rollout-2025-11-04T13-16-49-019a50ba-c926-7373-a8ef-73588422094d.jsonl:::/private/var/folders/k7/pnh4vv9j3gzcv_bsl5n6w2k40000gn/T/tmp.sllY727I2w

@@ -31,7 +31,8 @@ if [[ -z "${CODEX_CMD}" ]]; then
   exit 14
 fi
 
-WORKDIR="$(mktemp -d)"
+WORKDIR="${WORKDIR:-$HOME/Library/Application Support/AgentSessions/AgentSessions-codex-usage}"
+mkdir -p "$WORKDIR"
 
 "$TMUX_CMD" -L "$LABEL" new -d -s s "cd '$WORKDIR'; env TERM=xterm-256color '$CODEX_CMD' -m '$MODEL'"
 "$TMUX_CMD" -L "$LABEL" set-option -t s history-limit 5000 >/dev/null 2>&1 || true

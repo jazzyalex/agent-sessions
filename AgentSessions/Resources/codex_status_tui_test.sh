@@ -28,7 +28,8 @@ if [[ -z "${CODEX_CMD}" ]]; then
 fi
 
 # Use a temp working directory to avoid approval prompts from repo settings
-WORKDIR="$(mktemp -d)"
+WORKDIR="${WORKDIR:-$HOME/Library/Application Support/AgentSessions/AgentSessions-codex-usage}"
+mkdir -p "$WORKDIR"
 
 # Start Codex in a detached tmux session
 "$TMUX_CMD" -L "$LABEL" new-session -d -s s "cd '$WORKDIR'; env TERM=xterm-256color '$CODEX_CMD' -m $MODEL"
