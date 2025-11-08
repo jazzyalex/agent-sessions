@@ -24,6 +24,18 @@ struct CodexUsageSnapshot: Equatable {
     var lastTotalTokens: Int? = nil
 }
 
+struct CodexProbeDiagnostics {
+    let success: Bool
+    let exitCode: Int32
+    let scriptPath: String
+    let workdir: String
+    let codexBin: String?
+    let tmuxBin: String?
+    let timeoutSecs: String?
+    let stdout: String
+    let stderr: String
+}
+
 @MainActor
 final class CodexUsageModel: ObservableObject {
     static let shared = CodexUsageModel()
@@ -98,6 +110,49 @@ final class CodexUsageModel: ObservableObject {
             }
             let svc = CodexStatusService(updateHandler: handler, availabilityHandler: availability)
             await svc.refreshNow()
+        }
+    }
+
+    // Hard-probe from Preferences pane: forces a /status tmux probe, shows result via callback
+    func hardProbeNow(completion: @escaping (Bool) -> Void) {
+        Task { [weak self] in
+            guard let self = self else { return }
+            if let svc = self.service {
+                let diag = await svc.forceProbeNow()
+                await MainActor.run { completion(diag.success) }
+                return
+            }
+            // Create a short-lived service for the probe
+            let handler: @Sendable (CodexUsageSnapshot) -> Void = { snapshot in
+                Task { @MainActor in self.apply(snapshot) }
+            }
+            let availability: @Sendable (Bool) -> Void = { unavailable in
+                Task { @MainActor in self.cliUnavailable = unavailable }
+            }
+            let svc = CodexStatusService(updateHandler: handler, availabilityHandler: availability)
+            let diag = await svc.forceProbeNow()
+            await MainActor.run { completion(diag.success) }
+        }
+    }
+
+    // Hard-probe variant that returns full diagnostics for UI display
+    func hardProbeNowDiagnostics(completion: @escaping (CodexProbeDiagnostics) -> Void) {
+        Task { [weak self] in
+            guard let self = self else { return }
+            if let svc = self.service {
+                let diag = await svc.forceProbeNow()
+                await MainActor.run { completion(diag) }
+                return
+            }
+            let handler: @Sendable (CodexUsageSnapshot) -> Void = { snapshot in
+                Task { @MainActor in self.apply(snapshot) }
+            }
+            let availability: @Sendable (Bool) -> Void = { unavailable in
+                Task { @MainActor in self.cliUnavailable = unavailable }
+            }
+            let svc = CodexStatusService(updateHandler: handler, availabilityHandler: availability)
+            let diag = await svc.forceProbeNow()
+            await MainActor.run { completion(diag) }
         }
     }
 
@@ -227,6 +282,7 @@ actor CodexStatusService {
     }
 
     func refreshNow() {
+        // Manual refresh from strip/menu uses the same stale-only probe rule.
         Task { await self.refreshTick(userInitiated: true) }
     }
 
@@ -412,16 +468,12 @@ actor CodexStatusService {
     }
 
     private func refreshTick(userInitiated: Bool = false) async {
-        // Log-probe path: scan latest JSONL for token_count rate_limits
-        let root = sessionsRoot()
-        var isDir: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir)
-        guard exists && isDir.boolValue else {
-            availabilityHandler(true)
-            return
-        }
+        // Log-probe path: scan latest JSONL for token_count/rate_limits across known roots
+        let roots = sessionsRoots()
+        guard !roots.isEmpty else { availabilityHandler(true); return }
         availabilityHandler(false)
-        if let summary = probeLatestRateLimits(root: root) {
+
+        if let summary = probeLatestRateLimits(roots: roots) {
             var s = snapshot
             if let p = summary.fiveHour.usedPercent { s.fiveHourPercent = clampPercent(p) }
             if let p = summary.weekly.usedPercent { s.weekPercent = clampPercent(p) }
@@ -430,24 +482,32 @@ actor CodexStatusService {
             lastFiveHourResetDate = summary.fiveHour.resetAt
             s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
             s.eventTimestamp = summary.eventTimestamp
+#if DEBUG
+            if let f = summary.sourceFile { print("[CodexUsage] Parsed rate_limits from: \(f.path)") }
+#endif
             snapshot = s
             updateHandler(snapshot)
         }
 
-        // Optional: run a one-shot tmux /status probe when stale or on manual refresh
-        await maybeProbeStatusViaTMUX(userInitiated: userInitiated)
+        // Optional: run a one-shot tmux /status probe only when stale (manual or auto)
+        if !FeatureFlags.disableCodexProbes {
+            await maybeProbeStatusViaTMUX(userInitiated: userInitiated)
+        }
     }
 
     // MARK: - Optional tmux /status probe
     private func maybeProbeStatusViaTMUX(userInitiated: Bool) async {
+        // Probes are strictly secondary and must only run when usage looks stale.
         let now = Date()
-        let allowAuto = UserDefaults.standard.bool(forKey: "CodexAllowStatusProbe")
+        let stale5h = isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
+        let staleWeek = isResetInfoStale(kind: "week", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
+        guard stale5h || staleWeek else { return }
+
+        // Additional gates for automatic/background path only
         if !userInitiated {
+            let allowAuto = UserDefaults.standard.bool(forKey: "CodexAllowStatusProbe")
             guard allowAuto else { return }
             guard visible else { return }
-            let stale5h = isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
-            let staleWeek = isResetInfoStale(kind: "week", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
-            guard stale5h || staleWeek else { return }
             if let last = lastStatusProbe, now.timeIntervalSince(last) < 600 { return }
         }
 
@@ -464,31 +524,78 @@ actor CodexStatusService {
         _ = CodexProbeCleanup.cleanupNowIfAuto()
     }
 
+    // Hard-probe entry point: forces a tmux /status probe regardless of staleness or prefs.
+    // Returns diagnostics; merges snapshot on success.
+    func forceProbeNow() async -> CodexProbeDiagnostics {
+        guard !FeatureFlags.disableCodexProbes else {
+            return CodexProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Probes disabled by feature flag")
+        }
+        let (snap, diag) = await runCodexStatusViaTMUXAndCollect()
+        if let tmuxSnap = snap {
+            var merged = snapshot
+            if tmuxSnap.fiveHourPercent > 0 { merged.fiveHourPercent = clampPercent(tmuxSnap.fiveHourPercent) }
+            if !tmuxSnap.fiveHourResetText.isEmpty { merged.fiveHourResetText = tmuxSnap.fiveHourResetText }
+            if tmuxSnap.weekPercent > 0 { merged.weekPercent = clampPercent(tmuxSnap.weekPercent) }
+            if !tmuxSnap.weekResetText.isEmpty { merged.weekResetText = tmuxSnap.weekResetText }
+            merged.eventTimestamp = Date()
+            snapshot = merged
+            updateHandler(merged)
+            _ = CodexProbeCleanup.cleanupNowIfAuto()
+        }
+        return diag
+    }
+
     private func runCodexStatusViaTMUX() async -> CodexUsageSnapshot? {
-        guard let scriptURL = Bundle.main.url(forResource: "codex_status_capture", withExtension: "sh") else { return nil }
+        let (snap, _) = await runCodexStatusViaTMUXAndCollect()
+        return snap
+    }
+
+    private func runCodexStatusViaTMUXAndCollect() async -> (CodexUsageSnapshot?, CodexProbeDiagnostics) {
+        guard let scriptURL = Bundle.main.url(forResource: "codex_status_capture", withExtension: "sh") else {
+            let d = CodexProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(missing)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Script not found in bundle")
+            return (nil, d)
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [scriptURL.path]
 
         var env = ProcessInfo.processInfo.environment
-        // Provide WORKDIR to funnel probe sessions
         let workDir = CodexProbeConfig.probeWorkingDirectory()
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
         env["WORKDIR"] = workDir
-        // Do not force a model; use user's current Codex defaults to avoid disrupting sessions
-        // Resolve codex binary if possible
-        let envResolver = CodexCLIEnvironment()
-        if let bin = envResolver.resolveBinary(customPath: nil) { env["CODEX_BIN"] = bin.path }
+        env["TIMEOUT_SECS"] = env["TIMEOUT_SECS"] ?? "14"
+        let resolver = CodexCLIEnvironment()
+        let codexBin = resolver.resolveBinary(customPath: nil)?.path
+        if let codexBin { env["CODEX_BIN"] = codexBin }
+        let tmuxBin = resolveTmuxPath()
+        if let tmuxBin { env["TMUX_BIN"] = tmuxBin }
 
+        // Provide a Terminal-like PATH so Node and vendor binaries resolve inside tmux
+        if let terminalPATH = Self.terminalPATH() { env["PATH"] = terminalPATH }
         process.environment = env
         let out = Pipe(); let err = Pipe()
         process.standardOutput = out; process.standardError = err
-        do { try process.run() } catch { return nil }
+        do { try process.run() } catch {
+            let d = CodexProbeDiagnostics(success: false, exitCode: 127, scriptPath: scriptURL.path, workdir: workDir, codexBin: codexBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: "", stderr: error.localizedDescription)
+            print("[CodexProbe] Failed to launch capture script: \(error.localizedDescription)")
+            return (nil, d)
+        }
         process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        guard let json = String(data: data, encoding: .utf8) else { return nil }
-        return parseStatusJSON(json)
+        let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        if process.terminationStatus != 0 {
+            if !stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                print("[CodexProbe] Script non-zero (\(process.terminationStatus)). stdout: \n\(stdout)")
+            }
+            if !stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                print("[CodexProbe] Script stderr: \n\(stderr)")
+            }
+            let d = CodexProbeDiagnostics(success: false, exitCode: process.terminationStatus, scriptPath: scriptURL.path, workdir: workDir, codexBin: codexBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
+            return (nil, d)
+        }
+        let snap = parseStatusJSON(stdout)
+        let d = CodexProbeDiagnostics(success: snap != nil, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, codexBin: codexBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
+        return (snap, d)
     }
 
     private func parseStatusJSON(_ json: String) -> CodexUsageSnapshot? {
@@ -509,8 +616,8 @@ actor CodexStatusService {
     }
 
     private func nextInterval() -> UInt64 {
-        // Read user preference for polling interval (default 120s = 2 min)
-        let userInterval = UInt64(UserDefaults.standard.object(forKey: "UsagePollingInterval") as? Int ?? 300)
+        // Read Codex-specific polling interval (defaults to 300s = 5 min)
+        let userInterval = UInt64(UserDefaults.standard.object(forKey: "CodexPollingInterval") as? Int ?? 300)
 
         // Energy optimization: Stop polling entirely when nothing is visible
         // (menu bar and strips both hidden)
@@ -555,19 +662,38 @@ actor CodexStatusService {
 
     // MARK: - Log probe helpers
 
-    private func sessionsRoot() -> URL {
+    private func sessionsRoots() -> [URL] {
+        var roots: [URL] = []
+        func add(_ path: String) {
+            var isDir: ObjCBool = false
+            let url = URL(fileURLWithPath: path)
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                roots.append(url)
+            }
+        }
         if let override = UserDefaults.standard.string(forKey: "SessionsRootOverride"), !override.isEmpty {
-            return URL(fileURLWithPath: override)
+            add(override)
         }
         if let env = ProcessInfo.processInfo.environment["CODEX_HOME"], !env.isEmpty {
-            return URL(fileURLWithPath: env).appendingPathComponent("sessions")
+            add((env as NSString).appendingPathComponent("sessions"))
         }
-        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/sessions")
+        add((NSHomeDirectory() as NSString).appendingPathComponent(".codex/sessions"))
+        // Dedup by path
+        var seen = Set<String>()
+        roots = roots.filter { seen.insert($0.path).inserted }
+        return roots
     }
 
-    private func probeLatestRateLimits(root: URL) -> RateLimitSummary? {
-        let candidates = findCandidateFiles(root: root, daysBack: 7, limit: 12)
-        for url in candidates {
+    private func probeLatestRateLimits(roots: [URL]) -> RateLimitSummary? {
+        var files: [URL] = []
+        for r in roots { files.append(contentsOf: findCandidateFiles(root: r, daysBack: 10, limit: 80)) }
+        // Global sort by mtime desc across roots
+        files.sort { (a, b) in
+            let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
+            let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
+            return da > db
+        }
+        for url in files {
             if let summary = parseTokenCountTail(url: url) { return summary }
         }
         return RateLimitSummary(
@@ -613,14 +739,15 @@ actor CodexStatusService {
 
     private func parseTokenCountTail(url: URL) -> RateLimitSummary? {
         guard let lines = tailLines(url: url, maxBytes: 512 * 1024) else { return nil }
-        // Walk most-recent → older. Accept both legacy token_count and new turn.completed payloads
+        // Walk most-recent → older. Be permissive about shape; Codex logs can vary.
         for raw in lines.reversed() {
             guard let data = raw.data(using: .utf8) else { continue }
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-            guard (obj["type"] as? String) == "event_msg" else { continue }
-            guard let payload = obj["payload"] as? [String: Any] else { continue }
 
-            // Establish a createdAt for this event early (best-effort)
+            // Prefer nested payload, but fall back to top-level when payload is absent.
+            let payload = (obj["payload"] as? [String: Any]) ?? obj
+
+            // Establish a createdAt for this event (best-effort)
             let createdAt = decodeFlexibleDate(obj["created_at"]) ??
                             decodeFlexibleDate(payload["created_at"]) ??
                             decodeFlexibleDate(obj["timestamp"]) ??
@@ -630,13 +757,10 @@ actor CodexStatusService {
             // Surface usage tokens if present (new or legacy forms)
             extractUsageIfPresent(from: payload, createdAt: createdAt)
 
-            // Prefer any payload that contains rate_limits, regardless of type label
-            if let rate = payload["rate_limits"] as? [String: Any] {
-                // New format: captured_at anchors relative deltas; prefer it over event timestamp
+            // Rate limits may appear at payload.rate_limits or (legacy) at top-level
+            if let rate = (payload["rate_limits"] as? [String: Any]) ?? (obj["rate_limits"] as? [String: Any]) {
                 let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? createdAt
-                // Clamp future timestamps (clock skew protection)
                 if capturedAt > Date() { continue }
-
                 let primary = rate["primary"] as? [String: Any]
                 let secondary = rate["secondary"] as? [String: Any]
                 let five = decodeWindow(primary, created: createdAt, capturedAt: capturedAt)
@@ -646,18 +770,19 @@ actor CodexStatusService {
                 return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
             }
 
-            // Legacy: specifically labeled token_count with rate_limits
-            if (payload["type"] as? String) == "token_count",
-               let rate = payload["rate_limits"] as? [String: Any] {
-                let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? createdAt
-                if capturedAt > Date() { continue }
-                let primary = rate["primary"] as? [String: Any]
-                let secondary = rate["secondary"] as? [String: Any]
-                let five = decodeWindow(primary, created: createdAt, capturedAt: capturedAt)
-                let week = decodeWindow(secondary, created: createdAt, capturedAt: capturedAt)
-                let base = capturedAt
-                let stale = Date().timeIntervalSince(base) > 3 * 60
-                return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
+            // Legacy: token_count style where rate_limits nested under payload.info
+            if let kind = payload["type"] as? String, kind.lowercased() == "token_count" {
+                if let info = payload["info"] as? [String: Any], let rate = info["rate_limits"] as? [String: Any] {
+                    let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? createdAt
+                    if capturedAt > Date() { continue }
+                    let primary = rate["primary"] as? [String: Any]
+                    let secondary = rate["secondary"] as? [String: Any]
+                    let five = decodeWindow(primary, created: createdAt, capturedAt: capturedAt)
+                    let week = decodeWindow(secondary, created: createdAt, capturedAt: capturedAt)
+                    let base = capturedAt
+                    let stale = Date().timeIntervalSince(base) > 3 * 60
+                    return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
+                }
             }
         }
         return nil
@@ -667,8 +792,8 @@ actor CodexStatusService {
 
     private func extractUsageIfPresent(from payload: [String: Any], createdAt: Date) {
         // New model: turn.completed with usage {...}
-        if let kind = payload["type"] as? String, kind == "turn.completed" || kind == "turn_completed" {
-            if let usage = payload["usage"] as? [String: Any] {
+        if let kind = (payload["type"] as? String)?.lowercased(), kind == "turn.completed" || kind == "turn_completed" || kind == "turn-completed" {
+            if let usage = payload["usage"] as? [String: Any] ?? (payload["data"] as? [String: Any])?["usage"] as? [String: Any] {
                 var s = snapshot
                 s.lastInputTokens = intValue(usage["input_tokens"]) ?? s.lastInputTokens
                 s.lastCachedInputTokens = intValue(usage["cached_input_tokens"]) ?? s.lastCachedInputTokens
@@ -686,7 +811,7 @@ actor CodexStatusService {
             }
         }
         // Legacy path: token_count.info.last_token_usage {...}
-        if let kind = payload["type"] as? String, kind == "token_count" {
+        if let kind = (payload["type"] as? String)?.lowercased(), kind == "token_count" {
             if let info = payload["info"] as? [String: Any] {
                 if let last = info["last_token_usage"] as? [String: Any] {
                     var s = snapshot
@@ -875,5 +1000,19 @@ actor CodexStatusService {
         let data = out.fileHandleForReading.readDataToEndOfFile()
         let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return (path?.isEmpty == false) ? path : nil
+    }
+
+    // Resolve tmux path via the user's login shell so GUI-launched app can find Homebrew installs.
+    private func resolveTmuxPath() -> String? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: shell)
+        p.arguments = ["-lic", "command -v tmux || true"]
+        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        do { try p.run() } catch { return nil }
+        p.waitUntilExit()
+        let s = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let path = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? nil : path
     }
 }

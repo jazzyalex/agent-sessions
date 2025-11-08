@@ -49,7 +49,9 @@ struct PreferencesView: View {
     @AppStorage("StripMonochromeMeters") private var stripMonochromeGlobal: Bool = false
     @AppStorage("HideZeroMessageSessions") private var hideZeroMessageSessionsPref: Bool = true
     @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = true
-    @AppStorage("UsagePollingInterval") private var usagePollingInterval: Int = 300 // seconds (default 5 min)
+    // Per-agent polling intervals
+    @AppStorage("CodexPollingInterval") private var codexPollingInterval: Int = 300   // 1/5/15 min options, default 5m
+    @AppStorage("ClaudePollingInterval") private var claudePollingInterval: Int = 2400 // 10/30/40/60 min options, default 40m
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
@@ -406,6 +408,19 @@ struct PreferencesView: View {
                     ), help: "Show the Codex usage strip at the bottom of the Unified window")
                     .disabled(!codexUsageEnabled)
                 }
+                labeledRow("Refresh Interval") {
+                    Picker("", selection: $codexPollingInterval) {
+                        Text("1 minute").tag(60)
+                        Text("5 minutes").tag(300)
+                        Text("15 minutes").tag(900)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 360)
+                    .help("How often to refresh Codex usage")
+                }
+                Text("Tracking limits for Codex is not using tokens.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Divider().padding(.vertical, 4)
 
@@ -423,25 +438,29 @@ struct PreferencesView: View {
                     ), help: "Show the Claude usage strip at the bottom of the Unified window")
                     .disabled(!claudeUsageEnabled)
                 }
+                labeledRow("Refresh Interval") {
+                    Picker("", selection: $claudePollingInterval) {
+                        Text("10 minutes").tag(600)
+                        Text("30 minutes").tag(1800)
+                        Text("40 minutes").tag(2400)
+                        Text("60 minutes").tag(3600)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 420)
+                    .help("How often to refresh Claude usage")
+                }
+                Text("Claude limit tracking consumes one message per probe and decreases Claude's usage.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            // Strip options
+            // Strip options (shared)
             sectionHeader("Strip Options")
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 16) {
                     toggleRow("Show reset times", isOn: $stripShowResetTime, help: "Display the usage reset timestamp next to each meter")
                 }
-                labeledRow("Refresh Interval") {
-                    Picker("", selection: $usagePollingInterval) {
-                        Text("1 minute").tag(60)
-                        Text("5 minutes").tag(300)
-                        Text("15 minutes").tag(900)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 360)
-                    .help("How often to refresh usage data (affects both Codex and Claude)")
-                }
-                Text("Longer intervals reduce CPU usage. Strips stack vertically when both are shown.")
+                Text("Strips stack vertically when both are shown.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

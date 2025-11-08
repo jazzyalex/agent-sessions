@@ -333,8 +333,8 @@ actor ClaudeStatusService {
     }
 
     private func nextInterval() -> UInt64 {
-        // Read user preference for polling interval (default 120s = 2 min)
-        let userInterval = UInt64(UserDefaults.standard.object(forKey: "UsagePollingInterval") as? Int ?? 300)
+        // Read Claude-specific polling interval (defaults to 2400s = 40 min)
+        let userInterval = UInt64(UserDefaults.standard.object(forKey: "ClaudePollingInterval") as? Int ?? 2400)
 
         // Energy optimization: Stop polling entirely when nothing is visible
         // (menu bar and strips both hidden)
