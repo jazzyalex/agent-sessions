@@ -77,13 +77,15 @@ actor ClaudeStatusService {
 
     private func refreshTick() async {
         guard tmuxAvailable && claudeAvailable else { return }
-        // Central gate: suppress probes when not visible to the user or screen inactive
-        if !UsageProbeGate.shared.shouldProbe() {
+        // Central gate + daily budget: suppress when invisible/inactive or budget exhausted
+        if await !UsageProbeGate.shared.canProbeAutomatic() {
             #if DEBUG
-            print("ClaudeStatusService: probe suppressed by UsageProbeGate")
+            print("ClaudeStatusService: probe suppressed (gate or budget)")
             #endif
             return
         }
+        // Count this attempt toward the daily budget
+        await UsageProbeGate.shared.recordProbeAttempt()
 
         do {
             let json = try await executeScript()
