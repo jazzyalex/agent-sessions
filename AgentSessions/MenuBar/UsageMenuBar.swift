@@ -15,41 +15,74 @@ struct UsageMenuBarLabel: View {
         let source = MenuBarSource(rawValue: sourceRaw) ?? .codex
         let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
 
-        // No cap badge for now (calculations retained; UI disabled)
-
-        let text: Text = {
+        HStack(spacing: 0) {
             switch source {
             case .codex:
-                return renderSource(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefix: "CX")
+                renderSourceView(prefix: "CX",
+                                 five: codexStatus.fiveHourPercent,
+                                 week: codexStatus.weekPercent,
+                                 scope: scope,
+                                 style: style,
+                                 showSpinner: codexStatus.isUpdating)
             case .claude:
                 if claudeEnabled {
-                    return renderSource(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefix: "CL")
-                } else {
-                    return Text("")
+                    renderSourceView(prefix: "CL",
+                                     five: claudeStatus.sessionPercent,
+                                     week: claudeStatus.weekAllModelsPercent,
+                                     scope: scope,
+                                     style: style,
+                                     showSpinner: claudeStatus.isUpdating)
                 }
             case .both:
-                let codex = renderSource(five: codexStatus.fiveHourPercent, week: codexStatus.weekPercent, scope: scope, style: style, prefix: "CX")
+                renderSourceView(prefix: "CX",
+                                 five: codexStatus.fiveHourPercent,
+                                 week: codexStatus.weekPercent,
+                                 scope: scope,
+                                 style: style,
+                                 showSpinner: codexStatus.isUpdating)
                 if claudeEnabled {
-                    let claude = renderSource(five: claudeStatus.sessionPercent, week: claudeStatus.weekAllModelsPercent, scope: scope, style: style, prefix: "CL")
-                    return codex + Text(" │ ") + claude
-                } else {
-                    return codex
+                    Text(" │ ").font(.system(size: 12, weight: .regular, design: .monospaced))
+                    renderSourceView(prefix: "CL",
+                                     five: claudeStatus.sessionPercent,
+                                     week: claudeStatus.weekAllModelsPercent,
+                                     scope: scope,
+                                     style: style,
+                                     showSpinner: claudeStatus.isUpdating)
                 }
             }
-        }()
+        }
+        .padding(.horizontal, 4)
+        .fixedSize(horizontal: true, vertical: false)
+        .onAppear {
+            codexStatus.setMenuVisible(true)
+            claudeStatus.setMenuVisible(true)
+        }
+        .onDisappear {
+            codexStatus.setMenuVisible(false)
+            codexStatus.setMenuVisible(false)
+        }
+    }
 
-        return text
-            .font(.system(size: 12, weight: .regular, design: .monospaced))
-            .padding(.horizontal, 4)
-            .fixedSize(horizontal: true, vertical: false)
-            .onAppear {
-                codexStatus.setMenuVisible(true)
-                claudeStatus.setMenuVisible(true)
+    @ViewBuilder
+    private func renderSourceView(prefix: String, five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, showSpinner: Bool) -> some View {
+        HStack(spacing: 4) {
+            renderSource(five: five, week: week, scope: scope, style: style, prefix: prefix)
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
+            if showSpinner {
+                SpinningIcon()
             }
-            .onDisappear {
-                codexStatus.setMenuVisible(false)
-                codexStatus.setMenuVisible(false)
-            }
+        }
+    }
+
+    private struct SpinningIcon: View {
+        @State private var rotate = false
+        var body: some View {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 11, weight: .regular))
+                .rotationEffect(.degrees(rotate ? 360 : 0))
+                .animation(.linear(duration: 1.2).repeatForever(autoreverses: false), value: rotate)
+                .onAppear { rotate = true }
+        }
     }
 
     private func renderSource(five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, prefix: String?) -> Text {

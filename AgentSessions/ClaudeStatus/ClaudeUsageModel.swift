@@ -25,6 +25,8 @@ final class ClaudeUsageModel: ObservableObject {
     @Published var cliUnavailable: Bool = false
     @Published var tmuxUnavailable: Bool = false
     @Published var loginRequired: Bool = false
+    @Published var isUpdating: Bool = false
+    @Published var lastSuccessAt: Date? = nil
 
     private var service: ClaudeStatusService?
     private var isEnabled: Bool = false
@@ -64,8 +66,12 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     func refreshNow() {
+        if isUpdating { return }
+        isUpdating = true
         Task.detached { [weak self] in
             await self?.service?.refreshNow()
+            try? await Task.sleep(nanoseconds: 65 * 1_000_000_000)
+            await MainActor.run { if self?.isUpdating == true { self?.isUpdating = false } }
         }
     }
 
@@ -99,11 +105,20 @@ final class ClaudeUsageModel: ObservableObject {
 
     // Hard-probe entry: run a one-off /usage probe and return diagnostics
     func hardProbeNowDiagnostics(completion: @escaping (ClaudeProbeDiagnostics) -> Void) {
+        if isUpdating { return }
+        isUpdating = true
         Task { [weak self] in
             guard let self else { return }
             if let svc = self.service {
                 let diag = await svc.forceProbeNow()
-                await MainActor.run { completion(diag) }
+                await MainActor.run {
+                    if diag.success {
+                        self.lastSuccessAt = Date()
+                        setFreshUntil(for: .claude, until: Date().addingTimeInterval(60 * 60))
+                    }
+                    self.isUpdating = false
+                    completion(diag)
+                }
                 return
             }
             let handler: @Sendable (ClaudeUsageSnapshot) -> Void = { snapshot in
@@ -118,7 +133,14 @@ final class ClaudeUsageModel: ObservableObject {
             }
             let svc = ClaudeStatusService(updateHandler: handler, availabilityHandler: availability)
             let diag = await svc.forceProbeNow()
-            await MainActor.run { completion(diag) }
+            await MainActor.run {
+                if diag.success {
+                    self.lastSuccessAt = Date()
+                    setFreshUntil(for: .claude, until: Date().addingTimeInterval(60 * 60))
+                }
+                self.isUpdating = false
+                completion(diag)
+            }
         }
     }
 
@@ -130,6 +152,7 @@ final class ClaudeUsageModel: ObservableObject {
         weekAllModelsResetText = s.weekAllModelsResetText
         weekOpusResetText = s.weekOpusResetText
         lastUpdate = Date()
+        if isUpdating { isUpdating = false }
     }
 
     private func clampPercent(_ v: Int) -> Int { max(0, min(100, v)) }

@@ -27,6 +27,10 @@ struct ClaudeUsageStripView: View {
 
             Spacer(minLength: 0)
 
+            if status.isUpdating {
+                UpdatingBadge()
+            }
+
             // Status text (right-aligned): only show problems/warnings
             if status.loginRequired {
                 Text("Login required").font(.caption).foregroundStyle(.red)
@@ -50,7 +54,7 @@ struct ClaudeUsageStripView: View {
         .onTapGesture(count: 2) {
             if status.tmuxUnavailable {
                 showTmuxHelp = true
-            } else {
+            } else if !status.isUpdating {
                 status.refreshNow()
             }
         }
@@ -105,7 +109,9 @@ private struct UsageMeter: View {
 
     var body: some View {
         let includeReset = showResetTime && !reset.isEmpty
-        let stale = isResetInfoStale(kind: title, source: .claude, lastUpdate: lastUpdate)
+        // Unified freshness: allow TTL after manual hard probe
+        let effectiveEvent = effectiveEventTimestamp(source: .claude, eventTimestamp: nil, lastUpdate: lastUpdate)
+        let stale = isResetInfoStale(kind: title, source: .claude, lastUpdate: effectiveEvent)
         let displayText = stale ? UsageStaleThresholds.outdatedCopy : formattedReset(reset)
 
         HStack(spacing: UsageMeterLayout.itemSpacing) {
