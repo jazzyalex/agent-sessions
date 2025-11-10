@@ -125,7 +125,7 @@ final class StatusItemController: NSObject {
 
         menu.addItem(makeActionItem(title: "Hard Refresh Codex", action: #selector(refreshCodexHard)))
         if claudeEnabled {
-            menu.addItem(makeActionItem(title: "Hard Refresh Claude (consumes tokens)", action: #selector(refreshClaudeHard)))
+            menu.addItem(makeActionItem(title: "Hard Refresh Claude (consumes ~1% of 5h limit in Pro $20 plan)", action: #selector(refreshClaudeHard)))
         }
         menu.addItem(NSMenuItem.separator())
         menu.addItem(makeActionItem(title: "Open Preferences…", action: #selector(openPreferences)))
@@ -198,17 +198,7 @@ final class StatusItemController: NSObject {
 // MARK: - Stale + Helpers
 extension StatusItemController {
     private func staleAwareResetText(kind: String, source: UsageTrackingSource, raw: String, lastUpdate: Date?, eventTimestamp: Date?) -> String {
-        let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate)
-        let isStale = isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff)
-        if isStale || raw.isEmpty { return UsageStaleThresholds.outdatedCopy }
-        return trimReset(raw)
-    }
-
-    private func trimReset(_ text: String) -> String {
-        var result = text
-        if result.hasPrefix("resets ") { result = String(result.dropFirst("resets ".count)) }
-        if let parenIndex = result.firstIndex(of: "(") { result = String(result[..<parenIndex]).trimmingCharacters(in: .whitespaces) }
-        return result
+        return formatResetDisplay(kind: kind, source: source, raw: raw, lastUpdate: lastUpdate, eventTimestamp: eventTimestamp)
     }
 
     private func presentFailureAlert(title: String, diagnostics: Any) {

@@ -268,19 +268,7 @@ struct UsageMenuBarMenuContent: View {
                 openWindow(id: "Agent Sessions")
             }
             // Dynamic label: warn when Claude probes will consume tokens
-            let refreshLabel: some View = {
-                if source == .claude || source == .both {
-                    return AnyView(VStack(alignment: .leading, spacing: 0) {
-                        Text("Refresh Limits")
-                        Text("(consumes Claude's tokens)")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .padding(.leading, 2)
-                    })
-                } else {
-                    return AnyView(Text("Refresh Limits"))
-                }
-            }()
+            let refreshLabel: some View = AnyView(Text("Refresh Limits"))
             Button(action: {
                 switch source {
                 case .codex:
@@ -351,22 +339,7 @@ private func colorFor(percent: Int) -> Color {
 }
 
 private func displayReset(_ text: String, kind: String, source: UsageTrackingSource, lastUpdate: Date?, eventTimestamp: Date? = nil) -> String {
-    guard !text.isEmpty else { return "—" }
-
-    // Check if data is stale
-    if isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eventTimestamp) {
-        return UsageStaleThresholds.outdatedCopy
-    }
-
-    var result = text
-    if result.hasPrefix("resets ") {
-        result = String(result.dropFirst("resets ".count))
-    }
-    // Strip timezone like "(America/Los_Angeles)"
-    if let parenIndex = result.firstIndex(of: "(") {
-        result = String(result[..<parenIndex]).trimmingCharacters(in: .whitespaces)
-    }
-    return result
+    return formatResetDisplay(kind: kind, source: source, raw: text, lastUpdate: lastUpdate, eventTimestamp: eventTimestamp)
 }
 
 private func inlineBar(_ percent: Int, segments: Int = 5) -> String {

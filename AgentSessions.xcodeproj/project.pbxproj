@@ -88,6 +88,7 @@
 		B000001C2A0A000100000079 /* LayoutMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000017BA0A000100000001 /* LayoutMode.swift */; };
 		B0000SSS2A0A000100000001 /* SessionSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000SSS4A0A000100000002 /* SessionSource.swift */; };
 		B4DE1CF2B8D3EED28CF5ACCB /* PreferencesConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 299D9075E7B99D8F44BA5E5A /* PreferencesConstants.swift */; };
+		BD469FC1E97B1CF3CF477114 /* UsageDisplayFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B1BB48F55E6AB3C915FA53 /* UsageDisplayFormatter.swift */; };
 		BF169B05FC63470E9B57D885 /* StatsCardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */; };
 		C0D3E5A1700A000000000001 /* CodexStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000001 /* CodexStatusService.swift */; };
 		C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000002 /* UsageStripView.swift */; };
@@ -200,6 +201,7 @@
 		3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeminiCLISettings.swift; path = AgentSessions/Services/GeminiCLISettings.swift; sourceTree = SOURCE_ROOT; };
 		35186F4194824F3250DE3B8E /* AppRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppRuntime.swift; path = AgentSessions/Support/AppRuntime.swift; sourceTree = SOURCE_ROOT; };
 		37006C856FBE4448A658887B /* CommandExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CommandExecutor.swift; path = AgentSessions/Resume/CommandExecutor.swift; sourceTree = SOURCE_ROOT; };
+		41B1BB48F55E6AB3C915FA53 /* UsageDisplayFormatter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = UsageDisplayFormatter.swift; path = AgentSessions/CodexStatus/UsageDisplayFormatter.swift; sourceTree = "<group>"; };
 		43373461163E432CB25162BC /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		43F39BE67C6349D1B76115C9 /* UpdateModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateModels.swift; path = AgentSessions/Update/UpdateModels.swift; sourceTree = SOURCE_ROOT; };
 		45E7621E9F33B15FEEA3C856 /* ProbeAutoCleanupTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProbeAutoCleanupTests.swift; path = AgentSessionsLogicTests/ProbeAutoCleanupTests.swift; sourceTree = "<group>"; };
@@ -722,6 +724,7 @@
 				02CA6B9DF2873CC9F366A3A7 /* CodexProbeConfig.swift */,
 				885AF956063BEBF5966E25A2 /* CodexProbeCleanup.swift */,
 				5D14178FB4333F9BC7B3EBCC /* UsageFreshness.swift */,
+				41B1BB48F55E6AB3C915FA53 /* UsageDisplayFormatter.swift */,
 			);
 			path = CodexStatus;
 			sourceTree = "<group>";
@@ -1135,6 +1138,7 @@
 				22047AEA4AB1CEB601B2D6D9 /* PreferencesView+Layout.swift in Sources */,
 				B4DE1CF2B8D3EED28CF5ACCB /* PreferencesConstants.swift in Sources */,
 				9F89EF848A0EB2D79B0AC11B /* UsageFreshness.swift in Sources */,
+				BD469FC1E97B1CF3CF477114 /* UsageDisplayFormatter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
