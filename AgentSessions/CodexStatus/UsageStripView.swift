@@ -27,6 +27,11 @@ struct UsageStripView: View {
                 Spacer(minLength: 0)
                 if codexStatus.isUpdating {
                     UpdatingBadge()
+                } else if let eff = effectiveEventTimestamp(source: .codex, eventTimestamp: codexStatus.lastEventTimestamp, lastUpdate: codexStatus.lastUpdate),
+                          Date().timeIntervalSince(eff) > 30 * 60 {
+                    Text("Last updated: \(timeAgo(eff))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -151,6 +156,13 @@ private struct UsageMeter: View {
 }
 
 // Detail popover removed; tooltips provide reset info.
+
+private func timeAgo(_ date: Date) -> String {
+    let interval = Date().timeIntervalSince(date)
+    if interval < 60 { return "just now" }
+    if interval < 3600 { return "\(Int(interval/60))m ago" }
+    return "\(Int(interval/3600))h ago"
+}
 
 private enum UsageMeterLayout {
     static let itemSpacing: CGFloat = 6
