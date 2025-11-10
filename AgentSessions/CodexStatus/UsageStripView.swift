@@ -25,6 +25,9 @@ struct UsageStripView: View {
                 UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
                 UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
                 Spacer(minLength: 0)
+                if codexStatus.isUpdating {
+                    UpdatingBadge()
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -32,7 +35,9 @@ struct UsageStripView: View {
         .padding(.bottom, collapseBottom ? 0 : verticalPadding)
         .background(drawBackground ? AnyShapeStyle(.thickMaterial) : AnyShapeStyle(.clear))
         .onTapGesture(count: 2) {
-            codexStatus.refreshNow()
+            if !codexStatus.isUpdating {
+                codexStatus.refreshNow()
+            }
         }
         .help(makeTooltip())
         .onAppear { codexStatus.setStripVisible(true) }
@@ -76,6 +81,21 @@ struct UsageStripView: View {
     }
 }
 
+struct UpdatingBadge: View {
+    @State private var rotate = false
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .rotationEffect(.degrees(rotate ? 360 : 0))
+                .animation(.linear(duration: 1.2).repeatForever(autoreverses: false), value: rotate)
+                .onAppear { rotate = true }
+            Text("Updating")
+                .font(.caption)
+        }
+        .foregroundStyle(.primary)
+    }
+}
+
 private struct UsageMeter: View {
     let title: String
     let percent: Int
@@ -87,10 +107,8 @@ private struct UsageMeter: View {
 
     var body: some View {
         let includeReset = showResetTime
-        // Use eventTimestamp when available; fall back to lastUpdate so the strip
-        // stops showing stale when a recent refresh occurred but no new event timestamp
-        // was recorded (e.g., during CLI /status fallback or format changes).
-        let effectiveEvent = eventTimestamp ?? lastUpdate
+        // Use unified freshness helper to smooth manual refresh TTL.
+        let effectiveEvent = effectiveEventTimestamp(source: .codex, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate)
         let stale = isResetInfoStale(kind: title, source: .codex, lastUpdate: lastUpdate, eventTimestamp: effectiveEvent)
         let displayText = (stale || reset.isEmpty)
             ? UsageStaleThresholds.outdatedCopy
@@ -148,4 +166,3 @@ private enum UsageMeterLayout {
         return base + resetComponent + itemSpacing * spacingCount
     }
 }
-

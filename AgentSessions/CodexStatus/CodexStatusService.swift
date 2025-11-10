@@ -56,6 +56,8 @@ final class CodexUsageModel: ObservableObject {
     @Published var lastOutputTokens: Int? = nil
     @Published var lastReasoningOutputTokens: Int? = nil
     @Published var lastTotalTokens: Int? = nil
+    @Published var isUpdating: Bool = false
+    @Published var lastSuccessAt: Date? = nil
 
     private var service: CodexStatusService?
     private var isEnabled: Bool = false
@@ -95,10 +97,17 @@ final class CodexUsageModel: ObservableObject {
     }
 
     func refreshNow() {
+        if isUpdating { return }
+        isUpdating = true
         Task { [weak self] in
             guard let self = self else { return }
             if let svc = self.service {
                 await svc.refreshNow()
+                // Fallback timeout guard
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 65 * 1_000_000_000)
+                    if self.isUpdating { self.isUpdating = false }
+                }
                 return
             }
             // On-demand one-shot refresh even when tracking is disabled
@@ -110,16 +119,29 @@ final class CodexUsageModel: ObservableObject {
             }
             let svc = CodexStatusService(updateHandler: handler, availabilityHandler: availability)
             await svc.refreshNow()
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 65 * 1_000_000_000)
+                if self.isUpdating { self.isUpdating = false }
+            }
         }
     }
 
     // Hard-probe from Preferences pane: forces a /status tmux probe, shows result via callback
     func hardProbeNow(completion: @escaping (Bool) -> Void) {
+        if isUpdating { return }
+        isUpdating = true
         Task { [weak self] in
             guard let self = self else { return }
             if let svc = self.service {
                 let diag = await svc.forceProbeNow()
-                await MainActor.run { completion(diag.success) }
+                await MainActor.run {
+                    if diag.success {
+                        self.lastSuccessAt = Date()
+                        setFreshUntil(for: .codex, until: Date().addingTimeInterval(60 * 60))
+                    }
+                    self.isUpdating = false
+                    completion(diag.success)
+                }
                 return
             }
             // Create a short-lived service for the probe
@@ -131,7 +153,14 @@ final class CodexUsageModel: ObservableObject {
             }
             let svc = CodexStatusService(updateHandler: handler, availabilityHandler: availability)
             let diag = await svc.forceProbeNow()
-            await MainActor.run { completion(diag.success) }
+            await MainActor.run {
+                if diag.success {
+                    self.lastSuccessAt = Date()
+                    setFreshUntil(for: .codex, until: Date().addingTimeInterval(60 * 60))
+                }
+                self.isUpdating = false
+                completion(diag.success)
+            }
         }
     }
 
@@ -152,7 +181,14 @@ final class CodexUsageModel: ObservableObject {
             }
             let svc = CodexStatusService(updateHandler: handler, availabilityHandler: availability)
             let diag = await svc.forceProbeNow()
-            await MainActor.run { completion(diag) }
+            await MainActor.run {
+                if diag.success {
+                    self.lastSuccessAt = Date()
+                    setFreshUntil(for: .codex, until: Date().addingTimeInterval(60 * 60))
+                }
+                self.isUpdating = false
+                completion(diag)
+            }
         }
     }
 
@@ -197,6 +233,8 @@ final class CodexUsageModel: ObservableObject {
         lastOutputTokens = s.lastOutputTokens
         lastReasoningOutputTokens = s.lastReasoningOutputTokens
         lastTotalTokens = s.lastTotalTokens
+        // Any snapshot means we received data; clear updating if set
+        if isUpdating { isUpdating = false }
     }
 
     private func clampPercent(_ v: Int) -> Int { max(0, min(100, v)) }

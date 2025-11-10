@@ -91,15 +91,15 @@ final class StatusItemController: NSObject {
         // Reset lines (clicking opens Preferences → Menu Bar)
         if source == .codex || source == .both {
             menu.addItem(makeTitleItem("Codex"))
-            menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText), action: #selector(openPreferences)))
-            menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText), action: #selector(openPreferences)))
+            menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: codexStatus.fiveHourPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
+            menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: codexStatus.weekPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
         }
         let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
         if source == .both && claudeEnabled { menu.addItem(NSMenuItem.separator()) }
         if (source == .claude || source == .both) && claudeEnabled {
             menu.addItem(makeTitleItem("Claude"))
-            menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: claudeStatus.sessionPercent, reset: claudeStatus.sessionResetText), action: #selector(openPreferences)))
-            menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsPercent, reset: claudeStatus.weekAllModelsResetText), action: #selector(openPreferences)))
+            menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: claudeStatus.sessionPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
+            menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -123,14 +123,10 @@ final class StatusItemController: NSObject {
 
         menu.addItem(NSMenuItem.separator())
 
-        let refreshTitle: String = {
-            if source == .claude || source == .both {
-                return "Refresh Limits\n  (consumes Claude's tokens)"
-            } else {
-                return "Refresh Limits"
-            }
-        }()
-        menu.addItem(makeActionItem(title: refreshTitle, action: #selector(refreshLimits)))
+        menu.addItem(makeActionItem(title: "Hard Refresh Codex", action: #selector(refreshCodexHard)))
+        if claudeEnabled {
+            menu.addItem(makeActionItem(title: "Hard Refresh Claude (consumes tokens)", action: #selector(refreshClaudeHard)))
+        }
         menu.addItem(NSMenuItem.separator())
         menu.addItem(makeActionItem(title: "Open Preferences…", action: #selector(openPreferences)))
         menu.addItem(makeActionItem(title: "Hide Menu Bar Usage", action: #selector(hideMenuBar)))
@@ -176,10 +172,17 @@ final class StatusItemController: NSObject {
         }
         NSApp.activate(ignoringOtherApps: true)
     }
-    @objc private func refreshLimits() {
-        let src = UserDefaults.standard.string(forKey: "MenuBarSource") ?? MenuBarSource.codex.rawValue
-        if src == MenuBarSource.codex.rawValue || src == MenuBarSource.both.rawValue { codexStatus.refreshNow() }
-        if src == MenuBarSource.claude.rawValue || src == MenuBarSource.both.rawValue { claudeStatus.refreshNow() }
+    @objc private func refreshCodexHard() {
+        guard !codexStatus.isUpdating else { return }
+        codexStatus.hardProbeNowDiagnostics { diag in
+            if !diag.success { self.presentFailureAlert(title: "Codex Probe Failed", diagnostics: diag) }
+        }
+    }
+    @objc private func refreshClaudeHard() {
+        guard !claudeStatus.isUpdating else { return }
+        claudeStatus.hardProbeNowDiagnostics { diag in
+            if !diag.success { self.presentFailureAlert(title: "Claude Probe Failed", diagnostics: diag) }
+        }
     }
     @objc private func hideMenuBar() {
         UserDefaults.standard.set(false, forKey: "MenuBarEnabled")
@@ -189,5 +192,36 @@ final class StatusItemController: NSObject {
     private func resetLine(label: String, percent: Int, reset: String) -> String {
         let trimmed = reset.replacingOccurrences(of: "resets ", with: "")
         return "\(label) \(percent)%  \(trimmed.isEmpty ? "—" : trimmed)"
+    }
+}
+
+// MARK: - Stale + Helpers
+extension StatusItemController {
+    private func staleAwareResetText(kind: String, source: UsageTrackingSource, raw: String, lastUpdate: Date?, eventTimestamp: Date?) -> String {
+        let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate)
+        let isStale = isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff)
+        if isStale || raw.isEmpty { return UsageStaleThresholds.outdatedCopy }
+        return trimReset(raw)
+    }
+
+    private func trimReset(_ text: String) -> String {
+        var result = text
+        if result.hasPrefix("resets ") { result = String(result.dropFirst("resets ".count)) }
+        if let parenIndex = result.firstIndex(of: "(") { result = String(result[..<parenIndex]).trimmingCharacters(in: .whitespaces) }
+        return result
+    }
+
+    private func presentFailureAlert(title: String, diagnostics: Any) {
+        guard let win = NSApp.windows.first else { return }
+        let alert = NSAlert()
+        alert.messageText = title
+        if let d = diagnostics as? CodexProbeDiagnostics {
+            alert.informativeText = "Exit: \(d.exitCode)\nScript: \(d.scriptPath)\nWORKDIR: \(d.workdir)\n\n— stdout —\n\(d.stdout)\n\n— stderr —\n\(d.stderr)"
+        } else if let d = diagnostics as? ClaudeProbeDiagnostics {
+            alert.informativeText = "Exit: \(d.exitCode)\nScript: \(d.scriptPath)\nWORKDIR: \(d.workdir)\n\n— stdout —\n\(d.stdout)\n\n— stderr —\n\(d.stderr)"
+        }
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: win) { _ in }
     }
 }
