@@ -39,11 +39,11 @@ struct ClaudeUsageStripView: View {
             } else if status.tmuxUnavailable {
                 Text("tmux not found").font(.caption).foregroundStyle(.red)
             } else if let update = status.lastUpdate {
-                // Consider data stale if no update for 15 minutes
-                if Date().timeIntervalSince(update) > 15 * 60 {
-                    Text("No recent data — \(timeAgo(update))")
+                // Show a gentle "last updated" note only after 30 minutes
+                if Date().timeIntervalSince(update) > 30 * 60 {
+                    Text("Last updated: \(timeAgo(update))")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
