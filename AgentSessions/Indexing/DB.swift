@@ -513,6 +513,36 @@ actor IndexDB {
         return out
     }
 
+    func messagesBySource(sources: [String], dayStart: String?, dayEnd: String?) throws -> [String: Int] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let s = dayStart { clauses.append("day >= ?"); binds.append(s) }
+        if let e = dayEnd { clauses.append("day <= ?"); binds.append(e) }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = "SELECT source, COALESCE(SUM(messages),0) FROM rollups_daily\(whereSQL) GROUP BY source;"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db))) }
+        defer { sqlite3_finalize(stmt) }
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+        var out: [String: Int] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let src = String(cString: sqlite3_column_text(stmt, 0))
+            let messages = Int(sqlite3_column_int64(stmt, 1))
+            out[src] = messages
+        }
+        return out
+    }
+
     func avgSessionDuration(sources: [String], dayStart: String?, dayEnd: String?) throws -> TimeInterval {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []

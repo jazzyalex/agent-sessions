@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Inline star in Sessions list with context menu (Add/Remove from Favorites)
   - Toolbar toggle “Favorites” filters list (AND with search), persisted across launches
   - Favorites persist via UserDefaults (no schema changes)
+- Analytics: Sessions Over Time and By Agent cards now share a Sessions/Messages toggle, backed by per-agent message totals so both visuals stay in sync.
 
 ### Fixed
 - Git Context Inspector now responds to Light/Dark/System theme changes immediately; removed reliance on passing a nil preferredColorScheme which could leave the window stuck after switching to System.
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Analytics: Claude sessions now use a stable logical ID derived from the file’s `sessionId`, preventing one logical session from being split across many files. This normalizes avg session length vs Codex.
 - Analytics: Gemini sessions also switch to a stable logical ID from `sessionId` when present; added a one-time database rebuild for Gemini.
  - Analytics: Sessions and Messages totals now honor “Hide zero/low message sessions” prefs (DB path), matching the Sessions list.
+- Analytics: Stat card tooltips now explain ±% deltas and clarify they compare to the previous date range.
 
 ## [2.0.0] - 2025-10-04
 

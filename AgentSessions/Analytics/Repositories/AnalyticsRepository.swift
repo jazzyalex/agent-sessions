@@ -39,16 +39,25 @@ actor AnalyticsRepository {
         }
     }
 
-    struct AgentSlice { let source: String; let sessionsDistinct: Int; let durationSeconds: TimeInterval }
+    struct AgentSlice {
+        let source: String
+        let sessionsDistinct: Int
+        let messages: Int
+        let durationSeconds: TimeInterval
+    }
 
     /// Breakdown by source across bounds.
     func breakdownByAgent(sources: [String], dayStart: String?, dayEnd: String?) async -> [AgentSlice] {
         let distinct = (try? await db.distinctSessionsBySource(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? [:]
         let dur = (try? await db.durationBySource(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? [:]
+        let messages = (try? await db.messagesBySource(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? [:]
         var out: [AgentSlice] = []
-        let keys = Set(distinct.keys).union(dur.keys)
+        let keys = Set(distinct.keys).union(dur.keys).union(messages.keys)
         for k in keys {
-            out.append(AgentSlice(source: k, sessionsDistinct: distinct[k] ?? 0, durationSeconds: dur[k] ?? 0))
+            out.append(AgentSlice(source: k,
+                                  sessionsDistinct: distinct[k] ?? 0,
+                                  messages: messages[k] ?? 0,
+                                  durationSeconds: dur[k] ?? 0))
         }
         return out
     }

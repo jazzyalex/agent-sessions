@@ -5,6 +5,7 @@ import Charts
 struct SessionsChartView: View {
     let data: [AnalyticsTimeSeriesPoint]
     let dateRange: AnalyticsDateRange
+    @Binding var metric: AnalyticsAggregationMetric
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -18,6 +19,15 @@ struct SessionsChartView: View {
 
                 Spacer()
 
+                Picker("Aggregation", selection: $metric) {
+                    ForEach(AnalyticsAggregationMetric.allCases) { option in
+                        Text(option.displayName).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 220)
+                .help(metric.detailDescription)
+
                 // Legend
                 HStack(spacing: 20) {
                     ForEach(uniqueAgents, id: \.self) { agent in
@@ -26,7 +36,7 @@ struct SessionsChartView: View {
                                 .fill(Color.agentColor(for: agent))
                                 .frame(width: 10, height: 10)
 
-                            Text(agent)
+                            Text(agent.displayName)
                                 .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
                         }
@@ -48,16 +58,16 @@ struct SessionsChartView: View {
         Chart(data) { item in
             BarMark(
                 x: .value("Date", item.date, unit: dateUnit),
-                y: .value("Sessions", item.count),
+                y: .value(metric.axisLabel, item.value(for: metric)),
                 stacking: .standard
             )
-            .foregroundStyle(by: .value("Agent", item.agent))
+            .foregroundStyle(by: .value("Agent", item.agentDisplayName))
             .cornerRadius(AnalyticsDesign.chartBarCornerRadius)
         }
         .chartForegroundStyleScale([
-            "Codex CLI": Color.agentCodex,
-            "Claude Code": Color.agentClaude,
-            "Gemini": Color.agentGemini
+            SessionSource.codex.displayName: Color.agentCodex,
+            SessionSource.claude.displayName: Color.agentClaude,
+            SessionSource.gemini.displayName: Color.agentGemini
         ])
         .chartLegend(.hidden)
         .chartXAxis {
@@ -74,8 +84,12 @@ struct SessionsChartView: View {
                 AxisValueLabel()
             }
         }
+        .chartYAxisLabel(position: .leading) {
+            Text(metric.axisLabel)
+        }
         .frame(minHeight: 200, maxHeight: .infinity)
         .animation(.easeInOut(duration: AnalyticsDesign.chartDuration), value: data)
+        .animation(.easeInOut(duration: AnalyticsDesign.chartDuration), value: metric)
     }
 
     private var emptyState: some View {
@@ -96,8 +110,8 @@ struct SessionsChartView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var uniqueAgents: [String] {
-        Array(Set(data.map { $0.agent })).sorted()
+    private var uniqueAgents: [SessionSource] {
+        Array(Set(data.map { $0.agent })).sorted { $0.displayName < $1.displayName }
     }
 
     private var dateUnit: Calendar.Component {
@@ -143,35 +157,42 @@ struct SessionsChartView: View {
         for dayOffset in 0..<7 {
             let date = calendar.date(byAdding: .day, value: -dayOffset, to: Date())!
 
+            let codexSessions = Int.random(in: 3...12)
+            let claudeSessions = Int.random(in: 2...8)
+            let geminiSessions = Int.random(in: 1...5)
+
             points.append(AnalyticsTimeSeriesPoint(
                 date: date,
-                agent: "Codex CLI",
-                count: Int.random(in: 3...12)
+                agent: .codex,
+                sessionCount: codexSessions,
+                messageCount: codexSessions * Int.random(in: 2...6)
             ))
 
             points.append(AnalyticsTimeSeriesPoint(
                 date: date,
-                agent: "Claude Code",
-                count: Int.random(in: 2...8)
+                agent: .claude,
+                sessionCount: claudeSessions,
+                messageCount: claudeSessions * Int.random(in: 3...7)
             ))
 
             points.append(AnalyticsTimeSeriesPoint(
                 date: date,
-                agent: "Gemini",
-                count: Int.random(in: 1...5)
+                agent: .gemini,
+                sessionCount: geminiSessions,
+                messageCount: geminiSessions * Int.random(in: 2...5)
             ))
         }
 
         return points.sorted { $0.date < $1.date }
     }()
 
-    SessionsChartView(data: sampleData, dateRange: .last7Days)
+    SessionsChartView(data: sampleData, dateRange: .last7Days, metric: .constant(.sessions))
         .padding()
         .frame(height: 320)
 }
 
 #Preview("Sessions Chart - Empty") {
-    SessionsChartView(data: [], dateRange: .last7Days)
+    SessionsChartView(data: [], dateRange: .last7Days, metric: .constant(.sessions))
         .padding()
         .frame(height: 320)
 }

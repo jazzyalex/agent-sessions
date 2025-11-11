@@ -60,18 +60,22 @@ final class ClaudeUsageModel: ObservableObject {
 
     private func propagateVisibility() {
         let union = stripVisible || menuVisible
-        Task.detached { [weak self] in
-            await self?.service?.setVisible(union)
+        let svc = self.service
+        Task.detached {
+            await svc?.setVisible(union)
         }
     }
 
     func refreshNow() {
         if isUpdating { return }
         isUpdating = true
-        Task.detached { [weak self] in
-            await self?.service?.refreshNow()
+        let svc = self.service
+        Task.detached {
+            await svc?.refreshNow()
             try? await Task.sleep(nanoseconds: 65 * 1_000_000_000)
-            await MainActor.run { if self?.isUpdating == true { self?.isUpdating = false } }
+            await MainActor.run {
+                if ClaudeUsageModel.shared.isUpdating { ClaudeUsageModel.shared.isUpdating = false }
+            }
         }
     }
 

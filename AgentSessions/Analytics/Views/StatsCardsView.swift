@@ -20,7 +20,7 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
-            .help("Number of unique conversation sessions (excluding empty and low-message sessions)")
+            .help("Unique conversation sessions (matches Sessions list filters). Change compares to the previous range; +10% means more sessions than before, -10% means fewer.")
 
             StatsCard(
                 icon: "bubble.left.and.bubble.right.fill",
@@ -30,7 +30,7 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
-            .help("Total messages exchanged across all sessions in this period")
+            .help("Total messages exchanged in the selected period. Change compares to the previous range; +10% means more messages than before, -10% means fewer.")
 
             StatsCard(
                 icon: "clock.fill",
@@ -40,7 +40,7 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
-            .help("Average duration per session (from first to last message)")
+            .help("Average duration per session (first to last message). Change compares to the previous range; +10% means sessions ran longer, -10% shorter.")
 
             StatsCard(
                 icon: "timer",
@@ -50,7 +50,7 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
-            .help("Total active time across all sessions in this period")
+            .help("Total active time across all sessions. Change compares to the previous range; +10% means more active time than before, -10% means less.")
         }
         .fixedSize(horizontal: false, vertical: true)  // Grid tells the real height
         .frame(maxWidth: .infinity, alignment: .leading)
