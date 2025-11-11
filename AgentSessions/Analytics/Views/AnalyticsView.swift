@@ -10,6 +10,7 @@ struct AnalyticsView: View {
     @State private var projectFilter: AnalyticsProjectFilter = .all
     @State private var availableProjects: [String] = []
     @State private var isRefreshing: Bool = false
+    @State private var aggregationMetric: AnalyticsAggregationMetric = .sessions
 
     var body: some View {
         VStack(spacing: 0) {
@@ -120,13 +121,17 @@ struct AnalyticsView: View {
                 // Primary chart
                 SessionsChartView(
                     data: service.snapshot.timeSeriesData,
-                    dateRange: dateRange
+                    dateRange: dateRange,
+                    metric: $aggregationMetric
                 )
                 .frame(height: AnalyticsDesign.primaryChartHeight)
 
                 // Secondary insights (2-column grid) - lock to same height
                 HStack(alignment: .top, spacing: AnalyticsDesign.bottomGridSpacing) {
-                    AgentBreakdownView(breakdown: service.snapshot.agentBreakdown)
+                    AgentBreakdownView(
+                        breakdown: service.snapshot.agentBreakdown,
+                        metric: $aggregationMetric
+                    )
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                     TimeOfDayHeatmapView(

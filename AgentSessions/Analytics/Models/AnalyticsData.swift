@@ -1,5 +1,36 @@
 import Foundation
 
+/// Controls whether analytics aggregates describe session counts or total messages.
+enum AnalyticsAggregationMetric: String, CaseIterable, Identifiable {
+    case sessions
+    case messages
+
+    var id: Self { self }
+
+    var displayName: String {
+        switch self {
+        case .sessions: return "Sessions"
+        case .messages: return "Messages"
+        }
+    }
+
+    /// Shown in pickers/descriptions to clarify what changes when toggled.
+    var detailDescription: String {
+        switch self {
+        case .sessions: return "Counts unique conversations"
+        case .messages: return "Counts total messages across conversations"
+        }
+    }
+
+    /// Axis label for charts that visualize this metric.
+    var axisLabel: String {
+        switch self {
+        case .sessions: return "Sessions"
+        case .messages: return "Messages"
+        }
+    }
+}
+
 /// Summary statistics for the stats cards
 struct AnalyticsSummary: Equatable {
     /// Total number of sessions
@@ -115,15 +146,27 @@ struct AnalyticsSummary: Equatable {
 struct AnalyticsTimeSeriesPoint: Identifiable, Equatable {
     let id = UUID()
     let date: Date
-    let agent: String // "Codex", "Claude", "Gemini"
-    let count: Int
+    let agent: SessionSource
+    let sessionCount: Int
+    let messageCount: Int
+
+    func value(for metric: AnalyticsAggregationMetric) -> Int {
+        switch metric {
+        case .sessions: return sessionCount
+        case .messages: return messageCount
+        }
+    }
+
+    var agentDisplayName: String { agent.displayName }
 }
 
 /// Agent breakdown data for the progress bar card
 struct AnalyticsAgentBreakdown: Identifiable, Equatable {
     let agent: SessionSource
     let sessionCount: Int
-    let percentage: Double
+    let messageCount: Int
+    let sessionPercentage: Double
+    let messagePercentage: Double
     let durationSeconds: TimeInterval
 
     var id: String { agent.rawValue }
@@ -133,9 +176,29 @@ struct AnalyticsAgentBreakdown: Identifiable, Equatable {
         AnalyticsSummary.formatDuration(durationSeconds)
     }
 
-    /// Secondary info string (e.g., "52 sessions • 5h 12m")
-    var detailsFormatted: String {
-        "\(sessionCount) session\(sessionCount == 1 ? "" : "s") • \(durationFormatted)"
+    /// Value text that matches the selected aggregation metric.
+    func details(for metric: AnalyticsAggregationMetric) -> String {
+        switch metric {
+        case .sessions:
+            let suffix = sessionCount == 1 ? "session" : "sessions"
+            return "\(AnalyticsSummary.formatNumber(sessionCount)) \(suffix) • \(durationFormatted)"
+        case .messages:
+            return "\(AnalyticsSummary.formatNumber(messageCount)) messages • \(durationFormatted)"
+        }
+    }
+
+    func percentage(for metric: AnalyticsAggregationMetric) -> Double {
+        switch metric {
+        case .sessions: return sessionPercentage
+        case .messages: return messagePercentage
+        }
+    }
+
+    func value(for metric: AnalyticsAggregationMetric) -> Int {
+        switch metric {
+        case .sessions: return sessionCount
+        case .messages: return messageCount
+        }
     }
 }
 

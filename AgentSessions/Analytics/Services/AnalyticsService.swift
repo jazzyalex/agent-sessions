@@ -436,8 +436,8 @@ final class AnalyticsService: ObservableObject {
         // Representative date preference:
         // 1) latest event timestamp within bounds, if any
         // 2) else session.endTime, else startTime, else modifiedAt (if within bounds)
-        // This avoids inflating counts by the number of events in a session and fixes the 90‑day spike.
-        var buckets: [String: [SessionSource: Int]] = [:]
+        // Track both session and message totals per bucket to support UI toggles.
+        var buckets: [Date: [SessionSource: (sessions: Int, messages: Int)]] = [:]
         let bounds = dateBounds(for: dateRange)
 
         func bucket(_ date: Date) -> Date {
@@ -468,26 +468,35 @@ final class AnalyticsService: ObservableObject {
             }
             guard let date = repDate else { continue }
             let bucketDate = bucket(date)
-            let key = bucketDate.ISO8601Format()
-            if buckets[key] == nil { buckets[key] = [:] }
-            buckets[key]?[session.source, default: 0] += 1
+            if buckets[bucketDate] == nil { buckets[bucketDate] = [:] }
+            let messages = max(0, session.messageCount)
+            var agentAggregate = buckets[bucketDate] ?? [:]
+            var metrics = agentAggregate[session.source] ?? (sessions: 0, messages: 0)
+            metrics.sessions += 1
+            metrics.messages += messages
+            agentAggregate[session.source] = metrics
+            buckets[bucketDate] = agentAggregate
         }
 
         // Convert to time series points
         var points: [AnalyticsTimeSeriesPoint] = []
-        for (dateKey, agentCounts) in buckets {
-            guard let date = ISO8601DateFormatter().date(from: dateKey) else { continue }
-
-            for (source, count) in agentCounts {
+        for (date, agentCounts) in buckets {
+            for (source, metrics) in agentCounts {
                 points.append(AnalyticsTimeSeriesPoint(
                     date: date,
-                    agent: source.displayName,
-                    count: count
+                    agent: source,
+                    sessionCount: metrics.sessions,
+                    messageCount: metrics.messages
                 ))
             }
         }
 
-        return points.sorted { $0.date < $1.date }
+        return points.sorted {
+            if $0.date == $1.date {
+                return $0.agent.rawValue < $1.agent.rawValue
+            }
+            return $0.date < $1.date
+        }
     }
 
     /// Count tool_call events for a session within bounds.
@@ -522,39 +531,43 @@ final class AnalyticsService: ObservableObject {
     // MARK: - Agent Breakdown
 
     private func calculateAgentBreakdown(sessions: [Session], dateRange: AnalyticsDateRange) -> [AnalyticsAgentBreakdown] {
-        let totalCount = sessions.count
-        guard totalCount > 0 else { return [] }
+        guard !sessions.isEmpty else { return [] }
 
-        // Group by agent
-        var byAgent: [SessionSource: (count: Int, duration: TimeInterval)] = [:]
-
+        var byAgent: [SessionSource: (sessions: Int, messages: Int, duration: TimeInterval)] = [:]
         let bounds = dateBounds(for: dateRange)
 
         for session in sessions {
             let source = session.source
             let duration: TimeInterval = clippedDuration(for: session, within: bounds)
+            let messages = max(0, session.messageCount)
 
             if byAgent[source] == nil {
-                byAgent[source] = (count: 0, duration: 0)
+                byAgent[source] = (sessions: 0, messages: 0, duration: 0)
             }
-            byAgent[source]?.count += 1
+            byAgent[source]?.sessions += 1
+            byAgent[source]?.messages += messages
             byAgent[source]?.duration += duration
         }
 
-        // Convert to breakdown objects
-        var breakdowns: [AnalyticsAgentBreakdown] = []
-        for (source, data) in byAgent {
-            let percentage = Double(data.count) / Double(totalCount) * 100.0
-            breakdowns.append(AnalyticsAgentBreakdown(
-                agent: source,
-                sessionCount: data.count,
-                percentage: percentage,
-                durationSeconds: data.duration
-            ))
+        let totalSessions = byAgent.values.reduce(0) { $0 + $1.sessions }
+        let totalMessages = byAgent.values.reduce(0) { $0 + $1.messages }
+
+        func percentage(_ value: Int, total: Int) -> Double {
+            guard total > 0 else { return 0 }
+            return (Double(value) / Double(total)) * 100.0
         }
 
-        // Sort by count descending
-        return breakdowns.sorted { $0.sessionCount > $1.sessionCount }
+        return byAgent.map { (source, data) in
+            AnalyticsAgentBreakdown(
+                agent: source,
+                sessionCount: data.sessions,
+                messageCount: data.messages,
+                sessionPercentage: percentage(data.sessions, total: totalSessions),
+                messagePercentage: percentage(data.messages, total: totalMessages),
+                durationSeconds: data.duration
+            )
+        }
+        .sorted { $0.sessionCount > $1.sessionCount }
     }
 
     private func calculateAgentBreakdownFastOrFallback(dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter, projectFilter: AnalyticsProjectFilter, fallbackSessions: [Session]) async -> [AnalyticsAgentBreakdown] {
@@ -562,12 +575,19 @@ final class AnalyticsService: ObservableObject {
         if projectFilter == .all, let repo = repository, await repo.isReady(), agentFilter == .all {
             let (startDay, endDay) = dayBounds(for: dateRange)
             let slices = await repo.breakdownByAgent(sources: sourcesFor(.all), dayStart: startDay, dayEnd: endDay)
-            let total = max(1, slices.reduce(0) { $0 + $1.sessionsDistinct })
+            let totalSessions = slices.reduce(0) { $0 + $1.sessionsDistinct }
+            let totalMessages = slices.reduce(0) { $0 + $1.messages }
+            func percentage(_ value: Int, total: Int) -> Double {
+                guard total > 0 else { return 0 }
+                return (Double(value) / Double(total)) * 100.0
+            }
             return slices.map { s in
                 AnalyticsAgentBreakdown(
                     agent: SessionSource(rawValue: s.source) ?? .codex,
                     sessionCount: s.sessionsDistinct,
-                    percentage: (Double(s.sessionsDistinct) / Double(total)) * 100.0,
+                    messageCount: s.messages,
+                    sessionPercentage: percentage(s.sessionsDistinct, total: totalSessions),
+                    messagePercentage: percentage(s.messages, total: totalMessages),
                     durationSeconds: s.durationSeconds
                 )
             }.sorted { $0.sessionCount > $1.sessionCount }
