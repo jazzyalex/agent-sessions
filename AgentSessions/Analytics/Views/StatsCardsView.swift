@@ -2,9 +2,11 @@ import SwiftUI
 
 /// Displays the 4 summary stat cards at the top of analytics
 struct StatsCardsView: View {
-    let summary: AnalyticsSummary
+    let snapshot: AnalyticsSnapshot
     let dateRange: AnalyticsDateRange
     @Environment(\.colorScheme) private var colorScheme
+
+    private var summary: AnalyticsSummary { snapshot.summary }
 
     var body: some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: AnalyticsDesign.metricsCardSpacing),
@@ -13,41 +15,77 @@ struct StatsCardsView: View {
         LazyVGrid(columns: columns,
                   alignment: .leading,
                   spacing: AnalyticsDesign.metricsCardSpacing) {
-            StatsCard(
-                icon: "square.stack.3d.up.fill",
-                label: "Sessions",
-                value: AnalyticsSummary.formatNumber(summary.sessions),
-                change: AnalyticsSummary.formatChange(summary.sessionsChange)
+            // Sessions Card
+            FlippableStatsCard(
+                front: StatsCard(
+                    icon: "square.stack.3d.up.fill",
+                    label: "Sessions",
+                    value: AnalyticsSummary.formatNumber(summary.sessions),
+                    change: AnalyticsSummary.formatChange(summary.sessionsChange)
+                ),
+                back: CardBackView(
+                    sparklineData: sparklineDataFor(sessions: true),
+                    agentBreakdown: snapshot.agentBreakdown,
+                    insight: peakDayFor(sessions: true).map { "Peak: \($0)" },
+                    extraInfo: nil
+                )
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
             .help(tooltipText(for: "sessions"))
 
-            StatsCard(
-                icon: "bubble.left.and.bubble.right.fill",
-                label: "Messages",
-                value: AnalyticsSummary.formatNumber(summary.messages),
-                change: AnalyticsSummary.formatChange(summary.messagesChange)
+            // Messages Card
+            FlippableStatsCard(
+                front: StatsCard(
+                    icon: "bubble.left.and.bubble.right.fill",
+                    label: "Messages",
+                    value: AnalyticsSummary.formatNumber(summary.messages),
+                    change: AnalyticsSummary.formatChange(summary.messagesChange)
+                ),
+                back: CardBackView(
+                    sparklineData: sparklineDataFor(sessions: false),
+                    agentBreakdown: snapshot.agentBreakdown,
+                    insight: peakDayFor(sessions: false).map { "Peak: \($0)" },
+                    extraInfo: summary.sessions > 0 ? String(format: "Avg %.1f msgs/session", Double(summary.messages) / Double(summary.sessions)) : nil
+                )
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
             .help(tooltipText(for: "messages"))
 
-            StatsCard(
-                icon: "clock.fill",
-                label: "Avg Session Length",
-                value: summary.avgSessionLengthFormatted,
-                change: AnalyticsSummary.formatChange(summary.avgSessionLengthChange)
+            // Avg Session Length Card
+            FlippableStatsCard(
+                front: StatsCard(
+                    icon: "clock.fill",
+                    label: "Avg Session Length",
+                    value: summary.avgSessionLengthFormatted,
+                    change: AnalyticsSummary.formatChange(summary.avgSessionLengthChange)
+                ),
+                back: CardBackView(
+                    sparklineData: [],
+                    agentBreakdown: snapshot.agentBreakdown,
+                    insight: "Distribution",
+                    extraInfo: "View by agent above"
+                )
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
             .help(tooltipText(for: "avgLength"))
 
-            StatsCard(
-                icon: "timer",
-                label: "Total Duration",
-                value: summary.activeTimeFormatted,
-                change: AnalyticsSummary.formatChange(summary.activeTimeChange)
+            // Total Duration Card
+            FlippableStatsCard(
+                front: StatsCard(
+                    icon: "timer",
+                    label: "Total Duration",
+                    value: summary.activeTimeFormatted,
+                    change: AnalyticsSummary.formatChange(summary.activeTimeChange)
+                ),
+                back: CardBackView(
+                    sparklineData: sparklineDataForDuration(),
+                    agentBreakdown: snapshot.agentBreakdown,
+                    insight: "Commands: \(AnalyticsSummary.formatNumber(summary.commands))",
+                    extraInfo: summary.commandsChange.map { AnalyticsSummary.formatChange($0) ?? "" }
+                )
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
@@ -86,6 +124,41 @@ struct StatsCardsView: View {
         default:
             return ""
         }
+    }
+
+    // MARK: - Sparkline Data Helpers
+
+    private func sparklineDataFor(sessions: Bool) -> [Double] {
+        let grouped = Dictionary(grouping: snapshot.timeSeriesData) { $0.date }
+        let sorted = grouped.sorted { $0.key < $1.key }
+
+        return sorted.map { _, points in
+            Double(points.reduce(0) { $0 + (sessions ? $1.sessionCount : $1.messageCount) })
+        }
+    }
+
+    private func sparklineDataForDuration() -> [Double] {
+        // Approximate duration from session/message counts (actual duration not in time series)
+        let grouped = Dictionary(grouping: snapshot.timeSeriesData) { $0.date }
+        let sorted = grouped.sorted { $0.key < $1.key }
+
+        return sorted.map { _, points in
+            Double(points.reduce(0) { $0 + $1.sessionCount }) * (summary.avgSessionLengthSeconds / Double(max(summary.sessions, 1)))
+        }
+    }
+
+    private func peakDayFor(sessions: Bool) -> String? {
+        let grouped = Dictionary(grouping: snapshot.timeSeriesData) { $0.date }
+        guard let peak = grouped.max(by: { a, b in
+            let aSum = a.value.reduce(0) { $0 + (sessions ? $1.sessionCount : $1.messageCount) }
+            let bSum = b.value.reduce(0) { $0 + (sessions ? $1.sessionCount : $1.messageCount) }
+            return aSum < bSum
+        }) else { return nil }
+
+        let count = peak.value.reduce(0) { $0 + (sessions ? $1.sessionCount : $1.messageCount) }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+        return "\(formatter.string(from: peak.key)) (\(count))"
     }
 }
 
@@ -143,10 +216,146 @@ private struct StatsCard: View {
     }
 }
 
+// MARK: - Mini Sparkline
+
+/// Minimal sparkline chart for card backs
+private struct MiniSparklineView: View {
+    let values: [Double]
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geometry in
+            if values.count > 1 {
+                Path { path in
+                    let maxValue = values.max() ?? 1
+                    let minValue = values.min() ?? 0
+                    let range = maxValue - minValue
+                    let adjustedRange = range > 0 ? range : 1
+
+                    let stepX = geometry.size.width / CGFloat(values.count - 1)
+
+                    for (index, value) in values.enumerated() {
+                        let x = CGFloat(index) * stepX
+                        let normalizedValue = (value - minValue) / adjustedRange
+                        let y = geometry.size.height - (CGFloat(normalizedValue) * geometry.size.height)
+
+                        if index == 0 {
+                            path.move(to: CGPoint(x: x, y: y))
+                        } else {
+                            path.addLine(to: CGPoint(x: x, y: y))
+                        }
+                    }
+                }
+                .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+            }
+        }
+    }
+}
+
+// MARK: - Card Back View
+
+/// Back side of flippable stats card
+private struct CardBackView: View {
+    let sparklineData: [Double]
+    let agentBreakdown: [AnalyticsAgentBreakdown]
+    let insight: String?
+    let extraInfo: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Sparkline
+            if !sparklineData.isEmpty {
+                MiniSparklineView(values: sparklineData, color: .blue.opacity(0.7))
+                    .frame(height: 24)
+            } else {
+                Spacer().frame(height: 24)
+            }
+
+            Divider().opacity(0.2)
+
+            // Agent breakdown
+            if !agentBreakdown.isEmpty {
+                Text("BY AGENT")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.5)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(agentBreakdown.prefix(3), id: \.agent) { agent in
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.agentColor(for: agent.agent))
+                                .frame(width: 5, height: 5)
+                            Text("\(agent.agent.displayName) \(agent.sessionCount)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.primary)
+                            Text("(\(Int(agent.sessionPercentage))%)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Divider().opacity(0.2)
+
+            // Insight/extra info
+            VStack(alignment: .leading, spacing: 2) {
+                if let insight = insight {
+                    Text(insight)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                if let extraInfo = extraInfo {
+                    Text(extraInfo)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Flippable Card
+
+/// Wrapper that adds flip interaction to stats cards
+private struct FlippableStatsCard: View {
+    let front: StatsCard
+    let back: CardBackView
+    @State private var isFlipped = false
+
+    var body: some View {
+        ZStack {
+            // Front side
+            front
+                .opacity(isFlipped ? 0 : 1)
+                .rotation3DEffect(
+                    .degrees(isFlipped ? 180 : 0),
+                    axis: (x: 0, y: 1, z: 0)
+                )
+
+            // Back side
+            back
+                .opacity(isFlipped ? 1 : 0)
+                .rotation3DEffect(
+                    .degrees(isFlipped ? 0 : -180),
+                    axis: (x: 0, y: 1, z: 0)
+                )
+        }
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                isFlipped.toggle()
+            }
+        }
+        .accessibilityHint("Tap to flip card and see more details")
+    }
+}
+
 // MARK: - Previews
 
 #Preview("Stats Cards") {
-    StatsCardsView(
+    let snapshot = AnalyticsSnapshot(
         summary: AnalyticsSummary(
             sessions: 87,
             sessionsChange: 12,
@@ -159,8 +368,17 @@ private struct StatsCard: View {
             avgSessionLengthSeconds: 1260, // 21m average
             avgSessionLengthChange: 5
         ),
-        dateRange: .last7Days
+        timeSeriesData: [],
+        agentBreakdown: [
+            AnalyticsAgentBreakdown(agent: .codex, sessionCount: 52, messageCount: 210, sessionPercentage: 60, messagePercentage: 55, durationSeconds: 18720),
+            AnalyticsAgentBreakdown(agent: .claude, sessionCount: 35, messageCount: 132, sessionPercentage: 40, messagePercentage: 45, durationSeconds: 11460)
+        ],
+        heatmapCells: [],
+        mostActiveTimeRange: nil,
+        lastUpdated: Date()
     )
-    .padding()
-    .frame(height: 140)
+
+    StatsCardsView(snapshot: snapshot, dateRange: .last7Days)
+        .padding()
+        .frame(height: 140)
 }
