@@ -12,7 +12,7 @@ struct TimeOfDayHeatmapView: View {
     private let cols = 8  // 12a-9p buckets
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 16) {
             // Header
             Text("Time of Day")
                 .font(.system(size: 16, weight: .semibold))
