@@ -48,14 +48,6 @@ struct SessionsChartView: View {
                 .help(metric.detailDescription)
             }
 
-            // Y-axis label (horizontal, above chart)
-            if !data.isEmpty {
-                Text(metric.axisLabel)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
-            }
-
             // Chart
             if data.isEmpty {
                 emptyState

@@ -20,8 +20,8 @@ enum AnalyticsDesign {
     /// Internal spacing between individual stats cards in the top grid
     static let metricsCardSpacing: CGFloat = 15
 
-    /// Internal padding for stats cards
-    static let statsCardPadding: CGFloat = 20
+    /// Internal padding for stats cards (match charts/insights)
+    static let statsCardPadding: CGFloat = 24
 
     /// Internal padding for large cards (charts, breakdowns)
     static let cardPadding: CGFloat = 24
