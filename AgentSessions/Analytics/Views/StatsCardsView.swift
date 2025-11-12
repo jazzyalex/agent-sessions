@@ -324,16 +324,29 @@ private struct FlippableStatsCard: View {
     let front: StatsCard
     let back: CardBackView
     @State private var isFlipped = false
+    @State private var isHovered = false
 
     var body: some View {
         ZStack {
             // Front side
-            front
-                .opacity(isFlipped ? 0 : 1)
-                .rotation3DEffect(
-                    .degrees(isFlipped ? 180 : 0),
-                    axis: (x: 0, y: 1, z: 0)
-                )
+            ZStack(alignment: .topTrailing) {
+                front
+
+                // Flip hint icon
+                if !isFlipped {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .opacity(isHovered ? 0.8 : 0.3)
+                        .padding(8)
+                        .animation(.easeInOut(duration: 0.2), value: isHovered)
+                }
+            }
+            .opacity(isFlipped ? 0 : 1)
+            .rotation3DEffect(
+                .degrees(isFlipped ? 180 : 0),
+                axis: (x: 0, y: 1, z: 0)
+            )
 
             // Back side
             back
@@ -343,9 +356,21 @@ private struct FlippableStatsCard: View {
                     axis: (x: 0, y: 1, z: 0)
                 )
         }
+        .contentShape(Rectangle()) // Make entire bounds tappable
+        .onHover { hovering in
+            isHovered = hovering
+        }
         .onTapGesture {
             withAnimation(.easeInOut(duration: 0.4)) {
                 isFlipped.toggle()
+            }
+        }
+        .onContinuousHover { phase in
+            switch phase {
+            case .active:
+                NSCursor.pointingHand.push()
+            case .ended:
+                NSCursor.pop()
             }
         }
         .accessibilityHint("Tap to flip card and see more details")
