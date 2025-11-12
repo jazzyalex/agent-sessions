@@ -142,7 +142,8 @@ struct AnalyticsView: View {
                 }
                 .frame(height: AnalyticsDesign.secondaryCardHeight)
             }
-            .padding(AnalyticsDesign.windowPadding)  // Single source of outer padding
+            .padding(AnalyticsDesign.windowPadding)  // Outer padding
+            .padding(.bottom, AnalyticsDesign.windowPadding)  // Additional bottom padding to match top spacing
         }
         .background(Color.analyticsBackground)
     }
