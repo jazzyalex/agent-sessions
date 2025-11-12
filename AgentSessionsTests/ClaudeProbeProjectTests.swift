@@ -34,56 +34,51 @@ final class ClaudeProbeProjectTests: XCTestCase {
         XCTAssertEqual(id, "proj-123")
     }
 
-    func testCleanupRefusesWhenMarkerMissing() throws {
+    func testCleanupSucceedsForTinyProbeSession() throws {
         let testRoot = mkdtemp(prefix: "as-probe-projects")
         let probeWD = mkdtemp(prefix: "as-probe-wd")
         setEnv("AS_TEST_CLAUDE_PROJECTS_ROOT", testRoot.path)
         setEnv("AS_TEST_PROBE_WD", probeWD.path)
 
         // Make project and metadata
-        let projectDir = testRoot.appendingPathComponent("proj-no-marker")
+        let projectDir = testRoot.appendingPathComponent("proj-tiny")
         try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: ["rootPath": probeWD.path], options: []).write(to: projectDir.appendingPathComponent("project.json"))
 
-        // A session file whose first user message lacks the marker
+        // A tiny session (≤5 events) from probe WD - should be safe
         let sessionFile = projectDir.appendingPathComponent("session.ndjson")
-        let userLine = ["type": "user", "sessionId": "s1", "message": ["content": "hello world"]] as [String : Any]
-        let assistant = ["type": "assistant", "sessionId": "s1", "message": ["content": "ok"]] as [String : Any]
-        let data1 = try JSONSerialization.data(withJSONObject: userLine)
-        let data2 = try JSONSerialization.data(withJSONObject: assistant)
-        let content = String(data: data1, encoding: .utf8)! + "\n" + String(data: data2, encoding: .utf8)! + "\n"
+        let assistant = ["type": "assistant", "sessionId": "s1", "message": ["content": "usage data"]] as [String : Any]
+        let data = try JSONSerialization.data(withJSONObject: assistant)
+        let content = String(data: data, encoding: .utf8)! + "\n"
         try content.write(to: sessionFile, atomically: true, encoding: .utf8)
 
         let status = ClaudeProbeProject.cleanupNowUserInitiated()
         switch status {
-        case .unsafe:
-            break // expected
+        case .success:
+            break // expected - path-based filtering allows cleanup
         default:
-            XCTFail("Expected unsafe, got: \(status)")
+            XCTFail("Expected success, got: \(status)")
         }
-        // Directory should still exist
+        // Directory should be deleted
         var isDir: ObjCBool = false
-        XCTAssertTrue(FileManager.default.fileExists(atPath: projectDir.path, isDirectory: &isDir) && isDir.boolValue)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: projectDir.path, isDirectory: &isDir))
     }
 
-    func testCleanupDeletesWhenAllMarked() throws {
+    func testCleanupDeletesValidProbeProject() throws {
         let testRoot = mkdtemp(prefix: "as-probe-projects")
         let probeWD = mkdtemp(prefix: "as-probe-wd")
         setEnv("AS_TEST_CLAUDE_PROJECTS_ROOT", testRoot.path)
         setEnv("AS_TEST_PROBE_WD", probeWD.path)
 
-        let projectDir = testRoot.appendingPathComponent("proj-marked")
+        let projectDir = testRoot.appendingPathComponent("proj-valid")
         try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: ["rootPath": probeWD.path], options: []).write(to: projectDir.appendingPathComponent("project.json"))
 
-        // Session: first user message with marker
+        // Session: tiny probe session from correct working directory
         let sessionFile = projectDir.appendingPathComponent("session.jsonl")
-        let marker = ClaudeProbeConfig.markerPrefix
-        let userLine = ["type": "user", "sessionId": "s2", "message": ["content": "\(marker) ping"]] as [String : Any]
-        let assistant = ["type": "assistant", "sessionId": "s2", "message": ["content": "pong"]] as [String : Any]
-        let data1 = try JSONSerialization.data(withJSONObject: userLine)
-        let data2 = try JSONSerialization.data(withJSONObject: assistant)
-        let content = String(data: data1, encoding: .utf8)! + "\n" + String(data: data2, encoding: .utf8)! + "\n"
+        let assistant = ["type": "assistant", "sessionId": "s2", "message": ["content": "usage: 45%"]] as [String : Any]
+        let data = try JSONSerialization.data(withJSONObject: assistant)
+        let content = String(data: data, encoding: .utf8)! + "\n"
         try content.write(to: sessionFile, atomically: true, encoding: .utf8)
 
         let status = ClaudeProbeProject.cleanupNowUserInitiated()

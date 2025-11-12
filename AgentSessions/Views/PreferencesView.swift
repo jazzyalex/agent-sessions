@@ -52,7 +52,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.hideLowMessageSessions) var hideLowMessageSessionsPref: Bool = true
     // Per-agent polling intervals
     @AppStorage(PreferencesKey.codexPollingInterval) var codexPollingInterval: Int = 300   // 1/5/15 min options, default 5m
-    @AppStorage(PreferencesKey.claudePollingInterval) var claudePollingInterval: Int = 3600 // 30/60/120 min options, default 60m
+    @AppStorage(PreferencesKey.claudePollingInterval) var claudePollingInterval: Int = 900 // 3/15/30 min options, default 15m
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab

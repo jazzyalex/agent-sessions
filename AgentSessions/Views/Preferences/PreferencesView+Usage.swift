@@ -57,17 +57,17 @@ extension PreferencesView {
                 }
                 labeledRow("Refresh Interval") {
                     Picker("", selection: $claudePollingInterval) {
+                        Text("3 minutes").tag(180)
+                        Text("15 minutes").tag(900)
                         Text("30 minutes").tag(1800)
-                        Text("60 minutes").tag(3600)
-                        Text("120 minutes").tag(7200)
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 520)
                     .help("How often to refresh Claude usage")
                 }
-                Text("Claude limit tracking consumes one message per probe and decreases Claude's usage.")
+                Text("Probes use /usage command only (no user messages sent).")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.secondary)
             }
 
             // Strip options (shared)

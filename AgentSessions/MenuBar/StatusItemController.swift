@@ -125,7 +125,7 @@ final class StatusItemController: NSObject {
 
         menu.addItem(makeActionItem(title: "Hard Refresh Codex (consumes tokens)", action: #selector(refreshCodexHard)))
         if claudeEnabled {
-            menu.addItem(makeActionItem(title: "Hard Refresh Claude (consumes ~1% of 5h limit in Pro $20 plan)", action: #selector(refreshClaudeHard)))
+            menu.addItem(makeActionItem(title: "Hard Refresh Claude (free, no tokens)", action: #selector(refreshClaudeHard)))
         }
         menu.addItem(NSMenuItem.separator())
         menu.addItem(makeActionItem(title: "Open Preferences…", action: #selector(openPreferences)))

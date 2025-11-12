@@ -54,10 +54,10 @@ Non-Goals
 1. Determine whether the probe data is stale (see §8).
 2. If stale:
    - Invoke Claude Code with Probe WD as the current working directory.
-   - Send a fixed, recognizable first user message (probe marker), e.g. prefix with `[AS_USAGE_PROBE v1]` and include parsing instructions.
-3. Parse the assistant reply to extract usage and limits.
-4. Store the last successful probe timestamp and parsed data in AS’s store.
-5. Claude logs these sessions to the probe project; AS’s import/indexer filters them from user-visible surfaces by project or marker prefix.
+   - Navigate directly to `/usage` command (no user messages sent to preserve usage limits).
+3. Parse the usage screen output to extract usage percentages and reset times.
+4. Store the last successful probe timestamp and parsed data in AS's store.
+5. Claude logs these sessions to the probe project; AS's import/indexer filters them from user-visible surfaces by working directory path matching.
 
 **5. Identifying the Probe Project**
 
@@ -110,9 +110,10 @@ Cleanup deletes the probe project directory only when safe.
 
 **7.2 Safety Validation**
 1. Inspect session storage (e.g., JSONL files) inside the project.
-2. Validate every user message’s first entry begins with `[AS_USAGE_PROBE v1]`.
-3. Optional checks: confirm sessions are small and lack interactive patterns.
-4. If any session fails validation, cancel deletion and notify the user: “Probe project appears to contain non-probe sessions; cleanup skipped to avoid data loss.”
+2. Validate sessions are from the probe working directory and match the probe project path.
+3. Safety checks: confirm sessions are tiny (≤5 events), contain no tool calls, and have only user/assistant events.
+4. If any session fails validation, cancel deletion and notify the user: "Probe project appears to contain non-probe sessions; cleanup skipped to avoid data loss."
+5. Note: Probe sessions send no user messages (only `/usage` command), so they should be minimal.
 
 **7.3 Deletion Action**
 1. When validation passes, delete the entire probe project directory.

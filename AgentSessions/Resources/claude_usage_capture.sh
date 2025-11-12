@@ -160,18 +160,10 @@ fi
 # ============================================================================
 # Send /usage command and navigate to Usage tab
 # ============================================================================
+# NOTE: Unlike Codex, Claude Code's /usage command works immediately without
+#       requiring session activation. We go directly to /usage without sending
+#       any user messages, which preserves the 5h usage limit.
 
-###############################################################################
-# Send a one-line chat marker to identify this as an Agent Sessions probe
-###############################################################################
-"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "[AS_USAGE_PROBE v1] usage probe" 2>/dev/null
-sleep 0.2
-"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
-sleep 0.6
-
-###############################################################################
-# Open /usage and navigate to the Usage section
-###############################################################################
 # Send /usage
 "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "/" 2>/dev/null
 sleep 0.2

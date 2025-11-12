@@ -21,9 +21,8 @@ final class ProbeAutoCleanupTests: XCTestCase {
         try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: ["rootPath": probeWD.path], options: [])
             .write(to: projectDir.appendingPathComponent("project.json"))
-        // Add one session with marker
-        let marker = ClaudeProbeConfig.markerPrefix
-        let sessionLine = ["type": "user", "sessionId": "s1", "message": ["content": "\(marker) ping"]] as [String : Any]
+        // Add one tiny probe session (assistant response only)
+        let sessionLine = ["type": "assistant", "sessionId": "s1", "message": ["content": "usage: 50%"]] as [String : Any]
         let data = try JSONSerialization.data(withJSONObject: sessionLine)
         try (String(data: data, encoding: .utf8)! + "\n").write(to: projectDir.appendingPathComponent("one.jsonl"), atomically: true, encoding: .utf8)
 
