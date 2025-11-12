@@ -26,6 +26,7 @@ struct StatsCardsView: View {
                 back: CardBackView(
                     sparklineData: sparklineDataFor(sessions: true),
                     agentBreakdown: snapshot.agentBreakdown,
+                    metric: .sessions,
                     insight: peakDayFor(sessions: true).map { "Peak: \($0)" },
                     extraInfo: nil
                 )
@@ -45,6 +46,7 @@ struct StatsCardsView: View {
                 back: CardBackView(
                     sparklineData: sparklineDataFor(sessions: false),
                     agentBreakdown: snapshot.agentBreakdown,
+                    metric: .messages,
                     insight: peakDayFor(sessions: false).map { "Peak: \($0)" },
                     extraInfo: summary.sessions > 0 ? String(format: "Avg %.1f msgs/session", Double(summary.messages) / Double(summary.sessions)) : nil
                 )
@@ -64,6 +66,7 @@ struct StatsCardsView: View {
                 back: CardBackView(
                     sparklineData: sparklineDataForAvgLength(),
                     agentBreakdown: snapshot.agentBreakdown,
+                    metric: .duration,
                     insight: "Trend",
                     extraInfo: "Messages per session over time"
                 )
@@ -83,6 +86,7 @@ struct StatsCardsView: View {
                 back: CardBackView(
                     sparklineData: sparklineDataForDuration(),
                     agentBreakdown: snapshot.agentBreakdown,
+                    metric: .duration,
                     insight: "Commands: \(AnalyticsSummary.formatNumber(summary.commands))",
                     extraInfo: summary.commandsChange.map { AnalyticsSummary.formatChange($0) ?? "" }
                 )
@@ -266,10 +270,18 @@ private struct MiniSparklineView: View {
 
 // MARK: - Card Back View
 
+/// Metric type for card back display
+private enum CardBackMetric {
+    case sessions
+    case messages
+    case duration
+}
+
 /// Back side of flippable stats card
 private struct CardBackView: View {
     let sparklineData: [Double]
     let agentBreakdown: [AnalyticsAgentBreakdown]
+    let metric: CardBackMetric
     let insight: String?
     let extraInfo: String?
 
@@ -298,10 +310,10 @@ private struct CardBackView: View {
                             Circle()
                                 .fill(Color.agentColor(for: agent.agent))
                                 .frame(width: 5, height: 5)
-                            Text("\(agent.agent.displayName) \(agent.sessionCount)")
+                            Text(agentDisplayText(for: agent))
                                 .font(.system(size: 10))
                                 .foregroundStyle(.primary)
-                            Text("(\(Int(agent.sessionPercentage))%)")
+                            Text("(\(Int(agentPercentage(for: agent)))%)")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
                         }
@@ -326,6 +338,30 @@ private struct CardBackView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    private func agentDisplayText(for agent: AnalyticsAgentBreakdown) -> String {
+        switch metric {
+        case .sessions:
+            return "\(agent.agent.displayName) \(agent.sessionCount)"
+        case .messages:
+            return "\(agent.agent.displayName) \(agent.messageCount)"
+        case .duration:
+            return "\(agent.agent.displayName) \(AnalyticsSummary.formatDuration(agent.durationSeconds))"
+        }
+    }
+
+    private func agentPercentage(for agent: AnalyticsAgentBreakdown) -> Double {
+        switch metric {
+        case .sessions:
+            return agent.sessionPercentage
+        case .messages:
+            return agent.messagePercentage
+        case .duration:
+            // Calculate duration percentage from total
+            let total = agentBreakdown.reduce(0.0) { $0 + $1.durationSeconds }
+            return total > 0 ? (agent.durationSeconds / total * 100.0) : 0
+        }
     }
 }
 
