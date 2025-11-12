@@ -25,6 +25,7 @@ extension PreferencesView {
                     .disabled(!menuBarEnabled)
                     .frame(maxWidth: 360)
                     .help("Choose which agent usage the menu bar item displays")
+                    .accessibilityLabel(Text("Menu bar source"))
                 }
 
                 labeledRow("Scope") {
@@ -37,6 +38,7 @@ extension PreferencesView {
                     .disabled(!menuBarEnabled)
                     .frame(maxWidth: 360)
                     .help("Select whether the menu bar shows 5-hour, weekly, or both usage windows")
+                    .accessibilityLabel(Text("Menu bar scope"))
                 }
 
                 labeledRow("Style") {
@@ -49,6 +51,7 @@ extension PreferencesView {
                     .disabled(!menuBarEnabled)
                     .frame(maxWidth: 360)
                     .help("Switch between bar graphs and numeric usage in the menu bar")
+                    .accessibilityLabel(Text("Menu bar style"))
                 }
 
                 Text("Source: Codex, Claude, or Both. Style: Bars or numbers. Scope: 5h, weekly, or both.")

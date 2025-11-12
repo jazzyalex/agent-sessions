@@ -14,7 +14,7 @@ Goal: Support users whose providers offer both subscription-based caps (e.g., 5h
 
 - Add billing probe adapters (`codex_billing_capture.sh`, `claude_billing_capture.sh`) that fetch current balance. Never auto-run; only via explicit user action.
 - TTL: default 6h (`FreshUntilCredits*`). Persist to survive relaunch.
-- Use existing `UsageProbeGate` budget and visibility rules for safety.
+- Manual probes only; do not add automatic schedulers or hidden background polling.
 
 ## UI
 
@@ -38,4 +38,3 @@ Goal: Support users whose providers offer both subscription-based caps (e.g., 5h
 1) Implement data model + Preferences section behind a feature flag; no strip/menu changes.
 2) Add optional strip/menu lines for credits (opt-in).
 3) Default-on once validated, refine copy and thresholds.
-
