@@ -237,17 +237,32 @@ final class AnalyticsService: ObservableObject {
             let cur = await repo.summary(sources: sources, dayStart: startDay, dayEnd: endDay)
             let curAvgSessionLength = await repo.avgSessionLength(sources: sources, dayStart: startDay, dayEnd: endDay)
 
-            let prevB = previousPeriodBounds(for: dateRange)
-            let prevStart = prevB.start.map { dayString($0) }
-            let prevEnd = prevB.end.map { dayString($0.addingTimeInterval(-1)) }
-            let prev = await repo.summary(sources: sources, dayStart: prevStart, dayEnd: prevEnd)
-            let prevAvgSessionLength = await repo.avgSessionLength(sources: sources, dayStart: prevStart, dayEnd: prevEnd)
+            // For "All Time", don't calculate changes (no meaningful "previous all time")
+            let sessionsChange: Double?
+            let messagesChange: Double?
+            let commandsChange: Double?
+            let activeTimeChange: Double?
+            let avgSessionLengthChange: Double?
 
-            let sessionsChange = calculatePercentageChange(current: cur.sessionsDistinct, previous: prev.sessionsDistinct)
-            let messagesChange = calculatePercentageChange(current: cur.messages, previous: prev.messages)
-            let commandsChange = calculatePercentageChange(current: cur.commands, previous: prev.commands)
-            let activeTimeChange = calculatePercentageChange(current: cur.durationSeconds, previous: prev.durationSeconds)
-            let avgSessionLengthChange = calculatePercentageChange(current: curAvgSessionLength, previous: prevAvgSessionLength)
+            if dateRange == .allTime {
+                sessionsChange = nil
+                messagesChange = nil
+                commandsChange = nil
+                activeTimeChange = nil
+                avgSessionLengthChange = nil
+            } else {
+                let prevB = previousPeriodBounds(for: dateRange)
+                let prevStart = prevB.start.map { dayString($0) }
+                let prevEnd = prevB.end.map { dayString($0.addingTimeInterval(-1)) }
+                let prev = await repo.summary(sources: sources, dayStart: prevStart, dayEnd: prevEnd)
+                let prevAvgSessionLength = await repo.avgSessionLength(sources: sources, dayStart: prevStart, dayEnd: prevEnd)
+
+                sessionsChange = calculatePercentageChange(current: cur.sessionsDistinct, previous: prev.sessionsDistinct)
+                messagesChange = calculatePercentageChange(current: cur.messages, previous: prev.messages)
+                commandsChange = calculatePercentageChange(current: cur.commands, previous: prev.commands)
+                activeTimeChange = calculatePercentageChange(current: cur.durationSeconds, previous: prev.durationSeconds)
+                avgSessionLengthChange = calculatePercentageChange(current: curAvgSessionLength, previous: prevAvgSessionLength)
+            }
 
             return AnalyticsSummary(
                 sessions: cur.sessionsDistinct,
@@ -271,9 +286,6 @@ final class AnalyticsService: ObservableObject {
         let currentBounds = dateBounds(for: dateRange, now: now)
         let current = filterSessionsWithinBounds(allSessions, bounds: currentBounds, agentFilter: agentFilter, projectFilter: projectFilter)
 
-        let previousBounds = previousPeriodBounds(for: dateRange, now: now)
-        let previous = filterSessionsWithinBounds(allSessions, bounds: previousBounds, agentFilter: agentFilter, projectFilter: projectFilter)
-
         let sessionCount = current.count
         let messageCount = current.reduce(0) { $0 + $1.messageCount }
         let activeTime = current.reduce(0.0) { total, session in total + clippedDuration(for: session, within: currentBounds) }
@@ -281,13 +293,29 @@ final class AnalyticsService: ObservableObject {
         // Calculate average session length (total duration / session count)
         let avgSessionLength = sessionCount > 0 ? activeTime / Double(sessionCount) : 0
 
-        let sessionsChange = calculatePercentageChange(current: sessionCount, previous: previous.count)
-        let prevMessageCount = previous.reduce(0) { $0 + $1.messageCount }
-        let messagesChange = calculatePercentageChange(current: messageCount, previous: prevMessageCount)
-        let prevActiveTime = previous.reduce(0.0) { total, session in total + clippedDuration(for: session, within: previousBounds) }
-        let activeTimeChange = calculatePercentageChange(current: activeTime, previous: prevActiveTime)
-        let prevAvgSessionLength = previous.count > 0 ? prevActiveTime / Double(previous.count) : 0
-        let avgSessionLengthChange = calculatePercentageChange(current: avgSessionLength, previous: prevAvgSessionLength)
+        // For "All Time", don't calculate changes (no meaningful "previous all time")
+        let sessionsChange: Double?
+        let messagesChange: Double?
+        let activeTimeChange: Double?
+        let avgSessionLengthChange: Double?
+
+        if dateRange == .allTime {
+            sessionsChange = nil
+            messagesChange = nil
+            activeTimeChange = nil
+            avgSessionLengthChange = nil
+        } else {
+            let previousBounds = previousPeriodBounds(for: dateRange, now: now)
+            let previous = filterSessionsWithinBounds(allSessions, bounds: previousBounds, agentFilter: agentFilter, projectFilter: projectFilter)
+
+            sessionsChange = calculatePercentageChange(current: sessionCount, previous: previous.count)
+            let prevMessageCount = previous.reduce(0) { $0 + $1.messageCount }
+            messagesChange = calculatePercentageChange(current: messageCount, previous: prevMessageCount)
+            let prevActiveTime = previous.reduce(0.0) { total, session in total + clippedDuration(for: session, within: previousBounds) }
+            activeTimeChange = calculatePercentageChange(current: activeTime, previous: prevActiveTime)
+            let prevAvgSessionLength = previous.count > 0 ? prevActiveTime / Double(previous.count) : 0
+            avgSessionLengthChange = calculatePercentageChange(current: avgSessionLength, previous: prevAvgSessionLength)
+        }
 
         return AnalyticsSummary(
             sessions: sessionCount,
@@ -315,12 +343,27 @@ final class AnalyticsService: ObservableObject {
 
     private func calculatePercentageChange(current: Int, previous: Int) -> Double? {
         guard previous > 0 else { return nil }
-        return Double(current - previous) / Double(previous) * 100.0
+        let change = Double(current - previous) / Double(previous) * 100.0
+
+        // If change is extreme (>1000%), it's likely unreliable data (not enough history)
+        // Return nil to avoid showing misleading percentages
+        if abs(change) > 1000 {
+            return nil
+        }
+
+        return change
     }
 
     private func calculatePercentageChange(current: TimeInterval, previous: TimeInterval) -> Double? {
         guard previous > 0 else { return nil }
-        return (current - previous) / previous * 100.0
+        let change = (current - previous) / previous * 100.0
+
+        // If change is extreme (>1000%), it's likely unreliable data (not enough history)
+        if abs(change) > 1000 {
+            return nil
+        }
+
+        return change
     }
 
     // MARK: - Date bounds helpers

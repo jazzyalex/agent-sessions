@@ -3,6 +3,7 @@ import SwiftUI
 /// Displays the 4 summary stat cards at the top of analytics
 struct StatsCardsView: View {
     let summary: AnalyticsSummary
+    let dateRange: AnalyticsDateRange
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -20,7 +21,7 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
-            .help("Unique conversation sessions (matches Sessions list filters). Change compares to the previous range; +10% means more sessions than before, -10% means fewer.")
+            .help(tooltipText(for: "sessions"))
 
             StatsCard(
                 icon: "bubble.left.and.bubble.right.fill",
@@ -30,7 +31,7 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
-            .help("Total messages exchanged in the selected period. Change compares to the previous range; +10% means more messages than before, -10% means fewer.")
+            .help(tooltipText(for: "messages"))
 
             StatsCard(
                 icon: "clock.fill",
@@ -40,7 +41,7 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
-            .help("Average duration per session (first to last message). Change compares to the previous range; +10% means sessions ran longer, -10% shorter.")
+            .help(tooltipText(for: "avgLength"))
 
             StatsCard(
                 icon: "timer",
@@ -50,10 +51,41 @@ struct StatsCardsView: View {
             )
             .padding(AnalyticsDesign.statsCardPadding)
             .analyticsCard(padding: 0, colorScheme: colorScheme)
-            .help("Total active time across all sessions. Change compares to the previous range; +10% means more active time than before, -10% means less.")
+            .help(tooltipText(for: "totalDuration"))
         }
         .fixedSize(horizontal: false, vertical: true)  // Grid tells the real height
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tooltipText(for metric: String) -> String {
+        let comparisonText: String
+        switch dateRange {
+        case .today:
+            comparisonText = "Change shows vs. yesterday."
+        case .last7Days:
+            comparisonText = "Change shows vs. previous 7 days."
+        case .last30Days:
+            comparisonText = "Change shows vs. previous 30 days."
+        case .last90Days:
+            comparisonText = "Change shows vs. previous 90 days."
+        case .allTime:
+            comparisonText = "No comparison available for all-time view."
+        case .custom:
+            comparisonText = "Change shows vs. prior period of equal length."
+        }
+
+        switch metric {
+        case "sessions":
+            return "Unique conversation sessions.\n\(comparisonText)"
+        case "messages":
+            return "Total messages exchanged.\n\(comparisonText)"
+        case "avgLength":
+            return "Average session duration (first to last message).\n\(comparisonText)"
+        case "totalDuration":
+            return "Total active time across all sessions.\n\(comparisonText)"
+        default:
+            return ""
+        }
     }
 }
 
@@ -114,18 +146,21 @@ private struct StatsCard: View {
 // MARK: - Previews
 
 #Preview("Stats Cards") {
-    StatsCardsView(summary: AnalyticsSummary(
-        sessions: 87,
-        sessionsChange: 12,
-        messages: 342,
-        messagesChange: 8,
-        commands: 198,
-        commandsChange: -3,
-        activeTimeSeconds: 30180, // 8h 23m
-        activeTimeChange: 15,
-        avgSessionLengthSeconds: 1260, // 21m average
-        avgSessionLengthChange: 5
-    ))
+    StatsCardsView(
+        summary: AnalyticsSummary(
+            sessions: 87,
+            sessionsChange: 12,
+            messages: 342,
+            messagesChange: 8,
+            commands: 198,
+            commandsChange: -3,
+            activeTimeSeconds: 30180, // 8h 23m
+            activeTimeChange: 15,
+            avgSessionLengthSeconds: 1260, // 21m average
+            avgSessionLengthChange: 5
+        ),
+        dateRange: .last7Days
+    )
     .padding()
     .frame(height: 140)
 }
