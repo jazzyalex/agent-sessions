@@ -19,29 +19,41 @@ struct SessionsChartView: View {
 
                 Spacer()
 
-                Picker("Aggregation", selection: $metric) {
+                // Legend
+                HStack(spacing: 20) {
+                    ForEach(uniqueAgents, id: \.self) { agent in
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color.agentColor(for: agent))
+                                .frame(width: 8, height: 8)
+
+                            Text(agent.displayName)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                // Metric toggle (no label for cleaner look)
+                Picker("", selection: $metric) {
                     ForEach(AnalyticsAggregationMetric.allCases) { option in
                         Text(option.displayName).tag(option)
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 220)
+                .labelsHidden()
+                .frame(width: 200)
                 .help(metric.detailDescription)
+            }
 
-                // Legend
-                HStack(spacing: 20) {
-                    ForEach(uniqueAgents, id: \.self) { agent in
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(Color.agentColor(for: agent))
-                                .frame(width: 10, height: 10)
-
-                            Text(agent.displayName)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
+            // Y-axis label (horizontal, above chart)
+            if !data.isEmpty {
+                Text(metric.axisLabel)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
             }
 
             // Chart
@@ -83,9 +95,6 @@ struct SessionsChartView: View {
                     .foregroundStyle(Color("AxisGridline"))
                 AxisValueLabel()
             }
-        }
-        .chartYAxisLabel(position: .leading) {
-            Text(metric.axisLabel)
         }
         .frame(minHeight: 200, maxHeight: .infinity)
         .animation(.easeInOut(duration: AnalyticsDesign.chartDuration), value: data)

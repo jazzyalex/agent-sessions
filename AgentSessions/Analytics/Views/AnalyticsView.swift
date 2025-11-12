@@ -10,7 +10,7 @@ struct AnalyticsView: View {
     @State private var projectFilter: AnalyticsProjectFilter = .all
     @State private var availableProjects: [String] = []
     @State private var isRefreshing: Bool = false
-    @State private var aggregationMetric: AnalyticsAggregationMetric = .sessions
+    @State private var aggregationMetric: AnalyticsAggregationMetric = .messages
 
     var body: some View {
         VStack(spacing: 0) {
