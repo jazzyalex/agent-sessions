@@ -31,8 +31,7 @@ struct StatsCardsView: View {
                     extraInfo: nil
                 )
             )
-            .padding(AnalyticsDesign.statsCardPadding)
-            .analyticsCard(padding: 0, colorScheme: colorScheme)
+            .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
             .help(tooltipText(for: "sessions"))
 
             // Messages Card
@@ -51,8 +50,7 @@ struct StatsCardsView: View {
                     extraInfo: summary.sessions > 0 ? String(format: "Avg %.1f msgs/session", Double(summary.messages) / Double(summary.sessions)) : nil
                 )
             )
-            .padding(AnalyticsDesign.statsCardPadding)
-            .analyticsCard(padding: 0, colorScheme: colorScheme)
+            .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
             .help(tooltipText(for: "messages"))
 
             // Avg Session Length Card
@@ -71,8 +69,7 @@ struct StatsCardsView: View {
                     extraInfo: "Messages per session over time"
                 )
             )
-            .padding(AnalyticsDesign.statsCardPadding)
-            .analyticsCard(padding: 0, colorScheme: colorScheme)
+            .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
             .help(tooltipText(for: "avgLength"))
 
             // Total Duration Card
@@ -91,8 +88,7 @@ struct StatsCardsView: View {
                     extraInfo: summary.commandsChange.map { AnalyticsSummary.formatChange($0) ?? "" }
                 )
             )
-            .padding(AnalyticsDesign.statsCardPadding)
-            .analyticsCard(padding: 0, colorScheme: colorScheme)
+            .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
             .help(tooltipText(for: "totalDuration"))
         }
         .fixedSize(horizontal: false, vertical: true)  // Grid tells the real height
