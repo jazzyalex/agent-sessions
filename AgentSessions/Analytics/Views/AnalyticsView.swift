@@ -116,7 +116,7 @@ struct AnalyticsView: View {
         ScrollView {
             VStack(spacing: AnalyticsDesign.sectionSpacing) {
                 // Stats cards
-                StatsCardsView(summary: service.snapshot.summary)
+                StatsCardsView(summary: service.snapshot.summary, dateRange: dateRange)
 
                 // Primary chart
                 SessionsChartView(
