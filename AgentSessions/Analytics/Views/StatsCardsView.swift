@@ -32,6 +32,7 @@ struct StatsCardsView: View {
                 )
             )
             .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
+            .frame(minHeight: AnalyticsDesign.statsCardHeight)
             .help(tooltipText(for: "sessions"))
 
             // Messages Card
@@ -51,6 +52,7 @@ struct StatsCardsView: View {
                 )
             )
             .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
+            .frame(minHeight: AnalyticsDesign.statsCardHeight)
             .help(tooltipText(for: "messages"))
 
             // Avg Session Length Card
@@ -70,6 +72,7 @@ struct StatsCardsView: View {
                 )
             )
             .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
+            .frame(minHeight: AnalyticsDesign.statsCardHeight)
             .help(tooltipText(for: "avgLength"))
 
             // Total Duration Card
@@ -89,6 +92,7 @@ struct StatsCardsView: View {
                 )
             )
             .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
+            .frame(minHeight: AnalyticsDesign.statsCardHeight)
             .help(tooltipText(for: "totalDuration"))
         }
         .fixedSize(horizontal: false, vertical: true)  // Grid tells the real height

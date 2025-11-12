@@ -8,20 +8,17 @@ enum AnalyticsDesign {
     static let minimumSize = CGSize(width: 1100, height: 860)
 
     // MARK: - Spacing Hierarchy
-    /// Edge padding for the entire window content
-    static let windowPadding: CGFloat = 24
+    /// Universal spacing between all cards and window edges
+    static let windowPadding: CGFloat = 15
 
-    /// Spacing between stats cards and primary chart (compact - related content)
-    static let statsToChartSpacing: CGFloat = 20
-
-    /// Spacing between primary chart and secondary insights (major section break)
-    static let chartToInsightsSpacing: CGFloat = 32
+    /// Unified spacing between major sections (stats, chart, insights)
+    static let sectionSpacing: CGFloat = 15
 
     /// Horizontal spacing between cards in the bottom insights grid
-    static let insightsGridSpacing: CGFloat = 20
+    static let insightsGridSpacing: CGFloat = 15
 
     /// Internal spacing between individual stats cards in the top grid
-    static let metricsCardSpacing: CGFloat = 16
+    static let metricsCardSpacing: CGFloat = 15
 
     /// Internal padding for stats cards
     static let statsCardPadding: CGFloat = 20
@@ -32,8 +29,8 @@ enum AnalyticsDesign {
     // MARK: - Sizes
     static let headerHeight: CGFloat = 60
     static let statsCardHeight: CGFloat = 100
-    static let primaryChartHeight: CGFloat = 280
-    static let secondaryCardHeight: CGFloat = 300
+    static let primaryChartHeight: CGFloat = 260  // Reduced from 280 for better spacing
+    static let secondaryCardHeight: CGFloat = 270  // Reduced from 300 for better spacing
 
     // MARK: - Corner Radius
     static let cardCornerRadius: CGFloat = 8
@@ -56,6 +53,8 @@ extension View {
     /// Apply Analytics card styling: background, border, shadow, corner radius
     func analyticsCard(padding: CGFloat = AnalyticsDesign.cardPadding, colorScheme: ColorScheme) -> some View {
         self
+            // Prevent 3D flips / animations from painting outside the card
+            .clipShape(RoundedRectangle(cornerRadius: AnalyticsDesign.cardCornerRadius))
             .padding(padding)
             .background(
                 RoundedRectangle(cornerRadius: AnalyticsDesign.cardCornerRadius)

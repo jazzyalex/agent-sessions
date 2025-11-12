@@ -100,7 +100,7 @@ struct AnalyticsView: View {
             .help("Refresh analytics")
             .disabled(isRefreshing)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, AnalyticsDesign.windowPadding)
         .padding(.vertical, 12)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .bottom) {
@@ -114,26 +114,25 @@ struct AnalyticsView: View {
 
     private var totalView: some View {
         ScrollView {
-            VStack(spacing: 0) {
-                // Stats cards (top of layout - no extra spacing)
+            VStack(alignment: .leading, spacing: AnalyticsDesign.sectionSpacing) {
+                // Stats cards
                 StatsCardsView(snapshot: service.snapshot, dateRange: dateRange)
 
-                // Primary chart (compact spacing after stats)
+                // Primary chart
                 SessionsChartView(
                     data: service.snapshot.timeSeriesData,
                     dateRange: dateRange,
                     metric: $aggregationMetric
                 )
                 .frame(height: AnalyticsDesign.primaryChartHeight)
-                .padding(.top, AnalyticsDesign.statsToChartSpacing)
 
-                // Secondary insights (major section break - more spacing)
+                // Secondary insights (agent breakdown + time-of-day heatmap)
                 HStack(alignment: .top, spacing: AnalyticsDesign.insightsGridSpacing) {
                     AgentBreakdownView(
                         breakdown: service.snapshot.agentBreakdown,
                         metric: $aggregationMetric
                     )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                     TimeOfDayHeatmapView(
                         cells: service.snapshot.heatmapCells,
@@ -142,13 +141,8 @@ struct AnalyticsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 .frame(height: AnalyticsDesign.secondaryCardHeight)
-                .padding(.top, AnalyticsDesign.chartToInsightsSpacing)
             }
-            .padding(AnalyticsDesign.windowPadding)  // Outer padding
-        }
-        .safeAreaInset(edge: .bottom) {
-            // Ensures bottom spacing matches top
-            Color.clear.frame(height: AnalyticsDesign.windowPadding)
+            .padding(AnalyticsDesign.windowPadding)  // Outer padding for scroll content
         }
         .background(Color.analyticsBackground)
     }
