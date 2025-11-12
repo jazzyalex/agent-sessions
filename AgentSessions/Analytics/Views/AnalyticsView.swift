@@ -114,20 +114,21 @@ struct AnalyticsView: View {
 
     private var totalView: some View {
         ScrollView {
-            VStack(spacing: AnalyticsDesign.sectionSpacing) {
-                // Stats cards
+            VStack(spacing: 0) {
+                // Stats cards (top of layout - no extra spacing)
                 StatsCardsView(snapshot: service.snapshot, dateRange: dateRange)
 
-                // Primary chart
+                // Primary chart (compact spacing after stats)
                 SessionsChartView(
                     data: service.snapshot.timeSeriesData,
                     dateRange: dateRange,
                     metric: $aggregationMetric
                 )
                 .frame(height: AnalyticsDesign.primaryChartHeight)
+                .padding(.top, AnalyticsDesign.statsToChartSpacing)
 
-                // Secondary insights (2-column grid) - lock to same height
-                HStack(alignment: .top, spacing: AnalyticsDesign.bottomGridSpacing) {
+                // Secondary insights (major section break - more spacing)
+                HStack(alignment: .top, spacing: AnalyticsDesign.insightsGridSpacing) {
                     AgentBreakdownView(
                         breakdown: service.snapshot.agentBreakdown,
                         metric: $aggregationMetric
@@ -141,6 +142,7 @@ struct AnalyticsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 .frame(height: AnalyticsDesign.secondaryCardHeight)
+                .padding(.top, AnalyticsDesign.chartToInsightsSpacing)
             }
             .padding(AnalyticsDesign.windowPadding)  // Outer padding
         }

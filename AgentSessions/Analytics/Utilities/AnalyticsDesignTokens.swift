@@ -7,12 +7,26 @@ enum AnalyticsDesign {
     static let defaultSize = CGSize(width: 1100, height: 860)
     static let minimumSize = CGSize(width: 1100, height: 860)
 
-    // MARK: - Spacing
-    static let windowPadding: CGFloat = 24  // Universal spacing between all elements
-    static let sectionSpacing: CGFloat = 24  // Spacing between sections
-    static let bottomGridSpacing: CGFloat = 24  // Spacing between bottom cards
+    // MARK: - Spacing Hierarchy
+    /// Edge padding for the entire window content
+    static let windowPadding: CGFloat = 24
+
+    /// Spacing between stats cards and primary chart (compact - related content)
+    static let statsToChartSpacing: CGFloat = 20
+
+    /// Spacing between primary chart and secondary insights (major section break)
+    static let chartToInsightsSpacing: CGFloat = 32
+
+    /// Horizontal spacing between cards in the bottom insights grid
+    static let insightsGridSpacing: CGFloat = 20
+
+    /// Internal spacing between individual stats cards in the top grid
     static let metricsCardSpacing: CGFloat = 16
+
+    /// Internal padding for stats cards
     static let statsCardPadding: CGFloat = 20
+
+    /// Internal padding for large cards (charts, breakdowns)
     static let cardPadding: CGFloat = 24
 
     // MARK: - Sizes
