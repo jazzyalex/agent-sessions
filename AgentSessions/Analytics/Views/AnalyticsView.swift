@@ -143,7 +143,10 @@ struct AnalyticsView: View {
                 .frame(height: AnalyticsDesign.secondaryCardHeight)
             }
             .padding(AnalyticsDesign.windowPadding)  // Outer padding
-            .padding(.bottom, AnalyticsDesign.windowPadding)  // Additional bottom padding to match top spacing
+        }
+        .safeAreaInset(edge: .bottom) {
+            // Ensures bottom spacing matches top
+            Color.clear.frame(height: AnalyticsDesign.windowPadding)
         }
         .background(Color.analyticsBackground)
     }
