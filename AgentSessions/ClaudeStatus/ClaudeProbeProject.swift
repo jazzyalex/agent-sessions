@@ -251,32 +251,74 @@ enum ClaudeProbeProject {
     // MARK: - Validation
 
     private static func validateProjectContents(projectDir: URL) -> Bool {
-        // Enumerate JSONL/NDJSON files and verify they're from the probe directory.
         guard let enumerator = FileManager.default.enumerator(at: projectDir, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else {
             return false
         }
-        // Track first-user check per sessionId
-        var firstUserChecked = Set<String>()
+        let expectedWD = normalizePath(ClaudeProbeConfig.probeWorkingDirectory())
+        var inspectedFile = false
         for case let url as URL in enumerator {
             let ext = url.pathExtension.lowercased()
             if ext != "jsonl" && ext != "ndjson" { continue }
-            guard let reader = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            for line in reader.split(whereSeparator: { $0.isNewline }) {
-                guard let data = String(line).data(using: .utf8),
-                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-                let sid = (obj["sessionId"] as? String) ?? "?"
-                // Mark session as seen
-                if !sid.isEmpty {
-                    firstUserChecked.insert(sid)
-                }
-            }
+            inspectedFile = true
+            guard let stats = inspectProbeFile(url: url, expectedWD: expectedWD) else { return false }
+            if !stats.isSafeTinyProbe { return false }
         }
-        // Validation: Path-based filtering is primary safety mechanism.
-        // Probe sessions run in dedicated directory with no user messages.
-        return true
+        return inspectedFile
     }
 
     private struct ProbeFileMeta { let url: URL; let isProbe: Bool; let safe: Bool; let mtime: Date? }
+
+    private struct ProbeFileStats {
+        var sawProbeWD: Bool = false
+        var userCount: Int = 0
+        var assistantCount: Int = 0
+        var otherKinds: Int = 0
+        var totalEvents: Int { userCount + assistantCount + otherKinds }
+        var isSafeTinyProbe: Bool {
+            return sawProbeWD && otherKinds == 0 && totalEvents > 0 && totalEvents <= 5
+        }
+    }
+
+    private static let userEventTypes: Set<String> = ["user", "user_input", "user-input", "input", "prompt", "chat_input", "chat-input", "human"]
+    private static let assistantEventTypes: Set<String> = ["assistant", "response", "assistant_message", "assistant-message", "assistant_response", "assistant-response", "completion"]
+
+    private static func inspectProbeFile(url: URL, expectedWD: String) -> ProbeFileStats? {
+        let fh = try? FileHandle(forReadingFrom: url)
+        let data = try? fh?.read(upToCount: 256 * 1024)
+        try? fh?.close()
+        guard let data, !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return nil }
+
+        var stats = ProbeFileStats()
+        for raw in text.split(separator: "\n").prefix(400) {
+            guard let lineData = String(raw).data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else { continue }
+            if !stats.sawProbeWD {
+                if let cwd = obj["cwd"] as? String, normalizePath(cwd) == expectedWD { stats.sawProbeWD = true }
+                else if let proj = obj["project"] as? String, normalizePath(proj) == expectedWD { stats.sawProbeWD = true }
+            }
+            incrementEventCounts(obj, stats: &stats)
+        }
+
+        return stats.totalEvents > 0 ? stats : nil
+    }
+
+    private static func incrementEventCounts(_ obj: [String: Any], stats: inout ProbeFileStats) {
+        if let type = (obj["type"] as? String)?.lowercased() {
+            if userEventTypes.contains(type) { stats.userCount += 1; return }
+            if assistantEventTypes.contains(type) { stats.assistantCount += 1; return }
+            stats.otherKinds += 1; return
+        }
+        if let role = (obj["role"] as? String)?.lowercased() {
+            if role == "user" { stats.userCount += 1; return }
+            if role == "assistant" { stats.assistantCount += 1; return }
+            stats.otherKinds += 1; return
+        }
+        if let sender = (obj["sender"] as? String)?.lowercased() {
+            if sender == "user" { stats.userCount += 1; return }
+            if sender == "assistant" { stats.assistantCount += 1; return }
+        }
+        stats.otherKinds += 1
+    }
 
     private static func scanProbeFilesUnderProjectsRoot() -> [ProbeFileMeta] {
         // Prefer scanning only inside the discovered probe project directory for extra safety
@@ -293,51 +335,13 @@ enum ClaudeProbeProject {
     }
 
     private static func analyzeFile(url: URL) -> ProbeFileMeta {
-        let fh = try? FileHandle(forReadingFrom: url)
-        let data = try? fh?.read(upToCount: 256 * 1024)
-        try? fh?.close()
-        let dataEff = data ?? Data()
-        var sawProbeWD = false
-        var firstUserText: String? = nil
-        var userCount = 0
-        var assistantCount = 0
-        var otherKinds = 0
-        if !dataEff.isEmpty, let text = String(data: dataEff, encoding: .utf8) {
-            for raw in text.split(separator: "\n").prefix(400) {
-                guard let d = String(raw).data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
-                if !sawProbeWD {
-                    if let cwd = obj["cwd"] as? String, normalizePath(cwd) == normalizePath(ClaudeProbeConfig.probeWorkingDirectory()) { sawProbeWD = true }
-                    else if let proj = obj["project"] as? String, normalizePath(proj) == normalizePath(ClaudeProbeConfig.probeWorkingDirectory()) { sawProbeWD = true }
-                }
-                if firstUserText == nil, isUserEvent(obj) {
-                    firstUserText = extractText(obj)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                // Count rough event kinds for tiny-session heuristic
-                if let type = (obj["type"] as? String)?.lowercased() {
-                    if ["user","user_input","user-input","input","prompt","chat_input","chat-input","human"].contains(type) { userCount += 1 }
-                    else if ["assistant","response","assistant_message","assistant-message","assistant_response","assistant-response","completion"].contains(type) { assistantCount += 1 }
-                    else { otherKinds += 1 }
-                } else {
-                    // Fallback via role
-                    if let role = (obj["role"] as? String)?.lowercased() {
-                        if role == "user" { userCount += 1 }
-                        else if role == "assistant" { assistantCount += 1 }
-                        else { otherKinds += 1 }
-                    }
-                }
-            }
-        }
+        let stats = inspectProbeFile(url: url, expectedWD: normalizePath(ClaudeProbeConfig.probeWorkingDirectory()))
         let projectID = discoverProbeProjectId()
         let probeDirPrefix = projectID.map { (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects/\($0)") + "/" }
         let inProbeProject = probeDirPrefix.map { url.path.hasPrefix($0) } ?? false
 
-        // Safety heuristic: allow sessions from the Probe WD inside the probe project
-        // that have only user/assistant events (no tools/others) and are small.
-        // Probe sessions now send no user messages (just /usage command), so they should be tiny.
-        let totalSeen = userCount + assistantCount + otherKinds
-        let safeLegacy = inProbeProject && sawProbeWD && otherKinds == 0 && totalSeen > 0 && totalSeen <= 5
-
-        let safe = safeLegacy
+        let sawProbeWD = stats?.sawProbeWD ?? false
+        let safe = stats?.isSafeTinyProbe ?? false
         let isProbe = sawProbeWD || safe || inProbeProject
         let mtime = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         return ProbeFileMeta(url: url, isProbe: isProbe, safe: safe, mtime: mtime)

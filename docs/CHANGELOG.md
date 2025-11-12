@@ -10,13 +10,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
  - Preferences → Usage Tracking: Simplified and HIG‑aligned. Added per‑agent master toggles (Enable Codex tracking, Enable Claude tracking) independent of strip/menu bar visibility. Moved all probe controls into the new Usage Probes pane. Reduced vertical scrolling and clarified refresh interval and strip options.
- - Usage Tracking: Separate refresh intervals per agent. Codex offers 1/5/15 minutes (default 5m). Claude offers 10/30/60 minutes (default 30m) with a note that each probe consumes one message.
+ - Usage Tracking: Separate refresh intervals per agent. Codex offers 1/5/15 minutes (default 5m). Claude now offers 3/15/30 minutes (default 15m) and `/usage` probes no longer send user messages, so they don’t consume tokens.
+ - Usage probes run directly on their configured cadence. The legacy `UsageProbeGate` visibility/budget guard has been removed so Claude and Codex refreshers no longer stall after 24 attempts.
 
 ### Fixed
  - Usage Probes: Codex and Claude cleanup actions once again emit status notifications for disabled/unsafe exits and successfully delete Codex probe sessions that log their working directory inside nested payload data.
  - Usage (Codex): Stale indicator now reflects the age of the last rate‑limit capture only. Recent UI refreshes or token‑only events no longer mask outdated reset times; the strip/menu will show "Stale data" until fresh `rate_limits` arrive.
  - Claude Usage: Added a central probe gate that suppresses `/usage` probes when the menu bar limits are off and the main window isn’t visible, or when the screen is inactive (sleep/screensaver/locked).
- - Probe Budget: Hard cap of 24 usage probes per rolling 24h window for automatic probing; attempts beyond the budget are suppressed. Budget persists across app restarts.
+ - Claude Usage Probes: Cleanup now verifies every session file’s `cwd/project` matches the dedicated probe working directory, requires tiny (≤5 event) user/assistant-only transcripts, and aborts deletion when uncertain.
 
 ## [2.5.4] - 2025-11-03
 

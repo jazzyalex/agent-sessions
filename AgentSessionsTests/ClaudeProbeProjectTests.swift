@@ -47,7 +47,12 @@ final class ClaudeProbeProjectTests: XCTestCase {
 
         // A tiny session (≤5 events) from probe WD - should be safe
         let sessionFile = projectDir.appendingPathComponent("session.ndjson")
-        let assistant = ["type": "assistant", "sessionId": "s1", "message": ["content": "usage data"]] as [String : Any]
+        let assistant = [
+            "type": "assistant",
+            "sessionId": "s1",
+            "cwd": probeWD.path,
+            "message": ["content": "usage data"]
+        ] as [String : Any]
         let data = try JSONSerialization.data(withJSONObject: assistant)
         let content = String(data: data, encoding: .utf8)! + "\n"
         try content.write(to: sessionFile, atomically: true, encoding: .utf8)
@@ -76,7 +81,12 @@ final class ClaudeProbeProjectTests: XCTestCase {
 
         // Session: tiny probe session from correct working directory
         let sessionFile = projectDir.appendingPathComponent("session.jsonl")
-        let assistant = ["type": "assistant", "sessionId": "s2", "message": ["content": "usage: 45%"]] as [String : Any]
+        let assistant = [
+            "type": "assistant",
+            "sessionId": "s2",
+            "cwd": probeWD.path,
+            "message": ["content": "usage: 45%"]
+        ] as [String : Any]
         let data = try JSONSerialization.data(withJSONObject: assistant)
         let content = String(data: data, encoding: .utf8)! + "\n"
         try content.write(to: sessionFile, atomically: true, encoding: .utf8)

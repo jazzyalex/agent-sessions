@@ -31,7 +31,6 @@
 		55BA818013EFF41E692C7AE8 /* PreferencesView+About.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E0F0666E60EE2819FD7BF5B /* PreferencesView+About.swift */; };
 		5731AD7A25CF4B4DAA9BDF27 /* UpdateDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = B903187D9D8D4EDF9FAB0BBA /* UpdateDefaults.swift */; };
 		580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */; };
-		5AAEE496A3EAA67CCCA4EA79 /* UsageProbeGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AC5FD2685D91BDCE8E47269 /* UsageProbeGate.swift */; };
 		5F84C20CA86A1E10361CADAE /* CodexProbeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02CA6B9DF2873CC9F366A3A7 /* CodexProbeConfig.swift */; };
 		64888E382DCD41289C115461 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43373461163E432CB25162BC /* AnalyticsView.swift */; };
 		6C959E13B3E34DB886484076 /* AnalyticsData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52343E9958A54E9987227D4A /* AnalyticsData.swift */; };
@@ -220,7 +219,6 @@
 		602CE18FB970A465454E6CF7 /* ClaudeProbeProject.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeProbeProject.swift; sourceTree = "<group>"; };
 		6B29B924375946728A9EC1BF /* UpdateCheckModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateCheckModel.swift; path = AgentSessions/Update/UpdateCheckModel.swift; sourceTree = SOURCE_ROOT; };
 		6D16E742E5604163A332C366 /* AnalyticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsService.swift; sourceTree = "<group>"; };
-		7AC5FD2685D91BDCE8E47269 /* UsageProbeGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = UsageProbeGate.swift; path = UsageProbeGate.swift; sourceTree = "<group>"; };
 		7E8EFD200FFA4B90BCCF3434 /* CodexResumeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeSheet.swift; path = AgentSessions/Resume/CodexResumeSheet.swift; sourceTree = SOURCE_ROOT; };
 		8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentBreakdownView.swift; sourceTree = "<group>"; };
 		885AF956063BEBF5966E25A2 /* CodexProbeCleanup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CodexProbeCleanup.swift; path = CodexProbeCleanup.swift; sourceTree = "<group>"; };
@@ -801,7 +799,6 @@
 				SUPT000010000000000000001 /* TypingActivity.swift */,
 				35186F4194824F3250DE3B8E /* AppRuntime.swift */,
 				A62B8D98322763D14AF6ACF7 /* ColumnVisibilityStore.swift */,
-				7AC5FD2685D91BDCE8E47269 /* UsageProbeGate.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -1128,7 +1125,6 @@
 				CA0D8F5E7C5C485075B29DE1 /* ClaudeProbeProject.swift in Sources */,
 				5F84C20CA86A1E10361CADAE /* CodexProbeConfig.swift in Sources */,
 				924D6ED196C2A69C0E716C56 /* CodexProbeCleanup.swift in Sources */,
-				5AAEE496A3EAA67CCCA4EA79 /* UsageProbeGate.swift in Sources */,
 				E6C0241E412AB230B63D800F /* PreferencesView+General.swift in Sources */,
 				2D698D260E0C6EFBF3AB2649 /* PreferencesView+Usage.swift in Sources */,
 				907E81E2D9271D48E84190CF /* PreferencesView+UsageProbes.swift in Sources */,
