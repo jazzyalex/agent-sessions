@@ -17,23 +17,31 @@ struct AgentBreakdownView: View {
 
                 Spacer()
 
-                Picker("Aggregation", selection: $metric) {
+                // Metric toggle (no label for cleaner look)
+                Picker("", selection: $metric) {
                     ForEach(AnalyticsAggregationMetric.allCases) { option in
                         Text(option.displayName).tag(option)
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 220)
+                .labelsHidden()
+                .frame(width: 200)
                 .help(metric.detailDescription)
             }
 
             if breakdown.isEmpty {
                 emptyState
             } else {
-                // Agent rows
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(breakdown) { agent in
+                // Agent rows with dividers
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(breakdown.enumerated()), id: \.element.id) { index, agent in
                         AgentRow(agent: agent, metric: metric)
+                            .padding(.vertical, 16)
+
+                        if index < breakdown.count - 1 {
+                            Divider()
+                                .opacity(0.3)
+                        }
                     }
                 }
             }
@@ -64,34 +72,38 @@ private struct AgentRow: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(agent.agent.displayName)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
 
                 Text(agent.details(for: metric))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 80, alignment: .leading)
 
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color(nsColor: .systemGray).opacity(0.35))
-                    RoundedRectangle(cornerRadius: 4)
+                    // Background track
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(nsColor: .systemGray).opacity(0.2))
+
+                    // Foreground bar
+                    RoundedRectangle(cornerRadius: 6)
                         .fill(Color.agentColor(for: agent.agent))
                         .frame(width: max(0, geometry.size.width * (agent.percentage(for: metric) / 100.0)))
                         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: agent.percentage(for: metric))
                 }
             }
-            .frame(height: 8)
+            .frame(height: 12)
             .frame(maxWidth: .infinity)
 
             Text("\(Int(agent.percentage(for: metric)))%")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 14, weight: .medium))
                 .frame(width: 45, alignment: .trailing)
                 .foregroundStyle(.secondary)
+                .animation(.easeInOut(duration: 0.3), value: agent.percentage(for: metric))
         }
     }
 }
