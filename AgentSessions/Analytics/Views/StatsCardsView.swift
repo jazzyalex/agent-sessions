@@ -62,10 +62,10 @@ struct StatsCardsView: View {
                     change: AnalyticsSummary.formatChange(summary.avgSessionLengthChange)
                 ),
                 back: CardBackView(
-                    sparklineData: [],
+                    sparklineData: sparklineDataForAvgLength(),
                     agentBreakdown: snapshot.agentBreakdown,
-                    insight: "Distribution",
-                    extraInfo: "View by agent above"
+                    insight: "Trend",
+                    extraInfo: "Messages per session over time"
                 )
             )
             .padding(AnalyticsDesign.statsCardPadding)
@@ -144,6 +144,18 @@ struct StatsCardsView: View {
 
         return sorted.map { _, points in
             Double(points.reduce(0) { $0 + $1.sessionCount }) * (summary.avgSessionLengthSeconds / Double(max(summary.sessions, 1)))
+        }
+    }
+
+    private func sparklineDataForAvgLength() -> [Double] {
+        // Approximate avg session length trend using messages per session as proxy
+        let grouped = Dictionary(grouping: snapshot.timeSeriesData) { $0.date }
+        let sorted = grouped.sorted { $0.key < $1.key }
+
+        return sorted.map { _, points in
+            let totalSessions = Double(points.reduce(0) { $0 + $1.sessionCount })
+            let totalMessages = Double(points.reduce(0) { $0 + $1.messageCount })
+            return totalSessions > 0 ? (totalMessages / totalSessions) : 0
         }
     }
 
