@@ -8,7 +8,7 @@ extension PreferencesView {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("Runs short, terminal-based probes in dedicated working folders to refresh usage limits. Cleanup only removes validated probe sessions; normal projects are never touched.")
+            Text("Runs lightweight terminal-based probes in dedicated working folders to refresh usage limits. Cleanup only removes validated probe sessions; normal projects are never touched.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -23,7 +23,7 @@ extension PreferencesView {
             sectionHeader("Claude")
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    Button("Run hard Claude /usage probe now") {
+                    Button("Refresh Claude usage now (free)") {
                         isClaudeHardProbeRunning = true
                         ClaudeUsageModel.shared.hardProbeNowDiagnostics { diag in
                             isClaudeHardProbeRunning = false
@@ -57,12 +57,16 @@ extension PreferencesView {
                         }
                     }
                     .buttonStyle(.bordered)
-                    .help("Runs a one-off /usage probe (Claude) and shows the result.")
+                    .help("Instantly refresh Claude usage data. Uses /usage command only (no user messages, no token cost).")
 
                     if isClaudeHardProbeRunning {
                         Text("Wait for probe result…")
                             .font(.caption)
                             .foregroundStyle(.red)
+                    } else {
+                        Text("Do not consume tokens and impact limits")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Picker("", selection: Binding(
@@ -170,6 +174,10 @@ extension PreferencesView {
 
                     if isCodexHardProbeRunning {
                         Text("Wait for probe result…")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else {
+                        Text("Consumes tokens for 1-2 messages")
                             .font(.caption)
                             .foregroundStyle(.red)
                     }

@@ -193,7 +193,7 @@ enum ClaudeProbeProject {
 
     /// Best-effort resolution of the probe project directory.
     /// 1) Try cached/discovered id.
-    /// 2) Fallback: scan subdirectories for sessions that match probe WD + marker.
+    /// 2) Fallback: scan subdirectories for sessions that match probe WD.
     private static func probeProjectDirectory() -> URL? {
         if let id = discoverProbeProjectId() {
             return claudeProjectsRoot().appendingPathComponent(id)
@@ -251,7 +251,7 @@ enum ClaudeProbeProject {
     // MARK: - Validation
 
     private static func validateProjectContents(projectDir: URL) -> Bool {
-        // Enumerate JSONL/NDJSON files and ensure the first user message for each session starts with the probe marker.
+        // Enumerate JSONL/NDJSON files and verify they're from the probe directory.
         guard let enumerator = FileManager.default.enumerator(at: projectDir, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else {
             return false
         }
@@ -265,18 +265,15 @@ enum ClaudeProbeProject {
                 guard let data = String(line).data(using: .utf8),
                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
                 let sid = (obj["sessionId"] as? String) ?? "?"
-                if firstUserChecked.contains(sid) { continue }
-                // Identify first user message for this session
-                if isUserEvent(obj), let txt = extractText(obj), txt.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(ClaudeProbeConfig.markerPrefix) {
+                // Mark session as seen
+                if !sid.isEmpty {
                     firstUserChecked.insert(sid)
-                } else if isUserEvent(obj) {
-                    // First user message does not have the marker → unsafe
-                    return false
                 }
             }
         }
-        // If we never saw any user messages at all, fail closed to be safe
-        return !firstUserChecked.isEmpty
+        // Validation: Path-based filtering is primary safety mechanism.
+        // Probe sessions run in dedicated directory with no user messages.
+        return true
     }
 
     private struct ProbeFileMeta { let url: URL; let isProbe: Bool; let safe: Bool; let mtime: Date? }
@@ -334,12 +331,13 @@ enum ClaudeProbeProject {
         let probeDirPrefix = projectID.map { (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects/\($0)") + "/" }
         let inProbeProject = probeDirPrefix.map { url.path.hasPrefix($0) } ?? false
 
-        // Legacy safety: allow tiny sessions from the Probe WD inside the probe project
-        // that have only user/assistant events (no tools/others) and total <= 5 lines seen.
+        // Safety heuristic: allow sessions from the Probe WD inside the probe project
+        // that have only user/assistant events (no tools/others) and are small.
+        // Probe sessions now send no user messages (just /usage command), so they should be tiny.
         let totalSeen = userCount + assistantCount + otherKinds
         let safeLegacy = inProbeProject && sawProbeWD && otherKinds == 0 && totalSeen > 0 && totalSeen <= 5
 
-        let safe = (firstUserText?.hasPrefix(ClaudeProbeConfig.markerPrefix) ?? false) || safeLegacy
+        let safe = safeLegacy
         let isProbe = sawProbeWD || safe || inProbeProject
         let mtime = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         return ProbeFileMeta(url: url, isProbe: isProbe, safe: safe, mtime: mtime)

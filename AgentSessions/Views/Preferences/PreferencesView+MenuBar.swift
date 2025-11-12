@@ -13,7 +13,7 @@ extension PreferencesView {
                 toggleRow("Show menu bar usage", isOn: $menuBarEnabled, help: "Add a menu bar item that displays usage meters")
 
                 labeledRow("Source") {
-                    Picker("Source", selection: Binding(
+                    Picker("", selection: Binding(
                         get: { UserDefaults.standard.string(forKey: PreferencesKey.MenuBar.source) ?? MenuBarSource.codex.rawValue },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.source) }
                     )) {
@@ -28,7 +28,7 @@ extension PreferencesView {
                 }
 
                 labeledRow("Scope") {
-                    Picker("Scope", selection: $menuBarScopeRaw) {
+                    Picker("", selection: $menuBarScopeRaw) {
                         ForEach(MenuBarScope.allCases) { s in
                             Text(s.title).tag(s.rawValue)
                         }
@@ -40,7 +40,7 @@ extension PreferencesView {
                 }
 
                 labeledRow("Style") {
-                    Picker("Style", selection: $menuBarStyleRaw) {
+                    Picker("", selection: $menuBarStyleRaw) {
                         ForEach(MenuBarStyleKind.allCases) { k in
                             Text(k.title).tag(k.rawValue)
                         }

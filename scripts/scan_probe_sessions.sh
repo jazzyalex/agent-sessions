@@ -13,7 +13,7 @@ CL_WD_LEGACY_HINT="AgentSessions-claude-usage"  # appears in sanitized Claude pr
 # New canonical Codex probe working directory name
 CX_WD_CURRENT="$HOME/Library/Application Support/AgentSessions/AgentSessions-codex-usage"
 
-CL_MARKER="[AS_USAGE_PROBE v1]"
+# Note: Claude probes no longer send markers (preserves usage limits)
 CX_MARKER="[AS_CX_PROBE v1]"
 
 OUT_DIR="scripts/probe_scan_output"
@@ -23,19 +23,11 @@ CX_OUT="$OUT_DIR/codex_probe_sessions.txt"
 >"$CL_OUT"; >"$CX_OUT"
 
 scan_claude() {
-  local tmp_mark tmp_path tmp_proj
-  tmp_mark=$(mktemp)
+  local tmp_path
   tmp_path=$(mktemp)
 
-  # 1) Content-based: sessions containing the probe marker
-  if [[ -d "$CL_ROOT" ]]; then
-    # Find jsonl/ndjson and grep for the marker (case-sensitive)
-    find "$CL_ROOT" -type f \( -name '*.jsonl' -o -name '*.ndjson' \) -print0 \
-      | xargs -0 grep -l --binary-files=without-match -- "$CL_MARKER" \
-      | sort -u > "$tmp_mark" || true
-  fi
-
-  # 2) Path-based: any files living under project folders that reference the probe WD (current or legacy)
+  # Path-based only: any files living under project folders that reference the probe WD (current or legacy)
+  # Note: Claude probes no longer send user messages/markers to preserve usage limits
   #   - legacy project folder names contain "AgentSessions-claude-usage"
   #   - current projects may include the cleartext WD in project.json; also include any files under a folder name with that substring
   if [[ -d "$CL_ROOT" ]]; then
@@ -53,9 +45,9 @@ scan_claude() {
     # Append to tmp_path
   fi >> "$tmp_path"
 
-  # Union → output
-  cat "$tmp_mark" "$tmp_path" | sed '/^\s*$/d' | sort -u > "$CL_OUT"
-  rm -f "$tmp_mark" "$tmp_path"
+  # Output path-based results only
+  cat "$tmp_path" | sed '/^\s*$/d' | sort -u > "$CL_OUT"
+  rm -f "$tmp_path"
 }
 
 scan_codex() {
