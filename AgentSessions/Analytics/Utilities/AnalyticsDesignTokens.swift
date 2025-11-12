@@ -9,19 +9,19 @@ enum AnalyticsDesign {
 
     // MARK: - Spacing Hierarchy
     /// Universal spacing between all cards and window edges
-    static let windowPadding: CGFloat = 15
+    static let windowPadding: CGFloat = 20
 
     /// Unified spacing between major sections (stats, chart, insights)
-    static let sectionSpacing: CGFloat = 15
+    static let sectionSpacing: CGFloat = 20
 
     /// Horizontal spacing between cards in the bottom insights grid
-    static let insightsGridSpacing: CGFloat = 15
+    static let insightsGridSpacing: CGFloat = 20
 
     /// Internal spacing between individual stats cards in the top grid
     static let metricsCardSpacing: CGFloat = 15
 
-    /// Internal padding for stats cards (match charts/insights)
-    static let statsCardPadding: CGFloat = 24
+    /// Internal padding for stats cards (smaller than large cards)
+    static let statsCardPadding: CGFloat = 20
 
     /// Internal padding for large cards (charts, breakdowns)
     static let cardPadding: CGFloat = 24
