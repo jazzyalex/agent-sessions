@@ -4,8 +4,8 @@ import SwiftUI
 /// Based on analytics-design-guide.md specifications
 enum AnalyticsDesign {
     // MARK: - Window
-    static let defaultSize = CGSize(width: 1100, height: 860)
-    static let minimumSize = CGSize(width: 1100, height: 860)
+    static let defaultSize = CGSize(width: 1100, height: 900)
+    static let minimumSize = CGSize(width: 1100, height: 900)
 
     // MARK: - Spacing Hierarchy
     /// Universal spacing between all cards and window edges
@@ -30,7 +30,15 @@ enum AnalyticsDesign {
     static let headerHeight: CGFloat = 60
     static let statsCardHeight: CGFloat = 100
     static let primaryChartHeight: CGFloat = 260  // Reduced from 280 for better spacing
-    static let secondaryCardHeight: CGFloat = 270  // Reduced from 300 for better spacing
+    /// Height for the bottom insights row ("By Agent" + "Time of Day")
+    /// tuned for a 1100×900 Analytics window so that the cards
+    /// fit fully with roughly symmetric top/bottom padding.
+    ///
+    /// This value was eyeballed against the production layout
+    /// rather than derived purely from token math, to avoid
+    /// truncation on macOS while still giving the bottom cards
+    /// more presence than the original 270pt design.
+    static let secondaryCardHeight: CGFloat = 360
 
     // MARK: - Corner Radius
     static let cardCornerRadius: CGFloat = 8

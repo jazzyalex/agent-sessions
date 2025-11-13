@@ -142,7 +142,11 @@ struct AnalyticsView: View {
                 }
                 .frame(height: AnalyticsDesign.secondaryCardHeight)
             }
-            .padding(AnalyticsDesign.windowPadding)  // Outer padding for scroll content
+            // Outer padding for scroll content; top reduced by 15pt
+            // to tighten distance between toolbar and top cards
+            .padding(.horizontal, AnalyticsDesign.windowPadding)
+            .padding(.bottom, AnalyticsDesign.windowPadding)
+            .padding(.top, AnalyticsDesign.windowPadding - 10)
         }
         .background(Color.analyticsBackground)
     }
