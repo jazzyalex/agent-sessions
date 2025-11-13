@@ -8,23 +8,26 @@ enum AnalyticsDesign {
     static let minimumSize = CGSize(width: 1100, height: 900)
 
     // MARK: - Spacing Hierarchy
-    /// Universal spacing between all cards and window edges
-    static let windowPadding: CGFloat = 20
+    /// Edge padding for the entire window content (reduced from 24 → 16 for space savings)
+    static let windowPadding: CGFloat = 16
 
-    /// Unified spacing between major sections (stats, chart, insights)
-    static let sectionSpacing: CGFloat = 20
+    /// Spacing between stats cards and primary chart - compact, related content (reduced from 20 → 13)
+    static let statsToChartSpacing: CGFloat = 13
 
-    /// Horizontal spacing between cards in the bottom insights grid
-    static let insightsGridSpacing: CGFloat = 20
+    /// Spacing between primary chart and secondary insights - major section break (reduced from 32 → 20)
+    static let chartToInsightsSpacing: CGFloat = 20
 
-    /// Internal spacing between individual stats cards in the top grid
-    static let metricsCardSpacing: CGFloat = 15
+    /// Horizontal spacing between cards in the bottom insights grid (reduced from 20 → 13)
+    static let insightsGridSpacing: CGFloat = 13
 
-    /// Internal padding for stats cards (smaller than large cards)
-    static let statsCardPadding: CGFloat = 20
+    /// Internal spacing between individual stats cards in the top grid (reduced from 16 → 10)
+    static let metricsCardSpacing: CGFloat = 10
 
-    /// Internal padding for large cards (charts, breakdowns)
-    static let cardPadding: CGFloat = 24
+    /// Internal padding for stats cards (reduced from 20 → 14)
+    static let statsCardPadding: CGFloat = 14
+
+    /// Internal padding for large cards - charts, breakdowns (reduced from 24 → 16)
+    static let cardPadding: CGFloat = 16
 
     // MARK: - Sizes
     static let headerHeight: CGFloat = 60

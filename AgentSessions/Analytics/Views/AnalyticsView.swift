@@ -114,19 +114,20 @@ struct AnalyticsView: View {
 
     private var totalView: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AnalyticsDesign.sectionSpacing) {
-                // Stats cards
+            VStack(spacing: 0) {
+                // Stats cards (top of layout - no extra spacing)
                 StatsCardsView(snapshot: service.snapshot, dateRange: dateRange)
 
-                // Primary chart
+                // Primary chart (compact spacing after stats - related content)
                 SessionsChartView(
                     data: service.snapshot.timeSeriesData,
                     dateRange: dateRange,
                     metric: $aggregationMetric
                 )
                 .frame(height: AnalyticsDesign.primaryChartHeight)
+                .padding(.top, AnalyticsDesign.statsToChartSpacing)
 
-                // Secondary insights (agent breakdown + time-of-day heatmap)
+                // Secondary insights (major section break - more breathing room)
                 HStack(alignment: .top, spacing: AnalyticsDesign.insightsGridSpacing) {
                     AgentBreakdownView(
                         breakdown: service.snapshot.agentBreakdown,
@@ -141,12 +142,12 @@ struct AnalyticsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 .frame(height: AnalyticsDesign.secondaryCardHeight)
+                .padding(.top, AnalyticsDesign.chartToInsightsSpacing)
             }
-            // Outer padding for scroll content; top reduced by 15pt
-            // to tighten distance between toolbar and top cards
+            // Outer padding for scroll content
             .padding(.horizontal, AnalyticsDesign.windowPadding)
             .padding(.bottom, AnalyticsDesign.windowPadding)
-            .padding(.top, AnalyticsDesign.windowPadding - 10)
+            .padding(.top, AnalyticsDesign.windowPadding)
         }
         .background(Color.analyticsBackground)
     }

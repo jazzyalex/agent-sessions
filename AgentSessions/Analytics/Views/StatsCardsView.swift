@@ -66,9 +66,9 @@ struct StatsCardsView: View {
                 back: CardBackView(
                     sparklineData: sparklineDataForAvgLength(),
                     agentBreakdown: snapshot.agentBreakdown,
-                    metric: .duration,
+                    metric: .avgDuration,
                     insight: "Trend",
-                    extraInfo: "Messages per session over time"
+                    extraInfo: "Average session length per agent"
                 )
             )
             .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
@@ -275,6 +275,7 @@ private enum CardBackMetric {
     case sessions
     case messages
     case duration
+    case avgDuration  // Average session length per agent
 }
 
 /// Back side of flippable stats card
@@ -348,6 +349,10 @@ private struct CardBackView: View {
             return "\(agent.agent.displayName) \(agent.messageCount)"
         case .duration:
             return "\(agent.agent.displayName) \(AnalyticsSummary.formatDuration(agent.durationSeconds))"
+        case .avgDuration:
+            // Show average session length for this agent
+            let avgSeconds = agent.sessionCount > 0 ? agent.durationSeconds / Double(agent.sessionCount) : 0
+            return "\(agent.agent.displayName) \(AnalyticsSummary.formatDuration(avgSeconds))"
         }
     }
 
@@ -361,6 +366,14 @@ private struct CardBackView: View {
             // Calculate duration percentage from total
             let total = agentBreakdown.reduce(0.0) { $0 + $1.durationSeconds }
             return total > 0 ? (agent.durationSeconds / total * 100.0) : 0
+        case .avgDuration:
+            // Calculate percentage based on average session length
+            let avgSeconds = agent.sessionCount > 0 ? agent.durationSeconds / Double(agent.sessionCount) : 0
+            let totalAvg = agentBreakdown.reduce(0.0) { sum, a in
+                let agentAvg = a.sessionCount > 0 ? a.durationSeconds / Double(a.sessionCount) : 0
+                return sum + agentAvg
+            }
+            return totalAvg > 0 ? (avgSeconds / totalAvg * 100.0) : 0
         }
     }
 }
