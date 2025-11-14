@@ -16,6 +16,7 @@ struct UnifiedSessionsView: View {
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
 
     let layoutMode: LayoutMode
+    let analyticsReady: Bool
     let onToggleLayout: () -> Void
 
     @State private var selection: String?
@@ -48,11 +49,18 @@ struct UnifiedSessionsView: View {
         }
     }
 
-    init(unified: UnifiedSessionIndexer, codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, geminiIndexer: GeminiSessionIndexer, layoutMode: LayoutMode, onToggleLayout: @escaping () -> Void) {
+    init(unified: UnifiedSessionIndexer,
+         codexIndexer: SessionIndexer,
+         claudeIndexer: ClaudeSessionIndexer,
+         geminiIndexer: GeminiSessionIndexer,
+         analyticsReady: Bool,
+         layoutMode: LayoutMode,
+         onToggleLayout: @escaping () -> Void) {
         self.unified = unified
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
+        self.analyticsReady = analyticsReady
         self.layoutMode = layoutMode
         self.onToggleLayout = onToggleLayout
         _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer, geminiIndexer: geminiIndexer))
@@ -228,6 +236,11 @@ struct UnifiedSessionsView: View {
         .simultaneousGesture(TapGesture().onEnded {
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         })
+        .allowsHitTesting(!shouldShowLaunchOverlay)
+        if shouldShowLaunchOverlay {
+            launchAnimationView
+                .allowsHitTesting(false)
+        }
         }
         // Bottom overlay to avoid changing intrinsic size of the list pane
         .overlay(alignment: .bottom) {
@@ -376,8 +389,9 @@ struct UnifiedSessionsView: View {
                 .environmentObject(focusCoordinator)
                 .id("transcript-host")
 
-            // Overlays for error/empty/loading states to avoid replacing the base view
-            if let s = selectedSession {
+            if shouldShowLaunchOverlay {
+                launchBlockingTranscriptOverlay()
+            } else if let s = selectedSession {
                 if !FileManager.default.fileExists(atPath: s.filePath) {
                     let providerName: String = (s.source == .codex ? "Codex" : (s.source == .claude ? "Claude" : "Gemini"))
                     let accent: Color = sourceAccent(s)
@@ -418,16 +432,9 @@ struct UnifiedSessionsView: View {
                     .background(Color(nsColor: .textBackgroundColor))
                 }
             } else {
-                if unified.isIndexing || unified.isProcessingTranscripts {
-                    LoadingAnimationView(
-                        codexColor: .blue,
-                        claudeColor: Color(red: 204/255, green: 121/255, blue: 90/255)
-                    )
-                } else {
-                    Text("Select a session to view transcript")
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                Text("Select a session to view transcript")
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .simultaneousGesture(TapGesture().onEnded {
@@ -479,7 +486,10 @@ struct UnifiedSessionsView: View {
             .help(showStarColumn ? "Show only favorited sessions" : "Enable star column in Preferences to use favorites")
         }
         ToolbarItem(placement: .automatic) {
-            AnalyticsButtonView()
+            AnalyticsButtonView(
+                isEnabled: unified.launchState.isInteractive && analyticsReady,
+                disabledReason: analyticsDisabledReason
+            )
         }
         ToolbarItemGroup(placement: .automatic) {
             Button(action: { if let s = selectedSession { resume(s) } }) {
@@ -541,9 +551,14 @@ struct UnifiedSessionsView: View {
 
     private func updateSelectionBridge() {
         // If auto-selection is enabled, keep the selection pinned to the first row
-        if autoSelectEnabled, let first = cachedRows.first { selection = first.id }
+        if autoSelectEnabled, unified.launchState.isInteractive, let first = cachedRows.first {
+            selection = first.id
+        }
         // Keep single-selection Set in sync with selection id
-        let desired: Set<String> = selection.map { [$0] } ?? []
+        let desired: Set<String> = {
+            guard unified.launchState.isInteractive else { return [] }
+            return selection.map { [$0] } ?? []
+        }()
         if tableSelection != desired {
             programmaticSelectionUpdate = true
             tableSelection = desired
@@ -559,8 +574,13 @@ struct UnifiedSessionsView: View {
             cachedRows = rows.sorted(using: sortOrder)
         }
         if let sel = selection, !cachedRows.contains(where: { $0.id == sel }) {
-            selection = cachedRows.first?.id
-            tableSelection = selection.map { [$0] } ?? []
+            if unified.launchState.isInteractive {
+                selection = cachedRows.first?.id
+                tableSelection = selection.map { [$0] } ?? []
+            } else {
+                selection = nil
+                tableSelection = []
+            }
         }
     }
 
@@ -568,6 +588,33 @@ struct UnifiedSessionsView: View {
         columnLayoutID = UUID()
         updateCachedRows()
         updateSelectionBridge()
+    }
+
+    private var analyticsDisabledReason: String? {
+        if !unified.launchState.isInteractive {
+            return unified.launchState.statusDescription
+        }
+        if !analyticsReady {
+            return "Analytics warming up…"
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private func launchBlockingTranscriptOverlay() -> some View {
+        launchAnimationView
+            .allowsHitTesting(false)
+    }
+
+    private var shouldShowLaunchOverlay: Bool {
+        !unified.launchState.hasDisplayedSessions || !unified.launchState.isInteractive
+    }
+
+    private var launchAnimationView: some View {
+        LoadingAnimationView(
+            codexColor: .blue,
+            claudeColor: Color(red: 204/255, green: 121/255, blue: 90/255)
+        )
     }
 
     @ViewBuilder
@@ -1034,6 +1081,9 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
 // MARK: - Analytics Button
 
 private struct AnalyticsButtonView: View {
+    let isEnabled: Bool
+    let disabledReason: String?
+
     // Access via app-level notification instead of environment
     var body: some View {
         Button(action: {
@@ -1043,7 +1093,13 @@ private struct AnalyticsButtonView: View {
         }
         .buttonStyle(.bordered)
         .keyboardShortcut("k", modifiers: .command)
-        .help("View usage analytics (⌘K)")
+        .disabled(!isEnabled)
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        if isEnabled { return "View usage analytics (⌘K)" }
+        return disabledReason ?? "Analytics unavailable until launch completes."
     }
 }
 

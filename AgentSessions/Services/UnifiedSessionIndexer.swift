@@ -21,6 +21,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
+    @Published private(set) var launchState: LaunchState = .idle
 
     // Filters (unified)
     @Published var query: String = ""
@@ -84,6 +85,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let gemini: GeminiSessionIndexer
     private var cancellables = Set<AnyCancellable>()
     private var favorites = FavoritesStore()
+    private var hasPublishedInitialSessions = false
 
     // Debouncing for expensive operations
     private var recomputeDebouncer: DispatchWorkItem? = nil
@@ -169,7 +171,15 @@ final class UnifiedSessionIndexer: ObservableObject {
                 return results
             }
             .receive(on: DispatchQueue.main)
-            .assign(to: &$sessions)
+            .sink { [weak self] results in
+                guard let self else { return }
+                self.sessions = results
+                if !self.hasPublishedInitialSessions {
+                    self.hasPublishedInitialSessions = true
+                }
+                self.updateLaunchState()
+            }
+            .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
@@ -215,6 +225,22 @@ final class UnifiedSessionIndexer: ObservableObject {
                 if enabled { self.maybeAutoRefreshGemini() }
             }
             .store(in: &cancellables)
+
+        Publishers.CombineLatest3(codex.$launchPhase, claude.$launchPhase, gemini.$launchPhase)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _, _, _ in
+                self?.updateLaunchState()
+            }
+            .store(in: &cancellables)
+
+        Publishers.CombineLatest3($includeCodex, $includeClaude, $includeGemini)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _, _, _ in
+                self?.updateLaunchState()
+            }
+            .store(in: &cancellables)
+
+        updateLaunchState()
 
         // When probe cleanups succeed, refresh underlying providers and analytics rollups
         NotificationCenter.default.addObserver(forName: CodexProbeCleanup.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
@@ -300,6 +326,31 @@ final class UnifiedSessionIndexer: ObservableObject {
         recomputeDebouncer = work
         let delay: TimeInterval = FeatureFlags.increaseFilterDebounce ? 0.28 : 0.15
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func updateLaunchState() {
+        var phases: [SessionSource: LaunchPhase] = [:]
+        phases[.codex] = includeCodex ? codex.launchPhase : .ready
+        phases[.claude] = includeClaude ? claude.launchPhase : .ready
+        phases[.gemini] = includeGemini ? gemini.launchPhase : .ready
+
+        let overall: LaunchPhase
+        if phases.values.contains(.error) {
+            overall = .error
+        } else {
+            overall = phases.values.max() ?? .idle
+        }
+
+        let blocking = phases.compactMap { source, phase -> SessionSource? in
+            phase < .ready ? source : nil
+        }
+
+        launchState = LaunchState(
+            sourcePhases: phases,
+            overallPhase: overall,
+            blockingSources: blocking,
+            hasDisplayedSessions: hasPublishedInitialSessions
+        )
     }
 
     /// Apply current UI filters and sort preferences to a list of sessions.
@@ -418,3 +469,30 @@ final class UnifiedSessionIndexer: ObservableObject {
         recomputeNow()
     }
 }
+    struct LaunchState {
+        let sourcePhases: [SessionSource: LaunchPhase]
+        let overallPhase: LaunchPhase
+        let blockingSources: [SessionSource]
+        let hasDisplayedSessions: Bool
+
+        static let idle = LaunchState(
+            sourcePhases: [.codex: .idle, .claude: .idle, .gemini: .idle],
+            overallPhase: .idle,
+            blockingSources: SessionSource.allCases,
+            hasDisplayedSessions: false
+        )
+
+        var isInteractive: Bool {
+            overallPhase == .ready && hasDisplayedSessions
+        }
+
+        var statusDescription: String {
+            if isInteractive { return "Ready" }
+            var text = overallPhase.statusDescription
+            if !blockingSources.isEmpty {
+                let joined = blockingSources.map { $0.displayName }.joined(separator: ", ")
+                text += " (\(joined))"
+            }
+            return text
+        }
+    }

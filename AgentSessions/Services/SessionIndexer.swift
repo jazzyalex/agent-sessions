@@ -3,6 +3,34 @@ import Combine
 import CryptoKit
 import SwiftUI
 
+enum LaunchPhase: Int, Comparable {
+    case idle = 0
+    case hydrating
+    case scanning
+    case transcripts
+    case ready
+    case error
+
+    static func < (lhs: LaunchPhase, rhs: LaunchPhase) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+
+    var isInteractive: Bool {
+        self == .ready
+    }
+
+    var statusDescription: String {
+        switch self {
+        case .idle: return "Waiting to index…"
+        case .hydrating: return "Preparing session index…"
+        case .scanning: return "Scanning session files…"
+        case .transcripts: return "Processing transcripts…"
+        case .ready: return "Ready"
+        case .error: return "Indexing error"
+        }
+    }
+}
+
 // MARK: - Session Indexer Protocol
 
 /// Protocol defining the common interface for session indexers (Codex and Claude)
@@ -12,6 +40,7 @@ protocol SessionIndexerProtocol: ObservableObject {
     var isIndexing: Bool { get }
     var isLoadingSession: Bool { get }
     var loadingSessionID: String? { get }
+    var launchPhase: LaunchPhase { get }
 
     // Focus coordination
     var activeSearchUI: SessionIndexer.ActiveSearchUI { get set }
@@ -75,6 +104,7 @@ final class SessionIndexer: ObservableObject {
     @Published var progressText: String = ""
     @Published var filesProcessed: Int = 0
     @Published var totalFiles: Int = 0
+    @Published var launchPhase: LaunchPhase = .idle
 
     // Lazy loading state
     @Published var isLoadingSession: Bool = false
@@ -165,6 +195,7 @@ final class SessionIndexer: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var recomputeDebouncer: DispatchWorkItem? = nil
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
+    private var refreshToken = UUID()
 
     init(columnVisibility: ColumnVisibilityStore = ColumnVisibilityStore()) {
         self.columnVisibility = columnVisibility
@@ -472,6 +503,9 @@ final class SessionIndexer: ObservableObject {
         let root = sessionsRoot()
         print("\n🔄 INDEXING START: root=\(root.path)")
 
+        let token = UUID()
+        refreshToken = token
+        launchPhase = .hydrating
         isIndexing = true
         isProcessingTranscripts = false
         progressText = "Scanning…"
@@ -517,6 +551,9 @@ final class SessionIndexer: ObservableObject {
                     self.isIndexing = false
                     self.indexingError = "Sessions directory not found: \(root.path)"
                     self.progressText = "Error"
+                    if self.refreshToken == token {
+                        self.launchPhase = .error
+                    }
                 }
                 return
             }
@@ -541,6 +578,9 @@ final class SessionIndexer: ObservableObject {
                 self.hasEmptyDirectory = found.isEmpty
                 if !existingSessions.isEmpty {
                     self.progressText = "Scanning \(sortedFiles.count) new files..."
+                }
+                if self.refreshToken == token {
+                    self.launchPhase = .scanning
                 }
             }
 
@@ -589,12 +629,18 @@ final class SessionIndexer: ObservableObject {
                 // Start background transcript indexing for accurate search
                 self.isProcessingTranscripts = true
                 self.progressText = "Processing transcripts..."
+                if self.refreshToken == token {
+                    self.launchPhase = .transcripts
+                }
                 let cache = self.transcriptCache
                 Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
                     await cache.generateAndCache(sessions: sortedSessions)
                     await MainActor.run {
                         self.isProcessingTranscripts = false
                         self.progressText = "Ready"
+                        if self.refreshToken == token {
+                            self.launchPhase = .ready
+                        }
                     }
                 }
 

@@ -6,6 +6,7 @@ import Combine
 final class AnalyticsService: ObservableObject {
     @Published private(set) var snapshot: AnalyticsSnapshot = .empty
     @Published private(set) var isLoading: Bool = false
+    @Published private(set) var isReady: Bool = false
 
     // Parsing progress tracking
     @Published private(set) var isParsingSessions: Bool = false
@@ -745,5 +746,30 @@ final class AnalyticsService: ObservableObject {
                 // Auto-refresh will be triggered by the view when needed
             }
             .store(in: &cancellables)
+
+        codexIndexer.$launchPhase
+            .combineLatest(claudeIndexer.$launchPhase, geminiIndexer.$launchPhase)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _, _, _ in
+                self?.updateReadiness()
+            }
+            .store(in: &cancellables)
+
+        updateReadiness()
+    }
+
+    private func updateReadiness() {
+        let ready = [codexIndexer.launchPhase, claudeIndexer.launchPhase, geminiIndexer.launchPhase]
+            .allSatisfy { phase in
+                switch phase {
+                case .ready, .idle:
+                    return true
+                default:
+                    return false
+                }
+            }
+        if ready != isReady {
+            isReady = ready
+        }
     }
 }
