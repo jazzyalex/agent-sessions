@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 @main
 struct AgentSessionsApp: App {
@@ -33,6 +34,8 @@ struct AgentSessionsApp: App {
     // Analytics
     @State private var analyticsService: AnalyticsService?
     @State private var analyticsWindowController: AnalyticsWindowController?
+    @State private var analyticsReady: Bool = false
+    @State private var analyticsReadyObserver: AnyCancellable?
 
     var body: some Scene {
         // Default unified window
@@ -41,6 +44,7 @@ struct AgentSessionsApp: App {
                                 codexIndexer: indexer,
                                 claudeIndexer: claudeIndexer,
                                 geminiIndexer: geminiIndexer,
+                                analyticsReady: analyticsReady,
                                 layoutMode: LayoutMode(rawValue: layoutModeRaw) ?? .vertical,
                                 onToggleLayout: {
                                     let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
@@ -193,6 +197,12 @@ extension AgentSessionsApp {
             geminiIndexer: geminiIndexer
         )
         analyticsService = service
+        analyticsReady = service.isReady
+        analyticsReadyObserver = service.$isReady
+            .receive(on: RunLoop.main)
+            .sink { ready in
+                self.analyticsReady = ready
+            }
 
         // Create window controller
         let controller = AnalyticsWindowController(service: service)
@@ -205,6 +215,11 @@ extension AgentSessionsApp {
             queue: .main
         ) { _ in
             Task { @MainActor in
+                guard service.isReady else {
+                    NSSound.beep()
+                    print("[Analytics] Ignoring toggle – analytics still warming up")
+                    return
+                }
                 controller.toggle()
             }
         }

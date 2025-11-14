@@ -30,6 +30,7 @@ final class GeminiSessionIndexer: ObservableObject {
     @Published var totalFiles: Int = 0
     @Published var indexingError: String? = nil
     @Published var hasEmptyDirectory: Bool = false
+    @Published var launchPhase: LaunchPhase = .idle
 
     // Filters
     @Published var query: String = ""
@@ -53,6 +54,7 @@ final class GeminiSessionIndexer: ObservableObject {
     private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
     private var previewMTimeByID: [String: Date] = [:]
+    private var refreshToken = UUID()
 
     init() {
         self.discovery = GeminiSessionDiscovery()
@@ -91,6 +93,9 @@ final class GeminiSessionIndexer: ObservableObject {
         let root = discovery.sessionsRoot()
         print("\n🔵 GEMINI INDEXING START: root=\(root.path)")
 
+        let token = UUID()
+        refreshToken = token
+        launchPhase = .hydrating
         isIndexing = true
         isProcessingTranscripts = false
         progressText = "Scanning…"
@@ -114,13 +119,16 @@ final class GeminiSessionIndexer: ObservableObject {
                 sema.signal()
             }
             sema.wait()
-            if let sessions = indexed {
+            if let sessions = indexed, !sessions.isEmpty {
                 DispatchQueue.main.async {
                     self.allSessions = sessions
                     self.isIndexing = false
                     self.filesProcessed = sessions.count
                     self.totalFiles = sessions.count
                     self.progressText = "Loaded \(sessions.count) from index"
+                    if self.refreshToken == token {
+                        self.launchPhase = .ready
+                    }
                     #if DEBUG
                     print("[Launch] Hydrated Gemini sessions from DB: count=\(sessions.count)")
                     #endif
@@ -134,6 +142,9 @@ final class GeminiSessionIndexer: ObservableObject {
             DispatchQueue.main.async {
                 self.totalFiles = files.count
                 self.hasEmptyDirectory = files.isEmpty
+                if self.refreshToken == token {
+                    self.launchPhase = .scanning
+                }
             }
 
             var sessions: [Session] = []
@@ -176,12 +187,18 @@ final class GeminiSessionIndexer: ObservableObject {
                 // Background transcript cache generation for accurate search
                 self.isProcessingTranscripts = true
                 self.progressText = "Processing transcripts..."
+                if self.refreshToken == token {
+                    self.launchPhase = .transcripts
+                }
                 let cache = self.transcriptCache
                 Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
                     await cache.generateAndCache(sessions: sorted)
                     await MainActor.run {
                         self.isProcessingTranscripts = false
                         self.progressText = "Ready"
+                        if self.refreshToken == token {
+                            self.launchPhase = .ready
+                        }
                     }
                 }
             }

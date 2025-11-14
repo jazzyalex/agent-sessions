@@ -77,6 +77,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var lastBuildKey: String? = nil
 
     private var shouldShowLoadingAnimation: Bool {
+        if indexer.launchPhase < .ready { return true }
         guard let id = sessionID else { return false }
         return (indexer.isLoadingSession && indexer.loadingSessionID == id) || indexer.isIndexing
     }
@@ -180,9 +181,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
             }
         } else {
-            Text("Select a session to view transcript")
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if indexer.launchPhase < .ready || indexer.isIndexing {
+                LoadingAnimationView(
+                    codexColor: .blue,
+                    claudeColor: Color(red: 204/255, green: 121/255, blue: 90/255)
+                )
+            } else {
+                Text("Select a session to view transcript")
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 

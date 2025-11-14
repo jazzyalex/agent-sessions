@@ -30,6 +30,7 @@ final class ClaudeSessionIndexer: ObservableObject {
     @Published var totalFiles: Int = 0
     @Published var indexingError: String? = nil
     @Published var hasEmptyDirectory: Bool = false
+    @Published var launchPhase: LaunchPhase = .idle
 
     // Filters
     @Published var query: String = ""
@@ -69,6 +70,7 @@ final class ClaudeSessionIndexer: ObservableObject {
     private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
+    private var refreshToken = UUID()
 
     init() {
         // Initialize discovery with current override (if any)
@@ -147,6 +149,9 @@ final class ClaudeSessionIndexer: ObservableObject {
         let root = discovery.sessionsRoot()
         print("\n🔵 CLAUDE INDEXING START: root=\(root.path)")
 
+        let token = UUID()
+        refreshToken = token
+        launchPhase = .hydrating
         isIndexing = true
         isProcessingTranscripts = false
         progressText = "Scanning…"
@@ -188,6 +193,9 @@ final class ClaudeSessionIndexer: ObservableObject {
             DispatchQueue.main.async {
                 self.totalFiles = files.count
                 self.hasEmptyDirectory = files.isEmpty
+                if self.refreshToken == token {
+                    self.launchPhase = .scanning
+                }
             }
 
             var newSessions: [Session] = []
@@ -228,12 +236,18 @@ final class ClaudeSessionIndexer: ObservableObject {
                 // Start background transcript indexing for accurate search
                 self.isProcessingTranscripts = true
                 self.progressText = "Processing transcripts..."
+                if self.refreshToken == token {
+                    self.launchPhase = .transcripts
+                }
                 let cache = self.transcriptCache
                 Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
                     await cache.generateAndCache(sessions: sortedSessions)
                     await MainActor.run {
                         self.isProcessingTranscripts = false
                         self.progressText = "Ready"
+                        if self.refreshToken == token {
+                            self.launchPhase = .ready
+                        }
                     }
                 }
             }
