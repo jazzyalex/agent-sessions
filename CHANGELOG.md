@@ -7,20 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6] - 2025-11-14
+
 ### Added
-- Favorites (★):
-  - Inline star in Sessions list with context menu (Add/Remove from Favorites)
-  - Toolbar toggle “Favorites” filters list (AND with search), persisted across launches
-  - Favorites persist via UserDefaults (no schema changes)
-- Analytics: Sessions Over Time and By Agent cards now share a Sessions/Messages toggle, backed by per-agent message totals so both visuals stay in sync.
+- Usage probe support for Codex CLI:
+  - Automatic tmux-based /status probes when usage data goes stale
+  - New Usage Probes preferences pane with full control over probe behavior
+  - Configurable refresh intervals (30/60/120 minutes, default 60)
+  - 24-hour rolling probe budget to prevent excessive token usage
+  - Auto-delete probe sessions option with manual cleanup controls
+  - Probe session filtering from UI and analytics
+  - "Last updated" timestamps with 30-minute freshness threshold
+- Analytics flip cards:
+  - Interactive flip cards for all analytics charts with insights and sparklines
+  - Agent breakdowns and detailed context on card backs
+  - Unified Sessions/Messages toggle shared across all charts
+  - Per-agent message totals keep visualizations synchronized
+- Enhanced usage tracking UX:
+  - Separate refresh intervals for Codex and Claude
+  - "Show system probe sessions for debugging" toggle
+  - Menu bar clarity improvements for refresh costs
 
 ### Fixed
-- Git Context Inspector now responds to Light/Dark/System theme changes immediately; removed reliance on passing a nil preferredColorScheme which could leave the window stuck after switching to System.
-- Analytics window now immediately follows System appearance changes even when not key; listens for effective appearance changes and refreshes its SwiftUI root.
-- Analytics: Claude sessions now use a stable logical ID derived from the file’s `sessionId`, preventing one logical session from being split across many files. This normalizes avg session length vs Codex.
-- Analytics: Gemini sessions also switch to a stable logical ID from `sessionId` when present; added a one-time database rebuild for Gemini.
- - Analytics: Sessions and Messages totals now honor “Hide zero/low message sessions” prefs (DB path), matching the Sessions list.
-- Analytics: Stat card tooltips now explain ±% deltas and clarify they compare to the previous date range.
+- Git Context Inspector now responds to Light/Dark/System theme changes immediately
+- Analytics window now immediately follows System appearance changes even when not key
+- Analytics: Claude sessions now use stable logical ID from `sessionId`, preventing session splitting
+- Analytics: Gemini sessions also use stable logical ID from `sessionId` when present
+- Analytics: Sessions and Messages totals now honor "Hide zero/low message sessions" preferences
+- Analytics: Stat card tooltips now explain percentage deltas and date range comparisons
+- Codex probe reliability with robust /status capture, retry logic, and scroll handling
+- Claude probe hardening with better error handling and cleanup
+
+### Improved
+- Launch loading UX with better progress indicators and analytics gating
+- Analytics card layouts with balanced spacing and visual hierarchy
+- Probe session detection accuracy with working directory validation
+- Menu bar UX with clearer refresh cost indicators
 
 ## [2.0.0] - 2025-10-04
 

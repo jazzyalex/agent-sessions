@@ -3,30 +3,46 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.5.4</title>
-            <pubDate>Mon, 03 Nov 2025 16:57:30 -0800</pubDate>
-            <description><![CDATA[
-                <h2>What's New in 2.5.4</h2>
-
-<h3>Fixed</h3>
-<p>Sessions: Manual refresh now scans filesystem for new session files even when loading from database cache. Previously, the refresh button would load cached sessions and skip filesystem scan, causing new VSCode Codex sessions to remain invisible until background indexer ran.</p>
-<p>UI: Progress indicator now remains visible throughout entire refresh operation, including transcript processing phase. Previously, the spinner would disappear prematurely while heavy transcript cache generation continued in background, leaving users with unresponsive UI and no feedback.
-</p>
-<h3>Added</h3>
-<p>Indexing: SQLite rollups index with per-session daily splits and incremental Refresh. Background indexing runs at utility priority and updates only changed session files.</p>
-<p>Git Inspector (feature-flagged): Adds "Show Git Context" to the Unified Sessions context menu for Codex sessions; opens a non-blocking inspector window with current and historical git context.</p>
-<p>Advanced Analytics: Visualize AI coding patterns with session trends, agent breakdown, time-of-day heatmap, and key metrics via Window → Analytics.</p>
-
-<h3>Fixed</h3>
-<p>Usage (Codex): Reset times no longer show "Stale data" when recent `token_count` events are present. Now anchors `resets_in_seconds` to `rate_limits.captured_at` and accepts absolute `resets_at`/`reset_at` fields (including `*_ms`), with flexible timestamp parsing for old/new JSON formats.</p>
-<p>Analytics/Git Inspector: System theme updates immediately; stable session IDs for Claude/Gemini; aligned window theme handling.</p>
-<p>Sessions/Messages totals: Respect HideZeroMessageSessions/HideLowMessageSessions preferences in dashboard cards.</p>
-<p>Avg Session Length: Exclude noise sessions when preferences hide zero/low message sessions.</p>
-            ]]></description>
-            <sparkle:version>6</sparkle:version>
-            <sparkle:shortVersionString>2.5.4</sparkle:shortVersionString>
+            <title>2.6</title>
+            <pubDate>Sun, 16 Nov 2025 10:59:15 -0800</pubDate>
+    <description><![CDATA[
+<h2>What's New in 2.6</h2>
+<p>
+</p><h3>Added
+<li>Usage probe support for Codex CLI:
+  - Automatic tmux-based /status probes when usage data goes stale
+  - New Usage Probes preferences pane with full control over probe behavior
+  - Configurable refresh intervals (30/60/120 minutes, default 60)
+  - 24-hour rolling probe budget to prevent excessive token usage
+  - Auto-delete probe sessions option with manual cleanup controls
+  - Probe session filtering from UI and analytics
+  - "Last updated" timestamps with 30-minute freshness threshold
+<li>Analytics flip cards:
+  - Interactive flip cards for all analytics charts with insights and sparklines
+  - Agent breakdowns and detailed context on card backs
+  - Unified Sessions/Messages toggle shared across all charts
+  - Per-agent message totals keep visualizations synchronized
+<li>Enhanced usage tracking UX:
+  - Separate refresh intervals for Codex and Claude
+  - "Show system probe sessions for debugging" toggle
+  - Menu bar clarity improvements for refresh costs</p><p></p><h3>Fixed
+<li>Git Context Inspector now responds to Light/Dark/System theme changes immediately
+<li>Analytics window now immediately follows System appearance changes even when not key
+<li>Analytics: Claude sessions now use stable logical ID from `sessionId`, preventing session splitting
+<li>Analytics: Gemini sessions also use stable logical ID from `sessionId` when present
+<li>Analytics: Sessions and Messages totals now honor "Hide zero/low message sessions" preferences
+<li>Analytics: Stat card tooltips now explain percentage deltas and date range comparisons
+<li>Codex probe reliability with robust /status capture, retry logic, and scroll handling
+<li>Claude probe hardening with better error handling and cleanup</p><p></p><h3>Improved
+<li>Launch loading UX with better progress indicators and analytics gating
+<li>Analytics card layouts with balanced spacing and visual hierarchy
+<li>Probe session detection accuracy with working directory validation
+<li>Menu bar UX with clearer refresh cost indicators</p><p></p></ul>
+    ]]></description>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>2.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.4/AgentSessions-2.5.4.dmg" length="6214368" type="application/octet-stream" sparkle:edSignature="YfpJhT7o+aHPUAzzVrRCHpZ2TiPOESQIGLYcAZxO4nNkjJ3FfIw0SoUadO9VdP/uaUSFcH91TxSL5+sZB4QcDA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.6/AgentSessions-2.6.dmg" length="7304252" type="application/octet-stream" sparkle:edSignature="Kzo+2WhH3/MUUJ18Z0338QId/2Xxvfr/g8AcmmbrFph4C1m0vR6VngB6/X4+JtmkBd8I2JyXrBGaCZH7qid9Aw=="/>
         </item>
     </channel>
 </rss>
