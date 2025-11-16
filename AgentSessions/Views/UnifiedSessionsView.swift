@@ -35,6 +35,8 @@ struct UnifiedSessionsView: View {
     @State private var autoSelectEnabled: Bool = true
     @State private var programmaticSelectionUpdate: Bool = false
     @State private var isAutoSelectingFromSearch: Bool = false
+    @State private var hasEverHadSessions: Bool = false
+    @State private var hasUserManuallySelected: Bool = false
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
 
@@ -151,6 +153,11 @@ struct UnifiedSessionsView: View {
         .onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
+        .onReceive(unified.$sessions) { sessions in
+            if !sessions.isEmpty {
+                hasEverHadSessions = true
+            }
+        }
     }
 
     private var listPane: some View {
@@ -236,11 +243,6 @@ struct UnifiedSessionsView: View {
         .simultaneousGesture(TapGesture().onEnded {
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         })
-        .allowsHitTesting(!shouldShowLaunchOverlay)
-        if shouldShowLaunchOverlay {
-            launchAnimationView
-                .allowsHitTesting(false)
-        }
         }
         // Bottom overlay to avoid changing intrinsic size of the list pane
         .overlay(alignment: .bottom) {
@@ -329,7 +331,8 @@ struct UnifiedSessionsView: View {
             }
             selection = newSel.first
             if !programmaticSelectionUpdate {
-                // User interacted with the table; stop auto-selection
+                // User interacted with the table; mark as manually selected
+                hasUserManuallySelected = true
                 autoSelectEnabled = false
             }
             if !programmaticSelectionUpdate {
@@ -487,7 +490,7 @@ struct UnifiedSessionsView: View {
         }
         ToolbarItem(placement: .automatic) {
             AnalyticsButtonView(
-                isEnabled: unified.launchState.isInteractive && analyticsReady,
+                isEnabled: analyticsReady,
                 disabledReason: analyticsDisabledReason
             )
         }
@@ -550,15 +553,12 @@ struct UnifiedSessionsView: View {
     }
 
     private func updateSelectionBridge() {
-        // If auto-selection is enabled, keep the selection pinned to the first row
-        if autoSelectEnabled, unified.launchState.isInteractive, let first = cachedRows.first {
+        // Auto-select first row when sessions become available and user hasn't manually selected
+        if !hasUserManuallySelected, let first = cachedRows.first, selection == nil {
             selection = first.id
         }
         // Keep single-selection Set in sync with selection id
-        let desired: Set<String> = {
-            guard unified.launchState.isInteractive else { return [] }
-            return selection.map { [$0] } ?? []
-        }()
+        let desired: Set<String> = selection.map { [$0] } ?? []
         if tableSelection != desired {
             programmaticSelectionUpdate = true
             tableSelection = desired
@@ -573,14 +573,10 @@ struct UnifiedSessionsView: View {
         } else {
             cachedRows = rows.sorted(using: sortOrder)
         }
+        // If current selection disappeared from list, auto-select first row
         if let sel = selection, !cachedRows.contains(where: { $0.id == sel }) {
-            if unified.launchState.isInteractive {
-                selection = cachedRows.first?.id
-                tableSelection = selection.map { [$0] } ?? []
-            } else {
-                selection = nil
-                tableSelection = []
-            }
+            selection = cachedRows.first?.id
+            tableSelection = selection.map { [$0] } ?? []
         }
     }
 
@@ -591,9 +587,6 @@ struct UnifiedSessionsView: View {
     }
 
     private var analyticsDisabledReason: String? {
-        if !unified.launchState.isInteractive {
-            return unified.launchState.statusDescription
-        }
         if !analyticsReady {
             return "Analytics warming up…"
         }
@@ -607,7 +600,7 @@ struct UnifiedSessionsView: View {
     }
 
     private var shouldShowLaunchOverlay: Bool {
-        !unified.launchState.hasDisplayedSessions || !unified.launchState.isInteractive
+        unified.sessions.isEmpty && !hasEverHadSessions
     }
 
     private var launchAnimationView: some View {

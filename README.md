@@ -17,7 +17,7 @@
 </table>
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.4/AgentSessions-2.5.4.dmg"><b>Download Agent Sessions 2.5.4 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.6/AgentSessions-2.6.dmg"><b>Download Agent Sessions 2.6 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -62,9 +62,19 @@ Local-first, open source, and built for terminal vibe warriors.
 
 ---
 
-## What's New in 2.5.2
+## What's New in 2.6
 
-**Analytics filtering fix** reducing noise by 79% (now matches Sessions List defaults) • **Diagnostic script** for session analysis.
+### Usage Probe Support for Codex
+Automatic background probes refresh Codex usage limits when data goes stale. New Usage Probes preferences pane provides full control: enable/disable auto-probes, configure refresh intervals, and manage probe session cleanup. Mirrors the Claude usage tracking workflow with 24-hour probe budgets and auto-delete options.
+
+### Analytics Flip Cards
+Interactive flip cards reveal insights behind every metric. Click any analytics card to see sparklines, agent breakdowns, and detailed context. Switch between Sessions and Messages views with unified toggle across all charts.
+
+### Quality Improvements
+- Improved launch loading UX with better progress indicators and analytics gating
+- Hardened Claude and Codex probe reliability with robust capture logic
+- Refined analytics card layouts with balanced spacing and visual hierarchy
+- Better stale data indicators with "Last updated" timestamps
 
 ---
 
@@ -128,7 +138,7 @@ No cloud uploads or telemetry — **read‑only by design.**
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.5.4.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.4/AgentSessions-2.5.4.dmg)
+1. [Download AgentSessions-2.6.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.6/AgentSessions-2.6.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew Tap

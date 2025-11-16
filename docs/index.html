@@ -180,7 +180,7 @@
       </a>
     </div>
     <div class="header-right">
-      <span>• macOS • Open Source</span>
+      <span>• macOS • Open Source • <span id="github-stars-container" style="display:none;">⭐ <span id="github-stars">–</span></span></span>
     </div>
   </header>
   <div class="container">
@@ -196,21 +196,15 @@
       <span
         style="font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-weight: 600; color: #4B5563; font-size: 0.8em; font-variant: small-caps; letter-spacing: 0.05em;">local-first,
         open source, and built for terminal vibe warriors.</span>
-      
-      <a class="ph-badge" href="https://www.producthunt.com/products/agent-sessions" target="_blank" rel="noopener">
-        <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1024948&theme=light"
-             alt="Agent Sessions on Product Hunt"
-             style="height:24px; width:auto; opacity:0.9; vertical-align:top;">
-      </a>
     </div>
 
       <br>
       
     <div class="button-row" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
-      <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.5.4/AgentSessions-2.5.4.dmg"
+      <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.6/AgentSessions-2.6.dmg"
         class="btn primary"
         style="padding:10px 18px;border-radius:8px;background:#007aff;color:#fff;text-decoration:none;font-weight:500">
-        Download Agent Sessions 2.5.4
+        Download Agent Sessions 2.6
       </a>
 
       <a href="https://github.com/jazzyalex/agent-sessions" class="btn secondary"
@@ -231,43 +225,28 @@ brew install --cask agent-sessions</code></pre>
 
     <div class="features">
       <div class="card">
-        <h3>Unified Interface v2</h3>
-        <p>Browse <em>Codex CLI</em>, <em>Claude Code</em>, and <em>Gemini CLI</em> side-by-side. Toggle
-          between sources
-          with strict filtering and unified search.
-        <p>
-          ★ Star important sessions for quick access — one click in the toolbar brings up your favorites.</p>
+        <h3>Unified Interface</h3>
+        <p>Browse Codex CLI, Claude Code, and Gemini CLI side-by-side. Star important sessions for quick access with toolbar favorites toggle.</p>
       </div>
       <div class="card">
-        <h3>Unified Search v2</h3>
-        <p>One unified search across <em>Codex</em>, <em>Claude Code</em>, and <em>Gemini CLI</em> sessions. Find any snippet
-          or prompt instantly — no
-          matter which agent or terminal it came from. Smart sorting, instant cancel, full-text search with project
-          filters.</p>
+        <h3>Unified Search</h3>
+        <p>Search across all agents instantly. Smart sorting, project filters, and cancellable full-text search.</p>
       </div>
       <div class="card">
-        <h3>Instant Resume & Re-use</h3>
-        <p>Instantly reopen any <em>Codex</em> or <em>Claude Code</em> session in Terminal/iTerm2. When
-          <code>/resume</code>
-          fails or you only need a snippet — browse visually, copy the snippet, and paste it into a new terminal session
-          or chat.
-        </p>
+        <h3>Instant Resume</h3>
+        <p>Reopen any Codex or Claude session in Terminal/iTerm2. Browse visually and copy snippets when you need them.</p>
       </div>
       <div class="card">
         <h3>Usage Tracking</h3>
-        <p><strong>Always-on</strong> 5-hour and weekly limits for <em>Codex CLI</em> and <em>Claude Code</em>.
-          <strong>Menu bar</strong> or in-app strip indicators with thresholds and reset time.
-        </p>
-
+        <p>Always-on tracking of 5-hour and weekly limits for Codex and Claude. Menu bar and in-app indicators show usage with auto-refresh probes.</p>
       </div>
       <div class="card">
-        <h3>Analytics & Git Inspector</h3>
-        <p>Session stats, agent breakdowns, and time-of-day heatmaps show where your coding time actually goes. <strong>Git Inspector</strong> catches branch changes and uncommitted work before you resume sessions.</p>
+        <h3>Analytics</h3>
+        <p>Interactive flip cards with sparklines and insights. Session trends, agent breakdowns, and time-of-day heatmaps. Git Inspector shows repository state.</p>
       </div>
       <div class="card">
-        <h3>Local, Private & Safe</h3>
-        <p>All processing on your Mac. Reads <code>~/.codex/sessions</code>, <code>~/.claude/sessions</code> and <code>~/.gemini/tmp</code>.
-          No cloud uploads or telemetry. <strong>Read only</strong> – your sessions are always safe.</p>
+        <h3>Local & Private</h3>
+        <p>All processing on your Mac. Reads session directories locally. No cloud uploads or telemetry. Read-only by design.</p>
       </div>
 
     </div>
@@ -326,6 +305,35 @@ brew install --cask agent-sessions</code></pre>
   </div>
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
+
+    // Load GitHub stars count
+    async function loadGitHubStars() {
+      const el = document.getElementById('github-stars');
+      const container = document.getElementById('github-stars-container');
+      if (!el || !container) return;
+
+      try {
+        const res = await fetch('https://api.github.com/repos/jazzyalex/agent-sessions', {
+          headers: {
+            'Accept': 'application/vnd.github+json'
+          }
+        });
+
+        if (!res.ok) {
+          console.error('GitHub API error:', res.status, await res.text());
+          return;
+        }
+
+        const repo = await res.json();
+        const stars = repo.stargazers_count ?? 0;
+        el.textContent = stars;
+        container.style.display = 'inline';
+      } catch (e) {
+        console.error('Failed to load GitHub stars', e);
+      }
+    }
+
+    loadGitHubStars();
   </script>
 </body>
 
