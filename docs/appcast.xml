@@ -6,38 +6,13 @@
             <title>2.6</title>
             <pubDate>Sun, 16 Nov 2025 10:59:15 -0800</pubDate>
     <description><![CDATA[
-<h2>What's New in 2.6</h2>
-<p>
-</p><h3>Added
-<li>Usage probe support for Codex CLI:
-  - Automatic tmux-based /status probes when usage data goes stale
-  - New Usage Probes preferences pane with full control over probe behavior
-  - Configurable refresh intervals (30/60/120 minutes, default 60)
-  - 24-hour rolling probe budget to prevent excessive token usage
-  - Auto-delete probe sessions option with manual cleanup controls
-  - Probe session filtering from UI and analytics
-  - "Last updated" timestamps with 30-minute freshness threshold
-<li>Analytics flip cards:
-  - Interactive flip cards for all analytics charts with insights and sparklines
-  - Agent breakdowns and detailed context on card backs
-  - Unified Sessions/Messages toggle shared across all charts
-  - Per-agent message totals keep visualizations synchronized
-<li>Enhanced usage tracking UX:
-  - Separate refresh intervals for Codex and Claude
-  - "Show system probe sessions for debugging" toggle
-  - Menu bar clarity improvements for refresh costs</p><p></p><h3>Fixed
-<li>Git Context Inspector now responds to Light/Dark/System theme changes immediately
-<li>Analytics window now immediately follows System appearance changes even when not key
-<li>Analytics: Claude sessions now use stable logical ID from `sessionId`, preventing session splitting
-<li>Analytics: Gemini sessions also use stable logical ID from `sessionId` when present
-<li>Analytics: Sessions and Messages totals now honor "Hide zero/low message sessions" preferences
-<li>Analytics: Stat card tooltips now explain percentage deltas and date range comparisons
-<li>Codex probe reliability with robust /status capture, retry logic, and scroll handling
-<li>Claude probe hardening with better error handling and cleanup</p><p></p><h3>Improved
-<li>Launch loading UX with better progress indicators and analytics gating
-<li>Analytics card layouts with balanced spacing and visual hierarchy
-<li>Probe session detection accuracy with working directory validation
-<li>Menu bar UX with clearer refresh cost indicators</p><p></p></ul>
+<h3>What's New</h3>
+<ul>
+<li><strong>Codex Usage Probes</strong> — Automatic background refresh when data goes stale, with 24-hour budgets and cleanup controls</li>
+<li><strong>Analytics Flip Cards</strong> — Click any chart to reveal sparklines, agent breakdowns, and insights</li>
+<li><strong>Improved Theming</strong> — Analytics and Git Inspector windows respond instantly to appearance changes</li>
+<li><strong>Better Session Tracking</strong> — Stable session IDs fix analytics metrics for Claude and Gemini</li>
+</ul>
     ]]></description>
             <sparkle:version>7</sparkle:version>
             <sparkle:shortVersionString>2.6</sparkle:shortVersionString>
