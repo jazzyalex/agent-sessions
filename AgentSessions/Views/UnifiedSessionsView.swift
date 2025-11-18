@@ -179,6 +179,20 @@ struct UnifiedSessionsView: View {
 
             TableColumn("Session", value: \Session.title) { s in
                 SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        // Explicitly select the tapped row to avoid relying solely on Table's mouse handling.
+                        selection = s.id
+                        let desired: Set<String> = [s.id]
+                        if tableSelection != desired {
+                            programmaticSelectionUpdate = true
+                            tableSelection = desired
+                            DispatchQueue.main.async { programmaticSelectionUpdate = false }
+                        }
+                        hasUserManuallySelected = true
+                        autoSelectEnabled = false
+                        NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+                    }
             }
             .width(min: showTitle ? 160 : 0,
                    ideal: showTitle ? 320 : 0,
@@ -320,15 +334,7 @@ struct UnifiedSessionsView: View {
             updateCachedRows()
         }
         .onChange(of: tableSelection) { _, newSel in
-            // Prevent clearing the current selection by clicking empty table space (HIG: avoid accidental context loss)
-            if newSel.isEmpty, let current = selection {
-                if tableSelection != [current] {
-                    programmaticSelectionUpdate = true
-                    tableSelection = [current]
-                    DispatchQueue.main.async { programmaticSelectionUpdate = false }
-                }
-                return
-            }
+            // Allow empty selection when user clicks whitespace; do not force reselection.
             selection = newSel.first
             if !programmaticSelectionUpdate {
                 // User interacted with the table; mark as manually selected
@@ -340,8 +346,9 @@ struct UnifiedSessionsView: View {
             }
         }
         .onChange(of: unified.sessions) { _, _ in
-            updateSelectionBridge()
+            // Update cached rows first, then reconcile selection so auto-select uses fresh data.
             updateCachedRows()
+            updateSelectionBridge()
         }
         .onChange(of: columnVisibility.changeToken) { _, _ in refreshColumnLayout() }
         .onChange(of: showSourceColumn) { _, _ in refreshColumnLayout() }

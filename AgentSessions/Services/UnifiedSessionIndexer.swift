@@ -258,48 +258,28 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     func refresh() {
-        // Kick off background analytics indexing refresh (non-blocking)
+        // Stage 1: kick off per-source fast metadata hydration in parallel.
+        // Each indexer is internally serial and already hydrates from IndexDB.session_meta
+        // before scanning for new files, so starting them together is safe.
+        let shouldRefreshCodex = includeCodex && !codex.isIndexing
+        let shouldRefreshClaude = includeClaude && !claude.isIndexing
+        let shouldRefreshGemini = includeGemini && !gemini.isIndexing
+
+        if shouldRefreshCodex { codex.refresh() }
+        if shouldRefreshClaude { claude.refresh() }
+        if shouldRefreshGemini { gemini.refresh() }
+
+        // Stage 2: analytics enrichment (non-blocking, runs after hydration has begun).
         Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
             do {
                 let db = try IndexDB()
                 let indexer = AnalyticsIndexer(db: db)
                 await indexer.refresh()
             } catch {
-                // Silent failure: indexing is additive and optional for core UX
-                print("[Indexing] Refresh failed: \(error)")
+                // Silent failure: analytics are additive and optional for core UX.
+                print("[Indexing] Analytics refresh failed: \(error)")
             }
         }
-
-        // Sequential refresh: Codex → Claude → Gemini, gated by source toggles
-        // This stabilizes resolver seeding and avoids UI churn from parallel updates.
-        struct Step { let enabled: Bool; let start: () -> Void; let busy: () -> Bool }
-        let steps: [Step] = [
-            Step(enabled: includeCodex, start: { self.codex.refresh() }, busy: { self.codex.isIndexing }),
-            Step(enabled: includeClaude, start: { self.claude.refresh() }, busy: { self.claude.isIndexing }),
-            Step(enabled: includeGemini, start: { self.gemini.refresh() }, busy: { self.gemini.isIndexing })
-        ]
-
-        func run(from index: Int) {
-            // Find next enabled step
-            var i = index
-            while i < steps.count && !steps[i].enabled { i += 1 }
-            guard i < steps.count else { return }
-
-            let step = steps[i]
-            step.start()
-
-            func poll() {
-                if step.busy() {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { poll() }
-                } else {
-                    run(from: i + 1)
-                }
-            }
-            // Poll until this step finishes, then move on
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { poll() }
-        }
-
-        run(from: 0)
     }
 
     // Remove a session from the unified list (e.g., missing file cleanup)
