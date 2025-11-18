@@ -20,7 +20,7 @@ struct AgentSessionsApp: App {
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
-    @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.vertical.rawValue
+    @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.horizontal.rawValue
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     @AppStorage("CodexUsageEnabled") private var codexUsageEnabledPref: Bool = false
     @AppStorage("ClaudeUsageEnabled") private var claudeUsageEnabledPref: Bool = false
