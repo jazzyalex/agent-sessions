@@ -175,6 +175,7 @@ final class SessionIndexer: ObservableObject {
     // Track sessions currently being reloaded to prevent duplicate loads
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
+    private var lastPrewarmSignatureByID: [String: Int] = [:]
 
     var prefTheme: TranscriptTheme { TranscriptTheme(rawValue: themeRaw) ?? .codexDark }
     func setTheme(_ t: TranscriptTheme) { themeRaw = t.rawValue }
@@ -651,23 +652,48 @@ final class SessionIndexer: ObservableObject {
                     print("✅ INDEXING DONE: total=\(allParsedSessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
                 }
 
-                // Start background transcript indexing for accurate search
-                self.isProcessingTranscripts = true
-                self.progressText = "Processing transcripts..."
-                if self.refreshToken == token {
-                    self.launchPhase = .transcripts
-                }
-                let cache = self.transcriptCache
-                Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
-                    LaunchProfiler.log("Codex.refresh: transcript prewarm start")
-                    await cache.generateAndCache(sessions: sortedSessions)
-                    await MainActor.run {
-                        LaunchProfiler.log("Codex.refresh: transcript prewarm complete")
-                        self.isProcessingTranscripts = false
-                        self.progressText = "Ready"
-                        if self.refreshToken == token {
-                            self.launchPhase = .ready
+                // Start background transcript indexing for accurate search (delta-based).
+                // Only warm sessions that have real events, are not trivially empty/low,
+                // and whose (size,eventCount) signature changed since last prewarm.
+                let delta: [Session] = {
+                    let all = sortedSessions
+                    var out: [Session] = []
+                    out.reserveCapacity(all.count)
+                    for s in all {
+                        if s.events.isEmpty { continue }
+                        if s.messageCount <= 2 { continue }
+                        let size = s.fileSizeBytes ?? 0
+                        let sig = size ^ (s.eventCount << 16)
+                        if self.lastPrewarmSignatureByID[s.id] == sig { continue }
+                        self.lastPrewarmSignatureByID[s.id] = sig
+                        out.append(s)
+                        if out.count >= 256 { break } // bound initial work per refresh
+                    }
+                    return out
+                }()
+                if !delta.isEmpty {
+                    self.isProcessingTranscripts = true
+                    self.progressText = "Processing transcripts..."
+                    if self.refreshToken == token {
+                        self.launchPhase = .transcripts
+                    }
+                    let cache = self.transcriptCache
+                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
+                        LaunchProfiler.log("Codex.refresh: transcript prewarm start (delta=\(delta.count))")
+                        await cache.generateAndCache(sessions: delta)
+                        await MainActor.run {
+                            LaunchProfiler.log("Codex.refresh: transcript prewarm complete")
+                            self.isProcessingTranscripts = false
+                            self.progressText = "Ready"
+                            if self.refreshToken == token {
+                                self.launchPhase = .ready
+                            }
                         }
+                    }
+                } else {
+                    self.progressText = "Ready"
+                    if self.refreshToken == token {
+                        self.launchPhase = .ready
                     }
                 }
 

@@ -88,6 +88,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var hasPublishedInitialSessions = false
     private var isAnalyticsIndexing: Bool = false
     private var lastRefreshStartedAt: Date? = nil
+    private var lastAnalyticsRefreshStartedAt: Date? = nil
+    private let analyticsRefreshTTLSeconds: TimeInterval = 5 * 60  // 5 minutes
+    private let analyticsStartDelaySeconds: TimeInterval = 2.0     // small delay to avoid launch contention
 
     // Debouncing for expensive operations
     private var recomputeDebouncer: DispatchWorkItem? = nil
@@ -283,30 +286,42 @@ final class UnifiedSessionIndexer: ObservableObject {
         if shouldRefreshGemini { gemini.refresh() }
 
         // Stage 2: analytics enrichment (non-blocking, runs after hydration has begun).
-        // Use a simple gate so only one analytics index run happens at a time.
+        // Use a simple gate and TTL so only one analytics index run happens at a time
+        // and we avoid re-walking the entire corpus on every refresh.
         if !isAnalyticsIndexing {
-            isAnalyticsIndexing = true
-            Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self] in
-                guard let self else { return }
-                defer {
-                    Task { @MainActor [weak self] in self?.isAnalyticsIndexing = false }
-                }
-                do {
-                    LaunchProfiler.log("Unified.refresh: Analytics warmup (open IndexDB)")
-                    let db = try IndexDB()
-                    let indexer = AnalyticsIndexer(db: db)
-                    if try await db.isEmpty() {
-                        LaunchProfiler.log("Unified.refresh: Analytics fullBuild start")
-                        await indexer.fullBuild()
-                        LaunchProfiler.log("Unified.refresh: Analytics fullBuild complete")
-                    } else {
-                        LaunchProfiler.log("Unified.refresh: Analytics refresh start")
-                        await indexer.refresh()
-                        LaunchProfiler.log("Unified.refresh: Analytics refresh complete")
+            let now = Date()
+            if let last = lastAnalyticsRefreshStartedAt,
+               now.timeIntervalSince(last) < analyticsRefreshTTLSeconds {
+                LaunchProfiler.log("Unified.refresh: Analytics refresh skipped (within TTL)")
+            } else {
+                lastAnalyticsRefreshStartedAt = now
+                isAnalyticsIndexing = true
+                let delaySeconds = analyticsStartDelaySeconds
+                Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self] in
+                    guard let self else { return }
+                    defer {
+                        Task { @MainActor [weak self] in self?.isAnalyticsIndexing = false }
                     }
-                } catch {
-                    // Silent failure: analytics are additive and optional for core UX.
-                    print("[Indexing] Analytics refresh failed: \(error)")
+                    do {
+                        if delaySeconds > 0 {
+                            try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+                        }
+                        LaunchProfiler.log("Unified.refresh: Analytics warmup (open IndexDB)")
+                        let db = try IndexDB()
+                        let indexer = AnalyticsIndexer(db: db)
+                        if try await db.isEmpty() {
+                            LaunchProfiler.log("Unified.refresh: Analytics fullBuild start")
+                            await indexer.fullBuild()
+                            LaunchProfiler.log("Unified.refresh: Analytics fullBuild complete")
+                        } else {
+                            LaunchProfiler.log("Unified.refresh: Analytics refresh start")
+                            await indexer.refresh()
+                            LaunchProfiler.log("Unified.refresh: Analytics refresh complete")
+                        }
+                    } catch {
+                        // Silent failure: analytics are additive and optional for core UX.
+                        print("[Indexing] Analytics refresh failed: \(error)")
+                    }
                 }
             }
         }

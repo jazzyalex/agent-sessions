@@ -71,6 +71,7 @@ final class ClaudeSessionIndexer: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
     private var refreshToken = UUID()
+    private var lastPrewarmSignatureByID: [String: Int] = [:]
 
     init() {
         // Initialize discovery with current override (if any)
@@ -253,23 +254,45 @@ final class ClaudeSessionIndexer: ObservableObject {
                 self.isIndexing = false
                 print("✅ CLAUDE INDEXING DONE: total=\(sortedSessions.count) (existing=\(existingSessions.count), new=\(newSessions.count))")
 
-                // Start background transcript indexing for accurate search
-                self.isProcessingTranscripts = true
-                self.progressText = "Processing transcripts..."
-                if self.refreshToken == token {
-                    self.launchPhase = .transcripts
-                }
-                let cache = self.transcriptCache
-                Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
-                    LaunchProfiler.log("Claude.refresh: transcript prewarm start")
-                    await cache.generateAndCache(sessions: sortedSessions)
-                    await MainActor.run {
-                        LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
-                        self.isProcessingTranscripts = false
-                        self.progressText = "Ready"
-                        if self.refreshToken == token {
-                            self.launchPhase = .ready
+                // Delta-based transcript prewarm for Claude sessions.
+                let delta: [Session] = {
+                    var out: [Session] = []
+                    out.reserveCapacity(sortedSessions.count)
+                    for s in sortedSessions {
+                        if s.events.isEmpty { continue }
+                        if s.messageCount <= 2 { continue }
+                        let size = s.fileSizeBytes ?? 0
+                        let sig = size ^ (s.eventCount << 16)
+                        if self.lastPrewarmSignatureByID[s.id] == sig { continue }
+                        self.lastPrewarmSignatureByID[s.id] = sig
+                        out.append(s)
+                        if out.count >= 256 { break }
+                    }
+                    return out
+                }()
+                if !delta.isEmpty {
+                    self.isProcessingTranscripts = true
+                    self.progressText = "Processing transcripts..."
+                    if self.refreshToken == token {
+                        self.launchPhase = .transcripts
+                    }
+                    let cache = self.transcriptCache
+                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
+                        LaunchProfiler.log("Claude.refresh: transcript prewarm start (delta=\(delta.count))")
+                        await cache.generateAndCache(sessions: delta)
+                        await MainActor.run {
+                            LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
+                            self.isProcessingTranscripts = false
+                            self.progressText = "Ready"
+                            if self.refreshToken == token {
+                                self.launchPhase = .ready
+                            }
                         }
+                    }
+                } else {
+                    self.progressText = "Ready"
+                    if self.refreshToken == token {
+                        self.launchPhase = .ready
                     }
                 }
             }
