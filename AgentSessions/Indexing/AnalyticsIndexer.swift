@@ -25,6 +25,7 @@ actor AnalyticsIndexer {
 
     // MARK: - Core
     private func indexAll(incremental: Bool) async {
+        LaunchProfiler.log("Analytics.indexAll start (incremental=\(incremental))")
         // One-time migration: switch Claude sessions to stable logical IDs based on in-file sessionId.
         // Purge old Claude rows (which used path-hash IDs) once, then rebuild.
         // No destructive purges at startup; rely on refresh to reconcile
@@ -54,6 +55,7 @@ actor AnalyticsIndexer {
                 }
             }
         }
+        LaunchProfiler.log("Analytics.indexAll complete (incremental=\(incremental))")
     }
 
     private func indexFileIfNeeded(url: URL, source: String, incremental: Bool) async {

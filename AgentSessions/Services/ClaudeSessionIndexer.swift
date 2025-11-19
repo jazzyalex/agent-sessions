@@ -148,6 +148,7 @@ final class ClaudeSessionIndexer: ObservableObject {
     func refresh() {
         let root = discovery.sessionsRoot()
         print("\n🔵 CLAUDE INDEXING START: root=\(root.path)")
+        LaunchProfiler.log("Claude.refresh: start")
 
         let token = UUID()
         refreshToken = token
@@ -164,13 +165,28 @@ final class ClaudeSessionIndexer: ObservableObject {
         ioQueue.async {
             // Fast path: hydrate from SQLite index if available (bridge async)
             var indexed: [Session]? = nil
+            var indexedPaths: Set<String> = []
             let sema = DispatchSemaphore(value: 0)
             Task.detached(priority: .utility) {
-                indexed = try? await self.hydrateFromIndexDBIfAvailable()
-                if (indexed?.isEmpty ?? true) {
+                do {
+                    if let hydrated = try await self.hydrateFromIndexDBIfAvailable() {
+                        indexed = hydrated
+                    }
+                    let db = try IndexDB()
+                    let repo = SessionMetaRepository(db: db)
+                    indexedPaths = try await repo.fetchIndexedFilePaths(for: .claude)
+                } catch {
+                    // DB errors are non-fatal for UI; fall back to filesystem only.
+                }
+                if (indexed?.isEmpty ?? true) && indexedPaths.isEmpty {
                     try? await Task.sleep(nanoseconds: 250_000_000)
-                    let retry = try? await self.hydrateFromIndexDBIfAvailable()
-                    if let r = retry, !r.isEmpty { indexed = r }
+                    do {
+                        if let retry = try await self.hydrateFromIndexDBIfAvailable(), !retry.isEmpty {
+                            indexed = retry
+                        }
+                    } catch {
+                        // Still no DB hydrate; fall back to filesystem.
+                    }
                 }
                 sema.signal()
             }
@@ -178,17 +194,20 @@ final class ClaudeSessionIndexer: ObservableObject {
             let fm = FileManager.default
             let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
             let existingSessions = (indexed ?? []).filter(exists)
-            let existingPaths = Set(existingSessions.map { $0.filePath })
+            var existingPaths = Set(existingSessions.map { $0.filePath })
+            existingPaths.formUnion(indexedPaths)
             #if DEBUG
             if !existingSessions.isEmpty {
                 print("[Launch] Hydrated \(existingSessions.count) Claude sessions from DB (after pruning non-existent), now scanning for new files…")
             } else {
                 print("[Launch] DB hydration returned nil for Claude – scanning all files")
             }
+            LaunchProfiler.log("Claude.refresh: DB hydrate complete (existing=\(existingSessions.count))")
             #endif
             let files = self.discovery.discoverSessionFiles()
 
             print("📁 Found \(files.count) Claude Code session files")
+            LaunchProfiler.log("Claude.refresh: file enumeration done (files=\(files.count))")
 
             DispatchQueue.main.async {
                 self.totalFiles = files.count
@@ -229,6 +248,7 @@ final class ClaudeSessionIndexer: ObservableObject {
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
 
             DispatchQueue.main.async {
+                LaunchProfiler.log("Claude.refresh: sessions merged (total=\(sortedSessions.count))")
                 self.allSessions = sortedSessions
                 self.isIndexing = false
                 print("✅ CLAUDE INDEXING DONE: total=\(sortedSessions.count) (existing=\(existingSessions.count), new=\(newSessions.count))")
@@ -241,8 +261,10 @@ final class ClaudeSessionIndexer: ObservableObject {
                 }
                 let cache = self.transcriptCache
                 Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
+                    LaunchProfiler.log("Claude.refresh: transcript prewarm start")
                     await cache.generateAndCache(sessions: sortedSessions)
                     await MainActor.run {
+                        LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
                         self.isProcessingTranscripts = false
                         self.progressText = "Ready"
                         if self.refreshToken == token {

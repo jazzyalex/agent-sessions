@@ -92,6 +92,7 @@ final class GeminiSessionIndexer: ObservableObject {
     func refresh() {
         let root = discovery.sessionsRoot()
         print("\n🔵 GEMINI INDEXING START: root=\(root.path)")
+        LaunchProfiler.log("Gemini.refresh: start")
 
         let token = UUID()
         refreshToken = token
@@ -121,6 +122,7 @@ final class GeminiSessionIndexer: ObservableObject {
             sema.wait()
             if let sessions = indexed, !sessions.isEmpty {
                 DispatchQueue.main.async {
+                    LaunchProfiler.log("Gemini.refresh: DB hydrate hit (sessions=\(sessions.count))")
                     self.allSessions = sessions
                     self.isIndexing = false
                     self.filesProcessed = sessions.count
@@ -139,6 +141,7 @@ final class GeminiSessionIndexer: ObservableObject {
             print("[Launch] DB hydration returned nil for Gemini – falling back to filesystem scan")
             #endif
             let files = self.discovery.discoverSessionFiles()
+            LaunchProfiler.log("Gemini.refresh: file enumeration done (files=\(files.count))")
             DispatchQueue.main.async {
                 self.totalFiles = files.count
                 self.hasEmptyDirectory = files.isEmpty
@@ -176,6 +179,7 @@ final class GeminiSessionIndexer: ObservableObject {
 
             let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
             DispatchQueue.main.async {
+                LaunchProfiler.log("Gemini.refresh: sessions merged (total=\(sorted.count))")
                 self.allSessions = sorted
                 self.isIndexing = false
                 if FeatureFlags.throttleIndexingUIUpdates {
@@ -192,8 +196,10 @@ final class GeminiSessionIndexer: ObservableObject {
                 }
                 let cache = self.transcriptCache
                 Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
+                    LaunchProfiler.log("Gemini.refresh: transcript prewarm start")
                     await cache.generateAndCache(sessions: sorted)
                     await MainActor.run {
+                        LaunchProfiler.log("Gemini.refresh: transcript prewarm complete")
                         self.isProcessingTranscripts = false
                         self.progressText = "Ready"
                         if self.refreshToken == token {

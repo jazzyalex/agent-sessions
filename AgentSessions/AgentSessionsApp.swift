@@ -57,21 +57,9 @@ struct AgentSessionsApp: App {
                 .background(WindowAutosave(name: "MainWindow"))
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
-                    // Build or refresh analytics index at launch
-                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
-                        do {
-                            let db = try IndexDB()
-                            let indexer = AnalyticsIndexer(db: db)
-                            if try await db.isEmpty() {
-                                await indexer.fullBuild()
-                            } else {
-                                await indexer.refresh()
-                            }
-                        } catch {
-                            print("[Indexing] Launch indexing failed: \(error)")
-                        }
-                    }
-
+                    LaunchProfiler.reset("Unified main window")
+                    LaunchProfiler.log("Window appeared")
+                    LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
                     unifiedIndexerHolder.unified?.refresh()
                     updateUsageModels()
                     setupAnalytics()

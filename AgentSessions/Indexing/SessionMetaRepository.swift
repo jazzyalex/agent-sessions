@@ -5,6 +5,16 @@ actor SessionMetaRepository {
     private let db: IndexDB
     init(db: IndexDB) { self.db = db }
 
+    func fetchIndexedFilePaths(for source: SessionSource) async throws -> Set<String> {
+        let rows = try await db.fetchIndexedFiles(for: source.rawValue)
+        var paths: Set<String> = []
+        paths.reserveCapacity(rows.count)
+        for r in rows {
+            paths.insert(r.path)
+        }
+        return paths
+    }
+
     func fetchSessions(for source: SessionSource) async throws -> [Session] {
         let rows = try await db.fetchSessionMeta(for: source.rawValue)
         var out: [Session] = []
