@@ -188,23 +188,41 @@ final class GeminiSessionIndexer: ObservableObject {
                 }
                 print("✅ GEMINI INDEXING DONE: total=\(sessions.count)")
 
-                // Background transcript cache generation for accurate search
-                self.isProcessingTranscripts = true
-                self.progressText = "Processing transcripts..."
-                if self.refreshToken == token {
-                    self.launchPhase = .transcripts
-                }
-                let cache = self.transcriptCache
-                Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
-                    LaunchProfiler.log("Gemini.refresh: transcript prewarm start")
-                    await cache.generateAndCache(sessions: sorted)
-                    await MainActor.run {
-                        LaunchProfiler.log("Gemini.refresh: transcript prewarm complete")
-                        self.isProcessingTranscripts = false
-                        self.progressText = "Ready"
-                        if self.refreshToken == token {
-                            self.launchPhase = .ready
+                // Background transcript cache generation for accurate search (bounded batch).
+                let delta: [Session] = {
+                    var out: [Session] = []
+                    out.reserveCapacity(sorted.count)
+                    for s in sorted {
+                        if s.events.isEmpty { continue }
+                        if s.messageCount <= 2 { continue }
+                        out.append(s)
+                        if out.count >= 256 { break }
+                    }
+                    return out
+                }()
+                if !delta.isEmpty {
+                    self.isProcessingTranscripts = true
+                    self.progressText = "Processing transcripts..."
+                    if self.refreshToken == token {
+                        self.launchPhase = .transcripts
+                    }
+                    let cache = self.transcriptCache
+                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
+                        LaunchProfiler.log("Gemini.refresh: transcript prewarm start (delta=\(delta.count))")
+                        await cache.generateAndCache(sessions: delta)
+                        await MainActor.run {
+                            LaunchProfiler.log("Gemini.refresh: transcript prewarm complete")
+                            self.isProcessingTranscripts = false
+                            self.progressText = "Ready"
+                            if self.refreshToken == token {
+                                self.launchPhase = .ready
+                            }
                         }
+                    }
+                } else {
+                    self.progressText = "Ready"
+                    if self.refreshToken == token {
+                        self.launchPhase = .ready
                     }
                 }
             }
