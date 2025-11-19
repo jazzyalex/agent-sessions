@@ -86,6 +86,8 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var favorites = FavoritesStore()
     private var hasPublishedInitialSessions = false
+    private var isAnalyticsIndexing: Bool = false
+    private var lastRefreshStartedAt: Date? = nil
 
     // Debouncing for expensive operations
     private var recomputeDebouncer: DispatchWorkItem? = nil
@@ -258,9 +260,20 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     func refresh() {
+        // Guard against rapid consecutive refreshes (e.g., from probe cleanup
+        // or other background notifications) to avoid re-running Stage 1 and
+        // transcript prewarm immediately after launch.
+        let now = Date()
+        if let last = lastRefreshStartedAt, now.timeIntervalSince(last) < 15 {
+            LaunchProfiler.log("Unified.refresh: skipped (within 15s guard)")
+            return
+        }
+        lastRefreshStartedAt = now
+
         // Stage 1: kick off per-source fast metadata hydration in parallel.
         // Each indexer is internally serial and already hydrates from IndexDB.session_meta
         // before scanning for new files, so starting them together is safe.
+        LaunchProfiler.log("Unified.refresh: Stage 1 (per-source) start")
         let shouldRefreshCodex = includeCodex && !codex.isIndexing
         let shouldRefreshClaude = includeClaude && !claude.isIndexing
         let shouldRefreshGemini = includeGemini && !gemini.isIndexing
@@ -270,14 +283,31 @@ final class UnifiedSessionIndexer: ObservableObject {
         if shouldRefreshGemini { gemini.refresh() }
 
         // Stage 2: analytics enrichment (non-blocking, runs after hydration has begun).
-        Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
-            do {
-                let db = try IndexDB()
-                let indexer = AnalyticsIndexer(db: db)
-                await indexer.refresh()
-            } catch {
-                // Silent failure: analytics are additive and optional for core UX.
-                print("[Indexing] Analytics refresh failed: \(error)")
+        // Use a simple gate so only one analytics index run happens at a time.
+        if !isAnalyticsIndexing {
+            isAnalyticsIndexing = true
+            Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self] in
+                guard let self else { return }
+                defer {
+                    Task { @MainActor [weak self] in self?.isAnalyticsIndexing = false }
+                }
+                do {
+                    LaunchProfiler.log("Unified.refresh: Analytics warmup (open IndexDB)")
+                    let db = try IndexDB()
+                    let indexer = AnalyticsIndexer(db: db)
+                    if try await db.isEmpty() {
+                        LaunchProfiler.log("Unified.refresh: Analytics fullBuild start")
+                        await indexer.fullBuild()
+                        LaunchProfiler.log("Unified.refresh: Analytics fullBuild complete")
+                    } else {
+                        LaunchProfiler.log("Unified.refresh: Analytics refresh start")
+                        await indexer.refresh()
+                        LaunchProfiler.log("Unified.refresh: Analytics refresh complete")
+                    }
+                } catch {
+                    // Silent failure: analytics are additive and optional for core UX.
+                    print("[Indexing] Analytics refresh failed: \(error)")
+                }
             }
         }
     }
