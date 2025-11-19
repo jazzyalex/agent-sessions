@@ -86,7 +86,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var favorites = FavoritesStore()
     private var hasPublishedInitialSessions = false
-    private var isAnalyticsIndexing: Bool = false
+    @Published private(set) var isAnalyticsIndexing: Bool = false
     private var lastRefreshStartedAt: Date? = nil
     private var lastAnalyticsRefreshStartedAt: Date? = nil
     private let analyticsRefreshTTLSeconds: TimeInterval = 5 * 60  // 5 minutes
