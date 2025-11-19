@@ -37,6 +37,7 @@ struct UnifiedSessionsView: View {
     @State private var isAutoSelectingFromSearch: Bool = false
     @State private var hasEverHadSessions: Bool = false
     @State private var hasUserManuallySelected: Bool = false
+    @State private var showAnalyticsWarmupNotice: Bool = false
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
 
@@ -121,9 +122,30 @@ struct UnifiedSessionsView: View {
         .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .light) { $0.preferredColorScheme(.light) }
         .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .dark) { $0.preferredColorScheme(.dark) }
         .toolbar { toolbarContent }
+        .overlay(alignment: .topTrailing) {
+            if showAnalyticsWarmupNotice {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Analytics is warming up… try again in ~1–2 minutes")
+                        .font(.footnote)
+                }
+                .padding(10)
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.top, 8)
+                .padding(.trailing, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .onAppear {
             if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }
             updateCachedRows()
+        }
+        .onChange(of: analyticsReady) { _, ready in
+            if ready {
+                withAnimation { showAnalyticsWarmupNotice = false }
+            }
         }
         .onChange(of: selection) { _, id in
             guard let id, let s = cachedRows.first(where: { $0.id == id }) else { return }
@@ -497,8 +519,9 @@ struct UnifiedSessionsView: View {
         }
         ToolbarItem(placement: .automatic) {
             AnalyticsButtonView(
-                isEnabled: analyticsReady,
-                disabledReason: analyticsDisabledReason
+                isReady: analyticsReady,
+                disabledReason: analyticsDisabledReason,
+                onWarmupTap: handleAnalyticsWarmupTap
             )
         }
         ToolbarItemGroup(placement: .automatic) {
@@ -591,6 +614,15 @@ struct UnifiedSessionsView: View {
         columnLayoutID = UUID()
         updateCachedRows()
         updateSelectionBridge()
+    }
+
+    private func handleAnalyticsWarmupTap() {
+        if showAnalyticsWarmupNotice { return }
+        withAnimation { showAnalyticsWarmupNotice = true }
+        // Auto-dismiss after a short delay so the notice stays lightweight.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation { showAnalyticsWarmupNotice = false }
+        }
     }
 
     private var analyticsDisabledReason: String? {
@@ -1081,25 +1113,36 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
 // MARK: - Analytics Button
 
 private struct AnalyticsButtonView: View {
-    let isEnabled: Bool
+    let isReady: Bool
     let disabledReason: String?
+    let onWarmupTap: () -> Void
 
     // Access via app-level notification instead of environment
     var body: some View {
         Button(action: {
-            NotificationCenter.default.post(name: .toggleAnalytics, object: nil)
+            if isReady {
+                NotificationCenter.default.post(name: .toggleAnalytics, object: nil)
+            } else {
+                onWarmupTap()
+            }
         }) {
-            Label("Analytics", systemImage: "chart.bar.xaxis")
+            HStack(spacing: 6) {
+                if !isReady {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+                Label("Analytics", systemImage: "chart.bar.xaxis")
+            }
         }
         .buttonStyle(.bordered)
         .keyboardShortcut("k", modifiers: .command)
-        .disabled(!isEnabled)
+        // Keep pressable; communicate readiness instead of disabling.
         .help(helpText)
     }
 
     private var helpText: String {
-        if isEnabled { return "View usage analytics (⌘K)" }
-        return disabledReason ?? "Analytics unavailable until launch completes."
+        if isReady { return "View usage analytics (⌘K)" }
+        return disabledReason ?? "Analytics warming up – results will appear once indexing finishes."
     }
 }
 
