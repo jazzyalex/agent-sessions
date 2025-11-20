@@ -239,7 +239,23 @@ git status --porcelain
 - [ ] Verify Gatekeeper accepts app (right-click → Open)
 - [ ] Test app launches without errors
 - [ ] Test basic functionality (session list, search, resume)
-- [ ] Test Homebrew installation: `brew upgrade agent-sessions`
+- [ ] Test Homebrew cask installation locally:
+  ```bash
+  # Uninstall current version if present
+  brew uninstall agent-sessions
+
+  # Update tap and verify new version is available
+  brew update
+  brew info agent-sessions  # Should show version {VERSION}
+
+  # Install and verify
+  brew install agent-sessions
+  open -a "Agent Sessions"
+
+  # Verify version matches
+  plutil -p "/Applications/Agent Sessions.app/Contents/Info.plist" | grep CFBundleShortVersionString
+  # Expected: "CFBundleShortVersionString" => "{VERSION}"
+  ```
 
 ### Communication
 - [ ] Update website if needed (jazzyalex.github.io/agent-sessions)
