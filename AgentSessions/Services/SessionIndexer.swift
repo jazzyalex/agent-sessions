@@ -175,6 +175,7 @@ final class SessionIndexer: ObservableObject {
     // Track sessions currently being reloaded to prevent duplicate loads
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
+    private var lastPrewarmSignatureByID: [String: Int] = [:]
 
     var prefTheme: TranscriptTheme { TranscriptTheme(rawValue: themeRaw) ?? .codexDark }
     func setTheme(_ t: TranscriptTheme) { themeRaw = t.rawValue }
@@ -502,6 +503,7 @@ final class SessionIndexer: ObservableObject {
     func refresh() {
         let root = sessionsRoot()
         print("\n🔄 INDEXING START: root=\(root.path)")
+        LaunchProfiler.log("Codex.refresh: start")
 
         let token = UUID()
         refreshToken = token
@@ -519,15 +521,33 @@ final class SessionIndexer: ObservableObject {
         ioQueue.async {
             // Fast path: hydrate from SQLite index if available (bridge async)
             var indexed: [Session]? = nil
+            var indexedPaths: Set<String> = []
             let sema = DispatchSemaphore(value: 0)
             Task.detached(priority: .utility) {
                 // Try immediate hydration, then a brief grace retry to catch
                 // the AnalyticsIndexer writing session_meta at launch.
-                indexed = try? await self.hydrateFromIndexDBIfAvailable()
-                if (indexed?.isEmpty ?? true) {
+                do {
+                    if let hydrated = try await self.hydrateFromIndexDBIfAvailable() {
+                        indexed = hydrated
+                    }
+                    // Also consult the analytics files table so we treat
+                    // low-message / probe sessions as already indexed and
+                    // avoid reprocessing them on every launch.
+                    let db = try IndexDB()
+                    let repo = SessionMetaRepository(db: db)
+                    indexedPaths = try await repo.fetchIndexedFilePaths(for: .codex)
+                } catch {
+                    // Ignore DB errors here; fallback to filesystem-only scan.
+                }
+                if (indexed?.isEmpty ?? true) && indexedPaths.isEmpty {
                     try? await Task.sleep(nanoseconds: 250_000_000) // 250ms
-                    let retry = try? await self.hydrateFromIndexDBIfAvailable()
-                    if let r = retry, !r.isEmpty { indexed = r }
+                    do {
+                        if let retry = try await self.hydrateFromIndexDBIfAvailable(), !retry.isEmpty {
+                            indexed = retry
+                        }
+                    } catch {
+                        // Still no DB hydrate; fall through to filesystem.
+                    }
                 }
                 sema.signal()
             }
@@ -535,7 +555,10 @@ final class SessionIndexer: ObservableObject {
 
             // NEW: Even if we have indexed sessions, scan for NEW files and parse them
             let existingSessions = indexed ?? []
-            let existingPaths = Set(existingSessions.map { $0.filePath })
+            var existingPaths = Set(existingSessions.map { $0.filePath })
+            // Merge in any paths seen by analytics even when not represented
+            // in session_meta (e.g., probe sessions or low-message sessions).
+            existingPaths.formUnion(indexedPaths)
 
             #if DEBUG
             if !existingSessions.isEmpty {
@@ -543,6 +566,7 @@ final class SessionIndexer: ObservableObject {
             } else {
                 print("[Launch] DB hydration returned nil for Codex – scanning all files")
             }
+            LaunchProfiler.log("Codex.refresh: DB hydrate complete (existing=\(existingSessions.count))")
             #endif
             // Check if directory exists and is accessible
             var isDir: ObjCBool = false
@@ -571,6 +595,7 @@ final class SessionIndexer: ObservableObject {
             let newFiles = found.filter { !existingPaths.contains($0.path) }
 
             print("📁 Found \(found.count) total files, \(newFiles.count) are new (not in DB)")
+            LaunchProfiler.log("Codex.refresh: file enumeration done (found=\(found.count), new=\(newFiles.count))")
 
             let sortedFiles = newFiles.sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
             DispatchQueue.main.async {
@@ -616,6 +641,7 @@ final class SessionIndexer: ObservableObject {
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 .filter { hideProbes ? !CodexProbeConfig.isProbeSession($0) : true }
             DispatchQueue.main.async {
+                LaunchProfiler.log("Codex.refresh: sessions merged (total=\(sortedSessions.count))")
                 self.allSessions = sortedSessions
                 self.isIndexing = false
                 let lightCount = newSessions.filter { $0.events.isEmpty }.count
@@ -626,21 +652,48 @@ final class SessionIndexer: ObservableObject {
                     print("✅ INDEXING DONE: total=\(allParsedSessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
                 }
 
-                // Start background transcript indexing for accurate search
-                self.isProcessingTranscripts = true
-                self.progressText = "Processing transcripts..."
-                if self.refreshToken == token {
-                    self.launchPhase = .transcripts
-                }
-                let cache = self.transcriptCache
-                Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
-                    await cache.generateAndCache(sessions: sortedSessions)
-                    await MainActor.run {
-                        self.isProcessingTranscripts = false
-                        self.progressText = "Ready"
-                        if self.refreshToken == token {
-                            self.launchPhase = .ready
+                // Start background transcript indexing for accurate search (delta-based).
+                // Only warm sessions that have real events, are not trivially empty/low,
+                // and whose (size,eventCount) signature changed since last prewarm.
+                let delta: [Session] = {
+                    let all = sortedSessions
+                    var out: [Session] = []
+                    out.reserveCapacity(all.count)
+                    for s in all {
+                        if s.events.isEmpty { continue }
+                        if s.messageCount <= 2 { continue }
+                        let size = s.fileSizeBytes ?? 0
+                        let sig = size ^ (s.eventCount << 16)
+                        if self.lastPrewarmSignatureByID[s.id] == sig { continue }
+                        self.lastPrewarmSignatureByID[s.id] = sig
+                        out.append(s)
+                        if out.count >= 256 { break } // bound initial work per refresh
+                    }
+                    return out
+                }()
+                if !delta.isEmpty {
+                    self.isProcessingTranscripts = true
+                    self.progressText = "Processing transcripts..."
+                    if self.refreshToken == token {
+                        self.launchPhase = .transcripts
+                    }
+                    let cache = self.transcriptCache
+                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
+                        LaunchProfiler.log("Codex.refresh: transcript prewarm start (delta=\(delta.count))")
+                        await cache.generateAndCache(sessions: delta)
+                        await MainActor.run {
+                            LaunchProfiler.log("Codex.refresh: transcript prewarm complete")
+                            self.isProcessingTranscripts = false
+                            self.progressText = "Ready"
+                            if self.refreshToken == token {
+                                self.launchPhase = .ready
+                            }
                         }
+                    }
+                } else {
+                    self.progressText = "Ready"
+                    if self.refreshToken == token {
+                        self.launchPhase = .ready
                     }
                 }
 
@@ -688,17 +741,15 @@ final class SessionIndexer: ObservableObject {
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
 
-        // Fast path: heavy file → metadata-first, avoid full scan now
-        if size >= 10_000_000 { // 10 MB threshold
-            print("🔵 HEAVY FILE DETECTED: \(url.lastPathComponent) size=\(size) bytes (~\(size/1_000_000)MB)")
-            if let light = Self.lightweightSession(from: url, size: size, mtime: mtime) {
-                print("✅ LIGHTWEIGHT: \(url.lastPathComponent) estEvents=\(light.eventCount) messageCount=\(light.messageCount)")
-                return light
-            } else {
-                print("❌ LIGHTWEIGHT FAILED for \(url.lastPathComponent) - falling through to full parse")
-            }
+        // Prefer lightweight metadata-first parsing for all files at launch.
+        // This avoids full JSONL scans during Stage 1 and keeps launch bounded
+        // even when many sessions are present.
+        if let light = Self.lightweightSession(from: url, size: size, mtime: mtime) {
+            print("✅ LIGHTWEIGHT: \(url.lastPathComponent) estEvents=\(light.eventCount) messageCount=\(light.messageCount)")
+            return light
         }
 
+        // Fallback: full parse only when lightweight path fails.
         return parseFileFull(at: url)
     }
 

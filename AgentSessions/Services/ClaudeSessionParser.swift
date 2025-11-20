@@ -11,16 +11,14 @@ final class ClaudeSessionParser {
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
 
-        // Fast path: heavy file → metadata-first, avoid full scan now
-        if size >= 10_000_000 { // 10 MB threshold
-            print("🔵 HEAVY CLAUDE FILE: \(url.lastPathComponent) size=\(size) bytes (~\(size/1_000_000)MB)")
-            if let light = lightweightSession(from: url, size: size, mtime: mtime) {
-                print("✅ LIGHTWEIGHT CLAUDE: \(url.lastPathComponent) estEvents=\(light.eventCount) messageCount=\(light.messageCount)")
-                return light
-            }
-            print("❌ LIGHTWEIGHT FAILED - falling through to full parse")
+        // Prefer lightweight metadata-first parsing for all files at launch.
+        // This keeps Claude Stage 1 bounded even with many sessions.
+        if let light = lightweightSession(from: url, size: size, mtime: mtime) {
+            print("✅ LIGHTWEIGHT CLAUDE: \(url.lastPathComponent) estEvents=\(light.eventCount) messageCount=\(light.messageCount)")
+            return light
         }
 
+        // Fallback: full parse only when lightweight path fails.
         return parseFileFull(at: url)
     }
 
