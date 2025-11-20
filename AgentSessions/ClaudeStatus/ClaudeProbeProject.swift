@@ -272,15 +272,19 @@ enum ClaudeProbeProject {
         var sawProbeWD: Bool = false
         var userCount: Int = 0
         var assistantCount: Int = 0
-        var otherKinds: Int = 0
-        var totalEvents: Int { userCount + assistantCount + otherKinds }
+        var safeOtherCount: Int = 0   // e.g., system/local_command/summary events emitted by the probe itself
+        var unsafeOtherCount: Int = 0 // any other event kinds we don't explicitly allow
+
+        var totalEvents: Int { userCount + assistantCount + safeOtherCount + unsafeOtherCount }
         var isSafeTinyProbe: Bool {
-            return sawProbeWD && otherKinds == 0 && totalEvents > 0 && totalEvents <= 5
+            // Allow system/summary-only probe transcripts, but reject any unrecognized events.
+            return sawProbeWD && unsafeOtherCount == 0 && totalEvents > 0 && totalEvents <= 5
         }
     }
 
     private static let userEventTypes: Set<String> = ["user", "user_input", "user-input", "input", "prompt", "chat_input", "chat-input", "human"]
     private static let assistantEventTypes: Set<String> = ["assistant", "response", "assistant_message", "assistant-message", "assistant_response", "assistant-response", "completion"]
+    private static let safeProbeEventTypes: Set<String> = ["system", "local_command", "local-command", "summary", "meta", "metadata"]
 
     private static func inspectProbeFile(url: URL, expectedWD: String) -> ProbeFileStats? {
         let fh = try? FileHandle(forReadingFrom: url)
@@ -306,18 +310,20 @@ enum ClaudeProbeProject {
         if let type = (obj["type"] as? String)?.lowercased() {
             if userEventTypes.contains(type) { stats.userCount += 1; return }
             if assistantEventTypes.contains(type) { stats.assistantCount += 1; return }
-            stats.otherKinds += 1; return
+            if safeProbeEventTypes.contains(type) { stats.safeOtherCount += 1; return }
+            stats.unsafeOtherCount += 1; return
         }
         if let role = (obj["role"] as? String)?.lowercased() {
             if role == "user" { stats.userCount += 1; return }
             if role == "assistant" { stats.assistantCount += 1; return }
-            stats.otherKinds += 1; return
+            if safeProbeEventTypes.contains(role) { stats.safeOtherCount += 1; return }
+            stats.unsafeOtherCount += 1; return
         }
         if let sender = (obj["sender"] as? String)?.lowercased() {
             if sender == "user" { stats.userCount += 1; return }
             if sender == "assistant" { stats.assistantCount += 1; return }
         }
-        stats.otherKinds += 1
+        stats.unsafeOtherCount += 1
     }
 
     private static func scanProbeFilesUnderProjectsRoot() -> [ProbeFileMeta] {
