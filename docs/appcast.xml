@@ -3,21 +3,22 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.6</title>
-            <pubDate>Sun, 16 Nov 2025 10:59:15 -0800</pubDate>
-    <description><![CDATA[
-<h3>What's New</h3>
-<ul>
-<li><strong>Codex Usage Probes</strong> — Automatic background refresh when data goes stale, with 24-hour budgets and cleanup controls</li>
-<li><strong>Analytics Flip Cards</strong> — Click any chart to reveal sparklines, agent breakdowns, and insights</li>
-<li><strong>Improved Theming</strong> — Analytics and Git Inspector windows respond instantly to appearance changes</li>
-<li><strong>Better Session Tracking</strong> — Stable session IDs fix analytics metrics for Claude and Gemini</li>
-</ul>
-    ]]></description>
-            <sparkle:version>7</sparkle:version>
-            <sparkle:shortVersionString>2.6</sparkle:shortVersionString>
+            <title>2.6.1</title>
+            <pubDate>Wed, 19 Nov 2025 21:54:34 -0800</pubDate>
+            <description><![CDATA[
+                <h2>What's New in 2.6.1</h2>
+
+<h3>Performance</h3>
+<p>Dramatically improved loading and refresh times through optimized session indexing</p>
+<p>Eliminated UI blocking during session updates with background processing</p>
+<p>Reduced indexing contention to prevent launch churn</p>
+<p>Enhanced Analytics dashboard responsiveness for smoother interaction
+</p>
+            ]]></description>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>2.6.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.6/AgentSessions-2.6.dmg" length="7304252" type="application/octet-stream" sparkle:edSignature="Kzo+2WhH3/MUUJ18Z0338QId/2Xxvfr/g8AcmmbrFph4C1m0vR6VngB6/X4+JtmkBd8I2JyXrBGaCZH7qid9Aw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.6.1/AgentSessions-2.6.1.dmg" length="7364901" type="application/octet-stream" sparkle:edSignature="kNfUL+o5WMxSsyoeKgLOnSveAMWDb3fgdLNeDrMzmib3XMkAp1+3VhCdJHlxtgVL77K/I5nsTCphjKDkEo7dAA=="/>
         </item>
     </channel>
 </rss>
