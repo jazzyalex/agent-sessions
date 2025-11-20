@@ -57,25 +57,13 @@ struct AgentSessionsApp: App {
                 .background(WindowAutosave(name: "MainWindow"))
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
-                    // Build or refresh analytics index at launch
-                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
-                        do {
-                            let db = try IndexDB()
-                            let indexer = AnalyticsIndexer(db: db)
-                            if try await db.isEmpty() {
-                                await indexer.fullBuild()
-                            } else {
-                                await indexer.refresh()
-                            }
-                        } catch {
-                            print("[Indexing] Launch indexing failed: \(error)")
-                        }
-                    }
-
-                    unifiedIndexerHolder.unified?.refresh()
-                    updateUsageModels()
-                    setupAnalytics()
-                }
+                    LaunchProfiler.reset("Unified main window")
+                    LaunchProfiler.log("Window appeared")
+                    LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
+            unifiedIndexerHolder.unified?.refresh()
+            updateUsageModels()
+            setupAnalytics()
+        }
                 .onChange(of: showUsageStrip) { _, _ in
                     updateUsageModels()
                 }
@@ -197,12 +185,27 @@ extension AgentSessionsApp {
             geminiIndexer: geminiIndexer
         )
         analyticsService = service
-        analyticsReady = service.isReady
-        analyticsReadyObserver = service.$isReady
-            .receive(on: RunLoop.main)
-            .sink { ready in
-                self.analyticsReady = ready
-            }
+
+        // Gate readiness on both analytics warmup and unified analytics indexing.
+        if let unified = unifiedIndexerHolder.unified {
+            analyticsReady = service.isReady && !unified.isAnalyticsIndexing
+            analyticsReadyObserver = service.$isReady
+                .combineLatest(unified.$isAnalyticsIndexing)
+                .receive(on: RunLoop.main)
+                .sink { ready, indexing in
+                    self.analyticsReady = ready && !indexing
+                    if !indexing {
+                        service.refreshReadiness()
+                    }
+                }
+        } else {
+            analyticsReady = service.isReady
+            analyticsReadyObserver = service.$isReady
+                .receive(on: RunLoop.main)
+                .sink { ready in
+                    self.analyticsReady = ready
+                }
+        }
 
         // Create window controller
         let controller = AnalyticsWindowController(service: service)

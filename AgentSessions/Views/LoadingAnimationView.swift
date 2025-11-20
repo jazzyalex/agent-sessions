@@ -25,6 +25,9 @@ struct LoadingAnimationView: View {
                 .opacity(opacity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Never block mouse/trackpad interaction for underlying content.
+        // Loading animations are visual-only; users must be able to keep clicking in lists/transcripts.
+        .allowsHitTesting(false)
         .onAppear {
             startFading()
         }

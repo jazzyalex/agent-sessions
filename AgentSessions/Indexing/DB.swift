@@ -187,6 +187,35 @@ actor IndexDB {
         return hasDays == 0
     }
 
+    /// Fetch indexed file records for a source from the files table.
+    /// Used by launch-time indexers to avoid reprocessing files that analytics
+    /// has already seen (even when they are filtered out of session_meta).
+    func fetchIndexedFiles(for source: String) throws -> [IndexedFileRow] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = """
+        SELECT path, mtime, size
+        FROM files
+        WHERE source = ?
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            let msg = String(cString: sqlite3_errmsg(db))
+            throw DBError.prepareFailed(msg)
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        var out: [IndexedFileRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let row = IndexedFileRow(
+                path: String(cString: sqlite3_column_text(stmt, 0)),
+                mtime: sqlite3_column_int64(stmt, 1),
+                size: sqlite3_column_int64(stmt, 2)
+            )
+            out.append(row)
+        }
+        return out
+    }
+
     // Fetch session_meta rows for a source (used to hydrate sessions list quickly)
     func fetchSessionMeta(for source: String) throws -> [SessionMetaRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
@@ -755,6 +784,12 @@ struct SessionDayRow {
     let messages: Int
     let commands: Int
     let durationSec: Double
+}
+
+struct IndexedFileRow {
+    let path: String
+    let mtime: Int64
+    let size: Int64
 }
 
 // MARK: - SQLite helper

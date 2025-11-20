@@ -86,6 +86,11 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var favorites = FavoritesStore()
     private var hasPublishedInitialSessions = false
+    @Published private(set) var isAnalyticsIndexing: Bool = false
+    private var lastRefreshStartedAt: Date? = nil
+    private var lastAnalyticsRefreshStartedAt: Date? = nil
+    private let analyticsRefreshTTLSeconds: TimeInterval = 5 * 60  // 5 minutes
+    private let analyticsStartDelaySeconds: TimeInterval = 2.0     // small delay to avoid launch contention
 
     // Debouncing for expensive operations
     private var recomputeDebouncer: DispatchWorkItem? = nil
@@ -258,48 +263,68 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     func refresh() {
-        // Kick off background analytics indexing refresh (non-blocking)
-        Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
-            do {
-                let db = try IndexDB()
-                let indexer = AnalyticsIndexer(db: db)
-                await indexer.refresh()
-            } catch {
-                // Silent failure: indexing is additive and optional for core UX
-                print("[Indexing] Refresh failed: \(error)")
-            }
+        // Guard against rapid consecutive refreshes (e.g., from probe cleanup
+        // or other background notifications) to avoid re-running Stage 1 and
+        // transcript prewarm immediately after launch.
+        let now = Date()
+        if let last = lastRefreshStartedAt, now.timeIntervalSince(last) < 15 {
+            LaunchProfiler.log("Unified.refresh: skipped (within 15s guard)")
+            return
         }
+        lastRefreshStartedAt = now
 
-        // Sequential refresh: Codex → Claude → Gemini, gated by source toggles
-        // This stabilizes resolver seeding and avoids UI churn from parallel updates.
-        struct Step { let enabled: Bool; let start: () -> Void; let busy: () -> Bool }
-        let steps: [Step] = [
-            Step(enabled: includeCodex, start: { self.codex.refresh() }, busy: { self.codex.isIndexing }),
-            Step(enabled: includeClaude, start: { self.claude.refresh() }, busy: { self.claude.isIndexing }),
-            Step(enabled: includeGemini, start: { self.gemini.refresh() }, busy: { self.gemini.isIndexing })
-        ]
+        // Stage 1: kick off per-source fast metadata hydration in parallel.
+        // Each indexer is internally serial and already hydrates from IndexDB.session_meta
+        // before scanning for new files, so starting them together is safe.
+        LaunchProfiler.log("Unified.refresh: Stage 1 (per-source) start")
+        let shouldRefreshCodex = includeCodex && !codex.isIndexing
+        let shouldRefreshClaude = includeClaude && !claude.isIndexing
+        let shouldRefreshGemini = includeGemini && !gemini.isIndexing
 
-        func run(from index: Int) {
-            // Find next enabled step
-            var i = index
-            while i < steps.count && !steps[i].enabled { i += 1 }
-            guard i < steps.count else { return }
+        if shouldRefreshCodex { codex.refresh() }
+        if shouldRefreshClaude { claude.refresh() }
+        if shouldRefreshGemini { gemini.refresh() }
 
-            let step = steps[i]
-            step.start()
-
-            func poll() {
-                if step.busy() {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { poll() }
-                } else {
-                    run(from: i + 1)
+        // Stage 2: analytics enrichment (non-blocking, runs after hydration has begun).
+        // Use a simple gate and TTL so only one analytics index run happens at a time
+        // and we avoid re-walking the entire corpus on every refresh.
+        if !isAnalyticsIndexing {
+            let now = Date()
+            if let last = lastAnalyticsRefreshStartedAt,
+               now.timeIntervalSince(last) < analyticsRefreshTTLSeconds {
+                LaunchProfiler.log("Unified.refresh: Analytics refresh skipped (within TTL)")
+            } else {
+                lastAnalyticsRefreshStartedAt = now
+                isAnalyticsIndexing = true
+                let delaySeconds = analyticsStartDelaySeconds
+                Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self] in
+                    guard let self else { return }
+                    defer {
+                        Task { @MainActor [weak self] in self?.isAnalyticsIndexing = false }
+                    }
+                    do {
+                        if delaySeconds > 0 {
+                            try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+                        }
+                        LaunchProfiler.log("Unified.refresh: Analytics warmup (open IndexDB)")
+                        let db = try IndexDB()
+                        let indexer = AnalyticsIndexer(db: db)
+                        if try await db.isEmpty() {
+                            LaunchProfiler.log("Unified.refresh: Analytics fullBuild start")
+                            await indexer.fullBuild()
+                            LaunchProfiler.log("Unified.refresh: Analytics fullBuild complete")
+                        } else {
+                            LaunchProfiler.log("Unified.refresh: Analytics refresh start")
+                            await indexer.refresh()
+                            LaunchProfiler.log("Unified.refresh: Analytics refresh complete")
+                        }
+                    } catch {
+                        // Silent failure: analytics are additive and optional for core UX.
+                        print("[Indexing] Analytics refresh failed: \(error)")
+                    }
                 }
             }
-            // Poll until this step finishes, then move on
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { poll() }
         }
-
-        run(from: 0)
     }
 
     // Remove a session from the unified list (e.g., missing file cleanup)

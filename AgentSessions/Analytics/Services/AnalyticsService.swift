@@ -759,17 +759,36 @@ final class AnalyticsService: ObservableObject {
     }
 
     private func updateReadiness() {
-        let ready = [codexIndexer.launchPhase, claudeIndexer.launchPhase, geminiIndexer.launchPhase]
-            .allSatisfy { phase in
-                switch phase {
-                case .ready, .idle:
-                    return true
-                default:
-                    return false
+        Task { @MainActor in
+            let phasesReady = [codexIndexer.launchPhase, claudeIndexer.launchPhase, geminiIndexer.launchPhase]
+                .allSatisfy { phase in
+                    switch phase {
+                    case .ready, .idle:
+                        return true
+                    default:
+                        return false
+                    }
                 }
+
+            // A repository is considered ready once the rollup DB has data. If repo is unavailable, fall back to phase readiness.
+            let repoReady: Bool
+            if !phasesReady {
+                repoReady = false
+            } else if let repo = repository {
+                repoReady = await repo.isReady()
+            } else {
+                repoReady = true
             }
-        if ready != isReady {
-            isReady = ready
+
+            let ready = phasesReady && repoReady
+            if ready != isReady {
+                isReady = ready
+            }
         }
+    }
+
+    /// Manually trigger a readiness check (used when analytics indexing finishes).
+    func refreshReadiness() {
+        updateReadiness()
     }
 }
