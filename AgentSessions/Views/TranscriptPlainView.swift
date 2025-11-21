@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Foundation
 
 /// Codex transcript view - now a wrapper around UnifiedTranscriptView
 struct TranscriptPlainView: View {
@@ -63,6 +64,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         return renderModeRaw == TranscriptRenderMode.terminal.rawValue
     }
 
+    private var isJSONMode: Bool {
+        return renderModeRaw == TranscriptRenderMode.json.rawValue
+    }
+
     // Raw sheet
     @State private var showRawSheet: Bool = false
     // Selection for auto-scroll to find matches
@@ -95,11 +100,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         fontSize: CGFloat(transcriptFontSize),
                         highlights: highlightRanges,
                         currentIndex: currentMatchIndex,
-                        commandRanges: shouldColorize ? commandRanges : [],
-                        userRanges: shouldColorize ? userRanges : [],
-                        assistantRanges: shouldColorize ? assistantRanges : [],
-                        outputRanges: shouldColorize ? outputRanges : [],
-                        errorRanges: shouldColorize ? errorRanges : [],
+                        commandRanges: (shouldColorize || isJSONMode) ? commandRanges : [],
+                        userRanges: (shouldColorize || isJSONMode) ? userRanges : [],
+                        assistantRanges: (shouldColorize || isJSONMode) ? assistantRanges : [],
+                        outputRanges: (shouldColorize || isJSONMode) ? outputRanges : [],
+                        errorRanges: (shouldColorize || isJSONMode) ? errorRanges : [],
+                        isJSONMode: isJSONMode,
                         appAppearanceRaw: appAppearanceRaw,
                         colorScheme: colorScheme
                     )
@@ -208,6 +214,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .tag(TranscriptRenderMode.normal.rawValue)
                 Text("Terminal")
                     .tag(TranscriptRenderMode.terminal.rawValue)
+                Text("JSON")
+                    .tag(TranscriptRenderMode.json.rawValue)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -386,6 +394,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func rebuild(session: Session) {
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
         let mode = TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal
+        let buildKey = "\(session.id)|\(session.events.count)|\(renderModeRaw)|\(showTimestamps ? 1 : 0)"
 
         #if DEBUG
         print("🔨 REBUILD: mode=\(mode) shouldColorize=\(shouldColorize) enableCaching=\(enableCaching)")
@@ -393,11 +402,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
         if enableCaching {
             // Memoization key: session identity, event count, render mode, and timestamp setting
-            let key = "\(session.id)|\(session.events.count)|\(renderModeRaw)|\(showTimestamps ? 1 : 0)"
+            let key = buildKey
             if lastBuildKey == key { return }
             // Try in-view memo cache first
             if let cached = transcriptCache[key] {
                 transcript = cached
+                if mode == .json {
+                    let commandsOnly = session.events.contains { $0.kind == .tool_call }
+                    scheduleJSONBuild(session: session, key: key, shouldCache: true, hasCommands: commandsOnly, cachedText: cached)
+                    return
+                }
                 if mode == .terminal && shouldColorize {
                     commandRanges = terminalCommandRangesCache[key] ?? []
                     userRanges = terminalUserRangesCache[key] ?? []
@@ -412,6 +426,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 performFind(resetIndex: true)
                 selectedNSRange = nil
                 updateSelectionToCurrentMatch()
+                return
+            }
+
+            // JSON mode: build pretty-printed JSON once and cache it; skip indexer caches.
+            if mode == .json {
+                let commandsOnly = session.events.contains { $0.kind == .tool_call }
+                scheduleJSONBuild(session: session, key: key, shouldCache: true, hasCommands: commandsOnly)
                 return
             }
 
@@ -502,7 +523,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         } else {
             // No caching (Claude)
             let sessionHasCommands2 = session.events.contains { $0.kind == .tool_call }
-            if mode == .terminal && shouldColorize && sessionHasCommands2 {
+            if mode == .json {
+                scheduleJSONBuild(session: session, key: buildKey, shouldCache: false, hasCommands: sessionHasCommands2)
+            } else if mode == .terminal && shouldColorize && sessionHasCommands2 {
                 let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
                 transcript = built.0
                 commandRanges = built.1
@@ -708,6 +731,155 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
         return nil
     }
+
+    private func scheduleJSONBuild(session: Session, key: String, shouldCache: Bool, hasCommands: Bool, cachedText: String? = nil) {
+        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+        Task.detached(priority: prio) {
+            let pretty = cachedText ?? prettyJSONForSession(session)
+            let (keyRanges, stringRanges, numberRanges, keywordRanges) = jsonSyntaxHighlightRanges(for: pretty)
+            await MainActor.run {
+                self.transcript = pretty
+                self.commandRanges = keyRanges
+                self.userRanges = stringRanges
+                self.assistantRanges = keywordRanges
+                self.outputRanges = numberRanges
+                self.errorRanges = []
+                self.hasCommands = hasCommands
+                if shouldCache {
+                    self.transcriptCache[key] = pretty
+                }
+                self.lastBuildKey = key
+                self.performFind(resetIndex: true)
+                self.selectedNSRange = nil
+                self.updateSelectionToCurrentMatch()
+            }
+        }
+    }
+}
+
+// Build a single pretty-printed JSON array for the entire session.
+private func prettyJSONForSession(_ session: Session) -> String {
+    guard !session.events.isEmpty else { return "[]" }
+
+    // Hard cap on JSON size for pretty-printing to avoid UI stalls.
+    // We keep the total under ~300k UTF-16 units, then append a synthetic
+    // sentinel object if we had to truncate.
+    var pieces: [String] = []
+    var remainingBudget = 300_000
+    var omittedCount = 0
+
+    for e in session.events {
+        let payload = jsonPayload(for: e)
+        let cost = payload.utf16.count + 2 // comma/newline overhead
+        if cost <= remainingBudget {
+            pieces.append(payload)
+            remainingBudget -= cost
+        } else {
+            omittedCount += 1
+        }
+    }
+
+    if omittedCount > 0 {
+        let marker = #"{"type":"omitted","text":"[JSON view truncated - \#(omittedCount) events omitted]"}"#
+        pieces.append(marker)
+    }
+
+    let joined = "[" + pieces.joined(separator: ",") + "]"
+    return PrettyJSON.prettyPrinted(joined)
+}
+
+// Decode per-event rawJSON; handles plain JSON and base64-wrapped JSON.
+private func jsonPayload(for event: SessionEvent) -> String {
+    let raw = event.rawJSON
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return trimmed }
+    if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
+        return trimmed
+    }
+    if let data = Data(base64Encoded: trimmed),
+       let decoded = String(data: data, encoding: .utf8) {
+        return decoded
+    }
+    return trimmed
+}
+
+// Lightweight JSON tokenizer for syntax highlighting.
+// Returns: keys, string values, numbers, booleans/null.
+private func jsonSyntaxHighlightRanges(for text: String) -> ([NSRange], [NSRange], [NSRange], [NSRange]) {
+    let ns = text as NSString
+    let full = NSRange(location: 0, length: ns.length)
+    if full.length == 0 {
+        return ([], [], [], [])
+    }
+
+    var keyRanges: [NSRange] = []
+    var stringRanges: [NSRange] = []
+    var numberRanges: [NSRange] = []
+    var keywordRanges: [NSRange] = []
+
+    // Keys: any string directly followed by a colon.
+    if let keyRegex = try? NSRegularExpression(
+        pattern: "\"([^\"\\\\]|\\\\.)*\"(?=\\s*:)",
+        options: []
+    ) {
+        for match in keyRegex.matches(in: text, options: [], range: full) {
+            let r = match.range
+            if r.location != NSNotFound && r.length > 0 {
+                keyRanges.append(r)
+            }
+        }
+    }
+
+    // All strings
+    var allStringRanges: [NSRange] = []
+    if let strRegex = try? NSRegularExpression(
+        pattern: "\"([^\"\\\\]|\\\\.)*\"",
+        options: []
+    ) {
+        for match in strRegex.matches(in: text, options: [], range: full) {
+            let r = match.range
+            if r.location != NSNotFound && r.length > 0 {
+                allStringRanges.append(r)
+            }
+        }
+    }
+    // Value strings = all strings minus key strings
+    outer: for r in allStringRanges {
+        for k in keyRanges {
+            if NSIntersectionRange(k, r).length > 0 {
+                continue outer
+            }
+        }
+        stringRanges.append(r)
+    }
+
+    // Numbers
+    if let numRegex = try? NSRegularExpression(
+        pattern: "(?<![\\w\".-])(-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)",
+        options: []
+    ) {
+        for match in numRegex.matches(in: text, options: [], range: full) {
+            let r = match.range(at: 1)
+            if r.location != NSNotFound && r.length > 0 {
+                numberRanges.append(r)
+            }
+        }
+    }
+
+    // true / false / null
+    if let kwRegex = try? NSRegularExpression(
+        pattern: "\\b(true|false|null)\\b",
+        options: []
+    ) {
+        for match in kwRegex.matches(in: text, options: [], range: full) {
+            let r = match.range(at: 1)
+            if r.location != NSNotFound && r.length > 0 {
+                keywordRanges.append(r)
+            }
+        }
+    }
+
+    return (keyRanges, stringRanges, numberRanges, keywordRanges)
 }
 
 private struct PlainTextScrollView: NSViewRepresentable {
@@ -721,6 +893,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
     let assistantRanges: [NSRange]
     let outputRanges: [NSRange]
     let errorRanges: [NSRange]
+    let isJSONMode: Bool
     let appAppearanceRaw: String
     let colorScheme: ColorScheme
 
@@ -883,77 +1056,118 @@ private struct PlainTextScrollView: NSViewRepresentable {
         let baseColor = isDarkMode ? NSColor(white: 0.92, alpha: 1.0) : NSColor.labelColor
         textStorage.addAttribute(.foregroundColor, value: baseColor, range: full)
 
-        // Command colorization (foreground) – orange for high distinction
-        if !commandRanges.isEmpty {
-            let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+        if isJSONMode {
+            // JSON syntax palette (approximate Xcode-style):
+            // - Keys: pink
+            // - String values: blue
+            // - Numbers: green
+            // - true/false/null: purple
             let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-            let baseOrange = NSColor.systemOrange
-            let orange: NSColor = {
-                if isDark || increaseContrast { return baseOrange }
-                return baseOrange.withAlphaComponent(0.95)
-            }()
-            for r in commandRanges {
-                if NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: orange, range: r)
+
+            if !commandRanges.isEmpty {
+                let basePink = NSColor.systemPink
+                let pink: NSColor = {
+                    if isDarkMode || increaseContrast { return basePink }
+                    return basePink.withAlphaComponent(0.95)
+                }()
+                for r in commandRanges where NSMaxRange(r) <= full.length {
+                    textStorage.addAttribute(.foregroundColor, value: pink, range: r)
                 }
             }
-        }
-        // User input colorization (blue)
-        if !userRanges.isEmpty {
-            let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-            let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-            let baseBlue = NSColor.systemBlue
-            let blue: NSColor = {
-                if isDark || increaseContrast { return baseBlue }
-                return baseBlue.withAlphaComponent(0.9)
-            }()
-            for r in userRanges {
-                if NSMaxRange(r) <= full.length {
+            if !userRanges.isEmpty {
+                let baseBlue = NSColor.systemBlue
+                let blue: NSColor = {
+                    if isDarkMode || increaseContrast { return baseBlue }
+                    return baseBlue.withAlphaComponent(0.9)
+                }()
+                for r in userRanges where NSMaxRange(r) <= full.length {
                     textStorage.addAttribute(.foregroundColor, value: blue, range: r)
                 }
             }
-        }
-        // Assistant response colorization (subtle gray - less prominent)
-        if !assistantRanges.isEmpty {
-            let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-            let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-            let baseGray = NSColor.secondaryLabelColor
-            let gray: NSColor = {
-                if isDark || increaseContrast { return baseGray }
-                return baseGray.withAlphaComponent(0.8)
-            }()
-            for r in assistantRanges {
-                if NSMaxRange(r) <= full.length {
+            if !outputRanges.isEmpty {
+                let baseGreen = NSColor.systemGreen
+                let green: NSColor = {
+                    if isDarkMode || increaseContrast { return baseGreen }
+                    return baseGreen.withAlphaComponent(0.9)
+                }()
+                for r in outputRanges where NSMaxRange(r) <= full.length {
+                    textStorage.addAttribute(.foregroundColor, value: green, range: r)
+                }
+            }
+            if !assistantRanges.isEmpty {
+                let basePurple = NSColor.systemPurple
+                let purple: NSColor = {
+                    if isDarkMode || increaseContrast { return basePurple }
+                    return basePurple.withAlphaComponent(0.9)
+                }()
+                for r in assistantRanges where NSMaxRange(r) <= full.length {
+                    textStorage.addAttribute(.foregroundColor, value: purple, range: r)
+                }
+            }
+        } else {
+            // Terminal transcript palette
+            // Command colorization (foreground) – orange for high distinction
+            if !commandRanges.isEmpty {
+                let isDark = isDarkMode
+                let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+                let baseOrange = NSColor.systemOrange
+                let orange: NSColor = {
+                    if isDark || increaseContrast { return baseOrange }
+                    return baseOrange.withAlphaComponent(0.95)
+                }()
+                for r in commandRanges where NSMaxRange(r) <= full.length {
+                    textStorage.addAttribute(.foregroundColor, value: orange, range: r)
+                }
+            }
+            // User input colorization (blue)
+            if !userRanges.isEmpty {
+                let isDark = isDarkMode
+                let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+                let baseBlue = NSColor.systemBlue
+                let blue: NSColor = {
+                    if isDark || increaseContrast { return baseBlue }
+                    return baseBlue.withAlphaComponent(0.9)
+                }()
+                for r in userRanges where NSMaxRange(r) <= full.length {
+                    textStorage.addAttribute(.foregroundColor, value: blue, range: r)
+                }
+            }
+            // Assistant response colorization (subtle gray - less prominent)
+            if !assistantRanges.isEmpty {
+                let isDark = isDarkMode
+                let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+                let baseGray = NSColor.secondaryLabelColor
+                let gray: NSColor = {
+                    if isDark || increaseContrast { return baseGray }
+                    return baseGray.withAlphaComponent(0.8)
+                }()
+                for r in assistantRanges where NSMaxRange(r) <= full.length {
                     textStorage.addAttribute(.foregroundColor, value: gray, range: r)
                 }
             }
-        }
-        // Tool output colorization (teal/cyan family for contrast with orange)
-        if !outputRanges.isEmpty {
-            let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-            let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-            let baseTeal = NSColor.systemTeal
-            let teal: NSColor = {
-                if isDark || increaseContrast { return baseTeal }
-                return baseTeal.withAlphaComponent(0.90)
-            }()
-            for r in outputRanges {
-                if NSMaxRange(r) <= full.length {
+            // Tool output colorization (teal/cyan family for contrast with orange)
+            if !outputRanges.isEmpty {
+                let isDark = isDarkMode
+                let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+                let baseTeal = NSColor.systemTeal
+                let teal: NSColor = {
+                    if isDark || increaseContrast { return baseTeal }
+                    return baseTeal.withAlphaComponent(0.90)
+                }()
+                    for r in outputRanges where NSMaxRange(r) <= full.length {
                     textStorage.addAttribute(.foregroundColor, value: teal, range: r)
                 }
             }
-        }
-        // Error colorization (red)
-        if !errorRanges.isEmpty {
-            let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-            let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-            let baseRed = NSColor.systemRed
-            let red: NSColor = {
-                if isDark || increaseContrast { return baseRed }
-                return baseRed.withAlphaComponent(0.9)
-            }()
-            for r in errorRanges {
-                if NSMaxRange(r) <= full.length {
+            // Error colorization (red)
+            if !errorRanges.isEmpty {
+                let isDark = isDarkMode
+                let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+                let baseRed = NSColor.systemRed
+                let red: NSColor = {
+                    if isDark || increaseContrast { return baseRed }
+                    return baseRed.withAlphaComponent(0.9)
+                }()
+                for r in errorRanges where NSMaxRange(r) <= full.length {
                     textStorage.addAttribute(.foregroundColor, value: red, range: r)
                 }
             }
@@ -1068,7 +1282,7 @@ private struct WholeSessionRawPrettySheet: View {
             ScrollView {
                 if let s = session {
                     let raw = s.events.map { $0.rawJSON }.joined(separator: "\n")
-                    let pretty = PrettyJSON.prettyPrinted("[" + s.events.map { $0.rawJSON }.joined(separator: ",") + "]")
+                    let pretty = prettyJSONForSession(s)
                     if tab == 0 {
                         Text(pretty).font(.system(.body, design: .monospaced)).textSelection(.enabled).padding(12)
                     } else {
