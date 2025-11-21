@@ -813,7 +813,8 @@ private func prettyJSONForSession(_ session: Session) -> String {
     var omittedCount = 0
 
     for (idx, e) in session.events.enumerated() {
-        let payload = jsonPayload(for: e)
+        let rawPayload = jsonPayload(for: e)
+        let payload = redactEncryptedContent(inJSON: rawPayload)
         let cost = payload.utf16.count + 2 // comma/newline overhead
         if cost <= remainingBudget {
             pieces.append(payload)
@@ -846,6 +847,81 @@ private func jsonPayload(for event: SessionEvent) -> String {
         return decoded
     }
     return trimmed
+}
+
+/// Replace large opaque `encrypted_content` blobs with a compact, structured stub object
+/// so the JSON viewer stays readable and fast while still conveying type/size.
+///
+/// - Note: This only affects the JSON *presentation* in the viewer. The underlying
+///   `SessionEvent.rawJSON` remains unchanged on disk.
+private func redactEncryptedContent(inJSON json: String) -> String {
+    guard json.contains(#""encrypted_content""#) else { return json }
+    guard let data = json.data(using: .utf8) else { return json }
+
+    do {
+        let object = try JSONSerialization.jsonObject(with: data, options: [])
+        let redacted = redactEncryptedContentValue(object)
+        let redactedData = try JSONSerialization.data(withJSONObject: redacted, options: [])
+        return String(data: redactedData, encoding: .utf8) ?? json
+    } catch {
+        return json
+    }
+}
+
+/// Recursively walk the JSON structure and replace any `"encrypted_content": "<blob>"`
+/// string value with a small descriptor object containing encoding and size metadata.
+private func redactEncryptedContentValue(_ value: Any) -> Any {
+    if let array = value as? [Any] {
+        return array.map { redactEncryptedContentValue($0) }
+    }
+
+    guard let dict = value as? [String: Any] else {
+        return value
+    }
+
+    var updated: [String: Any] = [:]
+    for (key, rawValue) in dict {
+        if key == "encrypted_content", let blob = rawValue as? String {
+            updated[key] = makeEncryptedContentStub(from: blob, in: dict)
+        } else {
+            updated[key] = redactEncryptedContentValue(rawValue)
+        }
+    }
+    return updated
+}
+
+/// Build a small, JSON-serializable descriptor for an encrypted blob.
+/// We assume `encrypted_content` is base64-encoded, so we can approximate byte size.
+private func makeEncryptedContentStub(from base64: String, in container: [String: Any]) -> [String: Any] {
+    let length = base64.count
+    let approxBytes = approximateBase64Bytes(forLength: length, string: base64)
+    let approxKB = (Double(approxBytes) / 1024.0 * 10.0).rounded() / 10.0
+
+    var stub: [String: Any] = [
+        "_kind": "encrypted_blob",
+        "encoding": "base64",
+        "bytes": approxBytes,
+        "approx_kb": approxKB
+    ]
+
+    if let contentType = container["content_type"] as? String {
+        stub["content_type"] = contentType
+    } else if let mimeType = container["mime_type"] as? String {
+        stub["content_type"] = mimeType
+    }
+
+    return stub
+}
+
+/// Approximate decoded bytes for a Base64 string based on its length and padding.
+private func approximateBase64Bytes(forLength length: Int, string: String) -> Int {
+    guard length > 0 else { return 0 }
+    // Base64 pads with up to two '=' characters at the end.
+    let padding = string.suffix(2).reduce(0) { partial, char in
+        partial + (char == "=" ? 1 : 0)
+    }
+    let raw = (length * 3) / 4 - padding
+    return max(raw, 0)
 }
 
 // Lightweight JSON tokenizer for syntax highlighting.
