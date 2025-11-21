@@ -52,20 +52,40 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var errorRanges: [NSRange] = []
     @State private var hasCommands: Bool = false
     @State private var showLegendPopover: Bool = false
+    @State private var isBuildingJSON: Bool = false
 
     // Toggles (view-scoped)
     @State private var showTimestamps: Bool = false
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("TranscriptRenderMode") private var renderModeRaw: String = TranscriptRenderMode.normal.rawValue
+    @AppStorage("SessionViewMode") private var viewModeRaw: String = SessionViewMode.transcript.rawValue
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+
+    private var viewMode: SessionViewMode {
+        // Prefer persisted view mode when valid; otherwise derive from legacy renderModeRaw.
+        if let m = SessionViewMode(rawValue: viewModeRaw) {
+            return m
+        }
+        let legacy = TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal
+        return SessionViewMode.from(legacy)
+    }
+
+    /// Keep the legacy TranscriptRenderMode preference in sync with SessionViewMode
+    /// so existing callers that read only renderModeRaw still behave correctly.
+    private func syncRenderModeWithViewMode() {
+        let mapped = viewMode.transcriptRenderMode.rawValue
+        if renderModeRaw != mapped {
+            renderModeRaw = mapped
+        }
+    }
 
     // Auto-colorize in Terminal mode
     private var shouldColorize: Bool {
-        return renderModeRaw == TranscriptRenderMode.terminal.rawValue
+        return viewMode == .terminal
     }
 
     private var isJSONMode: Bool {
-        return renderModeRaw == TranscriptRenderMode.json.rawValue
+        return viewMode == .json
     }
 
     // Raw sheet
@@ -141,7 +161,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
             .onAppear { rebuild(session: session) }
             .onChange(of: id) { _, _ in rebuild(session: session) }
-            .onChange(of: renderModeRaw) { _, _ in rebuild(session: session) }
+            .onChange(of: viewModeRaw) { _, _ in
+                syncRenderModeWithViewMode()
+                rebuild(session: session)
+            }
             .onChange(of: session.events.count) { _, _ in rebuild(session: session) }
             .onChange(of: findFocused) { _, newValue in
                 #if DEBUG
@@ -199,30 +222,48 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
 
-            // Invisible button to toggle view mode with Cmd+Shift+T
+            // Invisible button to toggle Transcript/Terminal with Cmd+Shift+T
             Button(action: {
-                renderModeRaw = (renderModeRaw == TranscriptRenderMode.normal.rawValue)
-                    ? TranscriptRenderMode.terminal.rawValue
-                    : TranscriptRenderMode.normal.rawValue
+                let current = SessionViewMode.from(TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal)
+                let next: SessionViewMode
+                switch current {
+                case .transcript:
+                    next = .terminal
+                case .terminal:
+                    next = .transcript
+                case .json:
+                    // From JSON, Cmd+Shift+T toggles back to Transcript.
+                    next = .transcript
+                }
+                viewModeRaw = next.rawValue
+                renderModeRaw = next.transcriptRenderMode.rawValue
             }) { EmptyView() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
                 .hidden()
 
-            // === LEADING GROUP: View Mode Segmented Control ===
-            Picker("View Style", selection: $renderModeRaw) {
-                Text("Transcript")
-                    .tag(TranscriptRenderMode.normal.rawValue)
-                Text("Terminal")
-                    .tag(TranscriptRenderMode.terminal.rawValue)
-                Text("JSON")
-                    .tag(TranscriptRenderMode.json.rawValue)
+            // === LEADING GROUP: View Mode Segmented Control + JSON status ===
+            VStack(alignment: .leading, spacing: 2) {
+                Picker("View Style", selection: $viewModeRaw) {
+                    Text("Transcript").tag(SessionViewMode.transcript.rawValue)
+                    Text("Terminal").tag(SessionViewMode.terminal.rawValue)
+                    Text("JSON").tag(SessionViewMode.json.rawValue)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.regular)
+                .frame(width: 200)
+                .accessibilityLabel("View Style")
+                .help("Switch between Transcript, Terminal, and JSON views. Terminal colors: blue=user, gray=assistant, orange=command, teal=[out] output, red=error.")
+
+                if isJSONMode && isBuildingJSON {
+                    HStack(spacing: 6) {
+                        Image(systemName: "hourglass")
+                        Text("Building JSON view…")
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.regular)
-            .frame(width: 200)
-            .accessibilityLabel("View Style")
-            .help("Switch between Transcript and Terminal view (⌘⇧T). Terminal colors: blue=user, gray=assistant, orange=command, teal=[out] output, red=error.")
             .padding(.leading, 12)
 
             Button(action: { showLegendPopover.toggle() }) {
@@ -392,9 +433,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func rebuild(session: Session) {
+        syncRenderModeWithViewMode()
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
-        let mode = TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal
-        let buildKey = "\(session.id)|\(session.events.count)|\(renderModeRaw)|\(showTimestamps ? 1 : 0)"
+        let mode = viewMode.transcriptRenderMode
+        let buildKey = "\(session.id)|\(session.events.count)|\(viewMode.rawValue)|\(showTimestamps ? 1 : 0)"
 
         #if DEBUG
         print("🔨 REBUILD: mode=\(mode) shouldColorize=\(shouldColorize) enableCaching=\(enableCaching)")
@@ -407,12 +449,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // Try in-view memo cache first
             if let cached = transcriptCache[key] {
                 transcript = cached
-                if mode == .json {
-                    let commandsOnly = session.events.contains { $0.kind == .tool_call }
-                    scheduleJSONBuild(session: session, key: key, shouldCache: true, hasCommands: commandsOnly, cachedText: cached)
+                if viewMode == .json {
+                    let hasToolCommands = session.events.contains { $0.kind == .tool_call }
+                    scheduleJSONBuild(session: session, key: key, shouldCache: true, hasCommands: hasToolCommands, cachedText: cached)
                     return
                 }
-                if mode == .terminal && shouldColorize {
+                if viewMode == .terminal && shouldColorize {
                     commandRanges = terminalCommandRangesCache[key] ?? []
                     userRanges = terminalUserRangesCache[key] ?? []
                     hasCommands = !(commandRanges.isEmpty)
@@ -430,9 +472,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
 
             // JSON mode: build pretty-printed JSON once and cache it; skip indexer caches.
-            if mode == .json {
-                let commandsOnly = session.events.contains { $0.kind == .tool_call }
-                scheduleJSONBuild(session: session, key: key, shouldCache: true, hasCommands: commandsOnly)
+            if viewMode == .json {
+                let hasToolCommands = session.events.contains { $0.kind == .tool_call }
+                scheduleJSONBuild(session: session, key: key, shouldCache: true, hasCommands: hasToolCommands)
                 return
             }
 
@@ -523,9 +565,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         } else {
             // No caching (Claude)
             let sessionHasCommands2 = session.events.contains { $0.kind == .tool_call }
-            if mode == .json {
+            if viewMode == .json {
                 scheduleJSONBuild(session: session, key: buildKey, shouldCache: false, hasCommands: sessionHasCommands2)
-            } else if mode == .terminal && shouldColorize && sessionHasCommands2 {
+            } else if viewMode == .terminal && shouldColorize && sessionHasCommands2 {
                 let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
                 transcript = built.0
                 commandRanges = built.1
@@ -734,6 +776,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func scheduleJSONBuild(session: Session, key: String, shouldCache: Bool, hasCommands: Bool, cachedText: String? = nil) {
         let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+        isBuildingJSON = true
         Task.detached(priority: prio) {
             let pretty = cachedText ?? prettyJSONForSession(session)
             let (keyRanges, stringRanges, numberRanges, keywordRanges) = jsonSyntaxHighlightRanges(for: pretty)
@@ -752,6 +795,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 self.performFind(resetIndex: true)
                 self.selectedNSRange = nil
                 self.updateSelectionToCurrentMatch()
+                self.isBuildingJSON = false
             }
         }
     }
@@ -768,14 +812,15 @@ private func prettyJSONForSession(_ session: Session) -> String {
     var remainingBudget = 300_000
     var omittedCount = 0
 
-    for e in session.events {
+    for (idx, e) in session.events.enumerated() {
         let payload = jsonPayload(for: e)
         let cost = payload.utf16.count + 2 // comma/newline overhead
         if cost <= remainingBudget {
             pieces.append(payload)
             remainingBudget -= cost
         } else {
-            omittedCount += 1
+            omittedCount = session.events.count - idx
+            break
         }
     }
 
