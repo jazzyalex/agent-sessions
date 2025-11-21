@@ -903,6 +903,8 @@ private struct PlainTextScrollView: NSViewRepresentable {
         var lastPaintedIndex: Int = -1
         var lastAppearanceRaw: String = ""
         var lastColorScheme: ColorScheme?
+        var lastIsJSONMode: Bool = false
+        var lastColorSignature: (Int, Int, Int, Int, Int) = (0, 0, 0, 0, 0)
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -975,6 +977,15 @@ private struct PlainTextScrollView: NSViewRepresentable {
             let textChanged = tv.string != text
             let appearanceChanged = context.coordinator.lastAppearanceRaw != appAppearanceRaw
             let schemeChanged = context.coordinator.lastColorScheme != colorScheme
+            let modeChanged = context.coordinator.lastIsJSONMode != isJSONMode
+            let colorSignature = (
+                commandRanges.count,
+                userRanges.count,
+                assistantRanges.count,
+                outputRanges.count,
+                errorRanges.count
+            )
+            let colorsChanged = colorSignature != context.coordinator.lastColorSignature
 
             // Explicitly set NSView appearance when app appearance changes
             if appearanceChanged {
@@ -995,12 +1006,11 @@ private struct PlainTextScrollView: NSViewRepresentable {
 
             if textChanged {
                 tv.string = text
-                applySyntaxColors(tv)
                 context.coordinator.lastPaintedHighlights = []
             }
 
-            // Reapply colors when appearance changes (dark/light mode switch)
-            if appearanceChanged || schemeChanged {
+            // Reapply colors when text, appearance, mode, or ranges change
+            if textChanged || appearanceChanged || schemeChanged || modeChanged || colorsChanged {
                 applySyntaxColors(tv)
             }
 
@@ -1034,6 +1044,8 @@ private struct PlainTextScrollView: NSViewRepresentable {
 
             // Update last seen scheme at the end of the pass
             context.coordinator.lastColorScheme = colorScheme
+            context.coordinator.lastIsJSONMode = isJSONMode
+            context.coordinator.lastColorSignature = colorSignature
         }
     }
 
