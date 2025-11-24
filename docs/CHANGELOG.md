@@ -20,6 +20,31 @@ All notable changes to this project will be documented in this file.
  - Claude Usage: Added a central probe gate that suppresses `/usage` probes when the menu bar limits are off and the main window isn't visible, or when the screen is inactive (sleep/screensaver/locked).
  - Claude Usage Probes: Cleanup now verifies every session file's `cwd/project` matches the dedicated probe working directory, requires tiny (≤5 event) user/assistant-only transcripts, and aborts deletion when uncertain.
 
+## [2.7] - 2025-11-23
+
+### Major Features
+
+- **New Color View**: Terminal-inspired view with CLI-style colorized output, role-based filtering (User, Agent, Tools, Errors), and navigation shortcuts. Replaces the old "Terminal" mode with enhanced visual hierarchy and interactive filtering.
+- **Enhanced Transcript Modes**: Renamed "Transcript" to "Plain" view for clarity. Added improved JSON viewer with syntax highlighting and better readability for session inspection.
+- **View Mode Switching**: Quick toggle between Plain, Color, and JSON views with Cmd+Shift+T keyboard shortcut.
+
+### Critical Fixes
+
+- **Claude Usage Tracking**: Fixed compatibility with Claude Code's new usage format change ("% left" vs "% used"). The usage probe now supports both old and new formats with automatic percentage inversion, ensuring accurate limit tracking across all Claude CLI versions.
+- **Script Consolidation**: Unified usage capture scripts via symlink to prevent future divergence. Single source of truth in `AgentSessions/Resources/`.
+
+### Improvements
+
+- **Color View Navigation**: Added role-specific navigation buttons with circular pill styling and tint-aware colors. Jump between user messages, tool calls, or errors with keyboard shortcuts.
+- **NSTextView Renderer**: Implemented high-performance text rendering with native macOS text selection and smooth scrolling.
+- **JSON View**: Redacted `encrypted_content` fields for cleaner inspection. Improved syntax coloring stability across mode toggles.
+- **Debug Mode**: Added `CLAUDE_TUI_DEBUG` environment variable for troubleshooting usage capture issues with raw output dumps.
+
+### Technical
+
+- **Flexible Pattern Matching**: Usage probe now tries multiple patterns ("% left", "% used", "%left", "%used") with fallback to any "N%" format. Future-proofed against CLI format changes.
+- **Enhanced Testing**: Comprehensive test suite for both old and new Claude usage formats with validation of percentage inversion logic.
+
 ## [2.6.1] - 2025-11-19
 
 ### Performance
