@@ -263,7 +263,7 @@ struct SessionTranscriptBuilder {
 
     // MARK: New coalescer + renderer
 
-    private struct LogicalBlock: Equatable {
+    struct LogicalBlock: Equatable {
         enum Kind { case user, assistant, toolCall, toolOut, error, meta }
         var kind: Kind
         var text: String
@@ -272,27 +272,64 @@ struct SessionTranscriptBuilder {
         var toolName: String?
         var isDelta: Bool
         var toolInput: String?
+        // Marks tool output that represents an error (stderr/non-zero exit, etc.).
+        // This is primarily used by the new Terminal view to classify error lines.
+        var isErrorOutput: Bool
     }
 
     private static func block(from e: SessionEvent) -> LogicalBlock {
         switch e.kind {
         case .user:
-            return LogicalBlock(kind: .user, text: e.text ?? "", timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta)
+            return LogicalBlock(kind: .user, text: e.text ?? "", timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta, isErrorOutput: false)
         case .assistant:
-            return LogicalBlock(kind: .assistant, text: e.text ?? "", timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta)
+            return LogicalBlock(kind: .assistant, text: e.text ?? "", timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta, isErrorOutput: false)
         case .tool_call:
             let rendered = renderToolCallLabel(name: e.toolName, args: e.toolInput)
-            return LogicalBlock(kind: .toolCall, text: rendered, timestamp: e.timestamp, messageID: e.messageID ?? e.parentID, toolName: e.toolName, isDelta: e.isDelta, toolInput: e.toolInput)
+            return LogicalBlock(kind: .toolCall, text: rendered, timestamp: e.timestamp, messageID: e.messageID ?? e.parentID, toolName: e.toolName, isDelta: e.isDelta, toolInput: e.toolInput, isErrorOutput: false)
         case .tool_result:
-            return LogicalBlock(kind: .toolOut, text: e.toolOutput ?? "", timestamp: e.timestamp, messageID: e.messageID ?? e.parentID, toolName: e.toolName, isDelta: e.isDelta)
+            let outputText = e.toolOutput ?? ""
+            let looksLikeError = SessionTranscriptBuilder.textLooksLikeError(outputText)
+            return LogicalBlock(kind: .toolOut, text: outputText, timestamp: e.timestamp, messageID: e.messageID ?? e.parentID, toolName: e.toolName, isDelta: e.isDelta, toolInput: nil, isErrorOutput: looksLikeError)
         case .error:
             // If text is empty, fall back to pretty textified raw JSON
             let txt = (e.text?.isEmpty == false) ? e.text! : PrettyJSON.prettyPrinted(e.rawJSON)
-            return LogicalBlock(kind: .error, text: txt, timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta)
+            return LogicalBlock(kind: .error, text: txt, timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta, isErrorOutput: true)
         case .meta:
             let txt = e.text ?? PrettyJSON.prettyPrinted(e.rawJSON)
-            return LogicalBlock(kind: .meta, text: txt, timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta)
+            return LogicalBlock(kind: .meta, text: txt, timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta, isErrorOutput: false)
         }
+    }
+
+    /// Lightweight heuristic for detecting error-looking tool output.
+    ///
+    /// This is intentionally conservative and looks only at the first line of
+    /// the output for common prefixes like "error:" or "[error]".
+    private static func textLooksLikeError(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let firstLine: String
+        if let nl = trimmed.firstIndex(of: "\n") {
+            firstLine = String(trimmed[..<nl])
+        } else {
+            firstLine = trimmed
+        }
+        let lower = firstLine.lowercased()
+        if lower.hasPrefix("[error]") { return true }
+        if lower.hasPrefix("error:") { return true }
+        if lower.contains("exit code") || lower.contains("exit status") {
+            // Simple heuristic: treat mentions of exit code/status as error-ish.
+            return true
+        }
+        return false
+    }
+
+    /// Expose coalesced logical blocks for reuse in terminal-specific builders.
+    ///
+    /// This keeps the structural grouping logic in one place while allowing
+    /// new views to render the underlying data differently.
+    static func coalescedBlocks(for session: Session,
+                                includeMeta: Bool) -> [LogicalBlock] {
+        coalesce(session: session, includeMeta: includeMeta)
     }
 
     private static func canMerge(_ a: LogicalBlock, _ b: LogicalBlock) -> Bool {
