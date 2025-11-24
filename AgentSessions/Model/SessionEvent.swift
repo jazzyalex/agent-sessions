@@ -30,7 +30,7 @@ extension SessionEventKind {
         if let t = type?.lowercased() {
             switch t {
             case "tool_call", "tool-call", "toolcall", "tool_use", "tool-use", "function_call": return .tool_call
-            case "tool_result", "tool-result", "toolresult", "function_result": return .tool_result
+            case "tool_result", "tool-result", "toolresult", "function_result", "function_call_output": return .tool_result
             case "error", "err": return .error
             case "meta", "system", "environment_context", "environment-context", "env_context": return .meta
             default: break

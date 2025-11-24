@@ -52,6 +52,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var errorRanges: [NSRange] = []
     @State private var hasCommands: Bool = false
     @State private var isBuildingJSON: Bool = false
+    // Terminal-specific find state (used when viewMode == .terminal)
+    @State private var terminalFindMatchesCount: Int = 0
+    @State private var terminalFindCurrentIndex: Int = 0
+    @State private var terminalFindToken: Int = 0
+    @State private var terminalFindDirection: Int = 1
+    @State private var terminalFindResetFlag: Bool = true
 
     // Toggles (view-scoped)
     @State private var showTimestamps: Bool = false
@@ -113,40 +119,32 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .background(Color(NSColor.controlBackgroundColor))
                 Divider()
                 ZStack {
-                    PlainTextScrollView(
-                        text: transcript,
-                        selection: selectedNSRange,
-                        fontSize: CGFloat(transcriptFontSize),
-                        highlights: highlightRanges,
-                        currentIndex: currentMatchIndex,
-                        commandRanges: (shouldColorize || isJSONMode) ? commandRanges : [],
-                        userRanges: (shouldColorize || isJSONMode) ? userRanges : [],
-                        assistantRanges: (shouldColorize || isJSONMode) ? assistantRanges : [],
-                        outputRanges: (shouldColorize || isJSONMode) ? outputRanges : [],
-                        errorRanges: (shouldColorize || isJSONMode) ? errorRanges : [],
-                        isJSONMode: isJSONMode,
-                        appAppearanceRaw: appAppearanceRaw,
-                        colorScheme: colorScheme
-                    )
-
-                    // Inline notice for sessions without commands when in Terminal mode
-                    if shouldColorize && !hasCommands {
-                        HStack(spacing: 6) {
-                            Image(systemName: "info.circle")
-                            Text("No commands recorded; Terminal matches Transcript")
-                        }
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color(nsColor: .textBackgroundColor).opacity(0.9))
-                                .shadow(radius: 1)
+                    if viewMode == .terminal {
+                        SessionTerminalView(
+                            session: session,
+                            findQuery: findText,
+                            findToken: terminalFindToken,
+                            findDirection: terminalFindDirection,
+                            findReset: terminalFindResetFlag,
+                            externalMatchCount: $terminalFindMatchesCount,
+                            externalCurrentMatchIndex: $terminalFindCurrentIndex
                         )
-                        .padding([.top, .leading], 8)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .allowsHitTesting(false)
+                    } else {
+                        PlainTextScrollView(
+                            text: transcript,
+                            selection: selectedNSRange,
+                            fontSize: CGFloat(transcriptFontSize),
+                            highlights: highlightRanges,
+                            currentIndex: currentMatchIndex,
+                            commandRanges: (shouldColorize || isJSONMode) ? commandRanges : [],
+                            userRanges: (shouldColorize || isJSONMode) ? userRanges : [],
+                            assistantRanges: (shouldColorize || isJSONMode) ? assistantRanges : [],
+                            outputRanges: (shouldColorize || isJSONMode) ? outputRanges : [],
+                            errorRanges: (shouldColorize || isJSONMode) ? errorRanges : [],
+                            isJSONMode: isJSONMode,
+                            appAppearanceRaw: appAppearanceRaw,
+                            colorScheme: colorScheme
+                        )
                     }
 
                     // Show animation during lazy load OR full refresh
@@ -389,7 +387,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         Image(systemName: "chevron.up")
                     }
                     .buttonStyle(.borderless)
-                    .disabled(findMatches.isEmpty)
+                    .disabled(isFindNavigationDisabled)
                     .help("Previous match (⇧⌘G)")
                     .keyboardShortcut("g", modifiers: [.command, .shift])
 
@@ -397,7 +395,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         Image(systemName: "chevron.down")
                     }
                     .buttonStyle(.borderless)
-                    .disabled(findMatches.isEmpty)
+                    .disabled(isFindNavigationDisabled)
                     .help("Next match (⌘G)")
                     .keyboardShortcut("g", modifiers: .command)
                 }
@@ -406,7 +404,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 if !findText.isEmpty {
                     Text(findStatus())
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(findMatches.isEmpty ? .red : .secondary)
+                        .foregroundStyle(isFindNavigationDisabled ? .red : .secondary)
                         .frame(minWidth: 32, alignment: .trailing)
                         .accessibilityLabel("\(currentMatchIndex + 1) of \(findMatches.count) matches")
                 }
@@ -604,6 +602,21 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func performFind(resetIndex: Bool, direction: Int = 1) {
+        // Terminal mode uses a dedicated line-based search in SessionTerminalView.
+        if viewMode == .terminal {
+            let q = findText
+            guard !q.isEmpty else {
+                terminalFindMatchesCount = 0
+                terminalFindCurrentIndex = 0
+                terminalFindToken &+= 1
+                return
+            }
+            terminalFindDirection = direction
+            terminalFindResetFlag = resetIndex
+            terminalFindToken &+= 1
+            return
+        }
+
         let q = findText
         guard !q.isEmpty else {
             findMatches = []
@@ -674,8 +687,19 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func findStatus() -> String {
         if findText.isEmpty { return "" }
+        if viewMode == .terminal {
+            if terminalFindMatchesCount == 0 { return "0/0" }
+            return "\(terminalFindCurrentIndex + 1)/\(terminalFindMatchesCount)"
+        }
         if findMatches.isEmpty { return "0/0" }
         return "\(currentMatchIndex + 1)/\(findMatches.count)"
+    }
+
+    private var isFindNavigationDisabled: Bool {
+        if viewMode == .terminal {
+            return terminalFindMatchesCount == 0 || findText.isEmpty
+        }
+        return findMatches.isEmpty
     }
 
     private func adjustFont(_ delta: Int) {

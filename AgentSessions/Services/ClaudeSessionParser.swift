@@ -98,7 +98,7 @@ final class ClaudeSessionParser {
     // MARK: - Event Parsing
 
     private static func parseLine(_ obj: [String: Any], eventID: String) -> SessionEvent {
-        let eventType = obj["type"] as? String
+        var eventType = obj["type"] as? String
         let timestamp = extractTimestamp(from: obj)
 
         var role: String?
@@ -106,6 +106,8 @@ final class ClaudeSessionParser {
         var toolName: String?
         var toolInput: String?
         var toolOutput: String?
+        var toolKindOverride: SessionEventKind?
+        var toolIsError: Bool = false
 
         // Determine role and extract content based on type
         switch eventType?.lowercased() {
@@ -165,11 +167,76 @@ final class ClaudeSessionParser {
             }
         }
 
+        // Claude encodes tool usage/results inside message.content blocks rather than
+        // as top-level type events. Detect those here and override kind/tool fields.
+        if toolName == nil && toolInput == nil && toolOutput == nil {
+            if let message = obj["message"] as? [String: Any],
+               let contentArray = message["content"] as? [[String: Any]] {
+                for block in contentArray {
+                    guard let rawType = block["type"] as? String else { continue }
+                    let t = rawType.lowercased()
+                    if t == "tool_use" || t == "tool-use" || t == "tool_call" || t == "tool-call" {
+                        toolKindOverride = .tool_call
+                        role = "assistant"
+                        toolName = (block["name"] as? String) ?? (block["tool"] as? String)
+                        if let input = block["input"] {
+                            toolInput = stringifyJSON(input)
+                        }
+                        // Normalize eventType so downstream helpers see this as tool_call.
+                        eventType = eventType ?? "tool_call"
+                        break
+                    } else if t == "tool_result" || t == "tool-result" {
+                        toolKindOverride = .tool_result
+                        role = "tool"
+                        var output: String? = nil
+                        if let result = obj["toolUseResult"] as? [String: Any] {
+                            let stdout = (result["stdout"] as? String) ?? ""
+                            let stderr = (result["stderr"] as? String) ?? ""
+                            if !stdout.isEmpty && !stderr.isEmpty {
+                                output = stdout + "\n" + stderr
+                            } else if !stdout.isEmpty {
+                                output = stdout
+                            } else if !stderr.isEmpty {
+                                output = stderr
+                            }
+                            if let isErr = result["is_error"] as? Bool, isErr {
+                                toolIsError = true
+                            } else if let isErr = block["is_error"] as? Bool, isErr {
+                                toolIsError = true
+                            } else if let interrupted = result["interrupted"] as? Bool, interrupted {
+                                // Treat interrupted tool runs as errors so the terminal
+                                // Errors filter surfaces them clearly.
+                                toolIsError = true
+                            } else if !(result["stderr"] as? String ?? "").isEmpty {
+                                toolIsError = true
+                            }
+                        }
+                        if output == nil, let content = block["content"] as? String {
+                            output = content
+                        }
+                        toolOutput = output
+                        eventType = eventType ?? "tool_result"
+                        break
+                    }
+                }
+            }
+        }
+
         // Determine if this is a meta event based on type, not naive flags
         let et = eventType?.lowercased()
         let isMetaEvent = (et == "summary" || et == "file-history-snapshot" || et == "meta") && (role == nil || role == "meta")
 
-        let kind = SessionEventKind.from(role: role, type: eventType)
+        let baseKind = SessionEventKind.from(role: role, type: eventType)
+        let kind: SessionEventKind
+        if isMetaEvent {
+            kind = .meta
+        } else if toolIsError {
+            kind = .error
+        } else if let override = toolKindOverride {
+            kind = override
+        } else {
+            kind = baseKind
+        }
 
         return SessionEvent(
             id: eventID,
