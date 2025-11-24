@@ -316,11 +316,28 @@ struct SessionTranscriptBuilder {
         let lower = firstLine.lowercased()
         if lower.hasPrefix("[error]") { return true }
         if lower.hasPrefix("error:") { return true }
-        if lower.contains("exit code") || lower.contains("exit status") {
-            // Simple heuristic: treat mentions of exit code/status as error-ish.
+        if let code = parseExitValue(from: lower, pattern: "exit code[:\\s]*(-?\\d+)"), code != 0 {
+            return true
+        }
+        if let status = parseExitValue(from: lower, pattern: "exit status[:\\s]*(-?\\d+)"), status != 0 {
             return true
         }
         return false
+    }
+
+    private static func parseExitValue(from text: String, pattern: String) -> Int? {
+        guard let regex = try? NSRegularExpression(pattern: pattern,
+                                                   options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+              match.numberOfRanges >= 2,
+              let valueRange = Range(match.range(at: 1), in: text),
+              !valueRange.isEmpty else {
+            return nil
+        }
+        return Int(text[valueRange])
     }
 
     /// Expose coalesced logical blocks for reuse in terminal-specific builders.
