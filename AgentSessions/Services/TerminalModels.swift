@@ -85,6 +85,9 @@ struct TerminalBuilder {
 
             // Use the block text directly; do not inject CLI prefixes here.
             var rawText = block.text
+            if block.kind == .toolCall {
+                rawText = toolCallDisplayText(block: block)
+            }
             if rawText.isEmpty {
                 // Ensure tools and errors still render a placeholder line
                 if let tool = block.toolName, !tool.isEmpty {
@@ -145,7 +148,10 @@ struct TerminalBuilder {
                 }
             }()
 
-            let rawText = block.text
+            var rawText = block.text
+            if block.kind == .toolCall {
+                rawText = toolCallDisplayText(block: block)
+            }
             let splitLines = rawText.split(separator: "\n", omittingEmptySubsequences: false)
             if splitLines.isEmpty {
                 let line = TerminalLine(
@@ -179,6 +185,18 @@ struct TerminalBuilder {
         }
 
         return (lines, terminalBlocks)
+    }
+
+    private static func toolCallDisplayText(block: SessionTranscriptBuilder.LogicalBlock) -> String {
+        guard let input = block.toolInput, !input.isEmpty else {
+            return block.text
+        }
+        var pieces: [String] = []
+        if let name = block.toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            pieces.append(name)
+        }
+        pieces.append(input)
+        return pieces.joined(separator: " ")
     }
 }
 
