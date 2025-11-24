@@ -24,6 +24,7 @@ TIMEOUT_SECS="${TIMEOUT_SECS:-10}"
 SLEEP_BOOT="${SLEEP_BOOT:-0.4}"
 SLEEP_AFTER_USAGE="${SLEEP_AFTER_USAGE:-2.0}"
 WORKDIR="${WORKDIR:-$(pwd)}"
+# CLAUDE_TUI_DEBUG - set to 1 to dump raw tmux capture on parsing failure
 
 # Unique label to avoid interference
 LABEL="as-cc-$$"
@@ -228,18 +229,56 @@ extract_pct_and_reset() {
       if (c>0) { print; c-- }
     }
   ')
-  # Extract first percentage number preceding the literal "used"
+
+  # Extract percentage with multiple fallback patterns
+  # Try: "% left" (invert), "% used", "%left" (invert), "%used", any "N%"
   local pct
   pct=$(echo "$block" | awk '
-    /% used/ {
-      if (match($0, /[0-9]+/)) { print substr($0, RSTART, RLENGTH); exit }
+    BEGIN { pct = "" }
+    {
+      # Skip Resets line
+      if (/Resets/) next
+
+      # Pattern 1: "% left" or "%left" (case-insensitive) - invert percentage
+      if (tolower($0) ~ /% *left/) {
+        if (match($0, /[0-9]+/)) {
+          raw = substr($0, RSTART, RLENGTH)
+          pct = 100 - raw
+          exit
+        }
+      }
+
+      # Pattern 2: "% used" or "%used" (case-insensitive) - use as-is
+      if (tolower($0) ~ /% *used/) {
+        if (match($0, /[0-9]+/)) {
+          pct = substr($0, RSTART, RLENGTH)
+          exit
+        }
+      }
+
+      # Pattern 3: Fallback - any line with "N%" format (use as-is)
+      if (pct == "" && match($0, /[0-9]+%/)) {
+        pct = substr($0, RSTART, RLENGTH-1)
+        # If line contains "left", invert it
+        if (tolower($0) ~ /left/) {
+          pct = 100 - pct
+        }
+      }
     }
+    END { print pct }
   ')
-  # Extract text after "Resets"
+
+  # Extract text after "Resets" (more flexible whitespace handling)
   local resets
   resets=$(echo "$block" | awk '
-    /Resets/ { sub(/^.*Resets[ ]*/, ""); print; exit }
+    /Resets/ {
+      sub(/^.*Resets[ \t]*/, "")
+      gsub(/^[ \t]+|[ \t]+$/, "")  # trim whitespace
+      print
+      exit
+    }
   ')
+
   echo "$pct" "$resets"
 }
 
@@ -281,9 +320,11 @@ if [ -z "$session_pct" ] || [ -z "$week_all_pct" ]; then
     if [ "${CLAUDE_TUI_DEBUG:-0}" != "0" ]; then
         debug_file="$(mktemp -t claude_usage_pane)"
         echo "$usage_output" > "$debug_file"
-        echo "DEBUG pane saved to $debug_file" >&2
+        echo "DEBUG: Raw captured output saved to $debug_file" >&2
+        echo "DEBUG: session_pct='$session_pct' week_all_pct='$week_all_pct'" >&2
+        echo "DEBUG: session_resets='$session_resets' week_all_resets='$week_all_resets'" >&2
     fi
-    echo "$(error_json parsing_failed 'Failed to extract usage data from TUI')"
+    echo "$(error_json parsing_failed 'Failed to extract usage data from TUI. Set CLAUDE_TUI_DEBUG=1 for details.')"
     exit 16
 fi
 

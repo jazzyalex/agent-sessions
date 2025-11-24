@@ -11,6 +11,7 @@ struct SessionTerminalView: View {
     @Binding var externalMatchCount: Int
     @Binding var externalCurrentMatchIndex: Int
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var lines: [TerminalLine] = []
 
@@ -94,10 +95,10 @@ struct SessionTerminalView: View {
                 }
                 .buttonStyle(.borderless)
 
-                legendToggle(color: .blue, label: "User", role: .user)
-                legendToggle(color: .green, label: agentLegendLabel, role: .assistant)
-                legendToggle(color: .teal, label: "Tools", role: .tools)
-                legendToggle(color: .red, label: "Errors", role: .errors)
+                legendToggle(label: "User", role: .user)
+                legendToggle(label: agentLegendLabel, role: .assistant)
+                legendToggle(label: "Tools", role: .tools)
+                legendToggle(label: "Errors", role: .errors)
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -116,7 +117,8 @@ struct SessionTerminalView: View {
                     lines: filteredLines,
                     fontSize: CGFloat(transcriptFontSize),
                     matchIDs: matchIDSet,
-                    currentMatchLineID: currentMatchLineID
+                    currentMatchLineID: currentMatchLineID,
+                    colorScheme: colorScheme
                 )
                 .onChange(of: findToken) { _, _ in
                     handleFindRequest()
@@ -174,8 +176,9 @@ struct SessionTerminalView: View {
         roleToggleRaw = parts.joined(separator: ",")
     }
 
-    private func legendToggle(color: Color, label: String, role: RoleToggle) -> some View {
+    private func legendToggle(label: String, role: RoleToggle) -> some View {
         let isOn = activeRoles.contains(role)
+        let swatch = TerminalRolePalette.swiftUI(role: TerminalRolePalette.role(for: role), scheme: colorScheme)
         return Button(action: {
             if isOn {
                 activeRoles.remove(role)
@@ -186,7 +189,7 @@ struct SessionTerminalView: View {
         }) {
             HStack(spacing: 4) {
                 Circle()
-                    .fill(color.opacity(isOn ? 1.0 : 0.3))
+                    .fill(swatch.accent.opacity(isOn ? 1.0 : 0.35))
                     .frame(width: 8, height: 8)
                 Text(label)
                     .foregroundStyle(isOn ? .primary : .secondary)
@@ -195,7 +198,7 @@ struct SessionTerminalView: View {
             .padding(.vertical, 4)
             .background(
                 Capsule()
-                    .fill(isOn ? color.opacity(0.18) : Color.clear)
+                    .fill(isOn ? (swatch.background ?? swatch.accent.opacity(0.2)) : Color.clear)
             )
         }
         .buttonStyle(.borderless)
@@ -257,13 +260,14 @@ private struct TerminalLineView: View {
     let isMatch: Bool
     let isCurrentMatch: Bool
     let fontSize: Double
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             prefixView
             Text(line.text)
                 .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                .foregroundColor(foregroundColor)
+                .foregroundColor(swatch.foreground)
         }
         .textSelection(.enabled)
         .padding(.horizontal, 4)
@@ -277,17 +281,17 @@ private struct TerminalLineView: View {
         switch line.role {
         case .user:
             Text(">")
-                .foregroundColor(.blue.opacity(0.7))
+                .foregroundColor(swatch.accent)
                 .allowsHitTesting(false)
         case .toolInput:
             Image(systemName: "terminal")
                 .font(.system(size: 9))
-                .foregroundColor(.teal.opacity(0.8))
+                .foregroundColor(swatch.accent)
                 .allowsHitTesting(false)
         case .error:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 9))
-                .foregroundColor(.red.opacity(0.9))
+                .foregroundColor(swatch.accent)
                 .allowsHitTesting(false)
         default:
             EmptyView()
@@ -295,48 +299,125 @@ private struct TerminalLineView: View {
     }
 
     private var background: Color {
-        var base: Color
-        switch line.role {
-        case .user:
-            base = Color.blue.opacity(0.18)
-        case .assistant:
-            base = Color.green.opacity(0.18)
-        case .toolInput:
-            base = Color.indigo.opacity(0.24)
-        case .toolOutput:
-            base = Color.green.opacity(0.16)
-        case .error:
-            base = Color.red.opacity(0.55)
-        case .meta:
-            base = .clear
-        }
-
         if isCurrentMatch {
             return Color.yellow.opacity(0.5)
         } else if isMatch {
-            return base.opacity(0.9)
+            return (swatch.background ?? swatch.accent.opacity(0.22)).opacity(0.95)
         } else {
-            return base
+            return swatch.background ?? Color.clear
         }
     }
 
-    private var foregroundColor: Color {
-        switch line.role {
-        case .meta:
-            return .secondary
-        default:
-            return .primary
-        }
+    private var swatch: TerminalRolePalette.SwiftUISwatch {
+        TerminalRolePalette.swiftUI(role: line.role.paletteRole, scheme: colorScheme)
     }
 }
 
 // MARK: - NSTextView-backed selectable terminal renderer
+
+private struct TerminalRolePalette {
+    enum Role {
+        case user
+        case assistant
+        case tool
+        case error
+        case meta
+    }
+
+    struct SwiftUISwatch {
+        let foreground: Color
+        let background: Color?
+        let accent: Color
+    }
+
+    struct AppKitSwatch {
+        let foreground: NSColor
+        let background: NSColor?
+        let accent: NSColor
+    }
+
+    static func role(for toggle: SessionTerminalView.RoleToggle) -> Role {
+        switch toggle {
+        case .user: return .user
+        case .assistant: return .assistant
+        case .tools: return .tool
+        case .errors: return .error
+        }
+    }
+
+    static func swiftUI(role: Role, scheme: ColorScheme) -> SwiftUISwatch {
+        let appKitColors = baseColors(for: role, scheme: scheme)
+        return SwiftUISwatch(
+            foreground: Color(nsColor: appKitColors.foreground),
+            background: appKitColors.background.map { Color(nsColor: $0) },
+            accent: Color(nsColor: appKitColors.accent)
+        )
+    }
+
+    static func appKit(role: Role, scheme: ColorScheme) -> AppKitSwatch {
+        baseColors(for: role, scheme: scheme)
+    }
+
+    private static func baseColors(for role: Role, scheme: ColorScheme) -> AppKitSwatch {
+        let isDark = (scheme == .dark)
+
+        func tinted(_ color: NSColor, light: CGFloat, dark: CGFloat) -> NSColor {
+            color.withAlphaComponent(isDark ? dark : light)
+        }
+
+        switch role {
+        case .user:
+            return AppKitSwatch(
+                foreground: NSColor.labelColor,
+                background: tinted(NSColor.systemBlue, light: 0.16, dark: 0.30),
+                accent: NSColor.systemBlue
+            )
+        case .assistant:
+            return AppKitSwatch(
+                foreground: NSColor.labelColor,
+                background: tinted(NSColor.systemGreen, light: 0.16, dark: 0.26),
+                accent: NSColor.systemGreen
+            )
+        case .tool:
+            return AppKitSwatch(
+                foreground: NSColor.labelColor,
+                background: tinted(NSColor.systemIndigo, light: 0.20, dark: 0.32),
+                accent: NSColor.systemIndigo
+            )
+        case .error:
+            return AppKitSwatch(
+                foreground: NSColor.labelColor,
+                background: tinted(NSColor.systemRed, light: 0.28, dark: 0.40),
+                accent: NSColor.systemRed
+            )
+        case .meta:
+            return AppKitSwatch(
+                foreground: NSColor.secondaryLabelColor,
+                background: nil,
+                accent: NSColor.secondaryLabelColor
+            )
+        }
+    }
+}
+
+private extension TerminalLineRole {
+    var paletteRole: TerminalRolePalette.Role {
+        switch self {
+        case .user: return .user
+        case .assistant: return .assistant
+        case .toolInput, .toolOutput: return .tool
+        case .error: return .error
+        case .meta: return .meta
+        }
+    }
+}
 
 private struct TerminalTextScrollView: NSViewRepresentable {
     let lines: [TerminalLine]
     let fontSize: CGFloat
     let matchIDs: Set<Int>
     let currentMatchLineID: Int?
+    let colorScheme: ColorScheme
 
     class Coordinator {
         var lineRanges: [Int: NSRange] = [:]
