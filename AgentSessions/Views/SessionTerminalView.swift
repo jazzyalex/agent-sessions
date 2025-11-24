@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Foundation
 
 /// Terminal-style session view with filters, optional gutter, and legend toggles.
 struct SessionTerminalView: View {
@@ -25,10 +26,12 @@ struct SessionTerminalView: View {
     @AppStorage("TerminalRoleToggles") private var roleToggleRaw: String = "user,assistant,tools,errors"
     @State private var activeRoles: Set<RoleToggle> = Set(RoleToggle.allCases)
 
-    // Line indices for navigation
+    // Line identifiers for navigation
     @State private var userLineIndices: [Int] = []
+    @State private var assistantLineIndices: [Int] = []
     @State private var toolLineIndices: [Int] = []
     @State private var errorLineIndices: [Int] = []
+    @State private var roleNavPositions: [RoleToggle: Int] = [:]
 
     // Local find state
     @State private var matchingLineIDs: [Int] = []
@@ -80,7 +83,7 @@ struct SessionTerminalView: View {
     private var toolbar: some View {
         HStack {
             // Left: All + role toggles (legend chips act as toggles)
-            HStack(spacing: 6) {
+            HStack(spacing: 10) {
                 Button(action: {
                     activeRoles = Set(RoleToggle.allCases)
                     persistRoleToggles()
@@ -132,20 +135,38 @@ struct SessionTerminalView: View {
         let built = TerminalBuilder.buildLines(for: session, showMeta: false)
         lines = built
 
-        userLineIndices = built.enumerated().compactMap { idx, line in
-            line.role == .user ? idx : nil
+        // Collapse multi-line blocks into single navigable/message entries per role.
+        var firstLineForBlock: [Int: Int] = [:]       // blockIndex -> first line id
+        var roleForBlock: [Int: TerminalLineRole] = [:]
+
+        for line in built {
+            guard let blockIndex = line.blockIndex else { continue }
+            if firstLineForBlock[blockIndex] == nil {
+                firstLineForBlock[blockIndex] = line.id
+                roleForBlock[blockIndex] = line.role
+            }
         }
-        toolLineIndices = built.enumerated().compactMap { idx, line in
-            (line.role == .toolInput || line.role == .toolOutput) ? idx : nil
+
+        func messageIDs(for roleMatch: (TerminalLineRole) -> Bool) -> [Int] {
+            firstLineForBlock.compactMap { blockIndex, lineID in
+                guard let role = roleForBlock[blockIndex], roleMatch(role) else { return nil }
+                return lineID
+            }
+            .sorted()
         }
-        errorLineIndices = built.enumerated().compactMap { idx, line in
-            line.role == .error ? idx : nil
+
+        userLineIndices = messageIDs { $0 == .user }
+        assistantLineIndices = messageIDs { $0 == .assistant }
+        toolLineIndices = messageIDs { role in
+            role == .toolInput || role == .toolOutput
         }
+        errorLineIndices = messageIDs { $0 == .error }
 
         // Reset local find state when rebuilding.
         matchingLineIDs = []
         matchIDSet = []
         currentMatchLineID = nil
+        roleNavPositions = [:]
     }
 
     private func loadRoleToggles() {
@@ -179,29 +200,149 @@ struct SessionTerminalView: View {
     private func legendToggle(label: String, role: RoleToggle) -> some View {
         let isOn = activeRoles.contains(role)
         let swatch = TerminalRolePalette.swiftUI(role: TerminalRolePalette.role(for: role), scheme: colorScheme)
-        return Button(action: {
-            if isOn {
-                activeRoles.remove(role)
-            } else {
-                activeRoles.insert(role)
+        let indices = indicesForRole(role)
+        let hasLines = !indices.isEmpty
+        let navDisabled = !isOn || !hasLines
+        let showCount = true
+
+        return HStack(spacing: 6) {
+            Button(action: {
+                if isOn {
+                    activeRoles.remove(role)
+                } else {
+                    activeRoles.insert(role)
+                }
+                persistRoleToggles()
+            }) {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(swatch.accent.opacity(isOn ? 1.0 : 0.35))
+                        .frame(width: 8, height: 8)
+                    Text(label)
+                        .foregroundStyle(isOn ? .primary : .secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(isOn ? (swatch.background ?? swatch.accent.opacity(0.2)) : Color.clear)
+                )
             }
-            persistRoleToggles()
-        }) {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(swatch.accent.opacity(isOn ? 1.0 : 0.35))
-                    .frame(width: 8, height: 8)
-                Text(label)
-                    .foregroundStyle(isOn ? .primary : .secondary)
+            .buttonStyle(.borderless)
+
+            if showCount {
+                let status = navigationStatus(for: role)
+                Text("\(formattedCount(status.current))/\(formattedCount(status.total))")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(
+                        hasLines
+                        ? (isOn ? swatch.accent : swatch.accent.opacity(0.55))
+                        : Color.secondary.opacity(0.45)
+                    )
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule()
-                    .fill(isOn ? (swatch.background ?? swatch.accent.opacity(0.2)) : Color.clear)
-            )
+
+            HStack(spacing: 2) {
+                Button(action: { navigateRole(role, direction: -1) }) {
+                    Image(systemName: "chevron.up")
+                        .foregroundColor(navDisabled ? Color.secondary.opacity(0.6) : swatch.accent)
+                }
+                .buttonStyle(.borderless)
+                .disabled(navDisabled)
+                .help(previousHelpText(for: role))
+
+                Button(action: { navigateRole(role, direction: 1) }) {
+                    Image(systemName: "chevron.down")
+                        .foregroundColor(navDisabled ? Color.secondary.opacity(0.6) : swatch.accent)
+                }
+                .buttonStyle(.borderless)
+                .disabled(navDisabled)
+                .help(nextHelpText(for: role))
+            }
         }
-        .buttonStyle(.borderless)
+    }
+
+    private func formattedCount(_ count: Int) -> String {
+        let clamped = min(max(count, 0), 999_999)
+        let base = clamped.formatted(.number.grouping(.automatic))
+        if count > 999_999 {
+            return base + "+"
+        }
+        return base
+    }
+
+    private func navigationStatus(for role: RoleToggle) -> (current: Int, total: Int) {
+        let ids = indicesForRole(role)
+        let total = ids.count
+        guard total > 0 else { return (0, 0) }
+        let sorted = ids.sorted()
+
+        if let stored = roleNavPositions[role], stored >= 0, stored < total {
+            return (stored + 1, total)
+        }
+
+        if let currentID = currentMatchLineID, let pos = sorted.firstIndex(of: currentID) {
+            return (pos + 1, total)
+        }
+
+        return (0, total)
+    }
+
+    private func indicesForRole(_ role: RoleToggle) -> [Int] {
+        switch role {
+        case .user:
+            return userLineIndices
+        case .assistant:
+            return assistantLineIndices
+        case .tools:
+            return toolLineIndices
+        case .errors:
+            return errorLineIndices
+        }
+    }
+
+    private func previousHelpText(for role: RoleToggle) -> String {
+        switch role {
+        case .user: return "Previous user prompt"
+        case .assistant: return "Previous agent response"
+        case .tools: return "Previous tool call/output"
+        case .errors: return "Previous error"
+        }
+    }
+
+    private func nextHelpText(for role: RoleToggle) -> String {
+        switch role {
+        case .user: return "Next user prompt"
+        case .assistant: return "Next agent response"
+        case .tools: return "Next tool call/output"
+        case .errors: return "Next error"
+        }
+    }
+
+    private func navigateRole(_ role: RoleToggle, direction: Int) {
+        guard activeRoles.contains(role) else { return }
+        let ids = indicesForRole(role)
+        guard !ids.isEmpty else { return }
+
+        let sorted = ids.sorted()
+        let step = direction >= 0 ? 1 : -1
+        let count = sorted.count
+
+        func wrapIndex(_ value: Int) -> Int {
+            (value % count + count) % count
+        }
+
+        let startIndex: Int
+        if let stored = roleNavPositions[role], stored >= 0, stored < count {
+            startIndex = stored
+        } else if let currentID = currentMatchLineID, let pos = sorted.firstIndex(of: currentID) {
+            startIndex = pos
+        } else {
+            startIndex = direction >= 0 ? 0 : (count - 1)
+        }
+
+        let nextIndex = wrapIndex(startIndex + step)
+        roleNavPositions[role] = nextIndex
+        currentMatchLineID = sorted[nextIndex]
     }
 
     /// Execute a find request driven by the unified toolbar.

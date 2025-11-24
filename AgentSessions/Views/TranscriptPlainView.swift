@@ -62,8 +62,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     // Toggles (view-scoped)
     @State private var showTimestamps: Bool = false
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
-    @AppStorage("TranscriptRenderMode") private var renderModeRaw: String = TranscriptRenderMode.normal.rawValue
-    @AppStorage("SessionViewMode") private var viewModeRaw: String = SessionViewMode.transcript.rawValue
+    @AppStorage("TranscriptRenderMode") private var renderModeRaw: String = TranscriptRenderMode.terminal.rawValue
+    @AppStorage("SessionViewMode") private var viewModeRaw: String = SessionViewMode.terminal.rawValue
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     private var viewMode: SessionViewMode {
@@ -219,7 +219,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
 
-            // Invisible button to toggle Transcript/Color with Cmd+Shift+T
+            // Invisible button to toggle Plain/Color with Cmd+Shift+T
             Button(action: {
                 let current = SessionViewMode.from(TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal)
                 let next: SessionViewMode
@@ -229,7 +229,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 case .terminal:
                     next = .transcript
                 case .json:
-                    // From JSON, Cmd+Shift+T toggles back to Transcript.
+                    // From JSON, Cmd+Shift+T toggles back to Plain.
                     next = .transcript
                 }
                 viewModeRaw = next.rawValue
@@ -241,12 +241,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // === LEADING GROUP: View Mode Segmented Control + JSON status ===
             VStack(alignment: .leading, spacing: 2) {
                 Picker("View Style", selection: $viewModeRaw) {
-                    Text("Transcript")
+                    Text("Plain")
                         .tag(SessionViewMode.transcript.rawValue)
-                        .help("Transcript view \u{2014} merged chat and tools. Cmd+Shift+T toggles between Transcript and Color.")
+                        .help("Plain view \u{2014} merged chat and tools. Cmd+Shift+T toggles between Plain and Color.")
                     Text("Color")
                         .tag(SessionViewMode.terminal.rawValue)
-                        .help("Color view \u{2014} terminal-inspired output with colorized commands and tool output. Cmd+Shift+T toggles between Transcript and Color.")
+                        .help("Color view \u{2014} terminal-inspired output with colorized commands and tool output. Cmd+Shift+T toggles between Plain and Color.")
                     Text("JSON")
                         .tag(SessionViewMode.json.rawValue)
                         .help("JSON view \u{2014} formatted session JSON for readability. Encrypted blobs and large text blocks are summarized; use the session file on disk for raw JSON.")
