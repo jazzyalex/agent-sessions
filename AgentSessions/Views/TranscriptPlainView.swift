@@ -51,7 +51,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var outputRanges: [NSRange] = []
     @State private var errorRanges: [NSRange] = []
     @State private var hasCommands: Bool = false
-    @State private var showLegendPopover: Bool = false
     @State private var isBuildingJSON: Bool = false
 
     // Toggles (view-scoped)
@@ -244,16 +243,21 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // === LEADING GROUP: View Mode Segmented Control + JSON status ===
             VStack(alignment: .leading, spacing: 2) {
                 Picker("View Style", selection: $viewModeRaw) {
-                    Text("Transcript").tag(SessionViewMode.transcript.rawValue)
-                    Text("Terminal").tag(SessionViewMode.terminal.rawValue)
-                    Text("JSON").tag(SessionViewMode.json.rawValue)
+                    Text("Transcript")
+                        .tag(SessionViewMode.transcript.rawValue)
+                        .help("Transcript view \u{2014} merged chat and tools. Cmd+Shift+T toggles between Transcript and Terminal.")
+                    Text("Terminal")
+                        .tag(SessionViewMode.terminal.rawValue)
+                        .help("Terminal view \u{2014} CLI-style output with colorized commands and tool output. Cmd+Shift+T toggles between Transcript and Terminal.")
+                    Text("JSON")
+                        .tag(SessionViewMode.json.rawValue)
+                        .help("JSON view \u{2014} formatted session JSON for readability. Encrypted blobs and large text blocks are summarized; use the session file on disk for raw JSON.")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.regular)
                 .frame(width: 200)
                 .accessibilityLabel("View Style")
-                .help("Switch between Transcript, Terminal, and JSON views. Terminal colors: blue=user, gray=assistant, orange=command, teal=[out] output, red=error.")
 
                 if isJSONMode && isBuildingJSON {
                     HStack(spacing: 6) {
@@ -265,24 +269,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
             }
             .padding(.leading, 12)
-
-            Button(action: { showLegendPopover.toggle() }) {
-                Image(systemName: "info.circle")
-            }
-            .buttonStyle(.borderless)
-            .help("Show Terminal color legend")
-            .popover(isPresented: $showLegendPopover, arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Terminal Legend").font(.system(size: 13, weight: .semibold))
-                    HStack(spacing: 6) { Text("> user").foregroundStyle(.blue) }
-                    HStack(spacing: 6) { Text("[assistant]").foregroundStyle(.secondary) }
-                    HStack(spacing: 6) { Text("› tool: …").foregroundStyle(.orange) }
-                    HStack(spacing: 6) { Text("[out] …").foregroundStyle(.teal) }
-                    HStack(spacing: 6) { Text("! error …").foregroundStyle(.red) }
-                }
-                .padding(10)
-                .frame(width: 220)
-            }
 
             // System flexible space pushes trailing group to the right
             Spacer()
@@ -814,7 +800,7 @@ private func prettyJSONForSession(_ session: Session) -> String {
 
     for (idx, e) in session.events.enumerated() {
         let rawPayload = jsonPayload(for: e)
-        let payload = redactEncryptedContent(inJSON: rawPayload)
+        let payload = transformJSONForViewer(rawPayload)
         let cost = payload.utf16.count + 2 // comma/newline overhead
         if cost <= remainingBudget {
             pieces.append(payload)
@@ -849,30 +835,35 @@ private func jsonPayload(for event: SessionEvent) -> String {
     return trimmed
 }
 
-/// Replace large opaque `encrypted_content` blobs with a compact, structured stub object
-/// so the JSON viewer stays readable and fast while still conveying type/size.
+/// Transform per-event JSON for the viewer:
+/// - Replace large opaque `encrypted_content` blobs with a compact stub object.
+/// - Expand `content[].text` blocks into structured text stubs for readability.
 ///
 /// - Note: This only affects the JSON *presentation* in the viewer. The underlying
 ///   `SessionEvent.rawJSON` remains unchanged on disk.
-private func redactEncryptedContent(inJSON json: String) -> String {
-    guard json.contains(#""encrypted_content""#) else { return json }
+private func transformJSONForViewer(_ json: String) -> String {
+    // Fast path: only bother parsing when we see fields we care about.
+    guard json.contains(#""encrypted_content""#) || json.contains(#""content""#) else {
+        return json
+    }
     guard let data = json.data(using: .utf8) else { return json }
 
     do {
         let object = try JSONSerialization.jsonObject(with: data, options: [])
-        let redacted = redactEncryptedContentValue(object)
-        let redactedData = try JSONSerialization.data(withJSONObject: redacted, options: [])
-        return String(data: redactedData, encoding: .utf8) ?? json
+        let transformed = transformJSONValue(object)
+        let transformedData = try JSONSerialization.data(withJSONObject: transformed, options: [])
+        return String(data: transformedData, encoding: .utf8) ?? json
     } catch {
         return json
     }
 }
 
-/// Recursively walk the JSON structure and replace any `"encrypted_content": "<blob>"`
-/// string value with a small descriptor object containing encoding and size metadata.
-private func redactEncryptedContentValue(_ value: Any) -> Any {
+/// Recursively walk the JSON structure and:
+/// - Replace any `"encrypted_content": "<blob>"` string with a descriptor object.
+/// - Replace `content[].text` blocks (input/output text) with structured text stubs.
+private func transformJSONValue(_ value: Any) -> Any {
     if let array = value as? [Any] {
-        return array.map { redactEncryptedContentValue($0) }
+        return array.map { transformJSONValue($0) }
     }
 
     guard let dict = value as? [String: Any] else {
@@ -883,8 +874,20 @@ private func redactEncryptedContentValue(_ value: Any) -> Any {
     for (key, rawValue) in dict {
         if key == "encrypted_content", let blob = rawValue as? String {
             updated[key] = makeEncryptedContentStub(from: blob, in: dict)
+        } else if key == "text",
+                  let text = rawValue as? String,
+                  shouldConvertTextBlock(in: dict) {
+            updated[key] = makeTextBlockStub(from: text)
+        } else if key == "output",
+                  let text = rawValue as? String,
+                  shouldConvertOutputBlock(text: text, in: dict) {
+            updated[key] = makeTextBlockStub(from: text)
+        } else if key == "url",
+                  let url = rawValue as? String,
+                  shouldRedactDataURL(url, in: dict) {
+            updated[key] = makeDataURLStub(from: url, in: dict)
         } else {
-            updated[key] = redactEncryptedContentValue(rawValue)
+            updated[key] = transformJSONValue(rawValue)
         }
     }
     return updated
@@ -911,6 +914,96 @@ private func makeEncryptedContentStub(from base64: String, in container: [String
     }
 
     return stub
+}
+
+/// Decide whether a `"text"` field should be promoted to a structured text block
+/// for readability in the viewer. We currently focus on content parts like:
+///   { "type": "input_text", "text": "..." }
+private func shouldConvertTextBlock(in container: [String: Any]) -> Bool {
+    guard let type = container["type"] as? String else { return false }
+    switch type {
+    case "input_text", "output_text":
+        return true
+    default:
+        return false
+    }
+}
+
+/// Decide whether an `"output"` string should be promoted to a structured text block.
+/// This is mainly for large tool outputs (e.g., Gemini ReadFile responses) so that
+/// multi-line content becomes readable.
+private func shouldConvertOutputBlock(text: String, in container: [String: Any]) -> Bool {
+    // Only consider reasonably large, multi-line strings.
+    guard text.count > 200 else { return false }
+    guard text.contains("\n") else { return false }
+
+    // Avoid touching numeric-style outputs; these are almost always human text blobs.
+    if let _ = container["output_tokens"] as? NSNumber {
+        return false
+    }
+    return true
+}
+
+/// Decide whether a `url` string is an inline data: URL that should be summarized
+/// to avoid rendering a huge base64 blob (e.g., embedded images).
+private func shouldRedactDataURL(_ url: String, in container: [String: Any]) -> Bool {
+    guard url.count > 100 else { return false }
+    guard url.hasPrefix("data:") else { return false }
+    guard url.contains(";base64,") else { return false }
+    return true
+}
+
+/// Build a small descriptor for an inline data URL (typically an image) so the JSON
+/// view shows media type and size instead of the full base64 string.
+private func makeDataURLStub(from url: String, in container: [String: Any]) -> [String: Any] {
+    // data:<mediaType>;base64,<payload>
+    let prefix = "data:"
+    guard url.hasPrefix(prefix),
+          let semicolon = url.firstIndex(of: ";"),
+          let comma = url.firstIndex(of: ","),
+          semicolon < comma
+    else {
+        return [
+            "_kind": "data_url_blob",
+            "length": url.count
+        ]
+    }
+
+    let mediaStart = url.index(url.startIndex, offsetBy: prefix.count)
+    let mediaType = String(url[mediaStart..<semicolon])
+    let base64Start = url.index(after: comma)
+    let base64Payload = String(url[base64Start...])
+    let approxBytes = approximateBase64Bytes(forLength: base64Payload.count, string: base64Payload)
+    let approxKB = (Double(approxBytes) / 1024.0 * 10.0).rounded() / 10.0
+
+    var stub: [String: Any] = [
+        "_kind": "data_url_blob",
+        "media_type": mediaType,
+        "encoding": "base64",
+        "bytes": approxBytes,
+        "approx_kb": approxKB
+    ]
+
+    if let role = container["type"] as? String {
+        stub["context_type"] = role
+    }
+
+    return stub
+}
+
+/// Build a structured representation for large text blocks so that the JSON view
+/// shows them as readable paragraphs instead of a single escaped blob.
+private func makeTextBlockStub(from text: String) -> [String: Any] {
+    let lines = text.components(separatedBy: .newlines)
+    let lineCount = lines.count
+    let length = text.utf16.count
+
+    return [
+        "_kind": "text_block",
+        "lines": lines,
+        "line_count": lineCount,
+        "chars": length
+    ]
 }
 
 /// Approximate decoded bytes for a Base64 string based on its length and padding.
