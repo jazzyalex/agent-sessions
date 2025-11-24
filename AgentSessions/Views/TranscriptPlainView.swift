@@ -219,7 +219,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
 
-            // Invisible button to toggle Transcript/Terminal with Cmd+Shift+T
+            // Invisible button to toggle Transcript/Color with Cmd+Shift+T
             Button(action: {
                 let current = SessionViewMode.from(TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal)
                 let next: SessionViewMode
@@ -243,10 +243,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 Picker("View Style", selection: $viewModeRaw) {
                     Text("Transcript")
                         .tag(SessionViewMode.transcript.rawValue)
-                        .help("Transcript view \u{2014} merged chat and tools. Cmd+Shift+T toggles between Transcript and Terminal.")
-                    Text("Terminal")
+                        .help("Transcript view \u{2014} merged chat and tools. Cmd+Shift+T toggles between Transcript and Color.")
+                    Text("Color")
                         .tag(SessionViewMode.terminal.rawValue)
-                        .help("Terminal view \u{2014} CLI-style output with colorized commands and tool output. Cmd+Shift+T toggles between Transcript and Terminal.")
+                        .help("Color view \u{2014} terminal-inspired output with colorized commands and tool output. Cmd+Shift+T toggles between Transcript and Color.")
                     Text("JSON")
                         .tag(SessionViewMode.json.rawValue)
                         .help("JSON view \u{2014} formatted session JSON for readability. Encrypted blobs and large text blocks are summarized; use the session file on disk for raw JSON.")
