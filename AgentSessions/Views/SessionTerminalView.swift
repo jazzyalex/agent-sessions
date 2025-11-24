@@ -83,7 +83,7 @@ struct SessionTerminalView: View {
     private var toolbar: some View {
         HStack {
             // Left: All + role toggles (legend chips act as toggles)
-            HStack(spacing: 10) {
+            HStack(spacing: 14) {
                 Button(action: {
                     activeRoles = Set(RoleToggle.allCases)
                     persistRoleToggles()
@@ -244,17 +244,19 @@ struct SessionTerminalView: View {
             HStack(spacing: 2) {
                 Button(action: { navigateRole(role, direction: -1) }) {
                     Image(systemName: "chevron.up")
-                        .foregroundColor(navDisabled ? Color.secondary.opacity(0.6) : swatch.accent)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(PillIconButtonStyle(tint: swatch.accent, disabled: navDisabled))
                 .disabled(navDisabled)
                 .help(previousHelpText(for: role))
 
                 Button(action: { navigateRole(role, direction: 1) }) {
                     Image(systemName: "chevron.down")
-                        .foregroundColor(navDisabled ? Color.secondary.opacity(0.6) : swatch.accent)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(PillIconButtonStyle(tint: swatch.accent, disabled: navDisabled))
                 .disabled(navDisabled)
                 .help(nextHelpText(for: role))
             }
@@ -451,6 +453,39 @@ private struct TerminalLineView: View {
 
     private var swatch: TerminalRolePalette.SwiftUISwatch {
         TerminalRolePalette.swiftUI(role: line.role.paletteRole, scheme: colorScheme)
+    }
+}
+
+// MARK: - Button Styles
+
+private struct PillIconButtonStyle: ButtonStyle {
+    let tint: Color
+    let disabled: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundColor(disabled ? Color.secondary.opacity(0.6) : tint)
+            .background(
+                Circle()
+                    .fill(backgroundColor(isPressed: configuration.isPressed))
+            )
+            .overlay(
+                Circle()
+                    .stroke(borderColor(isPressed: configuration.isPressed), lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .animation(.easeInOut(duration: 0.08), value: configuration.isPressed)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if disabled { return Color.clear }
+        if isPressed { return tint.opacity(0.25) }
+        return tint.opacity(0.12)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if disabled { return Color.clear }
+        return tint.opacity(isPressed ? 0.55 : 0.35)
     }
 }
 
