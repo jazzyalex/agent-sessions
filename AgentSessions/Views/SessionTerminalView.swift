@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Terminal-style session view with filters, optional gutter, and legend toggles.
 struct SessionTerminalView: View {
@@ -111,33 +112,15 @@ struct SessionTerminalView: View {
     private var content: some View {
         GeometryReader { outerGeo in
             HStack(spacing: 8) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 1) {
-                            ForEach(filteredLines) { line in
-                                TerminalLineView(
-                                    line: line,
-                                    isMatch: matchIDSet.contains(line.id),
-                                    isCurrentMatch: currentMatchLineID == line.id,
-                                    fontSize: transcriptFontSize
-                                )
-                                .id(line.id)
-                            }
-                        }
-                    }
-                    .textSelection(.enabled)
-                    .onChange(of: currentMatchLineID) { _, newValue in
-                        guard let id = newValue else { return }
-                        withAnimation {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
-                    }
-
-        // Respond to toolbar-driven find requests.
-        .onChange(of: findToken) { _, _ in
-            handleFindRequest(proxy: proxy)
-        }
-    }
+                TerminalTextScrollView(
+                    lines: filteredLines,
+                    fontSize: CGFloat(transcriptFontSize),
+                    matchIDs: matchIDSet,
+                    currentMatchLineID: currentMatchLineID
+                )
+                .onChange(of: findToken) { _, _ in
+                    handleFindRequest()
+                }
             }
             .padding(.horizontal, 8)
         }
@@ -219,7 +202,7 @@ struct SessionTerminalView: View {
     }
 
     /// Execute a find request driven by the unified toolbar.
-    private func handleFindRequest(proxy: ScrollViewProxy) {
+    private func handleFindRequest() {
         let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             matchingLineIDs = []
@@ -264,35 +247,6 @@ struct SessionTerminalView: View {
         let clampedIndex = min(max(externalCurrentMatchIndex, 0), ids.count - 1)
         let lineID = ids[clampedIndex]
         currentMatchLineID = lineID
-
-        withAnimation {
-            proxy.scrollTo(lineID, anchor: .center)
-        }
-    }
-
-    private func scrollToApproximateLine(at ratio: Double,
-                                         allLines: [TerminalLine],
-                                         filteredLines: [TerminalLine],
-                                         proxy: ScrollViewProxy) {
-        guard !allLines.isEmpty else { return }
-        guard !filteredLines.isEmpty else { return }
-
-        let clampedRatio = min(max(ratio, 0), 1)
-        let targetGlobalIndex = Int(clampedRatio * Double(allLines.count - 1))
-
-        // Map the global index to the nearest visible filtered line.
-        let targetLine: TerminalLine
-        if let match = filteredLines.first(where: { $0.id >= targetGlobalIndex }) {
-            targetLine = match
-        } else if let last = filteredLines.last {
-            targetLine = last
-        } else {
-            return
-        }
-
-        withAnimation {
-            proxy.scrollTo(targetLine.id, anchor: .top)
-        }
     }
 }
 
@@ -311,6 +265,7 @@ private struct TerminalLineView: View {
                 .font(.system(size: fontSize, weight: .regular, design: .monospaced))
                 .foregroundColor(foregroundColor)
         }
+        .textSelection(.enabled)
         .padding(.horizontal, 4)
         .padding(.vertical, 1)
         .background(background)
@@ -323,14 +278,17 @@ private struct TerminalLineView: View {
         case .user:
             Text(">")
                 .foregroundColor(.blue.opacity(0.7))
+                .allowsHitTesting(false)
         case .toolInput:
             Image(systemName: "terminal")
                 .font(.system(size: 9))
                 .foregroundColor(.teal.opacity(0.8))
+                .allowsHitTesting(false)
         case .error:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 9))
                 .foregroundColor(.red.opacity(0.9))
+                .allowsHitTesting(false)
         default:
             EmptyView()
         }
@@ -369,5 +327,159 @@ private struct TerminalLineView: View {
         default:
             return .primary
         }
+    }
+}
+
+// MARK: - NSTextView-backed selectable terminal renderer
+
+private struct TerminalTextScrollView: NSViewRepresentable {
+    let lines: [TerminalLine]
+    let fontSize: CGFloat
+    let matchIDs: Set<Int>
+    let currentMatchLineID: Int?
+
+    class Coordinator {
+        var lineRanges: [Int: NSRange] = [:]
+        var lastLinesSignature: Int = 0
+        var lastMatchSignature: Int = 0
+        var lastFontSize: CGFloat = 0
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+
+        let textView = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize))
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.usesFindPanel = true
+        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.textContainer?.widthTracksTextView = true
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.minSize = NSSize(width: 0, height: scroll.contentSize.height)
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+        textView.layoutManager?.allowsNonContiguousLayout = true
+        textView.backgroundColor = NSColor.textBackgroundColor
+
+        scroll.documentView = textView
+
+        applyContent(to: textView, context: context)
+        return scroll
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let tv = nsView.documentView as? NSTextView else { return }
+
+        let lineSig = signature(for: lines)
+        let matchSig = signature(for: Array(matchIDs))
+        let fontChanged = abs((context.coordinator.lastFontSize) - fontSize) > 0.1
+        let needsReload = lineSig != context.coordinator.lastLinesSignature || matchSig != context.coordinator.lastMatchSignature || fontChanged
+
+        if needsReload {
+            applyContent(to: tv, context: context)
+            context.coordinator.lastLinesSignature = lineSig
+            context.coordinator.lastMatchSignature = matchSig
+            context.coordinator.lastFontSize = fontSize
+        }
+
+        if let target = currentMatchLineID, let range = context.coordinator.lineRanges[target] {
+            tv.scrollRangeToVisible(range)
+        }
+    }
+
+    private func applyContent(to textView: NSTextView, context: Context) {
+        let (attr, ranges) = buildAttributedString()
+        context.coordinator.lineRanges = ranges
+        textView.textStorage?.setAttributedString(attr)
+        textView.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+
+        // Ensure container tracks width
+        let width = max(1, textView.enclosingScrollView?.contentSize.width ?? textView.bounds.width)
+        textView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
+    }
+
+    private func buildAttributedString() -> (NSAttributedString, [Int: NSRange]) {
+        let attr = NSMutableAttributedString()
+        var ranges: [Int: NSRange] = [:]
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 1.5
+        paragraph.paragraphSpacing = 0
+        paragraph.lineBreakMode = .byWordWrapping
+
+        for (idx, line) in lines.enumerated() {
+            let text = line.text
+            let lineString = idx == lines.count - 1 ? text : text + "\n"
+            let ns = lineString as NSString
+            let range = NSRange(location: attr.length, length: ns.length)
+
+            let colors = colorsForRole(line.role)
+            let isCurrent = (line.id == currentMatchLineID)
+            let isMatch = matchIDs.contains(line.id)
+
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
+                .foregroundColor: colors.foreground,
+                .paragraphStyle: paragraph
+            ]
+
+            if isCurrent {
+                attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.5)
+            } else if isMatch {
+                attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.25)
+            } else if let bg = colors.background {
+                attributes[.backgroundColor] = bg
+            }
+
+            attr.append(NSAttributedString(string: lineString, attributes: attributes))
+            ranges[line.id] = range
+        }
+
+        return (attr, ranges)
+    }
+
+    private func colorsForRole(_ role: TerminalLineRole) -> (foreground: NSColor, background: NSColor?) {
+        switch role {
+        case .user:
+            return (NSColor.labelColor, NSColor.systemBlue.withAlphaComponent(0.18))
+        case .assistant:
+            return (NSColor.labelColor, NSColor.systemGreen.withAlphaComponent(0.18))
+        case .toolInput:
+            return (NSColor.labelColor, NSColor.systemIndigo.withAlphaComponent(0.24))
+        case .toolOutput:
+            return (NSColor.labelColor, NSColor.systemGreen.withAlphaComponent(0.16))
+        case .error:
+            return (NSColor.labelColor, NSColor.systemRed.withAlphaComponent(0.55))
+        case .meta:
+            return (NSColor.secondaryLabelColor, nil)
+        }
+    }
+
+    private func signature(for lines: [TerminalLine]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(lines.count)
+        if let first = lines.first { hasher.combine(first.id); hasher.combine(first.text.count) }
+        if let last = lines.last { hasher.combine(last.id); hasher.combine(last.text.count) }
+        let totalChars = lines.reduce(0) { $0 + $1.text.count }
+        hasher.combine(totalChars)
+        return hasher.finalize()
+    }
+
+    private func signature(for ids: [Int]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(ids.count)
+        if let first = ids.first { hasher.combine(first) }
+        if let last = ids.last { hasher.combine(last) }
+        return hasher.finalize()
     }
 }
