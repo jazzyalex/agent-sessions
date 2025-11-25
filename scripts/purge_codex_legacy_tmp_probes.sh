@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 #
-# Purge legacy Codex probe sessions that were logged in tmp.* working directories.
+# Purge LEGACY Codex probe sessions that were logged in tmp.* working directories.
+#
+# NOTE: This script is for cleaning up OLD probe sessions created BEFORE Nov 24, 2025.
+# Modern probes (post Nov 24, 2025) use ~/Library/Application Support/AgentSessions/AgentSessions-codex-usage
+# and are cleaned up by CodexProbeCleanup.swift.
 #
 # Safety rules:
 # - Only considers files under Codex sessions root: $CODEX_HOME/sessions or ~/.codex/sessions
 # - Requires cwd/project path to match a tmp-like folder (var/folders/.../T/tmp.* or /tmp/tmp.*)
 # - AND one of:
-#     * contains "[AS_CX_PROBE v1]" in a user message, OR
+#     * contains "[AS_CX_PROBE v1]" marker (legacy detection method), OR
 #     * contains a user_message with message "/status", OR
 #     * is a tiny session: <= 5 event_msg entries
 # - Prints a manifest (session path + project/cwd) before deletion.
