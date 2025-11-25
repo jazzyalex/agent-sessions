@@ -33,8 +33,8 @@ extension PreferencesView {
                                 lines.append("Result: SUCCESS")
                                 lines.append("")
                                 lines.append("Limits")
-                                lines.append("5h:     \(m.sessionRemainingPercent)% used (\(m.sessionResetText))")
-                                lines.append("Weekly: \(m.weekAllModelsRemainingPercent)% used (\(m.weekAllModelsResetText))")
+                                lines.append("5h:     \(m.sessionRemainingPercent)% remaining (\(m.sessionResetText))")
+                                lines.append("Weekly: \(m.weekAllModelsRemainingPercent)% remaining (\(m.weekAllModelsResetText))")
                                 claudeProbeMessage = lines.joined(separator: "\n")
                             } else {
                                 var lines: [String] = []
@@ -131,9 +131,9 @@ extension PreferencesView {
             // Codex subsection
             sectionHeader("Codex")
             VStack(alignment: .leading, spacing: 12) {
-                Toggle("Allow auto /status probe when stale", isOn: $codexAllowStatusProbe)
+                Toggle("Allow auto /status probe when no recent sessions", isOn: $codexAllowStatusProbe)
                     .toggleStyle(.checkbox)
-                    .help("When Codex limits look stale and the strip or menu bar is visible, ask Codex CLI (/status) via tmux for a fresh update.")
+                    .help("When there are no recent Codex sessions (6+ hours) and the strip or menu bar is visible, ask Codex CLI (/status) via tmux for current usage.")
                 HStack(spacing: 12) {
                     Button("Run hard Codex /status probe now") {
                         isCodexHardProbeRunning = true
@@ -146,8 +146,8 @@ extension PreferencesView {
                                 lines.append("Result: SUCCESS")
                                 lines.append("")
                                 lines.append("Limits")
-                                lines.append("5h:     \(m.fiveHourRemainingPercent)% used (\(m.fiveHourResetText))")
-                                lines.append("Weekly: \(m.weekRemainingPercent)% used (\(m.weekResetText))")
+                                lines.append("5h:     \(m.fiveHourRemainingPercent)% remaining (\(m.fiveHourResetText))")
+                                lines.append("Weekly: \(m.weekRemainingPercent)% remaining (\(m.weekResetText))")
                                 codexProbeMessage = lines.joined(separator: "\n")
                             } else {
                                 var lines: [String] = []
