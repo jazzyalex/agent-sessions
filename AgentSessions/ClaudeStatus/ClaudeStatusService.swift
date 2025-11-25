@@ -331,17 +331,17 @@ actor ClaudeStatusService {
             var snapshot = ClaudeUsageSnapshot()
 
             if let session = obj["session_5h"] as? [String: Any] {
-                snapshot.sessionRemainingPercent = session["pct_used"] as? Int ?? 0
+                snapshot.sessionRemainingPercent = session["pct_left"] as? Int ?? 0
                 snapshot.sessionResetText = formatResetTime(session["resets"] as? String ?? "", isWeekly: false)
             }
 
             if let weekAll = obj["week_all_models"] as? [String: Any] {
-                snapshot.weekAllModelsRemainingPercent = weekAll["pct_used"] as? Int ?? 0
+                snapshot.weekAllModelsRemainingPercent = weekAll["pct_left"] as? Int ?? 0
                 snapshot.weekAllModelsResetText = formatResetTime(weekAll["resets"] as? String ?? "", isWeekly: true)
             }
 
             if let weekOpus = obj["week_opus"] as? [String: Any] {
-                snapshot.weekOpusRemainingPercent = weekOpus["pct_used"] as? Int
+                snapshot.weekOpusRemainingPercent = weekOpus["pct_left"] as? Int
                 snapshot.weekOpusResetText = (weekOpus["resets"] as? String).map { formatResetTime($0, isWeekly: true) }
             }
 

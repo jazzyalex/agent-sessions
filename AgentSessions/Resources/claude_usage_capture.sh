@@ -230,8 +230,8 @@ extract_pct_and_reset() {
     }
   ')
 
-  # Extract percentage with multiple fallback patterns
-  # Try: "% left" (invert), "% used", "%left" (invert), "%used", any "N%"
+  # Extract percentage with "remaining" semantics (post Nov 24, 2025)
+  # Claude /usage now shows "X% left" directly - use as-is
   local pct
   pct=$(echo "$block" | awk '
     BEGIN { pct = "" }
@@ -239,30 +239,18 @@ extract_pct_and_reset() {
       # Skip Resets line
       if (/Resets/) next
 
-      # Pattern 1: "% left" or "%left" (case-insensitive) - invert percentage
-      if (tolower($0) ~ /% *left/) {
-        if (match($0, /[0-9]+/)) {
-          raw = substr($0, RSTART, RLENGTH)
-          pct = 100 - raw
-          exit
-        }
-      }
-
-      # Pattern 2: "% used" or "%used" (case-insensitive) - use as-is
-      if (tolower($0) ~ /% *used/) {
+      # Pattern 1: "% left" or "% remaining" (case-insensitive) - use as-is
+      if (tolower($0) ~ /% *(left|remaining)/) {
         if (match($0, /[0-9]+/)) {
           pct = substr($0, RSTART, RLENGTH)
           exit
         }
       }
 
-      # Pattern 3: Fallback - any line with "N%" format (use as-is)
+      # Pattern 2: Fallback - any line with "N%" format
       if (pct == "" && match($0, /[0-9]+%/)) {
         pct = substr($0, RSTART, RLENGTH-1)
-        # If line contains "left", invert it
-        if (tolower($0) ~ /left/) {
-          pct = 100 - pct
-        }
+        exit
       }
     }
     END { print pct }
@@ -295,7 +283,7 @@ fi
 # Opus weekly (optional)
 if echo "$usage_output" | grep -q "Current week (Opus)"; then
   read week_opus_pct week_opus_resets < <(extract_pct_and_reset "Current week (Opus)")
-  week_opus_json="{\"pct_used\": ${week_opus_pct:-0}, \"resets\": \"${week_opus_resets}\"}"
+  week_opus_json="{\"pct_left\": ${week_opus_pct:-0}, \"resets\": \"${week_opus_resets}\"}"
 else
   week_opus_json="null"
 fi
@@ -337,11 +325,11 @@ cat <<EOF
   "ok": true,
   "source": "tmux-capture",
   "session_5h": {
-    "pct_used": $session_pct,
+    "pct_left": $session_pct,
     "resets": "$session_resets"
   },
   "week_all_models": {
-    "pct_used": $week_all_pct,
+    "pct_left": $week_all_pct,
     "resets": "$week_all_resets"
   },
   "week_opus": $week_opus_json
