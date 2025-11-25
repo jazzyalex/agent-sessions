@@ -30,14 +30,19 @@ import IOKit.ps
 //    - Returns full diagnostics (success/failure, script output, etc.)
 //    - Sets 1-hour "freshness" TTL to prevent immediate re-staleness
 //
-// ## Current Data Model (Being Refactored)
+// ## Current Data Model
 //
-// NOTE: This code currently stores usage as "percent used" (0-100%) but is being migrated
-// to "percent remaining" to match new server-side semantics (Nov 24, 2025 OpenAI changes).
+// Stores usage as "percent remaining" (0-100%) to match server-side semantics (Nov 24, 2025).
 //
 // - CodexUsageSnapshot.fiveHourRemainingPercent: Stores "% remaining"
 // - CodexUsageSnapshot.weekRemainingPercent: Stores "% remaining"
 // - UI displays use helper methods to convert between used/remaining as needed
+//
+// TODO (Future Work - Quota Tracking):
+// - Add absolute quota tracking (e.g., "127 of 500 requests remaining")
+// - Implement "buy credits" feature detection and UI
+// - Support mobile subscription quota display
+// - See original plan step 7 for detailed requirements
 //
 // ## Staleness Semantics
 //

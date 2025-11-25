@@ -22,15 +22,20 @@ import IOKit.ps
 //    - Returns full diagnostics (success/failure, script output, limits)
 //    - Sets 1-hour "freshness" TTL to prevent immediate re-staleness
 //
-// ## Current Data Model (Being Refactored)
+// ## Current Data Model
 //
-// NOTE: This code currently stores usage as "percent used" (0-100%) but is being migrated
-// to "percent remaining" to match new CLI output format (aligned with Codex changes).
+// Stores usage as "percent remaining" (0-100%) to match CLI output format (Nov 24, 2025).
 //
 // - ClaudeUsageSnapshot.sessionRemainingPercent: Stores "% remaining"
 // - ClaudeUsageSnapshot.weekAllModelsRemainingPercent: Stores "% remaining"
 // - ClaudeUsageSnapshot.weekOpusRemainingPercent: Stores "% remaining"
 // - UI displays use helper methods to convert between used/remaining as needed
+//
+// TODO (Future Work - Quota Tracking):
+// - Add absolute quota tracking (e.g., "42 of 200 messages remaining")
+// - Implement quota-based feature gating if needed
+// - Support mobile/team subscription quota display
+// - See original plan step 7 for detailed requirements
 //
 // ## Staleness Semantics
 //
