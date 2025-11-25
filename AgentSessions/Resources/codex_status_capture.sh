@@ -105,14 +105,6 @@ while [ $iterations -lt $max_iterations ]; do
   fi
 done
 
-# Send a minimal non-reasoning marker that settles quickly, then wait
-wait_for_prompt || true
-MARKER_MSG="Protocol test [AS_CX_PROBE v1]. just reply Ok"
-"$TMUX_CMD" -L "$LABEL" send-keys -l -t "$SESSION:0.0" "$MARKER_MSG" 2>/dev/null || true
-sleep "$THINK_WAIT"
-"$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null || true
-sleep "$WAIT_AFTER_MSG"
-
 # Ensure prompt is ready and the cursor is at column 1 before typing /status
 wait_for_prompt || true
 "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" C-u Home 2>/dev/null || true

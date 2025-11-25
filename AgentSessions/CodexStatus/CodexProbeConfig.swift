@@ -2,9 +2,6 @@ import Foundation
 
 /// Shared configuration and helpers for identifying Agent Sessions' Codex status probe sessions.
 enum CodexProbeConfig {
-    /// Fixed marker prefix injected as the very first user message of a Codex probe.
-    static let markerPrefix: String = "[AS_CX_PROBE v1]"
-
     /// Absolute path to the dedicated working directory used for Codex probe sessions.
     static func probeWorkingDirectory() -> String {
         if let override = ProcessInfo.processInfo.environment["AS_TEST_CX_PROBE_WD"], !override.isEmpty {
@@ -16,38 +13,50 @@ enum CodexProbeConfig {
     }
 
     /// Returns true if the given session appears to be a Codex probe session.
-    /// Heuristics (ordered, conservative to avoid false positives):
-    /// - Source must be `.codex`.
-    /// - If lightweight `cwd` matches the Probe WD (normalized), treat as probe.
-    /// - Otherwise, treat as probe only when the marker appears in the FIRST user message
-    ///   (or lightweight title/preview), which is how our probes start.
-    /// - Tiny '/status' sessions (<= 5 messages) are treated as probe ONLY when `cwd`
-    ///   matches the Probe WD. This prevents hiding legitimate user /status snippets.
+    ///
+    /// Detection strategy (post Nov 24, 2025 - no marker message needed):
+    /// - Source must be `.codex`
+    /// - Working directory must match the probe WD
+    /// - Session characteristics: tiny (≤5 events) and contains `/status` command
+    ///
+    /// Conservative to avoid false positives: regular user sessions in other directories
+    /// won't be mistaken for probes even if they happen to run `/status`.
     static func isProbeSession(_ session: Session) -> Bool {
         guard session.source == .codex else { return false }
+
+        // Primary check: working directory must match probe WD
+        let probeWD = normalizePath(probeWorkingDirectory())
+        var cwdMatches = false
+
         if let cwd = session.lightweightCwd, !cwd.isEmpty {
-            if normalizePath(cwd) == normalizePath(probeWorkingDirectory()) { return true }
+            if normalizePath(cwd) == probeWD { cwdMatches = true }
         }
-        // Also check the fully-parsed path when present
         if let cwd = session.cwd, !cwd.isEmpty {
-            if normalizePath(cwd) == normalizePath(probeWorkingDirectory()) { return true }
+            if normalizePath(cwd) == probeWD { cwdMatches = true }
         }
-        // Marker in lightweight title or first user PREVIEW
-        if let t = session.lightweightTitle, t.contains(markerPrefix) { return true }
-        if let preview = session.firstUserPreview, preview.contains(markerPrefix) { return true }
-        // Marker in FIRST user of fully parsed sessions
-        if !session.events.isEmpty {
-            if let firstUser = session.events.first(where: { $0.kind == .user })?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-               firstUser.contains(markerPrefix) { return true }
-        }
-        // Tiny '/status' helper sessions — only when we know they ran in the Probe WD
+
+        guard cwdMatches else { return false }
+
+        // Secondary check: must be tiny and contain /status
+        // (Prevents hiding legitimate long sessions that happen to run in probe WD)
+        guard session.eventCount <= 5 else { return false }
+
         let title = session.events.isEmpty ? (session.lightweightTitle ?? "") : session.title
-        if let cwd = session.lightweightCwd,
-           normalizePath(cwd) == normalizePath(probeWorkingDirectory()),
-           title.trimmingCharacters(in: .whitespacesAndNewlines) == "/status",
-           session.eventCount <= 5 {
-            return true
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Look for /status in title (most probes)
+        if trimmedTitle == "/status" { return true }
+        if trimmedTitle.lowercased().contains("/status") { return true }
+
+        // Fallback: check if any event contains "/status" command
+        for event in session.events {
+            if let text = event.text?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                if text == "/status" || text.lowercased().contains("/status") {
+                    return true
+                }
+            }
         }
+
         return false
     }
 
