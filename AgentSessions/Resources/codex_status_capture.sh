@@ -155,11 +155,13 @@ if ! ensure_status; then
   pane=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p -S -500 2>/dev/null || echo "")
 fi
 
-# Extract helper: returns "<pct> <resets>"
+# Extract helper: returns "<pct_remaining> <resets>"
+# Post Nov 24, 2025: Codex /status shows "X% left" instead of "X% used"
 extract() {
   local anchor="$1"
   local block=$(echo "$pane" | awk -v a="$anchor" 'BEGIN{c=0} { if (index(tolower($0),tolower(a))>0) {c=4} if (c>0){print; c--} }')
-  local pct=$(echo "$block" | awk '/% used/{ if (match($0, /[0-9]+/)) { print substr($0,RSTART,RLENGTH); exit }}')
+  # Look for "X% left" or "X% remaining" patterns
+  local pct=$(echo "$block" | awk '/% (left|remaining)/{ if (match($0, /[0-9]+/)) { print substr($0,RSTART,RLENGTH); exit }}')
   local resets=$(echo "$block" | awk '/[Rr]esets/{ sub(/^.*[Rr]esets[[:space:]]*/, ""); sub(/[[:space:]]*│.*/, ""); sub(/[[:space:]]*\)$/, ""); sub(/[[:space:]]*$/, ""); print; exit }')
   echo "$pct" "$resets"
 }
@@ -177,8 +179,8 @@ fi
 cat <<EOF
 {
   "ok": true,
-  "five_hour": { "pct_used": ${p5:-0}, "resets": "${r5}" },
-  "weekly": { "pct_used": ${pw:-0}, "resets": "${rw}" }
+  "five_hour": { "pct_left": ${p5:-0}, "resets": "${r5}" },
+  "weekly": { "pct_left": ${pw:-0}, "resets": "${rw}" }
 }
 EOF
 
