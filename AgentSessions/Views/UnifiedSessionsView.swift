@@ -644,8 +644,8 @@ struct UnifiedSessionsView: View {
 
     private var launchAnimationView: some View {
         LoadingAnimationView(
-            codexColor: .blue,
-            claudeColor: Color(red: 204/255, green: 121/255, blue: 90/255)
+            codexColor: Color.agentColor(for: .codex, monochrome: stripMonochrome),
+            claudeColor: Color.agentColor(for: .claude, monochrome: stripMonochrome)
         )
     }
 
@@ -982,8 +982,8 @@ private struct UnifiedSearchFiltersView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.blue.opacity(0.1))
-                .background(RoundedRectangle(cornerRadius: 6).stroke(Color.blue.opacity(0.3)))
+                .background((stripMonochrome ? Color.secondary : Color.blue).opacity(0.1))
+                .background(RoundedRectangle(cornerRadius: 6).stroke((stripMonochrome ? Color.secondary : Color.blue).opacity(0.3)))
             }
         }
         .onChange(of: focus.activeFocus) { _, newFocus in
