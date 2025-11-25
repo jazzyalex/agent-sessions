@@ -4,6 +4,63 @@ import SwiftUI
 import IOKit.ps
 #endif
 
+// MARK: - Codex Usage Tracking Architecture Documentation
+//
+// This service implements a three-tier system for tracking Codex API rate limit usage:
+//
+// ## Data Sources (Priority Order)
+//
+// 1. **PRIMARY: JSONL Log Parsing** (Passive, Free)
+//    - Scans ~/.codex/sessions/YYYY/MM/DD/*.jsonl files for rate_limit events
+//    - Extracts 5-hour and weekly limit percentages from log events
+//    - Zero token cost (reads existing logs, no API calls)
+//    - Frequency: Every 5 minutes (reduced on battery)
+//    - Limitation: Only reflects usage from recent local Codex sessions
+//
+// 2. **SECONDARY: Auto /status Probe** (Active, 1-2 messages)
+//    - Triggers when: no recent sessions OR data looks stale AND visible AND user opted-in
+//    - Uses tmux to run `codex` CLI and send `/status` command
+//    - Token cost: 1-2 messages
+//    - Gated by: `CodexAllowStatusProbe` preference + 10min cooldown
+//    - Purpose: Fetch current usage when user hasn't used Codex recently
+//
+// 3. **TERTIARY: Hard Probe (Manual)** (Active, 1-2 messages)
+//    - User-triggered via Preferences → Usage Probes → "Run hard Codex /status probe now"
+//    - Always available regardless of staleness or auto-probe settings
+//    - Returns full diagnostics (success/failure, script output, etc.)
+//    - Sets 1-hour "freshness" TTL to prevent immediate re-staleness
+//
+// ## Current Data Model (Being Refactored)
+//
+// NOTE: This code currently stores usage as "percent used" (0-100%) but is being migrated
+// to "percent remaining" to match new server-side semantics (Nov 24, 2025 OpenAI changes).
+//
+// - CodexUsageSnapshot.fiveHourPercent: Currently "% used", will become "% remaining"
+// - CodexUsageSnapshot.weekPercent: Currently "% used", will become "% remaining"
+// - UI displays use helper methods to convert between used/remaining as needed
+//
+// ## Staleness Semantics
+//
+// "Stale" means "data is old" NOT "data is inaccurate" (server data is fresh since Nov 2025).
+//
+// Staleness thresholds:
+// - 5-hour window: 30 minutes since last event
+// - Weekly window: 4 hours since last event
+//
+// Staleness triggers:
+// - UI display: Shows "Last updated Xh ago" instead of reset time
+// - Auto-probe: May trigger if no recent sessions + visible + opted-in
+// - Freshness TTL: Manual probes set 1-hour "fresh" window to smooth UI
+//
+// ## Key Files
+//
+// - CodexStatusService.swift (this file): Main service, JSONL parsing, probe orchestration
+// - Resources/codex_status_capture.sh: Bash script for tmux-based /status probing
+// - CodexProbeConfig.swift: Probe session identification logic
+// - CodexProbeProject.swift: Probe session cleanup/deletion logic
+// - UsageStaleCheck.swift: Staleness detection logic (thresholds, event age)
+// - UsageFreshness.swift: Freshness TTL management (1-hour grace period)
+//
 // ILLUSTRATIVE: Minimal model + service for Codex usage parsing with optional CLI /status probe.
 
 // Snapshot of parsed values from Codex /status or banner
