@@ -804,8 +804,8 @@ actor CodexStatusService {
             if let summary = parseTokenCountTail(url: url) { return summary }
         }
         return RateLimitSummary(
-            fiveHour: RateLimitWindowInfo(usedPercent: nil, resetAt: nil, windowMinutes: nil),
-            weekly: RateLimitWindowInfo(usedPercent: nil, resetAt: nil, windowMinutes: nil),
+            fiveHour: RateLimitWindowInfo(remainingPercent: nil, resetAt: nil, windowMinutes: nil),
+            weekly: RateLimitWindowInfo(remainingPercent: nil, resetAt: nil, windowMinutes: nil),
             eventTimestamp: nil,
             stale: true,
             sourceFile: nil
@@ -983,11 +983,18 @@ actor CodexStatusService {
     }
 
     private func decodeWindow(_ dict: [String: Any]?, created: Date, capturedAt: Date?) -> RateLimitWindowInfo {
-        guard let dict else { return RateLimitWindowInfo(usedPercent: nil, resetAt: nil, windowMinutes: nil) }
-        var used: Int?
-        if let d = dict["used_percent"] as? Double { used = Int(d.rounded()) }
-        else if let i = dict["used_percent"] as? Int { used = max(0, min(100, i)) }
-        else if let n = dict["used_percent"] as? NSNumber { used = Int(truncating: n) }
+        guard let dict else { return RateLimitWindowInfo(remainingPercent: nil, resetAt: nil, windowMinutes: nil) }
+
+        // Parse remaining percentage (post Nov 24, 2025 server-side change)
+        var remaining: Int?
+        if let d = dict["remaining_percent"] as? Double { remaining = Int(d.rounded()) }
+        else if let i = dict["remaining_percent"] as? Int { remaining = max(0, min(100, i)) }
+        else if let n = dict["remaining_percent"] as? NSNumber { remaining = Int(truncating: n) }
+        // Alternate naming: pct_left, pct_remaining
+        else if let d = dict["pct_left"] as? Double { remaining = Int(d.rounded()) }
+        else if let i = dict["pct_left"] as? Int { remaining = max(0, min(100, i)) }
+        else if let d = dict["pct_remaining"] as? Double { remaining = Int(d.rounded()) }
+        else if let i = dict["pct_remaining"] as? Int { remaining = max(0, min(100, i)) }
 
         var resetsVal: Double?
         if let d = dict["resets_in_seconds"] as? Double { resetsVal = d }
@@ -1039,7 +1046,7 @@ actor CodexStatusService {
             }
         }
 
-        return RateLimitWindowInfo(usedPercent: used, resetAt: resetAt, windowMinutes: minutes)
+        return RateLimitWindowInfo(remainingPercent: remaining, resetAt: resetAt, windowMinutes: minutes)
     }
 
     private func tailLines(url: URL, maxBytes: Int) -> [String]? {
