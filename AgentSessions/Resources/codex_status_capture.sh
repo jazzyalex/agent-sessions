@@ -160,8 +160,17 @@ fi
 extract() {
   local anchor="$1"
   local block=$(echo "$pane" | awk -v a="$anchor" 'BEGIN{c=0} { if (index(tolower($0),tolower(a))>0) {c=4} if (c>0){print; c--} }')
-  # Look for "X% left" or "X% remaining" patterns
-  local pct=$(echo "$block" | awk '/% (left|remaining)/{ if (match($0, /[0-9]+/)) { print substr($0,RSTART,RLENGTH); exit }}')
+  # Look for "X% left" or "X% remaining" patterns - extract number immediately before %
+  local pct=$(echo "$block" | awk '{
+    if (match($0, /[0-9]+% *(left|remaining)/)) {
+      # Extract the matched substring, then get just the number part
+      matched = substr($0, RSTART, RLENGTH)
+      if (match(matched, /[0-9]+/)) {
+        print substr(matched, RSTART, RLENGTH)
+        exit
+      }
+    }
+  }')
   local resets=$(echo "$block" | awk '/[Rr]esets/{ sub(/^.*[Rr]esets[[:space:]]*/, ""); sub(/[[:space:]]*│.*/, ""); sub(/[[:space:]]*\)$/, ""); sub(/[[:space:]]*$/, ""); print; exit }')
   echo "$pct" "$resets"
 }
