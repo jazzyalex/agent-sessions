@@ -3,6 +3,59 @@ import Foundation
 import IOKit.ps
 #endif
 
+// MARK: - Claude Usage Tracking Architecture Documentation
+//
+// This service implements a two-tier system for tracking Claude CLI rate limit usage:
+//
+// ## Data Sources (Priority Order)
+//
+// 1. **PRIMARY: Periodic /usage Probe** (Active, Free)
+//    - Uses tmux to run `claude` CLI and send `/usage` command
+//    - Token cost: ZERO (the /usage command is free, no user messages needed)
+//    - Frequency: Every 15 minutes (reduced on battery, disabled when hidden)
+//    - Limitation: Requires active polling, but at zero cost
+//    - Note: Unlike Codex, Claude CLI doesn't expose usage logs for passive parsing
+//
+// 2. **SECONDARY: Hard Probe (Manual)** (Active, Free)
+//    - User-triggered via Preferences → Usage Probes → "Refresh Claude usage now (free)"
+//    - Always available for on-demand refresh
+//    - Returns full diagnostics (success/failure, script output, limits)
+//    - Sets 1-hour "freshness" TTL to prevent immediate re-staleness
+//
+// ## Current Data Model (Being Refactored)
+//
+// NOTE: This code currently stores usage as "percent used" (0-100%) but is being migrated
+// to "percent remaining" to match new CLI output format (aligned with Codex changes).
+//
+// - ClaudeUsageSnapshot.sessionPercent: Currently "% used", will become "% remaining"
+// - ClaudeUsageSnapshot.weekAllModelsPercent: Currently "% used", will become "% remaining"
+// - ClaudeUsageSnapshot.weekOpusPercent: Currently "% used", will become "% remaining"
+// - UI displays use helper methods to convert between used/remaining as needed
+//
+// ## Staleness Semantics
+//
+// "Stale" means "data is old" NOT "data is inaccurate" (CLI reports fresh server data).
+//
+// Staleness thresholds (based on last poll time):
+// - 5-hour (session) window: 90 minutes since last poll
+// - Weekly window: 6 hours since last poll
+//
+// Staleness triggers:
+// - UI display: Shows "Last updated Xh ago" instead of reset time
+// - Freshness TTL: Manual probes set 1-hour "fresh" window to smooth UI
+//
+// Note: Unlike Codex, Claude has no "auto-probe on stale" feature. Polling is continuous
+// at configured intervals, or user can manually refresh anytime.
+//
+// ## Key Files
+//
+// - ClaudeStatusService.swift (this file): Main service, tmux probe orchestration
+// - Resources/claude_usage_capture.sh: Bash script for tmux-based /usage probing
+// - ClaudeProbeConfig.swift: Probe session identification logic
+// - ClaudeProbeProject.swift: Probe session cleanup/deletion logic
+// - UsageStaleCheck.swift: Staleness detection logic (thresholds, poll age)
+// - UsageFreshness.swift: Freshness TTL management (1-hour grace period)
+//
 // Service for fetching Claude CLI usage via headless script execution
 actor ClaudeStatusService {
     private enum State { case idle, running, stopping }
