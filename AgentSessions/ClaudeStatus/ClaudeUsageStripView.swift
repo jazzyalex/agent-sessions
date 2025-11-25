@@ -118,10 +118,13 @@ private struct UsageMeter: View {
             Text(title)
                 .font(.footnote).bold()
                 .frame(width: UsageMeterLayout.titleWidth, alignment: .leading)
-            ProgressView(value: Double(percent), total: 100)
+            // Progress bar shows "used" (filled portion = used)
+            let percentUsed = 100 - percent
+            ProgressView(value: Double(percentUsed), total: 100)
                 .tint(stripMonochrome ? .secondary : tintColor)
                 .frame(width: UsageMeterLayout.progressWidth)
-            Text("\(percent)%")
+            // Label shows "remaining"
+            Text("\(percent)% left")
                 .font(.footnote)
                 .monospacedDigit()
                 .frame(width: UsageMeterLayout.percentWidth, alignment: .trailing)
@@ -154,7 +157,7 @@ private enum UsageMeterLayout {
     static let itemSpacing: CGFloat = 6
     static let titleWidth: CGFloat = 28
     static let progressWidth: CGFloat = 140
-    static let percentWidth: CGFloat = 36
+    static let percentWidth: CGFloat = 52  // Wider to fit "XX% left"
     static let resetWidth: CGFloat = 160
 
     static func totalWidth(includeReset: Bool) -> CGFloat {

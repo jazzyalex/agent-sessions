@@ -355,11 +355,13 @@ private func resetLine(label: String, percent: Int, reset: String) -> Attributed
     labelAttr.font = .system(size: 13, weight: .semibold)
     line.append(labelAttr)
 
-    var barAttr = AttributedString(inlineBar(percent) + " ")
+    // Bar shows "used" (filled = used), but percent value is "remaining"
+    let percentUsed = 100 - percent
+    var barAttr = AttributedString(inlineBar(percentUsed) + " ")
     barAttr.font = .system(size: 13, weight: .regular, design: .monospaced)
     line.append(barAttr)
 
-    var percentAttr = AttributedString("\(percent)%  ")
+    var percentAttr = AttributedString("\(percent)% left  ")
     percentAttr.font = .system(size: 13, weight: .regular, design: .monospaced)
     line.append(percentAttr)
 
