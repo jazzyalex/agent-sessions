@@ -603,11 +603,25 @@ actor CodexStatusService {
 
     // MARK: - Optional tmux /status probe
     private func maybeProbeStatusViaTMUX(userInitiated: Bool) async {
-        // Probes are strictly secondary and must only run when usage looks stale.
+        // Probes are strictly secondary: only run when we have NO recent local sessions.
+        // With fresh server data (post Nov 24, 2025), "stale" just means "data is old",
+        // not "data is inaccurate". We probe to get current usage when user hasn't used Codex recently.
         let now = Date()
+
+        // Check if we have NO recent JSONL events (no local sessions in last 6 hours)
+        var noRecentSessions = false
+        if let eventTime = snapshot.eventTimestamp {
+            if now.timeIntervalSince(eventTime) > 6 * 60 * 60 { noRecentSessions = true }
+        } else {
+            noRecentSessions = true  // No events at all
+        }
+
+        // Also check staleness for backward compat (data age display)
         let stale5h = isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
         let staleWeek = isResetInfoStale(kind: "week", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
-        guard stale5h || staleWeek else { return }
+
+        // Probe if: no recent sessions OR data looks stale (for monitoring when visible)
+        guard noRecentSessions || stale5h || staleWeek else { return }
 
         // Additional gates for automatic/background path only
         if !userInitiated {
