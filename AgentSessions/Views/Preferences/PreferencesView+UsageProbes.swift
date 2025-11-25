@@ -33,8 +33,8 @@ extension PreferencesView {
                                 lines.append("Result: SUCCESS")
                                 lines.append("")
                                 lines.append("Limits")
-                                lines.append("5h:     \(m.sessionPercent)% used (\(m.sessionResetText))")
-                                lines.append("Weekly: \(m.weekAllModelsPercent)% used (\(m.weekAllModelsResetText))")
+                                lines.append("5h:     \(m.sessionRemainingPercent)% used (\(m.sessionResetText))")
+                                lines.append("Weekly: \(m.weekAllModelsRemainingPercent)% used (\(m.weekAllModelsResetText))")
                                 claudeProbeMessage = lines.joined(separator: "\n")
                             } else {
                                 var lines: [String] = []
@@ -146,8 +146,8 @@ extension PreferencesView {
                                 lines.append("Result: SUCCESS")
                                 lines.append("")
                                 lines.append("Limits")
-                                lines.append("5h:     \(m.fiveHourPercent)% used (\(m.fiveHourResetText))")
-                                lines.append("Weekly: \(m.weekPercent)% used (\(m.weekResetText))")
+                                lines.append("5h:     \(m.fiveHourRemainingPercent)% used (\(m.fiveHourResetText))")
+                                lines.append("Weekly: \(m.weekRemainingPercent)% used (\(m.weekResetText))")
                                 codexProbeMessage = lines.joined(separator: "\n")
                             } else {
                                 var lines: [String] = []

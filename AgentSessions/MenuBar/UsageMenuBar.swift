@@ -19,32 +19,32 @@ struct UsageMenuBarLabel: View {
             switch source {
             case .codex:
                 renderSourceView(prefix: "CX",
-                                 five: codexStatus.fiveHourPercent,
-                                 week: codexStatus.weekPercent,
+                                 five: codexStatus.fiveHourRemainingPercent,
+                                 week: codexStatus.weekRemainingPercent,
                                  scope: scope,
                                  style: style,
                                  showSpinner: codexStatus.isUpdating)
             case .claude:
                 if claudeEnabled {
                     renderSourceView(prefix: "CL",
-                                     five: claudeStatus.sessionPercent,
-                                     week: claudeStatus.weekAllModelsPercent,
+                                     five: claudeStatus.sessionRemainingPercent,
+                                     week: claudeStatus.weekAllModelsRemainingPercent,
                                      scope: scope,
                                      style: style,
                                      showSpinner: claudeStatus.isUpdating)
                 }
             case .both:
                 renderSourceView(prefix: "CX",
-                                 five: codexStatus.fiveHourPercent,
-                                 week: codexStatus.weekPercent,
+                                 five: codexStatus.fiveHourRemainingPercent,
+                                 week: codexStatus.weekRemainingPercent,
                                  scope: scope,
                                  style: style,
                                  showSpinner: codexStatus.isUpdating)
                 if claudeEnabled {
                     Text(" │ ").font(.system(size: 12, weight: .regular, design: .monospaced))
                     renderSourceView(prefix: "CL",
-                                     five: claudeStatus.sessionPercent,
-                                     week: claudeStatus.weekAllModelsPercent,
+                                     five: claudeStatus.sessionRemainingPercent,
+                                     week: claudeStatus.weekAllModelsRemainingPercent,
                                      scope: scope,
                                      style: style,
                                      showSpinner: claudeStatus.isUpdating)
@@ -166,7 +166,7 @@ struct UsageMenuBarMenuContent: View {
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
-                            Text(resetLine(label: "5h:", percent: codexStatus.fiveHourPercent, reset: displayReset(codexStatus.fiveHourResetText, kind: "5h", source: .codex, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)))
+                            Text(resetLine(label: "5h:", percent: codexStatus.fiveHourRemainingPercent, reset: displayReset(codexStatus.fiveHourResetText, kind: "5h", source: .codex, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)))
                             Spacer()
                         }
                     }
@@ -174,7 +174,7 @@ struct UsageMenuBarMenuContent: View {
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
-                            Text(resetLine(label: "Wk:", percent: codexStatus.weekPercent, reset: displayReset(codexStatus.weekResetText, kind: "Wk", source: .codex, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)))
+                            Text(resetLine(label: "Wk:", percent: codexStatus.weekRemainingPercent, reset: displayReset(codexStatus.weekResetText, kind: "Wk", source: .codex, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)))
                             Spacer()
                         }
                     }
@@ -206,7 +206,7 @@ struct UsageMenuBarMenuContent: View {
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
-                            Text(resetLine(label: "5h:", percent: claudeStatus.sessionPercent, reset: displayReset(claudeStatus.sessionResetText, kind: "5h", source: .claude, lastUpdate: claudeStatus.lastUpdate)))
+                            Text(resetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: displayReset(claudeStatus.sessionResetText, kind: "5h", source: .claude, lastUpdate: claudeStatus.lastUpdate)))
                             Spacer()
                         }
                     }
@@ -214,7 +214,7 @@ struct UsageMenuBarMenuContent: View {
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
-                            Text(resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsPercent, reset: displayReset(claudeStatus.weekAllModelsResetText, kind: "Wk", source: .claude, lastUpdate: claudeStatus.lastUpdate)))
+                            Text(resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: displayReset(claudeStatus.weekAllModelsResetText, kind: "Wk", source: .claude, lastUpdate: claudeStatus.lastUpdate)))
                             Spacer()
                         }
                     }

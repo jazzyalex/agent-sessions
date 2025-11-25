@@ -27,9 +27,9 @@ import IOKit.ps
 // NOTE: This code currently stores usage as "percent used" (0-100%) but is being migrated
 // to "percent remaining" to match new CLI output format (aligned with Codex changes).
 //
-// - ClaudeUsageSnapshot.sessionPercent: Currently "% used", will become "% remaining"
-// - ClaudeUsageSnapshot.weekAllModelsPercent: Currently "% used", will become "% remaining"
-// - ClaudeUsageSnapshot.weekOpusPercent: Currently "% used", will become "% remaining"
+// - ClaudeUsageSnapshot.sessionRemainingPercent: Stores "% remaining"
+// - ClaudeUsageSnapshot.weekAllModelsRemainingPercent: Stores "% remaining"
+// - ClaudeUsageSnapshot.weekOpusRemainingPercent: Stores "% remaining"
 // - UI displays use helper methods to convert between used/remaining as needed
 //
 // ## Staleness Semantics
@@ -331,17 +331,17 @@ actor ClaudeStatusService {
             var snapshot = ClaudeUsageSnapshot()
 
             if let session = obj["session_5h"] as? [String: Any] {
-                snapshot.sessionPercent = session["pct_used"] as? Int ?? 0
+                snapshot.sessionRemainingPercent = session["pct_used"] as? Int ?? 0
                 snapshot.sessionResetText = formatResetTime(session["resets"] as? String ?? "", isWeekly: false)
             }
 
             if let weekAll = obj["week_all_models"] as? [String: Any] {
-                snapshot.weekAllModelsPercent = weekAll["pct_used"] as? Int ?? 0
+                snapshot.weekAllModelsRemainingPercent = weekAll["pct_used"] as? Int ?? 0
                 snapshot.weekAllModelsResetText = formatResetTime(weekAll["resets"] as? String ?? "", isWeekly: true)
             }
 
             if let weekOpus = obj["week_opus"] as? [String: Any] {
-                snapshot.weekOpusPercent = weekOpus["pct_used"] as? Int
+                snapshot.weekOpusRemainingPercent = weekOpus["pct_used"] as? Int
                 snapshot.weekOpusResetText = (weekOpus["resets"] as? String).map { formatResetTime($0, isWeekly: true) }
             }
 
@@ -444,7 +444,8 @@ actor ClaudeStatusService {
 
         // Energy optimization: Stop polling entirely when nothing is visible
         // (menu bar and strips both hidden)
-        let urgent = snapshot.sessionPercent >= 80
+        // Urgent if 5-hour limit is running low (≤20% remaining = ≥80% used)
+        let urgent = snapshot.sessionPercentUsed() >= 80
         if !visible && !urgent {
             // When hidden and not urgent: don't poll at all (1 hour = effectively disabled)
             return 3600 * 1_000_000_000

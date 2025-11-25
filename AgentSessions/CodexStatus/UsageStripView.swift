@@ -22,8 +22,8 @@ struct UsageStripView: View {
                         .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
                         .frame(width: labelWidth, alignment: .leading)
                 }
-                UsageMeter(title: "5h", percent: codexStatus.fiveHourPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
-                UsageMeter(title: "Wk", percent: codexStatus.weekPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
+                UsageMeter(title: "5h", percent: codexStatus.fiveHourRemainingPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
+                UsageMeter(title: "Wk", percent: codexStatus.weekRemainingPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
                 Spacer(minLength: 0)
                 if codexStatus.isUpdating {
                     UpdatingBadge()
