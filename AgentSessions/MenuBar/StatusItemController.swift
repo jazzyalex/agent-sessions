@@ -91,15 +91,15 @@ final class StatusItemController: NSObject {
         // Reset lines (clicking opens Preferences → Menu Bar)
         if source == .codex || source == .both {
             menu.addItem(makeTitleItem("Codex"))
-            menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: codexStatus.fiveHourPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
-            menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: codexStatus.weekPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
+            menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: codexStatus.fiveHourRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
+            menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: codexStatus.weekRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
         }
         let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
         if source == .both && claudeEnabled { menu.addItem(NSMenuItem.separator()) }
         if (source == .claude || source == .both) && claudeEnabled {
             menu.addItem(makeTitleItem("Claude"))
-            menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: claudeStatus.sessionPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
-            menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
+            menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
+            menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
         }
 
         menu.addItem(NSMenuItem.separator())

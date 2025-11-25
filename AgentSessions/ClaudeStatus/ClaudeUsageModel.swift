@@ -3,23 +3,39 @@ import SwiftUI
 
 // Snapshot of parsed values from Claude CLI /usage
 struct ClaudeUsageSnapshot: Equatable {
-    var sessionPercent: Int = 0
+    var sessionRemainingPercent: Int = 0
     var sessionResetText: String = ""
-    var weekAllModelsPercent: Int = 0
+    var weekAllModelsRemainingPercent: Int = 0
     var weekAllModelsResetText: String = ""
-    var weekOpusPercent: Int? = nil
+    var weekOpusRemainingPercent: Int? = nil
     var weekOpusResetText: String? = nil
+
+    // MARK: - Helper Methods for UI Display
+    // Server now reports "remaining" but UI may want to show "used" (e.g., progress bars)
+
+    func sessionPercentUsed() -> Int {
+        return 100 - sessionRemainingPercent
+    }
+
+    func weekAllModelsPercentUsed() -> Int {
+        return 100 - weekAllModelsRemainingPercent
+    }
+
+    func weekOpusPercentUsed() -> Int? {
+        guard let remaining = weekOpusRemainingPercent else { return nil }
+        return 100 - remaining
+    }
 }
 
 @MainActor
 final class ClaudeUsageModel: ObservableObject {
     static let shared = ClaudeUsageModel()
 
-    @Published var sessionPercent: Int = 0
+    @Published var sessionRemainingPercent: Int = 0
     @Published var sessionResetText: String = ""
-    @Published var weekAllModelsPercent: Int = 0
+    @Published var weekAllModelsRemainingPercent: Int = 0
     @Published var weekAllModelsResetText: String = ""
-    @Published var weekOpusPercent: Int? = nil
+    @Published var weekOpusRemainingPercent: Int? = nil
     @Published var weekOpusResetText: String? = nil
     @Published var lastUpdate: Date? = nil
     @Published var cliUnavailable: Bool = false
@@ -149,9 +165,9 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     private func apply(_ s: ClaudeUsageSnapshot) {
-        sessionPercent = clampPercent(s.sessionPercent)
-        weekAllModelsPercent = clampPercent(s.weekAllModelsPercent)
-        weekOpusPercent = s.weekOpusPercent.map(clampPercent)
+        sessionRemainingPercent = clampPercent(s.sessionRemainingPercent)
+        weekAllModelsRemainingPercent = clampPercent(s.weekAllModelsRemainingPercent)
+        weekOpusRemainingPercent = s.weekOpusRemainingPercent.map(clampPercent)
         sessionResetText = s.sessionResetText
         weekAllModelsResetText = s.weekAllModelsResetText
         weekOpusResetText = s.weekOpusResetText

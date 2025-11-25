@@ -35,8 +35,8 @@ import IOKit.ps
 // NOTE: This code currently stores usage as "percent used" (0-100%) but is being migrated
 // to "percent remaining" to match new server-side semantics (Nov 24, 2025 OpenAI changes).
 //
-// - CodexUsageSnapshot.fiveHourPercent: Currently "% used", will become "% remaining"
-// - CodexUsageSnapshot.weekPercent: Currently "% used", will become "% remaining"
+// - CodexUsageSnapshot.fiveHourRemainingPercent: Stores "% remaining"
+// - CodexUsageSnapshot.weekRemainingPercent: Stores "% remaining"
 // - UI displays use helper methods to convert between used/remaining as needed
 //
 // ## Staleness Semantics
@@ -65,9 +65,9 @@ import IOKit.ps
 
 // Snapshot of parsed values from Codex /status or banner
 struct CodexUsageSnapshot: Equatable {
-    var fiveHourPercent: Int = 0
+    var fiveHourRemainingPercent: Int = 0
     var fiveHourResetText: String = ""
-    var weekPercent: Int = 0
+    var weekRemainingPercent: Int = 0
     var weekResetText: String = ""
     var usageLine: String? = nil
     var accountLine: String? = nil
@@ -79,6 +79,17 @@ struct CodexUsageSnapshot: Equatable {
     var lastOutputTokens: Int? = nil
     var lastReasoningOutputTokens: Int? = nil
     var lastTotalTokens: Int? = nil
+
+    // MARK: - Helper Methods for UI Display
+    // Server now reports "remaining" but UI may want to show "used" (e.g., progress bars)
+
+    func fiveHourPercentUsed() -> Int {
+        return 100 - fiveHourRemainingPercent
+    }
+
+    func weekPercentUsed() -> Int {
+        return 100 - weekRemainingPercent
+    }
 }
 
 struct CodexProbeDiagnostics {
@@ -97,9 +108,9 @@ struct CodexProbeDiagnostics {
 final class CodexUsageModel: ObservableObject {
     static let shared = CodexUsageModel()
 
-    @Published var fiveHourPercent: Int = 0
+    @Published var fiveHourRemainingPercent: Int = 0
     @Published var fiveHourResetText: String = ""
-    @Published var weekPercent: Int = 0
+    @Published var weekRemainingPercent: Int = 0
     @Published var weekResetText: String = ""
     @Published var usageLine: String? = nil
     @Published var accountLine: String? = nil
@@ -276,8 +287,8 @@ final class CodexUsageModel: ObservableObject {
     }
 
     private func apply(_ s: CodexUsageSnapshot) {
-        fiveHourPercent = clampPercent(s.fiveHourPercent)
-        weekPercent = clampPercent(s.weekPercent)
+        fiveHourRemainingPercent = clampPercent(s.fiveHourRemainingPercent)
+        weekRemainingPercent = clampPercent(s.weekRemainingPercent)
         fiveHourResetText = s.fiveHourResetText
         weekResetText = s.weekResetText
         usageLine = s.usageLine
@@ -300,7 +311,7 @@ final class CodexUsageModel: ObservableObject {
 // MARK: - Rate-limit models (log probe)
 
 struct RateLimitWindowInfo {
-    var usedPercent: Int?
+    var remainingPercent: Int?
     var resetAt: Date?
     var windowMinutes: Int?
 }
@@ -521,7 +532,7 @@ actor CodexStatusService {
         let isFiveHour = (lower.contains("5h") || lower.contains("5 h") || lower.contains("5-hour") || lower.contains("5 hour")) && lower.contains("limit")
         if isFiveHour {
             var s = snapshot
-            s.fiveHourPercent = extractPercent(from: clean) ?? s.fiveHourPercent
+            s.fiveHourRemainingPercent = extractPercent(from: clean) ?? s.fiveHourRemainingPercent
             s.fiveHourResetText = extractResetText(from: clean) ?? s.fiveHourResetText
             snapshot = s
             updateHandler(snapshot)
@@ -530,7 +541,7 @@ actor CodexStatusService {
         let isWeekly = (lower.contains("weekly") && lower.contains("limit")) || lower.contains("week limit")
         if isWeekly {
             var s = snapshot
-            s.weekPercent = extractPercent(from: clean) ?? s.weekPercent
+            s.weekRemainingPercent = extractPercent(from: clean) ?? s.weekRemainingPercent
             s.weekResetText = extractResetText(from: clean) ?? s.weekResetText
             snapshot = s
             updateHandler(snapshot)
@@ -570,8 +581,8 @@ actor CodexStatusService {
 
         if let summary = probeLatestRateLimits(roots: roots) {
             var s = snapshot
-            if let p = summary.fiveHour.usedPercent { s.fiveHourPercent = clampPercent(p) }
-            if let p = summary.weekly.usedPercent { s.weekPercent = clampPercent(p) }
+            if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
+            if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
             s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
             s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
             lastFiveHourResetDate = summary.fiveHour.resetAt
@@ -609,9 +620,9 @@ actor CodexStatusService {
         guard let tmuxSnap = await runCodexStatusViaTMUX() else { return }
         lastStatusProbe = now
         var merged = snapshot
-        if tmuxSnap.fiveHourPercent > 0 { merged.fiveHourPercent = clampPercent(tmuxSnap.fiveHourPercent) }
+        if tmuxSnap.fiveHourRemainingPercent > 0 { merged.fiveHourRemainingPercent = clampPercent(tmuxSnap.fiveHourRemainingPercent) }
         if !tmuxSnap.fiveHourResetText.isEmpty { merged.fiveHourResetText = tmuxSnap.fiveHourResetText }
-        if tmuxSnap.weekPercent > 0 { merged.weekPercent = clampPercent(tmuxSnap.weekPercent) }
+        if tmuxSnap.weekRemainingPercent > 0 { merged.weekRemainingPercent = clampPercent(tmuxSnap.weekRemainingPercent) }
         if !tmuxSnap.weekResetText.isEmpty { merged.weekResetText = tmuxSnap.weekResetText }
         merged.eventTimestamp = now
         snapshot = merged
@@ -628,9 +639,9 @@ actor CodexStatusService {
         let (snap, diag) = await runCodexStatusViaTMUXAndCollect()
         if let tmuxSnap = snap {
             var merged = snapshot
-            if tmuxSnap.fiveHourPercent > 0 { merged.fiveHourPercent = clampPercent(tmuxSnap.fiveHourPercent) }
+            if tmuxSnap.fiveHourRemainingPercent > 0 { merged.fiveHourRemainingPercent = clampPercent(tmuxSnap.fiveHourRemainingPercent) }
             if !tmuxSnap.fiveHourResetText.isEmpty { merged.fiveHourResetText = tmuxSnap.fiveHourResetText }
-            if tmuxSnap.weekPercent > 0 { merged.weekPercent = clampPercent(tmuxSnap.weekPercent) }
+            if tmuxSnap.weekRemainingPercent > 0 { merged.weekRemainingPercent = clampPercent(tmuxSnap.weekRemainingPercent) }
             if !tmuxSnap.weekResetText.isEmpty { merged.weekResetText = tmuxSnap.weekResetText }
             merged.eventTimestamp = Date()
             snapshot = merged
@@ -699,11 +710,11 @@ actor CodexStatusService {
         if let ok = obj["ok"] as? Bool, !ok { return nil }
         var s = CodexUsageSnapshot()
         if let fh = obj["five_hour"] as? [String: Any] {
-            if let p = fh["pct_used"] as? Int { s.fiveHourPercent = p }
+            if let p = fh["pct_used"] as? Int { s.fiveHourRemainingPercent = p }
             if let r = fh["resets"] as? String { s.fiveHourResetText = r }
         }
         if let wk = obj["weekly"] as? [String: Any] {
-            if let p = wk["pct_used"] as? Int { s.weekPercent = p }
+            if let p = wk["pct_used"] as? Int { s.weekRemainingPercent = p }
             if let r = wk["resets"] as? String { s.weekResetText = r }
         }
         s.eventTimestamp = Date()
@@ -732,7 +743,8 @@ actor CodexStatusService {
     }
 
     private func isUrgent() -> Bool {
-        if snapshot.fiveHourPercent >= 80 { return true }
+        // Urgent if 5-hour limit is running low (≤20% remaining = ≥80% used)
+        if snapshot.fiveHourPercentUsed() >= 80 { return true }
         if let reset = lastFiveHourResetDate {
             if reset.timeIntervalSinceNow <= 15 * 60 { return true }
         }

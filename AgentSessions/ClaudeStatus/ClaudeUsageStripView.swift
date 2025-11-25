@@ -22,8 +22,8 @@ struct ClaudeUsageStripView: View {
                     .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
                     .frame(width: labelWidth, alignment: .leading)
             }
-            UsageMeter(title: "5h", percent: status.sessionPercent, reset: status.sessionResetText, tintColor: brandColor, lastUpdate: status.lastUpdate)
-            UsageMeter(title: "Wk", percent: status.weekAllModelsPercent, reset: status.weekAllModelsResetText, tintColor: brandColor, lastUpdate: status.lastUpdate)
+            UsageMeter(title: "5h", percent: status.sessionRemainingPercent, reset: status.sessionResetText, tintColor: brandColor, lastUpdate: status.lastUpdate)
+            UsageMeter(title: "Wk", percent: status.weekAllModelsRemainingPercent, reset: status.weekAllModelsResetText, tintColor: brandColor, lastUpdate: status.lastUpdate)
 
             Spacer(minLength: 0)
 
