@@ -18,10 +18,13 @@ func freshUntil(for source: UsageTrackingSource, now: Date = Date()) -> Date? {
 }
 
 // Unified effective timestamp used for stale checks across UI surfaces.
+//
+// Post Nov 24 2025: "Stale" means "data is old" not "data is inaccurate".
 // - Codex prefers event timestamps from logs; on successful manual probe, a
-//   60m TTL allows the UI to treat data as fresh even if logs lag.
+//   60m TTL allows the UI to treat data as recent even if logs lag.
 // - Claude normally uses lastUpdate (poll time); the same 60m TTL applies after
-//   a manual hard probe to keep UI fresh across relaunches.
+//   a manual hard probe to keep UI showing fresh timestamps across relaunches.
+// - These timestamps are for UI age display, not accuracy gating.
 func effectiveEventTimestamp(source: UsageTrackingSource,
                              eventTimestamp: Date?,
                              lastUpdate: Date?,
