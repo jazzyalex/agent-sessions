@@ -710,11 +710,11 @@ actor CodexStatusService {
         if let ok = obj["ok"] as? Bool, !ok { return nil }
         var s = CodexUsageSnapshot()
         if let fh = obj["five_hour"] as? [String: Any] {
-            if let p = fh["pct_used"] as? Int { s.fiveHourRemainingPercent = p }
+            if let p = fh["pct_left"] as? Int { s.fiveHourRemainingPercent = p }
             if let r = fh["resets"] as? String { s.fiveHourResetText = r }
         }
         if let wk = obj["weekly"] as? [String: Any] {
-            if let p = wk["pct_used"] as? Int { s.weekRemainingPercent = p }
+            if let p = wk["pct_left"] as? Int { s.weekRemainingPercent = p }
             if let r = wk["resets"] as? String { s.weekResetText = r }
         }
         s.eventTimestamp = Date()
