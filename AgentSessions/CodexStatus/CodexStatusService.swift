@@ -1014,6 +1014,10 @@ actor CodexStatusService {
         else if let i = dict["pct_left"] as? Int { remaining = max(0, min(100, i)) }
         else if let d = dict["pct_remaining"] as? Double { remaining = Int(d.rounded()) }
         else if let i = dict["pct_remaining"] as? Int { remaining = max(0, min(100, i)) }
+        // Fallback: JSONL still uses used_percent (convert to remaining)
+        else if let d = dict["used_percent"] as? Double { remaining = max(0, min(100, 100 - Int(d.rounded()))) }
+        else if let i = dict["used_percent"] as? Int { remaining = max(0, min(100, 100 - i)) }
+        else if let n = dict["used_percent"] as? NSNumber { remaining = max(0, min(100, 100 - Int(truncating: n))) }
 
         var resetsVal: Double?
         if let d = dict["resets_in_seconds"] as? Double { resetsVal = d }
