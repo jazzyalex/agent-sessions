@@ -13,8 +13,8 @@ CL_WD_LEGACY_HINT="AgentSessions-claude-usage"  # appears in sanitized Claude pr
 # New canonical Codex probe working directory name
 CX_WD_CURRENT="$HOME/Library/Application Support/AgentSessions/AgentSessions-codex-usage"
 
-# Note: Claude probes no longer send markers (preserves usage limits)
-CX_MARKER="[AS_CX_PROBE v1]"
+# Note: Codex probes no longer use markers (removed Nov 24, 2025)
+# Detection now uses: working directory + tiny session (≤5 events) + /status command
 
 OUT_DIR="scripts/probe_scan_output"
 mkdir -p "$OUT_DIR"
@@ -51,25 +51,20 @@ scan_claude() {
 }
 
 scan_codex() {
-  local tmp_mark tmp_wd tmp_all
-  tmp_mark=$(mktemp)
+  local tmp_wd
   tmp_wd=$(mktemp)
 
-  # 1) Content-based: marker in any jsonl
+  # Working dir-based: cwd/project/working_directory fields contain probe WD path
+  # Current path: ~/Library/Application Support/AgentSessions/AgentSessions-codex-usage
+  # Search for the distinctive "AgentSessions-codex-usage" substring
   if [[ -d "$CX_ROOT" ]]; then
-    rg -n --no-messages -F "$CX_MARKER" "$CX_ROOT" -g '**/*.jsonl' \
-      | cut -d: -f1 | sort -u > "$tmp_mark" || true
-  fi
-
-  # 2) Working dir-based: cwd/project fields contain CodexProbeProject path
-  if [[ -d "$CX_ROOT" ]]; then
-    rg -n --no-messages '"(cwd|project)"\s*:\s*".*AgentSessions/CodexProbeProject' "$CX_ROOT" -g '**/*.jsonl' \
+    rg -n --no-messages '"(cwd|project|working_directory|workingdirectory|probe_wd)"\s*:\s*".*AgentSessions-codex-usage' "$CX_ROOT" -g '**/*.jsonl' \
       | cut -d: -f1 | sort -u > "$tmp_wd" || true
   fi
 
-  # Union → output
-  cat "$tmp_mark" "$tmp_wd" | sed '/^\s*$/d' | sort -u > "$CX_OUT"
-  rm -f "$tmp_mark" "$tmp_wd"
+  # Output WD-based results
+  cat "$tmp_wd" | sed '/^\s*$/d' | sort -u > "$CX_OUT"
+  rm -f "$tmp_wd"
 }
 
 scan_claude

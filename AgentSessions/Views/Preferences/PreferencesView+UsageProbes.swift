@@ -217,7 +217,7 @@ extension PreferencesView {
                     showCleanupFlash("Codex auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
                 }
             } message: {
-                Text("After each status probe, only Codex probe sessions are deleted once safety checks verify they contain only probe markers.")
+                Text("After each status probe, only Codex probe sessions are deleted once safety checks verify they were created by Agent Sessions.")
             }
             .alert("Delete Codex Probe Sessions Now?", isPresented: $showConfirmCodexDeleteNow) {
                 Button("Cancel", role: .cancel) {}
