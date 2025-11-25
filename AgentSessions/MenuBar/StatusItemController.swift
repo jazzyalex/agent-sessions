@@ -191,7 +191,7 @@ final class StatusItemController: NSObject {
     // Lightweight replica of reset line
     private func resetLine(label: String, percent: Int, reset: String) -> String {
         let trimmed = reset.replacingOccurrences(of: "resets ", with: "")
-        return "\(label) \(percent)%  \(trimmed.isEmpty ? "—" : trimmed)"
+        return "\(label) \(percent)% left  \(trimmed.isEmpty ? "—" : trimmed)"
     }
 }
 
