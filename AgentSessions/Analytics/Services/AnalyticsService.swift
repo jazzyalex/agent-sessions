@@ -403,10 +403,11 @@ final class AnalyticsService: ObservableObject {
 
     private func sourcesFor(_ filter: AnalyticsAgentFilter) -> [String] {
         switch filter {
-        case .all: return [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue]
+        case .all: return [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue, SessionSource.opencode.rawValue]
         case .codexOnly: return [SessionSource.codex.rawValue]
         case .claudeOnly: return [SessionSource.claude.rawValue]
         case .geminiOnly: return [SessionSource.gemini.rawValue]
+        case .opencodeOnly: return [SessionSource.opencode.rawValue]
         }
     }
 
