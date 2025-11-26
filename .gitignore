@@ -42,3 +42,6 @@ docs/Sonnet-4.5-review.md
 
 # Temporary archives
 *.zip
+
+# Backup files created during development
+*.backup-*
