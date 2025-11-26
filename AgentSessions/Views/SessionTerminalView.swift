@@ -12,6 +12,7 @@ struct SessionTerminalView: View {
     @Binding var externalMatchCount: Int
     @Binding var externalCurrentMatchIndex: Int
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var lines: [TerminalLine] = []
@@ -121,7 +122,8 @@ struct SessionTerminalView: View {
                     fontSize: CGFloat(transcriptFontSize),
                     matchIDs: matchIDSet,
                     currentMatchLineID: currentMatchLineID,
-                    colorScheme: colorScheme
+                    colorScheme: colorScheme,
+                    monochrome: stripMonochrome
                 )
                 .onChange(of: findToken) { _, _ in
                     handleFindRequest()
@@ -199,7 +201,7 @@ struct SessionTerminalView: View {
 
     private func legendToggle(label: String, role: RoleToggle) -> some View {
         let isOn = activeRoles.contains(role)
-        let swatch = TerminalRolePalette.swiftUI(role: TerminalRolePalette.role(for: role), scheme: colorScheme)
+        let swatch = TerminalRolePalette.swiftUI(role: TerminalRolePalette.role(for: role), scheme: colorScheme, monochrome: stripMonochrome)
         let indices = indicesForRole(role)
         let hasLines = !indices.isEmpty
         let navDisabled = !isOn || !hasLines
@@ -403,6 +405,7 @@ private struct TerminalLineView: View {
     let isMatch: Bool
     let isCurrentMatch: Bool
     let fontSize: Double
+    let monochrome: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -452,7 +455,7 @@ private struct TerminalLineView: View {
     }
 
     private var swatch: TerminalRolePalette.SwiftUISwatch {
-        TerminalRolePalette.swiftUI(role: line.role.paletteRole, scheme: colorScheme)
+        TerminalRolePalette.swiftUI(role: line.role.paletteRole, scheme: colorScheme, monochrome: monochrome)
     }
 }
 
@@ -521,8 +524,8 @@ private struct TerminalRolePalette {
         }
     }
 
-    static func swiftUI(role: Role, scheme: ColorScheme) -> SwiftUISwatch {
-        let appKitColors = baseColors(for: role, scheme: scheme)
+    static func swiftUI(role: Role, scheme: ColorScheme, monochrome: Bool = false) -> SwiftUISwatch {
+        let appKitColors = baseColors(for: role, scheme: scheme, monochrome: monochrome)
         return SwiftUISwatch(
             foreground: Color(nsColor: appKitColors.foreground),
             background: appKitColors.background.map { Color(nsColor: $0) },
@@ -530,48 +533,85 @@ private struct TerminalRolePalette {
         )
     }
 
-    static func appKit(role: Role, scheme: ColorScheme) -> AppKitSwatch {
-        baseColors(for: role, scheme: scheme)
+    static func appKit(role: Role, scheme: ColorScheme, monochrome: Bool = false) -> AppKitSwatch {
+        baseColors(for: role, scheme: scheme, monochrome: monochrome)
     }
 
-    private static func baseColors(for role: Role, scheme: ColorScheme) -> AppKitSwatch {
+    private static func baseColors(for role: Role, scheme: ColorScheme, monochrome: Bool) -> AppKitSwatch {
         let isDark = (scheme == .dark)
 
         func tinted(_ color: NSColor, light: CGFloat, dark: CGFloat) -> NSColor {
             color.withAlphaComponent(isDark ? dark : light)
         }
 
-        switch role {
-        case .user:
-            return AppKitSwatch(
-                foreground: NSColor.labelColor,
-                background: tinted(NSColor.systemBlue, light: 0.16, dark: 0.30),
-                accent: NSColor.systemBlue
-            )
-        case .assistant:
-            return AppKitSwatch(
-                foreground: NSColor.labelColor,
-                background: tinted(NSColor.systemGreen, light: 0.16, dark: 0.26),
-                accent: NSColor.systemGreen
-            )
-        case .tool:
-            return AppKitSwatch(
-                foreground: NSColor.labelColor,
-                background: tinted(NSColor.systemIndigo, light: 0.20, dark: 0.32),
-                accent: NSColor.systemIndigo
-            )
-        case .error:
-            return AppKitSwatch(
-                foreground: NSColor.labelColor,
-                background: tinted(NSColor.systemRed, light: 0.28, dark: 0.40),
-                accent: NSColor.systemRed
-            )
-        case .meta:
-            return AppKitSwatch(
-                foreground: NSColor.secondaryLabelColor,
-                background: nil,
-                accent: NSColor.secondaryLabelColor
-            )
+        if monochrome {
+            // Monochrome mode: use gray shades
+            switch role {
+            case .user:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: NSColor(white: 0.5, alpha: isDark ? 0.20 : 0.12),
+                    accent: NSColor(white: 0.5, alpha: 1.0)
+                )
+            case .assistant:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: NSColor(white: 0.4, alpha: isDark ? 0.18 : 0.10),
+                    accent: NSColor(white: 0.4, alpha: 1.0)
+                )
+            case .tool:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: NSColor(white: 0.6, alpha: isDark ? 0.22 : 0.14),
+                    accent: NSColor(white: 0.6, alpha: 1.0)
+                )
+            case .error:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: NSColor(white: 0.3, alpha: isDark ? 0.30 : 0.20),
+                    accent: NSColor(white: 0.3, alpha: 1.0)
+                )
+            case .meta:
+                return AppKitSwatch(
+                    foreground: NSColor.secondaryLabelColor,
+                    background: nil,
+                    accent: NSColor.secondaryLabelColor
+                )
+            }
+        } else {
+            // Color mode: original palette
+            switch role {
+            case .user:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: tinted(NSColor.systemBlue, light: 0.16, dark: 0.30),
+                    accent: NSColor.systemBlue
+                )
+            case .assistant:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: tinted(NSColor.systemGreen, light: 0.16, dark: 0.26),
+                    accent: NSColor.systemGreen
+                )
+            case .tool:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: tinted(NSColor.systemIndigo, light: 0.20, dark: 0.32),
+                    accent: NSColor.systemIndigo
+                )
+            case .error:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: tinted(NSColor.systemRed, light: 0.28, dark: 0.40),
+                    accent: NSColor.systemRed
+                )
+            case .meta:
+                return AppKitSwatch(
+                    foreground: NSColor.secondaryLabelColor,
+                    background: nil,
+                    accent: NSColor.secondaryLabelColor
+                )
+            }
         }
     }
 }
@@ -594,12 +634,14 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let matchIDs: Set<Int>
     let currentMatchLineID: Int?
     let colorScheme: ColorScheme
+    let monochrome: Bool
 
     class Coordinator {
         var lineRanges: [Int: NSRange] = [:]
         var lastLinesSignature: Int = 0
         var lastMatchSignature: Int = 0
         var lastFontSize: CGFloat = 0
+        var lastMonochrome: Bool = false
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -639,13 +681,15 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         let lineSig = signature(for: lines)
         let matchSig = signature(for: Array(matchIDs))
         let fontChanged = abs((context.coordinator.lastFontSize) - fontSize) > 0.1
-        let needsReload = lineSig != context.coordinator.lastLinesSignature || matchSig != context.coordinator.lastMatchSignature || fontChanged
+        let monochromeChanged = context.coordinator.lastMonochrome != monochrome
+        let needsReload = lineSig != context.coordinator.lastLinesSignature || matchSig != context.coordinator.lastMatchSignature || fontChanged || monochromeChanged
 
         if needsReload {
             applyContent(to: tv, context: context)
             context.coordinator.lastLinesSignature = lineSig
             context.coordinator.lastMatchSignature = matchSig
             context.coordinator.lastFontSize = fontSize
+            context.coordinator.lastMonochrome = monochrome
         }
 
         if let target = currentMatchLineID, let range = context.coordinator.lineRanges[target] {
@@ -706,19 +750,38 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     }
 
     private func colorsForRole(_ role: TerminalLineRole) -> (foreground: NSColor, background: NSColor?) {
-        switch role {
-        case .user:
-            return (NSColor.labelColor, NSColor.systemBlue.withAlphaComponent(0.18))
-        case .assistant:
-            return (NSColor.labelColor, NSColor.systemGreen.withAlphaComponent(0.18))
-        case .toolInput:
-            return (NSColor.labelColor, NSColor.systemIndigo.withAlphaComponent(0.24))
-        case .toolOutput:
-            return (NSColor.labelColor, NSColor.systemGreen.withAlphaComponent(0.16))
-        case .error:
-            return (NSColor.labelColor, NSColor.systemRed.withAlphaComponent(0.55))
-        case .meta:
-            return (NSColor.secondaryLabelColor, nil)
+        if monochrome {
+            // Monochrome mode: use gray shades
+            switch role {
+            case .user:
+                return (NSColor.labelColor, NSColor(white: 0.5, alpha: 0.18))
+            case .assistant:
+                return (NSColor.labelColor, NSColor(white: 0.4, alpha: 0.18))
+            case .toolInput:
+                return (NSColor.labelColor, NSColor(white: 0.6, alpha: 0.24))
+            case .toolOutput:
+                return (NSColor.labelColor, NSColor(white: 0.6, alpha: 0.16))
+            case .error:
+                return (NSColor.labelColor, NSColor(white: 0.3, alpha: 0.55))
+            case .meta:
+                return (NSColor.secondaryLabelColor, nil)
+            }
+        } else {
+            // Color mode: original palette
+            switch role {
+            case .user:
+                return (NSColor.labelColor, NSColor.systemBlue.withAlphaComponent(0.18))
+            case .assistant:
+                return (NSColor.labelColor, NSColor.systemGreen.withAlphaComponent(0.18))
+            case .toolInput:
+                return (NSColor.labelColor, NSColor.systemIndigo.withAlphaComponent(0.24))
+            case .toolOutput:
+                return (NSColor.labelColor, NSColor.systemGreen.withAlphaComponent(0.16))
+            case .error:
+                return (NSColor.labelColor, NSColor.systemRed.withAlphaComponent(0.55))
+            case .meta:
+                return (NSColor.secondaryLabelColor, nil)
+            }
         }
     }
 

@@ -873,6 +873,7 @@ private struct UnifiedSearchFiltersView: View {
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var showInlineSearch: Bool = false
     @State private var searchDebouncer: DispatchWorkItem? = nil
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     private enum SearchFocusTarget: Hashable { case field, clear }
     var body: some View {
         HStack(spacing: 8) {
