@@ -57,6 +57,12 @@ final class UnifiedSessionIndexer: ObservableObject {
             recomputeNow()
         }
     }
+    @Published var includeOpenCode: Bool = UserDefaults.standard.object(forKey: "IncludeOpenCodeSessions") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(includeOpenCode, forKey: "IncludeOpenCodeSessions")
+            recomputeNow()
+        }
+    }
 
     // Sorting
     struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title, agent } }
@@ -83,6 +89,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let codex: SessionIndexer
     private let claude: ClaudeSessionIndexer
     private let gemini: GeminiSessionIndexer
+    private let opencode: OpenCodeSessionIndexer
     private var cancellables = Set<AnyCancellable>()
     private var favorites = FavoritesStore()
     private var hasPublishedInitialSessions = false
@@ -99,11 +106,13 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var lastAutoRefreshCodex: Date? = nil
     private var lastAutoRefreshClaude: Date? = nil
     private var lastAutoRefreshGemini: Date? = nil
+    private var lastAutoRefreshOpenCode: Date? = nil
 
-    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, geminiIndexer: GeminiSessionIndexer) {
+    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, geminiIndexer: GeminiSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer) {
         self.codex = codexIndexer
         self.claude = claudeIndexer
         self.gemini = geminiIndexer
+        self.opencode = opencodeIndexer
         // Observe UserDefaults changes to sync external toggles (Preferences) to this model
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: .main) { [weak self] _ in
             guard let self else { return }
@@ -112,9 +121,9 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
 
         // Merge underlying allSessions whenever any changes
-        Publishers.CombineLatest3(codex.$allSessions, claude.$allSessions, gemini.$allSessions)
-            .map { [weak self] codexList, claudeList, geminiList -> [Session] in
-                var merged = codexList + claudeList + geminiList
+        Publishers.CombineLatest4(codex.$allSessions, claude.$allSessions, gemini.$allSessions, opencode.$allSessions)
+            .map { [weak self] codexList, claudeList, geminiList, opencodeList -> [Session] in
+                var merged = codexList + claudeList + geminiList + opencodeList
                 if let favs = self?.favorites {
                     for i in merged.indices { merged[i].isFavorite = favs.contains(merged[i].id) }
                 }
@@ -127,18 +136,18 @@ final class UnifiedSessionIndexer: ObservableObject {
             .assign(to: &$allSessions)
 
         // isIndexing reflects any indexer working
-        Publishers.CombineLatest3(codex.$isIndexing, claude.$isIndexing, gemini.$isIndexing)
-            .map { $0 || $1 || $2 }
+        Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, gemini.$isIndexing, opencode.$isIndexing)
+            .map { $0 || $1 || $2 || $3 }
             .assign(to: &$isIndexing)
 
         // isProcessingTranscripts reflects any indexer processing transcripts
-        Publishers.CombineLatest3(codex.$isProcessingTranscripts, claude.$isProcessingTranscripts, gemini.$isProcessingTranscripts)
-            .map { $0 || $1 || $2 }
+        Publishers.CombineLatest4(codex.$isProcessingTranscripts, claude.$isProcessingTranscripts, gemini.$isProcessingTranscripts, opencode.$isProcessingTranscripts)
+            .map { $0 || $1 || $2 || $3 }
             .assign(to: &$isProcessingTranscripts)
 
-        // Forward errors (preference order codex → claude → gemini)
-        Publishers.CombineLatest3(codex.$indexingError, claude.$indexingError, gemini.$indexingError)
-            .map { codexErr, claudeErr, geminiErr in codexErr ?? claudeErr ?? geminiErr }
+        // Forward errors (preference order codex → claude → gemini → opencode)
+        Publishers.CombineLatest4(codex.$indexingError, claude.$indexingError, gemini.$indexingError, opencode.$indexingError)
+            .map { codexErr, claudeErr, geminiErr, opencodeErr in codexErr ?? claudeErr ?? geminiErr ?? opencodeErr }
             .assign(to: &$indexingError)
 
         // Debounced filtering and sorting pipeline (runs off main thread)
@@ -149,30 +158,42 @@ final class UnifiedSessionIndexer: ObservableObject {
             $selectedModel.removeDuplicates()
         )
         Publishers.CombineLatest(
-            Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, Publishers.CombineLatest3($includeCodex, $includeClaude, $includeGemini)),
+            Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, Publishers.CombineLatest4($includeCodex, $includeClaude, $includeGemini, $includeOpenCode)),
             $sortDescriptor.removeDuplicates()
         )
             .receive(on: FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
             .map { [weak self] combined, sortDesc -> [Session] in
+                guard let self else { return [] }
                 let (input, kinds, all, sources) = combined
                 let (q, from, to, model) = input
-                let (incCodex, incClaude, incGemini) = sources
-                let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
+                let (incCodex, incClaude, incGemini, incOpenCode) = sources
+
+                // Start from all sessions, then apply the same filters we use elsewhere.
                 var base = all
-                if !incCodex || !incClaude || !incGemini {
+                if !incCodex || !incClaude || !incGemini || !incOpenCode {
                     base = base.filter { s in
                         (s.source == .codex && incCodex) ||
                         (s.source == .claude && incClaude) ||
-                        (s.source == .gemini && incGemini)
+                        (s.source == .gemini && incGemini) ||
+                        (s.source == .opencode && incOpenCode)
                     }
                 }
+
+                let filters = Filters(query: q,
+                                      dateFrom: from,
+                                      dateTo: to,
+                                      model: model,
+                                      kinds: kinds,
+                                      repoName: self.projectFilter,
+                                      pathContains: nil)
                 var results = FilterEngine.filterSessions(base, filters: filters)
-                // Favorites-only must persist regardless of search clearing
-                if self?.showFavoritesOnly == true { results = results.filter { $0.isFavorite } }
-                if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
-                if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
+
+                if self.showFavoritesOnly { results = results.filter { $0.isFavorite } }
+                if self.hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
+                if self.hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
+
                 // Apply sort descriptor (now included in pipeline so changes trigger background re-sort)
-                results = self?.applySort(results, descriptor: sortDesc) ?? results
+                results = self.applySort(results, descriptor: sortDesc)
                 return results
             }
             .receive(on: DispatchQueue.main)
@@ -231,16 +252,26 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest3(codex.$launchPhase, claude.$launchPhase, gemini.$launchPhase)
+        $includeOpenCode
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                if enabled { self.maybeAutoRefreshOpenCode() }
+            }
+            .store(in: &cancellables)
+
+        Publishers.CombineLatest4(codex.$launchPhase, claude.$launchPhase, gemini.$launchPhase, opencode.$launchPhase)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
+            .sink { [weak self] _, _, _, _ in
                 self?.updateLaunchState()
             }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest3($includeCodex, $includeClaude, $includeGemini)
+        Publishers.CombineLatest4($includeCodex, $includeClaude, $includeGemini, $includeOpenCode)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
+            .sink { [weak self] _, _, _, _ in
                 self?.updateLaunchState()
             }
             .store(in: &cancellables)
@@ -280,10 +311,12 @@ final class UnifiedSessionIndexer: ObservableObject {
         let shouldRefreshCodex = includeCodex && !codex.isIndexing
         let shouldRefreshClaude = includeClaude && !claude.isIndexing
         let shouldRefreshGemini = includeGemini && !gemini.isIndexing
+        let shouldRefreshOpenCode = includeOpenCode && !opencode.isIndexing
 
         if shouldRefreshCodex { codex.refresh() }
         if shouldRefreshClaude { claude.refresh() }
         if shouldRefreshGemini { gemini.refresh() }
+        if shouldRefreshOpenCode { opencode.refresh() }
 
         // Stage 2: analytics enrichment (non-blocking, runs after hydration has begun).
         // Use a simple gate and TTL so only one analytics index run happens at a time
@@ -358,6 +391,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         phases[.codex] = includeCodex ? codex.launchPhase : .ready
         phases[.claude] = includeClaude ? claude.launchPhase : .ready
         phases[.gemini] = includeGemini ? gemini.launchPhase : .ready
+        phases[.opencode] = includeOpenCode ? opencode.launchPhase : .ready
 
         let overall: LaunchPhase
         if phases.values.contains(.error) {
@@ -383,11 +417,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     func applyFiltersAndSort(to sessions: [Session]) -> [Session] {
         // Filter by source (Codex/Claude toggles)
         var base = sessions
-        if !includeCodex || !includeClaude || !includeGemini {
+        if !includeCodex || !includeClaude || !includeGemini || !includeOpenCode {
             base = base.filter { s in
                 (s.source == .codex && includeCodex) ||
                 (s.source == .claude && includeClaude) ||
-                (s.source == .gemini && includeGemini)
+                (s.source == .gemini && includeGemini) ||
+                (s.source == .opencode && includeOpenCode)
             }
         }
 
@@ -398,12 +433,21 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Optional quick filter: sessions with commands (tool calls)
         if hasCommandsOnly {
             results = results.filter { s in
-                if s.source != .codex { return true } // keep non‑Codex sessions
-                if !s.events.isEmpty {
-                    return s.events.contains { $0.kind == .tool_call }
-                } else {
-                    return (s.lightweightCommands ?? 0) > 0
+                // For Codex and OpenCode, require evidence of commands/tool calls (or lightweightCommands>0).
+                if s.source == .codex || s.source == .opencode {
+                    if !s.events.isEmpty {
+                        return s.events.contains { $0.kind == .tool_call }
+                    } else {
+                        return (s.lightweightCommands ?? 0) > 0
+                    }
                 }
+                // For Claude and Gemini, treat sessions as command-bearing only when we see tool_call events.
+                if s.source == .claude || s.source == .gemini {
+                    if s.events.isEmpty { return false }
+                    return s.events.contains { $0.kind == .tool_call }
+                }
+                // Default: keep other sources (none today).
+                return true
             }
         }
 
@@ -412,8 +456,19 @@ final class UnifiedSessionIndexer: ObservableObject {
         if showFavoritesOnly { results = results.filter { $0.isFavorite } }
 
         // Filter by message count preferences
-        if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
-        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
+        if hideZeroMessageSessionsPref {
+            results = results.filter { s in
+                // Do not drop OpenCode sessions purely on message-count heuristics yet.
+                if s.source == .opencode { return true }
+                return s.messageCount > 0
+            }
+        }
+        if hideLowMessageSessionsPref {
+            results = results.filter { s in
+                if s.source == .opencode { return true }
+                return s.messageCount > 2
+            }
+        }
 
         // Apply sort
         results = applySort(results, descriptor: sortDescriptor)
@@ -484,6 +539,12 @@ final class UnifiedSessionIndexer: ObservableObject {
         lastAutoRefreshGemini = Date()
         gemini.refresh()
     }
+    private func maybeAutoRefreshOpenCode() {
+        if opencode.isIndexing { return }
+        if withinGuard(lastAutoRefreshOpenCode) { return }
+        lastAutoRefreshOpenCode = Date()
+        opencode.refresh()
+    }
 
     // MARK: - Favorites
     func toggleFavorite(_ id: String) {
@@ -501,7 +562,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let hasDisplayedSessions: Bool
 
         static let idle = LaunchState(
-            sourcePhases: [.codex: .idle, .claude: .idle, .gemini: .idle],
+            sourcePhases: [.codex: .idle, .claude: .idle, .gemini: .idle, .opencode: .idle],
             overallPhase: .idle,
             blockingSources: SessionSource.allCases,
             hasDisplayedSessions: false

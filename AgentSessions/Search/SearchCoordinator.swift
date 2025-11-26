@@ -35,6 +35,7 @@ final class SearchCoordinator: ObservableObject {
     private let codexIndexer: SessionIndexer
     private let claudeIndexer: ClaudeSessionIndexer
     private let geminiIndexer: GeminiSessionIndexer
+    private let opencodeIndexer: OpenCodeSessionIndexer
     // Promotion support for large-queue preemption
     private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
@@ -42,10 +43,14 @@ final class SearchCoordinator: ObservableObject {
     // Throttle guards for progress updates
     private var progressThrottleLastFlush = DispatchTime.now()
 
-    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, geminiIndexer: GeminiSessionIndexer) {
+    init(codexIndexer: SessionIndexer,
+         claudeIndexer: ClaudeSessionIndexer,
+         geminiIndexer: GeminiSessionIndexer,
+         opencodeIndexer: OpenCodeSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
+        self.opencodeIndexer = opencodeIndexer
     }
 
     // Get appropriate transcript cache based on session source
@@ -54,6 +59,7 @@ final class SearchCoordinator: ObservableObject {
         case .codex: return codexIndexer.searchTranscriptCache
         case .claude: return claudeIndexer.searchTranscriptCache
         case .gemini: return geminiIndexer.searchTranscriptCache
+        case .opencode: return opencodeIndexer.searchTranscriptCache
         }
     }
 
@@ -77,7 +83,13 @@ final class SearchCoordinator: ObservableObject {
         }
     }
 
-    func start(query: String, filters: Filters, includeCodex: Bool, includeClaude: Bool, includeGemini: Bool, all: [Session]) {
+    func start(query: String,
+               filters: Filters,
+               includeCodex: Bool,
+               includeClaude: Bool,
+               includeGemini: Bool,
+               includeOpenCode: Bool,
+               all: [Session]) {
         // Cancel any in-flight search
         currentTask?.cancel()
         wasCanceled = false
@@ -89,6 +101,7 @@ final class SearchCoordinator: ObservableObject {
             if includeCodex { set.insert(.codex) }
             if includeClaude { set.insert(.claude) }
             if includeGemini { set.insert(.gemini) }
+            if includeOpenCode { set.insert(.opencode) }
             return set
         }()
         
@@ -271,7 +284,8 @@ final class SearchCoordinator: ObservableObject {
                         await MainActor.run {
                             if parsed.source == .codex { self.codexIndexer.updateSession(parsed) }
                             else if parsed.source == .claude { self.claudeIndexer.updateSession(parsed) }
-                            else { self.geminiIndexer.updateSession(parsed) }
+                            else if parsed.source == .gemini { self.geminiIndexer.updateSession(parsed) }
+                            else if parsed.source == .opencode { self.opencodeIndexer.updateSession(parsed) }
                         }
                     }
                 }
@@ -301,6 +315,8 @@ final class SearchCoordinator: ObservableObject {
                 return ClaudeSessionParser.parseFileFull(at: url)
             case .gemini:
                 return GeminiSessionParser.parseFileFull(at: url)
+            case .opencode:
+                return OpenCodeSessionParser.parseFileFull(at: url)
             }
         }.value
     }

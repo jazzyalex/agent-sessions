@@ -269,8 +269,9 @@ public struct Session: Identifiable, Equatable, Codable {
 
     // MARK: - Repo/CWD helpers
     public var cwd: String? {
-        // Gemini sessions: trust lightweightCwd even after full parse (JSON rarely carries cwd)
-        if source == .gemini, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
+        // Gemini and OpenCode sessions: trust lightweightCwd even after full parse
+        if (source == .gemini || source == .opencode),
+           let lightCwd = lightweightCwd, !lightCwd.isEmpty {
             return lightCwd
         }
         // 0) Claude sessions: use cwd extracted during parsing
@@ -344,13 +345,16 @@ public struct Session: Identifiable, Equatable, Codable {
 
     public var nonMetaCount: Int { events.filter { $0.kind != .meta }.count }
 
-    // Effective message count: use actual nonMetaCount when events loaded, otherwise eventCount estimate
-    // This handles lightweight sessions (empty events array) vs fully parsed sessions
+    // Effective message count: use actual nonMetaCount when events loaded, otherwise eventCount estimate.
+    // This must be stable: loading events should not cause a previously-visible session to disappear under
+    // hide-zero / hide-low filters, so we use the max of estimate and actual.
     public var messageCount: Int {
+        let estimate = max(eventCount, 0)
+        let actual = nonMetaCount
         if events.isEmpty {
-            return eventCount  // Lightweight: use estimate
+            return estimate
         } else {
-            return nonMetaCount  // Fully parsed: actual non-meta count
+            return max(estimate, actual)
         }
     }
 

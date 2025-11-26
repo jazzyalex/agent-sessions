@@ -10,6 +10,7 @@ struct UnifiedSessionsView: View {
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
     @ObservedObject var geminiIndexer: GeminiSessionIndexer
+    @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @EnvironmentObject var updaterController: UpdaterController
@@ -56,6 +57,7 @@ struct UnifiedSessionsView: View {
          codexIndexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
          geminiIndexer: GeminiSessionIndexer,
+         opencodeIndexer: OpenCodeSessionIndexer,
          analyticsReady: Bool,
          layoutMode: LayoutMode,
          onToggleLayout: @escaping () -> Void) {
@@ -63,10 +65,14 @@ struct UnifiedSessionsView: View {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
+        self.opencodeIndexer = opencodeIndexer
         self.analyticsReady = analyticsReady
         self.layoutMode = layoutMode
         self.onToggleLayout = onToggleLayout
-        _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer, geminiIndexer: geminiIndexer))
+        _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(codexIndexer: codexIndexer,
+                                                                         claudeIndexer: claudeIndexer,
+                                                                         geminiIndexer: geminiIndexer,
+                                                                         opencodeIndexer: opencodeIndexer))
     }
 
     var body: some View {
@@ -167,6 +173,8 @@ struct UnifiedSessionsView: View {
                 claudeIndexer.reloadSession(id: id)
             } else if s.source == .gemini, let exist = geminiIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
                 geminiIndexer.reloadSession(id: id)
+            } else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+                opencodeIndexer.reloadSession(id: id)
             }
         }
         .onAppear {
@@ -175,6 +183,7 @@ struct UnifiedSessionsView: View {
         .onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
+        .onChange(of: unified.includeOpenCode) { _, _ in restartSearchIfRunning() }
         .onReceive(unified.$sessions) { sessions in
             if !sessions.isEmpty {
                 hasEverHadSessions = true
@@ -302,7 +311,7 @@ struct UnifiedSessionsView: View {
             if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
                 Button(s.isFavorite ? "Remove from Favorites" : "Add to Favorites") { unified.toggleFavorite(id) }
                 Divider()
-                if s.source != .gemini {
+                if s.source == .codex || s.source == .claude {
                     Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
                         .keyboardShortcut("r", modifiers: [.command, .control])
                         .help("Resume the selected session in its original CLI (⌃⌘R)")
@@ -417,7 +426,8 @@ struct UnifiedSessionsView: View {
                                selection: selection,
                                codexIndexer: codexIndexer,
                                claudeIndexer: claudeIndexer,
-                               geminiIndexer: geminiIndexer)
+                               geminiIndexer: geminiIndexer,
+                               opencodeIndexer: opencodeIndexer)
                 .environmentObject(focusCoordinator)
                 .id("transcript-host")
 
@@ -504,6 +514,15 @@ struct UnifiedSessionsView: View {
                 .toggleStyle(.button)
                 .help("Show or hide Gemini sessions in the list (⌘3)")
                 .keyboardShortcut("3", modifiers: .command)
+
+                Toggle(isOn: $unified.includeOpenCode) {
+                    Text("OpenCode")
+                        .foregroundStyle(stripMonochrome ? .primary : (unified.includeOpenCode ? Color.purple : .primary))
+                        .fixedSize()
+                }
+                .toggleStyle(.button)
+                .help("Show or hide OpenCode sessions in the list (⌘4)")
+                .keyboardShortcut("4", modifiers: .command)
             }
         }
         ToolbarItem(placement: .automatic) {
@@ -529,7 +548,7 @@ struct UnifiedSessionsView: View {
                 Label("Resume", systemImage: "play.circle")
             }
             .keyboardShortcut("r", modifiers: [.command, .control])
-            .disabled(selectedSession == nil || selectedSession?.source == .gemini)
+            .disabled(selectedSession == nil || !(selectedSession?.source == .codex || selectedSession?.source == .claude))
             .help("Resume the selected session in its original CLI (⌃⌘R)")
 
             Button(action: { if let s = selectedSession { openDir(s) } }) { Label("Open Working Directory", systemImage: "folder") }
@@ -671,6 +690,7 @@ struct UnifiedSessionsView: View {
         case .codex: label = "Codex"
         case .claude: label = "Claude"
         case .gemini: label = "Gemini"
+        case .opencode: label = "OpenCode"
         }
         return HStack(spacing: 6) {
             Text(label)
@@ -776,6 +796,7 @@ struct UnifiedSessionsView: View {
                                 includeCodex: unified.includeCodex,
                                 includeClaude: unified.includeClaude,
                                 includeGemini: unified.includeGemini,
+                                includeOpenCode: unified.includeOpenCode,
                                 all: unified.allSessions)
     }
 
@@ -784,6 +805,7 @@ struct UnifiedSessionsView: View {
         case .codex: return Color.blue
         case .claude: return Color(red: 204/255, green: 121/255, blue: 90/255)
         case .gemini: return Color.teal
+        case .opencode: return Color.purple
         }
     }
 
@@ -806,6 +828,7 @@ private struct TranscriptHostView: View {
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
     @ObservedObject var geminiIndexer: GeminiSessionIndexer
+    @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -816,6 +839,8 @@ private struct TranscriptHostView: View {
                 .opacity(kind == .claude ? 1 : 0)
             GeminiTranscriptView(indexer: geminiIndexer, sessionID: selection)
                 .opacity(kind == .gemini ? 1 : 0)
+            OpenCodeTranscriptView(indexer: opencodeIndexer, sessionID: selection)
+                .opacity(kind == .opencode ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -1017,6 +1042,7 @@ private struct UnifiedSearchFiltersView: View {
                      includeCodex: unified.includeCodex,
                      includeClaude: unified.includeClaude,
                      includeGemini: unified.includeGemini,
+                     includeOpenCode: unified.includeOpenCode,
                      all: unified.allSessions)
     }
 
@@ -1043,6 +1069,7 @@ private struct UnifiedSearchFiltersView: View {
                          includeCodex: unified.includeCodex,
                          includeClaude: unified.includeClaude,
                          includeGemini: unified.includeGemini,
+                         includeOpenCode: unified.includeOpenCode,
                          all: unified.allSessions)
         }
         searchDebouncer = work
