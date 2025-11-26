@@ -45,6 +45,7 @@ struct SessionTerminalView: View {
         case .codex: return "Codex"
         case .claude: return "Claude"
         case .gemini: return "Gemini"
+        case .opencode: return "OpenCode"
         }
     }
 
