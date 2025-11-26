@@ -3,11 +3,19 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.7</title>
-            <pubDate>Sun, 23 Nov 2025 21:39:11 -0800</pubDate>
+            <title>2.7.1</title>
+            <pubDate>Tue, 25 Nov 2025 22:45:16 -0800</pubDate>
             <description><![CDATA[
-                <h2>What's New in 2.7</h2>
+                <h2>What's New in 2.7.1</h2>
 
+<h3>Critical Fixes</h3>
+
+<p>**Codex Usage Tracking**: Added full support for new Codex usage backend format. The usage parser now handles both legacy local usage events and the new backend-based usage reporting system, ensuring accurate rate limit tracking across all Codex CLI versions. Automatic fallback to legacy format for older Codex versions.</p>
+
+<h3>Technical</h3>
+
+<p>**Usage Format Migration**: Enhanced `CodexUsageParser` with dual format support to seamlessly transition between Codex usage reporting systems without requiring user intervention or configuration changes.
+</p>
 <h3>Major Features</h3>
 
 <p>**New Color View**: Terminal-inspired view with CLI-style colorized output, role-based filtering (User, Agent, Tools, Errors), and navigation shortcuts. Replaces the old "Terminal" mode with enhanced visual hierarchy and interactive filtering.</p>
@@ -31,10 +39,10 @@
 <p>**Flexible Pattern Matching**: Usage probe now tries multiple patterns ("% left", "% used", "%left", "%used") with fallback to any "N%" format. Future-proofed against CLI format changes.</p>
 <p>**Enhanced Testing**: Comprehensive test suite for both old and new Claude usage formats with validation of percentage inversion logic.</p>
             ]]></description>
-            <sparkle:version>9</sparkle:version>
-            <sparkle:shortVersionString>2.7</sparkle:shortVersionString>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>2.7.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.7/AgentSessions-2.7.dmg" length="7507346" type="application/octet-stream" sparkle:edSignature="xb+QP0yLJ9u/0RqS8HX25TSG+93r8QZme06ew854cEEUHOwXViZnofTfNHARkIblFErs780VsgdwVyAl81WcCg=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.7.1/AgentSessions-2.7.1.dmg" length="7512459" type="application/octet-stream" sparkle:edSignature="YhgcVIFr1LUHnl0mr1aXwQKWty38n5yHyt/6o4aQehbNETiQhf1O3HLQPYQIm4+jlew038JkfYswCmWYZS3nDQ=="/>
         </item>
     </channel>
 </rss>
