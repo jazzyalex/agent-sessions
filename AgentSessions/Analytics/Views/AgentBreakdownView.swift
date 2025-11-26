@@ -135,7 +135,7 @@ struct AgentBreakdownView: View {
                 emptyState
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
                         // Per-agent detailed cards
                         ForEach(breakdown, id: \.id) { agent in
                             agentDetailCard(agent)
@@ -168,8 +168,6 @@ struct AgentBreakdownView: View {
                     .padding(.vertical, 4)
                 }
             }
-
-            Spacer()
         }
     }
 
