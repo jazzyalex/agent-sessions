@@ -16,9 +16,9 @@ extension Color {
     // MARK: - Monochrome Support
 
     /// Monochrome gray shades for each agent (maintains visual distinction)
-    static let agentCodexGray = Color(white: 0.4, alpha: 1.0)   // Darker gray
-    static let agentClaudeGray = Color(white: 0.5, alpha: 1.0)  // Medium gray
-    static let agentGeminiGray = Color(white: 0.6, alpha: 1.0)  // Lighter gray
+    static let agentCodexGray = Color(white: 0.4)   // Darker gray
+    static let agentClaudeGray = Color(white: 0.5)  // Medium gray
+    static let agentGeminiGray = Color(white: 0.6)  // Lighter gray
 
     /// Get the brand color for a given session source
     static func agentColor(for source: SessionSource) -> Color {

@@ -6,6 +6,7 @@ struct AgentBreakdownView: View {
     @Binding var metric: AnalyticsAggregationMetric
 
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @State private var isFlipped = false
     @State private var isHovered = false
 
@@ -85,7 +86,7 @@ struct AgentBreakdownView: View {
                 // Agent rows with dividers
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(breakdown.enumerated()), id: \.element.id) { index, agent in
-                        AgentRow(agent: agent, metric: metric)
+                        AgentRow(agent: agent, metric: metric, monochrome: stripMonochrome)
                             .padding(.vertical, 16)
 
                         if index < breakdown.count - 1 {
@@ -179,7 +180,7 @@ struct AgentBreakdownView: View {
             // Agent header
             HStack(spacing: 8) {
                 Circle()
-                    .fill(Color.agentColor(for: agent.agent))
+                    .fill(Color.agentColor(for: agent.agent, monochrome: stripMonochrome))
                     .frame(width: 12, height: 12)
 
                 Text(agent.agent.displayName)
@@ -193,7 +194,7 @@ struct AgentBreakdownView: View {
                     .font(.system(size: 12, weight: .medium))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.agentColor(for: agent.agent).opacity(0.2))
+                    .background(Color.agentColor(for: agent.agent, monochrome: stripMonochrome).opacity(0.2))
                     .cornerRadius(6)
             }
 
@@ -352,6 +353,7 @@ struct AgentBreakdownView: View {
 private struct AgentRow: View {
     let agent: AnalyticsAgentBreakdown
     let metric: AnalyticsAggregationMetric
+    let monochrome: Bool
 
     var body: some View {
         HStack(spacing: 16) {
@@ -374,7 +376,7 @@ private struct AgentRow: View {
 
                     // Foreground bar
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.agentColor(for: agent.agent))
+                        .fill(Color.agentColor(for: agent.agent, monochrome: monochrome))
                         .frame(width: max(0, geometry.size.width * (agent.percentage(for: metric) / 100.0)))
                         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: agent.percentage(for: metric))
                 }

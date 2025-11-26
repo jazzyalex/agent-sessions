@@ -8,6 +8,7 @@ struct SessionsChartView: View {
     @Binding var metric: AnalyticsAggregationMetric
 
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @State private var isFlipped = false
     @State private var isHovered = false
 
@@ -65,7 +66,7 @@ struct SessionsChartView: View {
                     ForEach(uniqueAgents, id: \.self) { agent in
                         HStack(spacing: 6) {
                             Circle()
-                                .fill(Color.agentColor(for: agent))
+                                .fill(Color.agentColor(for: agent, monochrome: stripMonochrome))
                                 .frame(width: 8, height: 8)
 
                             Text(agent.displayName)
@@ -118,9 +119,9 @@ struct SessionsChartView: View {
             .cornerRadius(AnalyticsDesign.chartBarCornerRadius)
         }
         .chartForegroundStyleScale([
-            SessionSource.codex.displayName: Color.agentCodex,
-            SessionSource.claude.displayName: Color.agentClaude,
-            SessionSource.gemini.displayName: Color.agentGemini
+            SessionSource.codex.displayName: Color.agentColor(for: .codex, monochrome: stripMonochrome),
+            SessionSource.claude.displayName: Color.agentColor(for: .claude, monochrome: stripMonochrome),
+            SessionSource.gemini.displayName: Color.agentColor(for: .gemini, monochrome: stripMonochrome)
         ])
         .chartLegend(.hidden)
         .chartXAxis {

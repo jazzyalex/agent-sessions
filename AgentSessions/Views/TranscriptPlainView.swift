@@ -65,6 +65,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @AppStorage("TranscriptRenderMode") private var renderModeRaw: String = TranscriptRenderMode.terminal.rawValue
     @AppStorage("SessionViewMode") private var viewModeRaw: String = SessionViewMode.terminal.rawValue
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     private var viewMode: SessionViewMode {
         // Prefer persisted view mode when valid; otherwise derive from legacy renderModeRaw.
@@ -143,7 +144,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             errorRanges: (shouldColorize || isJSONMode) ? errorRanges : [],
                             isJSONMode: isJSONMode,
                             appAppearanceRaw: appAppearanceRaw,
-                            colorScheme: colorScheme
+                            colorScheme: colorScheme,
+                            monochrome: stripMonochrome
                         )
                     }
 
@@ -1134,6 +1136,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
     let isJSONMode: Bool
     let appAppearanceRaw: String
     let colorScheme: ColorScheme
+    let monochrome: Bool
 
     class Coordinator {
         var lastWidth: CGFloat = 0
@@ -1142,6 +1145,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         var lastAppearanceRaw: String = ""
         var lastColorScheme: ColorScheme?
         var lastIsJSONMode: Bool = false
+        var lastMonochrome: Bool = false
         var lastColorSignature: (Int, Int, Int, Int, Int) = (0, 0, 0, 0, 0)
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -1216,6 +1220,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             let appearanceChanged = context.coordinator.lastAppearanceRaw != appAppearanceRaw
             let schemeChanged = context.coordinator.lastColorScheme != colorScheme
             let modeChanged = context.coordinator.lastIsJSONMode != isJSONMode
+            let monochromeChanged = context.coordinator.lastMonochrome != monochrome
             let colorSignature = (
                 commandRanges.count,
                 userRanges.count,
@@ -1247,8 +1252,8 @@ private struct PlainTextScrollView: NSViewRepresentable {
                 context.coordinator.lastPaintedHighlights = []
             }
 
-            // Reapply colors when text, appearance, mode, or ranges change
-            if textChanged || appearanceChanged || schemeChanged || modeChanged || colorsChanged {
+            // Reapply colors when text, appearance, mode, monochrome, or ranges change
+            if textChanged || appearanceChanged || schemeChanged || modeChanged || monochromeChanged || colorsChanged {
                 applySyntaxColors(tv)
             }
 
@@ -1283,6 +1288,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             // Update last seen scheme at the end of the pass
             context.coordinator.lastColorScheme = colorScheme
             context.coordinator.lastIsJSONMode = isJSONMode
+            context.coordinator.lastMonochrome = monochrome
             context.coordinator.lastColorSignature = colorSignature
         }
     }
@@ -1315,43 +1321,59 @@ private struct PlainTextScrollView: NSViewRepresentable {
             let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
 
             if !commandRanges.isEmpty {
-                let basePink = NSColor.systemPink
-                let pink: NSColor = {
-                    if isDarkMode || increaseContrast { return basePink }
-                    return basePink.withAlphaComponent(0.95)
+                let color: NSColor = {
+                    if monochrome {
+                        return NSColor(white: 0.45, alpha: 1.0)  // JSON keys in gray
+                    } else {
+                        let basePink = NSColor.systemPink
+                        if isDarkMode || increaseContrast { return basePink }
+                        return basePink.withAlphaComponent(0.95)
+                    }
                 }()
                 for r in commandRanges where NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: pink, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: color, range: r)
                 }
             }
             if !userRanges.isEmpty {
-                let baseBlue = NSColor.systemBlue
-                let blue: NSColor = {
-                    if isDarkMode || increaseContrast { return baseBlue }
-                    return baseBlue.withAlphaComponent(0.9)
+                let color: NSColor = {
+                    if monochrome {
+                        return NSColor(white: 0.55, alpha: 1.0)  // JSON strings in gray
+                    } else {
+                        let baseBlue = NSColor.systemBlue
+                        if isDarkMode || increaseContrast { return baseBlue }
+                        return baseBlue.withAlphaComponent(0.9)
+                    }
                 }()
                 for r in userRanges where NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: blue, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: color, range: r)
                 }
             }
             if !outputRanges.isEmpty {
-                let baseGreen = NSColor.systemGreen
-                let green: NSColor = {
-                    if isDarkMode || increaseContrast { return baseGreen }
-                    return baseGreen.withAlphaComponent(0.9)
+                let color: NSColor = {
+                    if monochrome {
+                        return NSColor(white: 0.65, alpha: 1.0)  // JSON numbers in gray
+                    } else {
+                        let baseGreen = NSColor.systemGreen
+                        if isDarkMode || increaseContrast { return baseGreen }
+                        return baseGreen.withAlphaComponent(0.9)
+                    }
                 }()
                 for r in outputRanges where NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: green, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: color, range: r)
                 }
             }
             if !assistantRanges.isEmpty {
-                let basePurple = NSColor.systemPurple
-                let purple: NSColor = {
-                    if isDarkMode || increaseContrast { return basePurple }
-                    return basePurple.withAlphaComponent(0.9)
+                let color: NSColor = {
+                    if monochrome {
+                        return NSColor(white: 0.35, alpha: 1.0)  // JSON keywords in gray
+                    } else {
+                        let basePurple = NSColor.systemPurple
+                        if isDarkMode || increaseContrast { return basePurple }
+                        return basePurple.withAlphaComponent(0.9)
+                    }
                 }()
                 for r in assistantRanges where NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: purple, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: color, range: r)
                 }
             }
         } else {
@@ -1360,26 +1382,34 @@ private struct PlainTextScrollView: NSViewRepresentable {
             if !commandRanges.isEmpty {
                 let isDark = isDarkMode
                 let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-                let baseOrange = NSColor.systemOrange
-                let orange: NSColor = {
-                    if isDark || increaseContrast { return baseOrange }
-                    return baseOrange.withAlphaComponent(0.95)
+                let color: NSColor = {
+                    if monochrome {
+                        return NSColor(white: 0.4, alpha: 1.0)  // Commands in darker gray
+                    } else {
+                        let baseOrange = NSColor.systemOrange
+                        if isDark || increaseContrast { return baseOrange }
+                        return baseOrange.withAlphaComponent(0.95)
+                    }
                 }()
                 for r in commandRanges where NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: orange, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: color, range: r)
                 }
             }
             // User input colorization (blue)
             if !userRanges.isEmpty {
                 let isDark = isDarkMode
                 let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-                let baseBlue = NSColor.systemBlue
-                let blue: NSColor = {
-                    if isDark || increaseContrast { return baseBlue }
-                    return baseBlue.withAlphaComponent(0.9)
+                let color: NSColor = {
+                    if monochrome {
+                        return NSColor(white: 0.5, alpha: 1.0)  // User input in medium gray
+                    } else {
+                        let baseBlue = NSColor.systemBlue
+                        if isDark || increaseContrast { return baseBlue }
+                        return baseBlue.withAlphaComponent(0.9)
+                    }
                 }()
                 for r in userRanges where NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: blue, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: color, range: r)
                 }
             }
             // Assistant response colorization (subtle gray - less prominent)
@@ -1399,26 +1429,34 @@ private struct PlainTextScrollView: NSViewRepresentable {
             if !outputRanges.isEmpty {
                 let isDark = isDarkMode
                 let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-                let baseTeal = NSColor.systemTeal
-                let teal: NSColor = {
-                    if isDark || increaseContrast { return baseTeal }
-                    return baseTeal.withAlphaComponent(0.90)
+                let color: NSColor = {
+                    if monochrome {
+                        return NSColor(white: 0.6, alpha: 1.0)  // Tool output in lighter gray
+                    } else {
+                        let baseTeal = NSColor.systemTeal
+                        if isDark || increaseContrast { return baseTeal }
+                        return baseTeal.withAlphaComponent(0.90)
+                    }
                 }()
                     for r in outputRanges where NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: teal, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: color, range: r)
                 }
             }
             // Error colorization (red)
             if !errorRanges.isEmpty {
                 let isDark = isDarkMode
                 let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-                let baseRed = NSColor.systemRed
-                let red: NSColor = {
-                    if isDark || increaseContrast { return baseRed }
-                    return baseRed.withAlphaComponent(0.9)
+                let color: NSColor = {
+                    if monochrome {
+                        return NSColor(white: 0.3, alpha: 1.0)  // Errors in darkest gray for emphasis
+                    } else {
+                        let baseRed = NSColor.systemRed
+                        if isDark || increaseContrast { return baseRed }
+                        return baseRed.withAlphaComponent(0.9)
+                    }
                 }()
                 for r in errorRanges where NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: red, range: r)
+                    textStorage.addAttribute(.foregroundColor, value: color, range: r)
                 }
             }
         }

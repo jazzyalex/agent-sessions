@@ -5,6 +5,7 @@ struct StatsCardsView: View {
     let snapshot: AnalyticsSnapshot
     let dateRange: AnalyticsDateRange
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
     private var summary: AnalyticsSummary { snapshot.summary }
 
@@ -28,7 +29,8 @@ struct StatsCardsView: View {
                     agentBreakdown: snapshot.agentBreakdown,
                     metric: .sessions,
                     insight: peakDayFor(sessions: true).map { "Peak: \($0)" },
-                    extraInfo: nil
+                    extraInfo: nil,
+                    monochrome: stripMonochrome
                 )
             )
             .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
@@ -48,7 +50,8 @@ struct StatsCardsView: View {
                     agentBreakdown: snapshot.agentBreakdown,
                     metric: .messages,
                     insight: peakDayFor(sessions: false).map { "Peak: \($0)" },
-                    extraInfo: summary.sessions > 0 ? String(format: "Avg %.1f msgs/session", Double(summary.messages) / Double(summary.sessions)) : nil
+                    extraInfo: summary.sessions > 0 ? String(format: "Avg %.1f msgs/session", Double(summary.messages) / Double(summary.sessions)) : nil,
+                    monochrome: stripMonochrome
                 )
             )
             .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
@@ -68,7 +71,8 @@ struct StatsCardsView: View {
                     agentBreakdown: snapshot.agentBreakdown,
                     metric: .avgDuration,
                     insight: "Trend",
-                    extraInfo: "Average session length per agent"
+                    extraInfo: "Average session length per agent",
+                    monochrome: stripMonochrome
                 )
             )
             .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
@@ -88,7 +92,8 @@ struct StatsCardsView: View {
                     agentBreakdown: snapshot.agentBreakdown,
                     metric: .duration,
                     insight: "Commands: \(AnalyticsSummary.formatNumber(summary.commands))",
-                    extraInfo: summary.commandsChange.map { AnalyticsSummary.formatChange($0) ?? "" }
+                    extraInfo: summary.commandsChange.map { AnalyticsSummary.formatChange($0) ?? "" },
+                    monochrome: stripMonochrome
                 )
             )
             .analyticsCard(padding: AnalyticsDesign.statsCardPadding, colorScheme: colorScheme)
@@ -285,6 +290,7 @@ private struct CardBackView: View {
     let metric: CardBackMetric
     let insight: String?
     let extraInfo: String?
+    let monochrome: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -309,7 +315,7 @@ private struct CardBackView: View {
                     ForEach(agentBreakdown.prefix(3), id: \.agent) { agent in
                         HStack(spacing: 4) {
                             Circle()
-                                .fill(Color.agentColor(for: agent.agent))
+                                .fill(Color.agentColor(for: agent.agent, monochrome: monochrome))
                                 .frame(width: 5, height: 5)
                             Text(agentDisplayText(for: agent))
                                 .font(.system(size: 10))
