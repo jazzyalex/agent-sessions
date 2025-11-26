@@ -190,7 +190,8 @@ extension AgentSessionsApp {
         let service = AnalyticsService(
             codexIndexer: indexer,
             claudeIndexer: claudeIndexer,
-            geminiIndexer: geminiIndexer
+            geminiIndexer: geminiIndexer,
+            opencodeIndexer: opencodeIndexer
         )
         analyticsService = service
 

@@ -273,11 +273,13 @@ extension View {
     let codexIndexer = SessionIndexer()
     let claudeIndexer = ClaudeSessionIndexer()
     let geminiIndexer = GeminiSessionIndexer()
+    let opencodeIndexer = OpenCodeSessionIndexer()
 
     let service = AnalyticsService(
         codexIndexer: codexIndexer,
         claudeIndexer: claudeIndexer,
-        geminiIndexer: geminiIndexer
+        geminiIndexer: geminiIndexer,
+        opencodeIndexer: opencodeIndexer
     )
 
     AnalyticsView(service: service)
