@@ -133,13 +133,13 @@ struct AnalyticsView: View {
                         breakdown: service.snapshot.agentBreakdown,
                         metric: $aggregationMetric
                     )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, minHeight: AnalyticsDesign.secondaryCardHeight, maxHeight: AnalyticsDesign.secondaryCardHeight, alignment: .topLeading)
 
                     TimeOfDayHeatmapView(
                         cells: service.snapshot.heatmapCells,
                         mostActive: service.snapshot.mostActiveTimeRange
                     )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, minHeight: AnalyticsDesign.secondaryCardHeight, maxHeight: AnalyticsDesign.secondaryCardHeight, alignment: .topLeading)
                 }
                 .frame(height: AnalyticsDesign.secondaryCardHeight)
                 .padding(.top, AnalyticsDesign.chartToInsightsSpacing)
