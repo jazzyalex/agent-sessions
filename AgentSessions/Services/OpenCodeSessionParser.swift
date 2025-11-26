@@ -110,6 +110,17 @@ final class OpenCodeSessionParser {
 
     // MARK: - Message loading helpers
 
+    private static func storageRoot(for sessionURL: URL) -> URL {
+        // sessionURL: ~/.local/share/opencode/storage/session/<projectID>/ses_<ID>.json
+        // Strip /ses_<ID>.json -> .../storage/session/<projectID>
+        // Strip project -> .../storage/session
+        // Strip session -> .../storage
+        return sessionURL
+            .deletingLastPathComponent()        // .../storage/session/<projectID>
+            .deletingLastPathComponent()        // .../storage/session
+            .deletingLastPathComponent()        // .../storage
+    }
+
     private static func messagesRoot(for sessionID: String, sessionURL: URL) -> URL {
         // sessionURL: ~/.local/share/opencode/storage/session/<projectID>/ses_<ID>.json
         let projectDir = sessionURL.deletingLastPathComponent()
@@ -122,6 +133,7 @@ final class OpenCodeSessionParser {
 
     private static func lightweightMessageMetadata(for sessionID: String, sessionURL: URL) -> (count: Int, modelID: String?, commands: Int) {
         let root = messagesRoot(for: sessionID, sessionURL: sessionURL)
+        let storageRoot = storageRoot(for: sessionURL)
         let fm = FileManager.default
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
@@ -150,6 +162,9 @@ final class OpenCodeSessionParser {
                    (tools.todowrite ?? false) || (tools.todoread ?? false) || (tools.task ?? false) {
                     commands += 1
                 }
+                if containsToolPart(for: msg.id, storageRoot: storageRoot) {
+                    commands += 1
+                }
             }
         }
         return (count, firstModelID, commands)
@@ -157,6 +172,7 @@ final class OpenCodeSessionParser {
 
     private static func loadMessages(for sessionID: String, sessionURL: URL) -> ([SessionEvent], String?, Int) {
         let root = messagesRoot(for: sessionID, sessionURL: sessionURL)
+        let storageRoot = storageRoot(for: sessionURL)
         let fm = FileManager.default
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
@@ -187,6 +203,9 @@ final class OpenCodeSessionParser {
                 modelID = mid
             }
 
+            let toolPartEvents = loadToolPartEvents(for: msg.id, storageRoot: storageRoot, fallbackTimestamp: ts)
+            let hasToolParts = !toolPartEvents.isEmpty
+
             let rawJSON: String = {
                 if let str = String(data: data, encoding: .utf8) {
                     return str
@@ -197,6 +216,7 @@ final class OpenCodeSessionParser {
             // Treat messages with tools flags as command/tool-call events for terminal view + filters
             let hasTools = (msg.tools?.todowrite ?? false) || (msg.tools?.todoread ?? false) || (msg.tools?.task ?? false)
             if hasTools { commandCount += 1 }
+            commandCount += toolPartEvents.filter { $0.kind == .tool_call }.count
 
             let baseKind = SessionEventKind.from(role: msg.role, type: nil)
             // Heuristic error detection: tool messages whose body clearly indicates failure become .error
@@ -232,7 +252,7 @@ final class OpenCodeSessionParser {
 
             // Drop completely empty, non-tool, non-error messages to avoid blank rows.
             let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if trimmed.isEmpty && !hasTools && !isError {
+            if trimmed.isEmpty && !hasTools && !hasToolParts && !isError {
                 continue
             }
 
@@ -251,6 +271,7 @@ final class OpenCodeSessionParser {
                 rawJSON: rawJSON
             )
             events.append(event)
+            events.append(contentsOf: toolPartEvents)
         }
 
         events.sort { (lhs, rhs) in
@@ -263,5 +284,127 @@ final class OpenCodeSessionParser {
         }
 
         return (events, modelID, commandCount)
+    }
+
+    // MARK: - Tool part helpers
+
+    private static func containsToolPart(for messageID: String, storageRoot: URL) -> Bool {
+        let partDir = storageRoot
+            .appendingPathComponent("part", isDirectory: true)
+            .appendingPathComponent(messageID, isDirectory: true)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: partDir.path, isDirectory: &isDir), isDir.boolValue else {
+            return false
+        }
+        guard let files = try? FileManager.default.contentsOfDirectory(at: partDir, includingPropertiesForKeys: nil) else {
+            return false
+        }
+        for file in files {
+            guard let data = try? Data(contentsOf: file),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = obj["type"] as? String,
+                  type.lowercased() == "tool" else {
+                continue
+            }
+            return true
+        }
+        return false
+    }
+
+    private static func loadToolPartEvents(for messageID: String, storageRoot: URL, fallbackTimestamp: Date?) -> [SessionEvent] {
+        let partDir = storageRoot
+            .appendingPathComponent("part", isDirectory: true)
+            .appendingPathComponent(messageID, isDirectory: true)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: partDir.path, isDirectory: &isDir), isDir.boolValue else {
+            return []
+        }
+        guard let files = try? FileManager.default.contentsOfDirectory(at: partDir, includingPropertiesForKeys: nil) else {
+            return []
+        }
+
+        var events: [SessionEvent] = []
+        let sortedFiles = files.sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        for file in sortedFiles {
+            guard let data = try? Data(contentsOf: file),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = obj["type"] as? String,
+                  type.lowercased() == "tool" else {
+                continue
+            }
+
+            let rawJSON = String(data: data, encoding: .utf8) ?? ""
+            let partID = (obj["id"] as? String) ?? file.lastPathComponent
+            let callID = obj["callID"] as? String
+            let toolName = obj["tool"] as? String
+
+            let state = obj["state"] as? [String: Any] ?? [:]
+            let status = (state["status"] as? String)?.lowercased()
+            let inputStr = stringifyJSON(state["input"])
+            let outputStr = stringifyJSON(state["output"]) ?? stringifyJSON(state["stdout"])
+            let errorStr = stringifyJSON(state["error"]) ?? stringifyJSON(state["stderr"])
+
+            let timeDict = state["time"] as? [String: Any]
+            let startDate = dateFromMillis(timeDict?["start"]) ?? fallbackTimestamp
+            let endDate = dateFromMillis(timeDict?["end"]) ?? dateFromMillis(timeDict?["start"]) ?? fallbackTimestamp
+
+            let callEvent = SessionEvent(
+                id: partID + "-call",
+                timestamp: startDate,
+                kind: .tool_call,
+                role: "assistant",
+                text: nil,
+                toolName: toolName,
+                toolInput: inputStr,
+                toolOutput: nil,
+                messageID: callID ?? messageID,
+                parentID: nil,
+                isDelta: false,
+                rawJSON: rawJSON
+            )
+            events.append(callEvent)
+
+            let isError = status == "error" || (errorStr?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            let resultKind: SessionEventKind = isError ? .error : .tool_result
+            let resultText: String? = {
+                if isError { return (errorStr?.isEmpty == false ? errorStr : outputStr) }
+                return outputStr
+            }()
+
+            let resultEvent = SessionEvent(
+                id: partID + (isError ? "-error" : "-result"),
+                timestamp: endDate,
+                kind: resultKind,
+                role: nil,
+                text: resultText,
+                toolName: toolName,
+                toolInput: nil,
+                toolOutput: outputStr,
+                messageID: callID ?? messageID,
+                parentID: callEvent.id,
+                isDelta: false,
+                rawJSON: rawJSON
+            )
+            events.append(resultEvent)
+        }
+
+        return events
+    }
+
+    private static func stringifyJSON(_ any: Any?) -> String? {
+        guard let any else { return nil }
+        if let str = any as? String { return str }
+        if JSONSerialization.isValidJSONObject(any),
+           let data = try? JSONSerialization.data(withJSONObject: any, options: [.prettyPrinted]),
+           let str = String(data: data, encoding: .utf8) {
+            return str
+        }
+        return String(describing: any)
+    }
+
+    private static func dateFromMillis(_ value: Any?) -> Date? {
+        guard let num = value as? NSNumber else { return nil }
+        return Date(timeIntervalSince1970: num.doubleValue / 1000.0)
     }
 }
