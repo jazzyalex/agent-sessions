@@ -312,7 +312,7 @@ private struct CardBackView: View {
                     .tracking(0.5)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(agentBreakdown.prefix(3), id: \.agent) { agent in
+                    ForEach(agentBreakdown.prefix(4), id: \.agent) { agent in
                         HStack(spacing: 4) {
                             Circle()
                                 .fill(Color.agentColor(for: agent.agent, monochrome: monochrome))

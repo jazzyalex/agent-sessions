@@ -16,6 +16,7 @@ final class AnalyticsService: ObservableObject {
     private let codexIndexer: SessionIndexer
     private let claudeIndexer: ClaudeSessionIndexer
     private let geminiIndexer: GeminiSessionIndexer
+    private let opencodeIndexer: OpenCodeSessionIndexer
 
     private var cancellables = Set<AnyCancellable>()
     private var parsingTask: Task<Void, Never>?
@@ -23,10 +24,12 @@ final class AnalyticsService: ObservableObject {
 
     init(codexIndexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
-         geminiIndexer: GeminiSessionIndexer) {
+         geminiIndexer: GeminiSessionIndexer,
+         opencodeIndexer: OpenCodeSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
+        self.opencodeIndexer = opencodeIndexer
         if let db = try? IndexDB() {
             self.repository = AnalyticsRepository(db: db)
         } else {
@@ -47,6 +50,8 @@ final class AnalyticsService: ObservableObject {
         allSessions.append(contentsOf: codexIndexer.allSessions)
         allSessions.append(contentsOf: claudeIndexer.allSessions)
         allSessions.append(contentsOf: geminiIndexer.allSessions)
+        allSessions.append(contentsOf: opencodeIndexer.allSessions)
+        allSessions.append(contentsOf: opencodeIndexer.allSessions)
 
         // Apply filters for current period
         let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
@@ -120,7 +125,8 @@ final class AnalyticsService: ObservableObject {
             let codexLightweight = codexIndexer.allSessions.filter { $0.events.isEmpty }.count
             let claudeLightweight = claudeIndexer.allSessions.filter { $0.events.isEmpty }.count
             let geminiLightweight = geminiIndexer.allSessions.filter { $0.events.isEmpty }.count
-            let totalLightweight = codexLightweight + claudeLightweight + geminiLightweight
+            let opencodeLightweight = 0 // OpenCode indexer does full parse during refresh; skip here
+            let totalLightweight = codexLightweight + claudeLightweight + geminiLightweight + opencodeLightweight
 
             guard totalLightweight > 0 else {
                 print("ℹ️ All sessions already fully parsed")
@@ -161,6 +167,9 @@ final class AnalyticsService: ObservableObject {
                     self.parsingStatus = "Analyzing Gemini sessions (\(current)/\(total))..."
                 }
             }
+
+            // Parse OpenCode sessions
+            // OpenCode sessions are already loaded in full during their index refresh; skip here.
 
             parsingProgress = 1.0
             parsingStatus = "Analysis complete!"
@@ -741,7 +750,7 @@ final class AnalyticsService: ObservableObject {
     private func setupObservers() {
         // Observe when session data changes (for auto-refresh when window visible)
         codexIndexer.$allSessions
-            .combineLatest(claudeIndexer.$allSessions, geminiIndexer.$allSessions)
+            .combineLatest(claudeIndexer.$allSessions, geminiIndexer.$allSessions, opencodeIndexer.$allSessions)
             .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
             .sink { _ in
                 // Auto-refresh will be triggered by the view when needed
@@ -749,9 +758,9 @@ final class AnalyticsService: ObservableObject {
             .store(in: &cancellables)
 
         codexIndexer.$launchPhase
-            .combineLatest(claudeIndexer.$launchPhase, geminiIndexer.$launchPhase)
+            .combineLatest(claudeIndexer.$launchPhase, geminiIndexer.$launchPhase, opencodeIndexer.$launchPhase)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
+            .sink { [weak self] _, _, _, _ in
                 self?.updateReadiness()
             }
             .store(in: &cancellables)
@@ -761,7 +770,7 @@ final class AnalyticsService: ObservableObject {
 
     private func updateReadiness() {
         Task { @MainActor in
-            let phasesReady = [codexIndexer.launchPhase, claudeIndexer.launchPhase, geminiIndexer.launchPhase]
+            let phasesReady = [codexIndexer.launchPhase, claudeIndexer.launchPhase, geminiIndexer.launchPhase, opencodeIndexer.launchPhase]
                 .allSatisfy { phase in
                     switch phase {
                     case .ready, .idle:
