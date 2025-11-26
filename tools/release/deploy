@@ -1,0 +1,502 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# deploy - Unified deployment tool for Agent Sessions
+# Consolidates bump, release, verify, and changelog workflows
+#
+# Usage:
+#   deploy bump [major|minor|patch]    - Bump version and update CHANGELOG
+#   deploy release VERSION             - Build, sign, notarize, and publish release
+#   deploy verify VERSION              - Verify deployment completed successfully
+#   deploy changelog [FROM_TAG]        - Generate CHANGELOG from conventional commits
+#   deploy help                        - Show this help message
+
+REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+cd "$REPO_ROOT"
+
+# ============================================================================
+# SHARED UTILITIES
+# ============================================================================
+
+green(){ printf "\033[32m%s\033[0m\n" "$*"; }
+yellow(){ printf "\033[33m%s\033[0m\n" "$*"; }
+red(){ printf "\033[31m%s\033[0m\n" "$*"; }
+
+# Structured logging
+LOG_FILE=""
+init_logging() {
+  local context="${1:-deploy}"
+  LOG_FILE="/tmp/${context}-$(date +%s).log"
+  exec > >(tee -a "$LOG_FILE") 2>&1
+}
+
+log() {
+  local level="$1"; shift
+  echo "[$(date -Iseconds)] [$level] $*"
+}
+
+# Comprehensive dependency validation
+check_dependencies() {
+  local required_cmds=("$@")
+  local missing=()
+
+  for cmd in "${required_cmds[@]}"; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      missing+=("$cmd")
+    fi
+  done
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    red "ERROR: Missing required dependencies:"
+    for dep in "${missing[@]}"; do
+      red "  - $dep"
+    done
+    exit 2
+  fi
+}
+
+# Retry function for network operations
+retry() {
+  local max_attempts=3
+  local timeout=5
+  local attempt=1
+  local exitCode=0
+
+  while [[ $attempt -le $max_attempts ]]; do
+    if "$@"; then
+      return 0
+    else
+      exitCode=$?
+    fi
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      yellow "Attempt $attempt failed (exit $exitCode). Retrying in $timeout seconds..."
+      sleep $timeout
+    fi
+    ((attempt++))
+  done
+
+  red "Command failed after $max_attempts attempts"
+  return $exitCode
+}
+
+# Improved cache wait with timeout
+wait_for_cache() {
+  local url="$1"
+  local expected="$2"
+  local max_wait="${3:-120}"
+  local interval=3
+
+  log INFO "Waiting for cache propagation: $url"
+
+  for ((i=0; i<max_wait; i+=interval)); do
+    if curl -sf "$url" 2>/dev/null | grep -q "$expected"; then
+      green "✓ Cache propagated after ${i}s"
+      return 0
+    fi
+    sleep $interval
+  done
+
+  red "ERROR: Cache did not propagate after ${max_wait}s"
+  return 1
+}
+
+# ============================================================================
+# SUBCOMMAND: bump
+# ============================================================================
+
+cmd_bump() {
+  shift # remove 'bump' from args
+  local BUMP_TYPE="${1:-patch}"
+
+  [[ "$BUMP_TYPE" =~ ^(major|minor|patch)$ ]] || {
+    red "ERROR: Invalid bump type. Use: major, minor, or patch"
+    echo "Usage: deploy bump [major|minor|patch]"
+    exit 1
+  }
+
+  check_dependencies git grep sed awk python3
+  init_logging "bump-${BUMP_TYPE}"
+
+  log INFO "Starting version bump: $BUMP_TYPE"
+  echo "==> Version Bump: $BUMP_TYPE"
+
+  # Detect current version
+  local CURR_MARKETING=$(grep -m1 "MARKETING_VERSION = " AgentSessions.xcodeproj/project.pbxproj | sed 's/.*= \([^;]*\);/\1/' | tr -d ' ')
+  local CURR_BUILD=$(grep -m1 "CURRENT_PROJECT_VERSION = " AgentSessions.xcodeproj/project.pbxproj | sed 's/.*= \([^;]*\);/\1/' | tr -d ' ')
+
+  echo "Current version: $CURR_MARKETING (build $CURR_BUILD)"
+
+  # Calculate new version using Python
+  local NEW_VERSION=$(python3 << PYEOF
+import sys
+version = "$CURR_MARKETING".split('.')
+major, minor = int(version[0]), int(version[1])
+patch = int(version[2]) if len(version) > 2 else 0
+
+if "$BUMP_TYPE" == "major":
+    major += 1
+    minor = 0
+    patch = 0
+elif "$BUMP_TYPE" == "minor":
+    minor += 1
+    patch = 0
+elif "$BUMP_TYPE" == "patch":
+    patch += 1
+
+print(f"{major}.{minor}.{patch}")
+PYEOF
+)
+
+  # Auto-increment build number
+  local NEW_BUILD=$((CURR_BUILD + 1))
+
+  echo "New version: $NEW_VERSION (build $NEW_BUILD)"
+
+  # Update project.pbxproj
+  echo "==> Updating AgentSessions.xcodeproj/project.pbxproj"
+  sed -i '' "s/CURRENT_PROJECT_VERSION = $CURR_BUILD;/CURRENT_PROJECT_VERSION = $NEW_BUILD;/g" AgentSessions.xcodeproj/project.pbxproj
+  sed -i '' "s/MARKETING_VERSION = $CURR_MARKETING;/MARKETING_VERSION = $NEW_VERSION;/g" AgentSessions.xcodeproj/project.pbxproj
+
+  # Verify replacements
+  local COUNT_BUILD=$(grep -c "CURRENT_PROJECT_VERSION = $NEW_BUILD;" AgentSessions.xcodeproj/project.pbxproj || true)
+  local COUNT_VERSION=$(grep -c "MARKETING_VERSION = $NEW_VERSION;" AgentSessions.xcodeproj/project.pbxproj || true)
+
+  if [[ $COUNT_BUILD -ne 2 || $COUNT_VERSION -ne 2 ]]; then
+    red "ERROR: Version replacement failed. Expected 2 occurrences each, got BUILD=$COUNT_BUILD VERSION=$COUNT_VERSION"
+    exit 1
+  fi
+  green "✓ Updated 2 CURRENT_PROJECT_VERSION and 2 MARKETING_VERSION entries"
+
+  # Update CHANGELOG.md
+  echo "==> Updating docs/CHANGELOG.md"
+  local TODAY=$(date +%Y-%m-%d)
+
+  # Check if version already exists
+  if grep -q "^## \[$NEW_VERSION\]" docs/CHANGELOG.md; then
+    yellow "WARNING: Version $NEW_VERSION already exists in CHANGELOG.md"
+    read -p "Continue anyway? [y/N] " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]] || exit 1
+  fi
+
+  # Insert new version section
+  awk -v ver="$NEW_VERSION" -v date="$TODAY" '
+/^## \[Unreleased\]/ {
+    print
+    print ""
+    print "## [" ver "] - " date
+    in_unreleased = 1
+    next
+}
+/^## \[/ && in_unreleased {
+    print ""
+    print "## [Unreleased]"
+    print ""
+    in_unreleased = 0
+}
+{ print }
+' docs/CHANGELOG.md > docs/CHANGELOG.md.tmp && mv docs/CHANGELOG.md.tmp docs/CHANGELOG.md
+
+  # Verify CHANGELOG has new section
+  if ! grep -q "^## \[$NEW_VERSION\] - $TODAY" docs/CHANGELOG.md; then
+    red "ERROR: Failed to update CHANGELOG.md"
+    exit 1
+  fi
+  green "✓ Added [$NEW_VERSION] section to CHANGELOG.md"
+
+  # Show diff for review
+  echo ""
+  echo "==> Changes to be committed:"
+  git diff AgentSessions.xcodeproj/project.pbxproj docs/CHANGELOG.md | head -50
+
+  # Confirm before committing
+  echo ""
+  read -p "Commit these changes? [y/N] " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    yellow "Aborted. Run 'git checkout AgentSessions.xcodeproj/project.pbxproj docs/CHANGELOG.md' to revert."
+    exit 1
+  fi
+
+  # Git commit
+  echo "==> Creating git commit"
+  git add AgentSessions.xcodeproj/project.pbxproj docs/CHANGELOG.md
+
+  # Read actual changes from CHANGELOG for commit message
+  local CHANGELOG_EXCERPT=$(sed -n "/^## \[$NEW_VERSION\]/,/^## \[/{/^## \[/d; p;}" docs/CHANGELOG.md | head -15)
+
+  git commit -m "chore: bump version to $NEW_VERSION (build $NEW_BUILD)
+
+Build number: $CURR_BUILD → $NEW_BUILD
+Marketing version: $CURR_MARKETING → $NEW_VERSION
+
+Release highlights:
+$CHANGELOG_EXCERPT
+
+Tool: deploy bump
+Model: Sonnet 4.5
+Why: Version bump for $NEW_VERSION release"
+
+  green "✓ Version bump committed"
+  log INFO "Version bump completed: $CURR_MARKETING → $NEW_VERSION"
+
+  echo ""
+  echo "Next steps:"
+  echo "  1. Review commit: git show HEAD"
+  echo "  2. Push to GitHub: git push origin main"
+  echo "  3. Deploy: deploy release $NEW_VERSION"
+}
+
+# ============================================================================
+# SUBCOMMAND: release
+# ============================================================================
+
+cmd_release() {
+  shift # remove 'release' from args
+  local VERSION="${1:-}"
+
+  if [[ -z "$VERSION" ]]; then
+    red "ERROR: VERSION not provided"
+    echo "Usage: deploy release VERSION"
+    exit 1
+  fi
+
+  check_dependencies xcodebuild git gh python3 curl shasum codesign hdiutil security
+  init_logging "release-${VERSION}"
+
+  log INFO "Starting release deployment for version $VERSION"
+
+  # Source the existing deploy-agent-sessions.sh script with VERSION set
+  export VERSION="$VERSION"
+  export SKIP_CONFIRM="${SKIP_CONFIRM:-0}"
+
+  # Call the existing deployment script
+  "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
+}
+
+# ============================================================================
+# SUBCOMMAND: verify
+# ============================================================================
+
+cmd_verify() {
+  shift # remove 'verify' from args
+  local VERSION="${1:-}"
+
+  if [[ -z "$VERSION" ]]; then
+    red "ERROR: VERSION not provided"
+    echo "Usage: deploy verify VERSION"
+    exit 1
+  fi
+
+  check_dependencies git gh curl grep base64
+
+  log INFO "Starting deployment verification for version $VERSION"
+
+  # Call the existing verify-deployment.sh script
+  "$REPO_ROOT/tools/release/verify-deployment.sh" "$VERSION"
+}
+
+# ============================================================================
+# SUBCOMMAND: changelog
+# ============================================================================
+
+cmd_changelog() {
+  shift # remove 'changelog' from args
+  local FROM_TAG="${1:-}"
+
+  check_dependencies git grep sed
+
+  # Auto-detect last tag if not provided
+  if [[ -z "$FROM_TAG" ]]; then
+    FROM_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | head -n1)
+    if [[ -z "$FROM_TAG" ]]; then
+      red "ERROR: No previous tags found and no FROM_TAG specified"
+      exit 1
+    fi
+    yellow "Using last tag: $FROM_TAG"
+  fi
+
+  echo "==> Generating CHANGELOG from $FROM_TAG..HEAD"
+  echo ""
+
+  # Extract conventional commits
+  local FEAT_COMMITS=$(git log --pretty=format:"%s" "$FROM_TAG..HEAD" | grep "^feat:" || true)
+  local FIX_COMMITS=$(git log --pretty=format:"%s" "$FROM_TAG..HEAD" | grep "^fix:" || true)
+  local PERF_COMMITS=$(git log --pretty=format:"%s" "$FROM_TAG..HEAD" | grep "^perf:" || true)
+  local REFACTOR_COMMITS=$(git log --pretty=format:"%s" "$FROM_TAG..HEAD" | grep "^refactor:" || true)
+  local DOCS_COMMITS=$(git log --pretty=format:"%s" "$FROM_TAG..HEAD" | grep "^docs:" || true)
+
+  # Count commits by category
+  local FEAT_COUNT=$(echo "$FEAT_COMMITS" | grep -c "^" || echo "0")
+  local FIX_COUNT=$(echo "$FIX_COMMITS" | grep -c "^" || echo "0")
+  local PERF_COUNT=$(echo "$PERF_COMMITS" | grep -c "^" || echo "0")
+  local REFACTOR_COUNT=$(echo "$REFACTOR_COMMITS" | grep -c "^" || echo "0")
+  local DOCS_COUNT=$(echo "$DOCS_COMMITS" | grep -c "^" || echo "0")
+
+  echo "Commit breakdown:"
+  echo "  Features:     $FEAT_COUNT"
+  echo "  Fixes:        $FIX_COUNT"
+  echo "  Performance:  $PERF_COUNT"
+  echo "  Refactoring:  $REFACTOR_COUNT"
+  echo "  Docs:         $DOCS_COUNT"
+  echo ""
+
+  # Generate CHANGELOG content
+  local OUTPUT=""
+
+  if [[ -n "$FEAT_COMMITS" ]]; then
+    OUTPUT+="### Added\n"
+    while IFS= read -r commit; do
+      local MSG=$(echo "$commit" | sed -E 's/^feat(\([^)]+\))?:[[:space:]]*//')
+      OUTPUT+="- $MSG\n"
+    done <<< "$FEAT_COMMITS"
+    OUTPUT+="\n"
+  fi
+
+  if [[ -n "$FIX_COMMITS" ]]; then
+    OUTPUT+="### Fixed\n"
+    while IFS= read -r commit; do
+      local MSG=$(echo "$commit" | sed -E 's/^fix(\([^)]+\))?:[[:space:]]*//')
+      OUTPUT+="- $MSG\n"
+    done <<< "$FIX_COMMITS"
+    OUTPUT+="\n"
+  fi
+
+  if [[ -n "$PERF_COMMITS" ]]; then
+    OUTPUT+="### Performance\n"
+    while IFS= read -r commit; do
+      local MSG=$(echo "$commit" | sed -E 's/^perf(\([^)]+\))?:[[:space:]]*//')
+      OUTPUT+="- $MSG\n"
+    done <<< "$PERF_COMMITS"
+    OUTPUT+="\n"
+  fi
+
+  if [[ -n "$REFACTOR_COMMITS" ]]; then
+    OUTPUT+="### Refactoring\n"
+    while IFS= read -r commit; do
+      local MSG=$(echo "$commit" | sed -E 's/^refactor(\([^)]+\))?:[[:space:]]*//')
+      OUTPUT+="- $MSG\n"
+    done <<< "$REFACTOR_COMMITS"
+    OUTPUT+="\n"
+  fi
+
+  if [[ -n "$DOCS_COMMITS" ]]; then
+    OUTPUT+="### Documentation\n"
+    while IFS= read -r commit; do
+      local MSG=$(echo "$commit" | sed -E 's/^docs(\([^)]+\))?:[[:space:]]*//')
+      OUTPUT+="- $MSG\n"
+    done <<< "$DOCS_COMMITS"
+    OUTPUT+="\n"
+  fi
+
+  if [[ -z "$OUTPUT" ]]; then
+    yellow "No conventional commits found. Showing all commits instead:"
+    echo ""
+    git log --pretty='- %s' "$FROM_TAG..HEAD"
+    exit 0
+  fi
+
+  green "==> Generated CHANGELOG:"
+  echo ""
+  echo -e "$OUTPUT"
+
+  # Offer to save to file
+  echo ""
+  read -p "Save to CHANGELOG snippet file? [y/N] " -n 1 -r
+  echo
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    local SNIPPET_FILE="/tmp/changelog-snippet-$(date +%s).md"
+    echo -e "$OUTPUT" > "$SNIPPET_FILE"
+    green "✓ Saved to $SNIPPET_FILE"
+    echo ""
+    echo "You can now copy this content into docs/CHANGELOG.md under the [Unreleased] section"
+  fi
+}
+
+# ============================================================================
+# HELP
+# ============================================================================
+
+cmd_help() {
+  cat << 'EOF'
+deploy - Unified deployment tool for Agent Sessions
+
+USAGE:
+    deploy <subcommand> [options]
+
+SUBCOMMANDS:
+    bump [major|minor|patch]    Bump version and update CHANGELOG
+                                Default: patch
+
+    release VERSION             Build, sign, notarize, and publish release
+                                Runs full deployment pipeline
+
+    verify VERSION              Verify deployment completed successfully
+                                Checks GitHub release, appcast, Homebrew cask
+
+    changelog [FROM_TAG]        Generate CHANGELOG from conventional commits
+                                Auto-detects last tag if not specified
+
+EXAMPLES:
+    # Typical release workflow
+    deploy changelog              # Review what changed
+    deploy bump minor             # Bump to next minor version
+    git push origin main          # Push version bump
+    deploy release 2.8.0          # Deploy the release
+    deploy verify 2.8.0           # Verify everything worked
+
+    # Quick patch release
+    deploy bump patch
+    git push origin main
+    deploy release 2.7.2
+
+    # Just verify existing release
+    deploy verify 2.7.1
+
+ENVIRONMENT:
+    VERSION             Release version (for release subcommand)
+    SKIP_CONFIRM        Set to 1 to skip confirmation prompts
+    TEAM_ID             Apple Team ID for code signing
+    DEV_ID_APP          Developer ID Application identity
+    NOTARY_PROFILE      Notarytool keychain profile name
+
+EMERGENCY:
+    For rollback, use the separate tool:
+        tools/release/rollback-release.sh VERSION
+
+LOGS:
+    All operations log to /tmp/<subcommand>-<timestamp>.log
+
+EOF
+}
+
+# ============================================================================
+# MAIN DISPATCHER
+# ============================================================================
+
+SUBCOMMAND="${1:-help}"
+
+case "$SUBCOMMAND" in
+  bump)
+    cmd_bump "$@"
+    ;;
+  release)
+    cmd_release "$@"
+    ;;
+  verify)
+    cmd_verify "$@"
+    ;;
+  changelog)
+    cmd_changelog "$@"
+    ;;
+  help|--help|-h)
+    cmd_help
+    ;;
+  *)
+    red "ERROR: Unknown subcommand: $SUBCOMMAND"
+    echo ""
+    cmd_help
+    exit 1
+    ;;
+esac

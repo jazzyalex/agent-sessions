@@ -38,8 +38,112 @@ green(){ printf "\033[32m%s\033[0m\n" "$*"; }
 yellow(){ printf "\033[33m%s\033[0m\n" "$*"; }
 red(){ printf "\033[31m%s\033[0m\n" "$*"; }
 
+# Structured logging
+LOG_FILE="/tmp/deploy-${VERSION:-unknown}-$(date +%s).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+log() {
+  local level="$1"; shift
+  echo "[$(date -Iseconds)] [$level] $*"
+}
+
+# Comprehensive dependency validation
+check_dependencies() {
+  log INFO "Checking dependencies..."
+  local missing=()
+  local missing_optional=()
+
+  # Required tools
+  for cmd in xcodebuild git gh python3 curl shasum codesign; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      missing+=("$cmd")
+    fi
+  done
+
+  # Optional but recommended tools
+  for cmd in hdiutil security; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      missing_optional+=("$cmd")
+    fi
+  done
+
+  # Check Python packages
+  if ! python3 -c "import packaging" 2>/dev/null; then
+    missing+=("python3-packaging (install: pip3 install packaging)")
+  fi
+
+  # Report missing dependencies
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    red "ERROR: Missing required dependencies:"
+    for dep in "${missing[@]}"; do
+      red "  - $dep"
+    done
+    exit 2
+  fi
+
+  if [[ ${#missing_optional[@]} -gt 0 ]]; then
+    yellow "WARNING: Missing optional dependencies:"
+    for dep in "${missing_optional[@]}"; do
+      yellow "  - $dep"
+    done
+  fi
+
+  green "✓ All required dependencies available"
+}
+
+# Improved cache wait with timeout
+wait_for_cache() {
+  local url="$1"
+  local expected="$2"
+  local max_wait="${3:-120}"  # seconds
+  local interval=3
+
+  log INFO "Waiting for cache propagation: $url"
+
+  for ((i=0; i<max_wait; i+=interval)); do
+    if curl -sf "$url" 2>/dev/null | grep -q "$expected"; then
+      green "✓ Cache propagated after ${i}s"
+      return 0
+    fi
+    sleep $interval
+  done
+
+  red "ERROR: Cache did not propagate after ${max_wait}s"
+  return 1
+}
+
+# Retry function for network operations
+retry() {
+  local max_attempts=3
+  local timeout=5
+  local attempt=1
+  local exitCode=0
+
+  while [[ $attempt -le $max_attempts ]]; do
+    if "$@"; then
+      return 0
+    else
+      exitCode=$?
+    fi
+
+    if [[ $attempt -lt $max_attempts ]]; then
+      yellow "Attempt $attempt failed (exit $exitCode). Retrying in $timeout seconds..."
+      sleep $timeout
+    fi
+    ((attempt++))
+  done
+
+  red "Command failed after $max_attempts attempts"
+  return $exitCode
+}
+
 echo "==> Pre-checks"
-command -v xcodebuild >/dev/null || { red "xcodebuild not found"; exit 2; }
+log INFO "Starting deployment pre-checks"
+
+# Run comprehensive dependency validation
+check_dependencies
+
+# Check gh authentication
 command -v gh >/dev/null || { red "gh CLI not found"; exit 2; }
 gh auth status >/dev/null 2>&1 || { red "gh not authenticated. Run: gh auth login"; exit 2; }
 
@@ -70,6 +174,106 @@ echo "Version   : $VERSION (tag $TAG)"
 echo "Team ID   : ${TEAM_ID:-<not set>}"
 echo "Dev ID    : $DEV_ID_APP"
 echo "Notary    : $NOTARY_PROFILE"
+
+# Enhanced pre-flight validation
+echo ""
+echo "==> Enhanced Pre-Flight Validation"
+
+# Git state validation
+echo "Checking git state..."
+if [[ -n $(git status --porcelain | grep -v "^??") ]]; then
+  red "ERROR: Uncommitted changes detected. Commit or stash changes before deploying."
+  git status --short
+  exit 2
+fi
+green "✓ Working directory clean"
+
+if [[ $(git branch --show-current) != "main" ]]; then
+  red "ERROR: Not on main branch (currently on $(git branch --show-current))"
+  exit 2
+fi
+green "✓ On main branch"
+
+git fetch origin main --quiet
+if [[ $(git rev-parse HEAD) != $(git rev-parse origin/main) ]]; then
+  red "ERROR: Local main not synced with origin/main. Run: git push or git pull"
+  exit 2
+fi
+green "✓ Local main synced with origin"
+
+# Version validation
+echo "Checking version validity..."
+if git rev-parse "$TAG" >/dev/null 2>&1; then
+  red "ERROR: Tag $TAG already exists. Delete it first or bump to a new version."
+  exit 2
+fi
+green "✓ Tag $TAG does not exist"
+
+# Check previous version/build
+PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | head -n1)
+if [[ -n "$PREV_TAG" ]]; then
+  PREV_VERSION=${PREV_TAG#v}
+  echo "Previous version: $PREV_VERSION"
+
+  # Semver comparison using Python
+  IS_GREATER=$(python3 << PYEOF
+from packaging import version
+try:
+    print("true" if version.parse("$VERSION") > version.parse("$PREV_VERSION") else "false")
+except:
+    print("true")  # Fallback if packaging module not available
+PYEOF
+)
+
+  if [[ "$IS_GREATER" != "true" ]]; then
+    red "ERROR: New version $VERSION must be greater than previous version $PREV_VERSION"
+    exit 2
+  fi
+  green "✓ Version $VERSION > $PREV_VERSION"
+
+  # Build number validation
+  PREV_BUILD=$(git show "$PREV_TAG:AgentSessions.xcodeproj/project.pbxproj" 2>/dev/null | grep -m1 "CURRENT_PROJECT_VERSION" | sed 's/.*= \([0-9]*\);/\1/' | tr -d ' ' || echo "0")
+  CURR_BUILD=$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\).*/\1/p' AgentSessions.xcodeproj/project.pbxproj | head -n1 | tr -d ' ')
+
+  if [[ -n "$CURR_BUILD" ]] && [[ -n "$PREV_BUILD" ]] && [[ $CURR_BUILD -le $PREV_BUILD ]]; then
+    red "ERROR: Build number $CURR_BUILD must be greater than previous build $PREV_BUILD (Sparkle requirement)"
+    exit 2
+  fi
+  green "✓ Build number $CURR_BUILD > $PREV_BUILD"
+fi
+
+# CHANGELOG validation
+echo "Checking CHANGELOG.md..."
+if [[ ! -f "docs/CHANGELOG.md" ]]; then
+  red "ERROR: docs/CHANGELOG.md not found"
+  exit 2
+fi
+
+if ! grep -q "^## \[$VERSION\]" docs/CHANGELOG.md; then
+  red "ERROR: docs/CHANGELOG.md missing section for [$VERSION]"
+  exit 2
+fi
+green "✓ CHANGELOG.md has section for $VERSION"
+
+TODAY=$(date +%Y-%m-%d)
+if ! grep -q "^## \[$VERSION\] - $TODAY" docs/CHANGELOG.md; then
+  yellow "WARNING: CHANGELOG.md date is not today ($TODAY). This is OK if intentional."
+fi
+
+# Dependency validation
+echo "Checking dependencies..."
+if ! command -v python3 >/dev/null; then
+  red "ERROR: python3 not found (required for version comparison)"
+  exit 2
+fi
+green "✓ python3 available"
+
+if ! security find-generic-password -s "https://sparkle-project.org" >/dev/null 2>&1; then
+  yellow "WARNING: Sparkle EdDSA private key not found in Keychain (appcast may fail)"
+fi
+
+echo ""
+green "✓ All pre-flight checks passed"
 
 # Pre-deployment checklist (user confirmation)
 echo
@@ -118,6 +322,59 @@ TEAM_ID="$TEAM_ID" NOTARY_PROFILE="$NOTARY_PROFILE" TAG="$TAG" VERSION="$VERSION
 
 DMG="$REPO_ROOT/dist/${APP_NAME}-${VERSION}.dmg"
 SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
+
+# Pre-deployment smoke test
+log INFO "Running pre-deployment smoke test on DMG"
+echo "==> Smoke Testing DMG"
+
+if [[ ! -f "$DMG" ]]; then
+  red "ERROR: DMG not found at $DMG"
+  exit 2
+fi
+
+# Verify DMG is valid and mountable
+if ! hdiutil verify "$DMG" >/dev/null 2>&1; then
+  red "ERROR: DMG verification failed - file may be corrupt"
+  exit 2
+fi
+green "✓ DMG structure valid"
+
+# Mount DMG and test app
+MOUNT_POINT="/tmp/agent-sessions-test-$$"
+if hdiutil attach "$DMG" -mountpoint "$MOUNT_POINT" -quiet 2>/dev/null; then
+  APP_PATH="$MOUNT_POINT/${APP_NAME}.app"
+
+  if [[ ! -d "$APP_PATH" ]]; then
+    red "ERROR: ${APP_NAME}.app not found in DMG"
+    hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
+    exit 2
+  fi
+  green "✓ App bundle found in DMG"
+
+  # Verify code signature
+  if codesign --verify --deep --strict "$APP_PATH" 2>/dev/null; then
+    green "✓ Code signature valid"
+  else
+    red "ERROR: Code signature verification failed"
+    hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
+    exit 2
+  fi
+
+  # Verify app version matches expected
+  APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "")
+  if [[ "$APP_VERSION" != "$VERSION" ]]; then
+    red "ERROR: App version mismatch. Expected $VERSION, got $APP_VERSION"
+    hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
+    exit 2
+  fi
+  green "✓ App version matches $VERSION"
+
+  hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
+  green "✓ All smoke tests passed"
+else
+  red "ERROR: Failed to mount DMG for smoke testing"
+  exit 2
+fi
 
 green "==> Generating Sparkle appcast"
 # Sparkle 2: Generate appcast.xml with EdDSA signatures
@@ -228,9 +485,15 @@ PYEOF
     git add "$REPO_ROOT/docs/appcast.xml"
     if ! git diff --staged --quiet; then
       git commit -m "chore(release): update appcast for ${VERSION}"
-      git push origin HEAD:main
+      retry git push origin HEAD:main
     else
       yellow "No appcast changes to commit."
+    fi
+
+    # Wait for GitHub Pages cache invalidation
+    echo "Waiting for GitHub Pages to serve new appcast..."
+    if ! wait_for_cache "https://jazzyalex.github.io/agent-sessions/appcast.xml" "$VERSION" 120; then
+      yellow "WARNING: Appcast cache did not propagate, but continuing..."
     fi
 
     green "Appcast published to GitHub Pages: https://jazzyalex.github.io/agent-sessions/appcast.xml"
@@ -272,7 +535,7 @@ done
 git add README.md docs/index.html
 if ! git diff --staged --quiet; then
   git commit -m "docs: update download links for ${VERSION}"
-  git push origin HEAD:main
+  retry git push origin HEAD:main
 else
   yellow "No README/docs link changes to commit."
 fi
@@ -322,27 +585,45 @@ CASK
   B64=$(base64 <"$CASK_FILE" | tr -d '\n')
 
   # Get current file sha if exists
-  CURR_SHA=$(gh api -H "Accept: application/vnd.github+json" \
+  CURR_SHA=$(retry gh api -H "Accept: application/vnd.github+json" \
     "/repos/${CASK_REPO}/contents/${CASK_PATH}" --jq .sha 2>/dev/null || true)
 
   # Create or update the file on main branch
   if [[ -n "$CURR_SHA" ]]; then
-    gh api -X PUT -H "Accept: application/vnd.github+json" \
+    retry gh api -X PUT -H "Accept: application/vnd.github+json" \
       "/repos/${CASK_REPO}/contents/${CASK_PATH}" \
       -f message="agent-sessions ${VERSION}" \
       -f content="$B64" \
       -f branch=main \
       -f sha="$CURR_SHA" >/dev/null
   else
-    gh api -X PUT -H "Accept: application/vnd.github+json" \
+    retry gh api -X PUT -H "Accept: application/vnd.github+json" \
       "/repos/${CASK_REPO}/contents/${CASK_PATH}" \
       -f message="agent-sessions ${VERSION}" \
       -f content="$B64" \
       -f branch=main >/dev/null
   fi
 
+  # Wait for GitHub API propagation
+  echo "Waiting for Homebrew cask propagation..."
+  log INFO "Checking Homebrew cask version propagation"
+
+  for i in {1..20}; do
+    CASK_VERSION=$(retry gh api -H "Accept: application/vnd.github+json" \
+      "/repos/${CASK_REPO}/contents/${CASK_PATH}" --jq .content 2>/dev/null | tr -d '\n' | base64 --decode | grep 'version' | cut -d'"' -f2 || echo "")
+    if [[ "$CASK_VERSION" == "$VERSION" ]]; then
+      green "✓ Cask propagated to version $VERSION after $((i*2))s"
+      break
+    fi
+    sleep 2
+  done
+
+  if [[ "$CASK_VERSION" != "$VERSION" ]]; then
+    yellow "WARNING: Cask version did not propagate to $VERSION in 40s (got: $CASK_VERSION)"
+  fi
+
   # Validate cask update via API (avoids raw cache)
-  CASK_BODY=$(gh api -H "Accept: application/vnd.github+json" \
+  CASK_BODY=$(retry gh api -H "Accept: application/vnd.github+json" \
     "/repos/${CASK_REPO}/contents/${CASK_PATH}" --jq .content | tr -d '\n' | base64 --decode)
   if ! printf "%s" "$CASK_BODY" | grep -q "version \"${VERSION}\""; then
     red "ERROR: Homebrew cask did not update to version ${VERSION}"
@@ -378,16 +659,65 @@ if [[ -z "${NOTES_FILE}" ]]; then
   NOTES_FILE="$TMP_NOTES"
 fi
 if gh release view "$TAG" >/dev/null 2>&1; then
-  gh release upload "$TAG" "$DMG" "$DMG.sha256" --clobber
-  if [[ -n "${NOTES_FILE}" ]]; then gh release edit "$TAG" --notes-file "$NOTES_FILE"; fi
-else
+  log INFO "Release $TAG already exists, updating assets"
+  yellow "Release $TAG already exists, updating assets..."
+  retry gh release upload "$TAG" "$DMG" "$DMG.sha256" --clobber
   if [[ -n "${NOTES_FILE}" ]]; then
-    gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes-file "$NOTES_FILE"
-  else
-    gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes "Release ${VERSION}"
+    log INFO "Updating release notes"
+    retry gh release edit "$TAG" --notes-file "$NOTES_FILE"
   fi
+  green "✓ Release $TAG updated (idempotent)"
+else
+  log INFO "Creating new release $TAG"
+  if [[ -n "${NOTES_FILE}" ]]; then
+    retry gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes-file "$NOTES_FILE"
+  else
+    retry gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes "Release ${VERSION}"
+  fi
+  green "✓ Release $TAG created"
 fi
 
+green "==> Running post-deployment verification"
+echo ""
+
+# Run automated verification
+if [[ -x "$REPO_ROOT/tools/release/verify-deployment.sh" ]]; then
+  if "$REPO_ROOT/tools/release/verify-deployment.sh" "$VERSION"; then
+    green "✓ All automated checks passed"
+  else
+    red "❌ Some verification checks failed"
+    log ERROR "Deployment verification failed for version $VERSION"
+    echo ""
+
+    # Auto-rollback prompt
+    if [[ -x "$REPO_ROOT/tools/release/rollback-release.sh" ]]; then
+      if [[ "${SKIP_CONFIRM}" == "1" ]]; then
+        yellow "SKIP_CONFIRM=1 set, skipping auto-rollback prompt"
+        yellow "Manual rollback: tools/release/rollback-release.sh $VERSION"
+        exit 1
+      fi
+
+      read -p "Deployment failed. Rollback release $VERSION? [Y/n] " -n 1 -r
+      echo
+      if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+        log INFO "Initiating automatic rollback for version $VERSION"
+        "$REPO_ROOT/tools/release/rollback-release.sh" "$VERSION"
+        red "Deployment rolled back. Fix issues and retry."
+        exit 1
+      else
+        yellow "Rollback skipped. Manual rollback: tools/release/rollback-release.sh $VERSION"
+        exit 1
+      fi
+    else
+      yellow "Rollback script not found. Manual cleanup required."
+      exit 1
+    fi
+  fi
+else
+  yellow "WARNING: verify-deployment.sh not found or not executable"
+fi
+
+echo ""
 green "Done."
 echo
 green "==> Post-deployment reminders"

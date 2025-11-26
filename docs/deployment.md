@@ -1,22 +1,109 @@
 # Agent Sessions Deployment Runbook
 
-This runbook provides a fully automated deployment process with upfront validation.
-All questions are answered before running the script, which then executes non-interactively.
+This runbook provides a **fully automated deployment process** with comprehensive validation, retry logic, automated testing, and verification.
 
-## Quick Start (2.5.1)
+## Quick Start (Unified Tool)
 
-If you’re ready to ship 2.5.1 and have Xcode + notarytool + gh configured on your Mac:
+The entire deployment workflow is now handled by a single unified tool: `tools/release/deploy`
+
+### Typical Release Workflow
 
 ```bash
-# Example for 2.5.1 (adjust TEAM_ID / DEV_ID_APP if needed)
-export VERSION=2.5.1
-export TEAM_ID=24NDRU35WD
-export NOTARY_PROFILE=AgentSessionsNotary
-export DEV_ID_APP="Developer ID Application: Alex M (24NDRU35WD)"
-export UPDATE_CASK=1
-export SKIP_CONFIRM=1
+# 1. Review what changed since last release
+tools/release/deploy changelog
 
-tools/release/deploy-agent-sessions.sh
+# 2. Bump version (patch/minor/major)
+tools/release/deploy bump minor
+
+# 3. Push version bump to GitHub
+git push origin main
+
+# 4. Deploy the release
+tools/release/deploy release 2.8.0
+
+# 5. Verify deployment (runs automatically, but can re-run)
+tools/release/deploy verify 2.8.0
+```
+
+### Quick Patch Release
+
+```bash
+tools/release/deploy bump patch
+git push origin main
+tools/release/deploy release 2.7.2
+```
+
+## Unified Tool Subcommands
+
+### `deploy bump [major|minor|patch]`
+Automatically increments version and updates CHANGELOG:
+- Auto-increments build number (critical for Sparkle)
+- Updates MARKETING_VERSION in project.pbxproj (2 occurrences)
+- Moves [Unreleased] to [VERSION] in CHANGELOG.md
+- Creates git commit with version bump
+- Shows diff for review before committing
+
+### `deploy release VERSION`
+Full deployment pipeline with enhanced safety:
+- ✅ **Comprehensive dependency validation** (all required tools)
+- ✅ **Enhanced pre-flight checks** (git state, version validation, build numbers)
+- ✅ **Build, sign, and notarize** (Apple Developer ID)
+- ✅ **DMG smoke testing** (mount, verify signature, check version)
+- ✅ **Sparkle appcast generation** (EdDSA signatures)
+- ✅ **GitHub release creation** (idempotent, can re-run)
+- ✅ **Homebrew cask update** (via GitHub API)
+- ✅ **Network retry logic** (3 attempts, 5s backoff)
+- ✅ **Cache propagation waits** (GitHub Pages, Homebrew)
+- ✅ **Automated verification** (8+ critical checks)
+- ✅ **Auto-rollback prompt** (if verification fails)
+- ✅ **Structured logging** (saved to /tmp/release-VERSION-timestamp.log)
+
+### `deploy verify VERSION`
+Post-deployment verification (runs automatically after release):
+- GitHub Release assets uploaded and downloadable
+- Appcast has correct version, EdDSA signature, release URLs
+- Documentation links updated (README.md, docs/index.html)
+- Homebrew cask updated to correct version
+- DMG downloadable and correct size
+- SHA256 checksums match
+- Git tags exist locally and remotely
+
+### `deploy changelog [FROM_TAG]`
+Generate CHANGELOG from conventional commits:
+- Auto-detects last tag if not specified
+- Extracts feat/fix/perf/refactor/docs commits
+- Groups into CHANGELOG sections (Added, Fixed, Performance, etc.)
+- Shows commit breakdown by category
+- Offers to save snippet file for easy copying
+
+### Emergency Rollback
+
+If deployment fails or has issues, use the separate rollback tool:
+
+```bash
+tools/release/rollback-release.sh VERSION
+
+# What it does:
+# - Deletes GitHub Release and git tags (local + remote)
+# - Reverts version-related commits
+# - Provides guidance for Homebrew cask cleanup
+# - Interactive confirmations for safety
+```
+
+## Legacy Commands (Still Work)
+
+The individual scripts are still available for backward compatibility:
+
+```bash
+# Old way (still works)
+tools/release/bump-version.sh patch
+VERSION=2.7.2 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
+tools/release/verify-deployment.sh 2.7.2
+
+# New unified way (recommended)
+tools/release/deploy bump patch
+tools/release/deploy release 2.7.2
+tools/release/deploy verify 2.7.2
 ```
 
 Outputs:
@@ -28,13 +115,117 @@ Outputs:
 
 If any step fails, see “Troubleshooting” below.
 
+## Deployment Features
+
+### 1. Comprehensive Dependency Validation
+All required tools are checked upfront:
+- ✅ xcodebuild, git, gh, python3, curl, shasum, codesign, hdiutil, security
+- ✅ Python packaging module for semver comparison
+- ✅ GitHub CLI authentication status
+- ✅ Apple notary profile configuration
+
+**Benefit**: Fails fast with clear error messages instead of mysterious mid-deployment failures
+
+### 2. Enhanced Pre-Flight Validation
+Before building, the system validates:
+- ✅ **Git state**: Clean working directory, on main branch, synced with origin
+- ✅ **Version validation**: Tag doesn't exist, semver comparison with previous version
+- ✅ **Build number**: Must increment for Sparkle (critical!)
+- ✅ **CHANGELOG**: Section exists for version with correct date format
+
+**Benefit**: Catches errors before the 10-minute build/notarize cycle
+
+### 3. Pre-Deployment Smoke Testing (NEW!)
+After DMG creation, before upload:
+- ✅ **DMG verification**: Validates structure with `hdiutil verify`
+- ✅ **Mount test**: Mounts DMG to verify it's bootable
+- ✅ **App bundle check**: Ensures .app exists in DMG
+- ✅ **Code signature**: Validates with `codesign --verify --deep --strict`
+- ✅ **Version check**: Confirms app version matches expected
+
+**Benefit**: Prevents uploading corrupted or incorrectly signed DMGs
+
+### 4. Network Retry Logic
+All network operations retry automatically (3 attempts, 5s backoff):
+- GitHub Release creation/upload
+- Homebrew cask updates via GitHub API
+- Git push operations (appcast, docs)
+
+**Benefit**: Resilient to transient network failures
+
+### 5. Improved Cache Propagation Waits
+Smart timeout-based waiting instead of hardcoded loops:
+- **GitHub Pages**: Waits up to 120s for appcast.xml to be live
+- **Homebrew cask**: Waits up to 40s for cask version to propagate
+- Shows elapsed time when cache propagates
+- Non-blocking warnings if timeout exceeded
+
+**Benefit**: Prevents race conditions, provides better feedback
+
+### 6. Idempotent Operations
+Safe to re-run if deployment partially fails:
+- GitHub release checks if release exists before creating
+- Asset uploads use `--clobber` flag to replace existing
+- All operations logged with structured timestamps
+
+**Benefit**: Can recover from partial failures by re-running
+
+### 7. Automated Verification
+After deployment, comprehensive checks run automatically:
+- GitHub Release assets exist and are downloadable
+- Appcast has correct version, EdDSA signature, and URLs
+- Validates README/docs download links
+- Checks Homebrew cask version matches
+- Verifies SHA256 checksums
+- Exits with error if any check fails
+
+**Benefit**: Catches deployment issues immediately
+
+### 8. Auto-Rollback on Failure (NEW!)
+If verification fails, the system prompts for automatic rollback:
+- ✅ Offers to run rollback script automatically (default: Yes)
+- ✅ Deletes GitHub Release and git tags
+- ✅ Reverts version-related commits
+- ✅ Provides clear error logging
+- ✅ Respects `SKIP_CONFIRM=1` flag (shows manual command instead)
+
+**Benefit**: Fast recovery from failed deployments
+
+### 9. Structured Logging
+All operations log to timestamped files:
+- Format: `/tmp/<subcommand>-<VERSION>-<timestamp>.log`
+- Includes ISO timestamps and severity levels
+- Captures all output for debugging
+- Example: `/tmp/release-2.8.0-1732652300.log`
+
+**Benefit**: Easy to debug failed deployments, share logs with team
+
+### 10. CHANGELOG Automation (NEW!)
+Generate CHANGELOG entries from conventional commits:
+- ✅ Extracts commits by type: feat/fix/perf/refactor/docs
+- ✅ Groups into CHANGELOG sections (Added, Fixed, Performance, etc.)
+- ✅ Shows commit breakdown by category
+- ✅ Offers to save snippet file for easy copying
+- ✅ Auto-detects last tag if not specified
+
+**Benefit**: No more manual CHANGELOG writing, consistent formatting
+
+## Rollback Capability
+`rollback-release.sh` provides fast recovery:
+- Deletes GitHub Release and git tags (local + remote)
+- Reverts appcast/README/docs commits
+- Checks Homebrew cask status
+- Interactive confirmations for destructive operations
+
+**Benefit**: MTTR (mean time to recover) reduced from hours to minutes
+
 ### Agent Execution (Codex CLI)
 - The Agent can and will run xcodebuild, codesign, notarytool, hdiutil, and gh with escalated permissions when you request a release.
-- Certificates and notary profile are assumed to be installed on the system Keychain (per this project’s setup). The Agent won’t prompt for them each time.
+- Certificates and notary profile are assumed to be installed on the system Keychain (per this project's setup). The Agent won't prompt for them each time.
 - To avoid repeated questions, prefer SKIP_CONFIRM=1 and provide VERSION/TEAM_ID/DEV_ID_APP/NOTARY_PROFILE explicitly.
 - The Agent will request elevation when necessary (build/sign/notarize/upload/cask writes) and proceed non‑interactively.
 
-## Pre-flight Checklist
+## Pre-flight Checklist (Mostly Automated Now)
 
 Complete this checklist **before** running the deployment script. Answer all questions and verify all conditions.
 
