@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Analytics feature provides insights into AI agent usage patterns across Codex, Claude Code, and Gemini CLIs.
+The Analytics feature provides insights into AI agent usage patterns across Codex, Claude Code, Gemini, and OpenCode sessions.
 
 ## Architecture
 
@@ -58,6 +58,7 @@ Uses consistent brand colors from main app:
 - **Codex**: `Color.blue` (system blue)
 - **Claude**: `Color(red: 204/255, green: 121/255, blue: 90/255)` (terracotta)
 - **Gemini**: `Color.teal` (system teal)
+- **OpenCode**: `Color.purple`
 
 Color utilities in `AnalyticsColors.swift` provide:
 ```swift

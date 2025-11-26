@@ -56,6 +56,8 @@ extension Color {
             return .agentClaude
         } else if lower.contains("gemini") {
             return .agentGemini
+        } else if lower.contains("opencode") {
+            return .agentOpenCode
         } else {
             return .accentColor
         }
@@ -71,6 +73,8 @@ extension Color {
                 return .agentClaudeGray
             } else if lower.contains("gemini") {
                 return .agentGeminiGray
+            } else if lower.contains("opencode") {
+                return .agentOpenCodeGray
             } else {
                 return .secondary
             }

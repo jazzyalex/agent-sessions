@@ -9,6 +9,7 @@ actor AnalyticsIndexer {
     private let codex = CodexSessionDiscovery()
     private let claude = ClaudeSessionDiscovery()
     private let gemini = GeminiSessionDiscovery()
+    private let opencode = OpenCodeSessionDiscovery()
 
     init(db: IndexDB) {
         self.db = db
@@ -33,7 +34,8 @@ actor AnalyticsIndexer {
         let sources: [(String, () -> [URL])] = [
             ("codex", { self.codex.discoverSessionFiles() }),
             ("claude", { self.claude.discoverSessionFiles() }),
-            ("gemini", { self.gemini.discoverSessionFiles() })
+            ("gemini", { self.gemini.discoverSessionFiles() }),
+            ("opencode", { self.opencode.discoverSessionFiles() })
         ]
 
         for (source, enumerate) in sources {
@@ -125,6 +127,8 @@ actor AnalyticsIndexer {
             return await Task.detached(priority: .utility) { ClaudeSessionParser.parseFileFull(at: url) }.value
         case "gemini":
             return await Task.detached(priority: .utility) { GeminiSessionParser.parseFileFull(at: url) }.value
+        case "opencode":
+            return await Task.detached(priority: .utility) { OpenCodeSessionParser.parseFileFull(at: url) }.value
         default:
             return nil
         }
