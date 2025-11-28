@@ -93,12 +93,37 @@ struct PreferencesView: View {
     @State var geminiVersionString: String? = nil
     @State var geminiResolvedPath: String? = nil
     @State var geminiProbeDebounce: DispatchWorkItem? = nil
+    // Gemini Sessions directory override
+    @AppStorage("GeminiSessionsRootOverride") var geminiSessionsPath: String = ""
+    @State var geminiSessionsPathValid: Bool = true
+    @State var geminiSessionsPathDebounce: DispatchWorkItem? = nil
+
+    // OpenCode probe state
+    @ObservedObject var opencodeSettings = OpenCodeSettings.shared
+    @State var opencodeProbeState: ProbeState = .idle
+    @State var opencodeVersionString: String? = nil
+    @State var opencodeResolvedPath: String? = nil
+    @State var opencodeProbeDebounce: DispatchWorkItem? = nil
+    // OpenCode Sessions directory override
+    @AppStorage("OpenCodeSessionsRootOverride") var opencodeSessionsPath: String = ""
+    @State var opencodeSessionsPathValid: Bool = true
+    @State var opencodeSessionsPathDebounce: DispatchWorkItem? = nil
 
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
-            List(visibleTabs, selection: $selectedTab) { tab in
-                Label(tab.title, systemImage: tab.iconName)
-                    .tag(tab)
+            List(selection: $selectedTab) {
+                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI }, id: \.self) { tab in
+                    Label(tab.title, systemImage: tab.iconName)
+                        .tag(tab)
+                }
+                Divider()
+                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI], id: \.self) { tab in
+                    Label(tab.title, systemImage: tab.iconName)
+                        .tag(tab)
+                }
+                Divider()
+                Label(PreferencesTab.about.title, systemImage: PreferencesTab.about.iconName)
+                    .tag(PreferencesTab.about)
             }
             // Fix the sidebar width to avoid horizontal jumps when switching panes
             .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)
@@ -200,6 +225,8 @@ struct PreferencesView: View {
                 codexCLITab
             case .claudeResume:
                 claudeResumeTab
+            case .opencode:
+                openCodeTab
             case .geminiCLI:
                 geminiCLITab
             case .about:
@@ -500,6 +527,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case unified
     case codexCLI
     case claudeResume
+    case opencode
     case geminiCLI
     case about
 
@@ -514,6 +542,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .unified: return "Unified Window"
         case .codexCLI: return "Codex CLI"
         case .claudeResume: return "Claude Code"
+        case .opencode: return "OpenCode"
         case .geminiCLI: return "Gemini CLI"
         case .about: return "About"
         }
@@ -527,7 +556,8 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .menuBar: return "menubar.rectangle"
         case .unified: return "square.grid.2x2"
         case .codexCLI: return "terminal"
-        case .claudeResume: return "chevron.left.slash.chevron.right"
+        case .claudeResume: return "c.square"
+        case .opencode: return "chevron.left.slash.chevron.right"
         case .geminiCLI: return "g.circle"
         case .about: return "info.circle"
         }
@@ -535,8 +565,8 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 }
 
 private extension PreferencesView {
-    // Sidebar order: General → Codex CLI → Claude Code → Gemini CLI → Unified Window → Usage Tracking → About
-    var visibleTabs: [PreferencesTab] { [.general, .codexCLI, .claudeResume, /*.geminiCLI,*/ .unified, .usageTracking, .usageProbes, .menuBar, .about] }
+    // Sidebar order: General → Unified Window → Usage Tracking → Usage Probes → Menu Bar → [4 Agents] → About
+    var visibleTabs: [PreferencesTab] { [.general, .unified, .usageTracking, .usageProbes, .menuBar, .codexCLI, .claudeResume, .opencode, .geminiCLI, .about] }
 }
 
 // MARK: - Probe helpers
@@ -623,6 +653,8 @@ extension PreferencesView {
             if probeVersion == nil && probeState != .probing { probeCodex() }
         case .claudeResume:
             if claudeVersionString == nil && claudeProbeState != .probing { probeClaude() }
+        case .opencode:
+            if opencodeVersionString == nil && opencodeProbeState != .probing { probeOpenCode() }
         case .geminiCLI:
             if geminiVersionString == nil && geminiProbeState != .probing { probeGemini() }
         case .menuBar, .usageProbes, .general, .unified, .about:

@@ -338,7 +338,7 @@ extension PreferencesView {
                                 Text("Gemini CLI not found")
                                     .font(.caption)
                                     .fontWeight(.medium)
-                                Text("Install via npm: npm install -g @google/generative-ai-cli")
+                                Text("Binary name: gemini · Install via npm: npm install -g @google/gemini-cli")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -388,8 +388,92 @@ extension PreferencesView {
                 }
             }
 
-            // Usage Tracking moved to Unified Window tab.
+            // Sessions Directory (Gemini)
+            sectionHeader("Sessions Directory")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    TextField("Custom path (optional)", text: $geminiSessionsPath)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 360)
+                        .onSubmit {
+                            validateGeminiSessionsPath()
+                            commitGeminiSessionsPathIfValid()
+                        }
+                        .onChange(of: geminiSessionsPath) { _, _ in
+                            validateGeminiSessionsPath()
+                            geminiSessionsPathDebounce?.cancel()
+                            let work = DispatchWorkItem { commitGeminiSessionsPathIfValid() }
+                            geminiSessionsPathDebounce = work
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                        }
+                        .help("Override the Gemini sessions directory. Leave blank to use the default location")
+
+                    Button(action: pickGeminiSessionsFolder) {
+                        Label("Choose…", systemImage: "folder")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Browse for a directory to store Gemini session logs")
+                }
+
+                if !geminiSessionsPathValid {
+                    Label("Path must point to an existing folder", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                Text("Default: ~/.gemini")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
         }
+    }
+
+    // MARK: - Gemini Pickers
+
+    func pickGeminiSessionsFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Select Gemini Sessions Directory"
+        panel.message = "Choose a folder where Gemini session logs are stored"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+
+        // Start at current override or default
+        if !geminiSessionsPath.isEmpty {
+            let expanded = (geminiSessionsPath as NSString).expandingTildeInPath
+            panel.directoryURL = URL(fileURLWithPath: expanded)
+        } else if let homeDir = FileManager.default.homeDirectoryForCurrentUser as URL? {
+            panel.directoryURL = homeDir.appendingPathComponent(".gemini")
+        }
+
+        if panel.runModal() == .OK, let url = panel.url {
+            geminiSessionsPath = url.path
+            validateGeminiSessionsPath()
+            commitGeminiSessionsPathIfValid()
+        }
+    }
+
+    // MARK: - Gemini Path Validation
+
+    func validateGeminiSessionsPath() {
+        guard !geminiSessionsPath.isEmpty else {
+            geminiSessionsPathValid = true
+            return
+        }
+        let expanded = (geminiSessionsPath as NSString).expandingTildeInPath
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir)
+        geminiSessionsPathValid = exists && isDir.boolValue
+    }
+
+    func commitGeminiSessionsPathIfValid() {
+        guard geminiSessionsPathValid else { return }
+        // The @AppStorage binding will automatically persist the value
+        // GeminiSessionIndexer listens to UserDefaults changes and triggers its own refresh
     }
 
 }
