@@ -230,8 +230,12 @@ extract_pct_and_reset() {
     }
   ')
 
-  # Extract percentage with "remaining" semantics (post Nov 24, 2025)
-  # Claude /usage now shows "X% left" directly - use as-is
+  # Extract percentage with unified "remaining" semantics.
+  # Claude /usage may show either:
+  #   - "83% used"
+  #   - "17% left" / "17% remaining"
+  # We always normalize to "percent left" so the app can
+  # treat Codex and Claude consistently.
   local pct
   pct=$(echo "$block" | awk '
     BEGIN { pct = "" }
@@ -239,7 +243,17 @@ extract_pct_and_reset() {
       # Skip Resets line
       if (/Resets/) next
 
-      # Pattern 1: "% left" or "% remaining" (case-insensitive) - use as-is
+      # Pattern 1: Explicit "X% used" → convert to remaining
+      if (tolower($0) ~ /% *used/) {
+        if (match($0, /[0-9]+/)) {
+          pct = 100 - substr($0, RSTART, RLENGTH)
+          if (pct < 0) pct = 0
+          if (pct > 100) pct = 100
+          exit
+        }
+      }
+
+      # Pattern 2: "% left" or "% remaining" (case-insensitive) - already remaining
       if (tolower($0) ~ /% *(left|remaining)/) {
         if (match($0, /[0-9]+/)) {
           pct = substr($0, RSTART, RLENGTH)
@@ -247,7 +261,8 @@ extract_pct_and_reset() {
         }
       }
 
-      # Pattern 2: Fallback - any line with "N%" format
+      # Pattern 3: Fallback - any line with "N%" format.
+      # Assume this already represents "percent left".
       if (pct == "" && match($0, /[0-9]+%/)) {
         pct = substr($0, RSTART, RLENGTH-1)
         exit

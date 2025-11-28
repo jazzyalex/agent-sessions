@@ -89,6 +89,14 @@ struct UsageMenuBarLabel: View {
         let fiveColor: Color = .primary
         let weekColor: Color = .primary
 
+        let mode = UsageDisplayMode.current()
+        let leftFive = max(0, min(100, five))
+        let leftWeek = max(0, min(100, week))
+        let barFive = mode.barUsedPercent(fromLeft: leftFive)
+        let barWeek = mode.barUsedPercent(fromLeft: leftWeek)
+        let displayFive = mode.numericPercent(fromLeft: leftFive)
+        let displayWeek = mode.numericPercent(fromLeft: leftWeek)
+
         // Create prefix with special styling applied via AttributedString
         let prefixText: Text = {
             if let pfx = prefix {
@@ -103,22 +111,22 @@ struct UsageMenuBarLabel: View {
 
         switch style {
         case .bars:
-            let p5 = segmentBar(for: five)
-            let pw = segmentBar(for: week)
+            let p5 = segmentBar(for: barFive)
+            let pw = segmentBar(for: barWeek)
             let left = Text("5h ").foregroundColor(fiveColor)
                 + Text(p5).foregroundColor(fiveColor)
-                + Text(" \(five)%").foregroundColor(fiveColor)
+                + Text(" \(displayFive)%").foregroundColor(fiveColor)
             let right = Text("Wk ").foregroundColor(weekColor)
                 + Text(pw).foregroundColor(weekColor)
-                + Text(" \(week)%").foregroundColor(weekColor)
+                + Text(" \(displayWeek)%").foregroundColor(weekColor)
             switch scope {
             case .fiveHour: return prefixText + left
             case .weekly: return prefixText + right
             case .both: return prefixText + left + Text("  ") + right
             }
         case .numbers:
-            let left = Text("5h \(five)%").foregroundColor(fiveColor)
-            let right = Text("Wk \(week)%").foregroundColor(weekColor)
+            let left = Text("5h \(displayFive)%").foregroundColor(fiveColor)
+            let right = Text("Wk \(displayWeek)%").foregroundColor(weekColor)
             switch scope {
             case .fiveHour: return prefixText + left
             case .weekly: return prefixText + right
@@ -354,14 +362,17 @@ private func resetLine(label: String, percent: Int, reset: String) -> Attributed
     var labelAttr = AttributedString(label + " ")
     labelAttr.font = .system(size: 13, weight: .semibold)
     line.append(labelAttr)
+    let mode = UsageDisplayMode.current()
+    let clampedLeft = max(0, min(100, percent))
+    // Bar always shows "used" (filled = used) for consistency
+    let percentUsed = mode.barUsedPercent(fromLeft: clampedLeft)
+    let displayPercent = mode.numericPercent(fromLeft: clampedLeft)
 
-    // Bar shows "used" (filled = used), but percent value is "remaining"
-    let percentUsed = 100 - percent
     var barAttr = AttributedString(inlineBar(percentUsed) + " ")
     barAttr.font = .system(size: 13, weight: .regular, design: .monospaced)
     line.append(barAttr)
 
-    var percentAttr = AttributedString("\(percent)% left  ")
+    var percentAttr = AttributedString("\(displayPercent)% \(mode.suffix)  ")
     percentAttr.font = .system(size: 13, weight: .regular, design: .monospaced)
     line.append(percentAttr)
 

@@ -58,6 +58,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.menuBarStyle) var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage(PreferencesKey.stripShowResetTime) var stripShowResetTime: Bool = false
     @AppStorage(PreferencesKey.stripMonochromeMeters) var stripMonochromeGlobal: Bool = false
+    @AppStorage(PreferencesKey.usageDisplayMode) var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.hideZeroMessageSessions) var hideZeroMessageSessionsPref: Bool = true
     @AppStorage(PreferencesKey.hideLowMessageSessions) var hideLowMessageSessionsPref: Bool = true
     // Per-agent polling intervals

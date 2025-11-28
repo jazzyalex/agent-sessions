@@ -109,6 +109,7 @@ private struct UsageMeter: View {
     let eventTimestamp: Date?
     @AppStorage("StripShowResetTime") private var showResetTime: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
+     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
 
     var body: some View {
         let includeReset = showResetTime
@@ -119,17 +120,21 @@ private struct UsageMeter: View {
             ? UsageStaleThresholds.outdatedCopy
             : formattedReset(reset)
 
+        let mode = UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left
+        let leftPercent = max(0, min(100, percent))
+        let barUsedPercent = mode.barUsedPercent(fromLeft: leftPercent)
+        let labelPercent = mode.numericPercent(fromLeft: leftPercent)
+
         HStack(spacing: UsageMeterLayout.itemSpacing) {
             Text(title)
                 .font(.footnote).bold()
                 .frame(width: UsageMeterLayout.titleWidth, alignment: .leading)
-            // Progress bar shows "used" (filled portion = used)
-            let percentUsed = 100 - percent
-            ProgressView(value: Double(percentUsed), total: 100)
+            // Progress bar shows "used" (filled portion = used) in both modes
+            ProgressView(value: Double(barUsedPercent), total: 100)
                 .tint(stripMonochrome ? .secondary : .accentColor)
                 .frame(width: UsageMeterLayout.progressWidth)
-            // Label shows "remaining"
-            Text("\(percent)% left")
+            // Label switches between "left" and "used" depending on mode
+            Text("\(labelPercent)% \(mode.suffix)")
                 .font(.footnote)
                 .monospacedDigit()
                 .frame(width: UsageMeterLayout.percentWidth, alignment: .trailing)

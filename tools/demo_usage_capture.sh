@@ -28,11 +28,11 @@ echo ""
 echo ""
 
 # Demo 3: Extract specific field with jq (if available)
-echo "[Demo 3] Extract specific field (session percentage)"
+echo "[Demo 3] Extract specific field (session percent left)"
 if command -v jq &>/dev/null; then
-    echo "$ ./claude_usage_capture.sh | jq -r '.session_5h.pct_used'"
+    echo "$ ./claude_usage_capture.sh | jq -r '.session_5h.pct_left'"
     echo ""
-    "$SCRIPT" 2>/dev/null | jq -r '.session_5h.pct_used'
+    "$SCRIPT" 2>/dev/null | jq -r '.session_5h.pct_left'
     echo ""
 else
     echo "(jq not installed - skipping)"
