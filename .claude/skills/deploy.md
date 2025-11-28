@@ -26,8 +26,13 @@ Ask the user: "Would you like to proceed with the deployment?"
 ### Step 2: Determine Version Bump
 Ask: "What type of release is this?"
 - **patch** - Bug fixes, small changes (2.7.1 → 2.7.2)
-- **minor** - New features, non-breaking changes (2.7.0 → 2.8.0)
-- **major** - Breaking changes (2.7.0 → 3.0.0)
+- **minor** - New features, non-breaking changes (2.7 → 2.8)
+- **major** - Breaking changes (2.7 → 3.0)
+
+**IMPORTANT**: Version format follows semantic versioning with a twist:
+- Use `X.Y` for minor/major releases (e.g., 2.8, 3.0)
+- Use `X.Y.Z` only for patch releases when Z is not zero (e.g., 2.8.1, 2.8.2)
+- Never use `X.Y.0` - always omit the `.0`
 
 Then run:
 ```bash
@@ -60,7 +65,7 @@ Then run:
 tools/release/deploy release VERSION
 ```
 
-Replace VERSION with the actual version (e.g., 2.8.0).
+Replace VERSION with the actual version (e.g., 2.8 for minor, 2.8.1 for patch).
 
 This will execute:
 1. ✅ Comprehensive dependency validation
@@ -145,7 +150,7 @@ The user can set these to skip prompts:
 
 Example:
 ```bash
-SKIP_CONFIRM=1 tools/release/deploy release 2.8.0
+SKIP_CONFIRM=1 tools/release/deploy release 2.8
 ```
 
 ## Your Role
