@@ -3,46 +3,34 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.7.1</title>
-            <pubDate>Tue, 25 Nov 2025 22:45:16 -0800</pubDate>
+            <title>2.8</title>
+            <pubDate>Thu, 27 Nov 2025 18:37:35 -0800</pubDate>
             <description><![CDATA[
-                <h2>What's New in 2.7.1</h2>
+                <h2>What's New in 2.8</h2>
 
-<h3>Critical Fixes</h3>
+🦃 **My thanks to the OpenCode community - Agent Sessions now supports OpenCode!** (Resume and usage tracking are on the roadmap.)
 
-<p>**Codex Usage Tracking**: Added full support for new Codex usage backend format. The usage parser now handles both legacy local usage events and the new backend-based usage reporting system, ensuring accurate rate limit tracking across all Codex CLI versions. Automatic fallback to legacy format for older Codex versions.</p>
+<h3>Added</h3>
+<p>**OpenCode Support**: Full session browser integration with Claude Code OpenCode sessions, including transcript viewing, analytics, and favorites. Sessions appear in the unified list with source filtering.</p>
+<p>Preferences → Claude Code: Sessions Directory override to choose a custom Claude sessions root. The Claude indexer honors this path and refreshes automatically when changed. Defaults to `~/.claude` when unset.</p>
+<p>Preferences → Usage Probes: New dedicated pane consolidating Claude and Codex terminal probe settings (auto-probe, cleanup, and one‑click delete), with clear safety messaging.</p>
 
-<h3>Technical</h3>
+<h3>Changed</h3>
+<p>Preferences → Usage Tracking: Simplified and HIG‑aligned. Added per‑agent master toggles (Enable Codex tracking, Enable Claude tracking) independent of strip/menu bar visibility. Moved all probe controls into the new Usage Probes pane. Reduced vertical scrolling and clarified refresh interval and strip options.</p>
+<p>Usage Tracking: Separate refresh intervals per agent. Codex offers 1/5/15 minutes (default 5m). Claude now offers 3/15/30 minutes (default 15m) and `/usage` probes no longer send user messages, so they don't consume tokens.</p>
+<p>Usage probes run directly on their configured cadence. The legacy `UsageProbeGate` visibility/budget guard has been removed so Claude and Codex refreshers no longer stall after 24 attempts.</p>
+<p>Website: Updated Open Graph and Twitter Card tags to use the `AS-social-media.png` preview so shared links render the large social image correctly.</p>
 
-<p>**Usage Format Migration**: Enhanced `CodexUsageParser` with dual format support to seamlessly transition between Codex usage reporting systems without requiring user intervention or configuration changes.
-</p>
-<h3>Major Features</h3>
-
-<p>**New Color View**: Terminal-inspired view with CLI-style colorized output, role-based filtering (User, Agent, Tools, Errors), and navigation shortcuts. Replaces the old "Terminal" mode with enhanced visual hierarchy and interactive filtering.</p>
-<p>**Enhanced Transcript Modes**: Renamed "Transcript" to "Plain" view for clarity. Added improved JSON viewer with syntax highlighting and better readability for session inspection.</p>
-<p>**View Mode Switching**: Quick toggle between Plain, Color, and JSON views with Cmd+Shift+T keyboard shortcut.</p>
-
-<h3>Critical Fixes</h3>
-
-<p>**Claude Usage Tracking**: Fixed compatibility with Claude Code's new usage format change ("% left" vs "% used"). The usage probe now supports both old and new formats with automatic percentage inversion, ensuring accurate limit tracking across all Claude CLI versions.</p>
-<p>**Script Consolidation**: Unified usage capture scripts via symlink to prevent future divergence. Single source of truth in `AgentSessions/Resources/`.</p>
-
-<h3>Improvements</h3>
-
-<p>**Color View Navigation**: Added role-specific navigation buttons with circular pill styling and tint-aware colors. Jump between user messages, tool calls, or errors with keyboard shortcuts.</p>
-<p>**NSTextView Renderer**: Implemented high-performance text rendering with native macOS text selection and smooth scrolling.</p>
-<p>**JSON View**: Redacted `encrypted_content` fields for cleaner inspection. Improved syntax coloring stability across mode toggles.</p>
-<p>**Debug Mode**: Added `CLAUDE_TUI_DEBUG` environment variable for troubleshooting usage capture issues with raw output dumps.</p>
-
-<h3>Technical</h3>
-
-<p>**Flexible Pattern Matching**: Usage probe now tries multiple patterns ("% left", "% used", "%left", "%used") with fallback to any "N%" format. Future-proofed against CLI format changes.</p>
-<p>**Enhanced Testing**: Comprehensive test suite for both old and new Claude usage formats with validation of percentage inversion logic.</p>
+<h3>Fixed</h3>
+<p>Usage Probes: Codex and Claude cleanup actions once again emit status notifications for disabled/unsafe exits and successfully delete Codex probe sessions that log their working directory inside nested payload data.</p>
+<p>Usage (Codex): Stale indicator now reflects the age of the last rate‑limit capture only. Recent UI refreshes or token‑only events no longer mask outdated reset times; the strip/menu will show "Stale data" until fresh `rate_limits` arrive.</p>
+<p>Claude Usage: Added a central probe gate that suppresses `/usage` probes when the menu bar limits are off and the main window isn't visible, or when the screen is inactive (sleep/screensaver/locked).</p>
+<p>Claude Usage Probes: Cleanup now verifies every session file's `cwd/project` matches the dedicated probe working directory, requires tiny (≤5 event) user/assistant-only transcripts, and aborts deletion when uncertain.</p>
             ]]></description>
-            <sparkle:version>10</sparkle:version>
-            <sparkle:shortVersionString>2.7.1</sparkle:shortVersionString>
+            <sparkle:version>11</sparkle:version>
+            <sparkle:shortVersionString>2.8</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.7.1/AgentSessions-2.7.1.dmg" length="7512459" type="application/octet-stream" sparkle:edSignature="YhgcVIFr1LUHnl0mr1aXwQKWty38n5yHyt/6o4aQehbNETiQhf1O3HLQPYQIm4+jlew038JkfYswCmWYZS3nDQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.8/AgentSessions-2.8.dmg" length="7694709" type="application/octet-stream" sparkle:edSignature="enzjFn9wtVEzpIgcbLxRqa1UEdGE6HEQ5o87sZalzh0B9LfCdp24kTzr47sIVGQAqeBAeI9Ysj1LUMucCIWQBA=="/>
         </item>
     </channel>
 </rss>
