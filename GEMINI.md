@@ -4,7 +4,7 @@ This document provides context for the Gemini Code Assistant to understand the c
 
 ## Project Overview
 
-This project is a native macOS application named "Agent Sessions". It provides a unified interface for browsing, searching, and resuming sessions from three different AI command-line tools: Codex CLI, Claude Code, and Gemini CLI.
+This project is a native macOS application named "Agent Sessions". It provides a unified interface for browsing, searching, and resuming sessions from four different AI command-line tools: Codex CLI, Claude Code, Gemini CLI, and OpenCode.
 
 The application is built using **Swift** and **SwiftUI**. It is a local-first application, meaning it reads session data directly from the local filesystem without any cloud integration. The core functionality revolves around indexing and displaying session data from different sources in a unified user interface.
 

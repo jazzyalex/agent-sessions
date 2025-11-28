@@ -55,7 +55,9 @@ struct ClaudeUsageStripView: View {
             if status.tmuxUnavailable {
                 showTmuxHelp = true
             } else if !status.isUpdating {
-                status.refreshNow()
+                // For Claude, a double-click triggers a hard /usage probe
+                // without showing the diagnostics dialog.
+                ClaudeUsageModel.shared.hardProbeNowDiagnostics { _ in }
             }
         }
         .help(makeTooltip())

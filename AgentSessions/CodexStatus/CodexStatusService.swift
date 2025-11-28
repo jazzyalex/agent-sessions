@@ -243,7 +243,13 @@ final class CodexUsageModel: ObservableObject {
             guard let self = self else { return }
             if let svc = self.service {
                 let diag = await svc.forceProbeNow()
-                await MainActor.run { completion(diag) }
+                await MainActor.run {
+                    if diag.success {
+                        self.lastSuccessAt = Date()
+                        setFreshUntil(for: .codex, until: Date().addingTimeInterval(60 * 60))
+                    }
+                    completion(diag)
+                }
                 return
             }
             let handler: @Sendable (CodexUsageSnapshot) -> Void = { snapshot in
@@ -585,19 +591,31 @@ actor CodexStatusService {
         availabilityHandler(false)
 
         if let summary = probeLatestRateLimits(roots: roots) {
-            var s = snapshot
-            if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
-            if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
-            s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
-            s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
-            lastFiveHourResetDate = summary.fiveHour.resetAt
-            s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
-            s.eventTimestamp = summary.eventTimestamp
-#if DEBUG
-            if let f = summary.sourceFile { print("[CodexUsage] Parsed rate_limits from: \(f.path)") }
-#endif
-            snapshot = s
-            updateHandler(snapshot)
+            // Do not regress to older data after a successful /status probe.
+            // Only apply log-derived snapshots when they are at least as new
+            // as the current in-memory snapshot, or when we have no timestamp.
+            let previousEvent = snapshot.eventTimestamp
+            let newEvent = summary.eventTimestamp
+            let shouldApply: Bool
+            if let newEvent, let previousEvent {
+                shouldApply = newEvent >= previousEvent
+            } else {
+                // When either side lacks a timestamp, prefer applying the update.
+                shouldApply = true
+            }
+
+            if shouldApply {
+                var s = snapshot
+                if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
+                if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
+                s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
+                s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
+                lastFiveHourResetDate = summary.fiveHour.resetAt
+                s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
+                s.eventTimestamp = summary.eventTimestamp
+                snapshot = s
+                updateHandler(snapshot)
+            }
         }
 
         // Optional: run a one-shot tmux /status probe only when stale (manual or auto)
@@ -630,6 +648,11 @@ actor CodexStatusService {
 
         // Additional gates for automatic/background path only
         if !userInitiated {
+            // If a recent hard /status probe ran, respect its freshness TTL and
+            // avoid firing an additional automatic probe until it expires.
+            if let ttl = freshUntil(for: .codex, now: now), ttl > now {
+                return
+            }
             let allowAuto = UserDefaults.standard.bool(forKey: "CodexAllowStatusProbe")
             guard allowAuto else { return }
             guard visible else { return }

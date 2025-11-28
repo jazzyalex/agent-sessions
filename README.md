@@ -9,7 +9,7 @@
 </td>
 <td>
 
- **Unified session browser for Codex CLI, Claude Code, and Gemini CLI (read‑only).**  
+ **Unified session browser for Codex CLI, Claude Code, Gemini CLI, and OpenCode (read‑only).**  
  Search, browse, and resume any past AI-coding session in a single local-first macOS app.
 
 </td>
@@ -130,7 +130,7 @@ Right-click any Codex session → **Show Git Context** to open the inspector.
 
 ### Local, Private & Safe
 All processing runs on your Mac.  
-Reads `~/.codex/sessions`, `~/.claude/sessions`, and Gemini CLI checkpoints under `~/.gemini/tmp` (read‑only).  
+Reads `~/.codex/sessions`, `~/.claude/sessions`, Gemini CLI checkpoints under `~/.gemini/tmp`, and OpenCode sessions under `~/.local/share/opencode/storage/session` (all read‑only).  
 No cloud uploads or telemetry — **read‑only by design.**
 
 ---

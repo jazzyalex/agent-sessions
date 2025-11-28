@@ -137,11 +137,11 @@ extension PreferencesView {
                     Toggle("1–2 messages", isOn: $hideLowMessageSessionsPref)
                         .onChange(of: hideLowMessageSessionsPref) { _, _ in indexer.recomputeNow() }
                         .help("Hide sessions with only one or two messages")
-                    Toggle("Tool calls (Codex only)", isOn: Binding(
+                    Toggle("Tool calls (Codex & OpenCode)", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.hasCommandsOnly) },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.hasCommandsOnly) }
                     ))
-                    .help("Show only Codex sessions that contain recorded tool/command calls. Claude and Gemini are excluded when enabled.")
+                    .help("Show only Codex and OpenCode sessions that contain recorded tool/command calls. Claude and Gemini are excluded when enabled.")
                 }
 
                 // CLI toolbar filter visibility

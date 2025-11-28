@@ -590,7 +590,7 @@ struct UnifiedSessionsView: View {
             }
             .keyboardShortcut("r", modifiers: [.command, .control])
             .disabled(selectedSession == nil || !(selectedSession?.source == .codex || selectedSession?.source == .claude))
-            .help("Resume the selected session in its original CLI (⌃⌘R)")
+            .help("Resume the selected Codex or Claude session in its original CLI (⌃⌘R). Gemini and OpenCode sessions are read-only.")
 
             Button(action: { if let s = selectedSession { openDir(s) } }) { Label("Open Working Directory", systemImage: "folder") }
                 .keyboardShortcut("o", modifiers: [.command, .shift])

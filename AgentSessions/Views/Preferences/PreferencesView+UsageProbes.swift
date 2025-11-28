@@ -294,34 +294,54 @@ extension PreferencesView {
         }
         .onReceive(NotificationCenter.default.publisher(for: ClaudeProbeProject.didRunCleanupNotification)) { note in
             guard let info = note.userInfo as? [String: Any], let status = info["status"] as? String else { return }
-            var lines: [String] = []
-            switch status {
-            case "success":
-                let deleted = (info["deleted"] as? Int) ?? 0
-                let skipped = (info["skipped"] as? Int) ?? 0
-                if let ts = info["oldest_ts"] as? Double {
-                    let d = Date(timeIntervalSince1970: ts)
-                    let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short
-                    lines.append("Deleted: \(deleted)  Skipped: \(skipped)")
-                    lines.append("Oldest deleted: \(f.string(from: d))")
-                } else {
-                    lines.append("Deleted: \(deleted)  Skipped: \(skipped)")
+            let mode = (info["mode"] as? String) ?? "manual"
+            if mode == "manual" {
+                var lines: [String] = []
+                switch status {
+                case "success":
+                    let deleted = (info["deleted"] as? Int) ?? 0
+                    let skipped = (info["skipped"] as? Int) ?? 0
+                    if let ts = info["oldest_ts"] as? Double {
+                        let d = Date(timeIntervalSince1970: ts)
+                        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short
+                        lines.append("Deleted: \(deleted)  Skipped: \(skipped)")
+                        lines.append("Oldest deleted: \(f.string(from: d))")
+                    } else {
+                        lines.append("Deleted: \(deleted)  Skipped: \(skipped)")
+                    }
+                    if deleted == 0 { lines.append("No Claude probe sessions were removed.") }
+                    claudeCleanupMessage = lines.joined(separator: "\n")
+                    showClaudeCleanupResult = true
+                case "not_found":
+                    claudeCleanupMessage = "No Claude probe sessions found to delete."
+                    showClaudeCleanupResult = true
+                case "unsafe":
+                    claudeCleanupMessage = "Cleanup skipped: the project contained sessions that don’t look like Agent Sessions probes."
+                    showClaudeCleanupResult = true
+                case "io_error":
+                    let msg = (info["message"] as? String) ?? "Unknown I/O error"
+                    claudeCleanupMessage = "Failed to delete Claude probe sessions.\n\n\(msg)"
+                    showClaudeCleanupResult = true
+                default:
+                    break
                 }
-                if deleted == 0 { lines.append("No Claude probe sessions were removed.") }
-                claudeCleanupMessage = lines.joined(separator: "\n")
-                showClaudeCleanupResult = true
-            case "not_found":
-                claudeCleanupMessage = "No Claude probe sessions found to delete."
-                showClaudeCleanupResult = true
-            case "unsafe":
-                claudeCleanupMessage = "Cleanup skipped: the project contained sessions that don’t look like Agent Sessions probes."
-                showClaudeCleanupResult = true
-            case "io_error":
-                let msg = (info["message"] as? String) ?? "Unknown I/O error"
-                claudeCleanupMessage = "Failed to delete Claude probe sessions.\n\n\(msg)"
-                showClaudeCleanupResult = true
-            default:
-                break
+            } else {
+                // Auto mode: remain non-intrusive; mirror Codex behavior with a brief flash.
+                switch status {
+                case "success":
+                    if let n = info["deleted"] as? Int { showCleanupFlash("Deleted \(n) Claude probe file(s).", color: .green) }
+                    else { showCleanupFlash("Deleted Claude probe sessions.", color: .green) }
+                case "not_found":
+                    showCleanupFlash("No Claude probe sessions to delete.", color: .secondary)
+                case "unsafe":
+                    showCleanupFlash("Skipped: Claude sessions contained non-probe content.", color: .orange)
+                case "io_error":
+                    showCleanupFlash("Failed to delete Claude probe sessions.", color: .red)
+                case "disabled":
+                    break
+                default:
+                    break
+                }
             }
         }
     }

@@ -32,12 +32,16 @@ func effectiveEventTimestamp(source: UsageTrackingSource,
     let ttl = freshUntil(for: source, now: now)
     switch source {
     case .codex:
+        // Prefer a recent hard-probe TTL when present; treat usage as
+        // fresh for up to 60 minutes after a successful /status probe,
+        // even if the last JSONL event is older.
+        if let ttl, ttl > now {
+            return now
+        }
         if let eventTimestamp { return eventTimestamp }
-        if let ttl, ttl > now { return now }
         return lastUpdate
     case .claude:
         if let ttl, ttl > now { return now }
         return lastUpdate
     }
 }
-
