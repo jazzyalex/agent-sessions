@@ -41,7 +41,7 @@ enum AnalyticsDesign {
     /// rather than derived purely from token math, to avoid
     /// truncation on macOS while still giving the bottom cards
     /// more presence than the original 270pt design.
-    static let secondaryCardHeight: CGFloat = 360
+    static let secondaryCardHeight: CGFloat = 340
 
     // MARK: - Corner Radius
     static let cardCornerRadius: CGFloat = 8
