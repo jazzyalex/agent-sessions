@@ -558,7 +558,7 @@ cask "agent-sessions" do
   url "https://github.com/jazzyalex/agent-sessions/releases/download/v#{version}/AgentSessions-#{version}.dmg",
       verified: "github.com/jazzyalex/agent-sessions/"
   name "Agent Sessions"
-  desc "Unified session browser for Codex CLI, Claude Code, and Gemini CLI (read-only)"
+  desc "Unified session browser for Codex CLI, Claude Code, Gemini CLI, and OpenCode (read-only)"
   homepage "https://jazzyalex.github.io/agent-sessions/"
 
   livecheck do

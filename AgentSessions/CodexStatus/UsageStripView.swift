@@ -41,7 +41,9 @@ struct UsageStripView: View {
         .background(drawBackground ? AnyShapeStyle(.thickMaterial) : AnyShapeStyle(.clear))
         .onTapGesture(count: 2) {
             if !codexStatus.isUpdating {
-                codexStatus.refreshNow()
+                // Double-click performs a hard /status probe (same as the
+                // Usage Probes button) but without showing a diagnostics dialog.
+                CodexUsageModel.shared.hardProbeNow { _ in }
             }
         }
         .help(makeTooltip())
