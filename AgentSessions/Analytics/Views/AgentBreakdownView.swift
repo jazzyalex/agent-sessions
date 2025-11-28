@@ -50,7 +50,7 @@ struct AgentBreakdownView: View {
     }
 
     private var frontView: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
                 Text("By Agent")
@@ -87,7 +87,7 @@ struct AgentBreakdownView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(breakdown.enumerated()), id: \.element.id) { index, agent in
                         AgentRow(agent: agent, metric: metric, monochrome: stripMonochrome)
-                            .padding(.vertical, 16)
+                            .padding(.vertical, 9)
 
                         if index < breakdown.count - 1 {
                             Divider()
@@ -96,9 +96,8 @@ struct AgentBreakdownView: View {
                     }
                 }
             }
-
-            Spacer()
         }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var emptyState: some View {
