@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Preferences → Gemini CLI now detects the `gemini` binary (npm `@google/gemini-cli`) via the login-shell PATH fallback, matching the other CLI probes so “Auto” detection no longer reports “not found”.
+
 ## [2.8] - 2025-11-27
 
 🦃 **My thanks to the OpenCode community - Agent Sessions now supports OpenCode!** (Resume and usage tracking are on the roadmap.)
