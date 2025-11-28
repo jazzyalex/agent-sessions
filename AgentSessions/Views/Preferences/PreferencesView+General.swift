@@ -96,10 +96,8 @@ extension PreferencesView {
                     }
                     .help("Switch between relative and absolute modified timestamps")
                 }
-                // Micro-header for columns
-                Text("Columns")
-                    .font(.subheadline)
-                Divider()
+                // Columns section
+                sectionHeader("Columns")
                 // First row: three columns to reduce height
                 HStack(spacing: 16) {
                     Toggle("Session titles", isOn: $columnVisibility.showTitleColumn)
@@ -129,11 +127,9 @@ extension PreferencesView {
                     ))
                     .help("Show or hide the favorite star button in the CLI Agent column")
                 }
-                // Micro-header for filters
-                Text("Filters")
+                // Filters section
+                sectionHeader("Filters")
                     .padding(.top, 8)
-                    .font(.subheadline)
-                Divider()
                 HStack(spacing: 16) {
                     Toggle("Zero msgs", isOn: $hideZeroMessageSessionsPref)
                         .onChange(of: hideZeroMessageSessionsPref) { _, _ in indexer.recomputeNow() }
@@ -146,6 +142,56 @@ extension PreferencesView {
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.hasCommandsOnly) }
                     ))
                     .help("Show only Codex sessions that contain recorded tool/command calls. Claude and Gemini are excluded when enabled.")
+                }
+
+                // CLI toolbar filter visibility
+                sectionHeader("CLI Toolbar Filters")
+                    .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle(isOn: $showCodexToolbarFilter) {
+                        HStack {
+                            Text("Codex")
+                            Spacer()
+                            Text("⌘1").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(!codexCLIAvailable)
+                    .help("Show or hide the Codex source filter button in the Sessions toolbar")
+
+                    Toggle(isOn: $showClaudeToolbarFilter) {
+                        HStack {
+                            Text("Claude")
+                            Spacer()
+                            Text("⌘2").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(!claudeCLIAvailable)
+                    .help("Show or hide the Claude source filter button in the Sessions toolbar")
+
+                    Toggle(isOn: $showGeminiToolbarFilter) {
+                        HStack {
+                            Text("Gemini")
+                            Spacer()
+                            Text("⌘3").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(!geminiCLIAvailable)
+                    .help("Show or hide the Gemini source filter button in the Sessions toolbar")
+
+                    Toggle(isOn: $showOpenCodeToolbarFilter) {
+                        HStack {
+                            Text("OpenCode")
+                            Spacer()
+                            Text("⌘4").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(!openCodeCLIAvailable)
+                    .help("Show or hide the OpenCode source filter button in the Sessions toolbar")
+
+                    Text("Keyboard shortcuts: Codex ⌘1 · Claude ⌘2 · Gemini ⌘3 · OpenCode ⌘4")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
                 }
 
                 Divider()

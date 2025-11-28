@@ -415,14 +415,19 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// Apply current UI filters and sort preferences to a list of sessions.
     /// Used for both unified.sessions and search results to ensure consistent filtering/sorting.
     func applyFiltersAndSort(to sessions: [Session]) -> [Session] {
-        // Filter by source (Codex/Claude toggles)
-        var base = sessions
-        if !includeCodex || !includeClaude || !includeGemini || !includeOpenCode {
-            base = base.filter { s in
-                (s.source == .codex && includeCodex) ||
-                (s.source == .claude && includeClaude) ||
-                (s.source == .gemini && includeGemini) ||
-                (s.source == .opencode && includeOpenCode)
+        // Filter by source (Codex/Claude/Gemini/OpenCode toggles) and CLI availability.
+        let defaults = UserDefaults.standard
+        let codexAvailable = defaults.object(forKey: PreferencesKey.codexCLIAvailable) as? Bool ?? true
+        let claudeAvailable = defaults.object(forKey: PreferencesKey.claudeCLIAvailable) as? Bool ?? true
+        let geminiAvailable = defaults.object(forKey: PreferencesKey.geminiCLIAvailable) as? Bool ?? true
+        let openCodeAvailable = defaults.object(forKey: PreferencesKey.openCodeCLIAvailable) as? Bool ?? true
+
+        var base = sessions.filter { s in
+            switch s.source {
+            case .codex:    return codexAvailable && includeCodex
+            case .claude:   return claudeAvailable && includeClaude
+            case .gemini:   return geminiAvailable && includeGemini
+            case .opencode: return openCodeAvailable && includeOpenCode
             }
         }
 

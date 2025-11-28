@@ -23,6 +23,12 @@ enum PreferencesKey {
     static let hideZeroMessageSessions = "HideZeroMessageSessions"
     static let hideLowMessageSessions = "HideLowMessageSessions"
 
+    // CLI availability flags (assume installed until a probe fails)
+    static let codexCLIAvailable = "CodexCLIAvailable"
+    static let claudeCLIAvailable = "ClaudeCLIAvailable"
+    static let geminiCLIAvailable = "GeminiCLIAvailable"
+    static let openCodeCLIAvailable = "OpenCodeCLIAvailable"
+
     // Polling intervals
     static let codexPollingInterval = "CodexPollingInterval"
     static let claudePollingInterval = "ClaudePollingInterval"
@@ -35,6 +41,10 @@ enum PreferencesKey {
         static let showStarColumn = "UnifiedShowStarColumn"
         static let hasCommandsOnly = "UnifiedHasCommandsOnly"
         static let skipAgentsPreamble = "SkipAgentsPreamble"
+        static let showCodexToolbarFilter = "UnifiedShowCodexToolbarFilter"
+        static let showClaudeToolbarFilter = "UnifiedShowClaudeToolbarFilter"
+        static let showGeminiToolbarFilter = "UnifiedShowGeminiToolbarFilter"
+        static let showOpenCodeToolbarFilter = "UnifiedShowOpenCodeToolbarFilter"
     }
 
     enum MenuBar {
