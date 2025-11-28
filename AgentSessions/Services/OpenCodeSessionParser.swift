@@ -244,15 +244,23 @@ final class OpenCodeSessionParser {
             }()
 
             // Build event text with sensible fallbacks
-            var text = msg.summary?.body
-            if (text == nil || text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true),
-               let title = msg.summary?.title, !title.isEmpty {
-                text = title
+            var text: String?
+            if msg.role?.lowercased() == "user" {
+                // For user messages, ALWAYS use title (contains user's request summary)
+                text = msg.summary?.title
+            } else {
+                // For assistant/tool/other messages, use body with title fallback
+                text = msg.summary?.body
+                if (text == nil || text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true),
+                   let title = msg.summary?.title, !title.isEmpty {
+                    text = title
+                }
             }
 
             // Drop completely empty, non-tool, non-error messages to avoid blank rows.
             let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if trimmed.isEmpty && !hasTools && !hasToolParts && !isError {
+            let isUser = msg.role?.lowercased() == "user"
+            if trimmed.isEmpty && !hasTools && !hasToolParts && !isError && !isUser {
                 continue
             }
 
