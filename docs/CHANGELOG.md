@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [2.8.0] - 2025-11-27
+## [2.8] - 2025-11-27
 
 🦃 **My thanks to the OpenCode community - Agent Sessions now supports OpenCode!** (Resume and usage tracking are on the roadmap.)
 
