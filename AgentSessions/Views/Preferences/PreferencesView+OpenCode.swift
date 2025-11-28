@@ -161,10 +161,17 @@ extension PreferencesView {
                     self.opencodeVersionString = res.versionString
                     self.opencodeResolvedPath = res.binaryURL.path
                     self.opencodeProbeState = .success
+                    let wasUnavailable = !self.openCodeCLIAvailable
+                    self.openCodeCLIAvailable = true
+                    if wasUnavailable {
+                        self.showOpenCodeToolbarFilter = true
+                    }
                 case .failure:
                     self.opencodeVersionString = nil
                     self.opencodeResolvedPath = nil
                     self.opencodeProbeState = .failure
+                    self.openCodeCLIAvailable = false
+                    self.showOpenCodeToolbarFilter = false
                 }
             }
         }

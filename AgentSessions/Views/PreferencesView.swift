@@ -42,6 +42,16 @@ struct PreferencesView: View {
     @State var isClaudeHardProbeRunning: Bool = false
     @State var cleanupFlashText: String? = nil
     @State var cleanupFlashColor: Color = .secondary
+    // CLI availability (assume installed until a probe fails)
+    @AppStorage(PreferencesKey.codexCLIAvailable) var codexCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.claudeCLIAvailable) var claudeCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.geminiCLIAvailable) var geminiCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.openCodeCLIAvailable) var openCodeCLIAvailable: Bool = true
+    // Unified toolbar filter visibility
+    @AppStorage(PreferencesKey.Unified.showCodexToolbarFilter) var showCodexToolbarFilter: Bool = true
+    @AppStorage(PreferencesKey.Unified.showClaudeToolbarFilter) var showClaudeToolbarFilter: Bool = true
+    @AppStorage(PreferencesKey.Unified.showGeminiToolbarFilter) var showGeminiToolbarFilter: Bool = true
+    @AppStorage(PreferencesKey.Unified.showOpenCodeToolbarFilter) var showOpenCodeToolbarFilter: Bool = true
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -589,10 +599,17 @@ extension PreferencesView {
                     self.probeVersion = data.version
                     self.resolvedCodexPath = data.binaryURL.path
                     self.probeState = .success
+                    let wasUnavailable = !self.codexCLIAvailable
+                    self.codexCLIAvailable = true
+                    if wasUnavailable {
+                        self.showCodexToolbarFilter = true
+                    }
                 case .failure:
                     self.probeVersion = nil
                     self.resolvedCodexPath = nil
                     self.probeState = .failure
+                    self.codexCLIAvailable = false
+                    self.showCodexToolbarFilter = false
                 }
             }
         }
@@ -613,10 +630,17 @@ extension PreferencesView {
                     self.claudeVersionString = res.versionString
                     self.claudeResolvedPath = res.binaryURL.path
                     self.claudeProbeState = .success
+                    let wasUnavailable = !self.claudeCLIAvailable
+                    self.claudeCLIAvailable = true
+                    if wasUnavailable {
+                        self.showClaudeToolbarFilter = true
+                    }
                 case .failure:
                     self.claudeVersionString = nil
                     self.claudeResolvedPath = nil
                     self.claudeProbeState = .failure
+                    self.claudeCLIAvailable = false
+                    self.showClaudeToolbarFilter = false
                 }
             }
         }
@@ -637,10 +661,17 @@ extension PreferencesView {
                     self.geminiVersionString = res.versionString
                     self.geminiResolvedPath = res.binaryURL.path
                     self.geminiProbeState = .success
+                    let wasUnavailable = !self.geminiCLIAvailable
+                    self.geminiCLIAvailable = true
+                    if wasUnavailable {
+                        self.showGeminiToolbarFilter = true
+                    }
                 case .failure:
                     self.geminiVersionString = nil
                     self.geminiResolvedPath = nil
                     self.geminiProbeState = .failure
+                    self.geminiCLIAvailable = false
+                    self.showGeminiToolbarFilter = false
                 }
             }
         }

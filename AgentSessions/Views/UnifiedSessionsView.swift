@@ -39,6 +39,15 @@ struct UnifiedSessionsView: View {
     @State private var hasEverHadSessions: Bool = false
     @State private var hasUserManuallySelected: Bool = false
     @State private var showAnalyticsWarmupNotice: Bool = false
+    // CLI availability and toolbar filter visibility
+    @AppStorage(PreferencesKey.codexCLIAvailable) private var codexCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.claudeCLIAvailable) private var claudeCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.geminiCLIAvailable) private var geminiCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.openCodeCLIAvailable) private var openCodeCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.Unified.showCodexToolbarFilter) private var showCodexToolbarFilter: Bool = true
+    @AppStorage(PreferencesKey.Unified.showClaudeToolbarFilter) private var showClaudeToolbarFilter: Bool = true
+    @AppStorage(PreferencesKey.Unified.showGeminiToolbarFilter) private var showGeminiToolbarFilter: Bool = true
+    @AppStorage(PreferencesKey.Unified.showOpenCodeToolbarFilter) private var showOpenCodeToolbarFilter: Bool = true
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
 
@@ -488,41 +497,73 @@ struct UnifiedSessionsView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             HStack(spacing: 2) {
-                Toggle(isOn: $unified.includeCodex) {
-                    Text("Codex")
-                        .foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.blue : .primary))
-                        .fixedSize()
+                if codexCLIAvailable && showCodexToolbarFilter {
+                    Toggle(isOn: $unified.includeCodex) {
+                        Text("Codex")
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.blue : .primary))
+                            .fixedSize()
+                    }
+                    .toggleStyle(.button)
+                    .help("Show or hide Codex sessions in the list (⌘1)")
+                    .keyboardShortcut("1", modifiers: .command)
+                    .contextMenu {
+                        Button("Hide Codex filter") {
+                            showCodexToolbarFilter = false
+                            unified.includeCodex = false
+                        }
+                    }
                 }
-                .toggleStyle(.button)
-                .help("Show or hide Codex sessions in the list (⌘1)")
-                .keyboardShortcut("1", modifiers: .command)
 
-                Toggle(isOn: $unified.includeClaude) {
-                    Text("Claude")
-                        .foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary))
-                        .fixedSize()
+                if claudeCLIAvailable && showClaudeToolbarFilter {
+                    Toggle(isOn: $unified.includeClaude) {
+                        Text("Claude")
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary))
+                            .fixedSize()
+                    }
+                    .toggleStyle(.button)
+                    .help("Show or hide Claude sessions in the list (⌘2)")
+                    .keyboardShortcut("2", modifiers: .command)
+                    .contextMenu {
+                        Button("Hide Claude filter") {
+                            showClaudeToolbarFilter = false
+                            unified.includeClaude = false
+                        }
+                    }
                 }
-                .toggleStyle(.button)
-                .help("Show or hide Claude sessions in the list (⌘2)")
-                .keyboardShortcut("2", modifiers: .command)
 
-                Toggle(isOn: $unified.includeGemini) {
-                    Text("Gemini")
-                        .foregroundStyle(stripMonochrome ? .primary : (unified.includeGemini ? Color.teal : .primary))
-                        .fixedSize()
+                if geminiCLIAvailable && showGeminiToolbarFilter {
+                    Toggle(isOn: $unified.includeGemini) {
+                        Text("Gemini")
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeGemini ? Color.teal : .primary))
+                            .fixedSize()
+                    }
+                    .toggleStyle(.button)
+                    .help("Show or hide Gemini sessions in the list (⌘3)")
+                    .keyboardShortcut("3", modifiers: .command)
+                    .contextMenu {
+                        Button("Hide Gemini filter") {
+                            showGeminiToolbarFilter = false
+                            unified.includeGemini = false
+                        }
+                    }
                 }
-                .toggleStyle(.button)
-                .help("Show or hide Gemini sessions in the list (⌘3)")
-                .keyboardShortcut("3", modifiers: .command)
 
-                Toggle(isOn: $unified.includeOpenCode) {
-                    Text("OpenCode")
-                        .foregroundStyle(stripMonochrome ? .primary : (unified.includeOpenCode ? Color.purple : .primary))
-                        .fixedSize()
+                if openCodeCLIAvailable && showOpenCodeToolbarFilter {
+                    Toggle(isOn: $unified.includeOpenCode) {
+                        Text("OpenCode")
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeOpenCode ? Color.purple : .primary))
+                            .fixedSize()
+                    }
+                    .toggleStyle(.button)
+                    .help("Show or hide OpenCode sessions in the list (⌘4)")
+                    .keyboardShortcut("4", modifiers: .command)
+                    .contextMenu {
+                        Button("Hide OpenCode filter") {
+                            showOpenCodeToolbarFilter = false
+                            unified.includeOpenCode = false
+                        }
+                    }
                 }
-                .toggleStyle(.button)
-                .help("Show or hide OpenCode sessions in the list (⌘4)")
-                .keyboardShortcut("4", modifiers: .command)
             }
         }
         ToolbarItem(placement: .automatic) {
