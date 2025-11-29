@@ -6,8 +6,21 @@ All notable changes to this project will be documented in this file.
 
 ## [2.8.1] - 2025-11-28
 
-### Fixed
-- Preferences → Gemini CLI now detects the `gemini` binary (npm `@google/gemini-cli`) via the login-shell PATH fallback, matching the other CLI probes so “Auto” detection no longer reports “not found”.
+### Critical Fixes
+
+- **Usage Tracking Refresh**: Hard probe actions (Codex strip/menu refresh) now route through hard `/status` probes, preventing older log snapshots from overwriting fresh limits. Stale checks honor hard-probe TTL for accurate freshness indicators.
+- **OpenCode Sessions**: User messages now correctly extract from `summary.title` instead of `summary.body`, fixing incorrect assistant responses appearing in user messages for older OpenCode sessions. User messages are never dropped even if empty.
+
+### Added
+
+- **Per-CLI Toolbar Visibility**: New unified-pane toggles in Preferences → General to show/hide Codex, Claude, Gemini, and OpenCode session filters. CLIs automatically hide when unavailable.
+- **Usage Display Mode**: New Preferences toggle to switch between "% left" and "% used" display modes across Codex and Claude usage strips and menu bar. Normalizes Claude CLI percent_left semantics for consistency.
+- **Preferences → OpenCode**: New dedicated pane for OpenCode CLI configuration including Sessions Directory override to choose custom Claude sessions root (defaults to `~/.claude`).
+
+### Improved
+
+- **Gemini CLI Detection**: Enhanced Gemini binary detection via login-shell PATH fallback, matching other CLI probes. "Auto" detection now reliably finds the `gemini` binary (npm `@google/gemini-cli`).
+- **Cleanup UX**: Claude auto-cleanup now shows non-intrusive flash notifications instead of modal dialogs for better user experience.
 
 
 ## [Unreleased]
