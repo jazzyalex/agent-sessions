@@ -1,39 +1,30 @@
-<?xml version="1.0" standalone="yes"?>
+<?xml version='1.0' encoding='utf-8'?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>AgentSessions</title>
         <item>
             <title>2.8.1</title>
             <pubDate>Fri, 28 Nov 2025 16:05:35 -0800</pubDate>
-            <description><![CDATA[
-                <h2>What's New in 2.8.1</h2>
+            <description>&lt;![CDATA[
+&lt;h2&gt;What's New in 2.8.1&lt;/h2&gt;
 
-<h3>Fixed</h3>
-<p>Preferences → Gemini CLI now detects the `gemini` binary (npm `@google/gemini-cli`) via the login-shell PATH fallback, matching the other CLI probes so “Auto” detection no longer reports “not found”.
-</p>
-🦃 **My thanks to the OpenCode community - Agent Sessions now supports OpenCode!** (Resume and usage tracking are on the roadmap.)
+&lt;h3&gt;Critical Fixes&lt;/h3&gt;
+&lt;p&gt;&lt;strong&gt;Usage Tracking Refresh&lt;/strong&gt;: Hard probe actions (Codex strip/menu refresh) now route through hard `/status` probes, preventing older log snapshots from overwriting fresh limits. Stale checks honor hard-probe TTL for accurate freshness indicators.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;OpenCode Sessions&lt;/strong&gt;: User messages now correctly extract from `summary.title` instead of `summary.body`, fixing incorrect assistant responses appearing in user messages for older OpenCode sessions. User messages are never dropped even if empty.&lt;/p&gt;
 
-<h3>Added</h3>
-<p>**OpenCode Support**: Full session browser integration with Claude Code OpenCode sessions, including transcript viewing, analytics, and favorites. Sessions appear in the unified list with source filtering.</p>
-<p>Preferences → Claude Code: Sessions Directory override to choose a custom Claude sessions root. The Claude indexer honors this path and refreshes automatically when changed. Defaults to `~/.claude` when unset.</p>
-<p>Preferences → Usage Probes: New dedicated pane consolidating Claude and Codex terminal probe settings (auto-probe, cleanup, and one‑click delete), with clear safety messaging.</p>
+&lt;h3&gt;Added&lt;/h3&gt;
+&lt;p&gt;&lt;strong&gt;Per-CLI Toolbar Visibility&lt;/strong&gt;: New unified-pane toggles in Preferences → General to show/hide Codex, Claude, Gemini, and OpenCode session filters. CLIs automatically hide when unavailable.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Usage Display Mode&lt;/strong&gt;: New Preferences toggle to switch between "% left" and "% used" display modes across Codex and Claude usage strips and menu bar. Normalizes Claude CLI percent_left semantics for consistency.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Preferences → OpenCode&lt;/strong&gt;: New dedicated pane for OpenCode CLI configuration including Sessions Directory override to choose custom Claude sessions root (defaults to `~/.claude`).&lt;/p&gt;
 
-<h3>Changed</h3>
-<p>Preferences → Usage Tracking: Simplified and HIG‑aligned. Added per‑agent master toggles (Enable Codex tracking, Enable Claude tracking) independent of strip/menu bar visibility. Moved all probe controls into the new Usage Probes pane. Reduced vertical scrolling and clarified refresh interval and strip options.</p>
-<p>Usage Tracking: Separate refresh intervals per agent. Codex offers 1/5/15 minutes (default 5m). Claude now offers 3/15/30 minutes (default 15m) and `/usage` probes no longer send user messages, so they don't consume tokens.</p>
-<p>Usage probes run directly on their configured cadence. The legacy `UsageProbeGate` visibility/budget guard has been removed so Claude and Codex refreshers no longer stall after 24 attempts.</p>
-<p>Website: Updated Open Graph and Twitter Card tags to use the `AS-social-media.png` preview so shared links render the large social image correctly.</p>
-
-<h3>Fixed</h3>
-<p>Usage Probes: Codex and Claude cleanup actions once again emit status notifications for disabled/unsafe exits and successfully delete Codex probe sessions that log their working directory inside nested payload data.</p>
-<p>Usage (Codex): Stale indicator now reflects the age of the last rate‑limit capture only. Recent UI refreshes or token‑only events no longer mask outdated reset times; the strip/menu will show "Stale data" until fresh `rate_limits` arrive.</p>
-<p>Claude Usage: Added a central probe gate that suppresses `/usage` probes when the menu bar limits are off and the main window isn't visible, or when the screen is inactive (sleep/screensaver/locked).</p>
-<p>Claude Usage Probes: Cleanup now verifies every session file's `cwd/project` matches the dedicated probe working directory, requires tiny (≤5 event) user/assistant-only transcripts, and aborts deletion when uncertain.</p>
-            ]]></description>
+&lt;h3&gt;Improved&lt;/h3&gt;
+&lt;p&gt;&lt;strong&gt;Gemini CLI Detection&lt;/strong&gt;: Enhanced Gemini binary detection via login-shell PATH fallback, matching other CLI probes. "Auto" detection now reliably finds the `gemini` binary (npm `@google/gemini-cli`).&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Cleanup UX&lt;/strong&gt;: Claude auto-cleanup now shows non-intrusive flash notifications instead of modal dialogs for better user experience.&lt;/p&gt;
+]]&gt;</description>
             <sparkle:version>12</sparkle:version>
             <sparkle:shortVersionString>2.8.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.8.1/AgentSessions-2.8.1.dmg" length="7836766" type="application/octet-stream" sparkle:edSignature="woVNpzuAFy+ekMNAEn2gNfBd+Rh9SXUFLzJnHkXoI51FbT1TZ9GeYCJzoIEXeOdgfAtzyYof2T3jZ/lTht2EDA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.8.1/AgentSessions-2.8.1.dmg" length="7836766" type="application/octet-stream" sparkle:edSignature="woVNpzuAFy+ekMNAEn2gNfBd+Rh9SXUFLzJnHkXoI51FbT1TZ9GeYCJzoIEXeOdgfAtzyYof2T3jZ/lTht2EDA==" />
         </item>
     </channel>
 </rss>
