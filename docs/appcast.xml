@@ -3,11 +3,14 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.8</title>
-            <pubDate>Thu, 27 Nov 2025 18:37:35 -0800</pubDate>
+            <title>2.8.1</title>
+            <pubDate>Fri, 28 Nov 2025 16:05:35 -0800</pubDate>
             <description><![CDATA[
-                <h2>What's New in 2.8</h2>
+                <h2>What's New in 2.8.1</h2>
 
+<h3>Fixed</h3>
+<p>Preferences → Gemini CLI now detects the `gemini` binary (npm `@google/gemini-cli`) via the login-shell PATH fallback, matching the other CLI probes so “Auto” detection no longer reports “not found”.
+</p>
 🦃 **My thanks to the OpenCode community - Agent Sessions now supports OpenCode!** (Resume and usage tracking are on the roadmap.)
 
 <h3>Added</h3>
@@ -27,10 +30,10 @@
 <p>Claude Usage: Added a central probe gate that suppresses `/usage` probes when the menu bar limits are off and the main window isn't visible, or when the screen is inactive (sleep/screensaver/locked).</p>
 <p>Claude Usage Probes: Cleanup now verifies every session file's `cwd/project` matches the dedicated probe working directory, requires tiny (≤5 event) user/assistant-only transcripts, and aborts deletion when uncertain.</p>
             ]]></description>
-            <sparkle:version>11</sparkle:version>
-            <sparkle:shortVersionString>2.8</sparkle:shortVersionString>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>2.8.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.8/AgentSessions-2.8.dmg" length="7694709" type="application/octet-stream" sparkle:edSignature="enzjFn9wtVEzpIgcbLxRqa1UEdGE6HEQ5o87sZalzh0B9LfCdp24kTzr47sIVGQAqeBAeI9Ysj1LUMucCIWQBA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.8.1/AgentSessions-2.8.1.dmg" length="7836766" type="application/octet-stream" sparkle:edSignature="woVNpzuAFy+ekMNAEn2gNfBd+Rh9SXUFLzJnHkXoI51FbT1TZ9GeYCJzoIEXeOdgfAtzyYof2T3jZ/lTht2EDA=="/>
         </item>
     </channel>
 </rss>
