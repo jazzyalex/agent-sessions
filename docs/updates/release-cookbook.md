@@ -1,7 +1,9 @@
 # Sparkle Release Cookbook
 
+Status: Legacy / Supplemental
+
 ## Document Purpose
-Step-by-step guide for releasing Agent Sessions with Sparkle updates. Integrates with existing `tools/release/deploy-agent-sessions.sh` workflow.
+Step-by-step Sparkle-focused notes that supplement the main deployment runbook. For the authoritative release pipeline, always start from `docs/deployment.md` and the `tools/release/deploy` wrapper.
 
 ## Prerequisites
 - [ ] Xcode with Agent Sessions project

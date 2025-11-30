@@ -101,6 +101,99 @@ wait_for_cache() {
   return 1
 }
 
+# Safe, verified version bump with locking and rollback
+safe_version_bump() {
+  local pbxproj="$1"
+  local curr_build="$2"
+  local new_build="$3"
+  local curr_marketing="$4"
+  local new_marketing="$5"
+
+  local lock_file="${pbxproj}.lock"
+  local backup_file="${pbxproj}.backup.$(date +%s)"
+
+  PBXPROJ="$pbxproj" \
+  LOCK_FILE="$lock_file" \
+  BACKUP_FILE="$backup_file" \
+  CURR_BUILD="$curr_build" \
+  NEW_BUILD="$new_build" \
+  CURR_MARKETING="$curr_marketing" \
+  NEW_MARKETING="$new_marketing" \
+  python3 <<'PYEOF'
+import fcntl, os, shutil, sys, time
+
+pbx = os.environ["PBXPROJ"]
+lock_path = os.environ["LOCK_FILE"]
+backup = os.environ["BACKUP_FILE"]
+curr_build = os.environ["CURR_BUILD"]
+new_build = os.environ["NEW_BUILD"]
+curr_marketing = os.environ["CURR_MARKETING"]
+new_marketing = os.environ["NEW_MARKETING"]
+
+curr_build_token = f"CURRENT_PROJECT_VERSION = {curr_build};"
+new_build_token = f"CURRENT_PROJECT_VERSION = {new_build};"
+curr_marketing_token = f"MARKETING_VERSION = {curr_marketing};"
+new_marketing_token = f"MARKETING_VERSION = {new_marketing};"
+
+start = time.time()
+timeout = 10
+
+with open(lock_path, "w") as lock:
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.time() - start > timeout:
+                print(f"ERROR: Could not acquire lock {lock_path} after {timeout}s", file=sys.stderr)
+                sys.exit(1)
+            time.sleep(0.2)
+
+    if not os.path.exists(pbx):
+        print(f"ERROR: {pbx} not found", file=sys.stderr)
+        sys.exit(1)
+
+    with open(pbx, "r", encoding="utf-8") as f:
+        data = f.read()
+
+    if curr_build_token not in data or curr_marketing_token not in data:
+        print("ERROR: Expected version tokens not found in project file", file=sys.stderr)
+        sys.exit(1)
+
+    shutil.copyfile(pbx, backup)
+
+    updated = data.replace(curr_build_token, new_build_token)
+    updated = updated.replace(curr_marketing_token, new_marketing_token)
+
+    if curr_build_token in updated or curr_marketing_token in updated:
+        print("ERROR: Old version tokens still present after update", file=sys.stderr)
+        shutil.copyfile(backup, pbx)
+        sys.exit(1)
+
+    if updated.count(new_build_token) < 1 or updated.count(new_marketing_token) < 1:
+        print("ERROR: New version tokens missing after update", file=sys.stderr)
+        shutil.copyfile(backup, pbx)
+        sys.exit(1)
+
+    tmp = pbx + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(updated)
+        f.flush()
+        os.fsync(f.fileno())
+
+    os.replace(tmp, pbx)
+
+    dir_path = os.path.dirname(pbx) or "."
+    dir_fd = os.open(dir_path, os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+print(f"Backup saved to {backup}")
+PYEOF
+}
+
 # ============================================================================
 # SUBCOMMAND: bump
 # ============================================================================
@@ -154,19 +247,20 @@ PYEOF
   echo "New version: $NEW_VERSION (build $NEW_BUILD)"
 
   # Update project.pbxproj
-  echo "==> Updating AgentSessions.xcodeproj/project.pbxproj"
-  sed -i '' "s/CURRENT_PROJECT_VERSION = $CURR_BUILD;/CURRENT_PROJECT_VERSION = $NEW_BUILD;/g" AgentSessions.xcodeproj/project.pbxproj
-  sed -i '' "s/MARKETING_VERSION = $CURR_MARKETING;/MARKETING_VERSION = $NEW_VERSION;/g" AgentSessions.xcodeproj/project.pbxproj
+  echo "==> Updating AgentSessions.xcodeproj/project.pbxproj (locked, verified)"
+  safe_version_bump "AgentSessions.xcodeproj/project.pbxproj" "$CURR_BUILD" "$NEW_BUILD" "$CURR_MARKETING" "$NEW_VERSION"
 
-  # Verify replacements
+  # Verify replacements (read-back)
   local COUNT_BUILD=$(grep -c "CURRENT_PROJECT_VERSION = $NEW_BUILD;" AgentSessions.xcodeproj/project.pbxproj || true)
   local COUNT_VERSION=$(grep -c "MARKETING_VERSION = $NEW_VERSION;" AgentSessions.xcodeproj/project.pbxproj || true)
+  local OLD_BUILD_REMAIN=$(grep -c "CURRENT_PROJECT_VERSION = $CURR_BUILD;" AgentSessions.xcodeproj/project.pbxproj || true)
+  local OLD_MARKETING_REMAIN=$(grep -c "MARKETING_VERSION = $CURR_MARKETING;" AgentSessions.xcodeproj/project.pbxproj || true)
 
-  if [[ $COUNT_BUILD -ne 2 || $COUNT_VERSION -ne 2 ]]; then
-    red "ERROR: Version replacement failed. Expected 2 occurrences each, got BUILD=$COUNT_BUILD VERSION=$COUNT_VERSION"
+  if [[ $COUNT_BUILD -lt 1 || $COUNT_VERSION -lt 1 || $OLD_BUILD_REMAIN -gt 0 || $OLD_MARKETING_REMAIN -gt 0 ]]; then
+    red "ERROR: Version replacement failed (new build=$COUNT_BUILD new version=$COUNT_VERSION old build still present=$OLD_BUILD_REMAIN old version still present=$OLD_MARKETING_REMAIN)"
     exit 1
   fi
-  green "✓ Updated 2 CURRENT_PROJECT_VERSION and 2 MARKETING_VERSION entries"
+  green "✓ Updated CURRENT_PROJECT_VERSION → $NEW_BUILD and MARKETING_VERSION → $NEW_VERSION"
 
   # Update CHANGELOG.md
   echo "==> Updating docs/CHANGELOG.md"
@@ -175,9 +269,13 @@ PYEOF
   # Check if version already exists
   if grep -q "^## \[$NEW_VERSION\]" docs/CHANGELOG.md; then
     yellow "WARNING: Version $NEW_VERSION already exists in CHANGELOG.md"
-    read -p "Continue anyway? [y/N] " -n 1 -r
-    echo
-    [[ $REPLY =~ ^[Yy]$ ]] || exit 1
+    if [[ "${SKIP_CONFIRM:-0}" != "1" ]]; then
+      read -p "Continue anyway? [y/N] " -n 1 -r
+      echo
+      [[ $REPLY =~ ^[Yy]$ ]] || exit 1
+    else
+      yellow "SKIP_CONFIRM=1 set, continuing despite existing version in CHANGELOG.md"
+    fi
   fi
 
   # Insert new version section
@@ -212,11 +310,15 @@ PYEOF
 
   # Confirm before committing
   echo ""
-  read -p "Commit these changes? [y/N] " -n 1 -r
-  echo
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    yellow "Aborted. Run 'git checkout AgentSessions.xcodeproj/project.pbxproj docs/CHANGELOG.md' to revert."
-    exit 1
+  if [[ "${SKIP_CONFIRM:-0}" != "1" ]]; then
+    read -p "Commit these changes? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      yellow "Aborted. Run 'git checkout AgentSessions.xcodeproj/project.pbxproj docs/CHANGELOG.md' to revert."
+      exit 1
+    fi
+  else
+    green "Proceeding automatically (SKIP_CONFIRM=1): committing version bump without interactive prompt"
   fi
 
   # Git commit
