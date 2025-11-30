@@ -1,6 +1,28 @@
 # Agent Sessions Deployment Runbook
 
+This document is the canonical deployment runbook for all agents (Claude, Codex, OpenCode, Xcode, manual shell). Always treat this file as the single source of truth for how releases are built, signed, notarized, and published.
+
+
 This runbook provides a **fully automated deployment process** with comprehensive validation, retry logic, automated testing, and verification.
+
+## One-screen cheat sheet
+
+**Core commands** (run from repo root):
+- `tools/release/deploy changelog [FROM_TAG]`
+- `tools/release/deploy bump [patch|minor|major]`
+- `git push origin main`
+- `tools/release/deploy release <VERSION>`
+- `tools/release/deploy verify <VERSION>`
+
+**Key environment flags**:
+- `SKIP_CONFIRM=1` — make bump and release flows unattended (suppresses confirmation prompts where supported).
+- `NOTARIZE_SYNC=1` — use legacy blocking notarization instead of background polling.
+- `UPDATE_CASK=1` — update the Homebrew tap via GitHub API.
+
+**Log locations** (see troubleshooting for details):
+- Unified deploy log: `tools/release/deploy` prints the path (in `/tmp`) when running `release`.
+- Verification log: `/tmp/deploy-<VERSION>.log`.
+- Notarization log: `/tmp/notarization-<VERSION>-<timestamp>.log`.
 
 ## Quick Start (Unified Tool)
 
@@ -42,6 +64,7 @@ Automatically increments version and updates CHANGELOG:
 - Moves [Unreleased] to [VERSION] in CHANGELOG.md
 - Creates git commit with version bump
 - Shows diff for review before committing
+- Respects `SKIP_CONFIRM=1` to skip interactive confirmations when running unattended
 
 ### `deploy release VERSION`
 Full deployment pipeline with enhanced safety:
@@ -505,6 +528,13 @@ xcrun notarytool submit dist/AgentSessions-{VERSION}.dmg --keychain-profile Agen
 ```
 
 **Prevention**: The updated build script now includes DMG verification before notarization.
+
+## Docs sanity check (for agents)
+
+Before changing deployment scripts, do a quick paper dry run using a fake version (for example, 2.9.0):
+- Walk through the cheat sheet commands and confirm each one is documented with required flags and environment variables.
+- Verify that `docs/deployment.md` and `docs/deploy-skill.md` reference the same entrypoints (`tools/release/deploy`).
+- Treat this as a documentation validation step only; do not actually tag or publish 2.9.0.
 
 ### Sparkle EdDSA signature errors
 

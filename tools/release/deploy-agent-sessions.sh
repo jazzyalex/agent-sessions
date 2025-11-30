@@ -137,6 +137,47 @@ retry() {
   return $exitCode
 }
 
+show_preflight_checklist() {
+  local build_number="$1"
+  local previous_version="$2"
+  local previous_build="$3"
+
+  echo ""
+  echo "==> Pre-Flight Checklist"
+  echo "────────────────────────"
+  cat <<EOF
+Context:
+  - App: ${APP_NAME}
+  - Version: ${VERSION} (tag ${TAG})
+  - Build: ${build_number:-unknown}
+  - Previous: ${previous_version:-n/a} (build ${previous_build:-n/a})
+  - Build progression (Sparkle critical): ${previous_build:-n/a} → ${build_number:-unknown}
+
+Validations (already passed):
+  ✓ Dependencies available and gh authenticated
+  ✓ Notary profile '${NOTARY_PROFILE}' present
+  ✓ Working tree clean, on main, synced with origin/main
+  ✓ Version progression validated and tag available
+  ✓ CHANGELOG.md contains [${VERSION}]
+
+Deployment pipeline:
+  1) Build → 2) Sign → 3) DMG → 4) Notarize (background)
+  5) Appcast → 6) GitHub Release → 7) Docs → 8) Homebrew
+
+If a step fails, rollback prompt will appear after automated verification.
+EOF
+
+  if [[ "${SKIP_CONFIRM}" != "1" ]]; then
+    read -r -p "Approve checklist and start deployment? [y/N] " go
+    if [[ ! "$go" =~ ^[Yy]$ ]]; then
+      yellow "Aborted before deployment"
+      exit 0
+    fi
+  else
+    green "Proceeding automatically (SKIP_CONFIRM=1)"
+  fi
+}
+
 echo "==> Pre-checks"
 log INFO "Starting deployment pre-checks"
 
@@ -274,44 +315,8 @@ fi
 
 echo ""
 green "✓ All pre-flight checks passed"
-
-# Pre-deployment checklist (user confirmation)
-echo
-echo "Pre-deployment checklist:"
-echo "  - Screenshots updated: docs/assets/screenshot-V.png, screenshot-H.png"
-echo "  - CHANGELOG.md has a section for ${VERSION}"
-echo "  - README sections reviewed (links, instructions)"
-echo "  - GitHub CLI authenticated (gh auth status ok)"
-echo "  - Notary profile available in Keychain (${NOTARY_PROFILE})"
-
-# Simple validations
-if [[ -f "docs/CHANGELOG.md" ]]; then
-  if ! grep -q -E "^##[ ]*\[?${VERSION}\]?" docs/CHANGELOG.md; then
-    yellow "WARNING: docs/CHANGELOG.md has no explicit section for ${VERSION}. Release notes will fall back to git log."
-  fi
-fi
-
-# Build number validation (critical for Sparkle auto-updates)
 CURR_BUILD=$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\).*/\1/p' AgentSessions.xcodeproj/project.pbxproj | head -n1)
-if [[ -n "$CURR_BUILD" ]]; then
-  echo "Current build number: $CURR_BUILD"
-  yellow "REMINDER: Sparkle uses build numbers (CFBundleVersion), not marketing versions, for update detection."
-  yellow "If previous release also had build number $CURR_BUILD, users won't see an update!"
-  yellow "Increment CURRENT_PROJECT_VERSION in project.pbxproj before releasing."
-else
-  yellow "WARNING: Could not detect CURRENT_PROJECT_VERSION from project.pbxproj"
-fi
-
-# Skip confirmation if SKIP_CONFIRM=1
-if [[ "${SKIP_CONFIRM}" != "1" ]]; then
-  read -r -p "Proceed with build/sign/notarize now? [y/N] " go
-  if [[ "${go:-}" != "y" && "${go:-}" != "Y" ]]; then
-    yellow "Aborted by user"
-    exit 0
-  fi
-else
-  green "Proceeding automatically (SKIP_CONFIRM=1)"
-fi
+show_preflight_checklist "$CURR_BUILD" "${PREV_VERSION:-}" "${PREV_BUILD:-}"
 
 export TEAM_ID NOTARY_PROFILE DEV_ID_APP VERSION TAG
 

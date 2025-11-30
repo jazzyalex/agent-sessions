@@ -1,5 +1,9 @@
 # Agent Sessions — Release & Deployment Guide
 
+Status: Legacy / Supplemental
+
+> Note: For the canonical, up-to-date deployment workflow used by Claude, Codex, OpenCode, and manual shells, see `docs/deployment.md`. This file only covers additional context (prereqs, local defaults) and should not be treated as the primary runbook.
+
 This guide and script help you ship a new Agent Sessions DMG to GitHub Releases, update docs, and (optionally) update the Homebrew cask. No secrets are stored in the repo.
 
 ## Prerequisites
@@ -36,7 +40,7 @@ DEV_ID_APP="Developer ID Application: Your Name (24NDRU35WD)"
 - Export fresh screenshots to `docs/assets/screenshot-V.png` and `docs/assets/screenshot-H.png`.
 - Update README sections if needed.
 
-## Run the deployment helper
+## Run the deployment helper (legacy, low-level)
 
 ```bash
 chmod +x tools/release/deploy-agent-sessions.sh

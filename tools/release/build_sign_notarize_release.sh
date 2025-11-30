@@ -112,8 +112,97 @@ if [[ ! "$FILE_TYPE" =~ "Macintosh HFS Extended" ]] && [[ ! "$FILE_TYPE" =~ "App
 fi
 echo "✅ DMG file type validated"
 
-echo "==> Notarizing DMG (this may take 5-15 minutes)"
-xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+notarize_background() {
+  local dmg="$1"
+  local profile="$2"
+  local interval=30
+  local max_wait=1200 # 20 minutes
+  local log_file="/tmp/notarization-${VERSION:-unknown}-$(date +%s).log"
+
+  echo "==> Notarizing DMG asynchronously (log: $log_file)"
+  echo "Monitor in another shell: tail -f $log_file"
+
+  # Submit for notarization without blocking
+  local submission_json submission_id
+  if ! submission_json=$(xcrun notarytool submit "$dmg" --keychain-profile "$profile" --output-format json 2>&1 | tee "$log_file"); then
+    echo "ERROR: Notarization submission failed" >&2
+    exit 7
+  fi
+
+  submission_id=$(python3 <<'PYEOF'
+import json, re, sys
+text = sys.stdin.read()
+data = {}
+try:
+    data = json.loads(text)
+except Exception:
+    # Fall back to last JSON object in the stream
+    matches = list(re.finditer(r'{.*}', text, re.S))
+    if matches:
+        data = json.loads(matches[-1].group(0))
+print(data.get("id", ""))
+PYEOF
+<<< "$submission_json")
+
+  if [[ -z "$submission_id" ]]; then
+    echo "ERROR: Could not parse notarization submission ID" >&2
+    exit 7
+  fi
+
+  echo "Submission ID: $submission_id"
+
+  local status="In Progress"
+  local elapsed=0
+  while [[ "$status" == "In Progress" ]]; do
+    sleep "$interval"
+    ((elapsed+=interval))
+
+    local info_json
+    if ! info_json=$(xcrun notarytool info "$submission_id" --keychain-profile "$profile" --output-format json 2>&1 | tee -a "$log_file"); then
+      echo "ERROR: Failed to poll notarization status" >&2
+      exit 7
+    fi
+
+    status=$(python3 <<'PYEOF'
+import json, re, sys
+text = sys.stdin.read()
+data = {}
+try:
+    data = json.loads(text)
+except Exception:
+    matches = list(re.finditer(r'{.*}', text, re.S))
+    if matches:
+        data = json.loads(matches[-1].group(0))
+print(data.get("status", ""))
+PYEOF
+<<< "$info_json")
+
+    echo "Notarization status: ${status:-unknown} (elapsed ${elapsed}s)" | tee -a "$log_file"
+
+    if (( elapsed >= max_wait )); then
+      echo "ERROR: Notarization polling timed out after ${max_wait}s" >&2
+      exit 7
+    fi
+  done
+
+  case "$status" in
+    Accepted)
+      echo "✅ Notarization accepted" | tee -a "$log_file"
+      ;;
+    *)
+      echo "ERROR: Notarization finished with status '$status'" >&2
+      echo "See log: $log_file" >&2
+      exit 7
+      ;;
+  esac
+}
+
+if [[ "${NOTARIZE_SYNC:-0}" == "1" ]]; then
+  echo "==> Notarizing DMG (synchronous mode)"
+  xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+else
+  notarize_background "$DMG" "$NOTARY_PROFILE"
+fi
 
 echo "==> Stapling and verifying Gatekeeper"
 xcrun stapler staple "$DMG"
