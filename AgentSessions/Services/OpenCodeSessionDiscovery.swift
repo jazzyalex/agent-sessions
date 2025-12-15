@@ -49,8 +49,7 @@ final class OpenCodeSessionDiscovery: SessionDiscovery {
         return found.sorted {
             let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return (a ?? .distantPast) > (b ?? .distantPast)
+            return a > b
         }
     }
 }
-

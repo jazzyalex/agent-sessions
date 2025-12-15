@@ -422,7 +422,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let geminiAvailable = defaults.object(forKey: PreferencesKey.geminiCLIAvailable) as? Bool ?? true
         let openCodeAvailable = defaults.object(forKey: PreferencesKey.openCodeCLIAvailable) as? Bool ?? true
 
-        var base = sessions.filter { s in
+        let base = sessions.filter { s in
             switch s.source {
             case .codex:    return codexAvailable && includeCodex
             case .claude:   return claudeAvailable && includeClaude
