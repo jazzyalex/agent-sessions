@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **OpenCode Sessions**: Fixed missing conversation content in Plain/Color views by extracting actual message text from OpenCode `storage/part/*` text parts (not just `summary.title/body`), so both user prompts and assistant responses render correctly.
+
 ## [2.8.1] - 2025-11-28
 
 ### Critical Fixes

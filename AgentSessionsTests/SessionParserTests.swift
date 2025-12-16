@@ -57,4 +57,110 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(filtered.count, 1)
         XCTAssertEqual(filtered.first?.id, s2.id)
     }
+
+    func testOpenCodeParsesTextPartsIntoConversation() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let sessionID = "ses_testQuickCheckIn"
+        let projectID = "global"
+
+        let storageRoot = root.appendingPathComponent("storage", isDirectory: true)
+        let sessionDir = storageRoot
+            .appendingPathComponent("session", isDirectory: true)
+            .appendingPathComponent(projectID, isDirectory: true)
+        let messageDir = storageRoot
+            .appendingPathComponent("message", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+
+        try fm.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: messageDir, withIntermediateDirectories: true)
+
+        let createdMillis: Int64 = 1_700_000_000_000
+
+        // Session record
+        let sessionURL = sessionDir.appendingPathComponent("\(sessionID).json")
+        let sessionJSON = """
+        {
+          "id": "\(sessionID)",
+          "version": "1.0.test",
+          "projectID": "\(projectID)",
+          "directory": "/tmp",
+          "title": "Quick check-in",
+          "time": { "created": \(createdMillis), "updated": \(createdMillis + 1000) },
+          "summary": { "additions": 0, "deletions": 0, "files": 0 }
+        }
+        """
+        try sessionJSON.data(using: .utf8)!.write(to: sessionURL)
+
+        // User message record without summary (text lives only in part/*.json)
+        let userMsgID = "msg_user_1"
+        let userMsgJSON = """
+        {
+          "id": "\(userMsgID)",
+          "sessionID": "\(sessionID)",
+          "role": "user",
+          "agent": "plan",
+          "time": { "created": \(createdMillis + 10) }
+        }
+        """
+        try userMsgJSON.data(using: .utf8)!.write(to: messageDir.appendingPathComponent("msg_0001.json"))
+
+        // Assistant message record without summary (text lives only in part/*.json)
+        let assistantMsgID = "msg_assistant_1"
+        let assistantMsgJSON = """
+        {
+          "id": "\(assistantMsgID)",
+          "sessionID": "\(sessionID)",
+          "role": "assistant",
+          "agent": "plan",
+          "time": { "created": \(createdMillis + 20) },
+          "providerID": "openrouter",
+          "modelID": "anthropic/claude-haiku-4.5"
+        }
+        """
+        try assistantMsgJSON.data(using: .utf8)!.write(to: messageDir.appendingPathComponent("msg_0002.json"))
+
+        // Parts: actual user prompt + assistant response
+        let partRoot = storageRoot.appendingPathComponent("part", isDirectory: true)
+        let userPartDir = partRoot.appendingPathComponent(userMsgID, isDirectory: true)
+        let assistantPartDir = partRoot.appendingPathComponent(assistantMsgID, isDirectory: true)
+        try fm.createDirectory(at: userPartDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: assistantPartDir, withIntermediateDirectories: true)
+
+        let userPartJSON = """
+        {
+          "id": "prt_user_text_1",
+          "sessionID": "\(sessionID)",
+          "messageID": "\(userMsgID)",
+          "type": "text",
+          "text": "Hello there",
+          "time": { "start": \(createdMillis + 10), "end": \(createdMillis + 10) }
+        }
+        """
+        try userPartJSON.data(using: .utf8)!.write(to: userPartDir.appendingPathComponent("prt_0001.json"))
+
+        let assistantPartJSON = """
+        {
+          "id": "prt_assistant_text_1",
+          "sessionID": "\(sessionID)",
+          "messageID": "\(assistantMsgID)",
+          "type": "text",
+          "text": "Hi! How can I help?",
+          "time": { "start": \(createdMillis + 20), "end": \(createdMillis + 20) }
+        }
+        """
+        try assistantPartJSON.data(using: .utf8)!.write(to: assistantPartDir.appendingPathComponent("prt_0001.json"))
+
+        let session = OpenCodeSessionParser.parseFileFull(at: sessionURL)
+        XCTAssertNotNil(session)
+        guard let parsed = session else { return }
+
+        let userTexts = parsed.events.filter { $0.kind == .user }.compactMap { $0.text }
+        let assistantTexts = parsed.events.filter { $0.kind == .assistant }.compactMap { $0.text }
+
+        XCTAssertTrue(userTexts.contains(where: { $0.contains("Hello there") }), "Expected user text part to appear as a .user event")
+        XCTAssertTrue(assistantTexts.contains(where: { $0.contains("Hi! How can I help?") }), "Expected assistant text part to appear as a .assistant event")
+    }
 }
