@@ -67,6 +67,9 @@ final class SessionParserTests: XCTestCase {
         let projectID = "global"
 
         let storageRoot = root.appendingPathComponent("storage", isDirectory: true)
+        try fm.createDirectory(at: storageRoot, withIntermediateDirectories: true)
+        try "2".data(using: .utf8)!.write(to: storageRoot.appendingPathComponent("migration"))
+
         let sessionDir = storageRoot
             .appendingPathComponent("session", isDirectory: true)
             .appendingPathComponent(projectID, isDirectory: true)
@@ -139,7 +142,7 @@ final class SessionParserTests: XCTestCase {
           "time": { "start": \(createdMillis + 10), "end": \(createdMillis + 10) }
         }
         """
-        try userPartJSON.data(using: .utf8)!.write(to: userPartDir.appendingPathComponent("prt_0001.json"))
+        try userPartJSON.data(using: .utf8)!.write(to: userPartDir.appendingPathComponent("prt_user_0001.json"))
 
         let assistantPartJSON = """
         {
@@ -151,7 +154,19 @@ final class SessionParserTests: XCTestCase {
           "time": { "start": \(createdMillis + 20), "end": \(createdMillis + 20) }
         }
         """
-        try assistantPartJSON.data(using: .utf8)!.write(to: assistantPartDir.appendingPathComponent("prt_0001.json"))
+        try assistantPartJSON.data(using: .utf8)!.write(to: assistantPartDir.appendingPathComponent("prt_assistant_0001.json"))
+
+        // Unknown part type should not crash import and should surface in JSON via meta events.
+        let unknownPartJSON = """
+        {
+          "id": "prt_unknown_1",
+          "sessionID": "\(sessionID)",
+          "messageID": "\(assistantMsgID)",
+          "type": "new-type",
+          "payload": { "hello": "world" }
+        }
+        """
+        try unknownPartJSON.data(using: .utf8)!.write(to: assistantPartDir.appendingPathComponent("prt_unknown_0002.json"))
 
         let session = OpenCodeSessionParser.parseFileFull(at: sessionURL)
         XCTAssertNotNil(session)
@@ -162,5 +177,28 @@ final class SessionParserTests: XCTestCase {
 
         XCTAssertTrue(userTexts.contains(where: { $0.contains("Hello there") }), "Expected user text part to appear as a .user event")
         XCTAssertTrue(assistantTexts.contains(where: { $0.contains("Hi! How can I help?") }), "Expected assistant text part to appear as a .assistant event")
+
+        let metaTexts = parsed.events.filter { $0.kind == .meta }.compactMap { $0.text }
+        XCTAssertTrue(metaTexts.contains(where: { $0.contains("OpenCode part: new-type") }), "Expected unknown OpenCode part type to be preserved as a meta event for JSON view")
+    }
+
+    func testOpenCodeDiscoveryAcceptsStorageRootOverride() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-Discovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let storageRoot = root.appendingPathComponent("storage", isDirectory: true)
+        let sessionDir = storageRoot.appendingPathComponent("session", isDirectory: true).appendingPathComponent("global", isDirectory: true)
+        try fm.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: storageRoot, withIntermediateDirectories: true)
+        try "2".data(using: .utf8)!.write(to: storageRoot.appendingPathComponent("migration"))
+
+        let sessionURL = sessionDir.appendingPathComponent("ses_demo.json")
+        try #"{"id":"ses_demo","time":{"created":1700000000000}}"#.data(using: .utf8)!.write(to: sessionURL)
+
+        let discovery = OpenCodeSessionDiscovery(customRoot: storageRoot.path)
+        let found = discovery.discoverSessionFiles()
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first?.lastPathComponent, "ses_demo.json")
     }
 }
