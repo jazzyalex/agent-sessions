@@ -12,7 +12,35 @@ final class OpenCodeSessionDiscovery: SessionDiscovery {
     /// Default: ~/.local/share/opencode/storage/session
     func sessionsRoot() -> URL {
         if let custom = customRoot, !custom.isEmpty {
-            return URL(fileURLWithPath: custom)
+            let expanded = (custom as NSString).expandingTildeInPath
+            let url = URL(fileURLWithPath: expanded, isDirectory: true)
+            // Allow users to point at either:
+            // - ~/.local/share/opencode/storage            (storage root)
+            // - ~/.local/share/opencode/storage/session     (sessions root)
+            // - ~/.local/share/opencode                    (contains storage/)
+            let fm = FileManager.default
+
+            // If this looks like a storage root, use its session/ subdirectory.
+            let migration = url.appendingPathComponent("migration", isDirectory: false)
+            let sessionDir = url.appendingPathComponent("session", isDirectory: true)
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: migration.path),
+               fm.fileExists(atPath: sessionDir.path, isDirectory: &isDir),
+               isDir.boolValue {
+                return sessionDir
+            }
+
+            // If user picked the opencode root, step into storage/session when present.
+            let storageDir = url.appendingPathComponent("storage", isDirectory: true)
+            let storageSessionDir = storageDir.appendingPathComponent("session", isDirectory: true)
+            var isStorageSessionDir: ObjCBool = false
+            if fm.fileExists(atPath: storageSessionDir.path, isDirectory: &isStorageSessionDir),
+               isStorageSessionDir.boolValue {
+                return storageSessionDir
+            }
+
+            // If user provided the sessions root directly, use it as-is.
+            return url
         }
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home

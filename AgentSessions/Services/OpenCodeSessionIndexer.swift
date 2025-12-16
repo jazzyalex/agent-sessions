@@ -106,6 +106,17 @@ final class OpenCodeSessionIndexer: ObservableObject {
 
     func refresh() {
         let root = discovery.sessionsRoot()
+        let storageRoot = (root.lastPathComponent == "session") ? root.deletingLastPathComponent() : root
+        let migrationURL = storageRoot.appendingPathComponent("migration", isDirectory: false)
+        if let data = try? Data(contentsOf: migrationURL),
+           let str = String(data: data, encoding: .utf8) {
+            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+            let version = trimmed.isEmpty ? "(empty)" : trimmed
+            print("OpenCode storage schema: migration=\(version)")
+        } else {
+            print("OpenCode storage schema: migration=(missing)")
+        }
+
         print("\n🟣 OPENCode INDEXING START: root=\(root.path)")
         LaunchProfiler.log("OpenCode.refresh: start")
 
