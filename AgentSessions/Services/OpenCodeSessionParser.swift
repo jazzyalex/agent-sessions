@@ -47,6 +47,9 @@ final class OpenCodeSessionParser {
         let summary: Summary?
         let agent: String?
         let model: Model?
+        // Some OpenCode message records store model fields at the top level.
+        let providerID: String?
+        let modelID: String?
         let tools: Tools?
     }
 
@@ -155,7 +158,7 @@ final class OpenCodeSessionParser {
                     continue
                 }
                 if firstModelID == nil,
-                   let mid = msg.model?.modelID, !mid.isEmpty {
+                   let mid = (msg.model?.modelID ?? msg.modelID), !mid.isEmpty {
                     firstModelID = mid
                 }
                 if let tools = msg.tools,
@@ -199,12 +202,14 @@ final class OpenCodeSessionParser {
             }
 
             let ts = msg.time?.created.flatMap { Date(timeIntervalSince1970: TimeInterval($0) / 1000.0) }
-            if modelID == nil, let mid = msg.model?.modelID, !mid.isEmpty {
+            if modelID == nil, let mid = (msg.model?.modelID ?? msg.modelID), !mid.isEmpty {
                 modelID = mid
             }
 
             let toolPartEvents = loadToolPartEvents(for: msg.id, storageRoot: storageRoot, fallbackTimestamp: ts)
             let hasToolParts = !toolPartEvents.isEmpty
+            let textPartEvents = loadTextPartEvents(forMessageID: msg.id, role: msg.role, messageTimestamp: ts, storageRoot: storageRoot)
+            let hasTextParts = !textPartEvents.isEmpty
 
             let rawJSON: String = {
                 if let str = String(data: data, encoding: .utf8) {
@@ -218,67 +223,76 @@ final class OpenCodeSessionParser {
             if hasTools { commandCount += 1 }
             commandCount += toolPartEvents.filter { $0.kind == .tool_call }.count
 
-            let baseKind = SessionEventKind.from(role: msg.role, type: nil)
-            // Heuristic error detection: tool messages whose body clearly indicates failure become .error
-            var isError = false
-            if hasTools, let body = msg.summary?.body?.lowercased() {
-                if body.contains("error") || body.contains("failed") || body.contains("exception") || body.contains("traceback") {
-                    isError = true
-                }
-            }
-            let kind: SessionEventKind
-            if isError {
-                kind = .error
-            } else if hasTools {
-                kind = .tool_call
-            } else {
-                kind = baseKind
-            }
-
-            let toolName: String? = {
-                guard let tools = msg.tools else { return nil }
-                if tools.task == true { return "task" }
-                if tools.todowrite == true { return "write" }
-                if tools.todoread == true { return "read" }
-                return nil
-            }()
-
-            // Build event text with sensible fallbacks
-            var text: String?
-            if msg.role?.lowercased() == "user" {
-                // For user messages, ALWAYS use title (contains user's request summary)
-                text = msg.summary?.title
-            } else {
-                // For assistant/tool/other messages, use body with title fallback
-                text = msg.summary?.body
-                if (text == nil || text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true),
-                   let title = msg.summary?.title, !title.isEmpty {
-                    text = title
-                }
-            }
-
-            // Drop completely empty, non-tool, non-error messages to avoid blank rows.
-            let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let isUser = msg.role?.lowercased() == "user"
-            if trimmed.isEmpty && !hasTools && !hasToolParts && !isError && !isUser {
-                continue
-            }
-
-            let event = SessionEvent(
-                id: msg.id,
+            // Preserve the raw message record for JSON view/debugging, but do not let it
+            // drive transcript rendering (OpenCode stores actual text content in part files).
+            let messageMetaEvent = SessionEvent(
+                id: msg.id + "-meta",
                 timestamp: ts,
-                kind: kind,
+                kind: .meta,
                 role: msg.role,
-                text: text,
-                toolName: toolName,
+                text: nil,
+                toolName: nil,
                 toolInput: nil,
                 toolOutput: nil,
-                messageID: nil,
+                messageID: msg.id,
                 parentID: nil,
                 isDelta: false,
                 rawJSON: rawJSON
             )
-            events.append(event)
+            events.append(messageMetaEvent)
+
+            if hasTextParts {
+                events.append(contentsOf: textPartEvents)
+            } else {
+                // Fallback: use message summary fields when text parts are unavailable.
+                // (Some older OpenCode versions or compact records only store summary text.)
+                let baseKind = SessionEventKind.from(role: msg.role, type: nil)
+                let normalizedRole = msg.role?.lowercased()
+
+                // Build event text with sensible fallbacks
+                var text: String?
+                if normalizedRole == "user" {
+                    // Prefer title for user (older OpenCode sometimes placed assistant-style content in body).
+                    text = msg.summary?.title
+                    if (text == nil || text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true) {
+                        text = msg.summary?.body
+                    }
+                } else {
+                    // For assistant/tool/other messages, use body with title fallback
+                    text = msg.summary?.body
+                    if (text == nil || text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true),
+                       let title = msg.summary?.title, !title.isEmpty {
+                        text = title
+                    }
+                }
+
+                let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let isUser = normalizedRole == "user"
+
+                // If this message is purely a tool-call wrapper (common for assistant turns),
+                // rely on tool-part events instead of rendering an empty assistant/tool line.
+                if trimmed.isEmpty && (hasTools || hasToolParts) && !isUser {
+                    // no-op
+                } else if trimmed.isEmpty && !isUser {
+                    // Drop completely empty non-user messages to avoid blank rows.
+                } else {
+                    let event = SessionEvent(
+                        id: msg.id,
+                        timestamp: ts,
+                        kind: baseKind,
+                        role: msg.role,
+                        text: text,
+                        toolName: nil,
+                        toolInput: nil,
+                        toolOutput: nil,
+                        messageID: msg.id,
+                        parentID: nil,
+                        isDelta: false,
+                        rawJSON: rawJSON
+                    )
+                    events.append(event)
+                }
+            }
             events.append(contentsOf: toolPartEvents)
         }
 
@@ -295,6 +309,66 @@ final class OpenCodeSessionParser {
     }
 
     // MARK: - Tool part helpers
+
+    private static func loadTextPartEvents(forMessageID messageID: String,
+                                           role: String?,
+                                           messageTimestamp: Date?,
+                                           storageRoot: URL) -> [SessionEvent] {
+        let partDir = storageRoot
+            .appendingPathComponent("part", isDirectory: true)
+            .appendingPathComponent(messageID, isDirectory: true)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: partDir.path, isDirectory: &isDir), isDir.boolValue else {
+            return []
+        }
+        guard let files = try? FileManager.default.contentsOfDirectory(at: partDir, includingPropertiesForKeys: nil) else {
+            return []
+        }
+
+        let sortedFiles = files.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        var events: [SessionEvent] = []
+        events.reserveCapacity(sortedFiles.count)
+
+        let kind = SessionEventKind.from(role: role, type: nil)
+
+        for file in sortedFiles {
+            guard let data = try? Data(contentsOf: file),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = obj["type"] as? String,
+                  type.lowercased() == "text" else {
+                continue
+            }
+
+            let rawJSON = String(data: data, encoding: .utf8) ?? ""
+            let partID = (obj["id"] as? String) ?? file.lastPathComponent
+
+            // Most OpenCode parts store the actual conversational text here.
+            let text = (obj["text"] as? String) ?? ""
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                continue
+            }
+
+            // Use the message timestamp for stable ordering relative to tool parts.
+            let event = SessionEvent(
+                id: partID,
+                timestamp: messageTimestamp ?? dateFromMillis((obj["time"] as? [String: Any])?["start"]),
+                kind: kind,
+                role: role,
+                text: text,
+                toolName: nil,
+                toolInput: nil,
+                toolOutput: nil,
+                messageID: messageID,
+                parentID: nil,
+                isDelta: false,
+                rawJSON: rawJSON
+            )
+            events.append(event)
+        }
+
+        return events
+    }
 
     private static func containsToolPart(for messageID: String, storageRoot: URL) -> Bool {
         let partDir = storageRoot

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(AgentSessions)
+import AgentSessions
+#endif
 
 /// Shared configuration and helpers for identifying Agent Sessions' Claude usage probe sessions.
 enum ClaudeProbeConfig {
