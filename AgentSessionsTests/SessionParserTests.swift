@@ -135,6 +135,36 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(metaTexts.contains(where: { $0.localizedCaseInsensitiveContains("Rejected tool use:") }))
     }
 
+    func testClaudeFileReadToolResultDoesNotFalsePositiveExitCode() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-FileRead-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_fileread.jsonl")
+        let sessionID = "ses_testClaudeFileRead"
+
+        // Claude read-file tool_result payloads can include line numbers like "219→ ...".
+        // Previously our exit-code regex could match across the newline ("exit code\n220") and
+        // mistakenly treat the next line number as a non-zero exit code, coloring the whole block red.
+        let fileDump = """
+             219→        // Check exit code
+             220→        let exitCode = process.terminationStatus
+        """
+        let fileDumpEscaped = fileDump.replacingOccurrences(of: "\n", with: "\\n")
+        let line = #"{"type":"user","sessionId":"\#(sessionID)","version":"2.0.71","toolUseResult":{"type":"file","file":{"filePath":"/tmp/ClaudeStatusService.swift","content":"\#(fileDumpEscaped)"}},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_abc","content":"\#(fileDumpEscaped)"}]},"uuid":"u1","timestamp":"2025-12-16T00:00:00.000Z"}"#
+        try line.data(using: .utf8)!.write(to: url)
+
+        let session = ClaudeSessionParser.parseFileFull(at: url)
+        XCTAssertNotNil(session)
+        guard let parsed = session else { return }
+
+        XCTAssertTrue(parsed.events.filter { $0.kind == .error }.isEmpty)
+        let toolOutputs = parsed.events.filter { $0.kind == .tool_result }.compactMap { $0.toolOutput }
+        XCTAssertEqual(toolOutputs.count, 1)
+        XCTAssertTrue(toolOutputs.first?.contains("Check exit code") ?? false)
+    }
+
     func testOpenCodeParsesTextPartsIntoConversation() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-\(UUID().uuidString)", isDirectory: true)

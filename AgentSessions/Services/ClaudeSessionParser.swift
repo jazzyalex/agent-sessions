@@ -99,155 +99,19 @@ final class ClaudeSessionParser {
     // MARK: - Event Parsing
 
     private static func parseLine(_ obj: [String: Any], eventID: String) -> SessionEvent {
-        var eventType = obj["type"] as? String
-        let timestamp = extractTimestamp(from: obj)
-
-        var role: String?
-        var text: String?
-        var toolName: String?
-        var toolInput: String?
-        var toolOutput: String?
-        var toolKindOverride: SessionEventKind?
-        var toolIsError: Bool = false
-
-        // Determine role and extract content based on type
-        switch eventType?.lowercased() {
-        case "user", "user_input", "user-input", "input", "prompt", "chat_input", "chat-input", "human":
-            role = "user"
-            // Extract from nested message.content
-            if let message = obj["message"] as? [String: Any] {
-                text = extractContent(from: message)
-            }
-            // Fallback to direct content
-            if text == nil {
-                text = extractContent(from: obj)
-            }
-
-        case "assistant", "response", "assistant_message", "assistant-message", "assistant_response", "assistant-response", "completion":
-            role = "assistant"
-            if let message = obj["message"] as? [String: Any] {
-                text = extractContent(from: message)
-            }
-            if text == nil {
-                text = extractContent(from: obj)
-            }
-
-        case "system":
-            role = "system"
-            text = obj["content"] as? String
-
-        case "tool_use", "tool_call":
-            role = "assistant"
-            toolName = obj["name"] as? String ?? obj["tool"] as? String
-            if let input = obj["input"] {
-                toolInput = stringifyJSON(input)
-            }
-
-        case "tool_result":
-            role = "tool"
-            if let output = obj["output"] {
-                toolOutput = stringifyJSON(output)
-            }
-
-        default:
-            // Try to infer from explicit role/sender
-            if let explicitRole = (obj["role"] as? String) ?? (obj["sender"] as? String) {
-                let lower = explicitRole.lowercased()
-                if lower == "user" || lower == "human" { role = "user" }
-                else if lower == "assistant" || lower == "model" { role = "assistant" }
-            }
-            // If still unknown, treat as assistant when it has conversational content
-            if role == nil {
-                if let message = obj["message"] as? [String: Any], let c = extractContent(from: message), !c.isEmpty {
-                    role = "assistant"; text = c
-                } else if let c = extractContent(from: obj), !c.isEmpty {
-                    role = "assistant"; text = c
-                } else {
-                    role = "meta"
-                }
-            }
+        let derived = parseLineEvents(obj, baseEventID: eventID)
+        if let preferred = derived.first(where: { $0.kind == .user || $0.kind == .assistant }) {
+            return preferred
         }
-
-        // Claude encodes tool usage/results inside message.content blocks rather than
-        // as top-level type events. Detect those here and override kind/tool fields.
-        if toolName == nil && toolInput == nil && toolOutput == nil {
-            if let message = obj["message"] as? [String: Any],
-               let contentArray = message["content"] as? [[String: Any]] {
-                for block in contentArray {
-                    guard let rawType = block["type"] as? String else { continue }
-                    let t = rawType.lowercased()
-                    if t == "tool_use" || t == "tool-use" || t == "tool_call" || t == "tool-call" {
-                        toolKindOverride = .tool_call
-                        role = "assistant"
-                        toolName = (block["name"] as? String) ?? (block["tool"] as? String)
-                        if let input = block["input"] {
-                            toolInput = stringifyJSON(input)
-                        }
-                        // Normalize eventType so downstream helpers see this as tool_call.
-                        eventType = eventType ?? "tool_call"
-                        break
-                    } else if t == "tool_result" || t == "tool-result" {
-                        toolKindOverride = .tool_result
-                        role = "tool"
-                        var output: String? = nil
-                        if let result = obj["toolUseResult"] as? [String: Any] {
-                            let stdout = (result["stdout"] as? String) ?? ""
-                            let stderr = (result["stderr"] as? String) ?? ""
-                            if !stdout.isEmpty && !stderr.isEmpty {
-                                output = stdout + "\n" + stderr
-                            } else if !stdout.isEmpty {
-                                output = stdout
-                            } else if !stderr.isEmpty {
-                                output = stderr
-                            }
-                            if let isErr = result["is_error"] as? Bool, isErr {
-                                toolIsError = true
-                            } else if let isErr = block["is_error"] as? Bool, isErr {
-                                toolIsError = true
-                            } else if let interrupted = result["interrupted"] as? Bool, interrupted {
-                                // Treat interrupted tool runs as errors so the terminal
-                                // Errors filter surfaces them clearly.
-                                toolIsError = true
-                            } else if !(result["stderr"] as? String ?? "").isEmpty {
-                                toolIsError = true
-                            }
-                        }
-                        if output == nil, let content = block["content"] as? String {
-                            output = content
-                        }
-                        toolOutput = output
-                        eventType = eventType ?? "tool_result"
-                        break
-                    }
-                }
-            }
-        }
-
-        // Determine if this is a meta event based on type, not naive flags
-        let et = eventType?.lowercased()
-        let isMetaEvent = (et == "summary" || et == "file-history-snapshot" || et == "meta") && (role == nil || role == "meta")
-
-        let baseKind = SessionEventKind.from(role: role, type: eventType)
-        let kind: SessionEventKind
-        if isMetaEvent {
-            kind = .meta
-        } else if toolIsError {
-            kind = .error
-        } else if let override = toolKindOverride {
-            kind = override
-        } else {
-            kind = baseKind
-        }
-
-        return SessionEvent(
+        return derived.first ?? SessionEvent(
             id: eventID,
-            timestamp: timestamp,
-            kind: isMetaEvent ? .meta : kind,
-            role: role,
-            text: text,
-            toolName: toolName,
-            toolInput: toolInput,
-            toolOutput: toolOutput,
+            timestamp: extractTimestamp(from: obj),
+            kind: .meta,
+            role: "meta",
+            text: nil,
+            toolName: nil,
+            toolInput: nil,
+            toolOutput: nil,
             messageID: obj["uuid"] as? String,
             parentID: obj["parentUuid"] as? String,
             isDelta: false,
@@ -307,136 +171,54 @@ final class ClaudeSessionParser {
             }
         }
 
-        // Base role inference (no embedded-tool override here).
+        // Base role inference (block parsing below derives role/kind per block when possible).
         var eventType = obj["type"] as? String
         var role: String?
         var baseText: String?
 
-        switch eventType?.lowercased() {
-        case "user", "user_input", "user-input", "input", "prompt", "chat_input", "chat-input", "human":
-            role = "user"
-            if let message = obj["message"] as? [String: Any] {
-                baseText = extractContent(from: message)
-            }
-            if baseText == nil {
-                baseText = extractContent(from: obj)
-            }
-        case "assistant", "response", "assistant_message", "assistant-message", "assistant_response", "assistant-response", "completion":
-            role = "assistant"
-            if let message = obj["message"] as? [String: Any] {
-                baseText = extractContent(from: message)
-            }
-            if baseText == nil {
-                baseText = extractContent(from: obj)
-            }
-        case "system":
-            role = "system"
-            baseText = obj["content"] as? String
-        default:
-            if let explicitRole = (obj["role"] as? String) ?? (obj["sender"] as? String) {
-                let lower = explicitRole.lowercased()
-                if lower == "user" || lower == "human" { role = "user" }
-                else if lower == "assistant" || lower == "model" { role = "assistant" }
-            }
-            if role == nil {
-                if let message = obj["message"] as? [String: Any], let c = extractContent(from: message), !c.isEmpty {
-                    role = "assistant"; baseText = c
-                } else if let c = extractContent(from: obj), !c.isEmpty {
-                    role = "assistant"; baseText = c
-                } else {
-                    role = "meta"
+        if let message = obj["message"] as? [String: Any], let mr = (message["role"] as? String)?.lowercased() {
+            if mr == "user" || mr == "human" { role = "user" }
+            else if mr == "assistant" || mr == "model" { role = "assistant" }
+            else if mr == "system" { role = "system" }
+        }
+
+        if role == nil {
+            switch eventType?.lowercased() {
+            case "user", "user_input", "user-input", "input", "prompt", "chat_input", "chat-input", "human":
+                role = "user"
+            case "assistant", "response", "assistant_message", "assistant-message", "assistant_response", "assistant-response", "completion":
+                role = "assistant"
+            case "system":
+                role = "system"
+            default:
+                if let explicitRole = (obj["role"] as? String) ?? (obj["sender"] as? String) {
+                    let lower = explicitRole.lowercased()
+                    if lower == "user" || lower == "human" { role = "user" }
+                    else if lower == "assistant" || lower == "model" { role = "assistant" }
                 }
             }
+        }
+
+        if let message = obj["message"] as? [String: Any] {
+            // Only use baseText when there's no block array to split; otherwise we build text from blocks.
+            if (message["content"] as? [[String: Any]]) == nil {
+                baseText = extractContent(from: message)
+            }
+        }
+        if baseText == nil {
+            baseText = extractContent(from: obj)
+        }
+
+        if role == nil {
+            role = baseText?.isEmpty == false ? "assistant" : "meta"
         }
 
         // If we have message.content blocks, split them into events in-order.
         if let message = obj["message"] as? [String: Any],
            let contentArray = message["content"] as? [[String: Any]] {
-            // Claude often records tool_result (including failures) on top-level `type: "user"` lines.
-            // We still want to surface these tool results (and runtime-ish errors) consistently.
-            if role == "user" {
-                var out: [SessionEvent] = []
-                var seq = 0
-                func makeID(_ suffix: String) -> String { baseEventID + suffix }
-
-                if let t = baseText?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
-                    out.append(
-                        SessionEvent(
-                            id: makeID(String(format: "-u%02d", seq)),
-                            timestamp: timestamp,
-                            kind: .user,
-                            role: "user",
-                            text: t,
-                            toolName: nil,
-                            toolInput: nil,
-                            toolOutput: nil,
-                            messageID: messageID,
-                            parentID: parentID,
-                            isDelta: false,
-                            rawJSON: rawJSON
-                        )
-                    )
-                }
-
-                for block in contentArray {
-                    let t = (block["type"] as? String)?.lowercased()
-                    guard t == "tool_result" || t == "tool-result" else { continue }
-                    seq += 1
-                    let (toolOutput, disposition) = extractToolResultOutput(from: obj, block: block)
-                    let kind: SessionEventKind
-                    let role: String?
-                    let text: String?
-                    let toolOutputField: String?
-                    switch disposition {
-                    case .runtimeError:
-                        kind = .error
-                        role = "tool"
-                        text = toolOutput
-                        toolOutputField = nil
-                    case .rejectedOrPermissions:
-                        kind = .meta
-                        role = "system"
-                        text = toolOutput.flatMap { "Rejected tool use: " + $0 }
-                        toolOutputField = nil
-                    case .notFoundOrMismatch:
-                        kind = .tool_result
-                        role = "tool"
-                        text = nil
-                        toolOutputField = toolOutput
-                    case .otherToolFailure:
-                        kind = .tool_result
-                        role = "tool"
-                        text = nil
-                        toolOutputField = toolOutput
-                    case .ok:
-                        kind = .tool_result
-                        role = "tool"
-                        text = nil
-                        toolOutputField = toolOutput
-                    }
-                    out.append(
-                        SessionEvent(
-                            id: makeID(String(format: "-r%02d", seq)),
-                            timestamp: timestamp,
-                            kind: kind,
-                            role: role,
-                            text: text,
-                            toolName: (block["name"] as? String) ?? (block["tool"] as? String),
-                            toolInput: nil,
-                            toolOutput: toolOutputField,
-                            messageID: messageID,
-                            parentID: parentID,
-                            isDelta: false,
-                            rawJSON: rawJSON
-                        )
-                    )
-                }
-
-                if !out.isEmpty {
-                    return out
-                }
-                // No tool blocks found; fall back to base behavior below.
-            }
+            // Claude's tool_result blocks (including failures) frequently appear on JSONL lines whose
+            // top-level type is "user". Always parse message.content blocks, then derive role/kind
+            // per block instead of relying on the parent line type.
 
             var out: [SessionEvent] = []
             var textBuffer: [String] = []
@@ -446,17 +228,33 @@ final class ClaudeSessionParser {
                 baseEventID + suffix
             }
 
-            func flushAssistantTextIfNeeded() {
+            func flushTextIfNeeded() {
                 let joined = textBuffer.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
                 textBuffer.removeAll(keepingCapacity: true)
                 guard !joined.isEmpty else { return }
                 seq += 1
+                let inferred = (role ?? "assistant").lowercased()
+                let kind: SessionEventKind
+                let outRole: String?
+                if inferred == "user" {
+                    kind = .user
+                    outRole = "user"
+                } else if inferred == "assistant" {
+                    kind = .assistant
+                    outRole = "assistant"
+                } else if inferred == "system" {
+                    kind = .meta
+                    outRole = "system"
+                } else {
+                    kind = .assistant
+                    outRole = "assistant"
+                }
                 out.append(
                     SessionEvent(
                         id: makeID(String(format: "-p%02d", seq)),
                         timestamp: timestamp,
-                        kind: .assistant,
-                        role: "assistant",
+                        kind: kind,
+                        role: outRole,
                         text: joined,
                         toolName: nil,
                         toolInput: nil,
@@ -477,7 +275,7 @@ final class ClaudeSessionParser {
                         textBuffer.append(s)
                     }
                 case "thinking":
-                    flushAssistantTextIfNeeded()
+                    flushTextIfNeeded()
                     if let s = block["thinking"] as? String, !s.isEmpty {
                         seq += 1
                         out.append(
@@ -498,7 +296,7 @@ final class ClaudeSessionParser {
                         )
                     }
                 case "tool_use", "tool-use", "tool_call", "tool-call":
-                    flushAssistantTextIfNeeded()
+                    flushTextIfNeeded()
                     seq += 1
                     let toolName = (block["name"] as? String) ?? (block["tool"] as? String)
                     let toolInput = block["input"].flatMap(stringifyJSON)
@@ -519,7 +317,7 @@ final class ClaudeSessionParser {
                         )
                     )
                 case "tool_result", "tool-result":
-                    flushAssistantTextIfNeeded()
+                    flushTextIfNeeded()
                     seq += 1
                     let (toolOutput, disposition) = extractToolResultOutput(from: obj, block: block)
                     let kind: SessionEventKind
@@ -578,7 +376,7 @@ final class ClaudeSessionParser {
                     }
                 }
             }
-            flushAssistantTextIfNeeded()
+            flushTextIfNeeded()
 
             // If we didn't produce anything, fall back to base behavior.
             if out.isEmpty {
@@ -636,6 +434,9 @@ final class ClaudeSessionParser {
 
     private static func extractToolResultOutput(from obj: [String: Any], block: [String: Any]) -> (String?, ToolResultDisposition) {
         var output: String? = nil
+        let explicitBlockIsError = (block["is_error"] as? Bool) == true
+        var toolResultIsError: Bool = false
+        var isFilePayload: Bool = false
 
         // Prefer a summarized string when available.
         if let resultString = obj["toolUseResult"] as? String {
@@ -644,6 +445,12 @@ final class ClaudeSessionParser {
         }
 
         if let result = obj["toolUseResult"] as? [String: Any] {
+            if let t = (result["type"] as? String)?.lowercased(), t == "file" || result["file"] != nil {
+                isFilePayload = true
+            }
+            if let isErr = result["is_error"] as? Bool, isErr {
+                toolResultIsError = true
+            }
             let stdout = (result["stdout"] as? String) ?? ""
             let stderr = (result["stderr"] as? String) ?? ""
             if !stdout.isEmpty && !stderr.isEmpty {
@@ -669,6 +476,28 @@ final class ClaudeSessionParser {
         }
 
         let lower = trimmed.lowercased()
+        let isExplicitError = explicitBlockIsError || toolResultIsError
+
+        // Read-file payloads can contain arbitrary code/comments like "exit code" and should not be
+        // reclassified as runtime errors unless Claude explicitly flagged the tool_result as an error.
+        if isFilePayload && !isExplicitError {
+            return (output, .ok)
+        }
+
+        // If Claude didn't mark this as an error, be conservative: only classify failures when the
+        // output looks like a tool failure summary (e.g. "Error: ...") or an explicit interruption.
+        let looksLikeFailureSummary =
+            isExplicitError ||
+            lower.hasPrefix("error:") ||
+            lower.hasPrefix("[error]") ||
+            lower.contains("<tool_use_error>") ||
+            lower.contains("request interrupted by user") ||
+            lower.contains("interrupted by user") ||
+            lower.contains("request cancelled by user") ||
+            lower.contains("request canceled by user")
+        if !looksLikeFailureSummary {
+            return (output, .ok)
+        }
 
         // 1) User rejections (do not surface as errors).
         // Keep this strict to avoid classifying generic git/server "rejected" failures as rejections.
@@ -694,18 +523,18 @@ final class ClaudeSessionParser {
         // 5) Not-found / mismatch failures (keep visible but not counted as runtime-ish errors).
         if lower.contains("file does not exist") ||
             lower.contains("no such file or directory") ||
+            lower.contains("command not found") ||
             lower.contains("string to replace not found") ||
-            lower.contains("string to replace was not found") ||
-            lower.contains("not found") {
+            lower.contains("string to replace was not found") {
             return (output, .notFoundOrMismatch)
         }
 
-        // 5) Generic error prefix: treat as runtime-ish.
+        // 6) Generic error prefix: treat as runtime-ish.
         if lower.hasPrefix("error:") || lower.hasPrefix("[error]") {
             return (output, .runtimeError)
         }
 
-        if let isErr = block["is_error"] as? Bool, isErr {
+        if isExplicitError {
             return (output, .otherToolFailure)
         }
 
@@ -713,19 +542,24 @@ final class ClaudeSessionParser {
     }
 
     private static func parseExitCode(from text: String) -> Int? {
+        // IMPORTANT: Do not let patterns cross newlines. Claude read-file tool_results often include
+        // line-number prefixes like "219→ ...", and "\s*" can accidentally capture the next line number.
         let patterns = [
-            #"exit code[:\s]*(-?\d+)"#,
-            #"exit status[:\s]*(-?\d+)"#
+            #"exit code[: \t]*(-?\d+)"#,
+            #"exit status[: \t]*(-?\d+)"#
         ]
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
-            let range = NSRange(text.startIndex..., in: text)
-            guard let match = regex.firstMatch(in: text, options: [], range: range),
-                  match.numberOfRanges >= 2,
-                  let valueRange = Range(match.range(at: 1), in: text) else {
-                continue
+        for lineSub in text.split(whereSeparator: \.isNewline) {
+            let line = String(lineSub)
+            for pattern in patterns {
+                guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+                let range = NSRange(line.startIndex..., in: line)
+                guard let match = regex.firstMatch(in: line, options: [], range: range),
+                      match.numberOfRanges >= 2,
+                      let valueRange = Range(match.range(at: 1), in: line) else {
+                    continue
+                }
+                return Int(line[valueRange])
             }
-            return Int(text[valueRange])
         }
         return nil
     }
