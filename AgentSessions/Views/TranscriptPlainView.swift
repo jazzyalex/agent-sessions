@@ -832,6 +832,17 @@ private func prettyJSONForSession(_ session: Session) -> String {
             pieces.append(payload)
             remainingBudget -= cost
         } else {
+            // If a single event is too large, do not discard the rest of the session.
+            // Emit a compact stub marker for this event and continue if it fits.
+            let originalChars = rawPayload.utf16.count
+            let stub = #"{"type":"omitted","text":"[Large JSON event truncated - \#(originalChars) chars]","event_index":\#(idx)}"#
+            let stubCost = stub.utf16.count + 2
+            if stubCost <= remainingBudget {
+                pieces.append(stub)
+                remainingBudget -= stubCost
+                continue
+            }
+
             omittedCount = session.events.count - idx
             break
         }
@@ -868,8 +879,17 @@ private func jsonPayload(for event: SessionEvent) -> String {
 /// - Note: This only affects the JSON *presentation* in the viewer. The underlying
 ///   `SessionEvent.rawJSON` remains unchanged on disk.
 private func transformJSONForViewer(_ json: String) -> String {
-    // Fast path: only bother parsing when we see fields we care about.
-    guard json.contains(#""encrypted_content""#) || json.contains(#""content""#) else {
+    // Fast path: only bother parsing when we see fields we care about or the
+    // payload is large enough that we may want to stub huge strings for UI safety.
+    let isLargePayload = json.utf16.count > 60_000
+    guard isLargePayload
+        || json.contains(#""encrypted_content""#)
+        || json.contains(#""content""#)
+        || json.contains(#""resultDisplay""#)
+        || json.contains(#""stdout""#)
+        || json.contains(#""stderr""#)
+        || json.contains(#""url""#)
+    else {
         return json
     }
     guard let data = json.data(using: .utf8) else { return json }
@@ -888,6 +908,13 @@ private func transformJSONForViewer(_ json: String) -> String {
 /// - Replace any `"encrypted_content": "<blob>"` string with a descriptor object.
 /// - Replace `content[].text` blocks (input/output text) with structured text stubs.
 private func transformJSONValue(_ value: Any) -> Any {
+    if let string = value as? String {
+        if string.utf16.count > 40_000 {
+            return makeLargeStringStub(from: string)
+        }
+        return string
+    }
+
     if let array = value as? [Any] {
         return array.map { transformJSONValue($0) }
     }
@@ -900,6 +927,21 @@ private func transformJSONValue(_ value: Any) -> Any {
     for (key, rawValue) in dict {
         if key == "encrypted_content", let blob = rawValue as? String {
             updated[key] = makeEncryptedContentStub(from: blob, in: dict)
+        } else if key == "resultDisplay",
+                  let text = rawValue as? String,
+                  text.count > 200,
+                  text.contains("\n") {
+            updated[key] = makeTextBlockStub(from: text)
+        } else if key == "stdout",
+                  let text = rawValue as? String,
+                  text.count > 200,
+                  text.contains("\n") {
+            updated[key] = makeTextBlockStub(from: text)
+        } else if key == "stderr",
+                  let text = rawValue as? String,
+                  text.count > 200,
+                  text.contains("\n") {
+            updated[key] = makeTextBlockStub(from: text)
         } else if key == "text",
                   let text = rawValue as? String,
                   shouldConvertTextBlock(in: dict) {
@@ -1020,15 +1062,50 @@ private func makeDataURLStub(from url: String, in container: [String: Any]) -> [
 /// Build a structured representation for large text blocks so that the JSON view
 /// shows them as readable paragraphs instead of a single escaped blob.
 private func makeTextBlockStub(from text: String) -> [String: Any] {
-    let lines = text.components(separatedBy: .newlines)
-    let lineCount = lines.count
     let length = text.utf16.count
 
+    // Avoid exploding very large text (e.g., "ls -R" tool output) into thousands of JSON
+    // array items. Keep a preview for readability while keeping the JSON view responsive.
+    if length > 80_000 {
+        let previewLineLimit = 200
+        let preview = text.split(
+            separator: "\n",
+            maxSplits: previewLineLimit - 1,
+            omittingEmptySubsequences: false
+        ).map(String.init)
+        let newlineCount = text.utf8.reduce(0) { partial, byte in
+            partial + (byte == 10 ? 1 : 0)
+        }
+        let lineCount = newlineCount + 1
+        return [
+            "_kind": "text_block",
+            "preview_lines": preview,
+            "preview_line_count": preview.count,
+            "line_count": lineCount,
+            "chars": length,
+            "truncated": true
+        ]
+    }
+
+    let lines = text.components(separatedBy: .newlines)
     return [
         "_kind": "text_block",
         "lines": lines,
-        "line_count": lineCount,
+        "line_count": lines.count,
         "chars": length
+    ]
+}
+
+private func makeLargeStringStub(from text: String) -> [String: Any] {
+    let length = text.utf16.count
+    let previewLimit = 2_000
+    let preview = String(text.prefix(previewLimit))
+    return [
+        "_kind": "string_preview",
+        "chars": length,
+        "preview_chars": preview.utf16.count,
+        "preview": preview,
+        "truncated": true
     ]
 }
 

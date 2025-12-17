@@ -69,5 +69,79 @@ final class GeminiParserTests: XCTestCase {
         XCTAssertTrue(session.events[0].text?.contains("[inline data omitted]") == true)
         XCTAssertEqual(session.events[1].text, "It looks like...")
     }
-}
 
+    func testToolCallsAndInfoMessages() throws {
+        let json = """
+        {
+          "startTime": "2025-12-16T23:47:00.000Z",
+          "lastUpdated": "2025-12-16T23:48:00.000Z",
+          "projectHash": "205016864bd110904e9ad8314192344ab398d043e779da15bedbb9ee9be00da2",
+          "sessionId": "session-2025-12-16T23-47-b4f17607",
+          "messages": [
+            {
+              "id": "m1",
+              "timestamp": "2025-12-16T23:47:01.000Z",
+              "type": "user",
+              "content": "Run a command"
+            },
+            {
+              "id": "m2",
+              "timestamp": "2025-12-16T23:47:02.000Z",
+              "type": "gemini",
+              "content": "",
+              "toolCalls": [
+                {
+                  "id": "run_shell_command-1",
+                  "name": "run_shell_command",
+                  "displayName": "Shell",
+                  "args": { "command": "echo hi", "cwd": "/tmp" },
+                  "status": "success",
+                  "timestamp": "2025-12-16T23:47:03.000Z",
+                  "resultDisplay": "Output: hi\\n",
+                  "result": [
+                    {
+                      "functionResponse": {
+                        "id": "run_shell_command-1",
+                        "name": "run_shell_command",
+                        "response": { "output": "Output: hi\\n" }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "m3",
+              "timestamp": "2025-12-16T23:47:04.000Z",
+              "type": "info",
+              "content": "Request cancelled."
+            }
+          ]
+        }
+        """
+        let url = try writeTemp(json)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        // Full parse: toolCalls become explicit tool events; info becomes meta.
+        guard let session = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        XCTAssertEqual(session.events.filter { $0.kind == .user }.count, 1)
+        XCTAssertEqual(session.events.filter { $0.kind == .tool_call }.count, 1)
+        XCTAssertEqual(session.events.filter { $0.kind == .tool_result }.count, 1)
+        XCTAssertEqual(session.events.filter { $0.kind == .meta }.count, 1)
+
+        let call = session.events.first(where: { $0.kind == .tool_call })
+        XCTAssertEqual(call?.toolName, "Shell")
+        XCTAssertTrue((call?.toolInput ?? "").contains("echo hi"))
+
+        let result = session.events.first(where: { $0.kind == .tool_result })
+        XCTAssertTrue((result?.toolOutput ?? "").contains("Output: hi"))
+
+        let meta = session.events.first(where: { $0.kind == .meta })
+        XCTAssertEqual(meta?.text, "Request cancelled.")
+
+        // Preview parse: toolCalls contribute to eventCount; info does not.
+        guard let preview = GeminiSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
+        XCTAssertEqual(preview.eventCount, 3)
+        XCTAssertEqual(preview.messageCount, 3)
+    }
+}
