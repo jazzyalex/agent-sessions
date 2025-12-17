@@ -69,8 +69,9 @@ final class ClaudeSessionParser {
                 }
 
                 // Parse event
-                let event = parseLine(obj, eventID: eventID(for: url, index: idx))
-                events.append(event)
+                let baseID = eventID(for: url, index: idx)
+                let parsed = parseLineEvents(obj, baseEventID: baseID)
+                events.append(contentsOf: parsed)
             }
         } catch {
             print("❌ Failed to read Claude session: \(error)")
@@ -252,6 +253,416 @@ final class ClaudeSessionParser {
             isDelta: false,
             rawJSON: (try? JSONSerialization.data(withJSONObject: obj, options: []).base64EncodedString()) ?? ""
         )
+    }
+
+    /// Full-fidelity parse for a single JSONL object.
+    /// Claude Code can embed `tool_use`, `tool_result`, and `thinking` blocks inside `message.content[]`.
+    /// We split these into separate `SessionEvent`s to avoid collapsing tool activity into a single line.
+    private static func parseLineEvents(_ obj: [String: Any], baseEventID: String) -> [SessionEvent] {
+        let timestamp = extractTimestamp(from: obj)
+        let rawJSON = (try? JSONSerialization.data(withJSONObject: obj, options: []).base64EncodedString()) ?? ""
+        let messageID = obj["uuid"] as? String
+        let parentID = obj["parentUuid"] as? String
+
+        // Handle explicit top-level tool events (rare but supported).
+        if let t = (obj["type"] as? String)?.lowercased() {
+            if t == "tool_use" || t == "tool_call" {
+                let toolName = obj["name"] as? String ?? obj["tool"] as? String
+                let toolInput = obj["input"].flatMap(stringifyJSON)
+                return [
+                    SessionEvent(
+                        id: baseEventID,
+                        timestamp: timestamp,
+                        kind: .tool_call,
+                        role: "assistant",
+                        text: nil,
+                        toolName: toolName,
+                        toolInput: toolInput,
+                        toolOutput: nil,
+                        messageID: messageID,
+                        parentID: parentID,
+                        isDelta: false,
+                        rawJSON: rawJSON
+                    )
+                ]
+            }
+            if t == "tool_result" {
+                let toolOutput = obj["output"].flatMap(stringifyJSON)
+                return [
+                    SessionEvent(
+                        id: baseEventID,
+                        timestamp: timestamp,
+                        kind: .tool_result,
+                        role: "tool",
+                        text: nil,
+                        toolName: obj["name"] as? String ?? obj["tool"] as? String,
+                        toolInput: nil,
+                        toolOutput: toolOutput,
+                        messageID: messageID,
+                        parentID: parentID,
+                        isDelta: false,
+                        rawJSON: rawJSON
+                    )
+                ]
+            }
+        }
+
+        // Base role inference (no embedded-tool override here).
+        var eventType = obj["type"] as? String
+        var role: String?
+        var baseText: String?
+
+        switch eventType?.lowercased() {
+        case "user", "user_input", "user-input", "input", "prompt", "chat_input", "chat-input", "human":
+            role = "user"
+            if let message = obj["message"] as? [String: Any] {
+                baseText = extractContent(from: message)
+            }
+            if baseText == nil {
+                baseText = extractContent(from: obj)
+            }
+        case "assistant", "response", "assistant_message", "assistant-message", "assistant_response", "assistant-response", "completion":
+            role = "assistant"
+            if let message = obj["message"] as? [String: Any] {
+                baseText = extractContent(from: message)
+            }
+            if baseText == nil {
+                baseText = extractContent(from: obj)
+            }
+        case "system":
+            role = "system"
+            baseText = obj["content"] as? String
+        default:
+            if let explicitRole = (obj["role"] as? String) ?? (obj["sender"] as? String) {
+                let lower = explicitRole.lowercased()
+                if lower == "user" || lower == "human" { role = "user" }
+                else if lower == "assistant" || lower == "model" { role = "assistant" }
+            }
+            if role == nil {
+                if let message = obj["message"] as? [String: Any], let c = extractContent(from: message), !c.isEmpty {
+                    role = "assistant"; baseText = c
+                } else if let c = extractContent(from: obj), !c.isEmpty {
+                    role = "assistant"; baseText = c
+                } else {
+                    role = "meta"
+                }
+            }
+        }
+
+        // If we have message.content blocks, split them into events in-order.
+        if let message = obj["message"] as? [String: Any],
+           let contentArray = message["content"] as? [[String: Any]] {
+            var out: [SessionEvent] = []
+            var textBuffer: [String] = []
+            var seq = 0
+
+            func makeID(_ suffix: String) -> String {
+                baseEventID + suffix
+            }
+
+            func flushAssistantTextIfNeeded() {
+                let joined = textBuffer.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                textBuffer.removeAll(keepingCapacity: true)
+                guard !joined.isEmpty else { return }
+                seq += 1
+                out.append(
+                    SessionEvent(
+                        id: makeID(String(format: "-p%02d", seq)),
+                        timestamp: timestamp,
+                        kind: .assistant,
+                        role: "assistant",
+                        text: joined,
+                        toolName: nil,
+                        toolInput: nil,
+                        toolOutput: nil,
+                        messageID: messageID,
+                        parentID: parentID,
+                        isDelta: false,
+                        rawJSON: rawJSON
+                    )
+                )
+            }
+
+            for block in contentArray {
+                let t = (block["type"] as? String)?.lowercased()
+                switch t {
+                case "text":
+                    if let s = block["text"] as? String {
+                        textBuffer.append(s)
+                    }
+                case "thinking":
+                    flushAssistantTextIfNeeded()
+                    if let s = block["thinking"] as? String, !s.isEmpty {
+                        seq += 1
+                        out.append(
+                            SessionEvent(
+                                id: makeID(String(format: "-m%02d", seq)),
+                                timestamp: timestamp,
+                                kind: .meta,
+                                role: "assistant",
+                                text: "[thinking]\n" + s,
+                                toolName: nil,
+                                toolInput: nil,
+                                toolOutput: nil,
+                                messageID: messageID,
+                                parentID: parentID,
+                                isDelta: false,
+                                rawJSON: rawJSON
+                            )
+                        )
+                    }
+                case "tool_use", "tool-use", "tool_call", "tool-call":
+                    flushAssistantTextIfNeeded()
+                    seq += 1
+                    let toolName = (block["name"] as? String) ?? (block["tool"] as? String)
+                    let toolInput = block["input"].flatMap(stringifyJSON)
+                    out.append(
+                        SessionEvent(
+                            id: makeID(String(format: "-t%02d", seq)),
+                            timestamp: timestamp,
+                            kind: .tool_call,
+                            role: "assistant",
+                            text: nil,
+                            toolName: toolName,
+                            toolInput: toolInput,
+                            toolOutput: nil,
+                            messageID: messageID,
+                            parentID: parentID,
+                            isDelta: false,
+                            rawJSON: rawJSON
+                        )
+                    )
+                case "tool_result", "tool-result":
+                    flushAssistantTextIfNeeded()
+                    seq += 1
+                    let (toolOutput, disposition) = extractToolResultOutput(from: obj, block: block)
+                    let kind: SessionEventKind
+                    let role: String?
+                    let text: String?
+                    let toolOutputField: String?
+                    switch disposition {
+                    case .runtimeError:
+                        kind = .error
+                        role = "tool"
+                        text = toolOutput
+                        toolOutputField = nil
+                    case .rejectedOrPermissions:
+                        // Hide by default (meta is off), but keep for JSON inspection.
+                        kind = .meta
+                        role = "system"
+                        text = toolOutput.flatMap { "Rejected tool use: " + $0 }
+                        toolOutputField = nil
+                    case .notFoundOrMismatch:
+                        kind = .tool_result
+                        role = "tool"
+                        text = nil
+                        toolOutputField = toolOutput
+                    case .otherToolFailure:
+                        // Keep visible as tool output unless we can confidently call it runtime-ish.
+                        kind = .tool_result
+                        role = "tool"
+                        text = nil
+                        toolOutputField = toolOutput
+                    case .ok:
+                        kind = .tool_result
+                        role = "tool"
+                        text = nil
+                        toolOutputField = toolOutput
+                    }
+                    out.append(
+                        SessionEvent(
+                            id: makeID(String(format: "-r%02d", seq)),
+                            timestamp: timestamp,
+                            kind: kind,
+                            role: role,
+                            text: text,
+                            toolName: (block["name"] as? String) ?? (block["tool"] as? String),
+                            toolInput: nil,
+                            toolOutput: toolOutputField,
+                            messageID: messageID,
+                            parentID: parentID,
+                            isDelta: false,
+                            rawJSON: rawJSON
+                        )
+                    )
+                default:
+                    // Fallback: if there's a text field, treat as assistant-visible text.
+                    if let s = block["text"] as? String {
+                        textBuffer.append(s)
+                    }
+                }
+            }
+            flushAssistantTextIfNeeded()
+
+            // If this line is not an assistant message, keep a single base event instead.
+            if role != "assistant" && role != "model" {
+                let baseKind = SessionEventKind.from(role: role, type: eventType)
+                return [
+                    SessionEvent(
+                        id: baseEventID,
+                        timestamp: timestamp,
+                        kind: baseKind,
+                        role: role,
+                        text: baseText,
+                        toolName: nil,
+                        toolInput: nil,
+                        toolOutput: nil,
+                        messageID: messageID,
+                        parentID: parentID,
+                        isDelta: false,
+                        rawJSON: rawJSON
+                    )
+                ]
+            }
+
+            // If we didn't produce anything, fall back to base behavior.
+            if out.isEmpty {
+                let baseKind = SessionEventKind.from(role: role, type: eventType)
+                return [
+                    SessionEvent(
+                        id: baseEventID,
+                        timestamp: timestamp,
+                        kind: baseKind,
+                        role: role,
+                        text: baseText,
+                        toolName: nil,
+                        toolInput: nil,
+                        toolOutput: nil,
+                        messageID: messageID,
+                        parentID: parentID,
+                        isDelta: false,
+                        rawJSON: rawJSON
+                    )
+                ]
+            }
+
+            return out
+        }
+
+        // No block array: return a single base event.
+        let et = eventType?.lowercased()
+        let isMetaEvent = (et == "summary" || et == "file-history-snapshot" || et == "meta") && (role == nil || role == "meta")
+        let baseKind = SessionEventKind.from(role: role, type: eventType)
+        return [
+            SessionEvent(
+                id: baseEventID,
+                timestamp: timestamp,
+                kind: isMetaEvent ? .meta : baseKind,
+                role: role,
+                text: baseText,
+                toolName: nil,
+                toolInput: nil,
+                toolOutput: nil,
+                messageID: messageID,
+                parentID: parentID,
+                isDelta: false,
+                rawJSON: rawJSON
+            )
+        ]
+    }
+
+    private enum ToolResultDisposition {
+        case ok
+        case runtimeError
+        case rejectedOrPermissions
+        case notFoundOrMismatch
+        case otherToolFailure
+    }
+
+    private static func extractToolResultOutput(from obj: [String: Any], block: [String: Any]) -> (String?, ToolResultDisposition) {
+        var output: String? = nil
+
+        // Prefer a summarized string when available.
+        if let resultString = obj["toolUseResult"] as? String {
+            let t = resultString.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { output = t }
+        }
+
+        if let result = obj["toolUseResult"] as? [String: Any] {
+            let stdout = (result["stdout"] as? String) ?? ""
+            let stderr = (result["stderr"] as? String) ?? ""
+            if !stdout.isEmpty && !stderr.isEmpty {
+                output = stdout + "\n" + stderr
+            } else if !stdout.isEmpty {
+                output = stdout
+            } else if !stderr.isEmpty {
+                output = stderr
+            }
+        }
+
+        if output == nil {
+            if let content = block["content"] as? String {
+                output = content
+            } else if let content = block["content"] {
+                output = stringifyJSON(content)
+            }
+        }
+
+        let trimmed = (output ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return (output, .ok)
+        }
+
+        let lower = trimmed.lowercased()
+
+        // 1) User rejections (do not surface as errors).
+        // Keep this strict to avoid classifying generic git/server "rejected" failures as rejections.
+        if lower.contains("the user doesn't want to proceed with this tool use") ||
+            lower.contains("tool use was rejected") ||
+            lower.contains("the tool use was rejected") {
+            return (output, .rejectedOrPermissions)
+        }
+
+        // 2) Not-found / mismatch failures (keep visible but not counted as runtime-ish errors).
+        if lower.contains("file does not exist") ||
+            lower.contains("no such file or directory") ||
+            lower.contains("string to replace not found") ||
+            lower.contains("string to replace was not found") ||
+            lower.contains("not found") {
+            return (output, .notFoundOrMismatch)
+        }
+
+        // 3) Interrupted/cancelled tool runs should count as runtime-ish errors.
+        if lower.contains("request interrupted by user") ||
+            lower.contains("interrupted by user") ||
+            lower.contains("request cancelled by user") ||
+            lower.contains("request canceled by user") {
+            return (output, .runtimeError)
+        }
+
+        // 4) Exit code parsing: treat non-zero as runtime-ish.
+        if let code = parseExitCode(from: lower), code != 0 {
+            return (output, .runtimeError)
+        }
+
+        // 5) Generic error prefix: treat as runtime-ish.
+        if lower.hasPrefix("error:") || lower.hasPrefix("[error]") {
+            return (output, .runtimeError)
+        }
+
+        if let isErr = block["is_error"] as? Bool, isErr {
+            return (output, .otherToolFailure)
+        }
+
+        return (output, .ok)
+    }
+
+    private static func parseExitCode(from text: String) -> Int? {
+        let patterns = [
+            #"exit code[:\s]*(-?\d+)"#,
+            #"exit status[:\s]*(-?\d+)"#
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let range = NSRange(text.startIndex..., in: text)
+            guard let match = regex.firstMatch(in: text, options: [], range: range),
+                  match.numberOfRanges >= 2,
+                  let valueRange = Range(match.range(at: 1), in: text) else {
+                continue
+            }
+            return Int(text[valueRange])
+        }
+        return nil
     }
 
     // MARK: - Lightweight Session

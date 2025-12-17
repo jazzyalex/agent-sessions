@@ -77,10 +77,21 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
             return []
         }
 
+        // Claude Code stores sessions under ~/.claude/projects/<project>/... by default.
+        // Prefer that subtree to avoid picking up unrelated JSONL (e.g., history.jsonl).
+        let projectsRoot = root.appendingPathComponent("projects")
+        let scanRoot: URL = {
+            var isProjectsDir: ObjCBool = false
+            if fm.fileExists(atPath: projectsRoot.path, isDirectory: &isProjectsDir), isProjectsDir.boolValue {
+                return projectsRoot
+            }
+            return root
+        }()
+
         var found: [URL] = []
 
-        // Scan for .jsonl and .ndjson files in ~/.claude/
-        if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+        // Scan for .jsonl and .ndjson files (sessions) under scan root
+        if let enumerator = fm.enumerator(at: scanRoot, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
             for case let url as URL in enumerator {
                 let ext = url.pathExtension.lowercased()
                 if ext == "jsonl" || ext == "ndjson" {

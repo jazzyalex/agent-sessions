@@ -58,6 +58,83 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(filtered.first?.id, s2.id)
     }
 
+    func testClaudeSplitsThinkingAndToolBlocks() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_sample.jsonl")
+        let sessionID = "ses_testClaude"
+
+        let lines = [
+            #"{"type":"user","sessionId":"\#(sessionID)","version":"2.0.71","cwd":"/tmp","message":{"role":"user","content":"Hello"},"uuid":"u1","timestamp":"2025-12-16T00:00:00.000Z"}"#,
+            #"{"type":"assistant","sessionId":"\#(sessionID)","version":"2.0.71","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Reasoning goes here."},{"type":"text","text":"I'll list files."},{"type":"tool_use","name":"bash","input":{"command":"ls"}}]},"uuid":"a1","timestamp":"2025-12-16T00:00:01.000Z"}"#,
+            #"{"type":"assistant","sessionId":"\#(sessionID)","version":"2.0.71","toolUseResult":{"stdout":"file1\nfile2\n","stderr":"","is_error":false},"message":{"role":"assistant","content":[{"type":"tool_result","content":"ok"}]},"uuid":"a2","timestamp":"2025-12-16T00:00:02.000Z"}"#,
+            #"{"type":"assistant","sessionId":"\#(sessionID)","version":"2.0.71","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]},"uuid":"a3","timestamp":"2025-12-16T00:00:03.000Z"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = ClaudeSessionParser.parseFileFull(at: url)
+        XCTAssertNotNil(session)
+        guard let parsed = session else { return }
+
+        let metaTexts = parsed.events.filter { $0.kind == .meta }.compactMap { $0.text }
+        XCTAssertTrue(metaTexts.contains(where: { $0.contains("[thinking]") && $0.contains("Reasoning goes here.") }))
+
+        let assistantTexts = parsed.events.filter { $0.kind == .assistant }.compactMap { $0.text }
+        XCTAssertTrue(assistantTexts.contains(where: { $0.contains("I'll list files.") }))
+        XCTAssertTrue(assistantTexts.contains(where: { $0.contains("Done.") }))
+
+        let toolCalls = parsed.events.filter { $0.kind == .tool_call }
+        XCTAssertEqual(toolCalls.count, 1)
+        XCTAssertEqual(toolCalls.first?.toolName, "bash")
+        XCTAssertNotNil(toolCalls.first?.toolInput)
+        XCTAssertTrue(toolCalls.first?.toolInput?.contains("\"ls\"") ?? false)
+
+        let toolResults = parsed.events.filter { $0.kind == .tool_result }
+        XCTAssertEqual(toolResults.count, 1)
+        XCTAssertTrue(toolResults.first?.toolOutput?.contains("file1") ?? false)
+    }
+
+    func testClaudeToolResultErrorClassification() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-Errors-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_errors.jsonl")
+        let sessionID = "ses_testClaudeErrors"
+
+        // 1) Runtime-ish: exit non-zero => .error
+        // 2) Not found => keep as .tool_result
+        // 3) User rejected tool use => meta (hidden by default)
+        // 4) Interrupted => .error
+        let lines = [
+            #"{"type":"user","sessionId":"\#(sessionID)","version":"2.0.71","message":{"role":"user","content":"Start"},"uuid":"u1","timestamp":"2025-12-16T00:00:00.000Z"}"#,
+            #"{"type":"user","sessionId":"\#(sessionID)","version":"2.0.71","toolUseResult":"Error: Exit code 1\nsomething failed","message":{"role":"user","content":[{"type":"tool_result","content":"x","is_error":true}]},"uuid":"u2","timestamp":"2025-12-16T00:00:01.000Z"}"#,
+            #"{"type":"user","sessionId":"\#(sessionID)","version":"2.0.71","toolUseResult":"Error: File does not exist.","message":{"role":"user","content":[{"type":"tool_result","content":"<tool_use_error>File does not exist.</tool_use_error>","is_error":true}]},"uuid":"u3","timestamp":"2025-12-16T00:00:02.000Z"}"#,
+            #"{"type":"user","sessionId":"\#(sessionID)","version":"2.0.71","toolUseResult":"Error: The user doesn't want to proceed with this tool use. The tool use was rejected.","message":{"role":"user","content":[{"type":"tool_result","content":"rejected","is_error":true}]},"uuid":"u4","timestamp":"2025-12-16T00:00:03.000Z"}"#,
+            #"{"type":"user","sessionId":"\#(sessionID)","version":"2.0.71","toolUseResult":"Error: [Request interrupted by user for tool use]","message":{"role":"user","content":[{"type":"tool_result","content":"interrupted","is_error":true}]},"uuid":"u5","timestamp":"2025-12-16T00:00:04.000Z"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = ClaudeSessionParser.parseFileFull(at: url)
+        XCTAssertNotNil(session)
+        guard let parsed = session else { return }
+
+        let errorTexts = parsed.events.filter { $0.kind == .error }.compactMap { $0.text }
+        XCTAssertEqual(errorTexts.count, 2)
+        XCTAssertTrue(errorTexts.contains(where: { $0.contains("Exit code 1") }))
+        XCTAssertTrue(errorTexts.contains(where: { $0.localizedCaseInsensitiveContains("interrupted") }))
+
+        let toolResults = parsed.events.filter { $0.kind == .tool_result }.compactMap { $0.toolOutput }
+        XCTAssertTrue(toolResults.contains(where: { $0.localizedCaseInsensitiveContains("file does not exist") }))
+
+        let metaTexts = parsed.events.filter { $0.kind == .meta }.compactMap { $0.text }
+        XCTAssertTrue(metaTexts.contains(where: { $0.localizedCaseInsensitiveContains("Rejected tool use:") }))
+    }
+
     func testOpenCodeParsesTextPartsIntoConversation() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-\(UUID().uuidString)", isDirectory: true)
