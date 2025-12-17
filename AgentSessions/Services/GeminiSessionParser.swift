@@ -8,6 +8,8 @@ import CryptoKit
 /// Fallbacks handled: root array, or object.history
 final class GeminiSessionParser {
 
+    private static let previewCountScanLimit = 2_000
+
     /// Preview-only parse for list indexing. Builds a lightweight Session with empty events
     /// and a derived title from the first user message.
     static func parseFile(at url: URL) -> Session? {
@@ -22,7 +24,7 @@ final class GeminiSessionParser {
 
         let (items, meta) = extractItemsAndMeta(from: any)
         let folderHash = projectHash(from: url)
-        let count = items?.count ?? 0
+        let count = previewEventCount(from: items)
 
         // Title: first meaningful user line (from preview logic similar to Session.title expectations)
         var title: String? = nil
@@ -112,17 +114,18 @@ final class GeminiSessionParser {
                     if t == "user" || t == "human" { return "user" }
                     if t == "gemini" || t == "model" || t == "assistant" { return "assistant" }
                     if t == "system" { return "system" }
-                    if t == "tool" || t == "tool_result" { return "tool" }
+                    if t == "tool" || t == "tool_result" || t == "tool_use" || t == "tool_call" { return "tool" }
                     return t
                 }()
 
-                let kind: SessionEventKind = {
+                var kind: SessionEventKind = {
                     if let t = lowerType {
                         switch t {
                         case "tool_use", "tool_call": return .tool_call
                         case "tool_result": return .tool_result
                         case "error": return .error
                         case "system": return .meta
+                        case "info": return .meta
                         case "user", "human": return .user
                         case "gemini", "model", "assistant": return .assistant
                         default: break
@@ -140,7 +143,16 @@ final class GeminiSessionParser {
                     return .assistant
                 }()
 
-                let text = contentString(of: obj)
+                let text = contentString(of: obj)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let toolCalls = toolCallObjects(from: obj)
+                // Forward-compatibility: unknown message types without displayable content become meta.
+                if kind == .assistant {
+                    let isExplicitAssistant = (lowerType == "gemini" || lowerType == "model" || lowerType == "assistant" || roleNorm == "assistant")
+                    let hasText = (text?.isEmpty == false)
+                    if !isExplicitAssistant && !hasText && toolCalls.isEmpty {
+                        kind = .meta
+                    }
+                }
 
                 // Opportunistic cwd extraction while walking items (cheap checks)
                 if !cwdLockedByResolver, cwd == nil {
@@ -167,21 +179,39 @@ final class GeminiSessionParser {
                 let rawData = (try? JSONSerialization.data(withJSONObject: obj, options: [])) ?? Data()
                 let rawJSON = rawData.base64EncodedString()
 
-                let event = SessionEvent(
-                    id: sha256(path: url.path) + String(format: "-%04d", i),
-                    timestamp: ts,
-                    kind: kind,
-                    role: roleNorm,
-                    text: text,
-                    toolName: toolName,
-                    toolInput: toolInput,
-                    toolOutput: toolOutput,
-                    messageID: (obj["id"] as? String) ?? (obj["uuid"] as? String),
-                    parentID: obj["parentId"] as? String,
-                    isDelta: false,
-                    rawJSON: rawJSON
-                )
-                events.append(event)
+                let hasMeaningfulText = (text?.isEmpty == false)
+                let shouldEmitPrimaryEvent = !(kind == .assistant && !hasMeaningfulText && !toolCalls.isEmpty)
+                if shouldEmitPrimaryEvent {
+                    let event = SessionEvent(
+                        id: sha256(path: url.path) + String(format: "-%04d", i),
+                        timestamp: ts,
+                        kind: kind,
+                        role: roleNorm,
+                        text: text,
+                        toolName: toolName,
+                        toolInput: toolInput,
+                        toolOutput: toolOutput,
+                        messageID: (obj["id"] as? String) ?? (obj["uuid"] as? String),
+                        parentID: obj["parentId"] as? String,
+                        isDelta: false,
+                        rawJSON: rawJSON
+                    )
+                    events.append(event)
+                }
+
+                if !toolCalls.isEmpty {
+                    var tci = 0
+                    for tc in toolCalls {
+                        tci += 1
+                        let suffix = String(format: "-%04d-t%02d", i, tci)
+                        if let call = toolCallEvent(from: tc, baseID: sha256(path: url.path) + suffix) {
+                            events.append(call)
+                        }
+                        if let result = toolResultEvent(from: tc, baseID: sha256(path: url.path) + suffix + "-r") {
+                            events.append(result)
+                        }
+                    }
+                }
             }
         }
 
@@ -269,6 +299,95 @@ final class GeminiSessionParser {
             if !texts.isEmpty { return texts.joined(separator: "\n") }
         }
         return nil
+    }
+
+    // MARK: - ToolCalls (Gemini newer formats)
+
+    private static func toolCallObjects(from obj: [String: Any]) -> [[String: Any]] {
+        let direct = obj["toolCalls"] ?? obj["tool_calls"]
+        if let arr = direct as? [[String: Any]] { return arr }
+        if let arr = direct as? [Any] { return arr.compactMap { $0 as? [String: Any] } }
+        return []
+    }
+
+    private static func toolCallName(from tc: [String: Any]) -> String? {
+        if let s = tc["displayName"] as? String, !s.isEmpty { return s }
+        if let s = tc["name"] as? String, !s.isEmpty { return s }
+        if let s = tc["tool"] as? String, !s.isEmpty { return s }
+        return nil
+    }
+
+    private static func toolCallInput(from tc: [String: Any]) -> String? {
+        if let args = tc["args"] { return stringifyJSON(args) }
+        if let input = tc["input"] { return stringifyJSON(input) }
+        return nil
+    }
+
+    private static func toolCallOutput(from tc: [String: Any]) -> String? {
+        if let s = tc["resultDisplay"] as? String, !s.isEmpty { return s }
+        if let s = tc["output"] as? String, !s.isEmpty { return s }
+        if let result = tc["result"] as? [Any] {
+            for item in result {
+                guard let dict = item as? [String: Any] else { continue }
+                // Common Gemini nesting: result[].functionResponse.response.output
+                if let fr = dict["functionResponse"] as? [String: Any],
+                   let resp = fr["response"] as? [String: Any] {
+                    if let out = resp["output"] as? String, !out.isEmpty { return out }
+                    if let out = resp["stdout"] as? String, !out.isEmpty { return out }
+                    if let out = resp["text"] as? String, !out.isEmpty { return out }
+                    if let out = resp["content"] as? String, !out.isEmpty { return out }
+                }
+                if let out = dict["output"] as? String, !out.isEmpty { return out }
+                if let out = dict["stdout"] as? String, !out.isEmpty { return out }
+            }
+        }
+        return nil
+    }
+
+    private static func toolTimestamp(from tc: [String: Any]) -> Date? {
+        return decodeDate(tc["timestamp"] ?? tc["ts"] ?? tc["time"])
+    }
+
+    private static func toolCallEvent(from tc: [String: Any], baseID: String) -> SessionEvent? {
+        let toolName = toolCallName(from: tc)
+        let toolInput = toolCallInput(from: tc)
+        // Emit call even if args are missing, as long as we have a name or id.
+        if toolName == nil, tc["id"] == nil { return nil }
+        let rawData = (try? JSONSerialization.data(withJSONObject: tc, options: [])) ?? Data()
+        return SessionEvent(
+            id: baseID,
+            timestamp: toolTimestamp(from: tc),
+            kind: .tool_call,
+            role: "tool",
+            text: nil,
+            toolName: toolName ?? (tc["id"] as? String),
+            toolInput: toolInput,
+            toolOutput: nil,
+            messageID: tc["id"] as? String,
+            parentID: nil,
+            isDelta: false,
+            rawJSON: rawData.base64EncodedString()
+        )
+    }
+
+    private static func toolResultEvent(from tc: [String: Any], baseID: String) -> SessionEvent? {
+        guard let toolOutput = toolCallOutput(from: tc), !toolOutput.isEmpty else { return nil }
+        let toolName = toolCallName(from: tc)
+        let rawData = (try? JSONSerialization.data(withJSONObject: tc, options: [])) ?? Data()
+        return SessionEvent(
+            id: baseID,
+            timestamp: toolTimestamp(from: tc),
+            kind: .tool_result,
+            role: "tool",
+            text: nil,
+            toolName: toolName ?? (tc["id"] as? String),
+            toolInput: nil,
+            toolOutput: toolOutput,
+            messageID: tc["id"] as? String,
+            parentID: nil,
+            isDelta: false,
+            rawJSON: rawData.base64EncodedString()
+        )
     }
 
     /// Extract hashed project folder from path: ~/.gemini/tmp/<hash>/(chats)?/session-*.json
@@ -388,6 +507,57 @@ final class GeminiSessionParser {
             }
         }
         return nil
+    }
+
+    private static func previewEventCount(from items: [Any]?) -> Int {
+        guard let items, !items.isEmpty else { return 0 }
+        let limit = min(items.count, previewCountScanLimit)
+        var count = 0
+
+        for i in 0..<limit {
+            guard let obj = items[i] as? [String: Any] else { continue }
+
+            let typeStr = (obj["type"] as? String) ?? (obj["role"] as? String)
+            let lowerType = typeStr?.lowercased()
+
+            let toolCalls = toolCallObjects(from: obj)
+            if !toolCalls.isEmpty {
+                for tc in toolCalls {
+                    count += 1 // tool_call
+                    if toolCallOutput(from: tc) != nil { count += 1 } // tool_result
+                }
+            }
+
+            let text = contentString(of: obj)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasText = (text?.isEmpty == false)
+
+            let isMeta: Bool = {
+                if let t = lowerType {
+                    if t == "system" || t == "info" { return true }
+                    if t == "tool_result" { return false }
+                    if t == "tool_use" || t == "tool_call" { return false }
+                    if t == "user" || t == "human" { return false }
+                    if t == "gemini" || t == "model" || t == "assistant" { return false }
+                }
+                // Unknown: count only if it carries displayable content or toolCalls.
+                return !hasText && toolCalls.isEmpty
+            }()
+
+            if !isMeta {
+                // Avoid counting empty assistant wrappers when toolCalls exist (tool events already counted).
+                if lowerType == "gemini" || lowerType == "model" || lowerType == "assistant" {
+                    if hasText { count += 1 }
+                } else {
+                    count += 1
+                }
+            }
+        }
+
+        // If file is huge, assume remaining items are non-meta to avoid hiding real sessions.
+        if items.count > limit {
+            count += (items.count - limit)
+        }
+        return count
     }
 
     private static func decodeDate(_ any: Any?) -> Date? {

@@ -35,6 +35,9 @@ final class GeminiSessionDiscovery: SessionDiscovery {
         }
         for proj in projects {
             guard (try? proj.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            // Gemini CLI project dirs are SHA-256-ish hex hashes (avoid scanning unrelated folders like "bin")
+            let name = proj.lastPathComponent
+            if !(name.count >= 32 && name.count <= 64 && name.allSatisfy({ $0.isHexDigit })) { continue }
 
             // Prefer chats/ subdir
             let chats = proj.appendingPathComponent("chats", isDirectory: true)
