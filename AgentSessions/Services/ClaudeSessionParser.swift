@@ -352,6 +352,92 @@ final class ClaudeSessionParser {
         // If we have message.content blocks, split them into events in-order.
         if let message = obj["message"] as? [String: Any],
            let contentArray = message["content"] as? [[String: Any]] {
+            // Claude often records tool_result (including failures) on top-level `type: "user"` lines.
+            // We still want to surface these tool results (and runtime-ish errors) consistently.
+            if role == "user" {
+                var out: [SessionEvent] = []
+                var seq = 0
+                func makeID(_ suffix: String) -> String { baseEventID + suffix }
+
+                if let t = baseText?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
+                    out.append(
+                        SessionEvent(
+                            id: makeID(String(format: "-u%02d", seq)),
+                            timestamp: timestamp,
+                            kind: .user,
+                            role: "user",
+                            text: t,
+                            toolName: nil,
+                            toolInput: nil,
+                            toolOutput: nil,
+                            messageID: messageID,
+                            parentID: parentID,
+                            isDelta: false,
+                            rawJSON: rawJSON
+                        )
+                    )
+                }
+
+                for block in contentArray {
+                    let t = (block["type"] as? String)?.lowercased()
+                    guard t == "tool_result" || t == "tool-result" else { continue }
+                    seq += 1
+                    let (toolOutput, disposition) = extractToolResultOutput(from: obj, block: block)
+                    let kind: SessionEventKind
+                    let role: String?
+                    let text: String?
+                    let toolOutputField: String?
+                    switch disposition {
+                    case .runtimeError:
+                        kind = .error
+                        role = "tool"
+                        text = toolOutput
+                        toolOutputField = nil
+                    case .rejectedOrPermissions:
+                        kind = .meta
+                        role = "system"
+                        text = toolOutput.flatMap { "Rejected tool use: " + $0 }
+                        toolOutputField = nil
+                    case .notFoundOrMismatch:
+                        kind = .tool_result
+                        role = "tool"
+                        text = nil
+                        toolOutputField = toolOutput
+                    case .otherToolFailure:
+                        kind = .tool_result
+                        role = "tool"
+                        text = nil
+                        toolOutputField = toolOutput
+                    case .ok:
+                        kind = .tool_result
+                        role = "tool"
+                        text = nil
+                        toolOutputField = toolOutput
+                    }
+                    out.append(
+                        SessionEvent(
+                            id: makeID(String(format: "-r%02d", seq)),
+                            timestamp: timestamp,
+                            kind: kind,
+                            role: role,
+                            text: text,
+                            toolName: (block["name"] as? String) ?? (block["tool"] as? String),
+                            toolInput: nil,
+                            toolOutput: toolOutputField,
+                            messageID: messageID,
+                            parentID: parentID,
+                            isDelta: false,
+                            rawJSON: rawJSON
+                        )
+                    )
+                }
+
+                if !out.isEmpty {
+                    return out
+                }
+                // No tool blocks found; fall back to base behavior below.
+            }
+
             var out: [SessionEvent] = []
             var textBuffer: [String] = []
             var seq = 0
@@ -494,27 +580,6 @@ final class ClaudeSessionParser {
             }
             flushAssistantTextIfNeeded()
 
-            // If this line is not an assistant message, keep a single base event instead.
-            if role != "assistant" && role != "model" {
-                let baseKind = SessionEventKind.from(role: role, type: eventType)
-                return [
-                    SessionEvent(
-                        id: baseEventID,
-                        timestamp: timestamp,
-                        kind: baseKind,
-                        role: role,
-                        text: baseText,
-                        toolName: nil,
-                        toolInput: nil,
-                        toolOutput: nil,
-                        messageID: messageID,
-                        parentID: parentID,
-                        isDelta: false,
-                        rawJSON: rawJSON
-                    )
-                ]
-            }
-
             // If we didn't produce anything, fall back to base behavior.
             if out.isEmpty {
                 let baseKind = SessionEventKind.from(role: role, type: eventType)
@@ -613,15 +678,6 @@ final class ClaudeSessionParser {
             return (output, .rejectedOrPermissions)
         }
 
-        // 2) Not-found / mismatch failures (keep visible but not counted as runtime-ish errors).
-        if lower.contains("file does not exist") ||
-            lower.contains("no such file or directory") ||
-            lower.contains("string to replace not found") ||
-            lower.contains("string to replace was not found") ||
-            lower.contains("not found") {
-            return (output, .notFoundOrMismatch)
-        }
-
         // 3) Interrupted/cancelled tool runs should count as runtime-ish errors.
         if lower.contains("request interrupted by user") ||
             lower.contains("interrupted by user") ||
@@ -633,6 +689,15 @@ final class ClaudeSessionParser {
         // 4) Exit code parsing: treat non-zero as runtime-ish.
         if let code = parseExitCode(from: lower), code != 0 {
             return (output, .runtimeError)
+        }
+
+        // 5) Not-found / mismatch failures (keep visible but not counted as runtime-ish errors).
+        if lower.contains("file does not exist") ||
+            lower.contains("no such file or directory") ||
+            lower.contains("string to replace not found") ||
+            lower.contains("string to replace was not found") ||
+            lower.contains("not found") {
+            return (output, .notFoundOrMismatch)
         }
 
         // 5) Generic error prefix: treat as runtime-ish.
