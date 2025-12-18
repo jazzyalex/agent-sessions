@@ -155,7 +155,11 @@ extension PreferencesView {
 
                 Divider()
                 Toggle("Skip Agents.md lines when parsing", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.skipAgentsPreamble) },
+                    get: {
+                        let d = UserDefaults.standard
+                        if d.object(forKey: PreferencesKey.Unified.skipAgentsPreamble) == nil { return true }
+                        return d.bool(forKey: PreferencesKey.Unified.skipAgentsPreamble)
+                    },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.skipAgentsPreamble); indexer.recomputeNow() }
                 ))
                 .help("Hide agents.md-style preambles from titles, previews, and transcripts")
