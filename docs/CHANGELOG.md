@@ -44,7 +44,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Preferences → Usage Tracking: Simplified and HIG‑aligned. Added per‑agent master toggles (Enable Codex tracking, Enable Claude tracking) independent of strip/menu bar visibility. Moved all probe controls into the new Usage Probes pane. Reduced vertical scrolling and clarified refresh interval and strip options.
-- Usage Tracking: Separate refresh intervals per agent. Codex offers 1/5/15 minutes (default 5m). Claude now offers 3/15/30 minutes (default 15m) and `/usage` probes no longer send user messages, so they don't consume tokens.
+- Usage Tracking: Separate refresh intervals per agent. Codex offers 1/5/15 minutes (default 5m). Claude offers 3/15/30 minutes (default 15m). Note: Claude `/usage` probes launch Claude Code and may count toward Claude Code usage limits.
 - Usage probes run directly on their configured cadence. The legacy `UsageProbeGate` visibility/budget guard has been removed so Claude and Codex refreshers no longer stall after 24 attempts.
 - Website: Updated Open Graph and Twitter Card tags to use the `AS-social-media.png` preview so shared links render the large social image correctly.
 

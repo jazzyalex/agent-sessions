@@ -163,7 +163,8 @@ fi
 # ============================================================================
 # NOTE: Unlike Codex, Claude Code's /usage command works immediately without
 #       requiring session activation. We go directly to /usage without sending
-#       any user messages, which preserves the 5h usage limit.
+#       any user messages. WARNING: `/usage` is not guaranteed to be free and may
+#       count toward Claude Code usage limits depending on Claude Code behavior.
 
 # Send /usage
 "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "/" 2>/dev/null
@@ -198,15 +199,12 @@ ensure_usage_visible() {
     if echo "$usage_output" | grep -q "Current session"; then
       return 0
     fi
-    # Re-open /usage to force navigation
-    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Escape 2>/dev/null || true
-    sleep 0.2
-    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "/" 2>/dev/null
-    sleep 0.2
-    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" "usage" 2>/dev/null
-    sleep 0.2
-    "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
-    sleep "$SLEEP_AFTER_USAGE"
+    # Avoid re-sending /usage (can have usage impact). Try to cycle tabs / redraw and recapture.
+    for i in 1 2 3 4; do
+      "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Tab 2>/dev/null || true
+      sleep 0.25
+    done
+    sleep 0.8
     usage_output=$(capture_usage)
     tries=$((tries+1))
   done

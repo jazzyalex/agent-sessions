@@ -59,7 +59,7 @@ struct UsageMenuBarLabel: View {
         }
         .onDisappear {
             codexStatus.setMenuVisible(false)
-            codexStatus.setMenuVisible(false)
+            claudeStatus.setMenuVisible(false)
         }
     }
 

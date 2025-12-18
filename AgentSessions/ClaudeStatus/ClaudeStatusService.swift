@@ -9,15 +9,16 @@ import IOKit.ps
 //
 // ## Data Sources (Priority Order)
 //
-// 1. **PRIMARY: Periodic /usage Probe** (Active, Free)
+// 1. **PRIMARY: Periodic /usage Probe** (Active)
 //    - Uses tmux to run `claude` CLI and send `/usage` command
-//    - Token cost: ZERO (the /usage command is free, no user messages needed)
+//    - WARNING: Not guaranteed free. Running Claude Code and invoking `/usage` may
+//      generate server requests and may count toward Claude Code usage limits.
 //    - Frequency: Every 15 minutes (reduced on battery, disabled when hidden)
-//    - Limitation: Requires active polling, but at zero cost
+//    - Limitation: Requires active polling and launches Claude Code
 //    - Note: Unlike Codex, Claude CLI doesn't expose usage logs for passive parsing
 //
-// 2. **SECONDARY: Hard Probe (Manual)** (Active, Free)
-//    - User-triggered via Preferences → Usage Probes → "Refresh Claude usage now (free)"
+// 2. **SECONDARY: Hard Probe (Manual)** (Active)
+//    - User-triggered via Preferences → Usage Probes → "Refresh Claude usage now"
 //    - Always available for on-demand refresh
 //    - Returns full diagnostics (success/failure, script output, limits)
 //    - Sets 1-hour "freshness" TTL to prevent immediate re-staleness
@@ -457,10 +458,10 @@ actor ClaudeStatusService {
         }
 
         // Policy when visible or urgent:
-        // - On AC power: use userInterval
-        // - On battery: 300s
+        // - Honor the user-selected interval on both AC and battery.
+        // (Battery forcing a more frequent interval can increase usage unexpectedly.)
         if !Self.onACPower() {
-            return 300 * 1_000_000_000
+            return userInterval * 1_000_000_000
         }
         return userInterval * 1_000_000_000
     }
