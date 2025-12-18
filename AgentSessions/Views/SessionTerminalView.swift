@@ -39,7 +39,7 @@ struct SessionTerminalView: View {
     @State private var matchingLineIDs: [Int] = []
     @State private var matchIDSet: Set<Int> = []
     @State private var currentMatchLineID: Int? = nil
-    @State private var firstPromptLineID: Int? = nil
+    @State private var conversationStartLineID: Int? = nil
     @State private var scrollTargetLineID: Int? = nil
     @State private var scrollTargetToken: Int = 0
 
@@ -117,7 +117,7 @@ struct SessionTerminalView: View {
 
             Spacer()
 
-            if shouldShowConversationStartControls, let _ = firstPromptLineID {
+            if shouldShowConversationStartControls, let _ = conversationStartLineID {
                 Button(action: { jumpToFirstPrompt() }) {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.down.to.line")
@@ -159,9 +159,9 @@ struct SessionTerminalView: View {
     private func rebuildLines() {
         let built = TerminalBuilder.buildLines(for: session, showMeta: false)
         let skip = skipAgentsPreambleEnabled()
-        let (decorated, promptID) = applyConversationStartDividerIfNeeded(lines: built, enabled: skip)
+        let (decorated, dividerID) = applyConversationStartDividerIfNeeded(lines: built, enabled: skip)
         lines = decorated
-        firstPromptLineID = promptID
+        conversationStartLineID = dividerID
 
         // Collapse multi-line blocks into single navigable/message entries per role.
         var firstLineForBlock: [Int: Int] = [:]       // blockIndex -> first line id
@@ -428,7 +428,7 @@ struct SessionTerminalView: View {
     }
 
     private var shouldShowConversationStartControls: Bool {
-        skipAgentsPreambleEnabled() && (firstPromptLineID != nil)
+        skipAgentsPreambleEnabled() && (conversationStartLineID != nil)
     }
 
     private func skipAgentsPreambleEnabled() -> Bool {
@@ -439,7 +439,7 @@ struct SessionTerminalView: View {
     }
 
     private func jumpToFirstPrompt() {
-        guard let target = firstPromptLineID else { return }
+        guard let target = conversationStartLineID else { return }
         scrollTargetLineID = target
         scrollTargetToken &+= 1
     }
@@ -496,8 +496,8 @@ struct SessionTerminalView: View {
             )
         }
 
-        // Prompt line shifted down by +1 due to inserted divider.
-        return (out, insertAt + 1)
+        // Divider line is at insertAt after reindex.
+        return (out, insertAt)
     }
 }
 
@@ -805,9 +805,30 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         if scrollTargetToken != context.coordinator.lastScrollToken,
            let target = scrollTargetLineID,
            let range = context.coordinator.lineRanges[target] {
-            tv.scrollRangeToVisible(range)
+            scrollRangeToTop(tv, range: range)
             context.coordinator.lastScrollToken = scrollTargetToken
         }
+    }
+
+    private func scrollRangeToTop(_ tv: NSTextView, range: NSRange) {
+        guard let scrollView = tv.enclosingScrollView,
+              let lm = tv.layoutManager,
+              let tc = tv.textContainer else {
+            tv.scrollRangeToVisible(range)
+            return
+        }
+
+        lm.ensureLayout(for: tc)
+        let glyph = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = lm.boundingRect(forGlyphRange: glyph, in: tc)
+        let origin = tv.textContainerOrigin
+        rect.origin.x += origin.x
+        rect.origin.y += origin.y
+
+        let padding = max(0, tv.textContainerInset.height)
+        let y = max(0, rect.minY - padding)
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private func applyContent(to textView: NSTextView, context: Context) {

@@ -98,6 +98,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var showRawSheet: Bool = false
     // Selection for auto-scroll to find matches
     @State private var selectedNSRange: NSRange? = nil
+    @State private var selectionScrollMode: SelectionScrollMode = .ensureVisible
     // Ephemeral copy confirmation (popover)
     @State private var showIDCopiedPopover: Bool = false
     // Terminal-only jump trigger (Color view uses SessionTerminalView, not NSTextView selection)
@@ -137,6 +138,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         PlainTextScrollView(
                             text: transcript,
                             selection: selectedNSRange,
+                            selectionScrollMode: selectionScrollMode,
                             fontSize: CGFloat(transcriptFontSize),
                             highlights: highlightRanges,
                             currentIndex: currentMatchIndex,
@@ -695,6 +697,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             return
         }
         // Use selection only for scrolling, will be cleared immediately to avoid blue highlight
+        selectionScrollMode = .ensureVisible
         selectedNSRange = highlightRanges[currentMatchIndex]
     }
 
@@ -843,6 +846,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             return
         }
         guard let r = conversationStartRangeForJump(text: transcript) else { return }
+        selectionScrollMode = .alignTop
         selectedNSRange = r
     }
 
@@ -852,6 +856,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         guard viewMode != .terminal else { return }
         guard selectedNSRange == nil else { return }
         if let r = conversationStartRangeForJump(text: transcript) {
+            selectionScrollMode = .alignTop
             selectedNSRange = r
         }
     }
@@ -889,9 +894,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func conversationStartRangeForJump(text: String) -> NSRange? {
         let marker = "</INSTRUCTIONS>"
         guard let markerRange = text.range(of: marker) else { return nil }
-        var idx = markerRange.upperBound
+        // Prefer scrolling to the divider line itself so it lands as the top visible line.
+        let divider = "──────── Conversation starts here"
+        let suffix = text[markerRange.upperBound...]
+        if let div = suffix.range(of: divider) {
+            let start = div.lowerBound
+            let end = text.index(after: start)
+            return NSRange(start..<end, in: text)
+        }
 
-        // Skip whitespace/newlines after marker.
+        // Fallback: first non-whitespace character after the marker.
+        var idx = markerRange.upperBound
         while idx < text.endIndex {
             let ch = text[idx]
             if ch == "\n" || ch == "\r" || ch == " " || ch == "\t" {
@@ -901,25 +914,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             break
         }
         guard idx < text.endIndex else { return nil }
-
-        // If we inserted a divider line, skip it and the following newline(s).
-        if text[idx...].hasPrefix("──────── Conversation starts here") {
-            if let nl = text[idx...].firstIndex(of: "\n") {
-                idx = text.index(after: nl)
-            } else {
-                return nil
-            }
-            while idx < text.endIndex, (text[idx] == "\n" || text[idx] == "\r" || text[idx] == " " || text[idx] == "\t") {
-                idx = text.index(after: idx)
-            }
-        }
-
-        guard idx < text.endIndex else { return nil }
-        let start = idx
-        let end = text.index(after: idx)
-        let r = start..<end
-        return NSRange(r, in: text)
+        return NSRange(idx..<text.index(after: idx), in: text)
     }
+}
+
+private enum SelectionScrollMode {
+    case ensureVisible
+    case alignTop
 }
 
 // Build a single pretty-printed JSON array for the entire session.
@@ -1311,6 +1312,7 @@ private func jsonSyntaxHighlightRanges(for text: String) -> ([NSRange], [NSRange
 private struct PlainTextScrollView: NSViewRepresentable {
     let text: String
     let selection: NSRange?
+    let selectionScrollMode: SelectionScrollMode
     let fontSize: CGFloat
     let highlights: [NSRange]
     let currentIndex: Int
@@ -1393,7 +1395,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
 
         scroll.documentView = textView
         if let sel = selection {
-            textView.scrollRangeToVisible(sel)
+            scrollSelection(textView, range: sel, mode: selectionScrollMode)
             // Clear selection immediately to avoid blue highlight - we use yellow/white backgrounds instead
             textView.setSelectedRange(NSRange(location: 0, length: 0))
         }
@@ -1464,7 +1466,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
 
             // Scroll to current match if any
             if let sel = selection {
-                tv.scrollRangeToVisible(sel)
+                scrollSelection(tv, range: sel, mode: selectionScrollMode)
                 // Clear selection immediately to avoid blue highlight - we use yellow/white backgrounds instead
                 tv.setSelectedRange(NSRange(location: 0, length: 0))
             }
@@ -1477,6 +1479,38 @@ private struct PlainTextScrollView: NSViewRepresentable {
             context.coordinator.lastMonochrome = monochrome
             context.coordinator.lastColorSignature = colorSignature
         }
+    }
+
+    private func scrollSelection(_ tv: NSTextView, range: NSRange, mode: SelectionScrollMode) {
+        switch mode {
+        case .ensureVisible:
+            tv.scrollRangeToVisible(range)
+        case .alignTop:
+            scrollRangeToTop(tv, range: range)
+        }
+    }
+
+    private func scrollRangeToTop(_ tv: NSTextView, range: NSRange) {
+        guard let scrollView = tv.enclosingScrollView,
+              let lm = tv.layoutManager,
+              let tc = tv.textContainer else {
+            tv.scrollRangeToVisible(range)
+            return
+        }
+
+        lm.ensureLayout(for: tc)
+        let glyph = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = lm.boundingRect(forGlyphRange: glyph, in: tc)
+        // Translate into view coordinates.
+        let origin = tv.textContainerOrigin
+        rect.origin.x += origin.x
+        rect.origin.y += origin.y
+
+        // Align the target line to the top, leaving a small breathing room equal to the text inset.
+        let padding = max(0, tv.textContainerInset.height)
+        let y = max(0, rect.minY - padding)
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     // Apply syntax colors once when text changes (full document)
