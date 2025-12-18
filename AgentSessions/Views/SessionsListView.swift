@@ -227,7 +227,7 @@ struct SessionsListView: View {
 
     // MARK: - Git Inspector Integration
     private var isGitInspectorEnabled: Bool {
-        let flagEnabled = UserDefaults.standard.bool(forKey: "EnableGitInspector")
+        let flagEnabled = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector)
         let envEnabled = ProcessInfo.processInfo.environment["AGENTSESSIONS_FEATURES"]?.contains("gitInspector") == true
         print("🔍 GitInspector: flag=\(flagEnabled), env=\(envEnabled)")
         return flagEnabled || envEnabled

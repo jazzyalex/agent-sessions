@@ -233,6 +233,8 @@ struct PreferencesView: View {
                 menuBarTab
             case .unified:
                 unifiedTab
+            case .advanced:
+                advancedTab
             case .codexCLI:
                 codexCLITab
             case .claudeResume:
@@ -537,6 +539,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case usageProbes
     case menuBar
     case unified
+    case advanced
     case codexCLI
     case claudeResume
     case opencode
@@ -552,6 +555,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .usageProbes: return "Usage Probes"
         case .menuBar: return "Menu Bar"
         case .unified: return "Unified Window"
+        case .advanced: return "Advanced"
         case .codexCLI: return "Codex CLI"
         case .claudeResume: return "Claude Code"
         case .opencode: return "OpenCode"
@@ -567,6 +571,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .usageProbes: return "wrench.and.screwdriver"
         case .menuBar: return "menubar.rectangle"
         case .unified: return "square.grid.2x2"
+        case .advanced: return "slider.horizontal.3"
         case .codexCLI: return "terminal"
         case .claudeResume: return "c.square"
         case .opencode: return "chevron.left.slash.chevron.right"
@@ -578,7 +583,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Unified Window → Usage Tracking → Usage Probes → Menu Bar → [4 Agents] → About
-    var visibleTabs: [PreferencesTab] { [.general, .unified, .usageTracking, .usageProbes, .menuBar, .codexCLI, .claudeResume, .opencode, .geminiCLI, .about] }
+    var visibleTabs: [PreferencesTab] { [.general, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .about] }
 }
 
 // MARK: - Probe helpers
@@ -675,7 +680,7 @@ extension PreferencesView {
             if opencodeVersionString == nil && opencodeProbeState != .probing { probeOpenCode() }
         case .geminiCLI:
             if geminiVersionString == nil && geminiProbeState != .probing { probeGemini() }
-        case .menuBar, .usageProbes, .general, .unified, .about:
+        case .menuBar, .usageProbes, .general, .unified, .advanced, .about:
             break
         }
     }

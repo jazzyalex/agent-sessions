@@ -60,6 +60,10 @@ enum PreferencesKey {
         static let source = "MenuBarSource"
     }
 
+    enum Advanced {
+        static let enableGitInspector = "EnableGitInspector"
+    }
+
     enum Paths {
         static let claudeSessionsRootOverride = "ClaudeSessionsRootOverride"
     }
