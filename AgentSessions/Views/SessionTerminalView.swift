@@ -9,6 +9,7 @@ struct SessionTerminalView: View {
     let findToken: Int
     let findDirection: Int
     let findReset: Bool
+    let jumpToken: Int
     @Binding var externalMatchCount: Int
     @Binding var externalCurrentMatchIndex: Int
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
@@ -38,6 +39,9 @@ struct SessionTerminalView: View {
     @State private var matchingLineIDs: [Int] = []
     @State private var matchIDSet: Set<Int> = []
     @State private var currentMatchLineID: Int? = nil
+    @State private var firstPromptLineID: Int? = nil
+    @State private var scrollTargetLineID: Int? = nil
+    @State private var scrollTargetToken: Int = 0
 
     // Derived agent label for legend chips (Codex / Claude / Gemini)
     private var agentLegendLabel: String {
@@ -77,6 +81,9 @@ struct SessionTerminalView: View {
             loadRoleToggles()
             rebuildLines()
         }
+        .onChange(of: jumpToken) { _, _ in
+            jumpToFirstPrompt()
+        }
         .onChange(of: session.events.count) { _, _ in
             rebuildLines()
         }
@@ -109,6 +116,19 @@ struct SessionTerminalView: View {
             .foregroundStyle(.secondary)
 
             Spacer()
+
+            if shouldShowConversationStartControls, let _ = firstPromptLineID {
+                Button(action: { jumpToFirstPrompt() }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.to.line")
+                            .imageScale(.small)
+                        Text("First prompt")
+                    }
+                }
+                .buttonStyle(.borderless)
+                .font(.caption2)
+                .help("Jump to the first user prompt after </INSTRUCTIONS>")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -123,6 +143,8 @@ struct SessionTerminalView: View {
                     fontSize: CGFloat(transcriptFontSize),
                     matchIDs: matchIDSet,
                     currentMatchLineID: currentMatchLineID,
+                    scrollTargetLineID: scrollTargetLineID,
+                    scrollTargetToken: scrollTargetToken,
                     colorScheme: colorScheme,
                     monochrome: stripMonochrome
                 )
@@ -136,13 +158,16 @@ struct SessionTerminalView: View {
 
     private func rebuildLines() {
         let built = TerminalBuilder.buildLines(for: session, showMeta: false)
-        lines = built
+        let skip = skipAgentsPreambleEnabled()
+        let (decorated, promptID) = applyConversationStartDividerIfNeeded(lines: built, enabled: skip)
+        lines = decorated
+        firstPromptLineID = promptID
 
         // Collapse multi-line blocks into single navigable/message entries per role.
         var firstLineForBlock: [Int: Int] = [:]       // blockIndex -> first line id
         var roleForBlock: [Int: TerminalLineRole] = [:]
 
-        for line in built {
+        for line in decorated {
             guard let blockIndex = line.blockIndex else { continue }
             if firstLineForBlock[blockIndex] == nil {
                 firstLineForBlock[blockIndex] = line.id
@@ -170,6 +195,10 @@ struct SessionTerminalView: View {
         matchIDSet = []
         currentMatchLineID = nil
         roleNavPositions = [:]
+
+        if skip, findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            jumpToFirstPrompt()
+        }
     }
 
     private func loadRoleToggles() {
@@ -396,6 +425,79 @@ struct SessionTerminalView: View {
         let clampedIndex = min(max(externalCurrentMatchIndex, 0), ids.count - 1)
         let lineID = ids[clampedIndex]
         currentMatchLineID = lineID
+    }
+
+    private var shouldShowConversationStartControls: Bool {
+        skipAgentsPreambleEnabled() && (firstPromptLineID != nil)
+    }
+
+    private func skipAgentsPreambleEnabled() -> Bool {
+        let d = UserDefaults.standard
+        let key = PreferencesKey.Unified.skipAgentsPreamble
+        if d.object(forKey: key) == nil { return true }
+        return d.bool(forKey: key)
+    }
+
+    private func jumpToFirstPrompt() {
+        guard let target = firstPromptLineID else { return }
+        scrollTargetLineID = target
+        scrollTargetToken &+= 1
+    }
+
+    private func applyConversationStartDividerIfNeeded(lines: [TerminalLine], enabled: Bool) -> ([TerminalLine], Int?) {
+        guard enabled else { return (lines, nil) }
+        let marker = "</INSTRUCTIONS>"
+        guard let closeIndex = lines.firstIndex(where: { $0.text.contains(marker) }) else {
+            return (lines, nil)
+        }
+        // Find first non-empty user line after the closing marker.
+        var promptIndex: Int? = nil
+        var i = closeIndex + 1
+        while i < lines.count {
+            let line = lines[i]
+            if line.role == .user {
+                let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty, !trimmed.contains(marker) {
+                    promptIndex = i
+                    break
+                }
+            }
+            i += 1
+        }
+        guard let insertAt = promptIndex else { return (lines, nil) }
+
+        // Avoid double insertion.
+        if lines.contains(where: { $0.role == .meta && $0.text.contains("Conversation starts here") }) {
+            return (lines, insertAt)
+        }
+
+        var out: [TerminalLine] = []
+        out.reserveCapacity(lines.count + 1)
+        for (idx, line) in lines.enumerated() {
+            if idx == insertAt {
+                out.append(TerminalLine(
+                    id: -1,
+                    text: "──────── Conversation starts here ────────",
+                    role: .meta,
+                    eventIndex: nil,
+                    blockIndex: nil
+                ))
+            }
+            out.append(line)
+        }
+        // Reindex IDs to remain stable/incremental.
+        out = out.enumerated().map { newIdx, line in
+            TerminalLine(
+                id: newIdx,
+                text: line.text,
+                role: line.role,
+                eventIndex: line.eventIndex,
+                blockIndex: line.blockIndex
+            )
+        }
+
+        // Prompt line shifted down by +1 due to inserted divider.
+        return (out, insertAt + 1)
     }
 }
 
@@ -634,6 +736,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let fontSize: CGFloat
     let matchIDs: Set<Int>
     let currentMatchLineID: Int?
+    let scrollTargetLineID: Int?
+    let scrollTargetToken: Int
     let colorScheme: ColorScheme
     let monochrome: Bool
 
@@ -643,6 +747,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastMatchSignature: Int = 0
         var lastFontSize: CGFloat = 0
         var lastMonochrome: Bool = false
+        var lastScrollToken: Int = 0
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -695,6 +800,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         if let target = currentMatchLineID, let range = context.coordinator.lineRanges[target] {
             tv.scrollRangeToVisible(range)
+        }
+
+        if scrollTargetToken != context.coordinator.lastScrollToken,
+           let target = scrollTargetLineID,
+           let range = context.coordinator.lineRanges[target] {
+            tv.scrollRangeToVisible(range)
+            context.coordinator.lastScrollToken = scrollTargetToken
         }
     }
 
