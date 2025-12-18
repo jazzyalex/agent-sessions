@@ -769,8 +769,8 @@ final class SessionIndexer: ObservableObject {
         do {
             try reader.forEachLine { rawLine in
                 idx += 1
-                // Only sanitize very large lines (>100KB) - sanitizeAllImages has its own guards for smaller lines
-                let safeLine = rawLine.utf8.count > 100_000 ? Self.sanitizeAllImages(rawLine) : rawLine
+                // Only sanitize very large lines (>100KB) - sanitizeLargeLine has its own guards for smaller lines
+                let safeLine = rawLine.utf8.count > 100_000 ? Self.sanitizeLargeLine(rawLine) : rawLine
                 let (event, maybeModel) = Self.parseLine(safeLine, eventID: self.eventID(for: url, index: idx))
                 if let m = maybeModel, modelSeen == nil { modelSeen = m }
                 events.append(event)
@@ -810,13 +810,54 @@ final class SessionIndexer: ObservableObject {
 
     /// Build a lightweight Session by scanning only head/tail slices for timestamps and model, and estimating event count.
     private static func lightweightSession(from url: URL, size: Int, mtime: Date) -> Session? {
-        let headBytes = 256 * 1024
+        let headBytesInitial = 256 * 1024
+        let headBytesMax = 2 * 1024 * 1024
         let tailBytes = 256 * 1024
         guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? fh.close() }
 
-        // Read head slice
-        let headData = try? fh.read(upToCount: headBytes) ?? Data()
+        // Read head lines (newline-bounded) rather than a fixed slice.
+        // Newer Codex sessions can have an extremely large first line (session_meta with embedded instructions),
+        // which can exceed 256KB and otherwise prevent extracting any usable metadata/title.
+        func readHeadLines(initialBytes: Int, maxBytes: Int, maxLines: Int) -> (lines: [String], bytesRead: Int, newlineCount: Int) {
+            var out: [String] = []
+            out.reserveCapacity(min(maxLines, 300))
+            var buffer = Data()
+            buffer.reserveCapacity(64 * 1024)
+            var bytesRead = 0
+            var newlineCount = 0
+
+            while bytesRead < maxBytes, out.count < maxLines {
+                let remaining = maxBytes - bytesRead
+                let chunkSize = min(64 * 1024, remaining)
+                let chunk = (try? fh.read(upToCount: chunkSize)) ?? Data()
+                if chunk.isEmpty { break }
+                bytesRead += chunk.count
+                newlineCount += chunk.filter { $0 == 0x0a }.count
+                buffer.append(chunk)
+
+                while out.count < maxLines {
+                    guard let nl = buffer.firstIndex(of: 0x0a) else { break }
+                    let lineData = buffer.prefix(upTo: nl)
+                    buffer.removeSubrange(...nl) // remove through newline
+                    if let line = String(data: lineData, encoding: .utf8) {
+                        out.append(line)
+                    }
+                }
+
+                // Common case: once we've reached the "old" head slice size and have at least one complete line,
+                // stop early to avoid reading megabytes per file during normal indexing.
+                if bytesRead >= initialBytes, !out.isEmpty { break }
+            }
+
+            // If we never saw a newline but have some content, keep a best-effort first line.
+            if out.isEmpty, !buffer.isEmpty, let s = String(data: buffer, encoding: .utf8) {
+                out.append(s)
+            }
+            return (out, bytesRead, newlineCount)
+        }
+
+        let headRead = readHeadLines(initialBytes: headBytesInitial, maxBytes: headBytesMax, maxLines: 300)
 
         // Read tail slice
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? size
@@ -837,7 +878,7 @@ final class SessionIndexer: ObservableObject {
             }
         }
 
-        let headLines = lines(from: headData ?? Data(), keepHead: true)
+        let headLines = headRead.lines
         let tailLines = lines(from: tailData, keepHead: false)
 
         var model: String? = nil
@@ -848,7 +889,7 @@ final class SessionIndexer: ObservableObject {
         var cwd: String? = nil
 
         func ingest(_ raw: String) {
-            let line = sanitizeImagePayload(raw)
+            let line = sanitizeCodexHugeFields(sanitizeImagePayload(raw))
             let (ev, maybeModel) = parseLine(line, eventID: "light-\(sampleCount)")
             if let ts = ev.timestamp {
                 if tmin == nil || ts < tmin! { tmin = ts }
@@ -856,13 +897,17 @@ final class SessionIndexer: ObservableObject {
             }
             if model == nil, let m = maybeModel, !m.isEmpty { model = m }
             // Extract cwd from session_meta or environment_context
-            if cwd == nil, let text = ev.text {
-                if text.contains("<cwd>") {
-                    if let start = text.range(of: "<cwd>"), let end = text.range(of: "</cwd>", range: start.upperBound..<text.endIndex) {
+            if cwd == nil {
+                if let text = ev.text, text.contains("<cwd>") {
+                    if let start = text.range(of: "<cwd>"),
+                       let end = text.range(of: "</cwd>", range: start.upperBound..<text.endIndex) {
                         cwd = String(text[start.upperBound..<end.lowerBound])
                     }
-                } else if let data = line.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    if let payload = obj["payload"] as? [String: Any], let cwdValue = payload["cwd"] as? String {
+                } else if let data = line.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let payload = obj["payload"] as? [String: Any], let cwdValue = payload["cwd"] as? String, !cwdValue.isEmpty {
+                        cwd = cwdValue
+                    } else if let cwdValue = obj["cwd"] as? String, !cwdValue.isEmpty {
                         cwd = cwdValue
                     }
                 }
@@ -875,8 +920,8 @@ final class SessionIndexer: ObservableObject {
         tailLines.forEach(ingest)
 
         // Estimate event count: count newlines in head slice for more accurate estimate
-        let headBytesRead = headData?.count ?? 1
-        let newlineCount = headData?.filter { $0 == 0x0a }.count ?? 1  // Count \n bytes
+        let headBytesRead = max(headRead.bytesRead, 1)
+        let newlineCount = max(headRead.newlineCount, 1)
         let avgLineLen = max(256, headBytesRead / max(newlineCount, 1))  // Min 256 bytes per line
         let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
 
@@ -1040,6 +1085,131 @@ final class SessionIndexer: ObservableObject {
     }
     
     // MARK: - Sanitizers
+    /// Replace very large JSON string fields that can balloon memory or slow down parsing.
+    ///
+    /// Primarily for newer Codex CLI sessions which can include:
+    /// - `payload.encrypted_content` (reasoning) which can be very large
+    /// - `payload.instructions` (session_meta) which can also be very large
+    private static func sanitizeCodexHugeFields(_ line: String) -> String {
+        guard line.contains("\"encrypted_content\"") || line.contains("\"instructions\"") else { return line }
+        var s = line
+        s = sanitizeJSONStringValue(in: s, key: "\"encrypted_content\"", placeholder: "[ENCRYPTED_OMITTED]")
+        s = sanitizeJSONStringValue(in: s, key: "\"instructions\"", placeholder: "[INSTRUCTIONS_OMITTED]")
+        return s
+    }
+
+    /// Sanitizes a JSON string value for a given `"key"` by replacing its value with `placeholder`.
+    /// Byte-scanning implementation that respects JSON string escaping (\" and \\) and avoids String-index
+    /// invalidation issues when mutating the underlying storage.
+    private static func sanitizeJSONStringValue(in input: String, key: String, placeholder: String) -> String {
+        guard let inputData = input.data(using: .utf8),
+              let keyData = key.data(using: .utf8),
+              let placeholderData = placeholder.data(using: .utf8) else {
+            return input
+        }
+
+        let bytes = Array(inputData)
+        let needle = Array(keyData)
+        let replacement = Array(placeholderData)
+
+        func findSubsequence(_ haystack: [UInt8], _ needle: [UInt8], from start: Int) -> Int? {
+            guard !needle.isEmpty, start >= 0 else { return nil }
+            if needle.count > haystack.count { return nil }
+            var i = start
+            while i + needle.count <= haystack.count {
+                if haystack[i] == needle[0] {
+                    var match = true
+                    if needle.count > 1 {
+                        for j in 1..<needle.count where haystack[i + j] != needle[j] {
+                            match = false
+                            break
+                        }
+                    }
+                    if match { return i }
+                }
+                i += 1
+            }
+            return nil
+        }
+
+        var out: [UInt8] = []
+        out.reserveCapacity(bytes.count)
+
+        var i = 0
+        while let keyStart = findSubsequence(bytes, needle, from: i) {
+            let keyEnd = keyStart + needle.count
+            out.append(contentsOf: bytes[i..<keyStart])
+            out.append(contentsOf: bytes[keyStart..<keyEnd])
+
+            // Find the ':' following the key.
+            var j = keyEnd
+            while j < bytes.count, bytes[j] != 0x3A { j += 1 } // ':'
+            if j >= bytes.count {
+                out.append(contentsOf: bytes[keyEnd..<bytes.count])
+                return String(bytes: out, encoding: .utf8) ?? input
+            }
+
+            // Include everything up to and including the ':'.
+            out.append(contentsOf: bytes[keyEnd...j])
+            j += 1
+
+            // Preserve whitespace after ':'.
+            while j < bytes.count {
+                let b = bytes[j]
+                if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+                    out.append(b)
+                    j += 1
+                    continue
+                }
+                break
+            }
+
+            // Only handle string values. If not a string, continue scanning.
+            guard j < bytes.count, bytes[j] == 0x22 else { // '"'
+                i = j
+                continue
+            }
+
+            // Copy opening quote.
+            out.append(0x22)
+            j += 1
+
+            // Scan to closing quote, respecting escapes.
+            var escaped = false
+            while j < bytes.count {
+                let b = bytes[j]
+                if escaped {
+                    escaped = false
+                    j += 1
+                    continue
+                }
+                if b == 0x5C { // '\\'
+                    escaped = true
+                    j += 1
+                    continue
+                }
+                if b == 0x22 { break } // '"'
+                j += 1
+            }
+
+            // If we never found a closing quote (truncated), fall back to original input.
+            guard j < bytes.count, bytes[j] == 0x22 else { return input }
+
+            // Replace contents with placeholder, then copy closing quote.
+            out.append(contentsOf: replacement)
+            out.append(0x22)
+            j += 1
+
+            // Continue after the replaced value.
+            i = j
+        }
+
+        if i < bytes.count {
+            out.append(contentsOf: bytes[i..<bytes.count])
+        }
+        return String(bytes: out, encoding: .utf8) ?? input
+    }
+
     /// Replace any inline base64 image data URLs with a short placeholder to avoid huge allocations and slow JSON parsing.
     private static func sanitizeImagePayload(_ line: String) -> String {
         // Fast path: nothing to do
@@ -1105,6 +1275,15 @@ final class SessionIndexer: ObservableObject {
         }
 
         return result
+    }
+
+    /// Composite sanitizer for unusually large JSONL lines.
+    /// Intentionally conservative: only used for very large lines in full-parse paths.
+    private static func sanitizeLargeLine(_ line: String) -> String {
+        var s = line
+        s = sanitizeAllImages(s)
+        s = sanitizeCodexHugeFields(s)
+        return s
     }
 
     private func eventID(for url: URL, index: Int) -> String {

@@ -58,6 +58,110 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(filtered.first?.id, s2.id)
     }
 
+    func testCodexPayloadCwdRepoAndBranchExtraction() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Codex073-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let repoDir = root.appendingPathComponent("repo", isDirectory: true)
+        try fm.createDirectory(at: repoDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: repoDir.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2025-12-17T15-27-49-019b2ea4-2a8d-76e2-9cd8-58208e1f2837.jsonl")
+        let lines = [
+            #"{"timestamp":"2025-12-17T23:27:49.405Z","type":"session_meta","payload":{"id":"019b2ea4-2a8d-76e2-9cd8-58208e1f2837","timestamp":"2025-12-17T23:27:49.389Z","cwd":"\#(repoDir.path)","originator":"codex_cli_rs","cli_version":"0.73.0","git":{"branch":"feature/test"},"instructions":"short"}}"#,
+            #"{"timestamp":"2025-12-17T23:27:50.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Hello"}]}}"#,
+            #"{"timestamp":"2025-12-17T23:27:51.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let idx = SessionIndexer()
+        let session = idx.parseFileFull(at: url)
+        XCTAssertNotNil(session)
+        guard let s = session else { return }
+
+        XCTAssertEqual(s.cwd, repoDir.path)
+        XCTAssertEqual(s.repoName, repoDir.lastPathComponent)
+        XCTAssertEqual(s.gitBranch, "feature/test")
+        XCTAssertEqual(s.codexInternalSessionID, "019b2ea4-2a8d-76e2-9cd8-58208e1f2837")
+    }
+
+    func testCodexLightweightHandlesHugeFirstLine() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexHugeMeta-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let repoDir = root.appendingPathComponent("repo", isDirectory: true)
+        try fm.createDirectory(at: repoDir, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2025-12-17T15-27-49-019b2ea4-2a8d-76e2-9cd8-58208e1f2837.jsonl")
+        let hugeInstructions = String(repeating: "A", count: 320_000)
+        let first = #"{"timestamp":"2025-12-17T23:27:49.405Z","type":"session_meta","payload":{"id":"019b2ea4-2a8d-76e2-9cd8-58208e1f2837","timestamp":"2025-12-17T23:27:49.389Z","cwd":"\#(repoDir.path)","originator":"codex_cli_rs","cli_version":"0.73.0","instructions":"\#(hugeInstructions)"}}"#
+        let second = #"{"timestamp":"2025-12-17T23:27:50.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Hello title"}]}}"#
+        try ([first, second].joined(separator: "\n")).data(using: .utf8)!.write(to: url)
+
+        let idx = SessionIndexer()
+        let session = idx.parseFile(at: url)
+        XCTAssertNotNil(session)
+        guard let s = session else { return }
+
+        XCTAssertTrue(s.events.isEmpty, "Lightweight parse should not load events")
+        XCTAssertEqual(s.cwd, repoDir.path)
+        XCTAssertEqual(s.title, "Hello title")
+    }
+
+    func testCodexSanitizesEncryptedContentWhenHuge() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexEncrypted-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2025-12-17T15-27-49-019b2ea4-2a8d-76e2-9cd8-58208e1f2837.jsonl")
+        let huge = String(repeating: "B", count: 160_000)
+        let lines = [
+            #"{"timestamp":"2025-12-17T23:27:49.405Z","type":"session_meta","payload":{"id":"019b2ea4-2a8d-76e2-9cd8-58208e1f2837","timestamp":"2025-12-17T23:27:49.389Z","cwd":"/tmp","originator":"codex_cli_rs","cli_version":"0.73.0"}}"#,
+            #"{"timestamp":"2025-12-17T23:27:55.000Z","type":"response_item","payload":{"type":"reasoning","summary":[],"content":null,"encrypted_content":"\#(huge)"}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let idx = SessionIndexer()
+        let session = idx.parseFileFull(at: url)
+        XCTAssertNotNil(session)
+        guard let s = session else { return }
+
+        let meta = s.events.filter { $0.kind == .meta }
+        XCTAssertTrue(meta.contains(where: { $0.rawJSON.contains("[ENCRYPTED_OMITTED]") }))
+        XCTAssertTrue(meta.allSatisfy { $0.rawJSON.count < 50_000 }, "Sanitized rawJSON should stay reasonably small")
+        XCTAssertFalse(meta.contains(where: { $0.rawJSON.contains(String(huge.prefix(100))) }))
+    }
+
+    func testCodexSanitizerHandlesDuplicateKeysWithoutCrashing() throws {
+        // This guards against regressions where sanitizer loops replace multiple occurrences
+        // of the same key in a single JSONL line (possible in malformed logs).
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexDupKeys-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2025-12-17T15-27-49-019b2ea4-2a8d-76e2-9cd8-58208e1f2837.jsonl")
+        let hugeA = String(repeating: "A", count: 120_000)
+        let hugeB = String(repeating: "B", count: 120_000)
+        let line = #"{"timestamp":"2025-12-17T23:27:49.405Z","type":"session_meta","payload":{"id":"019b2ea4-2a8d-76e2-9cd8-58208e1f2837","cwd":"/tmp","instructions":"\#(hugeA)","instructions":"\#(hugeB)"}}"#
+        try (line + "\n").data(using: .utf8)!.write(to: url)
+
+        let idx = SessionIndexer()
+        let session = idx.parseFileFull(at: url)
+        XCTAssertNotNil(session)
+        guard let s = session else { return }
+
+        let meta = s.events.filter { $0.kind == .meta }
+        XCTAssertTrue(meta.contains(where: { $0.rawJSON.contains("[INSTRUCTIONS_OMITTED]") }))
+        XCTAssertFalse(meta.contains(where: { $0.rawJSON.contains(String(hugeA.prefix(50))) }))
+        XCTAssertFalse(meta.contains(where: { $0.rawJSON.contains(String(hugeB.prefix(50))) }))
+    }
+
     func testClaudeSplitsThinkingAndToolBlocks() throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-\(UUID().uuidString)", isDirectory: true)

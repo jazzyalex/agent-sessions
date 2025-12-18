@@ -249,7 +249,12 @@ public struct Session: Identifiable, Equatable, Codable {
             if let data = raw.data(using: .utf8),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 if let v = obj["session_id"] as? String, !v.isEmpty { return v }
-                if let payload = obj["payload"] as? [String: Any], let v = payload["session_id"] as? String, !v.isEmpty { return v }
+                if let payload = obj["payload"] as? [String: Any] {
+                    if let v = payload["session_id"] as? String, !v.isEmpty { return v }
+                    // Newer Codex session_meta uses `payload.id` as the session identifier.
+                    if let t = obj["type"] as? String, t == "session_meta",
+                       let v = payload["id"] as? String, !v.isEmpty { return v }
+                }
             }
             // Lightweight regex fallback when JSON parsing fails
             if let r = raw.range(of: #"\"session_id\"\s*:\s*\"([^"]+)\""#, options: .regularExpression) {
@@ -303,9 +308,8 @@ public struct Session: Identifiable, Equatable, Codable {
         for e in events {
             if let data = e.rawJSON.data(using: .utf8),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let c = obj["cwd"] as? String, !c.isEmpty {
-                return c
-            }
+               let c = (obj["cwd"] as? String) ?? ((obj["payload"] as? [String: Any])?["cwd"] as? String),
+               !c.isEmpty { return c }
         }
         return nil
     }
@@ -585,6 +589,10 @@ private func extractBranch(fromRawJSON raw: String) -> String? {
     if let data = raw.data(using: .utf8),
        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
         if let b = obj["git_branch"] as? String { return b }
+        if let payload = obj["payload"] as? [String: Any],
+           let git = payload["git"] as? [String: Any],
+           let b = git["branch"] as? String,
+           !b.isEmpty { return b }
         if let repo = obj["repo"] as? [String: Any], let b = repo["branch"] as? String { return b }
         if let b = obj["branch"] as? String { return b }
     }
