@@ -125,16 +125,16 @@ struct PreferencesView: View {
             List(selection: $selectedTab) {
                 ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
-                        .tag(tab)
+                        .tag(Optional(tab))
                 }
                 Divider()
                 ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
-                        .tag(tab)
+                        .tag(Optional(tab))
                 }
                 Divider()
                 Label(PreferencesTab.about.title, systemImage: PreferencesTab.about.iconName)
-                    .tag(PreferencesTab.about)
+                    .tag(Optional(PreferencesTab.about))
             }
             // Fix the sidebar width to avoid horizontal jumps when switching panes
             .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)

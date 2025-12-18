@@ -205,6 +205,8 @@ private extension PreferencesView {
             get: { isOn.wrappedValue },
             set: { newValue in
                 _ = AgentEnablement.setEnabled(source, enabled: newValue)
+                // Ensure immediate UI feedback (don’t rely on @AppStorage propagation timing).
+                isOn.wrappedValue = AgentEnablement.isEnabled(source)
             }
         )) {
             HStack {
