@@ -30,6 +30,14 @@ enum PreferencesKey {
     static let geminiCLIAvailable = "GeminiCLIAvailable"
     static let openCodeCLIAvailable = "OpenCodeCLIAvailable"
 
+    enum Agents {
+        static let didSeedEnabledAgents = "DidSeedEnabledAgents_v1"
+        static let codexEnabled = "AgentEnabledCodex"
+        static let claudeEnabled = "AgentEnabledClaude"
+        static let geminiEnabled = "AgentEnabledGemini"
+        static let openCodeEnabled = "AgentEnabledOpenCode"
+    }
+
     // Polling intervals
     static let codexPollingInterval = "CodexPollingInterval"
     static let claudePollingInterval = "ClaudePollingInterval"

@@ -4,6 +4,10 @@ import SwiftUI
 struct AnalyticsView: View {
     @ObservedObject var service: AnalyticsService
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
 
     @State private var dateRange: AnalyticsDateRange = .last7Days
     @State private var agentFilter: AnalyticsAgentFilter = .all
@@ -38,6 +42,10 @@ struct AnalyticsView: View {
         .onChange(of: dateRange) { _, _ in refreshData() }
         .onChange(of: agentFilter) { _, _ in refreshData() }
         .onChange(of: projectFilter) { _, _ in refreshData() }
+        .onChange(of: codexAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onChange(of: claudeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onChange(of: geminiAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onChange(of: openCodeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: service.isParsingSessions) { _, isParsing in
             // Refresh analytics when parsing completes
             if !isParsing {
@@ -58,6 +66,11 @@ struct AnalyticsView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
+            if anyAgentDisabled {
+                Text("Showing active agents only")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
 
             // Date range picker
@@ -72,7 +85,7 @@ struct AnalyticsView: View {
 
             // Agent filter picker
             Picker("Agent", selection: $agentFilter) {
-                ForEach(AnalyticsAgentFilter.allCases) { filter in
+                ForEach(availableAgentFilters) { filter in
                     Text(filter.rawValue).tag(filter)
                 }
             }
@@ -247,6 +260,25 @@ struct AnalyticsView: View {
 
             isRefreshing = false
         }
+    }
+
+    private var anyAgentDisabled: Bool {
+        !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled)
+    }
+
+    private var availableAgentFilters: [AnalyticsAgentFilter] {
+        var out: [AnalyticsAgentFilter] = [.all]
+        if codexAgentEnabled { out.append(.codexOnly) }
+        if claudeAgentEnabled { out.append(.claudeOnly) }
+        if geminiAgentEnabled { out.append(.geminiOnly) }
+        if openCodeAgentEnabled { out.append(.opencodeOnly) }
+        return out
+    }
+
+    private func sanitizeAgentFilterIfNeeded() {
+        if availableAgentFilters.contains(agentFilter) { return }
+        agentFilter = .all
+        refreshData()
     }
 }
 

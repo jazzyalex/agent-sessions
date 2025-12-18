@@ -26,6 +26,10 @@ struct AgentSessionsApp: App {
     @AppStorage("CodexUsageEnabled") private var codexUsageEnabledPref: Bool = false
     @AppStorage("ClaudeUsageEnabled") private var claudeUsageEnabledPref: Bool = false
     @AppStorage("ShowClaudeUsageStrip") private var showClaudeUsageStrip: Bool = false
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
     @AppStorage("UnifiedLegacyNoticeShown") private var unifiedNoticeShown: Bool = false
     @State private var selectedSessionID: String?
     @State private var selectedEventID: String?
@@ -37,6 +41,10 @@ struct AgentSessionsApp: App {
     @State private var analyticsWindowController: AnalyticsWindowController?
     @State private var analyticsReady: Bool = false
     @State private var analyticsReadyObserver: AnyCancellable?
+
+    init() {
+        AgentEnablement.seedIfNeeded()
+    }
 
     var body: some Scene {
         // Default unified window
@@ -76,9 +84,12 @@ struct AgentSessionsApp: App {
                     updateUsageModels()
                 }
                 .onChange(of: menuBarEnabled) { _, newValue in
-                    statusItemController?.setEnabled(newValue)
                     updateUsageModels()
                 }
+                .onChange(of: codexAgentEnabled) { _, _ in handleAgentEnablementChange() }
+                .onChange(of: claudeAgentEnabled) { _, _ in handleAgentEnablementChange() }
+                .onChange(of: geminiAgentEnabled) { _, _ in handleAgentEnablementChange() }
+                .onChange(of: openCodeAgentEnabled) { _, _ in handleAgentEnablementChange() }
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
                     if statusItemController == nil {
@@ -86,7 +97,7 @@ struct AgentSessionsApp: App {
                                                                      codexStatus: codexUsageModel,
                                                                      claudeStatus: claudeUsageModel)
                     }
-                    statusItemController?.setEnabled(menuBarEnabled)
+                    updateUsageModels()
                 }
                 // Immediate cleanup happens after each probe; no app-exit cleanup required.
         }
@@ -156,6 +167,12 @@ private struct FavoritesOnlyToggle: View {
 }
 
 extension AgentSessionsApp {
+    private func handleAgentEnablementChange() {
+        unifiedIndexerHolder.unified?.recomputeNow()
+        analyticsService?.refreshReadiness()
+        updateUsageModels()
+    }
+
     private func updateUsageModels() {
         let d = UserDefaults.standard
         // Migration defaults on first run of new toggles
@@ -168,7 +185,7 @@ extension AgentSessionsApp {
             }
             return d.bool(forKey: "CodexUsageEnabled")
         }()
-        codexUsageModel.setEnabled(codexEnabled)
+        codexUsageModel.setEnabled(codexEnabled && codexAgentEnabled)
 
         let claudeEnabled: Bool = {
             if d.object(forKey: "ClaudeUsageEnabled") == nil {
@@ -179,7 +196,10 @@ extension AgentSessionsApp {
             }
             return d.bool(forKey: "ClaudeUsageEnabled")
         }()
-        claudeUsageModel.setEnabled(claudeEnabled)
+        claudeUsageModel.setEnabled(claudeEnabled && claudeAgentEnabled)
+
+        let anyUsageAgentEnabled = (codexAgentEnabled || claudeAgentEnabled)
+        statusItemController?.setEnabled(menuBarEnabled && anyUsageAgentEnabled)
     }
 
     private func setupAnalytics() {

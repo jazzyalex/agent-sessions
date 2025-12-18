@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Preferences**: Moved Agent Accents (Color/Monochrome) from General to Unified Window.
+- **Preferences**: Replace Unified Window → CLI Toolbar Filters with General → Active CLI agents. Disabling an agent now hides it across the app (Sessions toolbar, Analytics, usage strip, menu bar) and stops related background work.
 - **OpenCode Sessions**: Fixed missing conversation content in Plain/Color views for OpenCode storage schema `migration=2` by extracting message text from `storage/part/msg_<message-id>/prt_*.json` text parts (not just `summary.title/body`), so both user prompts and assistant responses render correctly.
 - **Analytics (Codex)**: Count `web_search_call` and `custom_tool_call` (and their `*_output`) events as commands, improving tool-call totals and the “has commands” filter.
 - **Gemini Sessions**: Added support for embedded `toolCalls` and `type=info` messages in newer Gemini CLI session JSON, improving transcript fidelity and preventing low-message filtering from being skewed by informational entries.

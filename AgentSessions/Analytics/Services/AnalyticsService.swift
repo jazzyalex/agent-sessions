@@ -47,11 +47,10 @@ final class AnalyticsService: ObservableObject {
 
         // Gather all sessions
         var allSessions: [Session] = []
-        allSessions.append(contentsOf: codexIndexer.allSessions)
-        allSessions.append(contentsOf: claudeIndexer.allSessions)
-        allSessions.append(contentsOf: geminiIndexer.allSessions)
-        allSessions.append(contentsOf: opencodeIndexer.allSessions)
-        allSessions.append(contentsOf: opencodeIndexer.allSessions)
+        if AgentEnablement.isEnabled(.codex) { allSessions.append(contentsOf: codexIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.gemini) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
 
         // Apply filters for current period
         let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
@@ -77,9 +76,10 @@ final class AnalyticsService: ObservableObject {
     func getAvailableProjects() -> [String] {
         // Gather all sessions
         var allSessions: [Session] = []
-        allSessions.append(contentsOf: codexIndexer.allSessions)
-        allSessions.append(contentsOf: claudeIndexer.allSessions)
-        allSessions.append(contentsOf: geminiIndexer.allSessions)
+        if AgentEnablement.isEnabled(.codex) { allSessions.append(contentsOf: codexIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.gemini) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
 
         // Apply message count filters (same as Sessions List)
         let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
@@ -411,13 +411,21 @@ final class AnalyticsService: ObservableObject {
     }
 
     private func sourcesFor(_ filter: AnalyticsAgentFilter) -> [String] {
+        let enabled: Set<String> = Set(AgentEnablement.enabledSources().map { $0.rawValue })
+        let raw: [String]
         switch filter {
-        case .all: return [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue, SessionSource.opencode.rawValue]
-        case .codexOnly: return [SessionSource.codex.rawValue]
-        case .claudeOnly: return [SessionSource.claude.rawValue]
-        case .geminiOnly: return [SessionSource.gemini.rawValue]
-        case .opencodeOnly: return [SessionSource.opencode.rawValue]
+        case .all:
+            raw = [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue, SessionSource.opencode.rawValue]
+        case .codexOnly:
+            raw = [SessionSource.codex.rawValue]
+        case .claudeOnly:
+            raw = [SessionSource.claude.rawValue]
+        case .geminiOnly:
+            raw = [SessionSource.gemini.rawValue]
+        case .opencodeOnly:
+            raw = [SessionSource.opencode.rawValue]
         }
+        return raw.filter { enabled.contains($0) }
     }
 
     private func isWithin(_ date: Date, bounds: (start: Date?, end: Date?)) -> Bool {
@@ -770,15 +778,21 @@ final class AnalyticsService: ObservableObject {
 
     private func updateReadiness() {
         Task { @MainActor in
-            let phasesReady = [codexIndexer.launchPhase, claudeIndexer.launchPhase, geminiIndexer.launchPhase, opencodeIndexer.launchPhase]
-                .allSatisfy { phase in
-                    switch phase {
-                    case .ready, .idle:
-                        return true
-                    default:
-                        return false
-                    }
+            let enabled = AgentEnablement.enabledSources()
+            let phases = [
+                (SessionSource.codex, codexIndexer.launchPhase),
+                (SessionSource.claude, claudeIndexer.launchPhase),
+                (SessionSource.gemini, geminiIndexer.launchPhase),
+                (SessionSource.opencode, opencodeIndexer.launchPhase)
+            ].filter { enabled.contains($0.0) }.map { $0.1 }
+            let phasesReady = phases.allSatisfy { phase in
+                switch phase {
+                case .ready, .idle:
+                    return true
+                default:
+                    return false
                 }
+            }
 
             // A repository is considered ready once the rollup DB has data. If repo is unavailable, fall back to phase readiness.
             let repoReady: Bool

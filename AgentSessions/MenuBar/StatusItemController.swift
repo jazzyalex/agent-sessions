@@ -84,19 +84,27 @@ final class StatusItemController: NSObject {
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
         let d = UserDefaults.standard
-        let source = MenuBarSource(rawValue: d.string(forKey: "MenuBarSource") ?? MenuBarSource.codex.rawValue) ?? .codex
+        let codexAgentEnabled = d.object(forKey: PreferencesKey.Agents.codexEnabled) as? Bool ?? true
+        let claudeAgentEnabled = d.object(forKey: PreferencesKey.Agents.claudeEnabled) as? Bool ?? true
+        let desiredSource = MenuBarSource(rawValue: d.string(forKey: "MenuBarSource") ?? MenuBarSource.codex.rawValue) ?? .codex
         let style = MenuBarStyleKind(rawValue: d.string(forKey: "MenuBarStyle") ?? MenuBarStyleKind.bars.rawValue) ?? .bars
         let scope = MenuBarScope(rawValue: d.string(forKey: "MenuBarScope") ?? MenuBarScope.both.rawValue) ?? .both
+        let source: MenuBarSource = {
+            if codexAgentEnabled && claudeAgentEnabled { return desiredSource }
+            if codexAgentEnabled { return .codex }
+            if claudeAgentEnabled { return .claude }
+            return desiredSource
+        }()
 
         // Reset lines (clicking opens Preferences → Menu Bar)
-        if source == .codex || source == .both {
+        if codexAgentEnabled && (source == .codex || source == .both) {
             menu.addItem(makeTitleItem("Codex"))
             menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: codexStatus.fiveHourRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
             menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: codexStatus.weekRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
         }
         let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
-        if source == .both && claudeEnabled { menu.addItem(NSMenuItem.separator()) }
-        if (source == .claude || source == .both) && claudeEnabled {
+        if source == .both && codexAgentEnabled && claudeAgentEnabled && claudeEnabled { menu.addItem(NSMenuItem.separator()) }
+        if claudeAgentEnabled && (source == .claude || source == .both) && claudeEnabled {
             menu.addItem(makeTitleItem("Claude"))
             menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
             menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
@@ -106,9 +114,15 @@ final class StatusItemController: NSObject {
 
         // Source
         menu.addItem(makeTitleItem("Source"))
-        menu.addItem(makeRadioItem(title: MenuBarSource.codex.title, selected: source == .codex, action: #selector(setSourceCodex)))
-        menu.addItem(makeRadioItem(title: MenuBarSource.claude.title, selected: source == .claude, action: #selector(setSourceClaude)))
-        menu.addItem(makeRadioItem(title: MenuBarSource.both.title, selected: source == .both, action: #selector(setSourceBoth)))
+        let srcCodex = makeRadioItem(title: MenuBarSource.codex.title, selected: source == .codex, action: #selector(setSourceCodex))
+        srcCodex.isEnabled = codexAgentEnabled
+        menu.addItem(srcCodex)
+        let srcClaude = makeRadioItem(title: MenuBarSource.claude.title, selected: source == .claude, action: #selector(setSourceClaude))
+        srcClaude.isEnabled = claudeAgentEnabled
+        menu.addItem(srcClaude)
+        let srcBoth = makeRadioItem(title: MenuBarSource.both.title, selected: source == .both, action: #selector(setSourceBoth))
+        srcBoth.isEnabled = codexAgentEnabled && claudeAgentEnabled
+        menu.addItem(srcBoth)
 
         // Style
         menu.addItem(makeTitleItem("Style"))
@@ -123,8 +137,10 @@ final class StatusItemController: NSObject {
 
         menu.addItem(NSMenuItem.separator())
 
-        menu.addItem(makeActionItem(title: "Hard Refresh Codex", action: #selector(refreshCodexHard)))
-        if claudeEnabled {
+        if codexAgentEnabled {
+            menu.addItem(makeActionItem(title: "Hard Refresh Codex", action: #selector(refreshCodexHard)))
+        }
+        if claudeAgentEnabled && claudeEnabled {
             menu.addItem(makeActionItem(title: "Hard Refresh Claude", action: #selector(refreshClaudeHard)))
         }
         menu.addItem(NSMenuItem.separator())

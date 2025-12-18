@@ -33,21 +33,17 @@ struct UnifiedSessionsView: View {
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
     @State private var autoSelectEnabled: Bool = true
     @State private var programmaticSelectionUpdate: Bool = false
     @State private var isAutoSelectingFromSearch: Bool = false
     @State private var hasEverHadSessions: Bool = false
     @State private var hasUserManuallySelected: Bool = false
     @State private var showAnalyticsWarmupNotice: Bool = false
-    // CLI availability and toolbar filter visibility
-    @AppStorage(PreferencesKey.codexCLIAvailable) private var codexCLIAvailable: Bool = true
-    @AppStorage(PreferencesKey.claudeCLIAvailable) private var claudeCLIAvailable: Bool = true
-    @AppStorage(PreferencesKey.geminiCLIAvailable) private var geminiCLIAvailable: Bool = true
-    @AppStorage(PreferencesKey.openCodeCLIAvailable) private var openCodeCLIAvailable: Bool = true
-    @AppStorage(PreferencesKey.Unified.showCodexToolbarFilter) private var showCodexToolbarFilter: Bool = true
-    @AppStorage(PreferencesKey.Unified.showClaudeToolbarFilter) private var showClaudeToolbarFilter: Bool = true
-    @AppStorage(PreferencesKey.Unified.showGeminiToolbarFilter) private var showGeminiToolbarFilter: Bool = true
-    @AppStorage(PreferencesKey.Unified.showOpenCodeToolbarFilter) private var showOpenCodeToolbarFilter: Bool = true
+    @State private var showAgentEnablementNotice: Bool = false
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
 
@@ -108,24 +104,26 @@ struct UnifiedSessionsView: View {
             }
 
             // Usage strips
-            if showCodexStrip || showClaudeStrip {
+            let shouldShowCodexStrip = codexAgentEnabled && showCodexStrip
+            let shouldShowClaudeStrip = claudeAgentEnabled && showClaudeStrip && UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip")
+            if shouldShowCodexStrip || shouldShowClaudeStrip {
                 VStack(spacing: 0) {
-                    if showCodexStrip {
+                    if shouldShowCodexStrip {
                         UsageStripView(codexStatus: codexUsageModel,
                                        label: "Codex",
                                        brandColor: .blue,
                                        verticalPadding: 4,
                                        drawBackground: false,
                                        collapseTop: false,
-                                       collapseBottom: showClaudeStrip)
+                                       collapseBottom: shouldShowClaudeStrip)
                     }
-                    if showClaudeStrip && UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip") {
+                    if shouldShowClaudeStrip {
                         ClaudeUsageStripView(status: claudeUsageModel,
                                              label: "Claude",
                                              brandColor: Color(red: 204/255, green: 121/255, blue: 90/255),
                                              verticalPadding: 4,
                                              drawBackground: false,
-                                             collapseTop: showCodexStrip,
+                                             collapseTop: shouldShowCodexStrip,
                                              collapseBottom: false)
                     }
                 }
@@ -151,6 +149,16 @@ struct UnifiedSessionsView: View {
                 .padding(.top, 8)
                 .padding(.trailing, 8)
                 .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            if showAgentEnablementNotice {
+                Text("Showing active agents only")
+                    .font(.footnote)
+                    .padding(10)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.top, 8)
+                    .padding(.trailing, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .onAppear {
@@ -193,6 +201,10 @@ struct UnifiedSessionsView: View {
         .onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeOpenCode) { _, _ in restartSearchIfRunning() }
+        .onChange(of: codexAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+        .onChange(of: claudeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+        .onChange(of: geminiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+        .onChange(of: openCodeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
         .onReceive(unified.$sessions) { sessions in
             if !sessions.isEmpty {
                 hasEverHadSessions = true
@@ -497,7 +509,7 @@ struct UnifiedSessionsView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             HStack(spacing: 2) {
-                if codexCLIAvailable && showCodexToolbarFilter {
+                if codexAgentEnabled {
                     Toggle(isOn: $unified.includeCodex) {
                         Text("Codex")
                             .foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.blue : .primary))
@@ -506,15 +518,9 @@ struct UnifiedSessionsView: View {
                     .toggleStyle(.button)
                     .help("Show or hide Codex sessions in the list (⌘1)")
                     .keyboardShortcut("1", modifiers: .command)
-                    .contextMenu {
-                        Button("Hide Codex filter") {
-                            showCodexToolbarFilter = false
-                            unified.includeCodex = false
-                        }
-                    }
                 }
 
-                if claudeCLIAvailable && showClaudeToolbarFilter {
+                if claudeAgentEnabled {
                     Toggle(isOn: $unified.includeClaude) {
                         Text("Claude")
                             .foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary))
@@ -523,15 +529,9 @@ struct UnifiedSessionsView: View {
                     .toggleStyle(.button)
                     .help("Show or hide Claude sessions in the list (⌘2)")
                     .keyboardShortcut("2", modifiers: .command)
-                    .contextMenu {
-                        Button("Hide Claude filter") {
-                            showClaudeToolbarFilter = false
-                            unified.includeClaude = false
-                        }
-                    }
                 }
 
-                if geminiCLIAvailable && showGeminiToolbarFilter {
+                if geminiAgentEnabled {
                     Toggle(isOn: $unified.includeGemini) {
                         Text("Gemini")
                             .foregroundStyle(stripMonochrome ? .primary : (unified.includeGemini ? Color.teal : .primary))
@@ -540,15 +540,9 @@ struct UnifiedSessionsView: View {
                     .toggleStyle(.button)
                     .help("Show or hide Gemini sessions in the list (⌘3)")
                     .keyboardShortcut("3", modifiers: .command)
-                    .contextMenu {
-                        Button("Hide Gemini filter") {
-                            showGeminiToolbarFilter = false
-                            unified.includeGemini = false
-                        }
-                    }
                 }
 
-                if openCodeCLIAvailable && showOpenCodeToolbarFilter {
+                if openCodeAgentEnabled {
                     Toggle(isOn: $unified.includeOpenCode) {
                         Text("OpenCode")
                             .foregroundStyle(stripMonochrome ? .primary : (unified.includeOpenCode ? Color.purple : .primary))
@@ -557,12 +551,6 @@ struct UnifiedSessionsView: View {
                     .toggleStyle(.button)
                     .help("Show or hide OpenCode sessions in the list (⌘4)")
                     .keyboardShortcut("4", modifiers: .command)
-                    .contextMenu {
-                        Button("Hide OpenCode filter") {
-                            showOpenCodeToolbarFilter = false
-                            unified.includeOpenCode = false
-                        }
-                    }
                 }
             }
         }
@@ -834,11 +822,24 @@ struct UnifiedSessionsView: View {
                               pathContains: nil)
         searchCoordinator.start(query: unified.query,
                                 filters: filters,
-                                includeCodex: unified.includeCodex,
-                                includeClaude: unified.includeClaude,
-                                includeGemini: unified.includeGemini,
-                                includeOpenCode: unified.includeOpenCode,
+                                includeCodex: unified.includeCodex && codexAgentEnabled,
+                                includeClaude: unified.includeClaude && claudeAgentEnabled,
+                                includeGemini: unified.includeGemini && geminiAgentEnabled,
+                                includeOpenCode: unified.includeOpenCode && openCodeAgentEnabled,
                                 all: unified.allSessions)
+    }
+
+    private func flashAgentEnablementNoticeIfNeeded() {
+        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled)
+        guard anyDisabled else {
+            withAnimation { showAgentEnablementNotice = false }
+            return
+        }
+
+        withAnimation { showAgentEnablementNotice = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            withAnimation { showAgentEnablementNotice = false }
+        }
     }
 
     private func sourceAccent(_ s: Session) -> Color {

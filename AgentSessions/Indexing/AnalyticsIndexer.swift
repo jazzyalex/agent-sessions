@@ -6,13 +6,15 @@ actor AnalyticsIndexer {
     struct Progress: Equatable { let processed: Int; let total: Int; let phase: String }
 
     private let db: IndexDB
+    private let enabledSources: Set<String>
     private let codex = CodexSessionDiscovery()
     private let claude = ClaudeSessionDiscovery()
     private let gemini = GeminiSessionDiscovery()
     private let opencode = OpenCodeSessionDiscovery()
 
-    init(db: IndexDB) {
+    init(db: IndexDB, enabledSources: Set<String>) {
         self.db = db
+        self.enabledSources = enabledSources
     }
 
     // MARK: - Public API
@@ -39,6 +41,7 @@ actor AnalyticsIndexer {
         ]
 
         for (source, enumerate) in sources {
+            if !enabledSources.contains(source) { continue }
             let files = enumerate()
             // Purge previous rows for this source so refresh reflects file deletions as well
             do { try await db.purgeSource(source) } catch { /* non-fatal */ }

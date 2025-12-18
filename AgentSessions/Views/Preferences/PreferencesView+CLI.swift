@@ -3,18 +3,27 @@ import AppKit
 
 extension PreferencesView {
 
-    var codexCLITab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Codex CLI")
-                .font(.title2)
-                .fontWeight(.semibold)
+	    var codexCLITab: some View {
+	        VStack(alignment: .leading, spacing: 24) {
+	            Text("Codex CLI")
+	                .font(.title2)
+	                .fontWeight(.semibold)
 
-            sectionHeader("Codex CLI Binary")
-            VStack(alignment: .leading, spacing: 12) {
-                labeledRow("Binary Source") {
-                    Picker("", selection: Binding(
-                        get: { codexBinaryOverride.isEmpty ? 0 : 1 },
-                        set: { idx in
+	            if !codexAgentEnabled {
+	                PreferenceCallout {
+	                    Text("This agent is disabled in General → Active CLI agents.")
+	                        .font(.caption)
+	                        .foregroundStyle(.secondary)
+	                }
+	            }
+
+	            Group {
+	            sectionHeader("Codex CLI Binary")
+	            VStack(alignment: .leading, spacing: 12) {
+	                labeledRow("Binary Source") {
+	                    Picker("", selection: Binding(
+	                        get: { codexBinaryOverride.isEmpty ? 0 : 1 },
+	                        set: { idx in
                             if idx == 0 {
                                 // Auto: clear override
                                 codexBinaryOverride = ""
@@ -144,19 +153,30 @@ extension PreferencesView {
                         .foregroundStyle(.red)
                 }
 
-                Text("Default: $CODEX_HOME/sessions or ~/.codex/sessions")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
+	                Text("Default: $CODEX_HOME/sessions or ~/.codex/sessions")
+	                    .font(.system(.caption, design: .monospaced))
+	                    .foregroundStyle(.secondary)
+	            }
+	            }
+	            .disabled(!codexAgentEnabled)
+	        }
+	    }
 
-    var claudeResumeTab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Claude Code").font(.title2).fontWeight(.semibold)
+	    var claudeResumeTab: some View {
+	        VStack(alignment: .leading, spacing: 18) {
+	            Text("Claude Code").font(.title2).fontWeight(.semibold)
 
-            // Binary Source
-            VStack(alignment: .leading, spacing: 10) {
+	            if !claudeAgentEnabled {
+	                PreferenceCallout {
+	                    Text("This agent is disabled in General → Active CLI agents.")
+	                        .font(.caption)
+	                        .foregroundStyle(.secondary)
+	                }
+	            }
+
+	            Group {
+	            // Binary Source
+	            VStack(alignment: .leading, spacing: 10) {
                 // Binary source segmented: Auto | Custom
                 labeledRow("Binary Source") {
                     Picker("", selection: Binding(
@@ -288,16 +308,27 @@ extension PreferencesView {
 
             // Usage Tracking moved to Unified Window tab.
 
-            // Probe cleanup controls moved to Usage Tracking → Usage Terminal Probes
-        }
-    }
+	            // Probe cleanup controls moved to Usage Tracking → Usage Terminal Probes
+	            }
+	            .disabled(!claudeAgentEnabled)
+	        }
+	    }
 
-    var geminiCLITab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Gemini CLI").font(.title2).fontWeight(.semibold)
+	    var geminiCLITab: some View {
+	        VStack(alignment: .leading, spacing: 18) {
+	            Text("Gemini CLI").font(.title2).fontWeight(.semibold)
 
-            // Binary Source
-            VStack(alignment: .leading, spacing: 10) {
+	            if !geminiAgentEnabled {
+	                PreferenceCallout {
+	                    Text("This agent is disabled in General → Active CLI agents.")
+	                        .font(.caption)
+	                        .foregroundStyle(.secondary)
+	                }
+	            }
+
+	            Group {
+	            // Binary Source
+	            VStack(alignment: .leading, spacing: 10) {
                 // Binary source segmented: Auto | Custom
                 labeledRow("Binary Source") {
                     Picker("", selection: Binding(
@@ -422,14 +453,16 @@ extension PreferencesView {
                         .foregroundStyle(.red)
                 }
 
-                Text("Default: ~/.gemini")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
+	                Text("Default: ~/.gemini")
+	                    .font(.system(.caption, design: .monospaced))
+	                    .foregroundStyle(.secondary)
+	            }
+	            }
+	            .disabled(!geminiAgentEnabled)
 
-            Spacer()
-        }
-    }
+	            Spacer()
+	        }
+	    }
 
     // MARK: - Gemini Pickers
 

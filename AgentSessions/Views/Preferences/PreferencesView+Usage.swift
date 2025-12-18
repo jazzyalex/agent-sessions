@@ -16,8 +16,9 @@ extension PreferencesView {
                     toggleRow("Enable Codex tracking", isOn: $codexUsageEnabled, help: "Turn Codex usage tracking on or off (independent of strip/menu bar)")
                     Button("Refresh now") { CodexUsageModel.shared.refreshNow() }
                         .buttonStyle(.bordered)
-                        .disabled(!codexUsageEnabled)
+                        .disabled(!codexUsageEnabled || !codexAgentEnabled)
                 }
+                .disabled(!codexAgentEnabled)
                 labeledRow("Refresh every") {
                     Picker("", selection: $codexPollingInterval) {
                         Text("1 minute").tag(60)
@@ -28,6 +29,7 @@ extension PreferencesView {
                     .frame(maxWidth: 360)
                     .help("How often to refresh Codex usage")
                 }
+                .disabled(!codexAgentEnabled)
 
                 Divider().padding(.vertical, 6)
 
@@ -36,8 +38,9 @@ extension PreferencesView {
                     toggleRow("Enable Claude tracking", isOn: $claudeUsageEnabled, help: "Turn Claude usage tracking on or off (independent of strip/menu bar)")
                     Button("Refresh now") { ClaudeUsageModel.shared.refreshNow() }
                         .buttonStyle(.bordered)
-                        .disabled(!claudeUsageEnabled)
+                        .disabled(!claudeUsageEnabled || !claudeAgentEnabled)
                 }
+                .disabled(!claudeAgentEnabled)
                 labeledRow("Refresh every") {
                     Picker("", selection: $claudePollingInterval) {
                         Text("3 minutes").tag(180)
@@ -48,6 +51,7 @@ extension PreferencesView {
                     .frame(maxWidth: 520)
                     .help("How often to refresh Claude usage")
                 }
+                .disabled(!claudeAgentEnabled)
             }
 
             // Strip options (shared)
@@ -58,12 +62,12 @@ extension PreferencesView {
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showCodexStrip) },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.showCodexStrip) }
                     ), help: "Show the Codex usage strip at the bottom of the Unified window")
-                        .disabled(!codexUsageEnabled)
+                        .disabled(!codexUsageEnabled || !codexAgentEnabled)
                     toggleRow("Show Claude strip", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showClaudeStrip) },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.showClaudeStrip) }
                     ), help: "Show the Claude usage strip at the bottom of the Unified window")
-                        .disabled(!claudeUsageEnabled)
+                        .disabled(!claudeUsageEnabled || !claudeAgentEnabled)
                 }
                 HStack(spacing: 12) {
                     toggleRow("Show reset times", isOn: $stripShowResetTime, help: "Display the usage reset timestamp next to each meter")

@@ -22,27 +22,6 @@ extension PreferencesView {
                     }
                     .help("Choose the overall app appearance")
                 }
-
-                Divider()
-
-                // Modified Date moved to Unified Window pane
-
-                // Agent color is controlled by UI Elements (Monochrome/Color)
-
-                labeledRow("Agent Accents") {
-                    Picker("", selection: Binding(
-                        get: { stripMonochromeGlobal ? 1 : 0 },
-                        set: { stripMonochromeGlobal = ($0 == 1) }
-                    )) {
-                        Text("Color").tag(0)
-                        Text("Monochrome").tag(1)
-                    }
-                    .pickerStyle(.segmented)
-                    .help("Choose colored or monochrome styling for agent accents")
-                }
-                Text("Affects usage strips, source labels, and CLI Agent colors in Sessions.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             sectionHeader("Resume")
@@ -70,12 +49,25 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
             }
 
-            
-            
+            sectionHeader("Active CLI agents")
+            VStack(alignment: .leading, spacing: 6) {
+                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled].filter { $0 }.count
+
+                agentEnableToggle(title: "Codex", source: .codex, isOn: $codexAgentEnabled, enabledCount: enabledCount)
+                agentEnableToggle(title: "Claude", source: .claude, isOn: $claudeAgentEnabled, enabledCount: enabledCount)
+                agentEnableToggle(title: "Gemini", source: .gemini, isOn: $geminiAgentEnabled, enabledCount: enabledCount)
+                agentEnableToggle(title: "OpenCode", source: .opencode, isOn: $openCodeAgentEnabled, enabledCount: enabledCount)
+
+                Text("Disabled agents are hidden across the app and background work is paused.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+            }
+
         }
     }
 
-    var unifiedTab: some View {
+            var unifiedTab: some View {
         VStack(alignment: .leading, spacing: 24) {
             Text("Unified Window")
                 .font(.title2)
@@ -96,6 +88,23 @@ extension PreferencesView {
                     }
                     .help("Switch between relative and absolute modified timestamps")
                 }
+
+                sectionHeader("Appearance")
+                labeledRow("Agent Accents") {
+                    Picker("", selection: Binding(
+                        get: { stripMonochromeGlobal ? 1 : 0 },
+                        set: { stripMonochromeGlobal = ($0 == 1) }
+                    )) {
+                        Text("Color").tag(0)
+                        Text("Monochrome").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Choose colored or monochrome styling for agent accents")
+                }
+                Text("Affects usage strips, source labels, and CLI Agent colors in Sessions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 // Columns section
                 sectionHeader("Columns")
                 // First row: three columns to reduce height
@@ -144,56 +153,6 @@ extension PreferencesView {
                     .help("Show only Codex and OpenCode sessions that contain recorded tool/command calls. Claude and Gemini are excluded when enabled.")
                 }
 
-                // CLI toolbar filter visibility
-                sectionHeader("CLI Toolbar Filters")
-                    .padding(.top, 8)
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle(isOn: $showCodexToolbarFilter) {
-                        HStack {
-                            Text("Codex")
-                            Spacer()
-                            Text("⌘1").font(.caption.monospaced()).foregroundStyle(.secondary)
-                        }
-                    }
-                    .disabled(!codexCLIAvailable)
-                    .help("Show or hide the Codex source filter button in the Sessions toolbar")
-
-                    Toggle(isOn: $showClaudeToolbarFilter) {
-                        HStack {
-                            Text("Claude")
-                            Spacer()
-                            Text("⌘2").font(.caption.monospaced()).foregroundStyle(.secondary)
-                        }
-                    }
-                    .disabled(!claudeCLIAvailable)
-                    .help("Show or hide the Claude source filter button in the Sessions toolbar")
-
-                    Toggle(isOn: $showGeminiToolbarFilter) {
-                        HStack {
-                            Text("Gemini")
-                            Spacer()
-                            Text("⌘3").font(.caption.monospaced()).foregroundStyle(.secondary)
-                        }
-                    }
-                    .disabled(!geminiCLIAvailable)
-                    .help("Show or hide the Gemini source filter button in the Sessions toolbar")
-
-                    Toggle(isOn: $showOpenCodeToolbarFilter) {
-                        HStack {
-                            Text("OpenCode")
-                            Spacer()
-                            Text("⌘4").font(.caption.monospaced()).foregroundStyle(.secondary)
-                        }
-                    }
-                    .disabled(!openCodeCLIAvailable)
-                    .help("Show or hide the OpenCode source filter button in the Sessions toolbar")
-
-                    Text("Keyboard shortcuts: Codex ⌘1 · Claude ⌘2 · Gemini ⌘3 · OpenCode ⌘4")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 2)
-                }
-
                 Divider()
                 Toggle("Skip Agents.md lines when parsing", isOn: Binding(
                     get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.skipAgentsPreamble) },
@@ -206,4 +165,31 @@ extension PreferencesView {
         }
     }
 
+}
+
+private extension PreferencesView {
+    func agentEnableToggle(title: String, source: SessionSource, isOn: Binding<Bool>, enabledCount: Int) -> some View {
+        let installed = AgentEnablement.binaryInstalled(for: source)
+        let available = installed || AgentEnablement.isAvailable(source)
+        let statusText: String = installed ? "Installed" : (available ? "Data folder found" : "Not installed")
+        let isCurrentlyOn = isOn.wrappedValue
+        let canDisable = !(enabledCount == 1 && isCurrentlyOn)
+        let canEnable = available || isCurrentlyOn
+
+        return Toggle(isOn: Binding(
+            get: { isOn.wrappedValue },
+            set: { newValue in
+                _ = AgentEnablement.setEnabled(source, enabled: newValue)
+            }
+        )) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .disabled(!(canDisable && canEnable))
+    }
 }
