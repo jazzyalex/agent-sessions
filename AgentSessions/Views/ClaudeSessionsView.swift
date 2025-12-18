@@ -341,7 +341,7 @@ private struct ClaudeSessionsListView: View {
 
     // MARK: - Git Inspector (Claude current-only)
     private var isGitInspectorEnabled: Bool {
-        let flag = UserDefaults.standard.bool(forKey: "EnableGitInspector")
+        let flag = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector)
         if flag { return true }
         if let env = ProcessInfo.processInfo.environment["AGENTSESSIONS_FEATURES"], env.contains("gitInspector") { return true }
         return false

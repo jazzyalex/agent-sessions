@@ -427,7 +427,7 @@ struct UnifiedSessionsView: View {
 
     // MARK: - Git Inspector Integration (Unified View)
     private var isGitInspectorEnabled: Bool {
-        let flagEnabled = UserDefaults.standard.bool(forKey: "EnableGitInspector")
+        let flagEnabled = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector)
         if flagEnabled { return true }
         if let env = ProcessInfo.processInfo.environment["AGENTSESSIONS_FEATURES"], env.contains("gitInspector") { return true }
         return false
@@ -585,10 +585,12 @@ struct UnifiedSessionsView: View {
                 .disabled(selectedSession == nil)
                 .help("Reveal the selected session's working directory in Finder (⌘⇧O)")
 
-            Button(action: { if let s = selectedSession { showGitInspector(s) } }) { Label("Git Context", systemImage: "clock.arrow.circlepath") }
-                .keyboardShortcut("g", modifiers: [.command, .shift])
-                .disabled(selectedSession == nil)
-                .help("Show historical and current git context with safety analysis (⌘⇧G)")
+            if isGitInspectorEnabled {
+                Button(action: { if let s = selectedSession { showGitInspector(s) } }) { Label("Git Context", systemImage: "clock.arrow.circlepath") }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    .disabled(selectedSession == nil)
+                    .help("Show historical and current git context with safety analysis (⌘⇧G)")
+            }
         }
         ToolbarItem(placement: .automatic) {
             Button(action: { unified.refresh() }) {
