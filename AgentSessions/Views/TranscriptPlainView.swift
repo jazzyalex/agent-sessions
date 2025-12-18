@@ -100,6 +100,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var selectedNSRange: NSRange? = nil
     // Ephemeral copy confirmation (popover)
     @State private var showIDCopiedPopover: Bool = false
+    // Terminal-only jump trigger (Color view uses SessionTerminalView, not NSTextView selection)
+    @State private var terminalJumpToken: Int = 0
 
     // Simple memoization (for Codex)
     @State private var transcriptCache: [String: String] = [:]
@@ -127,6 +129,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             findToken: terminalFindToken,
                             findDirection: terminalFindDirection,
                             findReset: terminalFindResetFlag,
+                            jumpToken: terminalJumpToken,
                             externalMatchCount: $terminalFindMatchesCount,
                             externalCurrentMatchIndex: $terminalFindCurrentIndex
                         )
@@ -330,6 +333,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
             // === TRAILING GROUP: Copy and Find Controls ===
             HStack(spacing: 12) {
+                if shouldShowJumpToFirstPrompt(session: session) {
+                    Button(action: { jumpToFirstPrompt(session: session) }) {
+                        Image(systemName: "arrow.down.to.line")
+                            .imageScale(.medium)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Jump to the first user prompt after </INSTRUCTIONS>")
+                    .accessibilityLabel("Jump to first prompt")
+                }
+
                 // Copy transcript button
                 Button("Copy") { copyAll() }
                     .buttonStyle(.borderless)
@@ -422,7 +435,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         syncRenderModeWithViewMode()
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
         let mode = viewMode.transcriptRenderMode
-        let buildKey = "\(session.id)|\(session.events.count)|\(viewMode.rawValue)|\(showTimestamps ? 1 : 0)"
+        let skipFlag = skipAgentsPreambleEnabled() ? 1 : 0
+        let buildKey = "\(session.id)|\(session.events.count)|\(viewMode.rawValue)|\(showTimestamps ? 1 : 0)|\(skipFlag)"
 
         #if DEBUG
         print("🔨 REBUILD: mode=\(mode) shouldColorize=\(shouldColorize) enableCaching=\(enableCaching)")
@@ -434,7 +448,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             if lastBuildKey == key { return }
             // Try in-view memo cache first
             if let cached = transcriptCache[key] {
-                transcript = cached
+                transcript = decorateTranscriptIfNeeded(cached, session: session)
                 if viewMode == .json {
                     let hasToolCommands = session.events.contains { $0.kind == .tool_call }
                     scheduleJSONBuild(session: session, key: key, shouldCache: true, hasCommands: hasToolCommands, cachedText: cached)
@@ -454,6 +468,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 performFind(resetIndex: true)
                 selectedNSRange = nil
                 updateSelectionToCurrentMatch()
+                maybeAutoJumpToFirstPrompt(session: session)
                 return
             }
 
@@ -467,14 +482,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // Try external indexer transcript caches (Codex/Claude/Gemini) without generation
             if FeatureFlags.offloadTranscriptBuildInView {
                 if let t = externalCachedTranscript(for: session.id) {
-                    transcript = t
+                    let decorated = decorateTranscriptIfNeeded(t, session: session)
+                    transcript = decorated
                     commandRanges = []; userRanges = []; assistantRanges = []; outputRanges = []; errorRanges = []
                     hasCommands = session.events.contains { $0.kind == .tool_call }
-                    transcriptCache[key] = t
+                    transcriptCache[key] = decorated
                     lastBuildKey = key
                     performFind(resetIndex: true)
                     selectedNSRange = nil
                     updateSelectionToCurrentMatch()
+                    maybeAutoJumpToFirstPrompt(session: session)
                     return
                 }
 
@@ -486,7 +503,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     if mode == .terminal && shouldColorize && sessionHasCommands {
                         let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
                         await MainActor.run {
-                            self.transcript = built.0
+                            let decorated = self.decorateTranscriptIfNeeded(built.0, session: session)
+                            self.transcript = decorated
                             self.commandRanges = built.1
                             self.userRanges = built.2
                             self.assistantRanges = []
@@ -494,29 +512,32 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.errorRanges = []
                             self.hasCommands = true
                             self.findAdditionalRanges()
-                            self.transcriptCache[key] = built.0
+                            self.transcriptCache[key] = decorated
                             self.terminalCommandRangesCache[key] = built.1
                             self.terminalUserRangesCache[key] = built.2
                             self.lastBuildKey = key
                             self.performFind(resetIndex: true)
                             self.selectedNSRange = nil
                             self.updateSelectionToCurrentMatch()
+                            self.maybeAutoJumpToFirstPrompt(session: session)
                         }
                     } else {
                         let t = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal)
                         await MainActor.run {
-                            self.transcript = t
+                            let decorated = self.decorateTranscriptIfNeeded(t, session: session)
+                            self.transcript = decorated
                             self.commandRanges = []
                             self.userRanges = []
                             self.assistantRanges = []
                             self.outputRanges = []
                             self.errorRanges = []
                             self.hasCommands = sessionHasCommands
-                            self.transcriptCache[key] = t
+                            self.transcriptCache[key] = decorated
                             self.lastBuildKey = key
                             self.performFind(resetIndex: true)
                             self.selectedNSRange = nil
                             self.updateSelectionToCurrentMatch()
+                            self.maybeAutoJumpToFirstPrompt(session: session)
                         }
                     }
                 }
@@ -527,7 +548,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             let sessionHasCommands = session.events.contains { $0.kind == .tool_call }
             if mode == .terminal && shouldColorize && sessionHasCommands {
                 let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
-                transcript = built.0
+                transcript = decorateTranscriptIfNeeded(built.0, session: session)
                 commandRanges = built.1
                 userRanges = built.2
                 assistantRanges = []
@@ -539,7 +560,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 terminalUserRangesCache[key] = userRanges
                 lastBuildKey = key
             } else {
-                transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal)
+                transcript = decorateTranscriptIfNeeded(SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal), session: session)
                 commandRanges = []
                 userRanges = []
                 assistantRanges = []
@@ -555,7 +576,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 scheduleJSONBuild(session: session, key: buildKey, shouldCache: false, hasCommands: sessionHasCommands2)
             } else if viewMode == .terminal && shouldColorize && sessionHasCommands2 {
                 let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
-                transcript = built.0
+                transcript = decorateTranscriptIfNeeded(built.0, session: session)
                 commandRanges = built.1
                 userRanges = built.2
                 assistantRanges = []
@@ -564,7 +585,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 hasCommands = true
                 findAdditionalRanges()
             } else {
-                transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal)
+                transcript = decorateTranscriptIfNeeded(SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal), session: session)
                 commandRanges = []
                 userRanges = []
                 assistantRanges = []
@@ -578,17 +599,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         performFind(resetIndex: true)
         selectedNSRange = nil
         updateSelectionToCurrentMatch()
-
-        // Auto-scroll to first conversational message if skipping preamble is enabled
-        let d = UserDefaults.standard
-        let skip = (d.object(forKey: "SkipAgentsPreamble") == nil) ? true : d.bool(forKey: "SkipAgentsPreamble")
-        if skip, selectedNSRange == nil {
-            if let r = firstConversationRangeInTranscript(text: transcript) {
-                selectedNSRange = r
-            } else if let anchor = firstConversationAnchor(in: session), let rr = transcript.range(of: anchor) {
-                selectedNSRange = NSRange(rr, in: transcript)
-            }
-        }
+        maybeAutoJumpToFirstPrompt(session: session)
     }
 
     private func externalCachedTranscript(for id: String) -> String? {
@@ -810,6 +821,104 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 self.isBuildingJSON = false
             }
         }
+    }
+
+    // MARK: - Agents.md preamble jump + divider (no trimming)
+
+    private func skipAgentsPreambleEnabled() -> Bool {
+        let d = UserDefaults.standard
+        let key = PreferencesKey.Unified.skipAgentsPreamble
+        if d.object(forKey: key) == nil { return true }
+        return d.bool(forKey: key)
+    }
+
+    private func shouldShowJumpToFirstPrompt(session: Session) -> Bool {
+        guard skipAgentsPreambleEnabled() else { return false }
+        return session.events.contains(where: { ($0.text?.contains("</INSTRUCTIONS>") ?? false) })
+    }
+
+    private func jumpToFirstPrompt(session: Session) {
+        if viewMode == .terminal {
+            terminalJumpToken &+= 1
+            return
+        }
+        guard let r = conversationStartRangeForJump(text: transcript) else { return }
+        selectedNSRange = r
+    }
+
+    private func maybeAutoJumpToFirstPrompt(session: Session) {
+        guard skipAgentsPreambleEnabled() else { return }
+        guard findText.isEmpty else { return }
+        guard viewMode != .terminal else { return }
+        guard selectedNSRange == nil else { return }
+        if let r = conversationStartRangeForJump(text: transcript) {
+            selectedNSRange = r
+        }
+    }
+
+    private func decorateTranscriptIfNeeded(_ raw: String, session: Session) -> String {
+        guard skipAgentsPreambleEnabled() else { return raw }
+        guard viewMode != .json else { return raw }
+        return insertingConversationStartDividerIfNeeded(in: raw)
+    }
+
+    private func insertingConversationStartDividerIfNeeded(in text: String) -> String {
+        let marker = "</INSTRUCTIONS>"
+        guard let markerRange = text.range(of: marker) else { return text }
+        // Avoid double-insertion.
+        if text.contains("──────── Conversation starts here") { return text }
+
+        // Insert divider immediately above the first non-empty line after </INSTRUCTIONS>.
+        var idx = markerRange.upperBound
+        while idx < text.endIndex {
+            let ch = text[idx]
+            if ch == "\n" || ch == "\r" || ch == " " || ch == "\t" {
+                idx = text.index(after: idx)
+                continue
+            }
+            break
+        }
+        guard idx < text.endIndex else { return text }
+
+        let dividerLine = "──────── Conversation starts here ────────\n"
+        var out = text
+        out.insert(contentsOf: dividerLine, at: idx)
+        return out
+    }
+
+    private func conversationStartRangeForJump(text: String) -> NSRange? {
+        let marker = "</INSTRUCTIONS>"
+        guard let markerRange = text.range(of: marker) else { return nil }
+        var idx = markerRange.upperBound
+
+        // Skip whitespace/newlines after marker.
+        while idx < text.endIndex {
+            let ch = text[idx]
+            if ch == "\n" || ch == "\r" || ch == " " || ch == "\t" {
+                idx = text.index(after: idx)
+                continue
+            }
+            break
+        }
+        guard idx < text.endIndex else { return nil }
+
+        // If we inserted a divider line, skip it and the following newline(s).
+        if text[idx...].hasPrefix("──────── Conversation starts here") {
+            if let nl = text[idx...].firstIndex(of: "\n") {
+                idx = text.index(after: nl)
+            } else {
+                return nil
+            }
+            while idx < text.endIndex, (text[idx] == "\n" || text[idx] == "\r" || text[idx] == " " || text[idx] == "\t") {
+                idx = text.index(after: idx)
+            }
+        }
+
+        guard idx < text.endIndex else { return nil }
+        let start = idx
+        let end = text.index(after: idx)
+        let r = start..<end
+        return NSRange(r, in: text)
     }
 }
 

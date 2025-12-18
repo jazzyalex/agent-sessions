@@ -370,9 +370,8 @@ struct SessionTranscriptBuilder {
 
     private static func coalesce(session: Session, includeMeta: Bool) -> [LogicalBlock] {
         var blocks: [LogicalBlock] = []
-        let events = Self.eventsForTranscript(session: session, includeMeta: includeMeta)
-        blocks.reserveCapacity(events.count)
-        for e in events {
+        blocks.reserveCapacity(session.events.count)
+        for e in session.events {
             if e.kind == .meta && !includeMeta { continue }
             let b = block(from: e)
             if let last = blocks.last, canMerge(last, b) {
@@ -386,45 +385,6 @@ struct SessionTranscriptBuilder {
             }
         }
         return blocks
-    }
-
-    private static func eventsForTranscript(session: Session, includeMeta: Bool) -> [SessionEvent] {
-        var events = session.events
-        let shouldSkipPreamble: Bool = {
-            let defaults = UserDefaults.standard
-            let key = PreferencesKey.Unified.skipAgentsPreamble
-            if defaults.object(forKey: key) == nil { return true }
-            return defaults.bool(forKey: key)
-        }()
-
-        if shouldSkipPreamble {
-            events = dropLeadingAgentsPreambleEvents(events)
-        }
-
-        if !includeMeta {
-            // Keep behavior identical to the previous implementation (meta-filtering is also applied in the loop).
-            // This reduces work for sessions with lots of meta noise.
-            events = events.filter { $0.kind != .meta }
-        }
-        return events
-    }
-
-    private static func dropLeadingAgentsPreambleEvents(_ events: [SessionEvent]) -> [SessionEvent] {
-        guard !events.isEmpty else { return events }
-        var idx = 0
-        while idx < events.count {
-            let e = events[idx]
-            guard (e.kind == .user || e.kind == .assistant), let txt = e.text, !txt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                break
-            }
-            if Session.isAgentsPreambleText(txt) {
-                idx += 1
-                continue
-            }
-            break
-        }
-        if idx == 0 { return events }
-        return Array(events.dropFirst(idx))
     }
 
     private static func render(block b: LogicalBlock, options: Options) -> String {
