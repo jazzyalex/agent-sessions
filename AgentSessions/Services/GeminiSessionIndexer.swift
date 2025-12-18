@@ -90,6 +90,7 @@ final class GeminiSessionIndexer: ObservableObject {
     }
 
     func refresh() {
+        if !AgentEnablement.isEnabled(.gemini) { return }
         let root = discovery.sessionsRoot()
         print("\n🔵 GEMINI INDEXING START: root=\(root.path)")
         LaunchProfiler.log("Gemini.refresh: start")

@@ -147,6 +147,7 @@ final class ClaudeSessionIndexer: ObservableObject {
     }
 
     func refresh() {
+        if !AgentEnablement.isEnabled(.claude) { return }
         let root = discovery.sessionsRoot()
         print("\n🔵 CLAUDE INDEXING START: root=\(root.path)")
         LaunchProfiler.log("Claude.refresh: start")

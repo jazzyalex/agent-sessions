@@ -6,6 +6,15 @@ extension PreferencesView {
         VStack(alignment: .leading, spacing: 18) {
             Text("OpenCode").font(.title2).fontWeight(.semibold)
 
+            if !openCodeAgentEnabled {
+                PreferenceCallout {
+                    Text("This agent is disabled in General → Active CLI agents.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Group {
             // Binary Source
             VStack(alignment: .leading, spacing: 10) {
                 // Binary source segmented: Auto | Custom
@@ -136,6 +145,8 @@ extension PreferencesView {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
+            }
+            .disabled(!openCodeAgentEnabled)
 
             Spacer()
         }
@@ -161,17 +172,12 @@ extension PreferencesView {
                     self.opencodeVersionString = res.versionString
                     self.opencodeResolvedPath = res.binaryURL.path
                     self.opencodeProbeState = .success
-                    let wasUnavailable = !self.openCodeCLIAvailable
                     self.openCodeCLIAvailable = true
-                    if wasUnavailable {
-                        self.showOpenCodeToolbarFilter = true
-                    }
                 case .failure:
                     self.opencodeVersionString = nil
                     self.opencodeResolvedPath = nil
                     self.opencodeProbeState = .failure
                     self.openCodeCLIAvailable = false
-                    self.showOpenCodeToolbarFilter = false
                 }
             }
         }

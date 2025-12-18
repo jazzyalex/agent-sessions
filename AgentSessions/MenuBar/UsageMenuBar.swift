@@ -7,25 +7,35 @@ struct UsageMenuBarLabel: View {
     @AppStorage("MenuBarScope") private var scopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var styleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("MenuBarSource") private var sourceRaw: String = MenuBarSource.codex.rawValue
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     // Colorization is currently disabled (see TODO below)
 
     var body: some View {
         let scope = MenuBarScope(rawValue: scopeRaw) ?? .both
         let style = MenuBarStyleKind(rawValue: styleRaw) ?? .bars
-        let source = MenuBarSource(rawValue: sourceRaw) ?? .codex
+        let desiredSource = MenuBarSource(rawValue: sourceRaw) ?? .codex
         let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
+        let source: MenuBarSource = {
+            if codexAgentEnabled && claudeAgentEnabled { return desiredSource }
+            if codexAgentEnabled { return .codex }
+            if claudeAgentEnabled { return .claude }
+            return desiredSource
+        }()
 
         HStack(spacing: 0) {
             switch source {
             case .codex:
-                renderSourceView(prefix: "CX",
-                                 five: codexStatus.fiveHourRemainingPercent,
-                                 week: codexStatus.weekRemainingPercent,
-                                 scope: scope,
-                                 style: style,
-                                 showSpinner: codexStatus.isUpdating)
+                if codexAgentEnabled {
+                    renderSourceView(prefix: "CX",
+                                     five: codexStatus.fiveHourRemainingPercent,
+                                     week: codexStatus.weekRemainingPercent,
+                                     scope: scope,
+                                     style: style,
+                                     showSpinner: codexStatus.isUpdating)
+                }
             case .claude:
-                if claudeEnabled {
+                if claudeAgentEnabled && claudeEnabled {
                     renderSourceView(prefix: "CL",
                                      five: claudeStatus.sessionRemainingPercent,
                                      week: claudeStatus.weekAllModelsRemainingPercent,
@@ -34,13 +44,15 @@ struct UsageMenuBarLabel: View {
                                      showSpinner: claudeStatus.isUpdating)
                 }
             case .both:
-                renderSourceView(prefix: "CX",
-                                 five: codexStatus.fiveHourRemainingPercent,
-                                 week: codexStatus.weekRemainingPercent,
-                                 scope: scope,
-                                 style: style,
-                                 showSpinner: codexStatus.isUpdating)
-                if claudeEnabled {
+                if codexAgentEnabled {
+                    renderSourceView(prefix: "CX",
+                                     five: codexStatus.fiveHourRemainingPercent,
+                                     week: codexStatus.weekRemainingPercent,
+                                     scope: scope,
+                                     style: style,
+                                     showSpinner: codexStatus.isUpdating)
+                }
+                if codexAgentEnabled && claudeAgentEnabled && claudeEnabled {
                     Text(" │ ").font(.system(size: 12, weight: .regular, design: .monospaced))
                     renderSourceView(prefix: "CL",
                                      five: claudeStatus.sessionRemainingPercent,
@@ -54,8 +66,8 @@ struct UsageMenuBarLabel: View {
         .padding(.horizontal, 4)
         .fixedSize(horizontal: true, vertical: false)
         .onAppear {
-            codexStatus.setMenuVisible(true)
-            claudeStatus.setMenuVisible(true)
+            codexStatus.setMenuVisible(codexAgentEnabled)
+            claudeStatus.setMenuVisible(claudeAgentEnabled)
         }
         .onDisappear {
             codexStatus.setMenuVisible(false)

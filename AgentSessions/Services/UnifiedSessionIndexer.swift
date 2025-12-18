@@ -64,6 +64,12 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
+    // Global agent enablement (drives app-wide availability)
+    @Published private(set) var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
+    @Published private(set) var claudeAgentEnabled: Bool = AgentEnablement.isEnabled(.claude)
+    @Published private(set) var geminiAgentEnabled: Bool = AgentEnablement.isEnabled(.gemini)
+    @Published private(set) var openCodeAgentEnabled: Bool = AgentEnablement.isEnabled(.opencode)
+
     // Sorting
     struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title, agent } }
     @Published var sortDescriptor: SessionSortDescriptor = .init(key: .modified, ascending: false)
@@ -113,20 +119,26 @@ final class UnifiedSessionIndexer: ObservableObject {
         self.claude = claudeIndexer
         self.gemini = geminiIndexer
         self.opencode = opencodeIndexer
+
+        syncAgentEnablementFromDefaults()
         // Observe UserDefaults changes to sync external toggles (Preferences) to this model
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: .main) { [weak self] _ in
             guard let self else { return }
             let v = UserDefaults.standard.bool(forKey: "UnifiedHasCommandsOnly")
             if v != self.hasCommandsOnly { self.hasCommandsOnly = v }
+            self.syncAgentEnablementFromDefaults()
         }
 
         // Merge underlying allSessions whenever any changes
         Publishers.CombineLatest4(codex.$allSessions, claude.$allSessions, gemini.$allSessions, opencode.$allSessions)
             .map { [weak self] codexList, claudeList, geminiList, opencodeList -> [Session] in
-                var merged = codexList + claudeList + geminiList + opencodeList
-                if let favs = self?.favorites {
-                    for i in merged.indices { merged[i].isFavorite = favs.contains(merged[i].id) }
-                }
+                guard let self else { return [] }
+                var merged: [Session] = []
+                if self.codexAgentEnabled { merged.append(contentsOf: codexList) }
+                if self.claudeAgentEnabled { merged.append(contentsOf: claudeList) }
+                if self.geminiAgentEnabled { merged.append(contentsOf: geminiList) }
+                if self.openCodeAgentEnabled { merged.append(contentsOf: opencodeList) }
+                for i in merged.indices { merged[i].isFavorite = self.favorites.contains(merged[i].id) }
                 return merged.sorted { lhs, rhs in
                     if lhs.modifiedAt == rhs.modifiedAt { return lhs.id > rhs.id }
                     return lhs.modifiedAt > rhs.modifiedAt
@@ -135,19 +147,40 @@ final class UnifiedSessionIndexer: ObservableObject {
             .receive(on: DispatchQueue.main)
             .assign(to: &$allSessions)
 
-        // isIndexing reflects any indexer working
+        let agentEnabledFlags = Publishers.CombineLatest4($codexAgentEnabled, $claudeAgentEnabled, $geminiAgentEnabled, $openCodeAgentEnabled)
+
+        // isIndexing reflects any enabled indexer working
         Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, gemini.$isIndexing, opencode.$isIndexing)
-            .map { $0 || $1 || $2 || $3 }
+            .combineLatest(agentEnabledFlags)
+            .map { states, flags in
+                let (c, cl, g, o) = states
+                let (ec, ecl, eg, eo) = flags
+                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o)
+            }
             .assign(to: &$isIndexing)
 
-        // isProcessingTranscripts reflects any indexer processing transcripts
+        // isProcessingTranscripts reflects any enabled indexer processing transcripts
         Publishers.CombineLatest4(codex.$isProcessingTranscripts, claude.$isProcessingTranscripts, gemini.$isProcessingTranscripts, opencode.$isProcessingTranscripts)
-            .map { $0 || $1 || $2 || $3 }
+            .combineLatest(agentEnabledFlags)
+            .map { states, flags in
+                let (c, cl, g, o) = states
+                let (ec, ecl, eg, eo) = flags
+                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o)
+            }
             .assign(to: &$isProcessingTranscripts)
 
-        // Forward errors (preference order codex → claude → gemini → opencode)
+        // Forward errors (preference order codex → claude → gemini → opencode), ignoring disabled agents
         Publishers.CombineLatest4(codex.$indexingError, claude.$indexingError, gemini.$indexingError, opencode.$indexingError)
-            .map { codexErr, claudeErr, geminiErr, opencodeErr in codexErr ?? claudeErr ?? geminiErr ?? opencodeErr }
+            .combineLatest(agentEnabledFlags)
+            .map { errs, flags in
+                let (codexErr, claudeErr, geminiErr, opencodeErr) = errs
+                let (ec, ecl, eg, eo) = flags
+                let a = ec ? codexErr : nil
+                let b = ecl ? claudeErr : nil
+                let c = eg ? geminiErr : nil
+                let d = eo ? opencodeErr : nil
+                return a ?? b ?? c ?? d
+            }
             .assign(to: &$indexingError)
 
         // Debounced filtering and sorting pipeline (runs off main thread)
@@ -157,25 +190,32 @@ final class UnifiedSessionIndexer: ObservableObject {
             $dateTo.removeDuplicates(by: Self.dateEq),
             $selectedModel.removeDuplicates()
         )
+        let includes = Publishers.CombineLatest4($includeCodex, $includeClaude, $includeGemini, $includeOpenCode)
         Publishers.CombineLatest(
-            Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, Publishers.CombineLatest4($includeCodex, $includeClaude, $includeGemini, $includeOpenCode)),
+            Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, includes.combineLatest(agentEnabledFlags)),
             $sortDescriptor.removeDuplicates()
         )
             .receive(on: FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
             .map { [weak self] combined, sortDesc -> [Session] in
                 guard let self else { return [] }
-                let (input, kinds, all, sources) = combined
+                let (input, kinds, all, combinedFlags) = combined
                 let (q, from, to, model) = input
+                let (sources, enabledFlags) = combinedFlags
                 let (incCodex, incClaude, incGemini, incOpenCode) = sources
+                let (enCodex, enClaude, enGemini, enOpenCode) = enabledFlags
+                let effectiveCodex = incCodex && enCodex
+                let effectiveClaude = incClaude && enClaude
+                let effectiveGemini = incGemini && enGemini
+                let effectiveOpenCode = incOpenCode && enOpenCode
 
                 // Start from all sessions, then apply the same filters we use elsewhere.
                 var base = all
-                if !incCodex || !incClaude || !incGemini || !incOpenCode {
+                if !(effectiveCodex && effectiveClaude && effectiveGemini && effectiveOpenCode) {
                     base = base.filter { s in
-                        (s.source == .codex && incCodex) ||
-                        (s.source == .claude && incClaude) ||
-                        (s.source == .gemini && incGemini) ||
-                        (s.source == .opencode && incOpenCode)
+                        (s.source == .codex && effectiveCodex) ||
+                        (s.source == .claude && effectiveClaude) ||
+                        (s.source == .gemini && effectiveGemini) ||
+                        (s.source == .opencode && effectiveOpenCode)
                     }
                 }
 
@@ -215,8 +255,13 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Seed Gemini hash resolver with known working directories from Codex/Claude sessions
         Publishers.CombineLatest(codex.$allSessions, claude.$allSessions)
             .debounce(for: .milliseconds(150), scheduler: DispatchQueue.global(qos: .utility))
-            .sink { codexList, claudeList in
-                let paths = (codexList + claudeList).compactMap { $0.cwd }
+            .sink { [weak self] codexList, claudeList in
+                guard let self else { return }
+                if !self.codexAgentEnabled && !self.claudeAgentEnabled { return }
+                var base: [Session] = []
+                if self.codexAgentEnabled { base.append(contentsOf: codexList) }
+                if self.claudeAgentEnabled { base.append(contentsOf: claudeList) }
+                let paths = base.compactMap { $0.cwd }
                 GeminiHashResolver.shared.registerCandidates(paths)
             }
             .store(in: &cancellables)
@@ -293,6 +338,17 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
+    private func syncAgentEnablementFromDefaults(defaults: UserDefaults = .standard) {
+        let c1 = AgentEnablement.isEnabled(.codex, defaults: defaults)
+        let c2 = AgentEnablement.isEnabled(.claude, defaults: defaults)
+        let c3 = AgentEnablement.isEnabled(.gemini, defaults: defaults)
+        let c4 = AgentEnablement.isEnabled(.opencode, defaults: defaults)
+        if c1 != codexAgentEnabled { codexAgentEnabled = c1 }
+        if c2 != claudeAgentEnabled { claudeAgentEnabled = c2 }
+        if c3 != geminiAgentEnabled { geminiAgentEnabled = c3 }
+        if c4 != openCodeAgentEnabled { openCodeAgentEnabled = c4 }
+    }
+
     func refresh() {
         // Guard against rapid consecutive refreshes (e.g., from probe cleanup
         // or other background notifications) to avoid re-running Stage 1 and
@@ -308,10 +364,10 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Each indexer is internally serial and already hydrates from IndexDB.session_meta
         // before scanning for new files, so starting them together is safe.
         LaunchProfiler.log("Unified.refresh: Stage 1 (per-source) start")
-        let shouldRefreshCodex = includeCodex && !codex.isIndexing
-        let shouldRefreshClaude = includeClaude && !claude.isIndexing
-        let shouldRefreshGemini = includeGemini && !gemini.isIndexing
-        let shouldRefreshOpenCode = includeOpenCode && !opencode.isIndexing
+        let shouldRefreshCodex = codexAgentEnabled && includeCodex && !codex.isIndexing
+        let shouldRefreshClaude = claudeAgentEnabled && includeClaude && !claude.isIndexing
+        let shouldRefreshGemini = geminiAgentEnabled && includeGemini && !gemini.isIndexing
+        let shouldRefreshOpenCode = openCodeAgentEnabled && includeOpenCode && !opencode.isIndexing
 
         if shouldRefreshCodex { codex.refresh() }
         if shouldRefreshClaude { claude.refresh() }
@@ -341,7 +397,15 @@ final class UnifiedSessionIndexer: ObservableObject {
                         }
                         LaunchProfiler.log("Unified.refresh: Analytics warmup (open IndexDB)")
                         let db = try IndexDB()
-                        let indexer = AnalyticsIndexer(db: db)
+                        let enabledSources: Set<String> = {
+                            var s: Set<String> = []
+                            if self.codexAgentEnabled { s.insert("codex") }
+                            if self.claudeAgentEnabled { s.insert("claude") }
+                            if self.geminiAgentEnabled { s.insert("gemini") }
+                            if self.openCodeAgentEnabled { s.insert("opencode") }
+                            return s
+                        }()
+                        let indexer = AnalyticsIndexer(db: db, enabledSources: enabledSources)
                         if try await db.isEmpty() {
                             LaunchProfiler.log("Unified.refresh: Analytics fullBuild start")
                             await indexer.fullBuild()
@@ -388,10 +452,10 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private func updateLaunchState() {
         var phases: [SessionSource: LaunchPhase] = [:]
-        phases[.codex] = includeCodex ? codex.launchPhase : .ready
-        phases[.claude] = includeClaude ? claude.launchPhase : .ready
-        phases[.gemini] = includeGemini ? gemini.launchPhase : .ready
-        phases[.opencode] = includeOpenCode ? opencode.launchPhase : .ready
+        phases[.codex] = (codexAgentEnabled && includeCodex) ? codex.launchPhase : .ready
+        phases[.claude] = (claudeAgentEnabled && includeClaude) ? claude.launchPhase : .ready
+        phases[.gemini] = (geminiAgentEnabled && includeGemini) ? gemini.launchPhase : .ready
+        phases[.opencode] = (openCodeAgentEnabled && includeOpenCode) ? opencode.launchPhase : .ready
 
         let overall: LaunchPhase
         if phases.values.contains(.error) {
@@ -415,19 +479,13 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// Apply current UI filters and sort preferences to a list of sessions.
     /// Used for both unified.sessions and search results to ensure consistent filtering/sorting.
     func applyFiltersAndSort(to sessions: [Session]) -> [Session] {
-        // Filter by source (Codex/Claude/Gemini/OpenCode toggles) and CLI availability.
-        let defaults = UserDefaults.standard
-        let codexAvailable = defaults.object(forKey: PreferencesKey.codexCLIAvailable) as? Bool ?? true
-        let claudeAvailable = defaults.object(forKey: PreferencesKey.claudeCLIAvailable) as? Bool ?? true
-        let geminiAvailable = defaults.object(forKey: PreferencesKey.geminiCLIAvailable) as? Bool ?? true
-        let openCodeAvailable = defaults.object(forKey: PreferencesKey.openCodeCLIAvailable) as? Bool ?? true
-
+        // Filter by source (Codex/Claude/Gemini/OpenCode toggles) and global agent enablement.
         let base = sessions.filter { s in
             switch s.source {
-            case .codex:    return codexAvailable && includeCodex
-            case .claude:   return claudeAvailable && includeClaude
-            case .gemini:   return geminiAvailable && includeGemini
-            case .opencode: return openCodeAvailable && includeOpenCode
+            case .codex:    return codexAgentEnabled && includeCodex
+            case .claude:   return claudeAgentEnabled && includeClaude
+            case .gemini:   return geminiAgentEnabled && includeGemini
+            case .opencode: return openCodeAgentEnabled && includeOpenCode
             }
         }
 
@@ -525,6 +583,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     private func maybeAutoRefreshCodex() {
+        if !codexAgentEnabled { return }
         if codex.isIndexing { return }
         if withinGuard(lastAutoRefreshCodex) { return }
         lastAutoRefreshCodex = Date()
@@ -532,6 +591,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     private func maybeAutoRefreshClaude() {
+        if !claudeAgentEnabled { return }
         if claude.isIndexing { return }
         if withinGuard(lastAutoRefreshClaude) { return }
         lastAutoRefreshClaude = Date()
@@ -539,12 +599,14 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     private func maybeAutoRefreshGemini() {
+        if !geminiAgentEnabled { return }
         if gemini.isIndexing { return }
         if withinGuard(lastAutoRefreshGemini) { return }
         lastAutoRefreshGemini = Date()
         gemini.refresh()
     }
     private func maybeAutoRefreshOpenCode() {
+        if !openCodeAgentEnabled { return }
         if opencode.isIndexing { return }
         if withinGuard(lastAutoRefreshOpenCode) { return }
         lastAutoRefreshOpenCode = Date()

@@ -105,6 +105,7 @@ final class OpenCodeSessionIndexer: ObservableObject {
     }
 
     func refresh() {
+        if !AgentEnablement.isEnabled(.opencode) { return }
         let root = discovery.sessionsRoot()
         let storageRoot = (root.lastPathComponent == "session") ? root.deletingLastPathComponent() : root
         let migrationURL = storageRoot.appendingPathComponent("migration", isDirectory: false)

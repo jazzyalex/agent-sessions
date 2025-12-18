@@ -501,6 +501,7 @@ final class SessionIndexer: ObservableObject {
     }
 
     func refresh() {
+        if !AgentEnablement.isEnabled(.codex) { return }
         let root = sessionsRoot()
         print("\n🔄 INDEXING START: root=\(root.path)")
         LaunchProfiler.log("Codex.refresh: start")
