@@ -158,7 +158,7 @@ extension PreferencesView {
                     get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.skipAgentsPreamble) },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.skipAgentsPreamble); indexer.recomputeNow() }
                 ))
-                .help("Ignore agents.md-style preambles for titles and previews (content remains visible in transcripts)")
+                .help("Hide agents.md-style preambles from titles, previews, and transcripts")
             }
 
             // Usage Tracking moved to General pane

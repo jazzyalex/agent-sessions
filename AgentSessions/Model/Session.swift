@@ -173,6 +173,11 @@ public struct Session: Identifiable, Equatable, Codable {
     /// Heuristics for detecting an agents.md-style preamble or CLI caveat blocks at the start of a session.
     private static func looksLikeAgentsPreamble(_ text: String) -> Bool {
         let lower = text.lowercased()
+        // Codex CLI harness often injects an Agents.md preamble block (AGENTS.md + <INSTRUCTIONS> tags).
+        // When present, treat it as scaffolding rather than a real user prompt.
+        if lower.hasPrefix("# agents.md instructions for ") { return true }
+        if lower.contains("\n# agents.md instructions for ") { return true }
+        if lower.contains("<instructions>") || lower.contains("</instructions>") { return true }
         // Strong anchors commonly seen in agents.md-driven openings
         let anchors = [
             "<user_instructions>",
@@ -216,6 +221,11 @@ public struct Session: Identifiable, Equatable, Codable {
             if bulletOrHeading.count >= 4 { return true }
         }
         return false
+    }
+
+    /// Shared helper for transcript builders / views.
+    static func isAgentsPreambleText(_ text: String) -> Bool {
+        looksLikeAgentsPreamble(text)
     }
 
     // Extract timestamp and UUID from rollout filename for Codex sort order.
