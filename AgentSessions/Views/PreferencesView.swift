@@ -200,7 +200,7 @@ struct PreferencesView: View {
             .help("Enable the experimental Claude usage tracker despite the warning")
         } message: {
             Text("""
-            This feature runs Claude CLI headlessly every 60s via tmux to fetch /usage data.
+            This feature runs Claude Code headlessly via tmux to fetch `/usage` data (default: every 15 minutes).
 
             Requirements: Claude CLI + tmux installed and authenticated
 
@@ -209,6 +209,7 @@ struct PreferencesView: View {
 
             ⚠️ Warnings:
             - Experimental - may fail or cause slowdowns
+            - Probing may count toward Claude Code usage limits
             - Disable immediately if you notice performance issues
             - First use requests file access permission (one-time)
 

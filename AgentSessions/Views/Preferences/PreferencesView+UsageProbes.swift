@@ -23,7 +23,7 @@ extension PreferencesView {
             sectionHeader("Claude")
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    Button("Refresh Claude usage now (free)") {
+                    Button("Refresh Claude usage now") {
                         isClaudeHardProbeRunning = true
                         ClaudeUsageModel.shared.hardProbeNowDiagnostics { diag in
                             isClaudeHardProbeRunning = false
@@ -57,14 +57,14 @@ extension PreferencesView {
                         }
                     }
                     .buttonStyle(.bordered)
-                    .help("Instantly refresh Claude usage data. Uses /usage command only (no user messages, no token cost).")
+                    .help("Instantly refresh Claude usage data. Note: probing launches Claude Code and may count toward Claude Code usage limits.")
 
                     if isClaudeHardProbeRunning {
                         Text("Wait for probe result…")
                             .font(.caption)
                             .foregroundStyle(.red)
                     } else {
-                        Text("Do not consume tokens and impact limits")
+                        Text("May count toward Claude Code usage limits")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
