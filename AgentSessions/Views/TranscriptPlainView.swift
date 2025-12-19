@@ -204,7 +204,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     #endif
                 }
             }
-            .onReceive(indexer.requestCopyPlainPublisher) { _ in copyAll() }
             .sheet(isPresented: $showRawSheet) { WholeSessionRawPrettySheet(session: session) }
             .onChange(of: indexer.requestOpenRawSheet) { _, newVal in
                 if newVal {
