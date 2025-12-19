@@ -5,7 +5,8 @@ struct PreferencesView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @EnvironmentObject var updaterController: UpdaterController
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
-    @State var selectedTab: PreferencesTab?
+    @State private var selectedTab: PreferencesTab = .general
+    @State private var didInitializeSelection: Bool = false
     // Persist last-selected tab for smoother navigation across launches
     @AppStorage(PreferencesKey.lastSelectedTab) var lastSelectedTabRaw: String = PreferencesTab.general.rawValue
     private let initialTabArg: PreferencesTab
@@ -67,7 +68,6 @@ struct PreferencesView: View {
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
-        _selectedTab = State(initialValue: initialTab)
     }
 
     // General tab state
@@ -122,19 +122,22 @@ struct PreferencesView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
-            List(selection: $selectedTab) {
+            List(selection: Binding<PreferencesTab?>(
+                get: { selectedTab },
+                set: { if let newValue = $0 { selectedTab = newValue } }
+            )) {
                 ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
-                        .tag(Optional(tab))
+                        .tag(tab)
                 }
                 Divider()
                 ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
-                        .tag(Optional(tab))
+                        .tag(tab)
                 }
                 Divider()
                 Label(PreferencesTab.about.title, systemImage: PreferencesTab.about.iconName)
-                    .tag(Optional(PreferencesTab.about))
+                    .tag(PreferencesTab.about)
             }
             // Fix the sidebar width to avoid horizontal jumps when switching panes
             .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)
@@ -154,12 +157,16 @@ struct PreferencesView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             loadCurrentSettings()
-            // Respect caller-provided tab, otherwise restore last selection
-            if initialTabArg == .general, let restored = PreferencesTab(rawValue: lastSelectedTabRaw) {
-                selectedTab = restored
+            if !didInitializeSelection {
+                if initialTabArg != .general {
+                    selectedTab = initialTabArg
+                } else if let restored = PreferencesTab(rawValue: lastSelectedTabRaw) {
+                    selectedTab = restored
+                }
+                didInitializeSelection = true
             }
             // Trigger any probes needed for the initial/visible tab
-            if let tab = selectedTab ?? .some(initialTabArg) { maybeProbe(for: tab) }
+            maybeProbe(for: selectedTab)
         }
         // Keep UI feeling responsive when switching between panes
         .animation(.easeInOut(duration: 0.12), value: selectedTab)
@@ -186,9 +193,8 @@ struct PreferencesView: View {
             }
         }
         .onChange(of: selectedTab) { _, newValue in
-            guard let t = newValue else { return }
-            lastSelectedTabRaw = t.rawValue
-            maybeProbe(for: t)
+            lastSelectedTabRaw = newValue.rawValue
+            maybeProbe(for: newValue)
         }
         .alert("Claude Usage Tracking (Experimental)", isPresented: $showClaudeExperimentalWarning) {
             Button("Cancel", role: .cancel) { }
@@ -222,7 +228,7 @@ struct PreferencesView: View {
 
     private var tabBody: some View {
         VStack(alignment: .leading, spacing: 24) {
-            switch selectedTab ?? .general {
+            switch selectedTab {
             case .general:
                 generalTab
             case .usageTracking:
