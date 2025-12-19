@@ -5,8 +5,7 @@ struct PreferencesView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @EnvironmentObject var updaterController: UpdaterController
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
-    @State private var selectedTab: PreferencesTab = .general
-    @State private var didInitializeSelection: Bool = false
+    @State var selectedTab: PreferencesTab?
     // Persist last-selected tab for smoother navigation across launches
     @AppStorage(PreferencesKey.lastSelectedTab) var lastSelectedTabRaw: String = PreferencesTab.general.rawValue
     private let initialTabArg: PreferencesTab
@@ -68,6 +67,7 @@ struct PreferencesView: View {
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
+        _selectedTab = State(initialValue: initialTab)
     }
 
     // General tab state
@@ -122,10 +122,7 @@ struct PreferencesView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
-            List(selection: Binding<PreferencesTab?>(
-                get: { selectedTab },
-                set: { if let newValue = $0 { selectedTab = newValue } }
-            )) {
+            List(selection: $selectedTab) {
                 ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
@@ -157,16 +154,12 @@ struct PreferencesView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             loadCurrentSettings()
-            if !didInitializeSelection {
-                if initialTabArg != .general {
-                    selectedTab = initialTabArg
-                } else if let restored = PreferencesTab(rawValue: lastSelectedTabRaw) {
-                    selectedTab = restored
-                }
-                didInitializeSelection = true
+            // Respect caller-provided tab, otherwise restore last selection
+            if initialTabArg == .general, let restored = PreferencesTab(rawValue: lastSelectedTabRaw) {
+                selectedTab = restored
             }
             // Trigger any probes needed for the initial/visible tab
-            maybeProbe(for: selectedTab)
+            if let tab = selectedTab ?? .some(initialTabArg) { maybeProbe(for: tab) }
         }
         // Keep UI feeling responsive when switching between panes
         .animation(.easeInOut(duration: 0.12), value: selectedTab)
@@ -193,8 +186,9 @@ struct PreferencesView: View {
             }
         }
         .onChange(of: selectedTab) { _, newValue in
-            lastSelectedTabRaw = newValue.rawValue
-            maybeProbe(for: newValue)
+            guard let t = newValue else { return }
+            lastSelectedTabRaw = t.rawValue
+            maybeProbe(for: t)
         }
         .alert("Claude Usage Tracking (Experimental)", isPresented: $showClaudeExperimentalWarning) {
             Button("Cancel", role: .cancel) { }
@@ -228,7 +222,7 @@ struct PreferencesView: View {
 
     private var tabBody: some View {
         VStack(alignment: .leading, spacing: 24) {
-            switch selectedTab {
+            switch selectedTab ?? .general {
             case .general:
                 generalTab
             case .usageTracking:
@@ -577,7 +571,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .usageProbes: return "wrench.and.screwdriver"
         case .menuBar: return "menubar.rectangle"
         case .unified: return "square.grid.2x2"
-        case .advanced: return "slider.horizontal.3"
+        case .advanced: return "gearshape.2"
         case .codexCLI: return "terminal"
         case .claudeResume: return "c.square"
         case .opencode: return "chevron.left.slash.chevron.right"
