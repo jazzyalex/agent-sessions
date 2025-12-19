@@ -64,35 +64,35 @@ extension PreferencesView {
                     .padding(.top, 2)
             }
 
-	        }
-	    }
+        }
+    }
 
-	    var advancedTab: some View {
-	        VStack(alignment: .leading, spacing: 24) {
-	            Text("Advanced")
-	                .font(.title2)
-	                .fontWeight(.semibold)
+    var advancedTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Advanced")
+                .font(.title2)
+                .fontWeight(.semibold)
 
-	            sectionHeader("Git Context")
-	            VStack(alignment: .leading, spacing: 12) {
-	                Toggle("Show Git Context button", isOn: Binding(
-	                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector) },
-	                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableGitInspector) }
-	                ))
-	                .help("Show the Git Context toolbar button in Sessions (⌘⇧G)")
+            sectionHeader("Git Context")
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Show Git Context button", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector) },
+                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableGitInspector) }
+                ))
+                .help("Show the Git Context toolbar button in Sessions (⌘⇧G)")
 
-	                Text("Adds a Git Context button to the Sessions toolbar. This feature is experimental and may change.")
-	                    .font(.caption)
-	                    .foregroundStyle(.secondary)
-	            }
-	        }
-	    }
+                Text("Adds a Git Context button to the Sessions toolbar and context menus.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
 
-	            var unifiedTab: some View {
-	        VStack(alignment: .leading, spacing: 24) {
-	            Text("Unified Window")
-	                .font(.title2)
-	                .fontWeight(.semibold)
+            var unifiedTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Unified Window")
+                .font(.title2)
+                .fontWeight(.semibold)
 
             // Sessions List header removed per guidance; keep content compact
             VStack(alignment: .leading, spacing: 12) {
@@ -205,8 +205,6 @@ private extension PreferencesView {
             get: { isOn.wrappedValue },
             set: { newValue in
                 _ = AgentEnablement.setEnabled(source, enabled: newValue)
-                // Ensure immediate UI feedback (don’t rely on @AppStorage propagation timing).
-                isOn.wrappedValue = AgentEnablement.isEnabled(source)
             }
         )) {
             HStack {
