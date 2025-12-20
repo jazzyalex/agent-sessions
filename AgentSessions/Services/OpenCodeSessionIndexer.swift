@@ -167,9 +167,10 @@ final class OpenCodeSessionIndexer: ObservableObject {
             }
 
             let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
+            let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sorted, source: .opencode)
             DispatchQueue.main.async {
-                LaunchProfiler.log("OpenCode.refresh: sessions merged (total=\(sorted.count))")
-                self.allSessions = sorted
+                LaunchProfiler.log("OpenCode.refresh: sessions merged (total=\(mergedWithArchives.count))")
+                self.allSessions = mergedWithArchives
                 self.isIndexing = false
                 if FeatureFlags.throttleIndexingUIUpdates {
                     self.filesProcessed = self.totalFiles

@@ -179,9 +179,10 @@ final class GeminiSessionIndexer: ObservableObject {
             }
 
             let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
+            let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sorted, source: .gemini)
             DispatchQueue.main.async {
-                LaunchProfiler.log("Gemini.refresh: sessions merged (total=\(sorted.count))")
-                self.allSessions = sorted
+                LaunchProfiler.log("Gemini.refresh: sessions merged (total=\(mergedWithArchives.count))")
+                self.allSessions = mergedWithArchives
                 self.isIndexing = false
                 if FeatureFlags.throttleIndexingUIUpdates {
                     self.filesProcessed = self.totalFiles
@@ -192,8 +193,8 @@ final class GeminiSessionIndexer: ObservableObject {
                 // Background transcript cache generation for accurate search (bounded batch).
                 let delta: [Session] = {
                     var out: [Session] = []
-                    out.reserveCapacity(sorted.count)
-                    for s in sorted {
+                    out.reserveCapacity(mergedWithArchives.count)
+                    for s in mergedWithArchives {
                         if s.events.isEmpty { continue }
                         if s.messageCount <= 2 { continue }
                         out.append(s)
@@ -257,9 +258,10 @@ final class GeminiSessionIndexer: ObservableObject {
     // Reload a specific lightweight session with a parse pass
     func reloadSession(id: String) {
         guard let existing = allSessions.first(where: { $0.id == id }),
-              let url = URL(string: "file://\(existing.filePath)") else {
+              FileManager.default.fileExists(atPath: existing.filePath) else {
             return
         }
+        let url = URL(fileURLWithPath: existing.filePath)
 
         isLoadingSession = true
         loadingSessionID = id
@@ -267,7 +269,7 @@ final class GeminiSessionIndexer: ObservableObject {
         let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
         bgQueue.async {
             let start = Date()
-            let full = GeminiSessionParser.parseFileFull(at: url)
+            let full = GeminiSessionParser.parseFileFull(at: url, forcedID: id)
             let elapsed = Date().timeIntervalSince(start)
             print("  ⏱️ Gemini parse took \(String(format: "%.1f", elapsed))s - events=\(full?.events.count ?? 0)")
 
@@ -301,7 +303,7 @@ final class GeminiSessionIndexer: ObservableObject {
         let url = URL(fileURLWithPath: existing.filePath)
         let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
         bgQueue.async {
-            if let light = GeminiSessionParser.parseFile(at: url) {
+            if let light = GeminiSessionParser.parseFile(at: url, forcedID: id) {
                 DispatchQueue.main.async {
                     if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                         self.allSessions[idx] = light

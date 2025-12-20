@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Star / Pin**: Starring a session can now pin it by archiving its source files into Agent Sessions storage and syncing while the upstream session is still updating, so starred sessions don’t disappear when CLI history is pruned.
 - **Preferences**: Moved Agent Accents (Color/Monochrome) from General to Unified Window.
 - **Preferences**: Replace Unified Window → CLI Toolbar Filters with General → Active CLI agents. Disabling an agent now hides it across the app (Sessions toolbar, Analytics, usage strip, menu bar) and stops related background work.
 - **Preferences**: Hide the Sessions toolbar “Git Context” button by default. Re-enable it in Preferences → Advanced.

@@ -64,6 +64,10 @@ struct PreferencesView: View {
     // Per-agent polling intervals
     @AppStorage(PreferencesKey.codexPollingInterval) var codexPollingInterval: Int = 300   // 1/5/15 min options, default 5m
     @AppStorage(PreferencesKey.claudePollingInterval) var claudePollingInterval: Int = 900 // 3/15/30 min options, default 15m
+    // Star / Pin behavior
+    @AppStorage(PreferencesKey.Archives.starPinsSessions) var starPinsSessions: Bool = true
+    @AppStorage(PreferencesKey.Archives.stopSyncAfterInactivityMinutes) var stopSyncAfterInactivityMinutes: Int = 30
+    @AppStorage(PreferencesKey.Archives.unstarRemovesArchive) var unstarRemovesArchive: Bool = false
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab

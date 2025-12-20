@@ -248,18 +248,19 @@ final class ClaudeSessionIndexer: ObservableObject {
             let merged = (existingSessions + newSessions).filter(exists)
             let filtered = merged.filter { hideProbes ? !ClaudeProbeConfig.isProbeSession($0) : true }
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
+            let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .claude)
 
             DispatchQueue.main.async {
-                LaunchProfiler.log("Claude.refresh: sessions merged (total=\(sortedSessions.count))")
-                self.allSessions = sortedSessions
+                LaunchProfiler.log("Claude.refresh: sessions merged (total=\(mergedWithArchives.count))")
+                self.allSessions = mergedWithArchives
                 self.isIndexing = false
-                print("✅ CLAUDE INDEXING DONE: total=\(sortedSessions.count) (existing=\(existingSessions.count), new=\(newSessions.count))")
+                print("✅ CLAUDE INDEXING DONE: total=\(mergedWithArchives.count) (existing=\(existingSessions.count), new=\(newSessions.count))")
 
                 // Delta-based transcript prewarm for Claude sessions.
                 let delta: [Session] = {
                     var out: [Session] = []
-                    out.reserveCapacity(sortedSessions.count)
-                    for s in sortedSessions {
+                    out.reserveCapacity(mergedWithArchives.count)
+                    for s in mergedWithArchives {
                         if s.events.isEmpty { continue }
                         if s.messageCount <= 2 { continue }
                         let size = s.fileSizeBytes ?? 0
@@ -340,9 +341,10 @@ final class ClaudeSessionIndexer: ObservableObject {
     func reloadSession(id: String) {
         guard let existing = allSessions.first(where: { $0.id == id }),
               existing.events.isEmpty,
-              let url = URL(string: "file://\(existing.filePath)") else {
+              FileManager.default.fileExists(atPath: existing.filePath) else {
             return
         }
+        let url = URL(fileURLWithPath: existing.filePath)
 
         let filename = existing.filePath.components(separatedBy: "/").last ?? "?"
         print("🔄 Reloading lightweight Claude session: \(filename)")
@@ -354,7 +356,7 @@ final class ClaudeSessionIndexer: ObservableObject {
         bgQueue.async {
             let startTime = Date()
 
-            if let fullSession = ClaudeSessionParser.parseFileFull(at: url) {
+            if let fullSession = ClaudeSessionParser.parseFileFull(at: url, forcedID: id) {
                 let elapsed = Date().timeIntervalSince(startTime)
                 print("  ⏱️ Parse took \(String(format: "%.1f", elapsed))s - events=\(fullSession.events.count)")
 
@@ -398,7 +400,7 @@ final class ClaudeSessionIndexer: ObservableObject {
         print("🔍 Starting full parse of \(lightweightSessions.count) lightweight Claude sessions")
 
         for (index, session) in lightweightSessions.enumerated() {
-            guard let url = URL(string: "file://\(session.filePath)") else { continue }
+            let url = URL(fileURLWithPath: session.filePath)
 
             // Report progress on main thread
             await MainActor.run {
@@ -407,7 +409,7 @@ final class ClaudeSessionIndexer: ObservableObject {
 
             // Parse on background thread
             let fullSession = await Task.detached(priority: .userInitiated) {
-                return ClaudeSessionParser.parseFileFull(at: url)
+                return ClaudeSessionParser.parseFileFull(at: url, forcedID: session.id)
             }.value
 
             // Update allSessions on main thread

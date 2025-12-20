@@ -6,18 +6,12 @@ import SwiftUI
 final class UnifiedSessionIndexer: ObservableObject {
     // Lightweight favorites store (UserDefaults overlay)
     struct FavoritesStore {
-        static let key = "favoriteSessionIDs"
-        private(set) var ids: Set<String>
-        private let defaults: UserDefaults
         init(defaults: UserDefaults = .standard) {
-            self.defaults = defaults
-            ids = Set(defaults.stringArray(forKey: Self.key) ?? [])
+            store = StarredSessionsStore(defaults: defaults)
         }
-        func contains(_ id: String) -> Bool { ids.contains(id) }
-        mutating func toggle(_ id: String) { if ids.contains(id) { ids.remove(id) } else { ids.insert(id) }; persist() }
-        mutating func add(_ id: String) { ids.insert(id); persist() }
-        mutating func remove(_ id: String) { ids.remove(id); persist() }
-        private func persist() { defaults.set(Array(ids), forKey: Self.key) }
+        private(set) var store: StarredSessionsStore
+        func contains(id: String, source: SessionSource) -> Bool { store.contains(id: id, source: source) }
+        mutating func toggle(id: String, source: SessionSource) -> Bool { store.toggle(id: id, source: source) }
     }
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
@@ -138,7 +132,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 if self.claudeAgentEnabled { merged.append(contentsOf: claudeList) }
                 if self.geminiAgentEnabled { merged.append(contentsOf: geminiList) }
                 if self.openCodeAgentEnabled { merged.append(contentsOf: opencodeList) }
-                for i in merged.indices { merged[i].isFavorite = self.favorites.contains(merged[i].id) }
+                for i in merged.indices { merged[i].isFavorite = self.favorites.contains(id: merged[i].id, source: merged[i].source) }
                 return merged.sorted { lhs, rhs in
                     if lhs.modifiedAt == rhs.modifiedAt { return lhs.id > rhs.id }
                     return lhs.modifiedAt > rhs.modifiedAt
@@ -614,10 +608,17 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     // MARK: - Favorites
-    func toggleFavorite(_ id: String) {
-        favorites.toggle(id)
-        if let idx = allSessions.firstIndex(where: { $0.id == id }) {
-            allSessions[idx].isFavorite.toggle()
+    func toggleFavorite(_ id: String, source: SessionSource) {
+        let nowStarred = favorites.toggle(id: id, source: source)
+        if let idx = allSessions.firstIndex(where: { $0.id == id && $0.source == source }) {
+            allSessions[idx].isFavorite = nowStarred
+            let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
+            if nowStarred, pins {
+                SessionArchiveManager.shared.pin(session: allSessions[idx])
+            } else if !nowStarred {
+                let removeArchive = UserDefaults.standard.bool(forKey: PreferencesKey.Archives.unstarRemovesArchive)
+                SessionArchiveManager.shared.unstarred(source: source, id: id, removeArchive: removeArchive)
+            }
         }
         recomputeNow()
     }

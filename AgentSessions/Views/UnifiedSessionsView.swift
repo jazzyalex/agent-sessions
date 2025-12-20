@@ -330,7 +330,7 @@ struct UnifiedSessionsView: View {
         }
         .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
-                Button(s.isFavorite ? "Remove from Favorites" : "Add to Favorites") { unified.toggleFavorite(id) }
+                Button(s.isFavorite ? "Unstar" : "Star (Keep Forever)") { unified.toggleFavorite(id, source: s.source) }
                 Divider()
                 if s.source == .codex || s.source == .claude {
                     Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
@@ -559,11 +559,11 @@ struct UnifiedSessionsView: View {
         }
         ToolbarItem(placement: .automatic) {
             Toggle(isOn: $unified.showFavoritesOnly) {
-                Label("Favorites", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
+                Label("Starred", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
             }
             .toggleStyle(.button)
             .disabled(!showStarColumn)
-            .help(showStarColumn ? "Show only favorited sessions" : "Enable star column in Preferences to use favorites")
+            .help(showStarColumn ? "Show only starred sessions" : "Enable the star column in Preferences to use starring")
         }
         ToolbarItem(placement: .automatic) {
             AnalyticsButtonView(
@@ -702,14 +702,14 @@ struct UnifiedSessionsView: View {
     @ViewBuilder
     private func cellFavorite(for session: Session) -> some View {
         if showStarColumn {
-            Button(action: { unified.toggleFavorite(session.id) }) {
+            Button(action: { unified.toggleFavorite(session.id, source: session.source) }) {
                 Image(systemName: session.isFavorite ? "star.fill" : "star")
                     .imageScale(.medium)
                     .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
-            .help(session.isFavorite ? "Remove from Favorites" : "Add to Favorites")
-            .accessibilityLabel(session.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+            .help(starHelpText(isStarred: session.isFavorite))
+            .accessibilityLabel(session.isFavorite ? "Unstar" : "Star (Keep Forever)")
         } else {
             EmptyView()
         }
@@ -861,6 +861,18 @@ struct UnifiedSessionsView: View {
             return "Scanning small… \(p.scannedSmall)/\(p.totalSmall)"
         case .large:
             return "Scanning large… \(p.scannedLarge)/\(p.totalLarge)"
+        }
+    }
+
+    private func starHelpText(isStarred: Bool) -> String {
+        let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
+        let unstarRemoves = UserDefaults.standard.bool(forKey: PreferencesKey.Archives.unstarRemovesArchive)
+        if isStarred {
+            if pins && unstarRemoves { return "Unstar (removes local archive)" }
+            if pins { return "Unstar (keeps local archive)" }
+            return "Unstar"
+        } else {
+            return pins ? "Star (keep locally)" : "Star"
         }
     }
 }

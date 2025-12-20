@@ -354,7 +354,7 @@ final class SessionIndexer: ObservableObject {
 
             print("  🚀 Starting parseFileFull...")
             // Force full parse by calling parseFile directly (skip lightweight check)
-            if let fullSession = self.parseFileFull(at: url) {
+            if let fullSession = self.parseFileFull(at: url, forcedID: id) {
                 let elapsed = Date().timeIntervalSince(startTime)
                 print("  ⏱️ Parse took \(String(format: "%.1f", elapsed))s - events=\(fullSession.events.count)")
 
@@ -427,7 +427,7 @@ final class SessionIndexer: ObservableObject {
 
             // Parse on background thread
             let fullSession = await Task.detached(priority: .userInitiated) {
-                return self.parseFileFull(at: url)
+                return self.parseFileFull(at: url, forcedID: session.id)
             }.value
 
             // Update allSessions on main thread
@@ -641,9 +641,10 @@ final class SessionIndexer: ObservableObject {
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 .filter { hideProbes ? !CodexProbeConfig.isProbeSession($0) : true }
+            let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .codex)
             DispatchQueue.main.async {
-                LaunchProfiler.log("Codex.refresh: sessions merged (total=\(sortedSessions.count))")
-                self.allSessions = sortedSessions
+                LaunchProfiler.log("Codex.refresh: sessions merged (total=\(mergedWithArchives.count))")
+                self.allSessions = mergedWithArchives
                 self.isIndexing = false
                 let lightCount = newSessions.filter { $0.events.isEmpty }.count
                 let heavyCount = newSessions.count - lightCount
@@ -657,7 +658,7 @@ final class SessionIndexer: ObservableObject {
                 // Only warm sessions that have real events, are not trivially empty/low,
                 // and whose (size,eventCount) signature changed since last prewarm.
                 let delta: [Session] = {
-                    let all = sortedSessions
+                    let all = mergedWithArchives
                     var out: [Session] = []
                     out.reserveCapacity(all.count)
                     for s in all {
@@ -755,7 +756,7 @@ final class SessionIndexer: ObservableObject {
     }
 
     // Full parse (no lightweight check)
-    func parseFileFull(at url: URL) -> Session? {
+    func parseFileFull(at url: URL, forcedID: String? = nil) -> Session? {
         print("    📖 parseFileFull: Getting file attrs...")
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
@@ -791,7 +792,7 @@ final class SessionIndexer: ObservableObject {
                 if end == nil { end = (attrs[.modificationDate] as? Date) ?? start }
             }
         }
-        let id = Self.hash(path: url.path)
+        let id = forcedID ?? Self.hash(path: url.path)
         let session = Session(id: id,
                               source: .codex,
                               startTime: start,

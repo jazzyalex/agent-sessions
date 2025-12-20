@@ -151,12 +151,30 @@ extension PreferencesView {
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.showSizeColumn) }
                     ))
                     .help("Show or hide the file size column in the Unified list")
-                    Toggle("Favorite (star)", isOn: Binding(
+                    Toggle("Star (keep)", isOn: Binding(
                         get: { UserDefaults.standard.object(forKey: PreferencesKey.Unified.showStarColumn) as? Bool ?? true },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.showStarColumn) }
                     ))
-                    .help("Show or hide the favorite star button in the CLI Agent column")
+                    .help("Show or hide the star button. Starred sessions can be kept locally to prevent upstream pruning from removing them.")
                 }
+
+                sectionHeader("Star & Pin")
+                    .padding(.top, 8)
+                Toggle("Star also pins (keep locally)", isOn: $starPinsSessions)
+                    .help("When enabled, starring a session also archives its source files into Agent Sessions storage so it cannot disappear when the upstream CLI prunes history.")
+                HStack(spacing: 12) {
+                    Text("Stop syncing after inactivity")
+                    Picker("", selection: $stopSyncAfterInactivityMinutes) {
+                        Text("10 min").tag(10)
+                        Text("30 min").tag(30)
+                        Text("60 min").tag(60)
+                    }
+                    .labelsHidden()
+                    .frame(width: 120)
+                }
+                .help("After a pinned session stops changing upstream for this long, Agent Sessions marks the archive as Final. If it changes later, it will resume syncing.")
+                Toggle("Unstar removes local archive", isOn: $unstarRemovesArchive)
+                    .help("When enabled, removing the star also deletes the local archive copy. By default, unstar is non-destructive.")
                 // Filters section
                 sectionHeader("Filters")
                     .padding(.top, 8)
