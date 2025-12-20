@@ -112,7 +112,11 @@ struct PinnedSessionsView: View {
         let targets = selection
         selection.removeAll()
         for key in targets {
-            unified.toggleFavorite(key.id, source: key.source)
+            if let s = unified.allSessions.first(where: { $0.id == key.id && $0.source == key.source }) {
+                unified.toggleFavorite(s)
+            } else {
+                unified.toggleFavorite(key.id, source: key.source)
+            }
         }
     }
 
