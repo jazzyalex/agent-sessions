@@ -12,7 +12,7 @@ final class GeminiSessionParser {
 
     /// Preview-only parse for list indexing. Builds a lightweight Session with empty events
     /// and a derived title from the first user message.
-    static func parseFile(at url: URL) -> Session? {
+    static func parseFile(at url: URL, forcedID: String? = nil) -> Session? {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
@@ -57,7 +57,8 @@ final class GeminiSessionParser {
         if tmax == nil { tmax = mtime }
 
         // Use per-file stable ID for UI list consistency
-        return Session(id: sha256(path: url.path),
+        let sid = forcedID ?? sha256(path: url.path)
+        return Session(id: sid,
                        source: .gemini,
                        startTime: tmin,
                        endTime: tmax,
@@ -72,9 +73,10 @@ final class GeminiSessionParser {
     }
 
     // Full parse that normalizes Gemini JSON to Session + SessionEvent[]
-    static func parseFileFull(at url: URL) -> Session? {
+    static func parseFileFull(at url: URL, forcedID: String? = nil) -> Session? {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
+        let sid = forcedID ?? sha256(path: url.path)
 
         guard let data = try? Data(contentsOf: url),
               let any = try? JSONSerialization.jsonObject(with: data) else {
@@ -183,7 +185,7 @@ final class GeminiSessionParser {
                 let shouldEmitPrimaryEvent = !(kind == .assistant && !hasMeaningfulText && !toolCalls.isEmpty)
                 if shouldEmitPrimaryEvent {
                     let event = SessionEvent(
-                        id: sha256(path: url.path) + String(format: "-%04d", i),
+                        id: sid + String(format: "-%04d", i),
                         timestamp: ts,
                         kind: kind,
                         role: roleNorm,
@@ -204,10 +206,10 @@ final class GeminiSessionParser {
                     for tc in toolCalls {
                         tci += 1
                         let suffix = String(format: "-%04d-t%02d", i, tci)
-                        if let call = toolCallEvent(from: tc, baseID: sha256(path: url.path) + suffix) {
+                        if let call = toolCallEvent(from: tc, baseID: sid + suffix) {
                             events.append(call)
                         }
-                        if let result = toolResultEvent(from: tc, baseID: sha256(path: url.path) + suffix + "-r") {
+                        if let result = toolResultEvent(from: tc, baseID: sid + suffix + "-r") {
                             events.append(result)
                         }
                     }
@@ -218,7 +220,7 @@ final class GeminiSessionParser {
         // If still no cwd, try resolver again
         if !cwdLockedByResolver, cwd == nil, let hash = folderHash, let mapped = GeminiHashResolver.shared.resolve(hash) { cwd = validateCwd(mapped) }
 
-        return Session(id: sha256(path: url.path),
+        return Session(id: sid,
                        source: .gemini,
                        startTime: tmin,
                        endTime: tmax ?? tmin,

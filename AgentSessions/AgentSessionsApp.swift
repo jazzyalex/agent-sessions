@@ -7,6 +7,7 @@ struct AgentSessionsApp: App {
     @StateObject private var indexer = SessionIndexer()
     @StateObject private var claudeIndexer = ClaudeSessionIndexer()
     @StateObject private var opencodeIndexer = OpenCodeSessionIndexer()
+    @StateObject private var archiveManager = SessionArchiveManager.shared
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @StateObject private var geminiIndexer = GeminiSessionIndexer()
@@ -63,6 +64,7 @@ struct AgentSessionsApp: App {
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
                 .environmentObject(indexer.columnVisibility)
+                .environmentObject(archiveManager)
                 .environmentObject(updaterController)
                 .background(WindowAutosave(name: "MainWindow"))
                 .onAppear {
@@ -161,7 +163,7 @@ private struct FavoritesOnlyToggle: View {
                 unifiedHolder.unified?.showFavoritesOnly = newVal
             }
         )) {
-            Text("Favorites Only")
+            Text("Starred Only")
         }
     }
 }

@@ -29,6 +29,7 @@ struct TranscriptPlainView: View {
 struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @ObservedObject var indexer: Indexer
     @EnvironmentObject var focusCoordinator: WindowFocusCoordinator
+    @EnvironmentObject var archiveManager: SessionArchiveManager
     @Environment(\.colorScheme) private var colorScheme
     let sessionID: String?
     let sessionIDExtractor: (Session) -> String?  // Extract ID for clipboard
@@ -278,7 +279,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             Spacer()
 
             // === CENTER: Quiet secondary ID label (click-to-copy) ===
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 if let fullID = sessionIDExtractor(session) {
                     let displayLast4 = String(fullID.suffix(4))
                     let short = extractShortID(for: session) ?? String(fullID.prefix(6))
@@ -300,6 +301,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             .padding(8)
                             .font(.system(size: 12))
                     }
+                }
+                if StarredSessionsStore().contains(id: session.id, source: session.source) {
+                    pinnedBadge(session: session)
                 }
             }
 
@@ -832,6 +836,58 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         let key = PreferencesKey.Unified.skipAgentsPreamble
         if d.object(forKey: key) == nil { return true }
         return d.bool(forKey: key)
+    }
+
+    @ViewBuilder
+    private func pinnedBadge(session: Session) -> some View {
+        let info = archiveManager.info(source: session.source, id: session.id)
+        let statusText: String = {
+            guard let info else { return "Pinned" }
+            if info.upstreamMissing { return "Pinned (upstream missing)" }
+            switch info.status {
+            case .none: return "Pinned"
+            case .staging: return "Pinned (staging…)"
+            case .syncing: return "Pinned (syncing…)"
+            case .final: return "Pinned (final)"
+            case .error: return "Pinned (error)"
+            }
+        }()
+
+        Text(statusText)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color(NSColor.controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+            )
+            .help(pinnedHelpText(info: info))
+    }
+
+    private func pinnedHelpText(info: SessionArchiveInfo?) -> String {
+        guard let info else {
+            return "Starred sessions are kept locally."
+        }
+        var parts: [String] = []
+        if let last = info.lastSyncAt {
+            let r = RelativeDateTimeFormatter()
+            r.unitsStyle = .short
+            parts.append("Last sync: \(r.localizedString(for: last, relativeTo: Date()))")
+        } else {
+            parts.append("Not yet synced")
+        }
+        if let bytes = info.archiveSizeBytes, bytes > 0 {
+            parts.append("Archive size: \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))")
+        }
+        if info.upstreamMissing {
+            parts.append("Upstream missing — archived copy only")
+        }
+        return parts.joined(separator: "\n")
     }
 
     private func shouldShowJumpToFirstPrompt(session: Session) -> Bool {

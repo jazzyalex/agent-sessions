@@ -138,10 +138,12 @@
 		DE0381FB79864EDCA2C58B03 /* CodexResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABCAEC00B184A1F871509E5 /* CodexResumeCommandBuilder.swift */; };
 		E1DDA78C704848A381A6A426 /* LoadingAnimationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F188663773714C61A568F7AA /* LoadingAnimationView.swift */; };
 		E5022CFBD46E01CB4F97B2C2 /* ClaudeProbeProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5612FE92135230B461DA0E59 /* ClaudeProbeProject.swift */; };
+		E6BF69C2B5C7E68B274A8030 /* StarredSessionsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD4DB1D386011AE92EE08483 /* StarredSessionsStore.swift */; };
 		E6C0241E412AB230B63D800F /* PreferencesView+General.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14273196C77AAA12FFDF3CE /* PreferencesView+General.swift */; };
 		E94AFD66E49ABDDE3B17FBCE /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 23BE89E240FA50F2E4F89629 /* Foundation.framework */; };
 		EA1E7DFFCF6E2B71B8BD3AE5 /* ProbeAutoCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45E7621E9F33B15FEEA3C856 /* ProbeAutoCleanupTests.swift */; };
 		F0001909B140D84305F63FA1 /* codex_052_raw.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = ABFD9C178275CA23FCE6B3DE /* codex_052_raw.jsonl */; };
+		F2C6B688E1EC6DFAD5F87726 /* SessionArchiveManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE3BFABDF39A35915C5DDCAA /* SessionArchiveManager.swift */; };
 		F7079DCFE7E6447F920DBF84 /* CodexResumeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */; };
 		F9477DEFEF9D4511F567A712 /* ClaudeProbeProjectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCAF2FBE83AB906E7AE27B14 /* ClaudeProbeProjectTests.swift */; };
 		F99D8667D52F20CA899A68B2 /* codex_053_rate_limit.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 01B00401B46F260749DB02B1 /* codex_053_rate_limit.jsonl */; };
@@ -292,6 +294,7 @@
 		B3F6CC1703A8506BE7C6C8A0 /* PreferencesView+CLI.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "PreferencesView+CLI.swift"; path = "AgentSessions/Views/Preferences/PreferencesView+CLI.swift"; sourceTree = SOURCE_ROOT; };
 		B903187D9D8D4EDF9FAB0BBA /* UpdateDefaults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateDefaults.swift; path = AgentSessions/Update/UpdateDefaults.swift; sourceTree = SOURCE_ROOT; };
 		BBD66FC176CB54B298244DDB /* ClaudeProbeConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeProbeConfig.swift; sourceTree = "<group>"; };
+		BE3BFABDF39A35915C5DDCAA /* SessionArchiveManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SessionArchiveManager.swift; sourceTree = SOURCE_ROOT; };
 		C0D3E5A1700F000000000001 /* CodexStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexStatusService.swift; path = AgentSessions/CodexStatus/CodexStatusService.swift; sourceTree = SOURCE_ROOT; };
 		C0D3E5A1700F000000000002 /* UsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStripView.swift; path = AgentSessions/CodexStatus/UsageStripView.swift; sourceTree = SOURCE_ROOT; };
 		C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ResumeHealthCheck.swift; path = AgentSessions/Resume/ResumeHealthCheck.swift; sourceTree = SOURCE_ROOT; };
@@ -331,6 +334,7 @@
 		F14273196C77AAA12FFDF3CE /* PreferencesView+General.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "PreferencesView+General.swift"; path = "AgentSessions/Views/Preferences/PreferencesView+General.swift"; sourceTree = SOURCE_ROOT; };
 		F188663773714C61A568F7AA /* LoadingAnimationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LoadingAnimationView.swift; path = AgentSessions/Views/LoadingAnimationView.swift; sourceTree = SOURCE_ROOT; };
 		F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCoordinatorTests.swift; path = AgentSessionsTests/CodexResumeCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
+		FD4DB1D386011AE92EE08483 /* StarredSessionsStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/StarredSessionsStore.swift; sourceTree = SOURCE_ROOT; };
 		FF31F563529F4552B7B205FD /* UpdaterController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdaterController.swift; path = AgentSessions/Update/UpdaterController.swift; sourceTree = SOURCE_ROOT; };
 		GEM000010000000000000001 /* GeminiSessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		GEM000010000000000000002 /* GeminiSessionIndexer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/GeminiSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
@@ -676,6 +680,8 @@
 				9A35FF4EC89DCD3987AD16BB /* OpenCodeSessionParser.swift */,
 				05D72F56F8E9EB0484E4361C /* OpenCodeSessionIndexer.swift */,
 				372394B7F3B77108C9FEAFC8 /* AgentEnablement.swift */,
+				FD4DB1D386011AE92EE08483 /* StarredSessionsStore.swift */,
+				BE3BFABDF39A35915C5DDCAA /* SessionArchiveManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1191,6 +1197,8 @@
 				94C634230B294225B894EC66 /* PreferencesView+OpenCode.swift in Sources */,
 				37D93EDA993018B66B33250E /* UsageDisplayMode.swift in Sources */,
 				91569B1DCD425054CA314375 /* AgentEnablement.swift in Sources */,
+				E6BF69C2B5C7E68B274A8030 /* StarredSessionsStore.swift in Sources */,
+				F2C6B688E1EC6DFAD5F87726 /* SessionArchiveManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

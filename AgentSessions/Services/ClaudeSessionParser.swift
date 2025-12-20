@@ -23,7 +23,7 @@ final class ClaudeSessionParser {
     }
 
     /// Full parse of Claude Code session file
-    static func parseFileFull(at url: URL) -> Session? {
+    static func parseFileFull(at url: URL, forcedID: String? = nil) -> Session? {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let reader = JSONLReader(url: url)
@@ -79,7 +79,7 @@ final class ClaudeSessionParser {
         }
 
         // Use per-file stable ID to match Sessions list expectations
-        let fileID = hash(path: url.path)
+        let fileID = forcedID ?? hash(path: url.path)
         return Session(
             id: fileID,
             source: .claude,

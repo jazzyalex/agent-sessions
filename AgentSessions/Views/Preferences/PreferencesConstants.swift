@@ -67,4 +67,10 @@ enum PreferencesKey {
     enum Paths {
         static let claudeSessionsRootOverride = "ClaudeSessionsRootOverride"
     }
+
+    enum Archives {
+        static let starPinsSessions = "StarPinsSessions"
+        static let stopSyncAfterInactivityMinutes = "ArchiveStopSyncAfterInactivityMinutes"
+        static let unstarRemovesArchive = "UnstarRemovesLocalArchive"
+    }
 }
