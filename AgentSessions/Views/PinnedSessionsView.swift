@@ -6,7 +6,6 @@ struct PinnedSessionsView: View {
     @EnvironmentObject var archiveManager: SessionArchiveManager
     @State private var query: String = ""
     @State private var selection: Set<RowKey> = []
-    @State private var requestedPinning: Set<RowKey> = []
 
     private struct RowKey: Hashable {
         let source: SessionSource
@@ -93,9 +92,9 @@ struct PinnedSessionsView: View {
                 Text("\(rows.count) pinned")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Show in Agent Folder") { revealUpstreamForSelection() }
+                Button("Show Original Files") { revealUpstreamForSelection() }
                     .disabled(selection.count != 1)
-                Button("Show in Archive Folder") { revealArchiveForSelection() }
+                Button("Show Archived Copy") { revealArchiveForSelection() }
                     .disabled(selection.count != 1)
                 Button("Unstar Selected") { unstarSelected() }
                     .disabled(selection.isEmpty)
@@ -104,7 +103,10 @@ struct PinnedSessionsView: View {
             .padding(.bottom, 10)
         }
         .frame(width: 820, height: 460)
-        .onAppear { backfillArchivesIfNeeded() }
+        .onAppear {
+            archiveManager.syncPinnedSessionsNow()
+            backfillArchivesIfNeeded()
+        }
         .onReceive(unified.$allSessions) { _ in backfillArchivesIfNeeded() }
     }
 
@@ -123,14 +125,14 @@ struct PinnedSessionsView: View {
     private func archiveStatusLabel(for info: SessionArchiveInfo?) -> String {
         guard let info else {
             let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
-            return pins ? "Not archived yet" : "Starred"
+            return pins ? "Pending…" : "Starred"
         }
         if info.upstreamMissing { return "Upstream missing" }
         switch info.status {
         case .none: return "Pinned"
-        case .staging: return "Pinning…"
-        case .syncing: return "Syncing…"
-        case .final: return "Final"
+        case .staging: return "Archiving…"
+        case .syncing: return "Archived"
+        case .final: return "Archived (final)"
         case .error: return "Error"
         }
     }
@@ -153,10 +155,7 @@ struct PinnedSessionsView: View {
 
         // Backfill archives for previously-starred sessions when the user explicitly opens this window.
         for s in unified.allSessions where s.isFavorite {
-            let key = RowKey(source: s.source, id: s.id)
-            if requestedPinning.contains(key) { continue }
             if archiveManager.info(source: s.source, id: s.id) == nil {
-                requestedPinning.insert(key)
                 archiveManager.pin(session: s)
             }
         }
@@ -182,6 +181,6 @@ struct PinnedSessionsView: View {
     private func revealArchiveForSelection() {
         guard let key = selection.first else { return }
         guard let url = archiveManager.archiveFolderURL(source: key.source, id: key.id) else { return }
-        NSWorkspace.shared.open(url)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 }

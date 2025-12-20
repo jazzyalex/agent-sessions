@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import SQLite3
 
 enum SessionArchiveStatus: String, Codable {
     case none
@@ -53,8 +54,11 @@ final class SessionArchiveManager: ObservableObject {
 
     @Published private(set) var infoByKey: [String: SessionArchiveInfo] = [:]
 
-    private let ioQueue = DispatchQueue(label: "AgentSessions.SessionArchiveManager.io", qos: .utility)
+    // Pinning is a user action; keep the queue responsive.
+    private let ioQueue = DispatchQueue(label: "AgentSessions.SessionArchiveManager.io", qos: .userInitiated)
     private var timer: DispatchSourceTimer?
+    private var inFlightKeys: Set<String> = []
+    private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private init() {
         // Eagerly warm cache for UI.
@@ -72,12 +76,19 @@ final class SessionArchiveManager: ObservableObject {
 
     func archiveFolderURL(source: SessionSource, id: String) -> URL? {
         let root = sessionRoot(source: source, id: id)
-        return FileManager.default.fileExists(atPath: root.path) ? root : nil
+        // This action is user-initiated; prefer creating the folder so Finder can reveal it.
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
     }
 
     func pin(session: Session) {
+        let k = key(source: session.source, id: session.id)
         ioQueue.async { [weak self] in
             guard let self else { return }
+            if self.inFlightKeys.contains(k) { return }
+            self.inFlightKeys.insert(k)
+            defer { self.inFlightKeys.remove(k) }
+
             self.ensureArchiveExistsAndSync(session: session, reason: "pin")
             self.reloadCache()
         }
@@ -244,8 +255,15 @@ final class SessionArchiveManager: ObservableObject {
             let pinned = store.pinnedIDs(for: source)
             guard !pinned.isEmpty else { continue }
             for id in pinned {
-                guard var info = loadInfoIfExists(source: source, id: id) else { continue }
-                ensureArchiveExistsAndSync(info: &info, reason: reason)
+                if var info = loadInfoIfExists(source: source, id: id) {
+                    ensureArchiveExistsAndSync(info: &info, reason: reason)
+                    continue
+                }
+
+                // Backfill: older starred sessions won't have an archive folder yet.
+                // If we can resolve their upstream path from IndexDB.session_meta, pin immediately.
+                guard let session = resolveSessionFromIndexDB(source: source, sessionID: id) else { continue }
+                ensureArchiveExistsAndSync(session: session, reason: reason)
             }
         }
     }
@@ -287,6 +305,66 @@ final class SessionArchiveManager: ObservableObject {
         }
 
         ensureArchiveExistsAndSync(info: &info, reason: reason)
+    }
+
+    private func resolveSessionFromIndexDB(source: SessionSource, sessionID: String) -> Session? {
+        let fm = FileManager.default
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dbURL = appSupport
+            .appendingPathComponent("AgentSessions", isDirectory: true)
+            .appendingPathComponent("index.db", isDirectory: false)
+        guard fm.fileExists(atPath: dbURL.path) else { return nil }
+
+        var db: OpaquePointer?
+        if sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
+            if db != nil { sqlite3_close(db) }
+            return nil
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+        SELECT path, start_ts, end_ts, model, cwd, title, messages, commands, size
+        FROM session_meta
+        WHERE session_id = ? AND source = ?
+        LIMIT 1;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, sessionID, -1, sqliteTransient)
+        sqlite3_bind_text(stmt, 2, source.rawValue, -1, sqliteTransient)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        guard let cPath = sqlite3_column_text(stmt, 0) else { return nil }
+
+        let path = String(cString: cPath)
+        let startTS = sqlite3_column_type(stmt, 1) == SQLITE_NULL ? 0 : sqlite3_column_int64(stmt, 1)
+        let endTS = sqlite3_column_type(stmt, 2) == SQLITE_NULL ? 0 : sqlite3_column_int64(stmt, 2)
+        let model = sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 3))
+        let cwd = sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 4))
+        let title = sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 5))
+        let messages = Int(sqlite3_column_int64(stmt, 6))
+        let commands = Int(sqlite3_column_int64(stmt, 7))
+        let size = sqlite3_column_type(stmt, 8) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(stmt, 8))
+
+        let start = startTS > 0 ? Date(timeIntervalSince1970: TimeInterval(startTS)) : nil
+        let end = endTS > 0 ? Date(timeIntervalSince1970: TimeInterval(endTS)) : nil
+
+        return Session(
+            id: sessionID,
+            source: source,
+            startTime: start,
+            endTime: end,
+            model: model,
+            filePath: path,
+            fileSizeBytes: size,
+            eventCount: messages,
+            events: [],
+            cwd: cwd,
+            repoName: nil,
+            lightweightTitle: title,
+            lightweightCommands: commands
+        )
     }
 
     private func ensureArchiveExistsAndSync(info: inout SessionArchiveInfo, reason: String) {
