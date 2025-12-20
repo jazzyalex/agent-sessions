@@ -841,8 +841,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @ViewBuilder
     private func pinnedBadge(session: Session) -> some View {
         let info = archiveManager.info(source: session.source, id: session.id)
+        let pinsEnabled = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
         let statusText: String = {
-            guard let info else { return "Pinned" }
+            guard pinsEnabled else { return "Starred" }
+            guard let info else { return "Pinned (pending…)" }
             if info.upstreamMissing { return "Pinned (upstream missing)" }
             switch info.status {
             case .none: return "Pinned"
@@ -870,9 +872,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func pinnedHelpText(info: SessionArchiveInfo?) -> String {
-        guard let info else {
-            return "Starred sessions are kept locally."
-        }
+        let pinsEnabled = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
+        guard pinsEnabled else { return "Starred session." }
+        guard let info else { return "Archive pending." }
         var parts: [String] = []
         if let last = info.lastSyncAt {
             let r = RelativeDateTimeFormatter()
