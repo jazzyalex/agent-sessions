@@ -70,6 +70,11 @@ final class SessionArchiveManager: ObservableObject {
         infoByKey[key(source: source, id: id)]
     }
 
+    func archiveFolderURL(source: SessionSource, id: String) -> URL? {
+        let root = sessionRoot(source: source, id: id)
+        return FileManager.default.fileExists(atPath: root.path) ? root : nil
+    }
+
     func pin(session: Session) {
         ioQueue.async { [weak self] in
             guard let self else { return }
@@ -291,6 +296,7 @@ final class SessionArchiveManager: ObservableObject {
             info.status = .error
             info.lastError = error.localizedDescription
             try? writeInfo(info)
+            reloadCache()
         }
     }
 
@@ -308,6 +314,7 @@ final class SessionArchiveManager: ObservableObject {
             if fm.fileExists(atPath: sessionRoot(source: info.source, id: info.sessionID).path) {
                 info.status = .final
                 try writeInfo(info)
+                reloadCache()
             }
             return
         }
@@ -331,11 +338,13 @@ final class SessionArchiveManager: ObservableObject {
                 info.status = .syncing
             }
             try writeInfo(info)
+            reloadCache()
             return
         }
 
         info.status = .staging
         try writeInfo(info)
+        reloadCache()
 
         // Copy with consistency check.
         let attemptsMax = 4
