@@ -309,6 +309,12 @@ final class SessionArchiveManager: ObservableObject {
 
         try fm.createDirectory(at: sourceRoot(info.source), withIntermediateDirectories: true)
 
+        // Ensure there's always a visible "pin in progress" state on disk and in-memory
+        // even if scanning/copying fails later.
+        info.status = .staging
+        try writeInfo(info)
+        reloadCache()
+
         guard upstreamExists else {
             // Upstream missing: keep archive as-is and surface as final (safe).
             if fm.fileExists(atPath: sessionRoot(source: info.source, id: info.sessionID).path) {
@@ -341,10 +347,6 @@ final class SessionArchiveManager: ObservableObject {
             reloadCache()
             return
         }
-
-        info.status = .staging
-        try writeInfo(info)
-        reloadCache()
 
         // Copy with consistency check.
         let attemptsMax = 4
