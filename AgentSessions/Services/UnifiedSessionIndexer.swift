@@ -608,19 +608,34 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     // MARK: - Favorites
-    func toggleFavorite(_ id: String, source: SessionSource) {
-        let nowStarred = favorites.toggle(id: id, source: source)
-        if let idx = allSessions.firstIndex(where: { $0.id == id && $0.source == source }) {
+    func toggleFavorite(_ session: Session) {
+        let nowStarred = favorites.toggle(id: session.id, source: session.source)
+        if let idx = allSessions.firstIndex(where: { $0.id == session.id && $0.source == session.source }) {
             allSessions[idx].isFavorite = nowStarred
-            let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
-            if nowStarred, pins {
-                SessionArchiveManager.shared.pin(session: allSessions[idx])
-            } else if !nowStarred {
+        }
+
+        let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
+        if nowStarred, pins {
+            SessionArchiveManager.shared.pin(session: session)
+        } else if !nowStarred {
+            let removeArchive = UserDefaults.standard.bool(forKey: PreferencesKey.Archives.unstarRemovesArchive)
+            SessionArchiveManager.shared.unstarred(source: session.source, id: session.id, removeArchive: removeArchive)
+        }
+        recomputeNow()
+    }
+
+    func toggleFavorite(_ id: String, source: SessionSource) {
+        // Backward-compatible call site; prefer passing Session when available so pinning never depends on an array lookup.
+        if let s = allSessions.first(where: { $0.id == id && $0.source == source }) {
+            toggleFavorite(s)
+        } else {
+            let nowStarred = favorites.toggle(id: id, source: source)
+            if !nowStarred {
                 let removeArchive = UserDefaults.standard.bool(forKey: PreferencesKey.Archives.unstarRemovesArchive)
                 SessionArchiveManager.shared.unstarred(source: source, id: id, removeArchive: removeArchive)
             }
+            recomputeNow()
         }
-        recomputeNow()
     }
 }
     struct LaunchState {

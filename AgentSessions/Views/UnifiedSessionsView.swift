@@ -330,7 +330,7 @@ struct UnifiedSessionsView: View {
         }
         .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
-                Button(s.isFavorite ? "Unstar" : "Star (Keep Forever)") { unified.toggleFavorite(id, source: s.source) }
+                Button(s.isFavorite ? "Unstar" : "Star (Keep Forever)") { unified.toggleFavorite(s) }
                 Divider()
                 if s.source == .codex || s.source == .claude {
                     Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
@@ -702,7 +702,7 @@ struct UnifiedSessionsView: View {
     @ViewBuilder
     private func cellFavorite(for session: Session) -> some View {
         if showStarColumn {
-            Button(action: { unified.toggleFavorite(session.id, source: session.source) }) {
+            Button(action: { unified.toggleFavorite(session) }) {
                 Image(systemName: session.isFavorite ? "star.fill" : "star")
                     .imageScale(.medium)
                     .foregroundStyle(.primary)
