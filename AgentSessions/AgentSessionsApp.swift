@@ -123,7 +123,21 @@ struct AgentSessionsApp: App {
             CommandMenu("View") {
                 // Bind through UserDefaults so it persists; also forward to unified when it changes
                 FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
+                Divider()
+                OpenPinnedSessionsWindowButton()
             }
+        }
+
+        WindowGroup("Pinned Sessions", id: "PinnedSessions") {
+            PinnedSessionsView(
+                unified: unifiedIndexerHolder.makeUnified(
+                    codexIndexer: indexer,
+                    claudeIndexer: claudeIndexer,
+                    geminiIndexer: geminiIndexer,
+                    opencodeIndexer: opencodeIndexer
+                )
+            )
+            .environmentObject(archiveManager)
         }
 
         // Legacy windows removed; Unified is the single window.
@@ -165,6 +179,16 @@ private struct FavoritesOnlyToggle: View {
         )) {
             Text("Starred Only")
         }
+    }
+}
+
+private struct OpenPinnedSessionsWindowButton: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button("Pinned Sessions…") {
+            openWindow(id: "PinnedSessions")
+        }
+        .keyboardShortcut("p", modifiers: [.command, .option])
     }
 }
 
