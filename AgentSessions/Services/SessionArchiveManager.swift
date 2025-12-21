@@ -83,6 +83,7 @@ final class SessionArchiveManager: ObservableObject {
 
     func pin(session: Session) {
         let k = key(source: session.source, id: session.id)
+        writePinPlaceholder(session: session, key: k)
         ioQueue.async { [weak self] in
             guard let self else { return }
             if self.inFlightKeys.contains(k) { return }
@@ -305,6 +306,59 @@ final class SessionArchiveManager: ObservableObject {
         }
 
         ensureArchiveExistsAndSync(info: &info, reason: reason)
+    }
+
+    private func writePinPlaceholder(session: Session, key: String) {
+        var info = SessionArchiveInfo(
+            sessionID: session.id,
+            source: session.source,
+            upstreamPath: session.filePath,
+            upstreamIsDirectory: isDirectory(path: session.filePath),
+            primaryRelativePath: URL(fileURLWithPath: session.filePath).lastPathComponent,
+            pinnedAt: Date(),
+            lastSyncAt: nil,
+            lastUpstreamChangeAt: nil,
+            lastUpstreamSeenAt: nil,
+            upstreamMissing: false,
+            status: .staging,
+            lastError: nil,
+            startTime: session.startTime,
+            endTime: session.endTime,
+            model: session.model,
+            cwd: session.cwd,
+            title: session.title,
+            estimatedEventCount: session.eventCount,
+            estimatedCommands: session.lightweightCommands,
+            archiveSizeBytes: nil
+        )
+
+        if var existing = loadInfoIfExists(source: session.source, id: session.id) {
+            existing.upstreamPath = info.upstreamPath
+            existing.upstreamIsDirectory = info.upstreamIsDirectory
+            existing.primaryRelativePath = info.primaryRelativePath
+            existing.status = .staging
+            existing.lastError = nil
+
+            existing.startTime = info.startTime
+            existing.endTime = info.endTime
+            existing.model = info.model
+            existing.cwd = info.cwd
+            existing.title = info.title
+            existing.estimatedEventCount = info.estimatedEventCount
+            existing.estimatedCommands = info.estimatedCommands
+            info = existing
+        }
+
+        do {
+            try writeInfo(info)
+        } catch {
+            info.status = .error
+            info.lastError = "Failed to initialize archive: \(error.localizedDescription)"
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.infoByKey[key] = info
+        }
     }
 
     private func resolveSessionFromIndexDB(source: SessionSource, sessionID: String) -> Session? {

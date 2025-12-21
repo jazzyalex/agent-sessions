@@ -180,6 +180,10 @@ struct PinnedSessionsView: View {
 
     private func revealArchiveForSelection() {
         guard let key = selection.first else { return }
+        if archiveManager.info(source: key.source, id: key.id) == nil,
+           let s = unified.allSessions.first(where: { $0.id == key.id && $0.source == key.source }) {
+            archiveManager.pin(session: s)
+        }
         guard let url = archiveManager.archiveFolderURL(source: key.source, id: key.id) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
