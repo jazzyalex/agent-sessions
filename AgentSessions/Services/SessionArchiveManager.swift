@@ -58,6 +58,7 @@ final class SessionArchiveManager: ObservableObject {
     private let ioQueue = DispatchQueue(label: "AgentSessions.SessionArchiveManager.io", qos: .userInitiated)
     private var timer: DispatchSourceTimer?
     private var inFlightKeys: Set<String> = []
+    private var missingResolutionLogged: Set<String> = []
     private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private init() {
@@ -83,6 +84,7 @@ final class SessionArchiveManager: ObservableObject {
 
     func pin(session: Session) {
         let k = key(source: session.source, id: session.id)
+        log("pin requested source=\(session.source.rawValue) id=\(session.id) path=\(session.filePath)")
         writePinPlaceholder(session: session, key: k)
         ioQueue.async { [weak self] in
             guard let self else { return }
@@ -258,12 +260,21 @@ final class SessionArchiveManager: ObservableObject {
             for id in pinned {
                 if var info = loadInfoIfExists(source: source, id: id) {
                     ensureArchiveExistsAndSync(info: &info, reason: reason)
+                    let key = key(source: source, id: id)
+                    missingResolutionLogged.remove(key)
                     continue
                 }
 
                 // Backfill: older starred sessions won't have an archive folder yet.
                 // If we can resolve their upstream path from IndexDB.session_meta, pin immediately.
-                guard let session = resolveSessionFromIndexDB(source: source, sessionID: id) else { continue }
+                guard let session = resolveSessionFromIndexDB(source: source, sessionID: id) else {
+                    let key = key(source: source, id: id)
+                    if !missingResolutionLogged.contains(key) {
+                        log("pin backfill failed source=\(source.rawValue) id=\(id) reason=missing_session_meta")
+                        missingResolutionLogged.insert(key)
+                    }
+                    continue
+                }
                 ensureArchiveExistsAndSync(session: session, reason: reason)
             }
         }
@@ -351,9 +362,11 @@ final class SessionArchiveManager: ObservableObject {
 
         do {
             try writeInfo(info)
+            log("pin placeholder written source=\(session.source.rawValue) id=\(session.id)")
         } catch {
             info.status = .error
             info.lastError = "Failed to initialize archive: \(error.localizedDescription)"
+            log("pin placeholder failed source=\(session.source.rawValue) id=\(session.id) error=\(error.localizedDescription)")
         }
 
         DispatchQueue.main.async { [weak self] in
@@ -423,12 +436,15 @@ final class SessionArchiveManager: ObservableObject {
 
     private func ensureArchiveExistsAndSync(info: inout SessionArchiveInfo, reason: String) {
         do {
+            log("sync start source=\(info.source.rawValue) id=\(info.sessionID) reason=\(reason)")
             try ensureSynced(info: &info, reason: reason)
+            log("sync done source=\(info.source.rawValue) id=\(info.sessionID) status=\(info.status.rawValue)")
         } catch {
             info.status = .error
             info.lastError = error.localizedDescription
             try? writeInfo(info)
             reloadCache()
+            log("sync error source=\(info.source.rawValue) id=\(info.sessionID) error=\(error.localizedDescription)")
         }
     }
 
@@ -454,6 +470,7 @@ final class SessionArchiveManager: ObservableObject {
                 try writeInfo(info)
                 reloadCache()
             }
+            log("sync upstream missing source=\(info.source.rawValue) id=\(info.sessionID) path=\(info.upstreamPath)")
             return
         }
 
@@ -477,6 +494,7 @@ final class SessionArchiveManager: ObservableObject {
             }
             try writeInfo(info)
             reloadCache()
+            log("sync noop source=\(info.source.rawValue) id=\(info.sessionID) status=\(info.status.rawValue)")
             return
         }
 
@@ -520,6 +538,7 @@ final class SessionArchiveManager: ObservableObject {
                     info.status = .final
                     try writeInfo(info)
                 }
+                log("sync committed source=\(info.source.rawValue) id=\(info.sessionID) size=\(info.archiveSizeBytes ?? 0)")
                 return
             }
 
@@ -550,6 +569,7 @@ final class SessionArchiveManager: ObservableObject {
         try commitStaging(stagingSessionRoot, source: info.source, sessionID: info.sessionID)
 
         info = committedInfo
+        log("sync committed best-effort source=\(info.source.rawValue) id=\(info.sessionID) size=\(info.archiveSizeBytes ?? 0)")
     }
 
     private func shouldMarkFinal(lastChangeAt: Date?) -> Bool {
@@ -673,5 +693,27 @@ final class SessionArchiveManager: ObservableObject {
         let fm = FileManager.default
         let root = sessionRoot(source: source, id: id)
         try? fm.removeItem(at: root)
+    }
+
+    private func log(_ message: String) {
+        let fm = FileManager.default
+        let logURL = archivesRoot().appendingPathComponent("archive.log", isDirectory: false)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let ts = formatter.string(from: Date())
+        let line = "[\(ts)] \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if fm.fileExists(atPath: logURL.path) {
+            if let handle = try? FileHandle(forWritingTo: logURL) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                try? handle.close()
+            } else {
+                try? data.write(to: logURL, options: .atomic)
+            }
+        } else {
+            try? fm.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: logURL, options: .atomic)
+        }
     }
 }

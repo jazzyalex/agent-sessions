@@ -17,6 +17,7 @@ struct PinnedSessionsView: View {
         let title: String
         let sourceLabel: String
         let statusLabel: String
+        let statusHelp: String
         let lastSyncLabel: String
         let sizeLabel: String
     }
@@ -45,6 +46,7 @@ struct PinnedSessionsView: View {
                     title: s.title,
                     sourceLabel: s.source.displayName,
                     statusLabel: archiveStatusLabel(for: info),
+                    statusHelp: archiveStatusHelp(for: info),
                     lastSyncLabel: lastSyncLabel(for: info),
                     sizeLabel: sizeLabel(for: info)
                 )
@@ -76,6 +78,7 @@ struct PinnedSessionsView: View {
                 TableColumn("Status") { row in
                     Text(row.statusLabel)
                         .foregroundStyle(.secondary)
+                        .help(row.statusHelp)
                 }
                 TableColumn("Last Sync") { row in
                     Text(row.lastSyncLabel)
@@ -135,6 +138,20 @@ struct PinnedSessionsView: View {
         case .final: return "Archived (final)"
         case .error: return "Error"
         }
+    }
+
+    private func archiveStatusHelp(for info: SessionArchiveInfo?) -> String {
+        let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
+        guard pins else { return "Archiving is disabled in Settings." }
+        guard let info else {
+            return "Archive metadata not initialized yet. Try “Show Archived Copy” to retry pinning."
+        }
+        var parts: [String] = []
+        if let err = info.lastError, !err.isEmpty {
+            parts.append("Error: \(err)")
+        }
+        parts.append("Upstream: \(info.upstreamPath)")
+        return parts.joined(separator: "\n")
     }
 
     private func lastSyncLabel(for info: SessionArchiveInfo?) -> String {
