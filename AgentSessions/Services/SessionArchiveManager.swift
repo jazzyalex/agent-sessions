@@ -59,6 +59,7 @@ final class SessionArchiveManager: ObservableObject {
     private var timer: DispatchSourceTimer?
     private var inFlightKeys: Set<String> = []
     private var missingResolutionLogged: Set<String> = []
+    private var didLogArchivesRoot: Bool = false
     private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private init() {
@@ -82,8 +83,13 @@ final class SessionArchiveManager: ObservableObject {
         return root
     }
 
+    func archivesRootURL() -> URL {
+        archivesRoot()
+    }
+
     func pin(session: Session) {
         let k = key(source: session.source, id: session.id)
+        logArchivesRootIfNeeded()
         log("pin requested source=\(session.source.rawValue) id=\(session.id) path=\(session.filePath)")
         writePinPlaceholder(session: session, key: k)
         ioQueue.async { [weak self] in
@@ -103,6 +109,14 @@ final class SessionArchiveManager: ObservableObject {
             if removeArchive {
                 self.deleteArchive(source: source, id: id)
             }
+            self.reloadCache()
+        }
+    }
+
+    func deleteArchiveNow(source: SessionSource, id: String) {
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            self.deleteArchive(source: source, id: id)
             self.reloadCache()
         }
     }
@@ -363,6 +377,9 @@ final class SessionArchiveManager: ObservableObject {
         do {
             try writeInfo(info)
             log("pin placeholder written source=\(session.source.rawValue) id=\(session.id)")
+            log("pin meta path=\(metaURL(source: session.source, id: session.id).path)")
+            let metaExists = FileManager.default.fileExists(atPath: metaURL(source: session.source, id: session.id).path)
+            log("pin meta exists=\(metaExists) source=\(session.source.rawValue) id=\(session.id)")
         } catch {
             info.status = .error
             info.lastError = "Failed to initialize archive: \(error.localizedDescription)"
@@ -511,6 +528,7 @@ final class SessionArchiveManager: ObservableObject {
             let stagingSessionRoot = staging.appendingPathComponent(info.sessionID, isDirectory: true)
             let stagingDataRoot = stagingSessionRoot.appendingPathComponent("data", isDirectory: true)
             try fm.createDirectory(at: stagingDataRoot, withIntermediateDirectories: true)
+            log("sync staging created path=\(stagingSessionRoot.path) exists=\(fm.fileExists(atPath: stagingSessionRoot.path))")
 
             try copySnapshot(snapshot, from: upstreamURL, upstreamIsDirectory: info.upstreamIsDirectory, to: stagingDataRoot)
             let snapshotAfter = try scanUpstreamSnapshot(at: upstreamURL, primaryRelativePath: info.primaryRelativePath)
@@ -531,6 +549,9 @@ final class SessionArchiveManager: ObservableObject {
                 try writeManifestTo(path: stagingSessionRoot.appendingPathComponent("manifest.json", isDirectory: false), manifest: snapshot)
 
                 try commitStaging(stagingSessionRoot, source: info.source, sessionID: info.sessionID)
+                let final = sessionRoot(source: info.source, id: info.sessionID)
+                log("sync commit final=\(final.path) exists=\(fm.fileExists(atPath: final.path))")
+                log("sync commit staging still exists=\(fm.fileExists(atPath: stagingSessionRoot.path))")
 
                 info = committedInfo
                 // Mark final if quiet long enough.
@@ -567,6 +588,9 @@ final class SessionArchiveManager: ObservableObject {
         try writeInfoTo(path: stagingSessionRoot.appendingPathComponent("meta.json", isDirectory: false), info: committedInfo)
         try writeManifestTo(path: stagingSessionRoot.appendingPathComponent("manifest.json", isDirectory: false), manifest: snapshot)
         try commitStaging(stagingSessionRoot, source: info.source, sessionID: info.sessionID)
+        let final = sessionRoot(source: info.source, id: info.sessionID)
+        log("sync commit final=\(final.path) exists=\(fm.fileExists(atPath: final.path))")
+        log("sync commit staging still exists=\(fm.fileExists(atPath: stagingSessionRoot.path))")
 
         info = committedInfo
         log("sync committed best-effort source=\(info.source.rawValue) id=\(info.sessionID) size=\(info.archiveSizeBytes ?? 0)")
@@ -628,9 +652,20 @@ final class SessionArchiveManager: ObservableObject {
         let fm = FileManager.default
         let final = sessionRoot(source: source, id: sessionID)
         if fm.fileExists(atPath: final.path) {
-            let backupURL = try fm.replaceItemAt(final, withItemAt: stagingSessionRoot, backupItemName: ".backup-\(UUID().uuidString)", options: [])
-            if let backupURL {
+            let parent = final.deletingLastPathComponent()
+            let backupURL = parent.appendingPathComponent(".backup-\(sessionID)-\(UUID().uuidString)", isDirectory: true)
+            try fm.moveItem(at: final, to: backupURL)
+            do {
+                try fm.moveItem(at: stagingSessionRoot, to: final)
                 try? fm.removeItem(at: backupURL)
+            } catch {
+                if fm.fileExists(atPath: final.path) {
+                    try? fm.removeItem(at: final)
+                }
+                if fm.fileExists(atPath: backupURL.path) {
+                    try? fm.moveItem(at: backupURL, to: final)
+                }
+                throw error
             }
         } else {
             try fm.moveItem(at: stagingSessionRoot, to: final)
@@ -692,6 +727,7 @@ final class SessionArchiveManager: ObservableObject {
     private func deleteArchive(source: SessionSource, id: String) {
         let fm = FileManager.default
         let root = sessionRoot(source: source, id: id)
+        log("delete archive source=\(source.rawValue) id=\(id) path=\(root.path)")
         try? fm.removeItem(at: root)
     }
 
@@ -715,5 +751,11 @@ final class SessionArchiveManager: ObservableObject {
             try? fm.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? data.write(to: logURL, options: .atomic)
         }
+    }
+
+    private func logArchivesRootIfNeeded() {
+        guard !didLogArchivesRoot else { return }
+        didLogArchivesRoot = true
+        log("archivesRoot=\(archivesRoot().path)")
     }
 }
