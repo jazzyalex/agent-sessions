@@ -88,6 +88,11 @@ struct SessionTerminalView: View {
             jumpToFirstPrompt()
         }
         .onChange(of: roleNavToken) { _, _ in
+            // Keyboard navigation should reveal the target role even if the user filtered it off.
+            if !activeRoles.contains(roleNavRole) {
+                activeRoles.insert(roleNavRole)
+                persistRoleToggles()
+            }
             navigateRole(roleNavRole, direction: roleNavDirection)
         }
         .onChange(of: session.events.count) { _, _ in

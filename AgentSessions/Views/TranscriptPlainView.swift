@@ -892,6 +892,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private enum JumpKind { case user, tools, errors }
 
     private func jumpUser(direction: Int) {
+        // Some SwiftUI toolchains treat Shift as an "extra" modifier for arrow shortcuts.
+        // If the user presses ⌥⌘⇧↑/↓, make sure it routes to Errors navigation.
+        if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+            jumpErrors(direction: direction)
+            return
+        }
         if viewMode == .terminal {
             terminalRoleNavRole = .user
             terminalRoleNavDirection = direction
