@@ -151,17 +151,17 @@ extension PreferencesView {
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.showSizeColumn) }
                     ))
                     .help("Show or hide the file size column in the Unified list")
-                    Toggle("Star (keep)", isOn: Binding(
+                    Toggle("Save", isOn: Binding(
                         get: { UserDefaults.standard.object(forKey: PreferencesKey.Unified.showStarColumn) as? Bool ?? true },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.showStarColumn) }
                     ))
-                    .help("Show or hide the star button. Starred sessions can be kept locally to prevent upstream pruning from removing them.")
+                    .help("Show or hide the Save button. Saved sessions can be kept locally to prevent upstream pruning from removing them.")
                 }
 
-                sectionHeader("Star & Pin")
+                sectionHeader("Saved Sessions")
                     .padding(.top, 8)
-                Toggle("Star also pins (keep locally)", isOn: $starPinsSessions)
-                    .help("When enabled, starring a session also archives its source files into Agent Sessions storage so it cannot disappear when the upstream CLI prunes history.")
+                Toggle("Save also keeps locally", isOn: $starPinsSessions)
+                    .help("When enabled, saving a session also archives its source files into Agent Sessions storage so it cannot disappear when the upstream CLI prunes history.")
                 HStack(spacing: 12) {
                     Text("Stop syncing after inactivity")
                     Picker("", selection: $stopSyncAfterInactivityMinutes) {
@@ -172,9 +172,9 @@ extension PreferencesView {
                     .labelsHidden()
                     .frame(width: 120)
                 }
-                .help("After a pinned session stops changing upstream for this long, Agent Sessions marks the archive as Final. If it changes later, it will resume syncing.")
-                Toggle("Unstar removes local archive", isOn: $unstarRemovesArchive)
-                    .help("When enabled, removing the star also deletes the local archive copy. By default, unstar is non-destructive.")
+                .help("After a saved session stops changing upstream for this long, Agent Sessions stops syncing the local copy. If it changes later, syncing resumes.")
+                Toggle("Remove from Saved deletes local copy", isOn: $unstarRemovesArchive)
+                    .help("When enabled, removing a session from Saved also deletes the local archive copy. By default, removing from Saved is non-destructive.")
                 // Filters section
                 sectionHeader("Filters")
                     .padding(.top, 8)
