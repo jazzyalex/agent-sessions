@@ -185,13 +185,18 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 #if DEBUG
                 print("🎯 COORDINATOR FOCUS CHANGE: \(oldFocus) → \(newFocus)")
                 #endif
-                // Only focus if actively transitioning TO transcriptFind (not just because it IS transcriptFind)
-                if oldFocus != .transcriptFind && newFocus == .transcriptFind {
+                if newFocus == .transcriptFind {
                     #if DEBUG
                     print("  ↳ Setting allowFindFocus=true, findFocused=true")
                     #endif
                     allowFindFocus = true
                     findFocused = true
+                } else if oldFocus == .transcriptFind {
+                    #if DEBUG
+                    print("  ↳ Leaving transcriptFind: findFocused=false, allowFindFocus=false")
+                    #endif
+                    findFocused = false
+                    allowFindFocus = false
                 } else if newFocus != .transcriptFind && newFocus != .none {
                     #if DEBUG
                     print("  ↳ Setting findFocused=false, allowFindFocus=false")
@@ -224,6 +229,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // Invisible button to capture Cmd+F shortcut
             Button(action: { focusCoordinator.perform(.openTranscriptFind) }) { EmptyView() }
                 .keyboardShortcut("f", modifiers: .command)
+                .focusable(false)
                 .hidden()
 
             // Invisible button to toggle Plain/Color with Cmd+Shift+T
@@ -243,6 +249,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 renderModeRaw = next.transcriptRenderMode.rawValue
             }) { EmptyView() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+                .focusable(false)
                 .hidden()
 
             // === LEADING GROUP: View Mode Segmented Control + JSON status ===
@@ -379,6 +386,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
+                        .focusable(false)
                         .help("Clear search (⎋)")
                         .keyboardShortcut(.escape)
                     }
@@ -394,12 +402,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         .stroke(findFocused ? Color.accentColor.opacity(0.5) : Color.gray.opacity(0.25), lineWidth: findFocused ? 2 : 1)
                 )
                 .onTapGesture { focusCoordinator.perform(.openTranscriptFind) }
-                .onAppear {
-                    #if DEBUG
-                    print("👁️ FIND BAR ON APPEAR: Setting allowFindFocus=true")
-                    #endif
-                    allowFindFocus = true
-                }
 
                 // Next/Previous controls group
                 HStack(spacing: 2) {
@@ -407,6 +409,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         Image(systemName: "chevron.up")
                     }
                     .buttonStyle(.borderless)
+                    .focusable(false)
                     .disabled(isFindNavigationDisabled)
                     .help("Previous match (⇧⌘G)")
                     .keyboardShortcut("g", modifiers: [.command, .shift])
@@ -415,6 +418,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         Image(systemName: "chevron.down")
                     }
                     .buttonStyle(.borderless)
+                    .focusable(false)
                     .disabled(isFindNavigationDisabled)
                     .help("Next match (⌘G)")
                     .keyboardShortcut("g", modifiers: .command)
