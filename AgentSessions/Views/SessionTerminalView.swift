@@ -10,6 +10,9 @@ struct SessionTerminalView: View {
     let findDirection: Int
     let findReset: Bool
     let jumpToken: Int
+    let roleNavToken: Int
+    let roleNavRole: RoleToggle
+    let roleNavDirection: Int
     @Binding var externalMatchCount: Int
     @Binding var externalCurrentMatchIndex: Int
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
@@ -83,6 +86,9 @@ struct SessionTerminalView: View {
         }
         .onChange(of: jumpToken) { _, _ in
             jumpToFirstPrompt()
+        }
+        .onChange(of: roleNavToken) { _, _ in
+            navigateRole(roleNavRole, direction: roleNavDirection)
         }
         .onChange(of: session.events.count) { _, _ in
             rebuildLines()

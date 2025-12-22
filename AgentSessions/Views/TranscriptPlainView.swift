@@ -104,6 +104,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var showIDCopiedPopover: Bool = false
     // Terminal-only jump trigger (Color view uses SessionTerminalView, not NSTextView selection)
     @State private var terminalJumpToken: Int = 0
+    // Terminal-only role navigation trigger (User/Tools/Errors)
+    @State private var terminalRoleNavToken: Int = 0
+    @State private var terminalRoleNavRole: SessionTerminalView.RoleToggle = .user
+    @State private var terminalRoleNavDirection: Int = 1
+
+    // Plain view navigation cursors (used for keyboard jumps)
+    @State private var lastUserJumpLocation: Int? = nil
+    @State private var lastToolsJumpLocation: Int? = nil
+    @State private var lastErrorJumpLocation: Int? = nil
 
     // Simple memoization (for Codex)
     @State private var transcriptCache: [String: String] = [:]
@@ -132,6 +141,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             findDirection: terminalFindDirection,
                             findReset: terminalFindResetFlag,
                             jumpToken: terminalJumpToken,
+                            roleNavToken: terminalRoleNavToken,
+                            roleNavRole: terminalRoleNavRole,
+                            roleNavDirection: terminalRoleNavDirection,
                             externalMatchCount: $terminalFindMatchesCount,
                             externalCurrentMatchIndex: $terminalFindCurrentIndex
                         )
@@ -249,6 +261,32 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 renderModeRaw = next.transcriptRenderMode.rawValue
             }) { EmptyView() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+                .focusable(false)
+                .hidden()
+
+            // Invisible buttons to capture arrow-based transcript navigation shortcuts.
+            Button(action: { jumpUser(direction: 1) }) { EmptyView() }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                .focusable(false)
+                .hidden()
+            Button(action: { jumpUser(direction: -1) }) { EmptyView() }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                .focusable(false)
+                .hidden()
+            Button(action: { jumpTools(direction: 1) }) { EmptyView() }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                .focusable(false)
+                .hidden()
+            Button(action: { jumpTools(direction: -1) }) { EmptyView() }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                .focusable(false)
+                .hidden()
+            Button(action: { jumpErrors(direction: 1) }) { EmptyView() }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option, .shift])
+                .focusable(false)
+                .hidden()
+            Button(action: { jumpErrors(direction: -1) }) { EmptyView() }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option, .shift])
                 .focusable(false)
                 .hidden()
 
@@ -471,11 +509,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 } else {
                     commandRanges = []; userRanges = []; assistantRanges = []; outputRanges = []; errorRanges = []
                     hasCommands = session.events.contains { $0.kind == .tool_call }
+                    computeNavigationRangesIfNeeded()
                 }
                 lastBuildKey = key
                 // Reset find state
                 performFind(resetIndex: true)
                 selectedNSRange = nil
+                resetJumpCursors()
                 updateSelectionToCurrentMatch()
                 maybeAutoJumpToFirstPrompt(session: session)
                 return
@@ -495,10 +535,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     transcript = decorated
                     commandRanges = []; userRanges = []; assistantRanges = []; outputRanges = []; errorRanges = []
                     hasCommands = session.events.contains { $0.kind == .tool_call }
+                    computeNavigationRangesIfNeeded()
                     transcriptCache[key] = decorated
                     lastBuildKey = key
                     performFind(resetIndex: true)
                     selectedNSRange = nil
+                    resetJumpCursors()
                     updateSelectionToCurrentMatch()
                     maybeAutoJumpToFirstPrompt(session: session)
                     return
@@ -541,10 +583,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.outputRanges = []
                             self.errorRanges = []
                             self.hasCommands = sessionHasCommands
+                            self.computeNavigationRangesIfNeeded()
                             self.transcriptCache[key] = decorated
                             self.lastBuildKey = key
                             self.performFind(resetIndex: true)
                             self.selectedNSRange = nil
+                            self.resetJumpCursors()
                             self.updateSelectionToCurrentMatch()
                             self.maybeAutoJumpToFirstPrompt(session: session)
                         }
@@ -575,6 +619,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 assistantRanges = []
                 outputRanges = []
                 errorRanges = []
+                computeNavigationRangesIfNeeded()
                 transcriptCache[key] = transcript
                 lastBuildKey = key
             }
@@ -601,12 +646,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 outputRanges = []
                 errorRanges = []
                 hasCommands = sessionHasCommands2
+                computeNavigationRangesIfNeeded()
             }
         }
 
         // Reset find state
         performFind(resetIndex: true)
         selectedNSRange = nil
+        resetJumpCursors()
         updateSelectionToCurrentMatch()
         maybeAutoJumpToFirstPrompt(session: session)
     }
@@ -782,6 +829,150 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         errorRanges = err
     }
 
+    private func resetJumpCursors() {
+        lastUserJumpLocation = nil
+        lastToolsJumpLocation = nil
+        lastErrorJumpLocation = nil
+    }
+
+    private func computeNavigationRangesIfNeeded() {
+        guard viewMode != .terminal else { return }
+        guard viewMode != .json else { return }
+
+        // Build navigable ranges by scanning the transcript's stable prefixes. These ranges
+        // are used for keyboard navigation, not styling (Plain view does not colorize).
+        let text = transcript
+        var users: [NSRange] = []
+        var tools: [NSRange] = []
+        var outs: [NSRange] = []
+        var errs: [NSRange] = []
+
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var pos = 0
+        for line in lines {
+            let len = line.utf16.count
+            let range = NSRange(location: pos, length: max(1, len))
+
+            let stripped = stripTimestampPrefixIfPresent(line)
+            if stripped.hasPrefix(SessionTranscriptBuilder.userPrefix) {
+                users.append(range)
+            } else if stripped.hasPrefix(SessionTranscriptBuilder.toolPrefix) {
+                tools.append(range)
+            } else if stripped.hasPrefix(SessionTranscriptBuilder.outPrefix) {
+                outs.append(range)
+            } else if stripped.hasPrefix(SessionTranscriptBuilder.errorPrefix) {
+                errs.append(range)
+            }
+
+            pos += len + 1
+        }
+
+        userRanges = users
+        commandRanges = tools
+        outputRanges = outs
+        errorRanges = errs
+    }
+
+    private func stripTimestampPrefixIfPresent(_ line: Substring) -> Substring {
+        guard showTimestamps else { return line }
+        // Timestamp prefix is "HH:mm:ss " (9 chars) when enabled.
+        guard line.count >= 9 else { return line }
+        let s = line.startIndex
+        let i2 = line.index(s, offsetBy: 2)
+        let i5 = line.index(s, offsetBy: 5)
+        let i8 = line.index(s, offsetBy: 8)
+        guard line[i2] == ":", line[i5] == ":", line[i8] == " " else { return line }
+        let hh = line[s..<i2]
+        let mm = line[line.index(after: i2)..<i5]
+        let ss = line[line.index(after: i5)..<i8]
+        guard hh.allSatisfy(\.isNumber), mm.allSatisfy(\.isNumber), ss.allSatisfy(\.isNumber) else { return line }
+        return line[line.index(after: i8)...]
+    }
+
+    private enum JumpKind { case user, tools, errors }
+
+    private func jumpUser(direction: Int) {
+        if viewMode == .terminal {
+            terminalRoleNavRole = .user
+            terminalRoleNavDirection = direction
+            terminalRoleNavToken &+= 1
+            return
+        }
+        guard viewMode != .json else { return }
+        jumpInPlain(kind: .user, direction: direction)
+    }
+
+    private func jumpTools(direction: Int) {
+        if viewMode == .terminal {
+            terminalRoleNavRole = .tools
+            terminalRoleNavDirection = direction
+            terminalRoleNavToken &+= 1
+            return
+        }
+        guard viewMode != .json else { return }
+        jumpInPlain(kind: .tools, direction: direction)
+    }
+
+    private func jumpErrors(direction: Int) {
+        if viewMode == .terminal {
+            terminalRoleNavRole = .errors
+            terminalRoleNavDirection = direction
+            terminalRoleNavToken &+= 1
+            return
+        }
+        guard viewMode != .json else { return }
+        jumpInPlain(kind: .errors, direction: direction)
+    }
+
+    private func jumpInPlain(kind: JumpKind, direction: Int) {
+        computeNavigationRangesIfNeeded()
+
+        let list: [NSRange] = {
+            switch kind {
+            case .user:
+                return userRanges
+            case .tools:
+                return commandRanges + outputRanges
+            case .errors:
+                return errorRanges
+            }
+        }()
+
+        let ranges = list
+            .filter { $0.location >= 0 && $0.length > 0 }
+            .sorted { $0.location < $1.location }
+        guard !ranges.isEmpty else { return }
+
+        let cursor: Int? = {
+            switch kind {
+            case .user: return lastUserJumpLocation
+            case .tools: return lastToolsJumpLocation
+            case .errors: return lastErrorJumpLocation
+            }
+        }()
+
+        let next: NSRange = {
+            if direction >= 0 {
+                let start = cursor ?? -1
+                if let found = ranges.first(where: { $0.location > start }) { return found }
+                return ranges.first!
+            } else {
+                let start = cursor ?? Int.max
+                if let found = ranges.last(where: { $0.location < start }) { return found }
+                return ranges.last!
+            }
+        }()
+
+        switch kind {
+        case .user: lastUserJumpLocation = next.location
+        case .tools: lastToolsJumpLocation = next.location
+        case .errors: lastErrorJumpLocation = next.location
+        }
+
+        selectionScrollMode = .alignTop
+        selectedNSRange = next
+    }
+
     private func firstConversationAnchor(in s: Session) -> String? {
         for ev in s.events.prefix(5000) {
             if ev.kind == .assistant, let t = ev.text, !t.isEmpty {
@@ -847,15 +1038,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         let info = archiveManager.info(source: session.source, id: session.id)
         let pinsEnabled = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
         let statusText: String = {
-            guard pinsEnabled else { return "Starred" }
-            guard let info else { return "Pinned (pending…)" }
-            if info.upstreamMissing { return "Pinned (upstream missing)" }
+            // Keep the badge lean: "Saved" is the only label; details live in the tooltip.
+            if !pinsEnabled { return "Saved" }
+            guard let info else { return "Saved" }
+            if info.upstreamMissing { return "Saved" }
             switch info.status {
-            case .none: return "Pinned"
-            case .staging: return "Pinned (staging…)"
-            case .syncing: return "Pinned (syncing…)"
-            case .final: return "Pinned (final)"
-            case .error: return "Pinned (error)"
+            case .none, .staging, .syncing, .final, .error:
+                return "Saved"
             }
         }()
 
@@ -877,7 +1066,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func pinnedHelpText(info: SessionArchiveInfo?) -> String {
         let pinsEnabled = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
-        guard pinsEnabled else { return "Starred session." }
+        guard pinsEnabled else { return "Saved session. Archiving is disabled in Settings." }
         guard let info else { return "Archive pending." }
         var parts: [String] = []
         if let last = info.lastSyncAt {

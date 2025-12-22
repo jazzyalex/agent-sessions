@@ -119,7 +119,7 @@ struct AgentSessionsApp: App {
                 Button("Find in Transcript") { /* unified find focuses handled in view */ }.keyboardShortcut("f", modifiers: .command).disabled(true)
             }
             CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer, updaterController: updaterController) }.keyboardShortcut(",", modifiers: .command) }
-            // View menu with Favorites Only toggle (stateful)
+            // View menu with Saved Only toggle (stateful)
             CommandMenu("View") {
                 // Bind through UserDefaults so it persists; also forward to unified when it changes
                 FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
@@ -128,7 +128,7 @@ struct AgentSessionsApp: App {
             }
         }
 
-        WindowGroup("Pinned Sessions", id: "PinnedSessions") {
+        WindowGroup("Saved Sessions", id: "PinnedSessions") {
             PinnedSessionsView(
                 unified: unifiedIndexerHolder.makeUnified(
                     codexIndexer: indexer,
@@ -177,7 +177,7 @@ private struct FavoritesOnlyToggle: View {
                 unifiedHolder.unified?.showFavoritesOnly = newVal
             }
         )) {
-            Text("Starred Only")
+            Text("Saved Only")
         }
     }
 }
@@ -185,10 +185,10 @@ private struct FavoritesOnlyToggle: View {
 private struct OpenPinnedSessionsWindowButton: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Button("Pinned Sessions…") {
+        Button("Saved Sessions…") {
             openWindow(id: "PinnedSessions")
         }
-        .keyboardShortcut("p", modifiers: [.command, .option])
+        .keyboardShortcut("p", modifiers: [.command, .option, .shift])
     }
 }
 

@@ -330,7 +330,7 @@ struct UnifiedSessionsView: View {
         }
         .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
-                Button(s.isFavorite ? "Unstar" : "Star (Keep Forever)") { unified.toggleFavorite(s) }
+                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
                 Divider()
                 if s.source == .codex || s.source == .claude {
                     Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
@@ -559,11 +559,11 @@ struct UnifiedSessionsView: View {
         }
         ToolbarItem(placement: .automatic) {
             Toggle(isOn: $unified.showFavoritesOnly) {
-                Label("Starred", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
+                Label("Saved", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
             }
             .toggleStyle(.button)
             .disabled(!showStarColumn)
-            .help(showStarColumn ? "Show only starred sessions" : "Enable the star column in Preferences to use starring")
+            .help(showStarColumn ? "Show only saved sessions" : "Enable the Save column in Preferences to use saved sessions")
         }
         ToolbarItem(placement: .automatic) {
             AnalyticsButtonView(
@@ -709,7 +709,7 @@ struct UnifiedSessionsView: View {
             }
             .buttonStyle(.plain)
             .help(starHelpText(isStarred: session.isFavorite))
-            .accessibilityLabel(session.isFavorite ? "Unstar" : "Star (Keep Forever)")
+            .accessibilityLabel(session.isFavorite ? "Remove from Saved" : "Save")
         } else {
             EmptyView()
         }
@@ -868,11 +868,11 @@ struct UnifiedSessionsView: View {
         let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
         let unstarRemoves = UserDefaults.standard.bool(forKey: PreferencesKey.Archives.unstarRemovesArchive)
         if isStarred {
-            if pins && unstarRemoves { return "Unstar (removes local archive)" }
-            if pins { return "Unstar (keeps local archive)" }
-            return "Unstar"
+            if pins && unstarRemoves { return "Remove from Saved (deletes local copy)" }
+            if pins { return "Remove from Saved (keeps local copy)" }
+            return "Remove from Saved"
         } else {
-            return pins ? "Star (keep locally)" : "Star"
+            return pins ? "Save (keeps locally)" : "Save"
         }
     }
 }

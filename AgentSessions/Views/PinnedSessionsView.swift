@@ -56,7 +56,7 @@ struct PinnedSessionsView: View {
     var body: some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
-                Text("Pinned Sessions")
+                Text("Saved Sessions")
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
                 TextField("Search", text: $query)
@@ -92,16 +92,16 @@ struct PinnedSessionsView: View {
             .frame(minHeight: 360)
 
             HStack {
-                Text("\(rows.count) pinned")
+                Text("\(rows.count) saved")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Delete Archived Sessions") { deleteArchivedSelection() }
+                Button("Delete Saved Copies") { deleteArchivedSelection() }
                     .disabled(selection.isEmpty)
-                Button("Show Original Files") { revealUpstreamForSelection() }
+                Button("Show Session Files") { revealUpstreamForSelection() }
                     .disabled(selection.count != 1)
-                Button("Show Archived Copy") { revealArchiveForSelection() }
+                Button("Show Saved Copy") { revealArchiveForSelection() }
                     .disabled(selection.count != 1)
-                Button("Unstar Selected") { unstarSelected() }
+                Button("Remove from Saved") { unstarSelected() }
                     .disabled(selection.isEmpty)
             }
             .padding(.horizontal, 12)
@@ -148,14 +148,14 @@ struct PinnedSessionsView: View {
     private func archiveStatusLabel(for info: SessionArchiveInfo?) -> String {
         guard let info else {
             let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
-            return pins ? "Pending…" : "Starred"
+            return pins ? "Saving…" : "Saved"
         }
         if info.upstreamMissing { return "Upstream missing" }
         switch info.status {
-        case .none: return "Pinned"
-        case .staging: return "Archiving…"
-        case .syncing: return "Archived"
-        case .final: return "Archived (final)"
+        case .none: return "Saved"
+        case .staging: return "Saving…"
+        case .syncing: return "Saved"
+        case .final: return "Saved"
         case .error: return "Error"
         }
     }
@@ -164,7 +164,7 @@ struct PinnedSessionsView: View {
         let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
         guard pins else { return "Archiving is disabled in Settings." }
         guard let info else {
-            return "Archive metadata not initialized yet. Try “Show Archived Copy” to retry pinning."
+            return "Saved-copy metadata not initialized yet. Try “Show Saved Copy” to retry saving."
         }
         var parts: [String] = []
         if let err = info.lastError, !err.isEmpty {

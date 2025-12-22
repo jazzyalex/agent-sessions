@@ -4,12 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- **Star / Pin**: Starring a session can now pin it by archiving its source files into Agent Sessions storage and syncing while the upstream session is still updating, so starred sessions don’t disappear when CLI history is pruned.
-- **Pinned Sessions**: Fixed pinned-session archive backfill and Finder reveal actions so newly pinned sessions archive immediately and “Show Archived Copy” works reliably.
-- **Pinned Sessions**: Added archive diagnostics (status tooltips and a local archive log) to make pending pins debuggable.
-- **Pinned Sessions**: Added a simple “Pinned Sessions…” window (View menu) for listing and unstarring pinned sessions.
-- **Pinned Sessions**: Added a “Delete Archived Sessions” action to remove local archive copies from the Pinned Sessions window.
+- **Saved Sessions**: Saving a session can keep it locally by archiving its source files into Agent Sessions storage and syncing while the upstream session is still updating, so saved sessions don’t disappear when CLI history is pruned.
+- **Saved Sessions**: Fixed saved-session archive backfill and Finder reveal actions so newly saved sessions archive immediately and “Show Saved Copy” works reliably.
+- **Saved Sessions**: Added archive diagnostics (status tooltips and a local archive log) to make saving issues debuggable.
+- **Saved Sessions**: Added a simple “Saved Sessions…” window (View menu) for listing and managing saved sessions.
+- **Saved Sessions**: Added a “Delete Saved Copies” action to remove local archive copies from the Saved Sessions window.
 - **Keyboard**: Improved Tab focus behavior so transcript Find controls don’t enter the Tab chain unless Find is explicitly opened, avoiding “stuck/beep” focus states.
+- **Keyboard**: Added Option-Command-Arrow shortcuts to jump between user prompts, tool calls/outputs, and errors in transcripts.
 - **Preferences**: Moved Agent Accents (Color/Monochrome) from General to Unified Window.
 - **Preferences**: Replace Unified Window → CLI Toolbar Filters with General → Active CLI agents. Disabling an agent now hides it across the app (Sessions toolbar, Analytics, usage strip, menu bar) and stops related background work.
 - **Preferences**: Hide the Sessions toolbar “Git Context” button by default. Re-enable it in Preferences → Advanced.
