@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - **Pinned Sessions**: Added archive diagnostics (status tooltips and a local archive log) to make pending pins debuggable.
 - **Pinned Sessions**: Added a simple “Pinned Sessions…” window (View menu) for listing and unstarring pinned sessions.
 - **Pinned Sessions**: Added a “Delete Archived Sessions” action to remove local archive copies from the Pinned Sessions window.
+- **Keyboard**: Improved Tab focus behavior so transcript Find controls don’t enter the Tab chain unless Find is explicitly opened, avoiding “stuck/beep” focus states.
 - **Preferences**: Moved Agent Accents (Color/Monochrome) from General to Unified Window.
 - **Preferences**: Replace Unified Window → CLI Toolbar Filters with General → Active CLI agents. Disabling an agent now hides it across the app (Sessions toolbar, Analytics, usage strip, menu bar) and stops related background work.
 - **Preferences**: Hide the Sessions toolbar “Git Context” button by default. Re-enable it in Preferences → Advanced.
