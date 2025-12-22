@@ -95,6 +95,8 @@ struct PinnedSessionsView: View {
                 Text("\(rows.count) pinned")
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button("Delete Archived Sessions") { deleteArchivedSelection() }
+                    .disabled(selection.isEmpty)
                 Button("Show Original Files") { revealUpstreamForSelection() }
                     .disabled(selection.count != 1)
                 Button("Show Archived Copy") { revealArchiveForSelection() }
@@ -121,6 +123,24 @@ struct PinnedSessionsView: View {
                 unified.toggleFavorite(s)
             } else {
                 unified.toggleFavorite(key.id, source: key.source)
+            }
+        }
+    }
+
+    private func deleteArchivedSelection() {
+        let targets = selection
+        selection.removeAll()
+        for key in targets {
+            archiveManager.deleteArchiveNow(source: key.source, id: key.id)
+            if let s = unified.allSessions.first(where: { $0.id == key.id && $0.source == key.source }) {
+                if s.isFavorite {
+                    unified.toggleFavorite(s)
+                }
+            } else {
+                let favorites = StarredSessionsStore()
+                if favorites.pinnedIDs(for: key.source).contains(key.id) {
+                    unified.toggleFavorite(key.id, source: key.source)
+                }
             }
         }
     }
@@ -202,6 +222,10 @@ struct PinnedSessionsView: View {
             archiveManager.pin(session: s)
         }
         guard let url = archiveManager.archiveFolderURL(source: key.source, id: key.id) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.open(archiveManager.archivesRootURL())
+        }
     }
 }
