@@ -89,15 +89,41 @@ final class SessionArchiveManager: ObservableObject {
 
     func pin(session: Session) {
         let k = key(source: session.source, id: session.id)
-        logArchivesRootIfNeeded()
-        log("pin requested source=\(session.source.rawValue) id=\(session.id) path=\(session.filePath)")
-        writePinPlaceholder(session: session, key: k)
+        // Update UI immediately, but move all file IO/logging off the main thread.
+        let placeholder = SessionArchiveInfo(
+            sessionID: session.id,
+            source: session.source,
+            upstreamPath: session.filePath,
+            upstreamIsDirectory: false,
+            primaryRelativePath: URL(fileURLWithPath: session.filePath).lastPathComponent,
+            pinnedAt: Date(),
+            lastSyncAt: nil,
+            lastUpstreamChangeAt: nil,
+            lastUpstreamSeenAt: nil,
+            upstreamMissing: false,
+            status: .staging,
+            lastError: nil,
+            startTime: session.startTime,
+            endTime: session.endTime,
+            model: session.model,
+            cwd: session.cwd,
+            title: session.title,
+            estimatedEventCount: session.eventCount,
+            estimatedCommands: session.lightweightCommands,
+            archiveSizeBytes: nil
+        )
+        DispatchQueue.main.async { [weak self] in
+            self?.infoByKey[k] = placeholder
+        }
         ioQueue.async { [weak self] in
             guard let self else { return }
             if self.inFlightKeys.contains(k) { return }
             self.inFlightKeys.insert(k)
             defer { self.inFlightKeys.remove(k) }
 
+            self.logArchivesRootIfNeeded()
+            self.log("pin requested source=\(session.source.rawValue) id=\(session.id) path=\(session.filePath)")
+            self.writePinPlaceholder(session: session, key: k)
             self.ensureArchiveExistsAndSync(session: session, reason: "pin")
             self.reloadCache()
         }
@@ -271,6 +297,7 @@ final class SessionArchiveManager: ObservableObject {
         for source in SessionSource.allCases {
             let pinned = store.pinnedIDs(for: source)
             guard !pinned.isEmpty else { continue }
+            var fallbackURLs: [String: URL]? = nil
             for id in pinned {
                 if var info = loadInfoIfExists(source: source, id: id) {
                     ensureArchiveExistsAndSync(info: &info, reason: reason)
@@ -281,17 +308,119 @@ final class SessionArchiveManager: ObservableObject {
 
                 // Backfill: older starred sessions won't have an archive folder yet.
                 // If we can resolve their upstream path from IndexDB.session_meta, pin immediately.
-                guard let session = resolveSessionFromIndexDB(source: source, sessionID: id) else {
-                    let key = key(source: source, id: id)
-                    if !missingResolutionLogged.contains(key) {
-                        log("pin backfill failed source=\(source.rawValue) id=\(id) reason=missing_session_meta")
-                        missingResolutionLogged.insert(key)
-                    }
+                if let session = resolveSessionFromIndexDB(source: source, sessionID: id) {
+                    ensureArchiveExistsAndSync(session: session, reason: reason)
                     continue
                 }
-                ensureArchiveExistsAndSync(session: session, reason: reason)
+
+                // Fallback: if the index DB doesn't have this session yet (or is missing/corrupt),
+                // try resolving the upstream path directly from the filesystem.
+                if fallbackURLs == nil {
+                    fallbackURLs = resolveBackfillURLsFromFilesystem(source: source)
+                }
+                if let url = fallbackURLs?[id],
+                   let session = resolveSessionForBackfill(source: source, sessionID: id, upstreamURL: url) {
+                    log("pin backfill resolved via filesystem source=\(source.rawValue) id=\(id) path=\(url.path)")
+                    ensureArchiveExistsAndSync(session: session, reason: reason)
+                    continue
+                }
+
+                let key = key(source: source, id: id)
+                if !missingResolutionLogged.contains(key) {
+                    log("pin backfill failed source=\(source.rawValue) id=\(id) reason=missing_session_meta_and_upstream")
+                    missingResolutionLogged.insert(key)
+                }
             }
         }
+    }
+
+    private func resolveBackfillURLsFromFilesystem(source: SessionSource) -> [String: URL] {
+        let defaults = UserDefaults.standard
+        var map: [String: URL] = [:]
+
+        switch source {
+        case .copilot:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.copilotSessionsRootOverride)
+            let discovery = CopilotSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
+            for url in discovery.discoverSessionFiles() {
+                let base = url.deletingPathExtension().lastPathComponent
+                if !base.isEmpty { map[base] = url }
+            }
+        case .codex:
+            let custom = defaults.string(forKey: "SessionsRootOverride")
+            let discovery = CodexSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
+            for url in discovery.discoverSessionFiles() {
+                map[sha256Hex(url.path)] = url
+            }
+        case .claude:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
+            let discovery = ClaudeSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
+            for url in discovery.discoverSessionFiles() {
+                map[sha256Hex(url.path)] = url
+            }
+        case .gemini:
+            let custom = defaults.string(forKey: "GeminiSessionsRootOverride")
+            let discovery = GeminiSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
+            for url in discovery.discoverSessionFiles() {
+                map[sha256Hex(url.path)] = url
+            }
+        case .opencode:
+            let custom = defaults.string(forKey: "OpenCodeSessionsRootOverride")
+            let discovery = OpenCodeSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
+            for url in discovery.discoverSessionFiles() {
+                let base = url.deletingPathExtension().lastPathComponent
+                if base.isEmpty { continue }
+                map[base] = url
+                if base.hasPrefix("ses_") {
+                    map[String(base.dropFirst("ses_".count))] = url
+                }
+            }
+        }
+
+        return map
+    }
+
+    private func resolveSessionForBackfill(source: SessionSource, sessionID: String, upstreamURL: URL) -> Session? {
+        switch source {
+        case .copilot:
+            return CopilotSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .claude:
+            return ClaudeSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .gemini:
+            return GeminiSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .opencode:
+            return OpenCodeSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .codex:
+            // SessionIndexer’s lightweight parsing helpers are currently private; for backfill we only need
+            // a stable upstream path so the archive can be created. Metadata will be refreshed on later scans.
+            return minimalSession(source: source, id: sessionID, url: upstreamURL)
+        }
+    }
+
+    private func minimalSession(source: SessionSource, id: String, url: URL) -> Session {
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let size = (attrs[.size] as? NSNumber)?.intValue
+        let mtime = (attrs[.modificationDate] as? Date) ?? Date()
+        return Session(
+            id: id,
+            source: source,
+            startTime: mtime,
+            endTime: mtime,
+            model: nil,
+            filePath: url.path,
+            fileSizeBytes: size,
+            eventCount: 0,
+            events: [],
+            cwd: nil,
+            repoName: nil,
+            lightweightTitle: nil,
+            lightweightCommands: nil
+        )
+    }
+
+    private func sha256Hex(_ s: String) -> String {
+        let digest = SHA256.hash(data: Data(s.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     private func ensureArchiveExistsAndSync(session: Session, reason: String) {

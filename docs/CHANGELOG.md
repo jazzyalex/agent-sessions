@@ -26,6 +26,8 @@ All notable changes to this project will be documented in this file.
 - **Claude Sessions (Errors)**: Treat `tool_result` blocks marked `is_error=true` as errors only for runtime-ish failures (non-zero exit, generic `Error: ...`, and user-interrupted runs). User-rejected tool uses are suppressed by default, and “not found” failures remain tool output.
 - **Claude Sessions (Errors)**: Prevent false-positive error highlighting when read-file tool output contains phrases like “exit code” alongside line numbers (common in Claude’s numbered file dumps).
 - **Saved Sessions**: “Delete Saved Copies” moves local archive copies to the Trash and asks for confirmation.
+- **Saved Sessions**: Starred-session archive backfill now falls back to resolving upstream session files directly (when `index.db` metadata is missing), so saved copies are created reliably.
+- **Saved Sessions**: Pinning a session no longer performs disk IO on the main thread, reducing UI hitches.
 
 ## [2.8.1] - 2025-11-28
 
