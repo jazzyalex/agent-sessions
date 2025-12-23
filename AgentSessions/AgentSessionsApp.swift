@@ -5,6 +5,7 @@ import Combine
 extension Notification.Name {
     static let openSessionsSearchFromMenu = Notification.Name("AgentSessionsOpenSessionsSearchFromMenu")
     static let openTranscriptFindFromMenu = Notification.Name("AgentSessionsOpenTranscriptFindFromMenu")
+    static let showOnboardingFromMenu = Notification.Name("AgentSessionsShowOnboardingFromMenu")
 }
 
 @main
@@ -22,6 +23,7 @@ struct AgentSessionsApp: App {
         UpdaterController.shared = controller
         return controller
     }()
+    @StateObject private var onboardingCoordinator = OnboardingCoordinator()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @State private var statusItemController: StatusItemController? = nil
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
@@ -92,6 +94,7 @@ struct AgentSessionsApp: App {
                     unifiedIndexerHolder.unified?.refresh()
                     updateUsageModels()
                     setupAnalytics()
+                    onboardingCoordinator.checkAndPresentIfNeeded()
                 }
                 .onChange(of: showUsageStrip) { _, _ in
                     updateUsageModels()
@@ -117,6 +120,16 @@ struct AgentSessionsApp: App {
                                                                      claudeStatus: claudeUsageModel)
                     }
                     updateUsageModels()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .showOnboardingFromMenu)) { _ in
+                    onboardingCoordinator.presentManually()
+                }
+                .sheet(isPresented: $onboardingCoordinator.isPresented) {
+                    Group {
+                        if let content = onboardingCoordinator.content {
+                            OnboardingSheetView(content: content, coordinator: onboardingCoordinator)
+                        }
+                    }
                 }
                 // Immediate cleanup happens after each probe; no app-exit cleanup required.
         }
@@ -152,6 +165,12 @@ struct AgentSessionsApp: App {
                 FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
                 Divider()
                 OpenPinnedSessionsWindowButton()
+            }
+            CommandGroup(after: .help) {
+                Button("Onboarding…") {
+                    NotificationCenter.default.post(name: .showOnboardingFromMenu, object: nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
             }
         }
 
