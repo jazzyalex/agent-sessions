@@ -85,6 +85,14 @@ struct UnifiedSessionsView: View {
                                                                          copilotIndexer: copilotIndexer))
     }
 
+    private var preferredColorScheme: ColorScheme? {
+        switch AppAppearance(rawValue: appAppearanceRaw) ?? .system {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Cap ETA banner disabled (calculations retained; UI disabled)
@@ -136,9 +144,7 @@ struct UnifiedSessionsView: View {
             }
         }
         // Honor app-wide theme selection from Preferences → General.
-        // Apply preferredColorScheme only for explicit Light/Dark; omit for System to inherit.
-        .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .light) { $0.preferredColorScheme(.light) }
-        .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .dark) { $0.preferredColorScheme(.dark) }
+        .preferredColorScheme(preferredColorScheme)
         .toolbar { toolbarContent }
         .overlay(alignment: .topTrailing) {
             if showAnalyticsWarmupNotice {
@@ -218,6 +224,12 @@ struct UnifiedSessionsView: View {
             if !sessions.isEmpty {
                 hasEverHadSessions = true
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openSessionsSearchFromMenu)) { _ in
+            focusCoordinator.perform(.openSessionSearch)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openTranscriptFindFromMenu)) { _ in
+            focusCoordinator.perform(.openTranscriptFind)
         }
     }
 

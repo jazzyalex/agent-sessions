@@ -410,7 +410,7 @@ final class CopilotSessionParser {
 
     private static func decodeDate(_ any: Any?) -> Date? {
         guard let any else { return nil }
-        if let s = any as? String { return iso8601.date(from: s) }
+        if let s = any as? String { return iso8601.date(from: s) ?? iso8601NoFrac.date(from: s) }
         if let t = any as? TimeInterval { return Date(timeIntervalSince1970: t) }
         if let n = any as? NSNumber { return Date(timeIntervalSince1970: n.doubleValue) }
         return nil
@@ -419,6 +419,12 @@ final class CopilotSessionParser {
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let iso8601NoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
         return f
     }()
 

@@ -8,8 +8,8 @@ struct LoadingAnimationView: View {
     @State private var currentWordIndex = 0
     @State private var opacity: Double = 0.0
 
-    // Cycle order: Agent Sessions → Codex CLI → Claude Code → Gemini CLI → OpenCode → repeat
-    private let words = ["Agent Sessions", "Codex CLI", "Claude Code", "Gemini CLI", "OpenCode"]
+    // Cycle order: Agent Sessions → Codex CLI → Claude Code → Gemini CLI → OpenCode → GitHub Copilot CLI → repeat
+    private let words = ["Agent Sessions", "Codex CLI", "Claude Code", "Gemini CLI", "OpenCode", "GitHub Copilot CLI"]
 
     var body: some View {
         ZStack {

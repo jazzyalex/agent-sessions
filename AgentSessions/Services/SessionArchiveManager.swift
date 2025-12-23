@@ -474,12 +474,6 @@ final class SessionArchiveManager: ObservableObject {
 
         try fm.createDirectory(at: sourceRoot(info.source), withIntermediateDirectories: true)
 
-        // Ensure there's always a visible "pin in progress" state on disk and in-memory
-        // even if scanning/copying fails later.
-        info.status = .staging
-        try writeInfo(info)
-        reloadCache()
-
         guard upstreamExists else {
             // Upstream missing: keep archive as-is and surface as final (safe).
             if fm.fileExists(atPath: sessionRoot(source: info.source, id: info.sessionID).path) {
@@ -500,7 +494,17 @@ final class SessionArchiveManager: ObservableObject {
 
         let snapshotBefore = try scanUpstreamSnapshot(at: upstreamURL, primaryRelativePath: info.primaryRelativePath)
 
-        if let existingManifest, existingManifest == snapshotBefore, fm.fileExists(atPath: archivedPrimaryPath(info: info).path) {
+        // Only surface the "Saving…" staging state when we actually need to copy.
+        // Otherwise periodic sync checks can cause UI flicker even when nothing changes.
+        let hasArchivedPrimary = fm.fileExists(atPath: archivedPrimaryPath(info: info).path)
+        let isNoop = (existingManifest != nil && existingManifest == snapshotBefore && hasArchivedPrimary)
+        if !isNoop {
+            info.status = .staging
+            try writeInfo(info)
+            reloadCache()
+        }
+
+        if isNoop {
             // No changes; maybe transition to final if quiet long enough.
             let now = Date()
             if info.lastUpstreamChangeAt == nil { info.lastUpstreamChangeAt = info.lastSyncAt ?? now }
@@ -728,6 +732,10 @@ final class SessionArchiveManager: ObservableObject {
         let fm = FileManager.default
         let root = sessionRoot(source: source, id: id)
         log("delete archive source=\(source.rawValue) id=\(id) path=\(root.path)")
+        // Prefer moving to Trash so the action is reversible.
+        if (try? fm.trashItem(at: root, resultingItemURL: nil)) != nil {
+            return
+        }
         try? fm.removeItem(at: root)
     }
 

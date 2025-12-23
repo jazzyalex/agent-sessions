@@ -585,7 +585,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .claudeResume: return "Claude Code"
         case .opencode: return "OpenCode"
         case .geminiCLI: return "Gemini CLI"
-        case .copilotCLI: return "Copilot CLI"
+        case .copilotCLI: return "GitHub Copilot CLI"
         case .about: return "About"
         }
     }

@@ -6,6 +6,8 @@ struct PinnedSessionsView: View {
     @EnvironmentObject var archiveManager: SessionArchiveManager
     @State private var query: String = ""
     @State private var selection: Set<RowKey> = []
+    @State private var pendingDeleteSelection: Set<RowKey> = []
+    @State private var showDeleteConfirm: Bool = false
 
     private struct RowKey: Hashable {
         let source: SessionSource
@@ -95,7 +97,7 @@ struct PinnedSessionsView: View {
                 Text("\(rows.count) saved")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Delete Saved Copies") { deleteArchivedSelection() }
+                Button("Delete Saved Copies…") { requestDeleteArchivedSelection() }
                     .disabled(selection.isEmpty)
                 Button("Show Session Files") { revealUpstreamForSelection() }
                     .disabled(selection.count != 1)
@@ -108,6 +110,13 @@ struct PinnedSessionsView: View {
             .padding(.bottom, 10)
         }
         .frame(width: 820, height: 460)
+        .alert("Delete Saved Copies?", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) { pendingDeleteSelection.removeAll() }
+            Button("Delete", role: .destructive) { deleteArchivedSelection() }
+        } message: {
+            let count = pendingDeleteSelection.count
+            Text("This will remove \(count) session\(count == 1 ? "" : "s") from Saved and move their local archive copies to the Trash. Original session files are not deleted.")
+        }
         .onAppear {
             archiveManager.syncPinnedSessionsNow()
             backfillArchivesIfNeeded()
@@ -127,8 +136,14 @@ struct PinnedSessionsView: View {
         }
     }
 
+    private func requestDeleteArchivedSelection() {
+        pendingDeleteSelection = selection
+        showDeleteConfirm = !pendingDeleteSelection.isEmpty
+    }
+
     private func deleteArchivedSelection() {
-        let targets = selection
+        let targets = pendingDeleteSelection.isEmpty ? selection : pendingDeleteSelection
+        pendingDeleteSelection.removeAll()
         selection.removeAll()
         for key in targets {
             archiveManager.deleteArchiveNow(source: key.source, id: key.id)
