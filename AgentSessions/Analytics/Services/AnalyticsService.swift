@@ -17,6 +17,7 @@ final class AnalyticsService: ObservableObject {
     private let claudeIndexer: ClaudeSessionIndexer
     private let geminiIndexer: GeminiSessionIndexer
     private let opencodeIndexer: OpenCodeSessionIndexer
+    private let copilotIndexer: CopilotSessionIndexer
 
     private var cancellables = Set<AnyCancellable>()
     private var parsingTask: Task<Void, Never>?
@@ -25,11 +26,13 @@ final class AnalyticsService: ObservableObject {
     init(codexIndexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
          geminiIndexer: GeminiSessionIndexer,
-         opencodeIndexer: OpenCodeSessionIndexer) {
+         opencodeIndexer: OpenCodeSessionIndexer,
+         copilotIndexer: CopilotSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
         self.opencodeIndexer = opencodeIndexer
+        self.copilotIndexer = copilotIndexer
         if let db = try? IndexDB() {
             self.repository = AnalyticsRepository(db: db)
         } else {
@@ -51,6 +54,7 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
         if AgentEnablement.isEnabled(.gemini) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
         if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
 
         // Apply filters for current period
         let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
@@ -80,6 +84,7 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
         if AgentEnablement.isEnabled(.gemini) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
         if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
 
         // Apply message count filters (same as Sessions List)
         let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
@@ -126,7 +131,8 @@ final class AnalyticsService: ObservableObject {
             let claudeLightweight = claudeIndexer.allSessions.filter { $0.events.isEmpty }.count
             let geminiLightweight = geminiIndexer.allSessions.filter { $0.events.isEmpty }.count
             let opencodeLightweight = 0 // OpenCode indexer does full parse during refresh; skip here
-            let totalLightweight = codexLightweight + claudeLightweight + geminiLightweight + opencodeLightweight
+            let copilotLightweight = copilotIndexer.allSessions.filter { $0.events.isEmpty }.count
+            let totalLightweight = codexLightweight + claudeLightweight + geminiLightweight + opencodeLightweight + copilotLightweight
 
             guard totalLightweight > 0 else {
                 print("ℹ️ All sessions already fully parsed")
@@ -170,6 +176,17 @@ final class AnalyticsService: ObservableObject {
 
             // Parse OpenCode sessions
             // OpenCode sessions are already loaded in full during their index refresh; skip here.
+
+            // Parse Copilot sessions
+            if copilotLightweight > 0 {
+                let copilotOffset = codexLightweight + claudeLightweight + geminiLightweight
+                parsingStatus = "Analyzing \(copilotLightweight) Copilot sessions..."
+                await copilotIndexer.parseAllSessionsFull { current, total in
+                    completedCount = copilotOffset + current
+                    self.parsingProgress = Double(completedCount) / Double(totalLightweight)
+                    self.parsingStatus = "Analyzing Copilot sessions (\(current)/\(total))..."
+                }
+            }
 
             parsingProgress = 1.0
             parsingStatus = "Analysis complete!"
@@ -415,7 +432,7 @@ final class AnalyticsService: ObservableObject {
         let raw: [String]
         switch filter {
         case .all:
-            raw = [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue, SessionSource.opencode.rawValue]
+            raw = [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue, SessionSource.opencode.rawValue, SessionSource.copilot.rawValue]
         case .codexOnly:
             raw = [SessionSource.codex.rawValue]
         case .claudeOnly:
@@ -424,6 +441,8 @@ final class AnalyticsService: ObservableObject {
             raw = [SessionSource.gemini.rawValue]
         case .opencodeOnly:
             raw = [SessionSource.opencode.rawValue]
+        case .copilotOnly:
+            raw = [SessionSource.copilot.rawValue]
         }
         return raw.filter { enabled.contains($0) }
     }
@@ -757,18 +776,22 @@ final class AnalyticsService: ObservableObject {
 
     private func setupObservers() {
         // Observe when session data changes (for auto-refresh when window visible)
-        codexIndexer.$allSessions
-            .combineLatest(claudeIndexer.$allSessions, geminiIndexer.$allSessions, opencodeIndexer.$allSessions)
+        Publishers.CombineLatest(
+            Publishers.CombineLatest4(codexIndexer.$allSessions, claudeIndexer.$allSessions, geminiIndexer.$allSessions, opencodeIndexer.$allSessions),
+            copilotIndexer.$allSessions
+        )
             .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
             .sink { _ in
                 // Auto-refresh will be triggered by the view when needed
             }
             .store(in: &cancellables)
 
-        codexIndexer.$launchPhase
-            .combineLatest(claudeIndexer.$launchPhase, geminiIndexer.$launchPhase, opencodeIndexer.$launchPhase)
+        Publishers.CombineLatest(
+            Publishers.CombineLatest4(codexIndexer.$launchPhase, claudeIndexer.$launchPhase, geminiIndexer.$launchPhase, opencodeIndexer.$launchPhase),
+            copilotIndexer.$launchPhase
+        )
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _, _ in
+            .sink { [weak self] _, _ in
                 self?.updateReadiness()
             }
             .store(in: &cancellables)
@@ -783,7 +806,8 @@ final class AnalyticsService: ObservableObject {
                 (SessionSource.codex, codexIndexer.launchPhase),
                 (SessionSource.claude, claudeIndexer.launchPhase),
                 (SessionSource.gemini, geminiIndexer.launchPhase),
-                (SessionSource.opencode, opencodeIndexer.launchPhase)
+                (SessionSource.opencode, opencodeIndexer.launchPhase),
+                (SessionSource.copilot, copilotIndexer.launchPhase)
             ].filter { enabled.contains($0.0) }.map { $0.1 }
             let phasesReady = phases.allSatisfy { phase in
                 switch phase {

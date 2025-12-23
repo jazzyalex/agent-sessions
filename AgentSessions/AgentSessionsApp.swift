@@ -11,6 +11,7 @@ struct AgentSessionsApp: App {
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @StateObject private var geminiIndexer = GeminiSessionIndexer()
+    @StateObject private var copilotIndexer = CopilotSessionIndexer()
     @StateObject private var updaterController = {
         let controller = UpdaterController()
         UpdaterController.shared = controller
@@ -50,17 +51,28 @@ struct AgentSessionsApp: App {
     var body: some Scene {
         // Default unified window
         WindowGroup("Agent Sessions") {
-            UnifiedSessionsView(unified: unifiedIndexerHolder.makeUnified(codexIndexer: indexer, claudeIndexer: claudeIndexer, geminiIndexer: geminiIndexer, opencodeIndexer: opencodeIndexer),
-                                codexIndexer: indexer,
-                                claudeIndexer: claudeIndexer,
-                                geminiIndexer: geminiIndexer,
-                                opencodeIndexer: opencodeIndexer,
-                                analyticsReady: analyticsReady,
-                                layoutMode: LayoutMode(rawValue: layoutModeRaw) ?? .vertical,
-                                onToggleLayout: {
-                                    let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
-                                    layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
-                                })
+            let unified = unifiedIndexerHolder.makeUnified(
+                codexIndexer: indexer,
+                claudeIndexer: claudeIndexer,
+                geminiIndexer: geminiIndexer,
+                opencodeIndexer: opencodeIndexer,
+                copilotIndexer: copilotIndexer
+            )
+            let layoutMode = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
+            UnifiedSessionsView(
+                unified: unified,
+                codexIndexer: indexer,
+                claudeIndexer: claudeIndexer,
+                geminiIndexer: geminiIndexer,
+                opencodeIndexer: opencodeIndexer,
+                copilotIndexer: copilotIndexer,
+                analyticsReady: analyticsReady,
+                layoutMode: layoutMode,
+                onToggleLayout: {
+                    let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
+                    layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
+                }
+            )
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
                 .environmentObject(indexer.columnVisibility)
@@ -72,10 +84,10 @@ struct AgentSessionsApp: App {
                     LaunchProfiler.reset("Unified main window")
                     LaunchProfiler.log("Window appeared")
                     LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
-            unifiedIndexerHolder.unified?.refresh()
-            updateUsageModels()
-            setupAnalytics()
-        }
+                    unifiedIndexerHolder.unified?.refresh()
+                    updateUsageModels()
+                    setupAnalytics()
+                }
                 .onChange(of: showUsageStrip) { _, _ in
                     updateUsageModels()
                 }
@@ -134,7 +146,8 @@ struct AgentSessionsApp: App {
                     codexIndexer: indexer,
                     claudeIndexer: claudeIndexer,
                     geminiIndexer: geminiIndexer,
-                    opencodeIndexer: opencodeIndexer
+                    opencodeIndexer: opencodeIndexer,
+                    copilotIndexer: copilotIndexer
                 )
             )
             .environmentObject(archiveManager)
@@ -153,12 +166,14 @@ final class _UnifiedHolder: ObservableObject {
     func makeUnified(codexIndexer: SessionIndexer,
                      claudeIndexer: ClaudeSessionIndexer,
                      geminiIndexer: GeminiSessionIndexer,
-                     opencodeIndexer: OpenCodeSessionIndexer) -> UnifiedSessionIndexer {
+                     opencodeIndexer: OpenCodeSessionIndexer,
+                     copilotIndexer: CopilotSessionIndexer) -> UnifiedSessionIndexer {
         if let u = unified { return u }
         let u = UnifiedSessionIndexer(codexIndexer: codexIndexer,
                                       claudeIndexer: claudeIndexer,
                                       geminiIndexer: geminiIndexer,
-                                      opencodeIndexer: opencodeIndexer)
+                                      opencodeIndexer: opencodeIndexer,
+                                      copilotIndexer: copilotIndexer)
         unified = u
         return u
     }
@@ -237,7 +252,8 @@ extension AgentSessionsApp {
             codexIndexer: indexer,
             claudeIndexer: claudeIndexer,
             geminiIndexer: geminiIndexer,
-            opencodeIndexer: opencodeIndexer
+            opencodeIndexer: opencodeIndexer,
+            copilotIndexer: copilotIndexer
         )
         analyticsService = service
 

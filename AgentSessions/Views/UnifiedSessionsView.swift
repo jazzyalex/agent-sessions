@@ -11,6 +11,7 @@ struct UnifiedSessionsView: View {
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
     @ObservedObject var geminiIndexer: GeminiSessionIndexer
     @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
+    @ObservedObject var copilotIndexer: CopilotSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @EnvironmentObject var updaterController: UpdaterController
@@ -37,6 +38,7 @@ struct UnifiedSessionsView: View {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
     @State private var autoSelectEnabled: Bool = true
     @State private var programmaticSelectionUpdate: Bool = false
     @State private var isAutoSelectingFromSearch: Bool = false
@@ -63,6 +65,7 @@ struct UnifiedSessionsView: View {
          claudeIndexer: ClaudeSessionIndexer,
          geminiIndexer: GeminiSessionIndexer,
          opencodeIndexer: OpenCodeSessionIndexer,
+         copilotIndexer: CopilotSessionIndexer,
          analyticsReady: Bool,
          layoutMode: LayoutMode,
          onToggleLayout: @escaping () -> Void) {
@@ -71,13 +74,15 @@ struct UnifiedSessionsView: View {
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
         self.opencodeIndexer = opencodeIndexer
+        self.copilotIndexer = copilotIndexer
         self.analyticsReady = analyticsReady
         self.layoutMode = layoutMode
         self.onToggleLayout = onToggleLayout
         _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(codexIndexer: codexIndexer,
                                                                          claudeIndexer: claudeIndexer,
                                                                          geminiIndexer: geminiIndexer,
-                                                                         opencodeIndexer: opencodeIndexer))
+                                                                         opencodeIndexer: opencodeIndexer,
+                                                                         copilotIndexer: copilotIndexer))
     }
 
     var body: some View {
@@ -192,6 +197,8 @@ struct UnifiedSessionsView: View {
                 geminiIndexer.reloadSession(id: id)
             } else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
                 opencodeIndexer.reloadSession(id: id)
+            } else if s.source == .copilot, let exist = copilotIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+                copilotIndexer.reloadSession(id: id)
             }
         }
         .onAppear {
@@ -201,10 +208,12 @@ struct UnifiedSessionsView: View {
         .onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeOpenCode) { _, _ in restartSearchIfRunning() }
+        .onChange(of: unified.includeCopilot) { _, _ in restartSearchIfRunning() }
         .onChange(of: codexAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
         .onChange(of: claudeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
         .onChange(of: geminiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
         .onChange(of: openCodeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+        .onChange(of: copilotAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
         .onReceive(unified.$sessions) { sessions in
             if !sessions.isEmpty {
                 hasEverHadSessions = true
@@ -448,7 +457,8 @@ struct UnifiedSessionsView: View {
                                codexIndexer: codexIndexer,
                                claudeIndexer: claudeIndexer,
                                geminiIndexer: geminiIndexer,
-                               opencodeIndexer: opencodeIndexer)
+                               opencodeIndexer: opencodeIndexer,
+                               copilotIndexer: copilotIndexer)
                 .environmentObject(focusCoordinator)
                 .id("transcript-host")
 
@@ -552,6 +562,17 @@ struct UnifiedSessionsView: View {
                     .help("Show or hide OpenCode sessions in the list (⌘4)")
                     .keyboardShortcut("4", modifiers: .command)
                 }
+
+                if copilotAgentEnabled {
+                    Toggle(isOn: $unified.includeCopilot) {
+                        Text("Copilot")
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeCopilot ? Color.agentCopilot : .primary))
+                            .fixedSize()
+                    }
+                    .toggleStyle(.button)
+                    .help("Show or hide Copilot sessions in the list (⌘5)")
+                    .keyboardShortcut("5", modifiers: .command)
+                }
             }
         }
         ToolbarItem(placement: .automatic) {
@@ -578,7 +599,7 @@ struct UnifiedSessionsView: View {
             }
             .keyboardShortcut("r", modifiers: [.command, .control])
             .disabled(selectedSession == nil || !(selectedSession?.source == .codex || selectedSession?.source == .claude))
-            .help("Resume the selected Codex or Claude session in its original CLI (⌃⌘R). Gemini and OpenCode sessions are read-only.")
+            .help("Resume the selected Codex or Claude session in its original CLI (⌃⌘R). Gemini, OpenCode, and Copilot sessions are read-only.")
 
             Button(action: { if let s = selectedSession { openDir(s) } }) { Label("Open Working Directory", systemImage: "folder") }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
@@ -722,6 +743,7 @@ struct UnifiedSessionsView: View {
         case .claude: label = "Claude"
         case .gemini: label = "Gemini"
         case .opencode: label = "OpenCode"
+        case .copilot: label = "Copilot"
         }
         return HStack(spacing: 6) {
             Text(label)
@@ -828,11 +850,12 @@ struct UnifiedSessionsView: View {
                                 includeClaude: unified.includeClaude && claudeAgentEnabled,
                                 includeGemini: unified.includeGemini && geminiAgentEnabled,
                                 includeOpenCode: unified.includeOpenCode && openCodeAgentEnabled,
+                                includeCopilot: unified.includeCopilot && copilotAgentEnabled,
                                 all: unified.allSessions)
     }
 
     private func flashAgentEnablementNoticeIfNeeded() {
-        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled)
+        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled)
         guard anyDisabled else {
             withAnimation { showAgentEnablementNotice = false }
             return
@@ -850,6 +873,7 @@ struct UnifiedSessionsView: View {
         case .claude: return Color(red: 204/255, green: 121/255, blue: 90/255)
         case .gemini: return Color.teal
         case .opencode: return Color.purple
+        case .copilot: return Color.agentCopilot
         }
     }
 
@@ -885,6 +909,7 @@ private struct TranscriptHostView: View {
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
     @ObservedObject var geminiIndexer: GeminiSessionIndexer
     @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
+    @ObservedObject var copilotIndexer: CopilotSessionIndexer
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -897,6 +922,8 @@ private struct TranscriptHostView: View {
                 .opacity(kind == .gemini ? 1 : 0)
             OpenCodeTranscriptView(indexer: opencodeIndexer, sessionID: selection)
                 .opacity(kind == .opencode ? 1 : 0)
+            CopilotTranscriptView(indexer: copilotIndexer, sessionID: selection)
+                .opacity(kind == .copilot ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -1099,6 +1126,7 @@ private struct UnifiedSearchFiltersView: View {
                      includeClaude: unified.includeClaude,
                      includeGemini: unified.includeGemini,
                      includeOpenCode: unified.includeOpenCode,
+                     includeCopilot: unified.includeCopilot,
                      all: unified.allSessions)
     }
 
@@ -1126,6 +1154,7 @@ private struct UnifiedSearchFiltersView: View {
                          includeClaude: unified.includeClaude,
                          includeGemini: unified.includeGemini,
                          includeOpenCode: unified.includeOpenCode,
+                         includeCopilot: unified.includeCopilot,
                          all: unified.allSessions)
         }
         searchDebouncer = work

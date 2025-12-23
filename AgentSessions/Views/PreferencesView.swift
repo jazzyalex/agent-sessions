@@ -12,6 +12,7 @@ struct PreferencesView: View {
     @ObservedObject var resumeSettings = CodexResumeSettings.shared
     @ObservedObject var claudeSettings = ClaudeResumeSettings.shared
     @ObservedObject var geminiSettings = GeminiCLISettings.shared
+    @ObservedObject var copilotSettings = CopilotSettings.shared
     @State var showingResetConfirm: Bool = false
     @AppStorage(PreferencesKey.showUsageStrip) var showUsageStrip: Bool = false
     // Codex tracking master toggle
@@ -47,11 +48,13 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.claudeCLIAvailable) var claudeCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.geminiCLIAvailable) var geminiCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.openCodeCLIAvailable) var openCodeCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.copilotCLIAvailable) var copilotCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.geminiEnabled) var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) var openCodeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.copilotEnabled) var copilotAgentEnabled: Bool = true
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -124,15 +127,25 @@ struct PreferencesView: View {
     @State var opencodeSessionsPathValid: Bool = true
     @State var opencodeSessionsPathDebounce: DispatchWorkItem? = nil
 
+    // Copilot probe state
+    @State var copilotProbeState: ProbeState = .idle
+    @State var copilotVersionString: String? = nil
+    @State var copilotResolvedPath: String? = nil
+    @State var copilotProbeDebounce: DispatchWorkItem? = nil
+    // Copilot sessions directory override
+    @AppStorage(PreferencesKey.Paths.copilotSessionsRootOverride) var copilotSessionsPath: String = ""
+    @State var copilotSessionsPathValid: Bool = true
+    @State var copilotSessionsPathDebounce: DispatchWorkItem? = nil
+
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selectedTab) {
-                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI }, id: \.self) { tab in
+                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .copilotCLI }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
                 Divider()
-                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI], id: \.self) { tab in
+                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -247,6 +260,8 @@ struct PreferencesView: View {
                 openCodeTab
             case .geminiCLI:
                 geminiCLITab
+            case .copilotCLI:
+                copilotCLITab
             case .about:
                 aboutTab
             }
@@ -518,6 +533,10 @@ struct PreferencesView: View {
         resumeSettings.setLaunchMode(.terminal)
 
         geminiSettings.setBinaryOverride("")
+        copilotSettings.setBinaryPath("")
+
+        // Reset agent storage overrides
+        copilotSessionsPath = ""
 
         // Reset usage strip preferences
         UserDefaults.standard.set(false, forKey: PreferencesKey.showClaudeUsageStrip)
@@ -527,6 +546,7 @@ struct PreferencesView: View {
         scheduleCodexProbe()
         scheduleClaudeProbe()
         scheduleGeminiProbe()
+        scheduleCopilotProbe()
     }
 
     func closeWindow() {
@@ -548,6 +568,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case claudeResume
     case opencode
     case geminiCLI
+    case copilotCLI
     case about
 
     var id: String { rawValue }
@@ -564,6 +585,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .claudeResume: return "Claude Code"
         case .opencode: return "OpenCode"
         case .geminiCLI: return "Gemini CLI"
+        case .copilotCLI: return "Copilot CLI"
         case .about: return "About"
         }
     }
@@ -580,6 +602,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .claudeResume: return "c.square"
         case .opencode: return "chevron.left.slash.chevron.right"
         case .geminiCLI: return "g.circle"
+        case .copilotCLI: return "bolt.horizontal.circle"
         case .about: return "info.circle"
         }
     }
@@ -587,7 +610,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Unified Window → Usage Tracking → Usage Probes → Menu Bar → [4 Agents] → About
-    var visibleTabs: [PreferencesTab] { [.general, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .about] }
+    var visibleTabs: [PreferencesTab] { [.general, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .about] }
 }
 
 // MARK: - Probe helpers
@@ -684,6 +707,8 @@ extension PreferencesView {
             if opencodeVersionString == nil && opencodeProbeState != .probing { probeOpenCode() }
         case .geminiCLI:
             if geminiVersionString == nil && geminiProbeState != .probing { probeGemini() }
+        case .copilotCLI:
+            if copilotVersionString == nil && copilotProbeState != .probing { probeCopilot() }
         case .menuBar, .usageProbes, .general, .unified, .advanced, .about:
             break
         }
@@ -707,6 +732,13 @@ extension PreferencesView {
         geminiProbeDebounce?.cancel()
         let work = DispatchWorkItem { probeGemini() }
         geminiProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleCopilotProbe() {
+        copilotProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeCopilot() }
+        copilotProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 }

@@ -8,6 +8,7 @@ struct AnalyticsView: View {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
 
     @State private var dateRange: AnalyticsDateRange = .last7Days
     @State private var agentFilter: AnalyticsAgentFilter = .all
@@ -46,6 +47,7 @@ struct AnalyticsView: View {
         .onChange(of: claudeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: geminiAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: openCodeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onChange(of: copilotAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: service.isParsingSessions) { _, isParsing in
             // Refresh analytics when parsing completes
             if !isParsing {
@@ -263,7 +265,7 @@ struct AnalyticsView: View {
     }
 
     private var anyAgentDisabled: Bool {
-        !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled)
+        !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled)
     }
 
     private var availableAgentFilters: [AnalyticsAgentFilter] {
@@ -272,6 +274,7 @@ struct AnalyticsView: View {
         if claudeAgentEnabled { out.append(.claudeOnly) }
         if geminiAgentEnabled { out.append(.geminiOnly) }
         if openCodeAgentEnabled { out.append(.opencodeOnly) }
+        if copilotAgentEnabled { out.append(.copilotOnly) }
         return out
     }
 
@@ -306,12 +309,14 @@ extension View {
     let claudeIndexer = ClaudeSessionIndexer()
     let geminiIndexer = GeminiSessionIndexer()
     let opencodeIndexer = OpenCodeSessionIndexer()
+    let copilotIndexer = CopilotSessionIndexer()
 
     let service = AnalyticsService(
         codexIndexer: codexIndexer,
         claudeIndexer: claudeIndexer,
         geminiIndexer: geminiIndexer,
-        opencodeIndexer: opencodeIndexer
+        opencodeIndexer: opencodeIndexer,
+        copilotIndexer: copilotIndexer
     )
 
     AnalyticsView(service: service)

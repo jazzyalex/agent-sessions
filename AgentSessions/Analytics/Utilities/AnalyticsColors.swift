@@ -14,6 +14,8 @@ extension Color {
     static let agentGemini = Color.teal
     /// OpenCode brand color
     static let agentOpenCode = Color.purple
+    /// Copilot brand color
+    static let agentCopilot = Color(red: 0.90, green: 0.20, blue: 0.60)
 
     // MARK: - Monochrome Support
 
@@ -22,6 +24,7 @@ extension Color {
     static let agentClaudeGray = Color(white: 0.5)  // Medium gray
     static let agentGeminiGray = Color(white: 0.6)  // Lighter gray
     static let agentOpenCodeGray = Color(white: 0.7) // Lightest gray
+    static let agentCopilotGray = Color(white: 0.75) // Very light gray
 
     /// Get the brand color for a given session source
     static func agentColor(for source: SessionSource) -> Color {
@@ -30,6 +33,7 @@ extension Color {
         case .claude: return .agentClaude
         case .gemini: return .agentGemini
         case .opencode: return .agentOpenCode
+        case .copilot: return .agentCopilot
         }
     }
 
@@ -41,6 +45,7 @@ extension Color {
             case .claude: return .agentClaudeGray
             case .gemini: return .agentGeminiGray
             case .opencode: return .agentOpenCodeGray
+            case .copilot: return .agentCopilotGray
             }
         } else {
             return agentColor(for: source)
@@ -58,6 +63,8 @@ extension Color {
             return .agentGemini
         } else if lower.contains("opencode") {
             return .agentOpenCode
+        } else if lower.contains("copilot") {
+            return .agentCopilot
         } else {
             return .accentColor
         }
@@ -75,6 +82,8 @@ extension Color {
                 return .agentGeminiGray
             } else if lower.contains("opencode") {
                 return .agentOpenCodeGray
+            } else if lower.contains("copilot") {
+                return .agentCopilotGray
             } else {
                 return .secondary
             }
