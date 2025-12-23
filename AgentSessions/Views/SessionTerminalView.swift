@@ -348,19 +348,19 @@ struct SessionTerminalView: View {
 
     private func previousHelpText(for role: RoleToggle) -> String {
         switch role {
-        case .user: return "Previous user prompt"
+        case .user: return "Previous user prompt (⌥⌘↑)"
         case .assistant: return "Previous agent response"
-        case .tools: return "Previous tool call/output"
-        case .errors: return "Previous error"
+        case .tools: return "Previous tool call/output (⌥⌘←)"
+        case .errors: return "Previous error (⌥⌘⇧↑)"
         }
     }
 
     private func nextHelpText(for role: RoleToggle) -> String {
         switch role {
-        case .user: return "Next user prompt"
+        case .user: return "Next user prompt (⌥⌘↓)"
         case .assistant: return "Next agent response"
-        case .tools: return "Next tool call/output"
-        case .errors: return "Next error"
+        case .tools: return "Next tool call/output (⌥⌘→)"
+        case .errors: return "Next error (⌥⌘⇧↓)"
         }
     }
 
