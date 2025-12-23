@@ -172,7 +172,7 @@ final class ClaudeSessionParser {
         }
 
         // Base role inference (block parsing below derives role/kind per block when possible).
-        var eventType = obj["type"] as? String
+        let eventType = obj["type"] as? String
         var role: String?
         var baseText: String?
 
