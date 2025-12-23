@@ -239,6 +239,49 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(metaTexts.contains(where: { $0.localizedCaseInsensitiveContains("Rejected tool use:") }))
     }
 
+    func testCopilotJoinsToolExecutionByToolCallId() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("copilot_sample.jsonl")
+        let sessionID = "copilot_test_123"
+
+        let lines = [
+            #"{"type":"session.start","data":{"sessionId":"\#(sessionID)","version":1,"producer":"copilot-agent","copilotVersion":"0.0.372","startTime":"2025-12-18T21:32:04.182Z"},"id":"e1","timestamp":"2025-12-18T21:32:04.183Z","parentId":null}"#,
+            #"{"type":"session.model_change","data":{"newModel":"gpt-5-mini"},"id":"e2","timestamp":"2025-12-18T21:32:05.000Z","parentId":"e1"}"#,
+            #"{"type":"session.info","data":{"infoType":"folder_trust","message":"Folder /tmp/repo has been added to trusted folders."},"id":"e3","timestamp":"2025-12-18T21:32:06.000Z","parentId":"e2"}"#,
+            #"{"type":"user.message","data":{"content":"Hello","transformedContent":"Hello","attachments":[]},"id":"e4","timestamp":"2025-12-18T21:32:07.000Z","parentId":"e3"}"#,
+            #"{"type":"assistant.message","data":{"content":"","toolRequests":[{"toolCallId":"call_1","name":"bash","arguments":{"command":"ls"}}]},"id":"e5","timestamp":"2025-12-18T21:32:08.000Z","parentId":"e4"}"#,
+            #"{"type":"tool.execution_complete","data":{"toolCallId":"call_1","success":true,"result":{"content":"file1\\n"}},"id":"e6","timestamp":"2025-12-18T21:32:09.000Z","parentId":"e5"}"#,
+            #"{"type":"assistant.message","data":{"content":"Done","toolRequests":[]},"id":"e7","timestamp":"2025-12-18T21:32:10.000Z","parentId":"e6"}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = CopilotSessionParser.parseFileFull(at: url)
+        XCTAssertNotNil(session)
+        guard let s = session else { return }
+
+        XCTAssertEqual(s.id, sessionID)
+        XCTAssertEqual(s.model, "gpt-5-mini")
+        XCTAssertEqual(s.cwd, "/tmp/repo")
+
+        let assistants = s.events.filter { $0.kind == .assistant }
+        XCTAssertEqual(assistants.count, 1)
+        XCTAssertEqual(assistants.first?.text, "Done")
+
+        let toolCalls = s.events.filter { $0.kind == .tool_call }
+        XCTAssertEqual(toolCalls.count, 1)
+        XCTAssertEqual(toolCalls.first?.toolName, "bash")
+        XCTAssertTrue(toolCalls.first?.toolInput?.contains("\"ls\"") ?? false)
+
+        let toolResults = s.events.filter { $0.kind == .tool_result }
+        XCTAssertEqual(toolResults.count, 1)
+        XCTAssertEqual(toolResults.first?.toolName, "bash")
+        XCTAssertEqual(toolResults.first?.toolOutput, "file1\n")
+    }
+
     func testClaudeFileReadToolResultDoesNotFalsePositiveExitCode() throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-FileRead-\(UUID().uuidString)", isDirectory: true)

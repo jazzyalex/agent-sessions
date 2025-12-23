@@ -284,8 +284,8 @@ public struct Session: Identifiable, Equatable, Codable {
 
     // MARK: - Repo/CWD helpers
     public var cwd: String? {
-        // Gemini and OpenCode sessions: trust lightweightCwd even after full parse
-        if (source == .gemini || source == .opencode),
+        // Gemini/OpenCode/Copilot sessions: trust lightweightCwd even after full parse
+        if (source == .gemini || source == .opencode || source == .copilot),
            let lightCwd = lightweightCwd, !lightCwd.isEmpty {
             return lightCwd
         }

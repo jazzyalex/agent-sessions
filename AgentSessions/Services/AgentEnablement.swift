@@ -14,6 +14,8 @@ enum AgentEnablement {
             return defaults.object(forKey: PreferencesKey.Agents.geminiEnabled) as? Bool ?? true
         case .opencode:
             return defaults.object(forKey: PreferencesKey.Agents.openCodeEnabled) as? Bool ?? true
+        case .copilot:
+            return defaults.object(forKey: PreferencesKey.Agents.copilotEnabled) as? Bool ?? true
         }
     }
 
@@ -68,16 +70,19 @@ enum AgentEnablement {
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
             setEnabledInternal(.gemini, enabled: gemini, defaults: defaults)
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
+            setEnabledInternal(.copilot, enabled: true, defaults: defaults)
         } else {
             let codex = binaryDetectedCached("codex")
             let claude = binaryDetectedCached("claude")
             let gemini = binaryDetectedCached("gemini")
             let opencode = binaryDetectedCached("opencode")
+            let copilot = binaryDetectedCached("copilot")
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
             setEnabledInternal(.gemini, enabled: gemini, defaults: defaults)
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
+            setEnabledInternal(.copilot, enabled: copilot, defaults: defaults)
         }
 
         // Guarantee at least one enabled agent.
@@ -107,6 +112,9 @@ enum AgentEnablement {
         case .opencode:
             let custom = defaults.string(forKey: "OpenCodeSessionsRootOverride") ?? ""
             root = OpenCodeSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
+        case .copilot:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.copilotSessionsRootOverride) ?? ""
+            root = CopilotSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         }
         return fm.fileExists(atPath: root.path, isDirectory: &isDir) && isDir.boolValue
     }
@@ -117,6 +125,7 @@ enum AgentEnablement {
         case .claude: return binaryDetectedCached("claude")
         case .gemini: return binaryDetectedCached("gemini")
         case .opencode: return binaryDetectedCached("opencode")
+        case .copilot: return binaryDetectedCached("copilot")
         }
     }
 
@@ -130,6 +139,8 @@ enum AgentEnablement {
             defaults.set(enabled, forKey: PreferencesKey.Agents.geminiEnabled)
         case .opencode:
             defaults.set(enabled, forKey: PreferencesKey.Agents.openCodeEnabled)
+        case .copilot:
+            defaults.set(enabled, forKey: PreferencesKey.Agents.copilotEnabled)
         }
     }
 

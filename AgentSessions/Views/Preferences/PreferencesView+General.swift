@@ -51,12 +51,13 @@ extension PreferencesView {
 
             sectionHeader("Active CLI agents")
             VStack(alignment: .leading, spacing: 6) {
-                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled].filter { $0 }.count
+                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, copilotAgentEnabled].filter { $0 }.count
 
                 agentEnableToggle(title: "Codex", source: .codex, isOn: $codexAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Claude", source: .claude, isOn: $claudeAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Gemini", source: .gemini, isOn: $geminiAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "OpenCode", source: .opencode, isOn: $openCodeAgentEnabled, enabledCount: enabledCount)
+                agentEnableToggle(title: "Copilot", source: .copilot, isOn: $copilotAgentEnabled, enabledCount: enabledCount)
 
                 Text("Disabled agents are hidden across the app and background work is paused.")
                     .font(.caption)
@@ -185,11 +186,11 @@ extension PreferencesView {
                     Toggle("1–2 messages", isOn: $hideLowMessageSessionsPref)
                         .onChange(of: hideLowMessageSessionsPref) { _, _ in indexer.recomputeNow() }
                         .help("Hide sessions with only one or two messages")
-                    Toggle("Tool calls (Codex & OpenCode)", isOn: Binding(
+                    Toggle("Tool calls (Codex, Copilot & OpenCode)", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.hasCommandsOnly) },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.hasCommandsOnly) }
                     ))
-                    .help("Show only Codex and OpenCode sessions that contain recorded tool/command calls. Claude and Gemini are excluded when enabled.")
+                    .help("Show only Codex, Copilot, and OpenCode sessions that contain recorded tool/command calls. Claude and Gemini are excluded when enabled.")
                 }
 
                 Divider()
