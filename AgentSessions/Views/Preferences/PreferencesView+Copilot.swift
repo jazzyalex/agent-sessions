@@ -4,7 +4,7 @@ import AppKit
 extension PreferencesView {
     var copilotCLITab: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Copilot CLI").font(.title2).fontWeight(.semibold)
+            Text("GitHub Copilot CLI").font(.title2).fontWeight(.semibold)
 
             if !copilotAgentEnabled {
                 PreferenceCallout {
@@ -15,7 +15,7 @@ extension PreferencesView {
             }
 
             Group {
-                sectionHeader("Copilot CLI Binary")
+                sectionHeader("GitHub Copilot CLI Binary")
                 VStack(alignment: .leading, spacing: 10) {
                     labeledRow("Binary Source") {
                         Picker("", selection: Binding(
@@ -49,7 +49,7 @@ extension PreferencesView {
                         if copilotProbeState == .failure && copilotVersionString == nil {
                             PreferenceCallout {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Copilot CLI not found")
+                                    Text("GitHub Copilot CLI not found")
                                         .font(.caption)
                                         .fontWeight(.medium)
                                     Text("Install via Homebrew or download from GitHub Copilot CLI releases.")
@@ -88,10 +88,10 @@ extension PreferencesView {
                                 .frame(maxWidth: 360)
                                 .onSubmit { scheduleCopilotProbe() }
                                 .onChange(of: copilotSettings.binaryPath) { _, _ in scheduleCopilotProbe() }
-                                .help("Enter the full path to a custom Copilot CLI binary")
+                                .help("Enter the full path to a custom GitHub Copilot CLI binary")
                             Button("Choose…", action: pickCopilotBinary)
                                 .buttonStyle(.borderedProminent)
-                                .help("Select the Copilot CLI binary from the filesystem")
+                                .help("Select the GitHub Copilot CLI binary from the filesystem")
                         }
                         if !copilotSettings.binaryPath.isEmpty, copilotProbeState == .failure {
                             Text("Invalid Copilot binary path.")
@@ -181,7 +181,7 @@ extension PreferencesView {
 
     func pickCopilotBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select Copilot CLI Binary"
+        panel.title = "Select GitHub Copilot CLI Binary"
         panel.message = "Choose the copilot executable file"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -238,4 +238,3 @@ extension PreferencesView {
         // @AppStorage persists automatically; indexers update on refresh.
     }
 }
-

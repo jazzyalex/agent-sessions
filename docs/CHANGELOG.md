@@ -20,10 +20,12 @@ All notable changes to this project will be documented in this file.
 - **Analytics (Codex)**: Count `web_search_call` and `custom_tool_call` (and their `*_output`) events as commands, improving tool-call totals and the “has commands” filter.
 - **Gemini Sessions**: Added support for embedded `toolCalls` and `type=info` messages in newer Gemini CLI session JSON, improving transcript fidelity and preventing low-message filtering from being skewed by informational entries.
 - **Copilot CLI Sessions**: Added support for importing Copilot CLI agent sessions from `~/.copilot/session-state`, including a dedicated Preferences pane and a Sessions toolbar filter (⌘5).
+- **Preferences**: Renamed the Copilot preferences pane to “GitHub Copilot CLI” and moved Saved Sessions settings from Unified Window to Advanced.
 - **JSON View**: Prevent large tool outputs (e.g., recursive file listings) from truncating the entire JSON tab by replacing extremely large strings with compact previews.
 - **Claude Sessions**: Split embedded `message.content` blocks (`thinking`, `tool_use`, `tool_result`) into separate events so transcripts remain accurate with modern Claude Code behavior.
 - **Claude Sessions (Errors)**: Treat `tool_result` blocks marked `is_error=true` as errors only for runtime-ish failures (non-zero exit, generic `Error: ...`, and user-interrupted runs). User-rejected tool uses are suppressed by default, and “not found” failures remain tool output.
 - **Claude Sessions (Errors)**: Prevent false-positive error highlighting when read-file tool output contains phrases like “exit code” alongside line numbers (common in Claude’s numbered file dumps).
+- **Saved Sessions**: “Delete Saved Copies” moves local archive copies to the Trash and asks for confirmation.
 
 ## [2.8.1] - 2025-11-28
 

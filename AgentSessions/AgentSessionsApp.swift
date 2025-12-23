@@ -2,6 +2,11 @@ import SwiftUI
 import AppKit
 import Combine
 
+extension Notification.Name {
+    static let openSessionsSearchFromMenu = Notification.Name("AgentSessionsOpenSessionsSearchFromMenu")
+    static let openTranscriptFindFromMenu = Notification.Name("AgentSessionsOpenTranscriptFindFromMenu")
+}
+
 @main
 struct AgentSessionsApp: App {
     @StateObject private var indexer = SessionIndexer()
@@ -128,9 +133,19 @@ struct AgentSessionsApp: App {
             }
             CommandGroup(after: .newItem) {
                 Button("Refresh") { unifiedIndexerHolder.unified?.refresh() }.keyboardShortcut("r", modifiers: .command)
-                Button("Find in Transcript") { /* unified find focuses handled in view */ }.keyboardShortcut("f", modifiers: .command).disabled(true)
             }
             CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer, updaterController: updaterController) }.keyboardShortcut(",", modifiers: .command) }
+            CommandMenu("Search") {
+                Button("Search Sessions…") {
+                    NotificationCenter.default.post(name: .openSessionsSearchFromMenu, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+
+                Button("Search in Transcript…") {
+                    NotificationCenter.default.post(name: .openTranscriptFindFromMenu, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+            }
             // View menu with Saved Only toggle (stateful)
             CommandMenu("View") {
                 // Bind through UserDefaults so it persists; also forward to unified when it changes
