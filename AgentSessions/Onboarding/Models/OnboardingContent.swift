@@ -89,16 +89,11 @@ extension OnboardingContent {
                 Screen(
                     symbolName: "keyboard",
                     title: "Better keyboard shortcuts",
-                    body: "Common actions have improved shortcuts throughout the app.",
+                    body: "Common actions have improved shortcuts throughout the app. You can reopen this tour anytime from the Help menu.",
                     bullets: [
                         "Search Sessions and Search in Transcript are now in the Search menu.",
                         "Saved Sessions has a dedicated shortcut in the View menu."
                     ]
-                ),
-                Screen(
-                    symbolName: "checkmark.circle.fill",
-                    title: "You’re ready",
-                    body: "You can reopen this tour anytime from the Help menu."
                 )
             ]
         )
