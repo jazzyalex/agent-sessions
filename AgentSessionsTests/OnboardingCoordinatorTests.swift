@@ -10,35 +10,43 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertNil(OnboardingContent.majorMinor(from: "invalid"))
     }
 
-    func testCheckAndPresentIfNeededPresentsWhenNotSeen() async {
+    func testCheckAndPresentIfNeededPresentsFullTourOnFreshInstall() async {
         let suite = "OnboardingCoordinatorTests.present"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
 
-        let result = await MainActor.run { () -> (isPresented: Bool, majorMinor: String?) in
-            let coordinator = OnboardingCoordinator(defaults: defaults, currentMajorMinorProvider: { "2.9" })
+        let result = await MainActor.run { () -> (isPresented: Bool, kind: OnboardingContent.Kind?, title: String?) in
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "2.9" },
+                isFreshInstallProvider: { true }
+            )
             coordinator.checkAndPresentIfNeeded()
-            return (coordinator.isPresented, coordinator.content?.versionMajorMinor)
+            return (coordinator.isPresented, coordinator.content?.kind, coordinator.content?.screens.first?.title)
         }
 
         XCTAssertTrue(result.isPresented)
-        XCTAssertEqual(result.majorMinor, "2.9")
+        XCTAssertEqual(result.kind, .fullTour)
+        XCTAssertEqual(result.title, "Welcome to Agent Sessions")
     }
 
-    func testCheckAndPresentIfNeededDoesNotPresentWhenAlreadySeen() async {
+    func testCheckAndPresentIfNeededPresentsUpdateTourWhenNotFreshAndNotSeenForVersion() async {
         let suite = "OnboardingCoordinatorTests.seen"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        defaults.onboardingLastActionMajorMinor = "2.9"
 
-        let result = await MainActor.run { () -> (isPresented: Bool, hasContent: Bool) in
-            let coordinator = OnboardingCoordinator(defaults: defaults, currentMajorMinorProvider: { "2.9" })
+        let result = await MainActor.run { () -> (isPresented: Bool, kind: OnboardingContent.Kind?) in
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "2.9" },
+                isFreshInstallProvider: { false }
+            )
             coordinator.checkAndPresentIfNeeded()
-            return (coordinator.isPresented, coordinator.content != nil)
+            return (coordinator.isPresented, coordinator.content?.kind)
         }
 
-        XCTAssertFalse(result.isPresented)
-        XCTAssertFalse(result.hasContent)
+        XCTAssertTrue(result.isPresented)
+        XCTAssertEqual(result.kind, .updateTour)
     }
 
     func testSkipRecordsVersionAndDismisses() async {
@@ -47,7 +55,11 @@ final class OnboardingCoordinatorTests: XCTestCase {
         defaults.removePersistentDomain(forName: suite)
 
         let result = await MainActor.run { () -> Bool in
-            let coordinator = OnboardingCoordinator(defaults: defaults, currentMajorMinorProvider: { "2.9" })
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "2.9" },
+                isFreshInstallProvider: { true }
+            )
             coordinator.presentManually()
             coordinator.skip()
             return coordinator.isPresented
@@ -55,5 +67,6 @@ final class OnboardingCoordinatorTests: XCTestCase {
 
         XCTAssertFalse(result)
         XCTAssertEqual(defaults.onboardingLastActionMajorMinor, "2.9")
+        XCTAssertTrue(defaults.onboardingFullTourCompleted)
     }
 }

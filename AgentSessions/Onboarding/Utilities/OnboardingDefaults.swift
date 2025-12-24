@@ -3,6 +3,7 @@ import Foundation
 extension UserDefaults {
     private enum OnboardingKeys {
         static let lastActionMajorMinor = "OnboardingLastActionMajorMinor"
+        static let fullTourCompleted = "OnboardingFullTourCompleted"
     }
 
     /// The last major.minor version for which the onboarding flow was either completed or skipped.
@@ -12,5 +13,10 @@ extension UserDefaults {
         get { string(forKey: OnboardingKeys.lastActionMajorMinor) }
         set { set(newValue, forKey: OnboardingKeys.lastActionMajorMinor) }
     }
-}
 
+    /// True once the user completes or skips the full onboarding tour (fresh install experience).
+    var onboardingFullTourCompleted: Bool {
+        get { bool(forKey: OnboardingKeys.fullTourCompleted) }
+        set { set(newValue, forKey: OnboardingKeys.fullTourCompleted) }
+    }
+}
