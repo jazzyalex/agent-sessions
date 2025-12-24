@@ -7,11 +7,17 @@ final class OnboardingCoordinator: ObservableObject {
 
     private let defaults: UserDefaults
     private let currentMajorMinorProvider: () -> String?
+    private let isFreshInstallProvider: () -> Bool
     private var hasChecked: Bool = false
 
-    init(defaults: UserDefaults = .standard, currentMajorMinorProvider: @escaping () -> String? = OnboardingContent.currentMajorMinor) {
+    init(
+        defaults: UserDefaults = .standard,
+        currentMajorMinorProvider: @escaping () -> String? = OnboardingContent.currentMajorMinor,
+        isFreshInstallProvider: @escaping () -> Bool = OnboardingCoordinator.defaultIsFreshInstall
+    ) {
         self.defaults = defaults
         self.currentMajorMinorProvider = currentMajorMinorProvider
+        self.isFreshInstallProvider = isFreshInstallProvider
     }
 
     func checkAndPresentIfNeeded() {
@@ -19,14 +25,14 @@ final class OnboardingCoordinator: ObservableObject {
         hasChecked = true
 
         guard let majorMinor = currentMajorMinorProvider() else { return }
-        guard shouldAutoPresent(for: majorMinor) else { return }
+        guard let kind = determineAutoTourKind(for: majorMinor) else { return }
 
-        present(for: majorMinor)
+        present(kind: kind, majorMinor: majorMinor)
     }
 
     func presentManually() {
         guard let majorMinor = currentMajorMinorProvider() else { return }
-        present(for: majorMinor)
+        present(kind: .fullTour, majorMinor: majorMinor)
     }
 
     func skip() {
@@ -37,19 +43,49 @@ final class OnboardingCoordinator: ObservableObject {
         recordActionAndDismiss()
     }
 
-    private func shouldAutoPresent(for majorMinor: String) -> Bool {
-        defaults.onboardingLastActionMajorMinor != majorMinor
+    private func determineAutoTourKind(for majorMinor: String) -> OnboardingContent.Kind? {
+        if isFreshInstallProvider(), !defaults.onboardingFullTourCompleted {
+            return .fullTour
+        }
+
+        if defaults.onboardingLastActionMajorMinor != majorMinor {
+            return .updateTour
+        }
+
+        return nil
     }
 
-    private func present(for majorMinor: String) {
-        content = OnboardingContent.forMajorMinor(majorMinor) ?? OnboardingContent.fallback(for: majorMinor)
+    private func present(kind: OnboardingContent.Kind, majorMinor: String) {
+        switch kind {
+        case .fullTour:
+            content = OnboardingContent.fullTour(for: majorMinor)
+        case .updateTour:
+            content = OnboardingContent.updateTour(for: majorMinor) ?? OnboardingContent.fallbackUpdateTour(for: majorMinor)
+        }
         isPresented = true
     }
 
     private func recordActionAndDismiss() {
         if let majorMinor = content?.versionMajorMinor {
             defaults.onboardingLastActionMajorMinor = majorMinor
+
+            if content?.kind == .fullTour {
+                defaults.onboardingFullTourCompleted = true
+            }
         }
         isPresented = false
+    }
+}
+
+extension OnboardingCoordinator {
+    static func defaultIsFreshInstall() -> Bool {
+        let fm = FileManager.default
+        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        let dbURL = appSupport
+            .appendingPathComponent("AgentSessions", isDirectory: true)
+            .appendingPathComponent("index.db", isDirectory: false)
+        return !fm.fileExists(atPath: dbURL.path)
     }
 }

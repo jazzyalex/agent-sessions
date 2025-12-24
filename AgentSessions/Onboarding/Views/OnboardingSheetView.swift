@@ -17,6 +17,7 @@ struct OnboardingSheetView: View {
                     headerIcon
                     screenText
                     bullets
+                    shortcuts
                 }
                 .frame(maxWidth: 520)
                 .padding(.horizontal, 28)
@@ -32,6 +33,12 @@ struct OnboardingSheetView: View {
         }
         .frame(minWidth: 600, minHeight: 460)
         .interactiveDismissDisabled(true)
+        .onChange(of: content.versionMajorMinor) { _, _ in
+            screenIndex = 0
+        }
+        .onChange(of: content.kind) { _, _ in
+            screenIndex = 0
+        }
     }
 
     private var headerIcon: some View {
@@ -79,6 +86,29 @@ struct OnboardingSheetView: View {
                 }
             }
             .padding(.top, 2)
+        }
+    }
+
+    @ViewBuilder
+    private var shortcuts: some View {
+        let screen = content.screens[screenIndex]
+        if !screen.shortcuts.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Shortcuts")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .padding(.top, 4)
+
+                ForEach(screen.shortcuts) { s in
+                    HStack(spacing: 10) {
+                        Keycap(keys: s.keys)
+                        Text(s.label)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -131,3 +161,23 @@ private struct OnboardingProgressDots: View {
     }
 }
 
+private struct Keycap: View {
+    let keys: String
+
+    var body: some View {
+        Text(keys)
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+            )
+            .foregroundStyle(.primary)
+            .accessibilityLabel(keys)
+    }
+}

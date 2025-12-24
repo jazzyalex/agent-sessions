@@ -91,10 +91,10 @@ struct AgentSessionsApp: App {
                     LaunchProfiler.reset("Unified main window")
                     LaunchProfiler.log("Window appeared")
                     LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
+                    onboardingCoordinator.checkAndPresentIfNeeded()
                     unifiedIndexerHolder.unified?.refresh()
                     updateUsageModels()
                     setupAnalytics()
-                    onboardingCoordinator.checkAndPresentIfNeeded()
                 }
                 .onChange(of: showUsageStrip) { _, _ in
                     updateUsageModels()
