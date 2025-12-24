@@ -9,7 +9,12 @@ struct SemanticVersion: Comparable, Equatable, CustomStringConvertible {
     /// Parse from "1.2.3", "v1.2.3", "1.2", or "v1.2" (missing patch defaults to 0)
     init?(string: String) {
         let normalized = string.hasPrefix("v") ? String(string.dropFirst()) : string
-        let parts = normalized.split(separator: ".").compactMap { Int($0) }
+        let rawParts = normalized.split(separator: ".")
+        let parts: [Int] = rawParts.compactMap { part in
+            let digits = part.prefix(while: { $0.isNumber })
+            guard !digits.isEmpty else { return nil }
+            return Int(digits)
+        }
         guard parts.count >= 2 && parts.count <= 3 else { return nil }
         self.major = parts[0]
         self.minor = parts[1]
