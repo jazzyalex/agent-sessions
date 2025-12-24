@@ -24,6 +24,7 @@ When the user asks for help deploying Agent Sessions:
 2. **Follow the preferred workflow** (from the docs):
    - `tools/release/deploy changelog [FROM_TAG]` (optional)
    - `tools/release/deploy bump [patch|minor|major]`
+   - **Update README.md and docs/index.html** with new version and features
    - `git push origin main`
    - `tools/release/deploy release <VERSION>`
    - `tools/release/deploy verify <VERSION>`
@@ -69,6 +70,25 @@ When the user asks for help deploying Agent Sessions:
 - Marketing version should never end in `.0`
 - The deploy script handles version bumping, but verify it uses the correct format
 - CHANGELOG sections should be `## [2.9]` not `## [2.9.0]`
+
+### Update README.md and Website
+
+**REQUIRED**: After preparing release notes, update user-facing documentation:
+
+1. **README.md**:
+   - Update download link version (search for `v2.X` and `AgentSessions-2.X.dmg`)
+   - Add "What's New in X.Y" section at the top with key features from release notes
+   - Update agent list in overview if new agents added
+   - Keep concise - 3-5 key features, not exhaustive list
+
+2. **docs/index.html**:
+   - Update download button version and link
+   - Update meta descriptions to mention new features
+   - Update hero text if agent support changed
+   - Update feature cards if major features added
+   - Keep aligned with README messaging
+
+3. **Commit these updates** before pushing and deploying so website is in sync with release
 
 ## Your Role
 
