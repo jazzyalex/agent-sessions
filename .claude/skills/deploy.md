@@ -67,9 +67,9 @@ See `docs/deployment.md` for detailed commands. High-level flow:
 - Script may produce wrong format - verify manually
 
 ### Stale Agent Lists
-When adding new agent, update EVERYWHERE:
-- README overview, Core Features, paths list
-- index.html title, meta tags, hero, intro, feature cards
+When adding new agent, update 10+ places:
+- README: overview paragraph, Core Features (Unified Interface, Unified Search), Local & Private paths list, download links
+- index.html: `<title>`, og:description, og:title, twitter:title, twitter:description, hero `<h1>`, intro paragraph, feature cards
 
 ### Missing Intermediate Versions
 If README has "What's New in 2.6" but releasing 2.9:
