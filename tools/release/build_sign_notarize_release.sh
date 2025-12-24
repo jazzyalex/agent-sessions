@@ -131,21 +131,47 @@ notarize_background() {
 
   submission_id=$(python3 <<'PYEOF'
 import json, re, sys
-text = sys.stdin.read()
+text = sys.stdin.read().strip()
 data = {}
 try:
+    # First try: parse as-is
     data = json.loads(text)
 except Exception:
-    # Fall back to last JSON object in the stream
-    matches = list(re.finditer(r'{.*}', text, re.S))
-    if matches:
-        data = json.loads(matches[-1].group(0))
+    try:
+        # Second try: find JSON object with greedy matching
+        match = re.search(r'\{[^{}]*"id"[^{}]*\}', text)
+        if match:
+            data = json.loads(match.group(0))
+    except Exception:
+        try:
+            # Third try: extract just the last complete JSON object
+            # Find all balanced JSON objects
+            objects = []
+            depth = 0
+            start = -1
+            for i, c in enumerate(text):
+                if c == '{':
+                    if depth == 0:
+                        start = i
+                    depth += 1
+                elif c == '}':
+                    depth -= 1
+                    if depth == 0 and start >= 0:
+                        objects.append(text[start:i+1])
+                        start = -1
+            if objects:
+                data = json.loads(objects[-1])
+        except Exception:
+            pass
 print(data.get("id", ""))
 PYEOF
 <<< "$submission_json")
 
   if [[ -z "$submission_id" ]]; then
     echo "ERROR: Could not parse notarization submission ID" >&2
+    echo "Submission output was:" >&2
+    echo "$submission_json" | head -20 >&2
+    echo "Check log file: $log_file" >&2
     exit 7
   fi
 
@@ -165,14 +191,37 @@ PYEOF
 
     status=$(python3 <<'PYEOF'
 import json, re, sys
-text = sys.stdin.read()
+text = sys.stdin.read().strip()
 data = {}
 try:
+    # First try: parse as-is
     data = json.loads(text)
 except Exception:
-    matches = list(re.finditer(r'{.*}', text, re.S))
-    if matches:
-        data = json.loads(matches[-1].group(0))
+    try:
+        # Second try: find JSON object with status field
+        match = re.search(r'\{[^{}]*"status"[^{}]*\}', text)
+        if match:
+            data = json.loads(match.group(0))
+    except Exception:
+        try:
+            # Third try: extract last complete JSON object
+            objects = []
+            depth = 0
+            start = -1
+            for i, c in enumerate(text):
+                if c == '{':
+                    if depth == 0:
+                        start = i
+                    depth += 1
+                elif c == '}':
+                    depth -= 1
+                    if depth == 0 and start >= 0:
+                        objects.append(text[start:i+1])
+                        start = -1
+            if objects:
+                data = json.loads(objects[-1])
+        except Exception:
+            pass
 print(data.get("status", ""))
 PYEOF
 <<< "$info_json")
