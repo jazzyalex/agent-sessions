@@ -1,30 +1,66 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" standalone="yes"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.8.1</title>
-            <pubDate>Fri, 28 Nov 2025 16:05:35 -0800</pubDate>
-            <description>&lt;![CDATA[
-&lt;h2&gt;What's New in 2.8.1&lt;/h2&gt;
+            <title>2.9</title>
+            <pubDate>Tue, 23 Dec 2025 23:58:50 -0800</pubDate>
+            <description><![CDATA[
+                <h2>What's New in 2.9</h2>
+🎄 **Agent Sessions 2.9 Christmas Edition** - Welcome new users with guided onboarding tours and celebrate the season with festive touches!
 
-&lt;h3&gt;Critical Fixes&lt;/h3&gt;
-&lt;p&gt;&lt;strong&gt;Usage Tracking Refresh&lt;/strong&gt;: Hard probe actions (Codex strip/menu refresh) now route through hard `/status` probes, preventing older log snapshots from overwriting fresh limits. Stale checks honor hard-probe TTL for accurate freshness indicators.&lt;/p&gt;
-&lt;p&gt;&lt;strong&gt;OpenCode Sessions&lt;/strong&gt;: User messages now correctly extract from `summary.title` instead of `summary.body`, fixing incorrect assistant responses appearing in user messages for older OpenCode sessions. User messages are never dropped even if empty.&lt;/p&gt;
+<h3>Major Features</h3>
 
-&lt;h3&gt;Added&lt;/h3&gt;
-&lt;p&gt;&lt;strong&gt;Per-CLI Toolbar Visibility&lt;/strong&gt;: New unified-pane toggles in Preferences → General to show/hide Codex, Claude, Gemini, and OpenCode session filters. CLIs automatically hide when unavailable.&lt;/p&gt;
-&lt;p&gt;&lt;strong&gt;Usage Display Mode&lt;/strong&gt;: New Preferences toggle to switch between "% left" and "% used" display modes across Codex and Claude usage strips and menu bar. Normalizes Claude CLI percent_left semantics for consistency.&lt;/p&gt;
-&lt;p&gt;&lt;strong&gt;Preferences → OpenCode&lt;/strong&gt;: New dedicated pane for OpenCode CLI configuration including Sessions Directory override to choose custom Claude sessions root (defaults to `~/.claude`).&lt;/p&gt;
+<ul>
+<li><strong>Onboarding Tours</strong>: Added a comprehensive onboarding experience for fresh installs with an interactive tour covering key features. A skippable update tour also appears once per major/minor update (starting in 2.9). Both can be reopened from Help → Show Onboarding.</li>
+<li><strong>Christmas Edition</strong>: Agent Sessions 2.9 includes festive onboarding styling and a cheerful loading greeting to celebrate the season.</li>
+<li><strong>Copilot CLI Support</strong>: Full session browser integration with GitHub Copilot CLI sessions from `~/.copilot/session-state`. Includes a dedicated Preferences pane and Sessions toolbar filter (⌘5).</li>
+<li><strong>Saved Sessions Management</strong>: Added a dedicated "Saved Sessions…" window (View menu) for listing and managing archived sessions. Sessions can be saved locally by archiving source files into Agent Sessions storage, syncing while the upstream session updates so saved sessions don't disappear when CLI history is pruned.</li>
+</ul>
 
-&lt;h3&gt;Improved&lt;/h3&gt;
-&lt;p&gt;&lt;strong&gt;Gemini CLI Detection&lt;/strong&gt;: Enhanced Gemini binary detection via login-shell PATH fallback, matching other CLI probes. "Auto" detection now reliably finds the `gemini` binary (npm `@google/gemini-cli`).&lt;/p&gt;
-&lt;p&gt;&lt;strong&gt;Cleanup UX&lt;/strong&gt;: Claude auto-cleanup now shows non-intrusive flash notifications instead of modal dialogs for better user experience.&lt;/p&gt;
-]]&gt;</description>
-            <sparkle:version>12</sparkle:version>
-            <sparkle:shortVersionString>2.8.1</sparkle:shortVersionString>
+<h3>Added</h3>
+
+<ul>
+<li><strong>Keyboard Shortcuts</strong>: Added Option-Command-Arrow shortcuts to jump between user prompts, tool calls/outputs, and errors in transcripts for faster navigation.</li>
+<li><strong>Saved Sessions</strong>: Added "Delete Saved Copies" action to remove local archive copies from the Saved Sessions window (moves to Trash with confirmation).</li>
+<li><strong>Saved Sessions</strong>: Added archive diagnostics including status tooltips and a local archive log to make saving issues debuggable.</li>
+<li><strong>Analytics (Codex)</strong>: Count `web_search_call` and `custom_tool_call` (and their `*_output`) events as commands, improving tool-call totals and the "has commands" filter.</li>
+<li><strong>Gemini Sessions</strong>: Added support for embedded `toolCalls` and `type=info` messages in newer Gemini CLI session JSON, improving transcript fidelity.</li>
+</ul>
+
+<h3>Improved</h3>
+
+<ul>
+<li><strong>Onboarding</strong>: Refined the "Connect your agents" tour step with a centered supported-agents layout for better visual presentation.</li>
+<li><strong>Preferences</strong>: Replaced Unified Window → CLI Toolbar Filters with General → Active CLI agents. Disabling an agent now hides it across the app (Sessions toolbar, Analytics, usage strip, menu bar) and stops related background work.</li>
+<li><strong>Preferences</strong>: Moved Agent Accents (Color/Monochrome) from General to Unified Window, renamed Copilot pane to "GitHub Copilot CLI", and moved Saved Sessions settings from Unified Window to Advanced.</li>
+<li><strong>Preferences</strong>: Git Context button is now hidden by default in Sessions toolbar. Re-enable it in Preferences → Advanced.</li>
+<li><strong>Keyboard</strong>: Improved Tab focus behavior so transcript Find controls don't enter the Tab chain unless Find is explicitly opened, avoiding "stuck/beep" focus states.</li>
+<li><strong>JSON View</strong>: Prevent large tool outputs (e.g., recursive file listings) from truncating the entire JSON tab by replacing extremely large strings with compact previews.</li>
+</ul>
+
+<h3>Fixed</h3>
+
+<ul>
+<li><strong>Saved Sessions</strong>: Fixed saved-session archive backfill and Finder reveal actions so newly saved sessions archive immediately and "Show Saved Copy" works reliably.</li>
+<li><strong>Saved Sessions</strong>: Starred-session archive backfill now falls back to resolving upstream session files directly (when `index.db` metadata is missing), so saved copies are created reliably.</li>
+<li><strong>Saved Sessions</strong>: Pinning a session no longer performs disk IO on the main thread, reducing UI hitches.</li>
+<li><strong>Claude Sessions</strong>: Fixed session titles on hydrate by correctly parsing title from conversation data.</li>
+<li><strong>Claude Sessions</strong>: When "Skip Agents.md lines when parsing" is enabled, Agent Sessions ignores the injected Agents.md preamble for session titles and jumps transcripts to the first prompt (with a visible divider), while keeping all content searchable.</li>
+<li><strong>Claude Sessions</strong>: Split embedded `message.content` blocks (`thinking`, `tool_use`, `tool_result`) into separate events so transcripts remain accurate with modern Claude Code behavior.</li>
+<li><strong>Claude Sessions (Errors)</strong>: Treat `tool_result` blocks marked `is_error=true` as errors only for runtime-ish failures (non-zero exit, generic `Error: ...`, and user-interrupted runs). User-rejected tool uses are suppressed by default, and "not found" failures remain tool output.</li>
+<li><strong>Claude Sessions (Errors)</strong>: Prevent false-positive error highlighting when read-file tool output contains phrases like "exit code" alongside line numbers (common in Claude's numbered file dumps).</li>
+<li><strong>OpenCode Sessions</strong>: Fixed missing conversation content in Plain/Color views for OpenCode storage schema `migration=2` by extracting message text from `storage/part/msg_<message-id>/prt_*.json` text parts (not just `summary.title/body`), so both user prompts and assistant responses render correctly.</li>
+<li><strong>Clipboard</strong>: Fixed an intermittent issue where the clipboard could be overwritten with a full transcript, leading to unexpectedly large pastes in other apps.</li>
+<li><strong>Version Parsing</strong>: Harden version parsing to accept 2.9.0x-style versions and cancel loading loop on invalid versions.</li>
+<li><strong>Search</strong>: Harden search updates and trim excessive release logging for better performance.</li>
+</ul>
+
+            ]]></description>
+            <sparkle:version>13</sparkle:version>
+            <sparkle:shortVersionString>2.9</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.8.1/AgentSessions-2.8.1.dmg" length="7836766" type="application/octet-stream" sparkle:edSignature="woVNpzuAFy+ekMNAEn2gNfBd+Rh9SXUFLzJnHkXoI51FbT1TZ9GeYCJzoIEXeOdgfAtzyYof2T3jZ/lTht2EDA==" />
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.9/AgentSessions-2.9.dmg" length="8659033" type="application/octet-stream" sparkle:edSignature="JFBs4W45VkUEUmjfq4SRudXnZjnecsuOKCSNTpnqNaQYhNXiy7eFfQbxcUgHekDEXFotHlSd416WlACez/9yDg=="/>
         </item>
     </channel>
 </rss>
