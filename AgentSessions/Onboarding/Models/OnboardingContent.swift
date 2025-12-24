@@ -7,6 +7,13 @@ struct OnboardingContent: Equatable {
     }
 
     struct Screen: Identifiable, Equatable {
+        struct AgentShowcaseItem: Identifiable, Equatable {
+            let symbolName: String
+            let title: String
+
+            var id: String { title }
+        }
+
         struct Shortcut: Identifiable, Equatable {
             let keys: String
             let label: String
@@ -17,15 +24,17 @@ struct OnboardingContent: Equatable {
         let symbolName: String
         let title: String
         let body: String
+        let agentShowcase: [AgentShowcaseItem]
         let bullets: [String]
         let shortcuts: [Shortcut]
 
         var id: String { title }
 
-        init(symbolName: String, title: String, body: String, bullets: [String] = [], shortcuts: [Shortcut] = []) {
+        init(symbolName: String, title: String, body: String, agentShowcase: [AgentShowcaseItem] = [], bullets: [String] = [], shortcuts: [Shortcut] = []) {
             self.symbolName = symbolName
             self.title = title
             self.body = body
+            self.agentShowcase = agentShowcase
             self.bullets = bullets
             self.shortcuts = shortcuts
         }
@@ -71,11 +80,17 @@ extension OnboardingContent {
                 Screen(
                     symbolName: "tray.full",
                     title: "Connect your agents",
-                    body: "Indexing decides what shows up and what background work runs.",
+                    body: "",
+                    agentShowcase: [
+                        .init(symbolName: "terminal.fill", title: "Codex CLI"),
+                        .init(symbolName: "c.circle.fill", title: "Claude Code"),
+                        .init(symbolName: "sparkle", title: "Gemini CLI"),
+                        .init(symbolName: "chevron.left.slash.chevron.right", title: "OpenCode"),
+                        .init(symbolName: "person.crop.circle.badge.checkmark", title: "GitHub Copilot")
+                    ],
                     bullets: [
-                        "Agent Sessions can index sessions from Codex CLI, Claude Code, Gemini CLI, OpenCode, and GitHub Copilot.",
                         "Enable the agents you use in Settings. Agents you don’t use can stay disabled.",
-                        "Each agent can scan from its default sessions location or a custom path you choose."
+                        "You can keep indexing lightweight by only enabling what you use."
                     ]
                 ),
                 Screen(

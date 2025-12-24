@@ -20,6 +20,7 @@ struct OnboardingSheetView: View {
                 VStack(spacing: 18) {
                     headerIcon
                     screenText
+                    agentShowcase
                     bullets
                     shortcuts
                 }
@@ -119,10 +120,12 @@ struct OnboardingSheetView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text(screen.body)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            if !screen.body.isEmpty {
+                Text(screen.body)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
 
@@ -141,6 +144,22 @@ struct OnboardingSheetView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .padding(.top, 2)
+        }
+    }
+
+    @ViewBuilder
+    private var agentShowcase: some View {
+        let screen = content.screens[screenIndex]
+        if !screen.agentShowcase.isEmpty {
+            VStack(alignment: .center, spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10, alignment: .center)], spacing: 10) {
+                    ForEach(screen.agentShowcase) { item in
+                        AgentChip(symbolName: item.symbolName, title: item.title)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.top, 2)
         }
     }
@@ -241,4 +260,41 @@ private struct Keycap: View {
             .foregroundStyle(.primary)
             .accessibilityLabel(keys)
     }
+}
+
+private struct AgentChip: View {
+    let symbolName: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.15))
+                    .frame(width: 28, height: 28)
+                Image(systemName: symbolName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+	        .overlay(
+	            RoundedRectangle(cornerRadius: 12)
+	                .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
+	        )
+	        .frame(maxWidth: .infinity)
+	        .accessibilityElement(children: .combine)
+	        .accessibilityLabel(title)
+	    }
 }
