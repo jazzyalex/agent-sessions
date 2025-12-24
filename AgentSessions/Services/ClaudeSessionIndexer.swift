@@ -149,7 +149,9 @@ final class ClaudeSessionIndexer: ObservableObject {
     func refresh() {
         if !AgentEnablement.isEnabled(.claude) { return }
         let root = discovery.sessionsRoot()
+        #if DEBUG
         print("\n🔵 CLAUDE INDEXING START: root=\(root.path)")
+        #endif
         LaunchProfiler.log("Claude.refresh: start")
 
         let token = UUID()
@@ -208,7 +210,9 @@ final class ClaudeSessionIndexer: ObservableObject {
             #endif
             let files = self.discovery.discoverSessionFiles()
 
+            #if DEBUG
             print("📁 Found \(files.count) Claude Code session files")
+            #endif
             LaunchProfiler.log("Claude.refresh: file enumeration done (files=\(files.count))")
 
             DispatchQueue.main.async {
@@ -254,7 +258,9 @@ final class ClaudeSessionIndexer: ObservableObject {
                 LaunchProfiler.log("Claude.refresh: sessions merged (total=\(mergedWithArchives.count))")
                 self.allSessions = mergedWithArchives
                 self.isIndexing = false
+                #if DEBUG
                 print("✅ CLAUDE INDEXING DONE: total=\(mergedWithArchives.count) (existing=\(existingSessions.count), new=\(newSessions.count))")
+                #endif
 
                 // Delta-based transcript prewarm for Claude sessions.
                 let delta: [Session] = {
@@ -347,7 +353,9 @@ final class ClaudeSessionIndexer: ObservableObject {
         let url = URL(fileURLWithPath: existing.filePath)
 
         let filename = existing.filePath.components(separatedBy: "/").last ?? "?"
+        #if DEBUG
         print("🔄 Reloading lightweight Claude session: \(filename)")
+        #endif
 
         isLoadingSession = true
         loadingSessionID = id
@@ -358,7 +366,9 @@ final class ClaudeSessionIndexer: ObservableObject {
 
             if let fullSession = ClaudeSessionParser.parseFileFull(at: url, forcedID: id) {
                 let elapsed = Date().timeIntervalSince(startTime)
+                #if DEBUG
                 print("  ⏱️ Parse took \(String(format: "%.1f", elapsed))s - events=\(fullSession.events.count)")
+                #endif
 
                 DispatchQueue.main.async {
                     if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
@@ -380,7 +390,9 @@ final class ClaudeSessionIndexer: ObservableObject {
                     self.loadingSessionID = nil
                 }
             } else {
+                #if DEBUG
                 print("  ❌ Full parse failed")
+                #endif
                 DispatchQueue.main.async {
                     self.isLoadingSession = false
                     self.loadingSessionID = nil
@@ -393,11 +405,15 @@ final class ClaudeSessionIndexer: ObservableObject {
     func parseAllSessionsFull(progress: @escaping (Int, Int) -> Void) async {
         let lightweightSessions = allSessions.filter { $0.events.isEmpty }
         guard !lightweightSessions.isEmpty else {
+            #if DEBUG
             print("ℹ️ No lightweight Claude sessions to parse")
+            #endif
             return
         }
 
+        #if DEBUG
         print("🔍 Starting full parse of \(lightweightSessions.count) lightweight Claude sessions")
+        #endif
 
         for (index, session) in lightweightSessions.enumerated() {
             let url = URL(fileURLWithPath: session.filePath)
@@ -434,7 +450,9 @@ final class ClaudeSessionIndexer: ObservableObject {
             }
         }
 
+        #if DEBUG
         print("✅ Completed parsing \(lightweightSessions.count) lightweight Claude sessions")
+        #endif
     }
 
     private static func dateEq(_ lhs: Date?, _ rhs: Date?) -> Bool {

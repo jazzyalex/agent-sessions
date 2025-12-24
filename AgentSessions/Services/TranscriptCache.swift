@@ -82,7 +82,9 @@ final class TranscriptCache {
             return count
         }
 
+        #if DEBUG
         print("📝 TRANSCRIPT CACHE: Indexed \(indexed) sessions (total cached: \(totalCount))")
+        #endif
     }
 
     /// Clear all cached transcripts (thread-safe)

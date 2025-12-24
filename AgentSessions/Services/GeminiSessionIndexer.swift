@@ -92,7 +92,9 @@ final class GeminiSessionIndexer: ObservableObject {
     func refresh() {
         if !AgentEnablement.isEnabled(.gemini) { return }
         let root = discovery.sessionsRoot()
+        #if DEBUG
         print("\n🔵 GEMINI INDEXING START: root=\(root.path)")
+        #endif
         LaunchProfiler.log("Gemini.refresh: start")
 
         let token = UUID()
@@ -188,7 +190,9 @@ final class GeminiSessionIndexer: ObservableObject {
                     self.filesProcessed = self.totalFiles
                     self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"
                 }
+                #if DEBUG
                 print("✅ GEMINI INDEXING DONE: total=\(sessions.count)")
+                #endif
 
                 // Background transcript cache generation for accurate search (bounded batch).
                 let delta: [Session] = {
@@ -271,7 +275,9 @@ final class GeminiSessionIndexer: ObservableObject {
             let start = Date()
             let full = GeminiSessionParser.parseFileFull(at: url, forcedID: id)
             let elapsed = Date().timeIntervalSince(start)
+            #if DEBUG
             print("  ⏱️ Gemini parse took \(String(format: "%.1f", elapsed))s - events=\(full?.events.count ?? 0)")
+            #endif
 
             DispatchQueue.main.async {
                 if let full, let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
@@ -321,14 +327,18 @@ final class GeminiSessionIndexer: ObservableObject {
     func parseAllSessionsFull(progress: @escaping (Int, Int) -> Void) async {
         let lightweightSessions = allSessions.filter { $0.events.isEmpty }
         guard !lightweightSessions.isEmpty else {
+            #if DEBUG
             print("ℹ️ No lightweight Gemini sessions to parse")
+            #endif
             return
         }
 
+        #if DEBUG
         print("🔍 Starting full parse of \(lightweightSessions.count) lightweight Gemini sessions")
+        #endif
 
         for (index, session) in lightweightSessions.enumerated() {
-            guard let url = URL(string: "file://\(session.filePath)") else { continue }
+            let url = URL(fileURLWithPath: session.filePath)
 
             // Report progress on main thread
             await MainActor.run {
@@ -360,7 +370,9 @@ final class GeminiSessionIndexer: ObservableObject {
             }
         }
 
+        #if DEBUG
         print("✅ Completed parsing \(lightweightSessions.count) lightweight Gemini sessions")
+        #endif
     }
 
     // Update an existing session after full parse (used by SearchCoordinator)
