@@ -123,6 +123,12 @@ public struct Session: Identifiable, Equatable, Codable {
                 candidate = tail
             }
 
+            // Claude: sometimes the caveat transcript is split into multiple user events.
+            // Skip tag-only / local-command transcript fragments so we don't title sessions as "<local-command-stdout>…".
+            if skipPreamble, source == .claude, Self.looksLikeClaudeLocalCommandTranscript(candidate) {
+                continue
+            }
+
             if skipPreamble && Self.looksLikeAgentsPreamble(candidate) { continue }
 
             let collapsed = candidate.collapsedWhitespace()
@@ -454,6 +460,22 @@ public struct Session: Identifiable, Equatable, Codable {
         }
         let out = cleaned.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         return out.isEmpty ? nil : out
+    }
+
+    private static func looksLikeClaudeLocalCommandTranscript(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return false }
+        let lower = t.lowercased()
+        if lower.hasPrefix("<command-name>") { return true }
+        if lower.hasPrefix("<command-message>") { return true }
+        if lower.hasPrefix("<command-args>") { return true }
+        if lower.hasPrefix("<local-command-stdout") { return true }
+        if lower.contains("</local-command-stdout>") && lower.replacingOccurrences(of: " ", with: "").hasPrefix("<local-command-stdout>") {
+            return true
+        }
+        // Common non-prompt stdout fragments (safe to treat as transcript when skip preambles is enabled).
+        if lower.hasPrefix("set model to ") { return true }
+        return false
     }
 }
 

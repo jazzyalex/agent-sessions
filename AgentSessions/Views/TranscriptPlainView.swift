@@ -1133,6 +1133,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         let hasCaveat = session.events.contains(where: { $0.kind == .user && ($0.text?.lowercased().contains(anchor) ?? false) })
         guard hasCaveat else { return nil }
 
+        // Prefer scrolling to the divider line itself so it lands as the top visible line.
+        let divider = "──────── Conversation starts here"
+        if let div = text.range(of: divider) {
+            let start = div.lowerBound
+            let end = text.index(after: start)
+            return NSRange(start..<end, in: text)
+        }
+
         for ev in session.events where ev.kind == .user {
             guard let raw = ev.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
             let lower = raw.lowercased()
@@ -1141,7 +1149,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             if lower.contains(anchor) {
                 if let tail = Session.claudeLocalCommandPromptTail(from: raw),
                    let range = text.range(of: tail, options: []) {
-                    return NSRange(range.lowerBound..<text.index(after: range.lowerBound), in: text)
+                    // Jump to start-of-line to avoid leaving partial caveat text visible above.
+                    var start = range.lowerBound
+                    while start > text.startIndex {
+                        let prev = text.index(before: start)
+                        if text[prev] == "\n" { break }
+                        start = prev
+                    }
+                    return NSRange(start..<text.index(after: start), in: text)
                 }
                 // Pure command transcript: skip this user event and continue to the next.
                 continue
@@ -1149,7 +1164,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
             // Otherwise, jump to the first subsequent user prompt.
             if let range = text.range(of: raw, options: []) {
-                return NSRange(range.lowerBound..<text.index(after: range.lowerBound), in: text)
+                var start = range.lowerBound
+                while start > text.startIndex {
+                    let prev = text.index(before: start)
+                    if text[prev] == "\n" { break }
+                    start = prev
+                }
+                return NSRange(start..<text.index(after: start), in: text)
             }
         }
 
@@ -1159,31 +1180,83 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func decorateTranscriptIfNeeded(_ raw: String, session: Session) -> String {
         guard skipAgentsPreambleEnabled() else { return raw }
         guard viewMode != .json else { return raw }
-        return insertingConversationStartDividerIfNeeded(in: raw)
+        return insertingConversationStartDividerIfNeeded(in: raw, session: session)
     }
 
-    private func insertingConversationStartDividerIfNeeded(in text: String) -> String {
-        let marker = "</INSTRUCTIONS>"
-        guard let markerRange = text.range(of: marker) else { return text }
+    private func insertingConversationStartDividerIfNeeded(in text: String, session: Session) -> String {
         // Avoid double-insertion.
         if text.contains("──────── Conversation starts here") { return text }
 
-        // Insert divider immediately above the first non-empty line after </INSTRUCTIONS>.
-        var idx = markerRange.upperBound
-        while idx < text.endIndex {
-            let ch = text[idx]
-            if ch == "\n" || ch == "\r" || ch == " " || ch == "\t" {
-                idx = text.index(after: idx)
-                continue
-            }
-            break
-        }
-        guard idx < text.endIndex else { return text }
+        if session.source == .codex {
+            let marker = "</INSTRUCTIONS>"
+            guard let markerRange = text.range(of: marker) else { return text }
 
-        let dividerLine = "──────── Conversation starts here ────────\n"
-        var out = text
-        out.insert(contentsOf: dividerLine, at: idx)
-        return out
+            // Insert divider immediately above the first non-empty line after </INSTRUCTIONS>.
+            var idx = markerRange.upperBound
+            while idx < text.endIndex {
+                let ch = text[idx]
+                if ch == "\n" || ch == "\r" || ch == " " || ch == "\t" {
+                    idx = text.index(after: idx)
+                    continue
+                }
+                break
+            }
+            guard idx < text.endIndex else { return text }
+
+            let dividerLine = "──────── Conversation starts here ────────\n"
+            var out = text
+            out.insert(contentsOf: dividerLine, at: idx)
+            return out
+        }
+
+        if session.source == .claude {
+            // Claude Code: insert divider above the first real user prompt after the local-command caveat transcript.
+            let anchor = "caveat: the messages below were generated by the user while running local commands"
+            let hasCaveat = session.events.contains(where: { $0.kind == .user && ($0.text?.lowercased().contains(anchor) ?? false) })
+            guard hasCaveat else { return text }
+
+            func lineStartIndex(for needle: String) -> String.Index? {
+                guard let r = text.range(of: needle) else { return nil }
+                var start = r.lowerBound
+                while start > text.startIndex {
+                    let prev = text.index(before: start)
+                    if text[prev] == "\n" { break }
+                    start = prev
+                }
+                return start
+            }
+
+            // Prefer: prompt tail extracted from the caveat-containing user event.
+            for ev in session.events where ev.kind == .user {
+                guard let raw = ev.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
+                if raw.lowercased().contains(anchor) {
+                    if let tail = Session.claudeLocalCommandPromptTail(from: raw),
+                       let idx = lineStartIndex(for: tail) {
+                        let dividerLine = "──────── Conversation starts here ────────\n"
+                        var out = text
+                        out.insert(contentsOf: dividerLine, at: idx)
+                        return out
+                    }
+                    break
+                }
+            }
+
+            // Fallback: first user line that isn't a caveat/transcript fragment.
+            for ev in session.events where ev.kind == .user {
+                guard let raw = ev.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
+                let lower = raw.lowercased()
+                if lower.contains(anchor) { continue }
+                if Session.isAgentsPreambleText(raw) { continue }
+                if let idx = lineStartIndex(for: raw) {
+                    let dividerLine = "──────── Conversation starts here ────────\n"
+                    var out = text
+                    out.insert(contentsOf: dividerLine, at: idx)
+                    return out
+                }
+            }
+        }
+
+        return text
     }
 
     private func conversationStartRangeForJump(text: String) -> NSRange? {
