@@ -78,7 +78,7 @@ final class OnboardingCoordinator: ObservableObject {
 }
 
 extension OnboardingCoordinator {
-    static func defaultIsFreshInstall() -> Bool {
+    nonisolated static func defaultIsFreshInstall() -> Bool {
         let fm = FileManager.default
         guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return false
