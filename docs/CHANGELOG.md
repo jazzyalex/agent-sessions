@@ -6,46 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ## [2.9] - 2025-12-23
 
-🎄 **Agent Sessions 2.9 Christmas Edition** - Welcome new users with guided onboarding tours and celebrate the season with festive touches!
+🎄 **Agent Sessions 2.9 Christmas Edition**
 
-### Major Features
+### New Features
 
-- **Onboarding Tours**: Added a comprehensive onboarding experience for fresh installs with an interactive tour covering key features. A skippable update tour also appears once per major/minor update (starting in 2.9). Both can be reopened from Help → Show Onboarding.
-- **Christmas Edition**: Agent Sessions 2.9 includes festive onboarding styling and a cheerful loading greeting to celebrate the season.
-- **Copilot CLI Support**: Full session browser integration with GitHub Copilot CLI sessions from `~/.copilot/session-state`. Includes a dedicated Preferences pane and Sessions toolbar filter (⌘5).
-- **Saved Sessions Management**: Added a dedicated "Saved Sessions…" window (View menu) for listing and managing archived sessions. Sessions can be saved locally by archiving source files into Agent Sessions storage, syncing while the upstream session updates so saved sessions don't disappear when CLI history is pruned.
+- **Onboarding Tours**: Interactive onboarding for new installs and a skippable update tour for major/minor releases. Reopen anytime from Help → Show Onboarding.
+- **Copilot CLI Support**: Full session browser integration for GitHub Copilot CLI sessions. Includes Preferences pane and toolbar filter (⌘5).
+- **Saved Sessions Window**: New dedicated window (View menu) for managing archived sessions with delete, reveal, and diagnostics.
+- **Keyboard Navigation**: Option-Command-Arrow shortcuts to jump between user prompts, tool calls, and errors in transcripts.
 
-### Added
+### Improvements
 
-- **Keyboard Shortcuts**: Added Option-Command-Arrow shortcuts to jump between user prompts, tool calls/outputs, and errors in transcripts for faster navigation.
-- **Saved Sessions**: Added "Delete Saved Copies" action to remove local archive copies from the Saved Sessions window (moves to Trash with confirmation).
-- **Saved Sessions**: Added archive diagnostics including status tooltips and a local archive log to make saving issues debuggable.
-- **Analytics (Codex)**: Count `web_search_call` and `custom_tool_call` (and their `*_output`) events as commands, improving tool-call totals and the "has commands" filter.
-- **Gemini Sessions**: Added support for embedded `toolCalls` and `type=info` messages in newer Gemini CLI session JSON, improving transcript fidelity.
-
-### Improved
-
-- **Onboarding**: Refined the "Connect your agents" tour step with a centered supported-agents layout for better visual presentation.
-- **Preferences**: Replaced Unified Window → CLI Toolbar Filters with General → Active CLI agents. Disabling an agent now hides it across the app (Sessions toolbar, Analytics, usage strip, menu bar) and stops related background work.
-- **Preferences**: Moved Agent Accents (Color/Monochrome) from General to Unified Window, renamed Copilot pane to "GitHub Copilot CLI", and moved Saved Sessions settings from Unified Window to Advanced.
-- **Preferences**: Git Context button is now hidden by default in Sessions toolbar. Re-enable it in Preferences → Advanced.
-- **Keyboard**: Improved Tab focus behavior so transcript Find controls don't enter the Tab chain unless Find is explicitly opened, avoiding "stuck/beep" focus states.
-- **JSON View**: Prevent large tool outputs (e.g., recursive file listings) from truncating the entire JSON tab by replacing extremely large strings with compact previews.
+- **Preferences**: Reorganized CLI agent controls. Disabling an agent now hides it everywhere (toolbar, Analytics, menu bar) and stops background work.
+- **Improved Focus**: Transcript Find controls stay out of Tab navigation unless explicitly opened, preventing stuck focus states.
 
 ### Fixed
 
-- **Saved Sessions**: Fixed saved-session archive backfill and Finder reveal actions so newly saved sessions archive immediately and "Show Saved Copy" works reliably.
-- **Saved Sessions**: Starred-session archive backfill now falls back to resolving upstream session files directly (when `index.db` metadata is missing), so saved copies are created reliably.
-- **Saved Sessions**: Pinning a session no longer performs disk IO on the main thread, reducing UI hitches.
-- **Claude Sessions**: Fixed session titles on hydrate by correctly parsing title from conversation data.
-- **Claude Sessions**: When "Skip Agents.md lines when parsing" is enabled, Agent Sessions ignores the injected Agents.md preamble for session titles and jumps transcripts to the first prompt (with a visible divider), while keeping all content searchable.
-- **Claude Sessions**: Split embedded `message.content` blocks (`thinking`, `tool_use`, `tool_result`) into separate events so transcripts remain accurate with modern Claude Code behavior.
-- **Claude Sessions (Errors)**: Treat `tool_result` blocks marked `is_error=true` as errors only for runtime-ish failures (non-zero exit, generic `Error: ...`, and user-interrupted runs). User-rejected tool uses are suppressed by default, and "not found" failures remain tool output.
-- **Claude Sessions (Errors)**: Prevent false-positive error highlighting when read-file tool output contains phrases like "exit code" alongside line numbers (common in Claude's numbered file dumps).
-- **OpenCode Sessions**: Fixed missing conversation content in Plain/Color views for OpenCode storage schema `migration=2` by extracting message text from `storage/part/msg_<message-id>/prt_*.json` text parts (not just `summary.title/body`), so both user prompts and assistant responses render correctly.
-- **Clipboard**: Fixed an intermittent issue where the clipboard could be overwritten with a full transcript, leading to unexpectedly large pastes in other apps.
-- **Version Parsing**: Harden version parsing to accept 2.9.0x-style versions and cancel loading loop on invalid versions.
-- **Search**: Harden search updates and trim excessive release logging for better performance.
+- **Saved Sessions**: Archive backfill and reveal actions now work reliably. Pinning no longer blocks the UI.
+- **Claude Sessions**: Better parsing for modern Claude Code format, session titles, and error detection.
+- **OpenCode Sessions**: Fixed missing content in Plain/Color views for migration=2 storage schema.
+- **Clipboard**: Fixed intermittent issue where full transcripts could overwrite clipboard.
 
 ## [2.8.1] - 2025-11-28
 
