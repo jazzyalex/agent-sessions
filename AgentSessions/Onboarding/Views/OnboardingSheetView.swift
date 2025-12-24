@@ -6,11 +6,15 @@ struct OnboardingSheetView: View {
 
     @State private var screenIndex: Int = 0
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var christmasTwinkleStarted: Bool = false
+    @State private var christmasTwinkle: Bool = false
 
     private var isFirst: Bool { screenIndex == 0 }
     private var isLast: Bool { screenIndex >= content.screens.count - 1 }
 
     var body: some View {
+        let isChristmas = AppEdition.isChristmasEdition29
         VStack(spacing: 0) {
             ScrollView {
                 VStack(spacing: 18) {
@@ -39,14 +43,59 @@ struct OnboardingSheetView: View {
         .onChange(of: content.kind) { _, _ in
             screenIndex = 0
         }
+        .onAppear {
+            guard isChristmas else { return }
+            guard !reduceMotion else { return }
+            guard !christmasTwinkleStarted else { return }
+            christmasTwinkleStarted = true
+            withAnimation(.easeInOut(duration: 1.35).repeatForever(autoreverses: true)) {
+                christmasTwinkle = true
+            }
+        }
     }
 
     private var headerIcon: some View {
+        let isChristmas = AppEdition.isChristmasEdition29
         let screen = content.screens[screenIndex]
         return ZStack {
             Circle()
-                .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12))
+                .fill(
+                    isChristmas
+                        ? AnyShapeStyle(LinearGradient(
+                            colors: [
+                                Color.red.opacity(colorScheme == .dark ? 0.22 : 0.16),
+                                Color.green.opacity(colorScheme == .dark ? 0.20 : 0.14)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                        : AnyShapeStyle(Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12))
+                )
                 .frame(width: 92, height: 92)
+
+            if isChristmas && screenIndex == 0 {
+                Group {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 14, weight: .semibold))
+                        .offset(x: -42, y: -30)
+                        .opacity(christmasTwinkle ? 0.85 : 0.18)
+                        .scaleEffect(christmasTwinkle ? 1.05 : 0.8)
+
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .semibold))
+                        .offset(x: 44, y: -18)
+                        .opacity(christmasTwinkle ? 0.35 : 0.75)
+                        .scaleEffect(christmasTwinkle ? 0.85 : 1.05)
+
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12, weight: .semibold))
+                        .offset(x: 28, y: 40)
+                        .opacity(christmasTwinkle ? 0.72 : 0.22)
+                        .scaleEffect(christmasTwinkle ? 1.0 : 0.82)
+                }
+                .foregroundStyle(Color.primary.opacity(0.9))
+                .accessibilityHidden(true)
+            }
 
             Image(systemName: screen.symbolName)
                 .font(.system(size: 40, weight: .semibold))
@@ -56,12 +105,19 @@ struct OnboardingSheetView: View {
     }
 
     private var screenText: some View {
+        let isChristmas = AppEdition.isChristmasEdition29
         let screen = content.screens[screenIndex]
         return VStack(spacing: 10) {
             Text(screen.title)
                 .font(.title2)
                 .fontWeight(.semibold)
                 .multilineTextAlignment(.center)
+
+            if isChristmas && screenIndex == 0 {
+                Text("Christmas Edition")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
 
             Text(screen.body)
                 .font(.body)
@@ -91,6 +147,7 @@ struct OnboardingSheetView: View {
 
     @ViewBuilder
     private var shortcuts: some View {
+        let isChristmas = AppEdition.isChristmasEdition29
         let screen = content.screens[screenIndex]
         if !screen.shortcuts.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
@@ -101,7 +158,7 @@ struct OnboardingSheetView: View {
 
                 ForEach(screen.shortcuts) { s in
                     HStack(spacing: 10) {
-                        Keycap(keys: s.keys)
+                        Keycap(keys: s.keys, isChristmasEdition: isChristmas)
                         Text(s.label)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -163,6 +220,7 @@ private struct OnboardingProgressDots: View {
 
 private struct Keycap: View {
     let keys: String
+    let isChristmasEdition: Bool
 
     var body: some View {
         Text(keys)
@@ -175,7 +233,19 @@ private struct Keycap: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                    .stroke(
+                        isChristmasEdition
+                            ? AnyShapeStyle(LinearGradient(
+                                colors: [
+                                    Color.red.opacity(0.55),
+                                    Color.green.opacity(0.55)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ))
+                            : AnyShapeStyle(Color.secondary.opacity(0.25)),
+                        lineWidth: 1
+                    )
             )
             .foregroundStyle(.primary)
             .accessibilityLabel(keys)

@@ -16,6 +16,7 @@ struct UnifiedSessionsView: View {
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @EnvironmentObject var updaterController: UpdaterController
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let layoutMode: LayoutMode
     let analyticsReady: Bool
@@ -628,7 +629,15 @@ struct UnifiedSessionsView: View {
         ToolbarItem(placement: .automatic) {
             Button(action: { unified.refresh() }) {
                 if unified.isIndexing || unified.isProcessingTranscripts {
-                    ProgressView()
+                    if AppEdition.isChristmasEdition29 && !reduceMotion {
+                        TimelineView(.animation) { context in
+                            let t = context.date.timeIntervalSinceReferenceDate
+                            Image(systemName: "snowflake")
+                                .rotationEffect(.degrees(t * 70))
+                        }
+                    } else {
+                        ProgressView()
+                    }
                 } else {
                     Image(systemName: "arrow.clockwise")
                 }

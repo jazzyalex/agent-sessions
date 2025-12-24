@@ -30,6 +30,7 @@
 		35EAB2DDFC13FB3CB33A74EF /* ClaudeProbeProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5612FE92135230B461DA0E59 /* ClaudeProbeProject.swift */; };
 		37D93EDA993018B66B33250E /* UsageDisplayMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0637E0D51C63AE8AB3CCED8 /* UsageDisplayMode.swift */; };
 		3A769ECA2EAC3A6A008A7EC2 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = DB2E108A587C47918E9BC53D /* Sparkle */; };
+		3C0D8FBA8DED2516A91DB1BC /* AppEdition.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4FDB19BD9DB1AD8419CD3A4 /* AppEdition.swift */; };
 		3D7BE6551A4D05AE1747DA77 /* AppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35186F4194824F3250DE3B8E /* AppRuntime.swift */; };
 		42F90BA7CBE613327417D28D /* CopilotTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 815DCA7C60A7B56BC748C548 /* CopilotTranscriptView.swift */; };
 		4310AE956110DDEB90364B3D /* OpenCodeSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05D72F56F8E9EB0484E4361C /* OpenCodeSessionIndexer.swift */; };
@@ -343,6 +344,7 @@
 		CLC000020000000000000003 /* claude_usage_capture.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = AgentSessions/Resources/claude_usage_capture.sh; sourceTree = SOURCE_ROOT; };
 		CLC000020000000000000004 /* ClaudeUsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift; sourceTree = SOURCE_ROOT; };
 		D4ECF214EB1FA1A7D37628AA /* CopilotSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Copilot/CopilotSettings.swift; sourceTree = SOURCE_ROOT; };
+		D4FDB19BD9DB1AD8419CD3A4 /* AppEdition.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/AppEdition.swift; sourceTree = SOURCE_ROOT; };
 		D641BFBD310B4157871F120F /* CodexCLIEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexCLIEnvironment.swift; path = AgentSessions/Resume/CodexCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
 		D87F261D1630E0F744175E84 /* CapPressureStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CapPressureStore.swift; path = AgentSessions/CodexStatus/CapPressureStore.swift; sourceTree = SOURCE_ROOT; };
 		DBSTEST00001000000000001 /* DBSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Indexing/DBSmokeTests.swift; sourceTree = SOURCE_ROOT; };
@@ -925,6 +927,7 @@
 				SUPT000010000000000000001 /* TypingActivity.swift */,
 				35186F4194824F3250DE3B8E /* AppRuntime.swift */,
 				A62B8D98322763D14AF6ACF7 /* ColumnVisibilityStore.swift */,
+				D4FDB19BD9DB1AD8419CD3A4 /* AppEdition.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -1286,6 +1289,7 @@
 				4AE2E9940B9A7A5FEB3CA32F /* OnboardingContent.swift in Sources */,
 				1612D4A42E2EB79612E16BAD /* OnboardingCoordinator.swift in Sources */,
 				13B56F1BC8788AB9530AD015 /* OnboardingSheetView.swift in Sources */,
+				3C0D8FBA8DED2516A91DB1BC /* AppEdition.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
