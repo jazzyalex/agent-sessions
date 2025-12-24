@@ -36,6 +36,40 @@ When the user asks for help deploying Agent Sessions:
    - Follow the troubleshooting and log pointers in `docs/deployment.md`.
    - Only suggest `tools/release/rollback-release.sh <VERSION>` after the relevant logs have been reviewed.
 
+## Writing Clean Release Notes
+
+**CRITICAL**: Release notes are user-facing. Focus on what's NEW, not implementation details.
+
+### Bad Examples (Too Verbose)
+❌ "Fixed onboarding slide 2 layout"
+❌ "Refined the agents tour step with centered layout"
+❌ "Resolved Swift 6 actor isolation for onboarding"
+
+**Why bad?** These are implementation details from developing the Onboarding feature. Users don't care about individual bug fixes during development.
+
+### Good Examples (Concise, User-Focused)
+✅ "Onboarding Tours: Interactive onboarding for new installs"
+✅ "Copilot CLI Support: Full session browser integration"
+✅ "Saved Sessions: Archive backfill and reveal actions now work reliably"
+
+### Guidelines
+
+1. **New Features**: One line per feature. What does it do for the user?
+2. **Improvements**: Only list changes to existing features users will notice.
+3. **Fixed**: Only bugs users experienced in previous releases, NOT bugs introduced and fixed during development of new features.
+4. **Avoid**:
+   - Internal refactoring details
+   - Multiple items about the same feature (consolidate!)
+   - Implementation specifics (Swift 6, actor isolation, etc.)
+   - Fixes to code you just wrote in this release
+
+### Version Numbering
+
+**IMPORTANT**: Use version format `X.Y` (e.g., "2.9"), NOT `X.Y.0` (e.g., "2.9.0").
+- Marketing version should never end in `.0`
+- The deploy script handles version bumping, but verify it uses the correct format
+- CHANGELOG sections should be `## [2.9]` not `## [2.9.0]`
+
 ## Your Role
 
 - Do **not** re-specify the whole deployment flow here; instead, rely on the repository docs.
@@ -43,5 +77,6 @@ When the user asks for help deploying Agent Sessions:
   - Locating and reading `docs/deployment.md` and `docs/deploy-skill.md`.
   - Explaining which command to run next and why.
   - Helping interpret errors and logs using the documented guidance.
+  - Writing clean, user-focused release notes following the guidelines above.
 
 When in doubt, re-read `docs/deployment.md` and align your behavior with that runbook.
