@@ -83,6 +83,26 @@ New **Option-Command-Arrow** shortcuts jump between user prompts, tool calls, an
 
 ---
 
+## What's New in 2.8
+
+### OpenCode Support
+Full session browser integration with OpenCode sessions from `~/.local/share/opencode/storage/session`. Includes transcript viewing, analytics, and favorites. Sessions appear in the unified list with source filtering.
+
+### Improved Usage Tracking
+Separate refresh intervals per agent (Codex: 1/5/15 min, Claude: 3/15/30 min). New Usage Probes pane consolidates probe settings with clear safety messaging. Usage probes no longer stall after 24 attempts.
+
+---
+
+## What's New in 2.7
+
+### Color View
+Terminal-inspired view with CLI-style colorized output and role-based filtering (User, Agent, Tools, Errors). Quick toggle with Cmd+Shift+T.
+
+### Claude Usage Format Fix
+Fixed compatibility with Claude Code's usage format change ("% left" vs "% used") with automatic percentage inversion.
+
+---
+
 ## What's New in 2.6
 
 ### Usage Probe Support for Codex
@@ -118,10 +138,10 @@ Usage limit tracking and reset times now properly support Codex 0.50+ session fo
 ## Core Features
 
 ### Unified Interface v2
-Browse **Codex CLI**, **Claude Code**, and **Gemini CLI** sessions side-by-side. Toggle between sources (Both / Codex / Claude / Gemini) with strict filtering and unified search.
+Browse **Codex CLI**, **Claude Code**, **Gemini CLI**, **GitHub Copilot CLI**, and **OpenCode** sessions side-by-side. Toggle between sources with strict filtering and unified search. Star favorites for quick access.
 
 ### Unified Search v2
-One search for everything. Find any snippet or prompt instantly — no matter which agent or project it came from (Codex, Claude, or Gemini CLI).  
+One search for everything. Find any snippet or prompt instantly — no matter which agent or project it came from.
 Smart sorting, instant cancel, full-text search with project filters.
 
 ### Instant Resume & Re-use
@@ -150,8 +170,8 @@ Deep-dive into the git context of any Codex session:
 Right-click any Codex session → **Show Git Context** to open the inspector.
 
 ### Local, Private & Safe
-All processing runs on your Mac.  
-Reads `~/.codex/sessions`, `~/.claude/sessions`, Gemini CLI checkpoints under `~/.gemini/tmp`, and OpenCode sessions under `~/.local/share/opencode/storage/session` (all read‑only).  
+All processing runs on your Mac.
+Reads `~/.codex/sessions`, `~/.claude/sessions`, `~/.gemini/tmp`, `~/.copilot/session-state`, and `~/.local/share/opencode/storage/session` (all read‑only).
 No cloud uploads or telemetry — **read‑only by design.**
 
 ---
