@@ -234,16 +234,7 @@ private struct Keycap: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(
-                        isChristmasEdition
-                            ? AnyShapeStyle(LinearGradient(
-                                colors: [
-                                    Color.red.opacity(0.55),
-                                    Color.green.opacity(0.55)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ))
-                            : AnyShapeStyle(Color.secondary.opacity(0.25)),
+                        AnyShapeStyle(Color.secondary.opacity(0.25)),
                         lineWidth: 1
                     )
             )

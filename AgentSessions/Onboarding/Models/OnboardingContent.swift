@@ -73,13 +73,9 @@ extension OnboardingContent {
                     title: "Connect your agents",
                     body: "Indexing decides what shows up and what background work runs.",
                     bullets: [
-                        "Enable or disable agents in Settings to control what appears across the app.",
-                        "Configure where each agent’s sessions are scanned from.",
-                        "If something is missing, check agent enablement and scan paths first, then Refresh."
-                    ],
-                    shortcuts: [
-                        .init(keys: "⌘,", label: "Settings…"),
-                        .init(keys: "⌘R", label: "Refresh")
+                        "Agent Sessions can index sessions from Codex CLI, Claude Code, Gemini CLI, OpenCode, and GitHub Copilot.",
+                        "Enable the agents you use in Settings. Agents you don’t use can stay disabled.",
+                        "Each agent can scan from its default sessions location or a custom path you choose."
                     ]
                 ),
                 Screen(
