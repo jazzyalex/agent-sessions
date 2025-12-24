@@ -12,6 +12,11 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertEqual(SemanticVersion(string: "v2.0"), SemanticVersion(major: 2, minor: 0, patch: 0))
         XCTAssertEqual(SemanticVersion(string: "2.9.0x"), SemanticVersion(major: 2, minor: 9, patch: 0))
         XCTAssertEqual(SemanticVersion(string: "v2.9.0-beta1"), SemanticVersion(major: 2, minor: 9, patch: 0))
+        XCTAssertEqual(SemanticVersion(stableString: "2.9.0"), SemanticVersion(major: 2, minor: 9, patch: 0))
+        XCTAssertEqual(SemanticVersion(stableString: "2.9"), SemanticVersion(major: 2, minor: 9, patch: 0))
+        XCTAssertEqual(SemanticVersion(stableString: "v2.9.0"), SemanticVersion(major: 2, minor: 9, patch: 0))
+        XCTAssertNil(SemanticVersion(stableString: "2.9.0x"))
+        XCTAssertNil(SemanticVersion(stableString: "v2.9.0-beta1"))
         XCTAssertNil(SemanticVersion(string: "1"))
         XCTAssertNil(SemanticVersion(string: "invalid"))
     }
