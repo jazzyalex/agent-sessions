@@ -3,6 +3,12 @@ import Foundation
 enum AgentEnablement {
     static let didChangeNotification = Notification.Name("AgentEnablementDidChange")
     private static var cachedBinaryPresence: [String: Bool] = [:]
+    private static let fastBinarySearchPaths: [String] = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin"
+    ]
 
     static func isEnabled(_ source: SessionSource, defaults: UserDefaults = .standard) -> Bool {
         switch source {
@@ -72,11 +78,13 @@ enum AgentEnablement {
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
             setEnabledInternal(.copilot, enabled: true, defaults: defaults)
         } else {
-            let codex = binaryDetectedCached("codex")
-            let claude = binaryDetectedCached("claude")
-            let gemini = binaryDetectedCached("gemini")
-            let opencode = binaryDetectedCached("opencode")
-            let copilot = binaryDetectedCached("copilot")
+            // Cold start: avoid spawning the user's login shell (can be slow with heavy rc files).
+            // Prefer filesystem availability checks and fall back to a fast PATH/common-locations probe.
+            let codex = isAvailable(.codex, defaults: defaults)
+            let claude = isAvailable(.claude, defaults: defaults)
+            let gemini = isAvailable(.gemini, defaults: defaults)
+            let opencode = isAvailable(.opencode, defaults: defaults)
+            let copilot = isAvailable(.copilot, defaults: defaults)
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
@@ -94,8 +102,6 @@ enum AgentEnablement {
     }
 
     static func isAvailable(_ source: SessionSource, defaults: UserDefaults = .standard) -> Bool {
-        if binaryInstalled(for: source) { return true }
-
         let fm = FileManager.default
         var isDir: ObjCBool = false
         let root: URL
@@ -116,7 +122,8 @@ enum AgentEnablement {
             let custom = defaults.string(forKey: PreferencesKey.Paths.copilotSessionsRootOverride) ?? ""
             root = CopilotSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         }
-        return fm.fileExists(atPath: root.path, isDirectory: &isDir) && isDir.boolValue
+        if fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue { return true }
+        return binaryInstalled(for: source)
     }
 
     static func binaryInstalled(for source: SessionSource) -> Bool {
@@ -152,15 +159,26 @@ enum AgentEnablement {
     }
 
     private static func binaryDetected(_ command: String) -> Bool {
-        let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-lic", "command -v \(command) >/dev/null 2>&1"]
-        do {
-            try process.run()
-        } catch {
-            return false
+        // Fast path: common install locations (Homebrew + system)
+        for dir in fastBinarySearchPaths {
+            let path = URL(fileURLWithPath: dir, isDirectory: true).appendingPathComponent(command, isDirectory: false).path
+            if FileManager.default.isExecutableFile(atPath: path) { return true }
         }
+
+        // Next: scan current process PATH (no shell spawn).
+        if let path = ProcessInfo.processInfo.environment["PATH"], !path.isEmpty {
+            for component in path.split(separator: ":") {
+                let candidate = URL(fileURLWithPath: String(component), isDirectory: true)
+                    .appendingPathComponent(command, isDirectory: false).path
+                if FileManager.default.isExecutableFile(atPath: candidate) { return true }
+            }
+        }
+
+        // Last resort: /usr/bin/which (still avoids login shell).
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = [command]
+        do { try process.run() } catch { return false }
         process.waitUntilExit()
         return process.terminationStatus == 0
     }

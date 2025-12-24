@@ -54,6 +54,15 @@ final class SessionArchiveManager: ObservableObject {
 
     @Published private(set) var infoByKey: [String: SessionArchiveInfo] = [:]
 
+    private enum LogRotation {
+        static let maxBytes: Int64 = 1_000_000 // ~1 MB
+        static let backupsToKeep: Int = 2
+    }
+
+    private enum TempCleanup {
+        static let minAgeSeconds: TimeInterval = 24 * 60 * 60 // 24h
+    }
+
     // Pinning is a user action; keep the queue responsive.
     private let ioQueue = DispatchQueue(label: "AgentSessions.SessionArchiveManager.io", qos: .userInitiated)
     private var timer: DispatchSourceTimer?
@@ -66,6 +75,7 @@ final class SessionArchiveManager: ObservableObject {
         // Eagerly warm cache for UI.
         ioQueue.async { [weak self] in
             self?.reloadCache()
+            self?.cleanupOrphanedTempDirs()
         }
         startPeriodicSync()
     }
@@ -871,6 +881,7 @@ final class SessionArchiveManager: ObservableObject {
     private func log(_ message: String) {
         let fm = FileManager.default
         let logURL = archivesRoot().appendingPathComponent("archive.log", isDirectory: false)
+        rotateArchiveLogIfNeeded(logURL: logURL)
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let ts = formatter.string(from: Date())
@@ -887,6 +898,67 @@ final class SessionArchiveManager: ObservableObject {
         } else {
             try? fm.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? data.write(to: logURL, options: .atomic)
+        }
+    }
+
+    private func rotateArchiveLogIfNeeded(logURL: URL) {
+        let fm = FileManager.default
+        guard let attrs = try? fm.attributesOfItem(atPath: logURL.path),
+              let size = attrs[.size] as? NSNumber else {
+            return
+        }
+        if size.int64Value < LogRotation.maxBytes { return }
+
+        // Keep a small number of backups: archive.log.1, archive.log.2, ...
+        let parent = logURL.deletingLastPathComponent()
+        let base = logURL.lastPathComponent
+
+        // Remove the oldest backup first (best-effort).
+        if LogRotation.backupsToKeep >= 1 {
+            let oldest = parent.appendingPathComponent("\(base).\(LogRotation.backupsToKeep)", isDirectory: false)
+            try? fm.removeItem(at: oldest)
+        }
+
+        // Shift backups down: .(n-1) -> .n
+        if LogRotation.backupsToKeep >= 2 {
+            for i in stride(from: LogRotation.backupsToKeep - 1, through: 1, by: -1) {
+                let from = parent.appendingPathComponent("\(base).\(i)", isDirectory: false)
+                let to = parent.appendingPathComponent("\(base).\(i + 1)", isDirectory: false)
+                if fm.fileExists(atPath: from.path) {
+                    try? fm.removeItem(at: to)
+                    try? fm.moveItem(at: from, to: to)
+                }
+            }
+        }
+
+        // Move current log to .1
+        let first = parent.appendingPathComponent("\(base).1", isDirectory: false)
+        try? fm.removeItem(at: first)
+        try? fm.moveItem(at: logURL, to: first)
+    }
+
+    private func cleanupOrphanedTempDirs() {
+        let fm = FileManager.default
+        let root = archivesRoot()
+        let cutoff = Date().addingTimeInterval(-TempCleanup.minAgeSeconds)
+
+        // Ensure the root exists so enumeration is stable.
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        for source in SessionSource.allCases {
+            let dir = root.appendingPathComponent(source.rawValue, isDirectory: true)
+            guard let children = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]) else {
+                continue
+            }
+
+            for url in children {
+                let name = url.lastPathComponent
+                guard name.hasPrefix(".staging-") || name.hasPrefix(".backup-") else { continue }
+                let rv = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))
+                let mtime = rv?.contentModificationDate ?? .distantPast
+                guard mtime < cutoff else { continue }
+                try? fm.removeItem(at: url)
+            }
         }
     }
 
