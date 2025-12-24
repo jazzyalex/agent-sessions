@@ -148,30 +148,30 @@ struct UnifiedSessionsView: View {
         .preferredColorScheme(preferredColorScheme)
         .toolbar { toolbarContent }
         .overlay(alignment: .topTrailing) {
-            if showAnalyticsWarmupNotice {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Analytics is warming up… try again in ~1–2 minutes")
-                        .font(.footnote)
-                }
-                .padding(10)
-                .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .padding(.top, 8)
-                .padding(.trailing, 8)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-            if showAgentEnablementNotice {
-                Text("Showing active agents only")
-                    .font(.footnote)
+            VStack(alignment: .trailing, spacing: 8) {
+                if showAnalyticsWarmupNotice {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Analytics is warming up… try again in ~1–2 minutes")
+                            .font(.footnote)
+                    }
                     .padding(10)
                     .background(.regularMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.top, 8)
-                    .padding(.trailing, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if showAgentEnablementNotice {
+                    Text("Showing active agents only")
+                        .font(.footnote)
+                        .padding(10)
+                        .background(.regularMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
+            .padding(.top, 8)
+            .padding(.trailing, 8)
         }
         .onAppear {
             if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }
@@ -207,9 +207,6 @@ struct UnifiedSessionsView: View {
             } else if s.source == .copilot, let exist = copilotIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
                 copilotIndexer.reloadSession(id: id)
             }
-        }
-        .onAppear {
-            if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }
         }
         .onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }

@@ -455,7 +455,9 @@ final class UnifiedSessionIndexer: ObservableObject {
                         }
                     } catch {
                         // Silent failure: analytics are additive and optional for core UX.
+                        #if DEBUG
                         print("[Indexing] Analytics refresh failed: \(error)")
+                        #endif
                     }
                 }
             }

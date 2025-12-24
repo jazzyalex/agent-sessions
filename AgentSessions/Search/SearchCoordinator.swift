@@ -198,9 +198,18 @@ final class SearchCoordinator: ObservableObject {
                     // Optionally persist parsed session back to indexers for accuracy outside search
                     if !FeatureFlags.disableSessionUpdatesDuringSearch {
                         await MainActor.run {
-                            if parsed.source == .codex { self.codexIndexer.updateSession(parsed) }
-                            else if parsed.source == .claude { self.claudeIndexer.updateSession(parsed) }
-                            else { self.geminiIndexer.updateSession(parsed) }
+                            switch parsed.source {
+                            case .codex:
+                                self.codexIndexer.updateSession(parsed)
+                            case .claude:
+                                self.claudeIndexer.updateSession(parsed)
+                            case .gemini:
+                                self.geminiIndexer.updateSession(parsed)
+                            case .opencode:
+                                self.opencodeIndexer.updateSession(parsed)
+                            case .copilot:
+                                self.copilotIndexer.updateSession(parsed)
+                            }
                         }
                     }
 
@@ -292,6 +301,7 @@ final class SearchCoordinator: ObservableObject {
                             else if parsed.source == .claude { self.claudeIndexer.updateSession(parsed) }
                             else if parsed.source == .gemini { self.geminiIndexer.updateSession(parsed) }
                             else if parsed.source == .opencode { self.opencodeIndexer.updateSession(parsed) }
+                            else if parsed.source == .copilot { self.copilotIndexer.updateSession(parsed) }
                         }
                     }
                 }

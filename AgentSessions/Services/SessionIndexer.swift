@@ -309,7 +309,7 @@ final class SessionIndexer: ObservableObject {
         reloadLock.lock()
         if reloadingSessionIDs.contains(id) {
             reloadLock.unlock()
-            print("⏭️ Skip reload: session \(id.prefix(8)) already reloading")
+            DBG("⏭️ Skip reload: session \(id.prefix(8)) already reloading")
             return
         }
         reloadingSessionIDs.insert(id)
@@ -328,7 +328,7 @@ final class SessionIndexer: ObservableObject {
 
             guard let existing = self.allSessions.first(where: { $0.id == id }),
                   existing.events.isEmpty else {
-                print("⏭️ Skip reload: session already loaded or not found")
+                DBG("⏭️ Skip reload: session already loaded or not found")
                 // Clear loading state on early exit
                 DispatchQueue.main.async {
                     if self.loadingSessionID == id {
@@ -340,8 +340,8 @@ final class SessionIndexer: ObservableObject {
             }
 
             let filename = existing.filePath.components(separatedBy: "/").last ?? "?"
-            print("🔄 Reloading lightweight session: \(filename)")
-            print("  📂 Path: \(existing.filePath)")
+            DBG("🔄 Reloading lightweight session: \(filename)")
+            DBG("  📂 Path: \(existing.filePath)")
 
             // Show loading state immediately for better responsiveness
             DispatchQueue.main.async {
@@ -352,11 +352,11 @@ final class SessionIndexer: ObservableObject {
             let url = URL(fileURLWithPath: existing.filePath)
             let startTime = Date()
 
-            print("  🚀 Starting parseFileFull...")
+            DBG("  🚀 Starting parseFileFull...")
             // Force full parse by calling parseFile directly (skip lightweight check)
             if let fullSession = self.parseFileFull(at: url, forcedID: id) {
                 let elapsed = Date().timeIntervalSince(startTime)
-                print("  ⏱️ Parse took \(String(format: "%.1f", elapsed))s - events=\(fullSession.events.count)")
+                DBG("  ⏱️ Parse took \(String(format: "%.1f", elapsed))s - events=\(fullSession.events.count)")
 
                 DispatchQueue.main.async {
                     // Replace in allSessions
@@ -364,7 +364,7 @@ final class SessionIndexer: ObservableObject {
                         var updated = self.allSessions
                         updated[idx] = fullSession
                         self.allSessions = updated
-                        print("✅ Reloaded: \(filename) events=\(fullSession.events.count) nonMeta=\(fullSession.nonMetaCount) msgCount=\(fullSession.messageCount)")
+                        DBG("✅ Reloaded: \(filename) events=\(fullSession.events.count) nonMeta=\(fullSession.nonMetaCount) msgCount=\(fullSession.messageCount)")
 
                         // Update transcript cache for accurate search
                         let cache = self.transcriptCache
@@ -386,7 +386,7 @@ final class SessionIndexer: ObservableObject {
                             }
                         }
                     } else {
-                        print("❌ Failed to find session in allSessions after reload")
+                        DBG("❌ Failed to find session in allSessions after reload")
                         // Clear loading state on failure
                         if self.loadingSessionID == id {
                             self.isLoadingSession = false
@@ -395,7 +395,7 @@ final class SessionIndexer: ObservableObject {
                     }
                 }
             } else {
-                print("❌ parseFileFull returned nil for \(filename)")
+                DBG("❌ parseFileFull returned nil for \(filename)")
                 // Clear loading state on failure
                 DispatchQueue.main.async {
                     if self.loadingSessionID == id {
@@ -411,11 +411,11 @@ final class SessionIndexer: ObservableObject {
     func parseAllSessionsFull(progress: @escaping (Int, Int) -> Void) async {
         let lightweightSessions = allSessions.filter { $0.events.isEmpty }
         guard !lightweightSessions.isEmpty else {
-            print("ℹ️ No lightweight sessions to parse")
+            DBG("ℹ️ No lightweight sessions to parse")
             return
         }
 
-        print("🔍 Starting full parse of \(lightweightSessions.count) lightweight Codex sessions")
+        DBG("🔍 Starting full parse of \(lightweightSessions.count) lightweight Codex sessions")
 
         for (index, session) in lightweightSessions.enumerated() {
             let url = URL(fileURLWithPath: session.filePath)
@@ -454,7 +454,7 @@ final class SessionIndexer: ObservableObject {
             }
         }
 
-        print("✅ Completed parsing \(lightweightSessions.count) lightweight Codex sessions")
+        DBG("✅ Completed parsing \(lightweightSessions.count) lightweight Codex sessions")
     }
 
     // Trigger recompute of filtered sessions using current filters (debounced and off main thread).
@@ -503,7 +503,7 @@ final class SessionIndexer: ObservableObject {
     func refresh() {
         if !AgentEnablement.isEnabled(.codex) { return }
         let root = sessionsRoot()
-        print("\n🔄 INDEXING START: root=\(root.path)")
+        DBG("\n🔄 INDEXING START: root=\(root.path)")
         LaunchProfiler.log("Codex.refresh: start")
 
         let token = UUID()
@@ -595,7 +595,7 @@ final class SessionIndexer: ObservableObject {
             // Filter out files that are already indexed
             let newFiles = found.filter { !existingPaths.contains($0.path) }
 
-            print("📁 Found \(found.count) total files, \(newFiles.count) are new (not in DB)")
+            DBG("📁 Found \(found.count) total files, \(newFiles.count) are new (not in DB)")
             LaunchProfiler.log("Codex.refresh: file enumeration done (found=\(found.count), new=\(newFiles.count))")
 
             let sortedFiles = newFiles.sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
@@ -649,9 +649,9 @@ final class SessionIndexer: ObservableObject {
                 let lightCount = newSessions.filter { $0.events.isEmpty }.count
                 let heavyCount = newSessions.count - lightCount
                 if !existingSessions.isEmpty {
-                    print("✅ INDEXING DONE: total=\(allParsedSessions.count) (existing=\(existingSessions.count), new=\(newSessions.count), new_lightweight=\(lightCount), new_fullParse=\(heavyCount))")
+                    DBG("✅ INDEXING DONE: total=\(allParsedSessions.count) (existing=\(existingSessions.count), new=\(newSessions.count), new_lightweight=\(lightCount), new_fullParse=\(heavyCount))")
                 } else {
-                    print("✅ INDEXING DONE: total=\(allParsedSessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
+                    DBG("✅ INDEXING DONE: total=\(allParsedSessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
                 }
 
                 // Start background transcript indexing for accurate search (delta-based).
@@ -702,7 +702,7 @@ final class SessionIndexer: ObservableObject {
                 // Show lightweight sessions details (only for newly parsed ones)
                 let lightSessions = newSessions.filter { $0.events.isEmpty }
                 for s in lightSessions {
-                    print("  💡 Lightweight: \(s.filePath.components(separatedBy: "/").last ?? "?") msgCount=\(s.messageCount)")
+                    DBG("  💡 Lightweight: \(s.filePath.components(separatedBy: "/").last ?? "?") msgCount=\(s.messageCount)")
                 }
 
                 // Ensure final progress update is shown
@@ -715,11 +715,11 @@ final class SessionIndexer: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     let filteredCount = self.sessions.count
                     let lightInFiltered = self.sessions.filter { $0.events.isEmpty }.count
-                    print("📊 AFTER FILTERS: showing=\(filteredCount) (lightweight=\(lightInFiltered))")
+                    DBG("📊 AFTER FILTERS: showing=\(filteredCount) (lightweight=\(lightInFiltered))")
 
                     if lightInFiltered == 0 && lightCount > 0 {
-                        print("⚠️ WARNING: All lightweight sessions were filtered out!")
-                        print("   hideZeroMessageSessionsPref=\(self.hideZeroMessageSessionsPref)")
+                        DBG("⚠️ WARNING: All lightweight sessions were filtered out!")
+                        DBG("   hideZeroMessageSessionsPref=\(self.hideZeroMessageSessionsPref)")
                     }
                 }
             }
@@ -747,7 +747,7 @@ final class SessionIndexer: ObservableObject {
         // This avoids full JSONL scans during Stage 1 and keeps launch bounded
         // even when many sessions are present.
         if let light = Self.lightweightSession(from: url, size: size, mtime: mtime) {
-            print("✅ LIGHTWEIGHT: \(url.lastPathComponent) estEvents=\(light.eventCount) messageCount=\(light.messageCount)")
+            DBG("✅ LIGHTWEIGHT: \(url.lastPathComponent) estEvents=\(light.eventCount) messageCount=\(light.messageCount)")
             return light
         }
 
@@ -757,17 +757,17 @@ final class SessionIndexer: ObservableObject {
 
     // Full parse (no lightweight check)
     func parseFileFull(at url: URL, forcedID: String? = nil) -> Session? {
-        print("    📖 parseFileFull: Getting file attrs...")
+        DBG("    📖 parseFileFull: Getting file attrs...")
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
-        print("    📖 parseFileFull: File size = \(size) bytes")
+        DBG("    📖 parseFileFull: File size = \(size) bytes")
 
-        print("    📖 parseFileFull: Creating JSONLReader...")
+        DBG("    📖 parseFileFull: Creating JSONLReader...")
         let reader = JSONLReader(url: url)
         var events: [SessionEvent] = []
         var modelSeen: String? = nil
         var idx = 0
-        print("    📖 parseFileFull: Starting forEachLine...")
+        DBG("    📖 parseFileFull: Starting forEachLine...")
         do {
             try reader.forEachLine { rawLine in
                 idx += 1
@@ -804,7 +804,7 @@ final class SessionIndexer: ObservableObject {
                               events: events)
 
         if size > 5_000_000 {  // Log full parse of files >5MB
-            print("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
+            DBG("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
         }
 
         return session
@@ -927,7 +927,7 @@ final class SessionIndexer: ObservableObject {
         let avgLineLen = max(256, headBytesRead / max(newlineCount, 1))  // Min 256 bytes per line
         let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
 
-        print("  📊 Lightweight estimation: headBytes=\(headBytesRead) newlines=\(newlineCount) avgLineLen=\(avgLineLen) estEvents=\(estEvents)")
+        DBG("  📊 Lightweight estimation: headBytes=\(headBytesRead) newlines=\(newlineCount) avgLineLen=\(avgLineLen) estEvents=\(estEvents)")
 
         let id = Self.hash(path: url.path)
         // Use sample events for title/cwd extraction, then create lightweight session

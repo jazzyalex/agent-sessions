@@ -113,7 +113,9 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol {
         }
 
         let root = discovery.sessionsRoot()
+        #if DEBUG
         print("\n🟡 COPILOT INDEXING START: root=\(root.path)")
+        #endif
         LaunchProfiler.log("Copilot.refresh: start")
 
         let token = UUID()
@@ -250,7 +252,7 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol {
         }
 
         for (index, session) in lightweightSessions.enumerated() {
-            guard let url = URL(string: "file://\(session.filePath)") else { continue }
+            let url = URL(fileURLWithPath: session.filePath)
             await MainActor.run { progress(index + 1, lightweightSessions.count) }
 
             let fullSession = await Task.detached(priority: .userInitiated) {

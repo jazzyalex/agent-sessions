@@ -109,6 +109,7 @@ final class OpenCodeSessionIndexer: ObservableObject {
         let root = discovery.sessionsRoot()
         let storageRoot = (root.lastPathComponent == "session") ? root.deletingLastPathComponent() : root
         let migrationURL = storageRoot.appendingPathComponent("migration", isDirectory: false)
+        #if DEBUG
         if let data = try? Data(contentsOf: migrationURL),
            let str = String(data: data, encoding: .utf8) {
             let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -119,6 +120,7 @@ final class OpenCodeSessionIndexer: ObservableObject {
         }
 
         print("\n🟣 OPENCode INDEXING START: root=\(root.path)")
+        #endif
         LaunchProfiler.log("OpenCode.refresh: start")
 
         let token = UUID()

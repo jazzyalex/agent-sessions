@@ -14,7 +14,9 @@ final class ClaudeSessionParser {
         // Prefer lightweight metadata-first parsing for all files at launch.
         // This keeps Claude Stage 1 bounded even with many sessions.
         if let light = lightweightSession(from: url, size: size, mtime: mtime) {
+            #if DEBUG
             print("✅ LIGHTWEIGHT CLAUDE: \(url.lastPathComponent) estEvents=\(light.eventCount) messageCount=\(light.messageCount)")
+            #endif
             return light
         }
 
@@ -74,7 +76,9 @@ final class ClaudeSessionParser {
                 events.append(contentsOf: parsed)
             }
         } catch {
+            #if DEBUG
             print("❌ Failed to read Claude session: \(error)")
+            #endif
             return nil
         }
 
