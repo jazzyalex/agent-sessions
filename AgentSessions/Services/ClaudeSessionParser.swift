@@ -572,114 +572,135 @@ final class ClaudeSessionParser {
 
     /// Build a lightweight Session by scanning only head/tail slices
     private static func lightweightSession(from url: URL, size: Int, mtime: Date) -> Session? {
-        let headBytes = 256 * 1024
+        let headBytesInitial = 256 * 1024
+        let headBytesMax = 2 * 1024 * 1024
         let tailBytes = 256 * 1024
-        guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? fh.close() }
-
-        // Read head slice
-        let headData = try? fh.read(upToCount: headBytes) ?? Data()
-
-        // Read tail slice
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? size
-        var tailData: Data = Data()
-        if fileSize > tailBytes {
-            let offset = UInt64(fileSize - tailBytes)
-            try? fh.seek(toOffset: offset)
-            tailData = (try? fh.readToEnd()) ?? Data()
+        func looksLikeClaudeLocalCommandTitle(_ text: String) -> Bool {
+            let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty { return false }
+            if t.hasPrefix("Caveat:") { return true }
+            if t.contains("<local-command-") { return true }
+            if t.contains("<command-name>") { return true }
+            if t.contains("<command-message>") { return true }
+            if t.contains("<command-args>") { return true }
+            return false
         }
 
-        func lines(from data: Data, keepHead: Bool) -> [String] {
-            guard !data.isEmpty, let s = String(data: data, encoding: .utf8) else { return [] }
-            let parts = s.components(separatedBy: "\n")
-            if keepHead {
-                return Array(parts.prefix(300))
-            } else {
-                return Array(parts.suffix(300))
-            }
-        }
+        func build(headBytes: Int) -> Session? {
+            guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
+            defer { try? fh.close() }
 
-        let headLines = lines(from: headData ?? Data(), keepHead: true)
-        let tailLines = lines(from: tailData, keepHead: false)
+            // Read head slice
+            let headData = try? fh.read(upToCount: headBytes) ?? Data()
 
-        var sessionID: String?
-        var model: String?
-        var cwd: String?
-        var tmin: Date?
-        var tmax: Date?
-        var sampleCount = 0
-        var sampleEvents: [SessionEvent] = []
-
-        func ingest(_ rawLine: String) {
-            guard let data = rawLine.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return
+            // Read tail slice
+            let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? size
+            var tailData: Data = Data()
+            if fileSize > tailBytes {
+                let offset = UInt64(fileSize - tailBytes)
+                try? fh.seek(toOffset: offset)
+                tailData = (try? fh.readToEnd()) ?? Data()
             }
 
-            // Extract metadata
-            if sessionID == nil, let sid = obj["sessionId"] as? String {
-                sessionID = sid
-            }
-            if cwd == nil {
-                if let cwdVal = obj["cwd"] as? String, isValidPath(cwdVal) {
-                    cwd = cwdVal
-                } else if let projectVal = obj["project"] as? String, isValidPath(projectVal) {
-                    cwd = projectVal
+            func lines(from data: Data, keepHead: Bool) -> [String] {
+                guard !data.isEmpty, let s = String(data: data, encoding: .utf8) else { return [] }
+                let parts = s.components(separatedBy: "\n")
+                if keepHead {
+                    return Array(parts.prefix(300))
+                } else {
+                    return Array(parts.suffix(300))
                 }
             }
-            if model == nil, let ver = obj["version"] as? String {
-                model = "Claude Code \(ver)"
+
+            let headLines = lines(from: headData ?? Data(), keepHead: true)
+            let tailLines = lines(from: tailData, keepHead: false)
+
+            var model: String?
+            var cwd: String?
+            var tmin: Date?
+            var tmax: Date?
+            var sampleCount = 0
+            var sampleEvents: [SessionEvent] = []
+
+            func ingest(_ rawLine: String) {
+                guard let data = rawLine.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    return
+                }
+
+                // Extract metadata
+                if cwd == nil {
+                    if let cwdVal = obj["cwd"] as? String, isValidPath(cwdVal) {
+                        cwd = cwdVal
+                    } else if let projectVal = obj["project"] as? String, isValidPath(projectVal) {
+                        cwd = projectVal
+                    }
+                }
+                if model == nil, let ver = obj["version"] as? String {
+                    model = "Claude Code \(ver)"
+                }
+
+                // Extract timestamp
+                if let ts = extractTimestamp(from: obj) {
+                    if tmin == nil || ts < tmin! { tmin = ts }
+                    if tmax == nil || ts > tmax! { tmax = ts }
+                }
+
+                // Create sample event for title extraction
+                let event = parseLine(obj, eventID: "light-\(sampleCount)")
+                sampleEvents.append(event)
+                sampleCount += 1
             }
 
-            // Extract timestamp
-            if let ts = extractTimestamp(from: obj) {
-                if tmin == nil || ts < tmin! { tmin = ts }
-                if tmax == nil || ts > tmax! { tmax = ts }
-            }
+            headLines.forEach(ingest)
+            tailLines.forEach(ingest)
 
-            // Create sample event for title extraction
-            let event = parseLine(obj, eventID: "light-\(sampleCount)")
-            sampleEvents.append(event)
-            sampleCount += 1
+            // Estimate event count
+            let headBytesRead = headData?.count ?? 1
+            let newlineCount = headData?.filter { $0 == 0x0a }.count ?? 1
+            let avgLineLen = max(256, headBytesRead / max(newlineCount, 1))
+            let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
+
+            // Extract title from sample events (temp session; ID not used downstream for UI)
+            let tempSession = Session(id: hash(path: url.path),
+                                      source: .claude,
+                                      startTime: tmin,
+                                      endTime: tmax,
+                                      model: model,
+                                      filePath: url.path,
+                                      fileSizeBytes: size,
+                                      eventCount: estEvents,
+                                      events: sampleEvents,
+                                      cwd: cwd,
+                                      repoName: nil,
+                                      lightweightTitle: nil)
+            let title = tempSession.title
+
+            // Create final lightweight session with empty events
+            return Session(id: hash(path: url.path),
+                           source: .claude,
+                           startTime: tmin ?? mtime,
+                           endTime: tmax ?? mtime,
+                           model: model,
+                           filePath: url.path,
+                           fileSizeBytes: size,
+                           eventCount: estEvents,
+                           events: [],
+                           cwd: cwd,
+                           repoName: nil,
+                           lightweightTitle: title)
         }
 
-        headLines.forEach(ingest)
-        tailLines.forEach(ingest)
-
-        // Estimate event count
-        let headBytesRead = headData?.count ?? 1
-        let newlineCount = headData?.filter { $0 == 0x0a }.count ?? 1
-        let avgLineLen = max(256, headBytesRead / max(newlineCount, 1))
-        let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
-
-        // Extract title from sample events (temp session; ID not used downstream for UI)
-        let tempSession = Session(id: hash(path: url.path),
-                                   source: .claude,
-                                   startTime: tmin,
-                                   endTime: tmax,
-                                   model: model,
-                                   filePath: url.path,
-                                   fileSizeBytes: size,
-                                   eventCount: estEvents,
-                                   events: sampleEvents,
-                                   cwd: cwd,
-                                   repoName: nil,
-                                   lightweightTitle: nil)
-        let title = tempSession.title
-
-        // Create final lightweight session with empty events
-        return Session(id: hash(path: url.path),
-                       source: .claude,
-                       startTime: tmin ?? mtime,
-                       endTime: tmax ?? mtime,
-                       model: model,
-                       filePath: url.path,
-                       fileSizeBytes: size,
-                       eventCount: estEvents,
-                       events: [],
-                       cwd: cwd,
-                       repoName: nil,
-                       lightweightTitle: title)
+        guard let initial = build(headBytes: headBytesInitial) else { return nil }
+        guard headBytesInitial < headBytesMax else { return initial }
+        if let t = initial.lightweightTitle, looksLikeClaudeLocalCommandTitle(t) {
+            if let expanded = build(headBytes: headBytesMax),
+               let expTitle = expanded.lightweightTitle,
+               !looksLikeClaudeLocalCommandTitle(expTitle) {
+                return expanded
+            }
+        }
+        return initial
     }
 
     // MARK: - Helper Methods

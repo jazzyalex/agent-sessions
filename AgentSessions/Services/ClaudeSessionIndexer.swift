@@ -313,7 +313,62 @@ final class ClaudeSessionIndexer: ObservableObject {
         let repo = SessionMetaRepository(db: db)
         let list = try await repo.fetchSessions(for: .claude)
         guard !list.isEmpty else { return nil }
-        return list.sorted { $0.modifiedAt > $1.modifiedAt }
+        let sorted = list.sorted { $0.modifiedAt > $1.modifiedAt }
+        return await Self.fixupHydratedClaudeTitlesIfNeeded(sorted, db: db, limit: 200)
+    }
+
+    private static func fixupHydratedClaudeTitlesIfNeeded(_ sessions: [Session], db: IndexDB, limit: Int) async -> [Session] {
+        var out = sessions
+        let cap = min(limit, out.count)
+        guard cap > 0 else { return out }
+
+        for i in 0..<cap {
+            let current = out[i]
+            guard current.source == .claude, current.events.isEmpty else { continue }
+            guard let existing = current.lightweightTitle, Self.looksLikeClaudeLocalCommandTitle(existing) else { continue }
+            let url = URL(fileURLWithPath: current.filePath)
+            guard let reparsed = ClaudeSessionParser.parseFile(at: url),
+                  let newTitleRaw = reparsed.lightweightTitle else { continue }
+
+            let newTitle = newTitleRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !newTitle.isEmpty, !Self.looksLikeClaudeLocalCommandTitle(newTitle) else { continue }
+            if newTitle == existing { continue }
+
+            out[i] = Session(
+                id: current.id,
+                source: current.source,
+                startTime: current.startTime,
+                endTime: current.endTime,
+                model: current.model,
+                filePath: current.filePath,
+                fileSizeBytes: current.fileSizeBytes,
+                eventCount: current.eventCount,
+                events: current.events,
+                cwd: current.lightweightCwd,
+                repoName: nil,
+                lightweightTitle: newTitle,
+                lightweightCommands: current.lightweightCommands
+            )
+
+            do {
+                try await db.updateSessionMetaTitle(sessionID: current.id, source: SessionSource.claude.rawValue, title: newTitle)
+            } catch {
+                // Non-fatal: leave DB stale; in-memory list is still improved for this run.
+            }
+        }
+
+        return out
+    }
+
+    private static func looksLikeClaudeLocalCommandTitle(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return false }
+        if t.hasPrefix("Caveat:") { return true }
+        if t.contains("<local-command-") { return true }
+        if t.contains("<command-name>") { return true }
+        if t.contains("<command-message>") { return true }
+        if t.contains("<command-args>") { return true }
+        return false
     }
 
     func applySearch() {

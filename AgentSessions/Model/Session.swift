@@ -98,9 +98,27 @@ public struct Session: Identifiable, Equatable, Codable {
     // Derived human-friendly title for the session row.
     // Use improved Codex-style filtering with fallbacks for robustness
     public var title: String {
-        // 0) Lightweight session: use extracted title
+        let defaults = UserDefaults.standard
+        let skipPreamble = (defaults.object(forKey: "SkipAgentsPreamble") == nil)
+            ? true
+            : defaults.bool(forKey: "SkipAgentsPreamble")
+
+        // 0) Lightweight session: use extracted title (but avoid preamble-only garbage)
         if events.isEmpty, let lightTitle = lightweightTitle, !lightTitle.isEmpty {
-            return lightTitle
+            let trimmed = lightTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if skipPreamble {
+                if source == .claude, let tail = Self.claudeLocalCommandPromptTail(from: trimmed) {
+                    let collapsed = tail.collapsedWhitespace()
+                    if !collapsed.isEmpty { return collapsed }
+                }
+                if source == .claude, Self.looksLikeClaudeLocalCommandTranscript(trimmed) {
+                    return "No prompt"
+                }
+                if Self.looksLikeAgentsPreamble(trimmed) {
+                    return "No prompt"
+                }
+            }
+            return trimmed
         }
 
         // 1) Use Codex-style filtered title (best quality)
@@ -109,10 +127,6 @@ public struct Session: Identifiable, Equatable, Codable {
         }
 
         // 2) Fallback: first non-empty user line, skipping preamble if pref enabled (default ON)
-        let defaults = UserDefaults.standard
-        let skipPreamble = (defaults.object(forKey: "SkipAgentsPreamble") == nil)
-            ? true
-            : defaults.bool(forKey: "SkipAgentsPreamble")
         for e in events where e.kind == .user {
             guard let raw = e.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
             var candidate = raw

@@ -579,4 +579,33 @@ final class SessionParserTests: XCTestCase {
                         events: [e1, e2])
         XCTAssertEqual(s.title, "Actual user prompt")
     }
+
+    func testClaudeLightweightTitleDoesNotExposeLocalCommandTranscript() {
+        let defaults = UserDefaults.standard
+        let key = "SkipAgentsPreamble"
+        let oldValue = defaults.object(forKey: key)
+        defer {
+            if let oldValue {
+                defaults.set(oldValue, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+        defaults.removeObject(forKey: key) // default ON
+
+        let s = Session(id: "sid",
+                        source: .claude,
+                        startTime: nil,
+                        endTime: nil,
+                        model: nil,
+                        filePath: "/tmp/claude.jsonl",
+                        fileSizeBytes: nil,
+                        eventCount: 0,
+                        events: [],
+                        cwd: nil,
+                        repoName: nil,
+                        lightweightTitle: "<local-command-stdout></local-command-stdout>",
+                        lightweightCommands: nil)
+        XCTAssertFalse(s.title.contains("<local-command-"))
+    }
 }
