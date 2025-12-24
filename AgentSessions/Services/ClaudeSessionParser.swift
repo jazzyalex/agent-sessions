@@ -692,7 +692,6 @@ final class ClaudeSessionParser {
         }
 
         guard let initial = build(headBytes: headBytesInitial) else { return nil }
-        guard headBytesInitial < headBytesMax else { return initial }
         if let t = initial.lightweightTitle, looksLikeClaudeLocalCommandTitle(t) {
             if let expanded = build(headBytes: headBytesMax),
                let expTitle = expanded.lightweightTitle,
