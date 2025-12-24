@@ -75,7 +75,7 @@ actor UpdateChecker {
             defaults.updateErrorCount = 0
 
             // Compare versions
-            guard let remoteVersion = SemanticVersion(string: release.tag_name),
+            guard let remoteVersion = SemanticVersion(stableString: release.tag_name),
                   let localVersion = SemanticVersion(string: currentVersion) else {
                 updateHandler(.error("Invalid version format"))
                 return

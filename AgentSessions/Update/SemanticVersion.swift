@@ -21,6 +21,26 @@ struct SemanticVersion: Comparable, Equatable, CustomStringConvertible {
         self.patch = parts.count == 3 ? parts[2] : 0
     }
 
+    /// Strict parser for stable versions only (digits and dots, with optional leading "v").
+    /// - Accepts: "1.2", "1.2.3", "v1.2.3"
+    /// - Rejects: "1.2.3-beta1", "2.9.0x"
+    init?(stableString: String) {
+        let normalized = stableString.hasPrefix("v") ? String(stableString.dropFirst()) : stableString
+        let rawParts = normalized.split(separator: ".")
+        guard rawParts.count >= 2 && rawParts.count <= 3 else { return nil }
+
+        var ints: [Int] = []
+        ints.reserveCapacity(rawParts.count)
+        for part in rawParts {
+            guard !part.isEmpty, part.allSatisfy({ $0.isNumber }), let value = Int(part) else { return nil }
+            ints.append(value)
+        }
+
+        self.major = ints[0]
+        self.minor = ints[1]
+        self.patch = ints.count == 3 ? ints[2] : 0
+    }
+
     init(major: Int, minor: Int, patch: Int) {
         self.major = major
         self.minor = minor

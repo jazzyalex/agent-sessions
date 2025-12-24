@@ -35,27 +35,34 @@ struct LoadingAnimationView: View {
         // Never block mouse/trackpad interaction for underlying content.
         // Loading animations are visual-only; users must be able to keep clicking in lists/transcripts.
         .allowsHitTesting(false)
-        .onAppear {
-            startFading()
+        .task(id: words.count) {
+            await startFadingLoop()
         }
     }
 
-    private func startFading() {
-        // Fade in
-        withAnimation(.easeInOut(duration: 0.8)) {
-            opacity = 0.4
+    private func startFadingLoop() async {
+        await MainActor.run {
+            currentWordIndex = 0
+            opacity = 0.0
         }
 
-        // After fade in, wait then fade out and cycle to next word
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            withAnimation(.easeInOut(duration: 0.6)) {
-                opacity = 0.0
+        while !Task.isCancelled {
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.8)) {
+                    opacity = 0.4
+                }
             }
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
 
-            // Switch to next word after fade out
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                currentWordIndex = (currentWordIndex + 1) % words.count
-                startFading()
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.6)) {
+                    opacity = 0.0
+                }
+            }
+            try? await Task.sleep(nanoseconds: 600_000_000)
+
+            await MainActor.run {
+                currentWordIndex = (currentWordIndex + 1) % max(words.count, 1)
             }
         }
     }
