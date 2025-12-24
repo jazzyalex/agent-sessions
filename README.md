@@ -9,7 +9,7 @@
 </td>
 <td>
 
- **Unified session browser for Codex CLI, Claude Code, Gemini CLI, and OpenCode (read‑only).**  
+ **Unified session browser for Codex CLI, Claude Code, Gemini CLI, GitHub Copilot CLI, and OpenCode.**
  Search, browse, and resume any past AI-coding session in a single local-first macOS app.
 
 </td>
@@ -17,7 +17,7 @@
 </table>
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.8.1/AgentSessions-2.8.1.dmg"><b>Download Agent Sessions 2.8.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.9/AgentSessions-2.9.dmg"><b>Download Agent Sessions 2.9 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,8 +32,8 @@
 
 ##  Overview
 
-Agent Sessions 2 brings **Codex CLI**, **Claude Code**, and **Gemini CLI** together in one interface.  
-Look up any past session — even the ancient ones `/resume` can’t show — or browse visually to find that perfect prompt or code snippet, then instantly copy or resume it.
+Agent Sessions 2 brings **Codex CLI**, **Claude Code**, **Gemini CLI**, and **GitHub Copilot CLI** together in one interface.
+Look up any past session — even the ancient ones `/resume` can't show — or browse visually to find that perfect prompt or code snippet, then instantly copy or resume it.
 
 <div align="center">
 
@@ -59,6 +59,27 @@ Local-first, open source, and built for terminal vibe warriors.
   <p style="margin:0 0 15px 0;"><em>Git Context Inspector showing repository state and historical diffs (Light Mode)</em></p>
   <img src="docs/assets/git-context-light.png" alt="Git Context Inspector showing repository state and historical diffs (Light Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px auto;display:block;"/>
 </div>
+
+---
+
+## What's New in 2.9 🎄
+
+### Onboarding Tours
+Interactive onboarding experience for new users and a skippable update tour for major releases. Learn key features through guided walkthroughs. Reopen anytime from **Help → Show Onboarding**.
+
+### GitHub Copilot CLI Support
+Full session browser integration for GitHub Copilot CLI sessions from `~/.copilot/session-state`. Includes dedicated Preferences pane and toolbar filter (⌘5).
+
+### Saved Sessions Window
+New dedicated **Saved Sessions** window (View menu) for managing archived sessions. Delete, reveal, and diagnose saved sessions with archive status tooltips.
+
+### Keyboard Navigation
+New **Option-Command-Arrow** shortcuts jump between user prompts, tool calls, and errors in transcripts for faster navigation.
+
+### Improvements
+- Reorganized Preferences with better CLI agent controls
+- Disabling an agent now hides it everywhere (toolbar, Analytics, menu bar) and stops background work
+- Improved Tab focus behavior for Find controls
 
 ---
 
@@ -138,7 +159,7 @@ No cloud uploads or telemetry — **read‑only by design.**
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.8.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.8.1/AgentSessions-2.8.1.dmg)
+1. [Download AgentSessions-2.9.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.9/AgentSessions-2.9.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew Tap
