@@ -708,6 +708,20 @@ actor IndexDB {
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
+    func updateSessionMetaTitle(sessionID: String, source: String, title: String?) throws {
+        let sql = "UPDATE session_meta SET title=? WHERE session_id=? AND source=?;"
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        if let title {
+            sqlite3_bind_text(stmt, 1, title, -1, SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(stmt, 1)
+        }
+        sqlite3_bind_text(stmt, 2, sessionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 3, source, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("update session_meta title") }
+    }
+
     func deleteSessionDays(sessionID: String, source: String) throws {
         let sql = "DELETE FROM session_days WHERE session_id=? AND source=?;"
         let stmt = try prepare(sql)
