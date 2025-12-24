@@ -626,15 +626,7 @@ struct UnifiedSessionsView: View {
         ToolbarItem(placement: .automatic) {
             Button(action: { unified.refresh() }) {
                 if unified.isIndexing || unified.isProcessingTranscripts {
-                    if AppEdition.isChristmasEdition29 && !reduceMotion {
-                        TimelineView(.animation) { context in
-                            let t = context.date.timeIntervalSinceReferenceDate
-                            Image(systemName: "snowflake")
-                                .rotationEffect(.degrees(t * 70))
-                        }
-                    } else {
-                        ProgressView()
-                    }
+                    ProgressView()
                 } else {
                     Image(systemName: "arrow.clockwise")
                 }
