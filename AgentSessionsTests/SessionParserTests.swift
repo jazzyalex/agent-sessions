@@ -538,4 +538,45 @@ final class SessionParserTests: XCTestCase {
                         events: [e1, e2])
         XCTAssertEqual(s.title, "Real prompt after model switch")
     }
+
+    func testClaudeTitleSkipsTranscriptOnlyUserFragments() {
+        let e1 = SessionEvent(
+            id: "e1",
+            timestamp: nil,
+            kind: .user,
+            role: "user",
+            text: "<local-command-stdout></local-command-stdout>",
+            toolName: nil,
+            toolInput: nil,
+            toolOutput: nil,
+            messageID: nil,
+            parentID: nil,
+            isDelta: false,
+            rawJSON: "{}"
+        )
+        let e2 = SessionEvent(
+            id: "e2",
+            timestamp: nil,
+            kind: .user,
+            role: "user",
+            text: "Actual user prompt",
+            toolName: nil,
+            toolInput: nil,
+            toolOutput: nil,
+            messageID: nil,
+            parentID: nil,
+            isDelta: false,
+            rawJSON: "{}"
+        )
+        let s = Session(id: "sid",
+                        source: .claude,
+                        startTime: nil,
+                        endTime: nil,
+                        model: nil,
+                        filePath: "/tmp/claude.jsonl",
+                        fileSizeBytes: nil,
+                        eventCount: 2,
+                        events: [e1, e2])
+        XCTAssertEqual(s.title, "Actual user prompt")
+    }
 }
