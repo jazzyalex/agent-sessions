@@ -196,7 +196,7 @@ extension PreferencesView {
                 }
 
                 Divider()
-                Toggle("Skip Agents.md lines when parsing", isOn: Binding(
+                Toggle("Skip preambles when parsing (Codex + Claude)", isOn: Binding(
                     get: {
                         let d = UserDefaults.standard
                         if d.object(forKey: PreferencesKey.Unified.skipAgentsPreamble) == nil { return true }
@@ -204,7 +204,7 @@ extension PreferencesView {
                     },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.skipAgentsPreamble); indexer.recomputeNow() }
                 ))
-                .help("Ignore agents.md-style preambles for titles and jump to the first prompt in transcripts (content remains visible)")
+                .help("Ignore Codex Agents.md instructions and Claude local-command caveats when deriving titles and jumping to the first prompt (content remains visible)")
             }
 
             // Usage Tracking moved to General pane
