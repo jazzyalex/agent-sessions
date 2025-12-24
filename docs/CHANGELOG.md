@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - **Saved Sessions**: Added a simple “Saved Sessions…” window (View menu) for listing and managing saved sessions.
 - **Saved Sessions**: Added a “Delete Saved Copies” action to remove local archive copies from the Saved Sessions window.
 - **Onboarding**: Added a full onboarding tour for fresh installs and a skippable update tour that appears once per major/minor update (starting in 2.9). Both can be reopened from Help.
+- **Onboarding**: Agent Sessions 2.9.0 includes a Christmas Edition onboarding skin and a festive loading greeting.
 - **Keyboard**: Improved Tab focus behavior so transcript Find controls don’t enter the Tab chain unless Find is explicitly opened, avoiding “stuck/beep” focus states.
 - **Keyboard**: Added Option-Command-Arrow shortcuts to jump between user prompts, tool calls/outputs, and errors in transcripts.
 - **Preferences**: Moved Agent Accents (Color/Monochrome) from General to Unified Window.

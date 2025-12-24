@@ -9,7 +9,14 @@ struct LoadingAnimationView: View {
     @State private var opacity: Double = 0.0
 
     // Cycle order: Agent Sessions → Codex CLI → Claude Code → Gemini CLI → OpenCode → GitHub Copilot CLI → repeat
-    private let words = ["Agent Sessions", "Codex CLI", "Claude Code", "Gemini CLI", "OpenCode", "GitHub Copilot CLI"]
+    private let baseWords = ["Agent Sessions", "Codex CLI", "Claude Code", "Gemini CLI", "OpenCode", "GitHub Copilot CLI"]
+
+    private var words: [String] {
+        if AppEdition.isChristmasEdition29 {
+            return ["Merry Christmas"] + baseWords
+        }
+        return baseWords
+    }
 
     var body: some View {
         ZStack {
