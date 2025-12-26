@@ -486,6 +486,91 @@ PYEOF
     # Copy appcast to docs/ for GitHub Pages
     cp "$UPDATES_DIR/appcast.xml" "$REPO_ROOT/docs/appcast.xml"
 
+    # ========================================================================
+    # APPCAST VALIDATION
+    # ========================================================================
+    echo "==> Validating generated appcast..."
+    APPCAST_FILE="$REPO_ROOT/docs/appcast.xml"
+    APPCAST_VALID=1
+
+    # 1. Verify shortVersionString matches VERSION
+    APPCAST_SHORT_VERSION=$(grep -o '<sparkle:shortVersionString>[^<]*</sparkle:shortVersionString>' "$APPCAST_FILE" | head -1 | sed 's/<[^>]*>//g')
+    if [[ "$APPCAST_SHORT_VERSION" != "$VERSION" ]]; then
+      red "ERROR: Appcast shortVersionString mismatch. Expected $VERSION, got $APPCAST_SHORT_VERSION"
+      APPCAST_VALID=0
+    else
+      green "✓ Appcast shortVersionString: $APPCAST_SHORT_VERSION"
+    fi
+
+    # 2. Verify sparkle:version (build number) is present
+    APPCAST_BUILD=$(grep -o '<sparkle:version>[^<]*</sparkle:version>' "$APPCAST_FILE" | head -1 | sed 's/<[^>]*>//g')
+    if [[ -z "$APPCAST_BUILD" ]]; then
+      red "ERROR: Appcast missing sparkle:version (build number)"
+      APPCAST_VALID=0
+    else
+      # Check build number > previous
+      if [[ -n "${PREV_BUILD:-}" ]] && [[ "$APPCAST_BUILD" -le "$PREV_BUILD" ]]; then
+        red "ERROR: Appcast build $APPCAST_BUILD must be greater than previous $PREV_BUILD"
+        APPCAST_VALID=0
+      else
+        green "✓ Appcast build number: $APPCAST_BUILD"
+      fi
+    fi
+
+    # 3. Verify description element has content
+    if ! grep -q '<description>' "$APPCAST_FILE"; then
+      red "ERROR: Appcast missing <description> element (Sparkle UI will hang!)"
+      APPCAST_VALID=0
+    else
+      # Check it's not empty
+      DESC_CONTENT=$(sed -n '/<description>/,/<\/description>/p' "$APPCAST_FILE" | grep -v '<description>' | grep -v '</description>' | tr -d '[:space:]')
+      if [[ -z "$DESC_CONTENT" ]] || [[ "$DESC_CONTENT" == "<![CDATA[]]>" ]]; then
+        red "ERROR: Appcast <description> is empty (Sparkle UI will hang!)"
+        APPCAST_VALID=0
+      else
+        green "✓ Appcast has release notes"
+      fi
+    fi
+
+    # 4. Verify sparkle:edSignature is present
+    if ! grep -q 'sparkle:edSignature=' "$APPCAST_FILE"; then
+      red "ERROR: Appcast missing EdDSA signature (sparkle:edSignature)"
+      APPCAST_VALID=0
+    else
+      green "✓ Appcast has EdDSA signature"
+    fi
+
+    # 5. Verify enclosure URL format
+    ENCLOSURE_URL=$(grep -o 'url="[^"]*\.dmg"' "$APPCAST_FILE" | head -1 | sed 's/url="//;s/"$//')
+    EXPECTED_URL_PATTERN="https://github.com/jazzyalex/agent-sessions/releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg"
+    if [[ "$ENCLOSURE_URL" != "$EXPECTED_URL_PATTERN" ]]; then
+      red "ERROR: Appcast enclosure URL mismatch"
+      red "  Expected: $EXPECTED_URL_PATTERN"
+      red "  Got:      $ENCLOSURE_URL"
+      APPCAST_VALID=0
+    else
+      green "✓ Appcast enclosure URL correct"
+    fi
+
+    # 6. Verify enclosure has length attribute
+    if ! grep -q 'length="[0-9]\+"' "$APPCAST_FILE"; then
+      yellow "WARNING: Appcast enclosure missing length attribute"
+    else
+      green "✓ Appcast enclosure has length"
+    fi
+
+    if [[ "$APPCAST_VALID" -eq 0 ]]; then
+      red ""
+      red "═══════════════════════════════════════════════════════════"
+      red "  APPCAST VALIDATION FAILED"
+      red "  Fix the issues above before continuing."
+      red "═══════════════════════════════════════════════════════════"
+      exit 2
+    fi
+
+    green "✓ All appcast validation checks passed"
+    echo ""
+
     # Commit and push appcast to GitHub Pages (fail hard if push fails)
     git add "$REPO_ROOT/docs/appcast.xml"
     if ! git diff --staged --quiet; then
@@ -609,31 +694,89 @@ CASK
       -f branch=main >/dev/null
   fi
 
-  # Wait for GitHub API propagation
+  # Wait for GitHub API propagation (increased timeout: 120s)
   echo "Waiting for Homebrew cask propagation..."
   log INFO "Checking Homebrew cask version propagation"
 
-  for i in {1..20}; do
-    CASK_VERSION=$(retry gh api -H "Accept: application/vnd.github+json" \
-      "/repos/${CASK_REPO}/contents/${CASK_PATH}" --jq .content 2>/dev/null | tr -d '\n' | base64 --decode | grep 'version' | cut -d'"' -f2 || echo "")
+  CASK_PROPAGATED=0
+  for i in {1..40}; do
+    CASK_CONTENT=$(retry gh api -H "Accept: application/vnd.github+json" \
+      "/repos/${CASK_REPO}/contents/${CASK_PATH}" --jq .content 2>/dev/null | tr -d '\n' | base64 --decode || echo "")
+    CASK_VERSION=$(echo "$CASK_CONTENT" | grep 'version' | head -1 | cut -d'"' -f2 || echo "")
+
     if [[ "$CASK_VERSION" == "$VERSION" ]]; then
-      green "✓ Cask propagated to version $VERSION after $((i*2))s"
+      green "✓ Cask propagated to version $VERSION after $((i*3))s"
+      CASK_PROPAGATED=1
       break
     fi
-    sleep 2
+    sleep 3
   done
 
-  if [[ "$CASK_VERSION" != "$VERSION" ]]; then
-    yellow "WARNING: Cask version did not propagate to $VERSION in 40s (got: $CASK_VERSION)"
+  if [[ "$CASK_PROPAGATED" -eq 0 ]]; then
+    yellow "WARNING: Cask version did not propagate to $VERSION in 120s (got: $CASK_VERSION)"
   fi
 
-  # Validate cask update via API (avoids raw cache)
+  # ========================================================================
+  # HOMEBREW CASK VALIDATION
+  # ========================================================================
+  echo "==> Validating Homebrew cask..."
+
+  # Fetch final cask content
   CASK_BODY=$(retry gh api -H "Accept: application/vnd.github+json" \
-    "/repos/${CASK_REPO}/contents/${CASK_PATH}" --jq .content | tr -d '\n' | base64 --decode)
-  if ! printf "%s" "$CASK_BODY" | grep -q "version \"${VERSION}\""; then
-    red "ERROR: Homebrew cask did not update to version ${VERSION}"
-    exit 1
+    "/repos/${CASK_REPO}/contents/${CASK_PATH}" --jq .content 2>/dev/null | tr -d '\n' | base64 --decode || echo "")
+
+  CASK_VALID=1
+
+  # 1. Verify version in cask
+  CASK_VERSION=$(echo "$CASK_BODY" | grep 'version "' | head -1 | sed 's/.*version "\([^"]*\)".*/\1/')
+  if [[ "$CASK_VERSION" != "$VERSION" ]]; then
+    red "ERROR: Cask version mismatch. Expected $VERSION, got $CASK_VERSION"
+    CASK_VALID=0
+  else
+    green "✓ Cask version: $CASK_VERSION"
   fi
+
+  # 2. Verify SHA256 in cask matches our computed SHA
+  CASK_SHA=$(echo "$CASK_BODY" | grep 'sha256 "' | head -1 | sed 's/.*sha256 "\([^"]*\)".*/\1/')
+  if [[ "$CASK_SHA" != "$SHA" ]]; then
+    red "ERROR: Cask SHA256 mismatch!"
+    red "  Expected: $SHA"
+    red "  Got:      $CASK_SHA"
+    CASK_VALID=0
+  else
+    green "✓ Cask SHA256 matches DMG"
+  fi
+
+  # 3. Verify SHA256 file exists and matches
+  SHA_FILE="$REPO_ROOT/dist/${APP_NAME}-${VERSION}.dmg.sha256"
+  if [[ -f "$SHA_FILE" ]]; then
+    FILE_SHA=$(cat "$SHA_FILE" | awk '{print $1}')
+    if [[ "$FILE_SHA" != "$SHA" ]]; then
+      yellow "WARNING: SHA256 file content differs from computed SHA"
+    else
+      green "✓ SHA256 file matches computed SHA"
+    fi
+  fi
+
+  # 4. Verify URL format in cask
+  if ! echo "$CASK_BODY" | grep -q "releases/download/v#{version}/AgentSessions-#{version}.dmg"; then
+    yellow "WARNING: Cask URL may not be in expected format"
+  else
+    green "✓ Cask URL format correct"
+  fi
+
+  if [[ "$CASK_VALID" -eq 0 ]]; then
+    red ""
+    red "═══════════════════════════════════════════════════════════"
+    red "  HOMEBREW CASK VALIDATION FAILED"
+    red "  The cask was pushed but validation failed."
+    red "  Manual intervention may be required."
+    red "═══════════════════════════════════════════════════════════"
+    # Don't exit here - cask is already pushed, just warn
+  else
+    green "✓ All Homebrew cask validation checks passed"
+  fi
+  echo ""
 fi
 
 green "==> Creating or updating GitHub Release"

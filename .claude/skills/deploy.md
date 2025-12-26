@@ -16,8 +16,26 @@ See `docs/deployment.md` for detailed commands. High-level flow:
 2. **Bump version** - Update project.pbxproj + CHANGELOG
 3. **Update docs** - README.md + docs/index.html (see checklist below)
 4. **Commit and push**
-5. **Deploy** - `SKIP_CONFIRM=1 tools/release/deploy release {VERSION}`
-6. **Verify** - `tools/release/deploy verify {VERSION}`
+5. **Dry-run** - `tools/release/deploy release {VERSION} --dry-run` (preview what will happen)
+6. **Deploy** - `tools/release/deploy release {VERSION}` (runs validation automatically)
+7. **Verify** - `tools/release/deploy verify {VERSION}`
+
+## Pre-Deployment Validation
+
+The deploy script now runs `tools/release/validate-release.sh` automatically before deployment. This checks:
+
+- Version format (warns on trailing .0)
+- README.md: download links, "What's New" sections, agent mentions
+- docs/index.html: download links, title, meta tags, agent mentions
+- docs/CHANGELOG.md: version section with date and content
+- Agent list consistency (all 5 agents mentioned)
+
+**Exit codes:** 0 = pass, 1 = warnings (confirm to proceed), 2 = errors (cannot deploy)
+
+To run validation manually:
+```bash
+tools/release/validate-release.sh 2.9
+```
 
 ## Documentation Checklist
 
@@ -64,7 +82,8 @@ See `docs/deployment.md` for detailed commands. High-level flow:
 ### Version Format
 - **Wrong**: 2.9.0, 2.10.0
 - **Right**: 2.9, 2.10
-- Script may produce wrong format - verify manually
+- The `bump-version.sh` script now preserves input format by default
+- Use `--format two-part` or `--format three-part` to override
 
 ### Stale Agent Lists
 When adding new agent, update 10+ places:
@@ -99,6 +118,35 @@ Signs of problem:
 5. All meta tags current
 6. Test Sparkle update if possible
 
+## Dry-Run Mode
+
+Preview what deployment would do without making changes:
+
+```bash
+tools/release/deploy release 2.9 --dry-run
+```
+
+This runs validation and shows all steps that would be performed. Useful for:
+- Verifying documentation is ready
+- Checking version format is correct
+- Understanding the deployment pipeline
+
 ## Recovery
 
 If deployment fails partway through, see "Manual Deployment" and "Emergency Rollback" sections in `docs/deployment.md`.
+
+## Post-Deployment Validation
+
+The deployment script now validates both appcast and Homebrew cask after generation:
+
+**Appcast validation:**
+- sparkle:shortVersionString matches VERSION
+- sparkle:version (build number) present and > previous
+- description element has content (prevents Sparkle UI hang)
+- sparkle:edSignature present
+- enclosure URL format correct
+
+**Homebrew cask validation:**
+- version matches VERSION
+- SHA256 matches computed DMG hash
+- URL format correct
