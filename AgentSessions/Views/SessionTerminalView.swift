@@ -637,7 +637,8 @@ private struct TerminalRolePalette {
     enum Role {
         case user
         case assistant
-        case tool
+        case toolInput
+        case toolOutput
         case error
         case meta
     }
@@ -658,7 +659,8 @@ private struct TerminalRolePalette {
         switch toggle {
         case .user: return .user
         case .assistant: return .assistant
-        case .tools: return .tool
+        // Tools toggle includes both input/output; use tool input as the representative swatch.
+        case .tools: return .toolInput
         case .errors: return .error
         }
     }
@@ -698,7 +700,13 @@ private struct TerminalRolePalette {
                     background: NSColor(white: 0.4, alpha: isDark ? 0.18 : 0.10),
                     accent: NSColor(white: 0.4, alpha: 1.0)
                 )
-            case .tool:
+            case .toolInput:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: NSColor(white: 0.6, alpha: isDark ? 0.22 : 0.14),
+                    accent: NSColor(white: 0.6, alpha: 1.0)
+                )
+            case .toolOutput:
                 return AppKitSwatch(
                     foreground: NSColor.labelColor,
                     background: NSColor(white: 0.6, alpha: isDark ? 0.22 : 0.14),
@@ -718,25 +726,31 @@ private struct TerminalRolePalette {
                 )
             }
         } else {
-            // Color mode: original palette
+            // Color mode: high-contrast palette tuned for scanning in both dark/light modes.
             switch role {
             case .user:
                 return AppKitSwatch(
                     foreground: NSColor.labelColor,
-                    background: tinted(NSColor.systemBlue, light: 0.16, dark: 0.30),
+                    background: tinted(NSColor.systemBlue, light: 0.20, dark: 0.25),
                     accent: NSColor.systemBlue
                 )
             case .assistant:
                 return AppKitSwatch(
                     foreground: NSColor.labelColor,
-                    background: tinted(NSColor.systemGreen, light: 0.16, dark: 0.26),
+                    background: tinted(NSColor.systemGreen, light: 0.08, dark: 0.12),
                     accent: NSColor.systemGreen
                 )
-            case .tool:
+            case .toolInput:
                 return AppKitSwatch(
                     foreground: NSColor.labelColor,
-                    background: tinted(NSColor.systemIndigo, light: 0.20, dark: 0.32),
-                    accent: NSColor.systemIndigo
+                    background: tinted(NSColor.systemPurple, light: 0.16, dark: 0.18),
+                    accent: NSColor.systemPurple
+                )
+            case .toolOutput:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: tinted(NSColor.systemTeal, light: 0.16, dark: 0.18),
+                    accent: NSColor.systemTeal
                 )
             case .error:
                 return AppKitSwatch(
@@ -760,7 +774,8 @@ private extension TerminalLineRole {
         switch self {
         case .user: return .user
         case .assistant: return .assistant
-        case .toolInput, .toolOutput: return .tool
+        case .toolInput: return .toolInput
+        case .toolOutput: return .toolOutput
         case .error: return .error
         case .meta: return .meta
         }
@@ -871,7 +886,6 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         let (attr, ranges) = buildAttributedString()
         context.coordinator.lineRanges = ranges
         textView.textStorage?.setAttributedString(attr)
-        textView.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
         // Ensure container tracks width
         let width = max(1, textView.enclosingScrollView?.contentSize.width ?? textView.bounds.width)
@@ -883,10 +897,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         let attr = NSMutableAttributedString()
         var ranges: [Int: NSRange] = [:]
 
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 1.5
-        paragraph.paragraphSpacing = 0
-        paragraph.lineBreakMode = .byWordWrapping
+        let baseParagraph = NSMutableParagraphStyle()
+        baseParagraph.lineSpacing = 1.5
+        baseParagraph.paragraphSpacing = 0
+        baseParagraph.lineBreakMode = .byWordWrapping
 
         for (idx, line) in lines.enumerated() {
             let text = line.text
@@ -894,13 +908,38 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let ns = lineString as NSString
             let range = NSRange(location: attr.length, length: ns.length)
 
-            let colors = colorsForRole(line.role)
+            let swatch = TerminalRolePalette.appKit(role: line.role.paletteRole, scheme: colorScheme, monochrome: monochrome)
             let isCurrent = (line.id == currentMatchLineID)
             let isMatch = matchIDs.contains(line.id)
 
+            let isNewBlock: Bool = {
+                guard idx > 0 else { return false }
+                return lines[idx - 1].blockIndex != line.blockIndex
+            }()
+
+            let paragraphSpacingBefore: CGFloat = {
+                guard isNewBlock else { return 0 }
+                switch line.role {
+                case .user:
+                    return 14
+                case .toolInput, .toolOutput, .error:
+                    return 10
+                case .assistant:
+                    return 8
+                case .meta:
+                    return 10
+                }
+            }()
+
+            let paragraph = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
+            paragraph.paragraphSpacingBefore = paragraphSpacingBefore
+
             var attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
-                .foregroundColor: colors.foreground,
+                .font: NSFont.monospacedSystemFont(
+                    ofSize: fontSize,
+                    weight: line.role == .user ? .bold : .regular
+                ),
+                .foregroundColor: swatch.foreground,
                 .paragraphStyle: paragraph
             ]
 
@@ -908,7 +947,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.5)
             } else if isMatch {
                 attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.25)
-            } else if let bg = colors.background {
+            } else if let bg = swatch.background {
                 attributes[.backgroundColor] = bg
             }
 
@@ -917,42 +956,6 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
 
         return (attr, ranges)
-    }
-
-    private func colorsForRole(_ role: TerminalLineRole) -> (foreground: NSColor, background: NSColor?) {
-        if monochrome {
-            // Monochrome mode: use gray shades
-            switch role {
-            case .user:
-                return (NSColor.labelColor, NSColor(white: 0.5, alpha: 0.18))
-            case .assistant:
-                return (NSColor.labelColor, NSColor(white: 0.4, alpha: 0.18))
-            case .toolInput:
-                return (NSColor.labelColor, NSColor(white: 0.6, alpha: 0.24))
-            case .toolOutput:
-                return (NSColor.labelColor, NSColor(white: 0.6, alpha: 0.16))
-            case .error:
-                return (NSColor.labelColor, NSColor(white: 0.3, alpha: 0.55))
-            case .meta:
-                return (NSColor.secondaryLabelColor, nil)
-            }
-        } else {
-            // Color mode: original palette
-            switch role {
-            case .user:
-                return (NSColor.labelColor, NSColor.systemBlue.withAlphaComponent(0.18))
-            case .assistant:
-                return (NSColor.labelColor, NSColor.systemGreen.withAlphaComponent(0.18))
-            case .toolInput:
-                return (NSColor.labelColor, NSColor.systemIndigo.withAlphaComponent(0.24))
-            case .toolOutput:
-                return (NSColor.labelColor, NSColor.systemGreen.withAlphaComponent(0.16))
-            case .error:
-                return (NSColor.labelColor, NSColor.systemRed.withAlphaComponent(0.55))
-            case .meta:
-                return (NSColor.secondaryLabelColor, nil)
-            }
-        }
     }
 
     private func signature(for lines: [TerminalLine]) -> Int {
