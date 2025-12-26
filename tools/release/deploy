@@ -356,11 +356,37 @@ Why: Version bump for $NEW_VERSION release"
 
 cmd_release() {
   shift # remove 'release' from args
-  local VERSION="${1:-}"
+
+  # Parse release arguments
+  local VERSION=""
+  local DRY_RUN=0
+  local SKIP_VALIDATION=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run)
+        DRY_RUN=1
+        shift
+        ;;
+      --skip-validation)
+        SKIP_VALIDATION=1
+        shift
+        ;;
+      -*)
+        red "ERROR: Unknown option: $1"
+        echo "Usage: deploy release VERSION [--dry-run] [--skip-validation]"
+        exit 1
+        ;;
+      *)
+        VERSION="$1"
+        shift
+        ;;
+    esac
+  done
 
   if [[ -z "$VERSION" ]]; then
     red "ERROR: VERSION not provided"
-    echo "Usage: deploy release VERSION"
+    echo "Usage: deploy release VERSION [--dry-run] [--skip-validation]"
     exit 1
   fi
 
@@ -368,6 +394,105 @@ cmd_release() {
   init_logging "release-${VERSION}"
 
   log INFO "Starting release deployment for version $VERSION"
+
+  # ============================================================================
+  # DRY-RUN MODE
+  # ============================================================================
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    yellow "  DRY-RUN MODE - No changes will be made"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+
+    echo "==> Version: $VERSION"
+    echo ""
+
+    echo "==> Pre-deployment validation would run..."
+    if [[ -x "$REPO_ROOT/tools/release/validate-release.sh" ]]; then
+      "$REPO_ROOT/tools/release/validate-release.sh" "$VERSION"
+    else
+      yellow "    validate-release.sh not found"
+    fi
+
+    echo ""
+    echo "==> Steps that would be performed:"
+    echo "    1. Build Release configuration (xcodebuild)"
+    echo "    2. Create signed DMG (create_dmg_from_app)"
+    echo "    3. Submit to Apple Notary (xcrun notarytool)"
+    echo "    4. Wait for notarization (xcrun notarytool wait)"
+    echo "    5. Staple notarization ticket (xcrun stapler)"
+    echo "    6. Generate SHA256 checksum"
+    echo "    7. Generate appcast.xml (generate_appcast)"
+    echo "    8. Update Homebrew cask"
+    echo "    9. Create git tag v$VERSION"
+    echo "    10. Create GitHub release with DMG"
+    echo "    11. Push changes to remote"
+    echo ""
+
+    echo "==> Files that would be modified:"
+    echo "    - dist/AgentSessions-$VERSION.dmg (created)"
+    echo "    - dist/AgentSessions-$VERSION.dmg.sha256 (created)"
+    echo "    - docs/appcast.xml (updated)"
+    echo "    - homebrew-cask/Casks/agent-sessions.rb (updated)"
+    echo ""
+
+    echo "═══════════════════════════════════════════════════════════"
+    green "  DRY-RUN complete. Run without --dry-run to deploy."
+    echo "═══════════════════════════════════════════════════════════"
+    return 0
+  fi
+
+  # ============================================================================
+  # PRE-DEPLOYMENT VALIDATION
+  # ============================================================================
+  if [[ "$SKIP_VALIDATION" -eq 1 ]]; then
+    echo ""
+    yellow "⚠️  SKIP_VALIDATION=1: Skipping pre-deployment validation"
+    yellow "   This is not recommended for production releases!"
+    echo ""
+  else
+    echo ""
+    echo "==> Running pre-deployment validation..."
+
+    if [[ -x "$REPO_ROOT/tools/release/validate-release.sh" ]]; then
+      local VALIDATION_EXIT=0
+      "$REPO_ROOT/tools/release/validate-release.sh" "$VERSION" || VALIDATION_EXIT=$?
+
+      if [[ "$VALIDATION_EXIT" -eq 2 ]]; then
+        red ""
+        red "═══════════════════════════════════════════════════════════"
+        red "  VALIDATION FAILED: Cannot proceed with deployment"
+        red "  Fix the errors above and retry."
+        red "═══════════════════════════════════════════════════════════"
+        exit 2
+      elif [[ "$VALIDATION_EXIT" -eq 1 ]]; then
+        yellow ""
+        yellow "═══════════════════════════════════════════════════════════"
+        yellow "  VALIDATION PASSED WITH WARNINGS"
+        yellow "═══════════════════════════════════════════════════════════"
+        echo ""
+        if [[ "${SKIP_CONFIRM:-0}" != "1" ]]; then
+          read -p "Continue with deployment despite warnings? [y/N] " -n 1 -r
+          echo
+          if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            yellow "Deployment aborted. Fix warnings and retry."
+            exit 1
+          fi
+        else
+          yellow "SKIP_CONFIRM=1: Proceeding despite warnings"
+        fi
+      else
+        green ""
+        green "═══════════════════════════════════════════════════════════"
+        green "  VALIDATION PASSED: All checks OK"
+        green "═══════════════════════════════════════════════════════════"
+      fi
+    else
+      yellow "WARNING: validate-release.sh not found, skipping validation"
+    fi
+    echo ""
+  fi
 
   # Source the existing deploy-agent-sessions.sh script with VERSION set
   export VERSION="$VERSION"
@@ -531,8 +656,12 @@ SUBCOMMANDS:
     bump [major|minor|patch]    Bump version and update CHANGELOG
                                 Default: patch
 
-    release VERSION             Build, sign, notarize, and publish release
+    release VERSION [OPTIONS]   Build, sign, notarize, and publish release
                                 Runs full deployment pipeline
+
+                                Options:
+                                  --dry-run         Show what would happen without executing
+                                  --skip-validation Skip pre-deployment validation (not recommended)
 
     verify VERSION              Verify deployment completed successfully
                                 Checks GitHub release, appcast, Homebrew cask
@@ -545,13 +674,17 @@ EXAMPLES:
     deploy changelog              # Review what changed
     deploy bump minor             # Bump to next minor version
     git push origin main          # Push version bump
-    deploy release 2.8.0          # Deploy the release
-    deploy verify 2.8.0           # Verify everything worked
+    deploy release 2.8 --dry-run  # Preview what would happen
+    deploy release 2.8            # Deploy (runs validation first)
+    deploy verify 2.8             # Verify everything worked
 
     # Quick patch release
     deploy bump patch
     git push origin main
     deploy release 2.7.2
+
+    # Preview deployment without making changes
+    deploy release 2.9 --dry-run
 
     # Just verify existing release
     deploy verify 2.7.1
