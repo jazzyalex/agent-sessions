@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- Transcript (Color view): Increase role contrast and add block spacing so user prompts stand out near tool calls.
+
 ## [2.9] - 2025-12-23
 
 🎄 **Agent Sessions 2.9 Christmas Edition**
