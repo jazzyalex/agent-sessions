@@ -7,6 +7,7 @@ This skill guides Claude through deploying Agent Sessions. The technical runbook
 **Ask the user:**
 1. What version? (e.g., "2.9" - never trailing ".0")
 2. New agents or major features to highlight?
+3. Are there major changes that require Onboarding updates? (major versions only)
 
 ## Workflow Summary
 
@@ -55,6 +56,11 @@ tools/release/validate-release.sh 2.9
 - [ ] Download button href and text
 - [ ] Hero `<h1>` and intro paragraph: all agents
 - [ ] Feature cards: new features added
+
+### Onboarding (Major Versions Only)
+- [ ] Update onboarding slides for major UI/feature changes
+- [ ] Test onboarding flow on clean install
+- [ ] Skip for minor/patch releases unless onboarding-specific fixes
 
 ## Release Notes Guidelines
 
@@ -108,6 +114,12 @@ Signs of problem:
 - Multiple bullets about same feature
 - Implementation details mentioned
 - Listing fixes for bugs you introduced in this release
+
+### Outdated Onboarding
+For major version releases with significant UI/feature changes:
+- Update onboarding slides to reflect new features
+- Not required for minor versions (2.8 → 2.9) unless onboarding-specific
+- Test on clean install to verify flow
 
 ## Post-Deployment Verification
 
