@@ -3,42 +3,12 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.9</title>
-            <pubDate>Tue, 23 Dec 2025 23:58:50 -0800</pubDate>
-                        <description><![CDATA[
-                <h2>What's New in 2.9</h2>
-🎄 **Agent Sessions 2.9 Christmas Edition**
-
-<h3>New Features</h3>
-
-<ul>
-<li><strong>Onboarding Tours</strong>: Interactive onboarding for new installs and a skippable update tour for major/minor releases. Reopen anytime from Help → Show Onboarding.</li>
-<li><strong>Copilot CLI Support</strong>: Full session browser integration for GitHub Copilot CLI sessions. Includes Preferences pane and toolbar filter (⌘5).</li>
-<li><strong>Saved Sessions Window</strong>: New dedicated window (View menu) for managing archived sessions with delete, reveal, and diagnostics.</li>
-<li><strong>Keyboard Navigation</strong>: Option-Command-Arrow shortcuts to jump between user prompts, tool calls, and errors in transcripts.</li>
-</ul>
-
-<h3>Improvements</h3>
-
-<ul>
-<li><strong>Preferences</strong>: Reorganized CLI agent controls. Disabling an agent now hides it everywhere (toolbar, Analytics, menu bar) and stops background work.</li>
-<li><strong>Improved Focus</strong>: Transcript Find controls stay out of Tab navigation unless explicitly opened, preventing stuck focus states.</li>
-</ul>
-
-<h3>Fixed</h3>
-
-<ul>
-<li><strong>Saved Sessions</strong>: Archive backfill and reveal actions now work reliably. Pinning no longer blocks the UI.</li>
-<li><strong>Claude Sessions</strong>: Better parsing for modern Claude Code format, session titles, and error detection.</li>
-<li><strong>OpenCode Sessions</strong>: Fixed missing content in Plain/Color views for migration=2 storage schema.</li>
-<li><strong>Clipboard</strong>: Fixed intermittent issue where full transcripts could overwrite clipboard.</li>
-</ul>
-
-            ]]></description>
-            <sparkle:version>13</sparkle:version>
-            <sparkle:shortVersionString>2.9</sparkle:shortVersionString>
+            <title>2.9.1</title>
+            <pubDate>Mon, 29 Dec 2025 10:54:18 -0800</pubDate>
+            <sparkle:version>14</sparkle:version>
+            <sparkle:shortVersionString>2.9.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.9/AgentSessions-2.9.dmg" length="8659033" type="application/octet-stream" sparkle:edSignature="JFBs4W45VkUEUmjfq4SRudXnZjnecsuOKCSNTpnqNaQYhNXiy7eFfQbxcUgHekDEXFotHlSd416WlACez/9yDg=="/>
+            <enclosure url="https://jazzyalex.github.io/agent-sessions/AgentSessions-2.9.1.dmg" length="8882043" type="application/octet-stream" sparkle:edSignature="hiZjJauGr+xX62deY/U904cQZmWhyjWOfV7e6e0UtHgKwN1q4NuyA5gGyyz/NntoIelTWABmOU4z0fGO53wyDQ=="/>
         </item>
     </channel>
 </rss>
