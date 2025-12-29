@@ -9,7 +9,7 @@
 </td>
 <td>
 
- **Unified session browser for Codex CLI, Claude Code, Gemini CLI, GitHub Copilot CLI, and OpenCode.**
+ **Unified session browser for Codex CLI, Claude Code, Gemini CLI, GitHub Copilot CLI, Droid (Factory CLI), and OpenCode.**
  Search, browse, and resume any past AI-coding session in a single local-first macOS app.
 
 </td>
