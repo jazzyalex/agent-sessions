@@ -111,14 +111,12 @@ struct SessionTranscriptBuilder {
 
     private static func timestampTail(_ ts: Date?, options: Options) -> String {
         guard options.showTimestamps, let ts = ts else { return "" }
-        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
-        return " @" + f.string(from: ts)
+        return " @" + AppDateFormatting.transcriptTimestamp(ts)
     }
 
     private static func timestampPrefix(_ ts: Date?, options: Options) -> String {
         guard options.showTimestamps, let ts = ts else { return "" }
-        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
-        return f.string(from: ts) + " "
+        return AppDateFormatting.transcriptTimestamp(ts) + AppDateFormatting.transcriptSeparator
     }
 
     // Legacy builders kept for compatibility in case other views still call them

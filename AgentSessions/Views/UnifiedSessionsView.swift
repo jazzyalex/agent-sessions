@@ -684,12 +684,7 @@ struct UnifiedSessionsView: View {
     // Local helper mirrors SessionsListView absolute time formatting
     private func absoluteTimeUnified(_ date: Date?) -> String {
         guard let date else { return "" }
-        let f = DateFormatter()
-        f.locale = .current
-        f.dateStyle = .short
-        f.timeStyle = .short
-        f.doesRelativeDateFormatting = false
-        return f.string(from: date)
+        return AppDateFormatting.dateTimeShort(date)
     }
 
     private func updateSelectionBridge() {

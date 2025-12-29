@@ -1112,23 +1112,11 @@ actor CodexStatusService {
 
     private func formatCodexReset(_ date: Date?, windowMinutes: Int?) -> String {
         guard let date else { return "" }
-        let tz = TimeZone(identifier: "America/Los_Angeles")
-        let timeOnly = DateFormatter()
-        timeOnly.locale = Locale(identifier: "en_US_POSIX")
-        timeOnly.timeZone = tz
-        timeOnly.dateFormat = "HH:mm"
-        let t = timeOnly.string(from: date)
-        // 5-hour window → (resets HH:mm). Weekly → resets HH:mm on d MMM
+        // 5-hour window → show time-only. Weekly → show date + time.
         if let w = windowMinutes, w <= 360 { // treat <=6h as 5h style
-            return "resets \(t)"
-        } else {
-            let dayFmt = DateFormatter()
-            dayFmt.locale = Locale(identifier: "en_US_POSIX")
-            dayFmt.timeZone = tz
-            dayFmt.dateFormat = "d MMM"
-            let d = dayFmt.string(from: date)
-            return "resets \(t) on \(d)"
+            return "resets \(AppDateFormatting.timeShort(date))"
         }
+        return "resets \(AppDateFormatting.dateTimeShort(date))"
     }
 
     private func clampPercent(_ v: Int) -> Int { max(0, min(100, v)) }

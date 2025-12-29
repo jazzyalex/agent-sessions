@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- Dates: Normalize timestamps (usage reset times, session dates, analytics labels, and transcript timestamps) to follow system locale and 12/24-hour settings.
+
 ## [2.9.1] - 2025-12-29
 
 ### Added

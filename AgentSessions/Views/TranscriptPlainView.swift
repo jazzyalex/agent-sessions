@@ -875,18 +875,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func stripTimestampPrefixIfPresent(_ line: Substring) -> Substring {
         guard showTimestamps else { return line }
-        // Timestamp prefix is "HH:mm:ss " (9 chars) when enabled.
-        guard line.count >= 9 else { return line }
-        let s = line.startIndex
-        let i2 = line.index(s, offsetBy: 2)
-        let i5 = line.index(s, offsetBy: 5)
-        let i8 = line.index(s, offsetBy: 8)
-        guard line[i2] == ":", line[i5] == ":", line[i8] == " " else { return line }
-        let hh = line[s..<i2]
-        let mm = line[line.index(after: i2)..<i5]
-        let ss = line[line.index(after: i5)..<i8]
-        guard hh.allSatisfy(\.isNumber), mm.allSatisfy(\.isNumber), ss.allSatisfy(\.isNumber) else { return line }
-        return line[line.index(after: i8)...]
+        // Timestamp prefix uses a stable separator to avoid locale-dependent length assumptions.
+        // Example: "1:23:45 PM • > Hello"
+        let probe = line.prefix(40)
+        guard let range = probe.range(of: AppDateFormatting.transcriptSeparator) else { return line }
+        return line[range.upperBound...]
     }
 
     private enum JumpKind { case user, tools, errors }

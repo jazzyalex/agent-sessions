@@ -73,10 +73,7 @@ private struct EventRow: View {
 
     private var fullTimestamp: String {
         guard let ts = event.timestamp else { return "" }
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .medium
-        return f.string(from: ts)
+        return AppDateFormatting.dateTimeMedium(ts)
     }
 
     private var kindBadge: some View {
