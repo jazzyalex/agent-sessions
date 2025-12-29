@@ -4,12 +4,7 @@ set -euo pipefail
 # deploy - Unified deployment tool for Agent Sessions
 # Consolidates bump, release, verify, and changelog workflows
 #
-# Usage:
-#   deploy bump [major|minor|patch]    - Bump version and update CHANGELOG
-#   deploy release VERSION             - Build, sign, notarize, and publish release
-#   deploy verify VERSION              - Verify deployment completed successfully
-#   deploy changelog [FROM_TAG]        - Generate CHANGELOG from conventional commits
-#   deploy help                        - Show this help message
+# Canonical runbook: docs/deployment.md
 
 REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$REPO_ROOT"
@@ -235,7 +230,7 @@ cmd_bump() {
 
   [[ "$BUMP_TYPE" =~ ^(major|minor|patch)$ ]] || {
     red "ERROR: Invalid bump type. Use: major, minor, or patch"
-    echo "Usage: deploy bump [major|minor|patch]"
+    echo "Usage: tools/release/deploy bump [major|minor|patch]"
     exit 1
   }
 
@@ -378,7 +373,7 @@ Why: Version bump for $NEW_VERSION release"
   echo "Next steps:"
   echo "  1. Review commit: git show HEAD"
   echo "  2. Push to GitHub: git push origin main"
-  echo "  3. Deploy: deploy release $NEW_VERSION"
+  echo "  3. Deploy: tools/release/deploy release $NEW_VERSION"
 }
 
 # ============================================================================
@@ -405,7 +400,7 @@ cmd_release() {
         ;;
       -*)
         red "ERROR: Unknown option: $1"
-        echo "Usage: deploy release VERSION [--dry-run] [--skip-validation]"
+        echo "Usage: tools/release/deploy release VERSION [--dry-run] [--skip-validation]"
         exit 1
         ;;
       *)
@@ -417,7 +412,7 @@ cmd_release() {
 
   if [[ -z "$VERSION" ]]; then
     red "ERROR: VERSION not provided"
-    echo "Usage: deploy release VERSION [--dry-run] [--skip-validation]"
+    echo "Usage: tools/release/deploy release VERSION [--dry-run] [--skip-validation]"
     exit 1
   fi
 
@@ -543,7 +538,7 @@ cmd_verify() {
 
   if [[ -z "$VERSION" ]]; then
     red "ERROR: VERSION not provided"
-    echo "Usage: deploy verify VERSION"
+    echo "Usage: tools/release/deploy verify VERSION"
     exit 1
   fi
 
@@ -684,7 +679,7 @@ cmd_resume() {
   # Load saved state
   if ! state_json=$(load_state); then
     red "ERROR: No deployment state found"
-    echo "Nothing to resume. Use 'deploy release VERSION' to start a new deployment."
+    echo "Nothing to resume. Use 'tools/release/deploy release VERSION' to start a new deployment."
     exit 1
   fi
 
@@ -766,7 +761,7 @@ cmd_help() {
 deploy - Unified deployment tool for Agent Sessions
 
 USAGE:
-    deploy <subcommand> [options]
+    tools/release/deploy <subcommand> [options]
 
 SUBCOMMANDS:
     bump [major|minor|patch]    Bump version and update CHANGELOG
@@ -788,42 +783,8 @@ SUBCOMMANDS:
     resume                      Resume failed deployment from last checkpoint
                                 Automatically continues from where it left off
 
-EXAMPLES:
-    # Typical release workflow
-    deploy changelog              # Review what changed
-    deploy bump minor             # Bump to next minor version
-    git push origin main          # Push version bump
-    deploy release 2.8 --dry-run  # Preview what would happen
-    deploy release 2.8            # Deploy (runs validation first)
-    deploy verify 2.8             # Verify everything worked
-
-    # Quick patch release
-    deploy bump patch
-    git push origin main
-    deploy release 2.7.2
-
-    # Preview deployment without making changes
-    deploy release 2.9 --dry-run
-
-    # Resume failed deployment
-    deploy resume                 # Continue from last checkpoint
-
-    # Just verify existing release
-    deploy verify 2.7.1
-
-ENVIRONMENT:
-    VERSION             Release version (for release subcommand)
-    SKIP_CONFIRM        Set to 1 to skip confirmation prompts
-    TEAM_ID             Apple Team ID for code signing
-    DEV_ID_APP          Developer ID Application identity
-    NOTARY_PROFILE      Notarytool keychain profile name
-
-EMERGENCY:
-    For rollback, use the separate tool:
-        tools/release/rollback-release.sh VERSION
-
-LOGS:
-    All operations log to /tmp/<subcommand>-<timestamp>.log
+DOCUMENTATION:
+    See docs/deployment.md for prerequisites, environment variables, logs, and troubleshooting.
 
 EOF
 }

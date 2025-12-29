@@ -533,7 +533,7 @@ xcrun notarytool submit dist/AgentSessions-{VERSION}.dmg --keychain-profile Agen
 
 Before changing deployment scripts, do a quick paper dry run using a fake version (for example, 2.9.0):
 - Walk through the cheat sheet commands and confirm each one is documented with required flags and environment variables.
-- Verify that `docs/deployment.md` and `docs/deploy-skill.md` reference the same entrypoints (`tools/release/deploy`).
+- Verify that `docs/deployment.md` and `.claude/skills/deploy.md` reference the same entrypoints (`tools/release/deploy`).
 - Treat this as a documentation validation step only; do not actually tag or publish 2.9.0.
 
 ### Sparkle EdDSA signature errors

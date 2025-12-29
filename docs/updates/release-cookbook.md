@@ -1,16 +1,17 @@
 # Sparkle Release Cookbook
 
-Status: Legacy / Supplemental
+Status: Legacy / Redirect
 
-## Document Purpose
-Step-by-step Sparkle-focused notes that supplement the main deployment runbook. For the authoritative release pipeline, always start from `docs/deployment.md` and the `tools/release/deploy` wrapper.
+This document is kept for Sparkle-specific setup and troubleshooting notes. It is not the deployment runbook.
 
-## Prerequisites
-- [ ] Xcode with Agent Sessions project
-- [ ] Developer ID Application certificate installed
-- [ ] Notarization profile configured (`xcrun notarytool store-credentials`)
-- [ ] GitHub CLI (`gh`) authenticated
-- [ ] Sparkle tools available (auto-detected after SPM build)
+## Canonical deployment workflow
+
+For release steps (bump, build, sign, notarize, publish, verify), follow `docs/deployment.md` and use `tools/release/deploy`.
+
+## Sparkle references
+
+- Architecture: `docs/sparkle-updates.md`
+- Decision record: `docs/adr/0002-adopt-sparkle-2.md`
 
 ## One-Time Setup
 
@@ -44,7 +45,7 @@ Add the following to your Info.plist:
 <string>YOUR_BASE64_PUBLIC_KEY_HERE</string>
 ```
 
-**⚠️ IMPORTANT**:
+Important:
 - Private key is stored in Keychain under name "Sparkle"
 - **Back up the private key** to 1Password or secure location:
   ```bash
@@ -81,143 +82,24 @@ open /Users/alexm/Library/Developer/Xcode/DerivedData/.../Build/Products/Debug/A
 ```
 
 Expected: App launches without errors. Check Console.app for Sparkle logs.
+## Troubleshooting (Sparkle tools)
 
-## Per-Release Workflow
+### `generate_appcast` not found
 
-### Step 1: Pre-Release Checklist
-- [ ] Version bumped in Xcode (MARKETING_VERSION)
-- [ ] CHANGELOG.md updated with release notes
-- [ ] Code committed and pushed
-- [ ] CI passing (if applicable)
+1. Build once so SPM artifacts exist:
+   ```bash
+   xcodebuild -scheme AgentSessions -configuration Release
+   ```
+2. Locate the Sparkle tools in DerivedData:
+   ```bash
+   SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData -name "generate_appcast" \
+     -path "*/artifacts/*/Sparkle/bin/*" 2>/dev/null | head -n1)
+   echo "Sparkle tools at: $(dirname "$SPARKLE_BIN")"
+   ```
 
-### Step 2: Build & Notarize
-Use existing release script with new appcast generation:
+### EdDSA signature verification failures
 
-```bash
-export VERSION=2.4.0
-export TEAM_ID=24NDRU35WD
-export NOTARY_PROFILE=AgentSessionsNotary
-export DEV_ID_APP="Developer ID Application: Alex M (24NDRU35WD)"
-export UPDATE_CASK=1
-export SKIP_CONFIRM=1
-
-# Run modified release script (includes appcast generation)
-tools/release/deploy-agent-sessions.sh
-```
-
-**What the script does**:
-1. Clean build Release configuration
-2. Code sign with Developer ID
-3. Create read-only DMG
-4. Notarize with Apple (`xcrun notarytool submit --wait`)
-5. Staple notarization ticket to DMG
-6. **NEW**: Generate Sparkle appcast
-7. Create GitHub release
-8. Update Homebrew cask
-
-### Step 3: Appcast Generation (Automated)
-The release script will automatically:
-
-```bash
-# Inside deploy-agent-sessions.sh (new steps):
-
-# 1. Create/update dist/updates directory
-mkdir -p dist/updates
-
-# 2. Copy DMG to updates directory
-cp "dist/AgentSessions-${VERSION}.dmg" "dist/updates/"
-
-# 3. Find Sparkle tools
-SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData -name "generate_appcast" \
-  -path "*/artifacts/*/Sparkle/bin/*" 2>/dev/null | head -n1)
-
-# 4. Generate appcast (reads Keychain for private key)
-"$SPARKLE_BIN/generate_appcast" \
-  --link "https://jazzyalex.github.io/agent-sessions/updates" \
-  dist/updates/
-
-# Output: dist/updates/appcast.xml
-```
-
-**Appcast contains**:
-```xml
-<item>
-  <title>Version 2.4.0</title>
-  <pubDate>Wed, 15 Oct 2025 12:00:00 +0000</pubDate>
-  <sparkle:version>2.4.0</sparkle:version>
-  <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-  <enclosure url="https://jazzyalex.github.io/agent-sessions/updates/AgentSessions-2.4.0.dmg"
-             sparkle:edSignature="BASE64_SIGNATURE"
-             length="FILE_SIZE_BYTES"
-             type="application/octet-stream" />
-</item>
-```
-
-### Step 4: Publish to GitHub Pages
-The release script will:
-
-```bash
-# 1. Copy appcast and DMG to docs/ (GitHub Pages source)
-cp dist/updates/appcast.xml docs/appcast.xml
-mkdir -p docs/updates
-cp dist/updates/*.dmg docs/updates/
-
-# 2. Commit and push
-git add docs/appcast.xml docs/updates/
-git commit -m "chore(release): publish ${VERSION} appcast"
-git push origin main
-
-# GitHub Pages serves from /docs, so appcast is live at:
-# https://jazzyalex.github.io/agent-sessions/appcast.xml
-```
-
-**Verify publication**:
-```bash
-curl -I https://jazzyalex.github.io/agent-sessions/appcast.xml
-# Should return: 200 OK
-```
-
-### Step 5: Test Update Flow
-On a machine with previous version installed:
-
-```bash
-# Force update check
-defaults delete com.triada.AgentSessions SULastCheckTime
-
-# Launch app
-open "/Applications/Agent Sessions.app"
-
-# Expected: Sparkle detects update and shows alert (or gentle reminder if background)
-```
-
-### Step 6: Announce Release
-- GitHub release is auto-created by script
-- Optional: Post to Twitter/blog
-- Monitor for user reports
-
-## Troubleshooting
-
-### Appcast Generation Fails
-**Error**: `generate_appcast: command not found`
-
-**Fix**:
-```bash
-# Build project once to fetch Sparkle SPM artifacts
-xcodebuild -scheme AgentSessions -configuration Release
-
-# Manually find and use tool
-SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData -name "generate_appcast" \
-  -path "*/artifacts/*/Sparkle/bin/*" 2>/dev/null | head -n1)
-echo "Sparkle tools at: $(dirname "$SPARKLE_BIN")"
-```
-
-### Invalid EdDSA Signature
-**Error**: "Update signature verification failed"
-
-**Cause**: Appcast was generated with wrong private key or key not in Keychain.
-
-**Fix**:
-```bash
+For diagnosis and remediation, follow the Sparkle key guidance in `docs/deployment.md` and the architecture notes in `docs/sparkle-updates.md`.
 # Check Keychain for Sparkle key
 security find-generic-password -l "Sparkle"
 
