@@ -46,6 +46,7 @@
 		5731AD7A25CF4B4DAA9BDF27 /* UpdateDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = B903187D9D8D4EDF9FAB0BBA /* UpdateDefaults.swift */; };
 		580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */; };
 		5F84C20CA86A1E10361CADAE /* CodexProbeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02CA6B9DF2873CC9F366A3A7 /* CodexProbeConfig.swift */; };
+		5FC84482DB505F152513E853 /* AppDateFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3167C6F5C43A594DD6BE934 /* AppDateFormatting.swift */; };
 		64888E382DCD41289C115461 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43373461163E432CB25162BC /* AnalyticsView.swift */; };
 		65EB88B78C3C117848D9BD06 /* SessionFilterShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC3DE188DC2AB5740BACF57 /* SessionFilterShims.swift */; };
 		6829C28DA0E1BEE5984B8599 /* DroidSessionParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC5DFBBBA1745F69422B117 /* DroidSessionParserTests.swift */; };
@@ -150,6 +151,7 @@
 		D0B0AC3DFBD31FA07FE14EA8 /* ColorExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924F17AD700936A779630365 /* ColorExtensions.swift */; };
 		D1E2F3A4B5C647E8F9A0B1C2 /* ResumeHealthCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */; };
 		D22D5596AE304723BFB6B490 /* AnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D16E742E5604163A332C366 /* AnalyticsService.swift */; };
+		D3B6C5202DA0E71A758D873D /* UsageResetText.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8BC1E7E1250DBB8C91387AC /* UsageResetText.swift */; };
 		D53C587549079F4844715EF7 /* CopilotSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EDB65DB42A3B2DFB3D57204 /* CopilotSessionIndexer.swift */; };
 		D662565D3A2F3454DABDD3A7 /* SessionTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA6631A5EDD11CEF9D72312F /* SessionTerminalView.swift */; };
 		D7F1E4B0917E4B5B9044E08D /* AnalyticsDateRange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A1B977F038F41EDA841A08C /* AnalyticsDateRange.swift */; };
@@ -291,6 +293,7 @@
 		A0637E0D51C63AE8AB3CCED8 /* UsageDisplayMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CodexStatus/UsageDisplayMode.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D4E5F60708AA55BB65 /* MenuBarPrefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MenuBarPrefs.swift; path = AgentSessions/CodexStatus/MenuBarPrefs.swift; sourceTree = SOURCE_ROOT; };
 		A27D0637DFF720558181BE5D /* ClaudeProbeConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeProbeConfig.swift; sourceTree = "<group>"; };
+		A3167C6F5C43A594DD6BE934 /* AppDateFormatting.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/AppDateFormatting.swift; sourceTree = SOURCE_ROOT; };
 		A62B8D98322763D14AF6ACF7 /* ColumnVisibilityStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColumnVisibilityStore.swift; path = AgentSessions/Support/ColumnVisibilityStore.swift; sourceTree = SOURCE_ROOT; };
 		A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeTests.swift; path = AgentSessionsTests/CodexResumeTests.swift; sourceTree = SOURCE_ROOT; };
 		ABFD9C178275CA23FCE6B3DE /* codex_052_raw.jsonl */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = codex_052_raw.jsonl; path = Resources/Fixtures/codex_052_raw.jsonl; sourceTree = SOURCE_ROOT; };
@@ -376,6 +379,7 @@
 		E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageMenuBar.swift; path = AgentSessions/MenuBar/UsageMenuBar.swift; sourceTree = SOURCE_ROOT; };
 		E401FF3CCED67F77E3FD9521 /* OnboardingSheetView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Onboarding/Views/OnboardingSheetView.swift; sourceTree = SOURCE_ROOT; };
 		E6D01D75E98CEA8938D4C108 /* ColumnVisibilityStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColumnVisibilityStoreTests.swift; path = AgentSessionsTests/ColumnVisibilityStoreTests.swift; sourceTree = SOURCE_ROOT; };
+		E8BC1E7E1250DBB8C91387AC /* UsageResetText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/UsageResetText.swift; sourceTree = SOURCE_ROOT; };
 		EAD4071F08354BC681A6E5D9 /* GitHubClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GitHubClient.swift; path = AgentSessions/Update/GitHubClient.swift; sourceTree = SOURCE_ROOT; };
 		F14273196C77AAA12FFDF3CE /* PreferencesView+General.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "PreferencesView+General.swift"; path = "AgentSessions/Views/Preferences/PreferencesView+General.swift"; sourceTree = SOURCE_ROOT; };
 		F188663773714C61A568F7AA /* LoadingAnimationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LoadingAnimationView.swift; path = AgentSessions/Views/LoadingAnimationView.swift; sourceTree = SOURCE_ROOT; };
@@ -781,6 +785,8 @@
 				B00000177A0A000100000001 /* FlowLayout.swift */,
 				UTILW00001000000000000001 /* WindowAutosave.swift */,
 				UTILS00001000000000000001 /* SplitViewAutosave.swift */,
+				A3167C6F5C43A594DD6BE934 /* AppDateFormatting.swift */,
+				E8BC1E7E1250DBB8C91387AC /* UsageResetText.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -1324,6 +1330,8 @@
 				F906A4D0BB7EFEBE7B8EDDC0 /* DroidSessionIndexer.swift in Sources */,
 				5648330A0957544AC6A3C299 /* DroidTranscriptView.swift in Sources */,
 				CC28FF5D0628EBAFFCC4CC8C /* PreferencesView+Droid.swift in Sources */,
+				5FC84482DB505F152513E853 /* AppDateFormatting.swift in Sources */,
+				D3B6C5202DA0E71A758D873D /* UsageResetText.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

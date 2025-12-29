@@ -351,12 +351,7 @@ private struct ClaudeSessionsListView: View {
     // Match time formatter used elsewhere so absolute-time mode looks consistent
     private func absoluteTimeClaude(_ date: Date?) -> String {
         guard let date else { return "" }
-        let f = DateFormatter()
-        f.locale = .current
-        f.dateStyle = .short
-        f.timeStyle = .short
-        f.doesRelativeDateFormatting = false
-        return f.string(from: date)
+        return AppDateFormatting.dateTimeShort(date)
     }
 
     private func session(for id: String) -> Session? {

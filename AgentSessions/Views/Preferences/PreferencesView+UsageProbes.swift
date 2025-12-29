@@ -257,9 +257,8 @@ extension PreferencesView {
                     let skipped = (info["skipped"] as? Int) ?? 0
                     if let ts = info["oldest_ts"] as? Double {
                         let d = Date(timeIntervalSince1970: ts)
-                        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short
                         lines.append("Deleted: \(deleted)  Skipped: \(skipped)")
-                        lines.append("Oldest deleted: \(f.string(from: d))")
+                        lines.append("Oldest deleted: \(AppDateFormatting.dateTimeShort(d))")
                     } else {
                         lines.append("Deleted: \(deleted)  Skipped: \(skipped)")
                     }
@@ -303,9 +302,8 @@ extension PreferencesView {
                     let skipped = (info["skipped"] as? Int) ?? 0
                     if let ts = info["oldest_ts"] as? Double {
                         let d = Date(timeIntervalSince1970: ts)
-                        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short
                         lines.append("Deleted: \(deleted)  Skipped: \(skipped)")
-                        lines.append("Oldest deleted: \(f.string(from: d))")
+                        lines.append("Oldest deleted: \(AppDateFormatting.dateTimeShort(d))")
                     } else {
                         lines.append("Deleted: \(deleted)  Skipped: \(skipped)")
                     }

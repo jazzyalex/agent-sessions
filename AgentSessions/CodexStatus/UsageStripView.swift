@@ -120,7 +120,7 @@ private struct UsageMeter: View {
         let stale = isResetInfoStale(kind: title, source: .codex, lastUpdate: lastUpdate, eventTimestamp: effectiveEvent)
         let displayText = (stale || reset.isEmpty)
             ? UsageStaleThresholds.outdatedCopy
-            : formattedReset(reset)
+            : UsageResetText.displayTextWithPrefix(kind: title, source: .codex, raw: reset)
 
         let mode = UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left
         let leftPercent = max(0, min(100, percent))
@@ -149,19 +149,7 @@ private struct UsageMeter: View {
             }
         }
         .frame(width: UsageMeterLayout.totalWidth(includeReset: includeReset), alignment: .leading)
-        .help(reset.isEmpty ? "" : reset)
-    }
-
-    private func formattedReset(_ raw: String) -> String {
-        var s = raw.trimmingCharacters(in: .whitespaces)
-        // Strip timezone like "(America/Los_Angeles)"
-        if let idx = s.firstIndex(of: "(") { s = String(s[..<idx]).trimmingCharacters(in: .whitespaces) }
-        // Ensure prefix
-        let lower = s.lowercased()
-        if lower.hasPrefix("reset") || lower.hasPrefix("resets") {
-            return s
-        }
-        return "resets " + s
+        .help(reset.isEmpty ? "" : UsageResetText.displayTextWithPrefix(kind: title, source: .codex, raw: reset))
     }
 }
 

@@ -759,17 +759,14 @@ final class AnalyticsService: ObservableObject {
         let startHour = maxBucket * 3
         let endHour = (maxBucket + 1) * 3
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "ha"
-
         guard let startDate = calendar.date(bySettingHour: startHour, minute: 0, second: 0, of: Date()),
               let endDate = calendar.date(bySettingHour: endHour, minute: 0, second: 0, of: Date()) else {
             // Fallback: return hour range as string without formatting
             return "\(startHour):00 - \(endHour):00"
         }
 
-        let startStr = formatter.string(from: startDate).lowercased()
-        let endStr = formatter.string(from: endDate).lowercased()
+        let startStr = AppDateFormatting.hourLabel(startDate)
+        let endStr = AppDateFormatting.hourLabel(endDate)
 
         return "\(startStr) - \(endStr)"
     }

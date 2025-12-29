@@ -209,7 +209,7 @@ final class StatusItemController: NSObject {
         let mode = UsageDisplayMode.current()
         let clampedLeft = max(0, min(100, percent))
         let displayPercent = mode.numericPercent(fromLeft: clampedLeft)
-        let trimmed = reset.replacingOccurrences(of: "resets ", with: "")
+        let trimmed = reset.trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(label) \(displayPercent)% \(mode.suffix)  \(trimmed.isEmpty ? "—" : trimmed)"
     }
 }

@@ -115,7 +115,7 @@ private struct UsageMeter: View {
         // Unified freshness: allow TTL after manual hard probe
         let effectiveEvent = effectiveEventTimestamp(source: .claude, eventTimestamp: nil, lastUpdate: lastUpdate)
         let stale = isResetInfoStale(kind: title, source: .claude, lastUpdate: effectiveEvent)
-        let displayText = stale ? UsageStaleThresholds.outdatedCopy : formattedReset(reset)
+        let displayText = stale ? UsageStaleThresholds.outdatedCopy : UsageResetText.displayTextWithPrefix(kind: title, source: .claude, raw: reset)
 
         let mode = UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left
         let leftPercent = max(0, min(100, percent))
@@ -144,19 +144,7 @@ private struct UsageMeter: View {
             }
         }
         .frame(width: UsageMeterLayout.totalWidth(includeReset: includeReset), alignment: .leading)
-        .help(reset.isEmpty ? "" : reset)
-    }
-
-    private func formattedReset(_ raw: String) -> String {
-        var s = raw.trimmingCharacters(in: .whitespaces)
-        // Strip timezone like "(America/Los_Angeles)"
-        if let idx = s.firstIndex(of: "(") { s = String(s[..<idx]).trimmingCharacters(in: .whitespaces) }
-        // Ensure prefix
-        let lower = s.lowercased()
-        if lower.hasPrefix("reset") || lower.hasPrefix("resets") {
-            return s
-        }
-        return "resets " + s
+        .help(reset.isEmpty ? "" : UsageResetText.displayTextWithPrefix(kind: title, source: .claude, raw: reset))
     }
 }
 

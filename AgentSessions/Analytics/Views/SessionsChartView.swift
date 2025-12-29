@@ -380,9 +380,10 @@ struct SessionsChartView: View {
         }) else { return "N/A" }
 
         let count = peak.value.reduce(0) { $0 + $1.sessionCount }
-        let formatter = DateFormatter()
-        formatter.dateFormat = dateRange == .last7Days ? "EEE" : "MMM d"
-        return "\(formatter.string(from: peak.key)) (\(count))"
+        let label = dateRange == .last7Days
+            ? AppDateFormatting.weekdayAbbrev(peak.key)
+            : AppDateFormatting.monthDayAbbrev(peak.key)
+        return "\(label) (\(count))"
     }
 
     private var currentStreakText: String {

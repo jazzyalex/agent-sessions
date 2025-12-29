@@ -17,6 +17,5 @@ func formatResetDisplay(kind: String,
     let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate)
     let isStale = isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff)
     if isStale || raw.isEmpty { return UsageStaleThresholds.outdatedCopy }
-    return trimResetCopy(raw)
+    return UsageResetText.displayText(kind: kind, source: source, raw: raw, now: Date())
 }
-

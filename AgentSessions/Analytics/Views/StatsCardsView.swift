@@ -177,9 +177,7 @@ struct StatsCardsView: View {
         }) else { return nil }
 
         let count = peak.value.reduce(0) { $0 + (sessions ? $1.sessionCount : $1.messageCount) }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE"
-        return "\(formatter.string(from: peak.key)) (\(count))"
+        return "\(AppDateFormatting.weekdayAbbrev(peak.key)) (\(count))"
     }
 }
 
