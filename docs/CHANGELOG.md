@@ -4,12 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.9.1] - 2025-12-29
+
+### Added
+
+- **Droid Support**: Import Droid (Factory CLI) sessions (interactive store and stream-json logs) with a dedicated Preferences pane, toolbar filter, and Analytics support.
+
 ### Improvements
 
-- Transcript (Color view): Increase role contrast and add block spacing so user prompts stand out near tool calls.
-- Transcript (Color view): Avoid bold styling for Codex/Droid preamble blocks so system prompts are visually distinct from real user prompts.
-- Droid (Factory CLI): Import Droid sessions (interactive store and stream-json logs) with a dedicated Preferences pane, toolbar filter, and Analytics support.
-- Onboarding: Update the full and update tours to include Droid support and reflect the current agent lineup.
+- **Color View**: Increased role contrast and added block spacing so user prompts stand out near tool calls.
+- **Color View**: Removed bold styling for Codex/Droid preamble blocks so system prompts are visually distinct from real user prompts.
+- **Onboarding**: Updated full and update tours to include Droid support and reflect the current agent lineup.
 
 ## [2.9] - 2025-12-23
 
