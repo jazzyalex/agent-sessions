@@ -320,13 +320,26 @@ show_preflight_checklist "$CURR_BUILD" "${PREV_VERSION:-}" "${PREV_BUILD:-}"
 
 export TEAM_ID NOTARY_PROFILE DEV_ID_APP VERSION TAG
 
-green "==> Building and notarizing"
-chmod +x "$REPO_ROOT/tools/release/build_sign_notarize_release.sh"
-TEAM_ID="$TEAM_ID" NOTARY_PROFILE="$NOTARY_PROFILE" TAG="$TAG" VERSION="$VERSION" DEV_ID_APP="$DEV_ID_APP" \
-  "$REPO_ROOT/tools/release/build_sign_notarize_release.sh"
+# Check if resuming and build already complete
+if [[ "${RESUME_FROM:-}" == "appcast" ]] || [[ "${RESUME_FROM:-}" == "github_release" ]]; then
+  green "==> Skipping build (resuming from ${RESUME_FROM})"
+  DMG="$REPO_ROOT/dist/${APP_NAME}-${VERSION}.dmg"
+  if [[ ! -f "$DMG" ]]; then
+    red "ERROR: Cannot resume - DMG not found at $DMG"
+    exit 2
+  fi
+  SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
+else
+  green "==> Building and notarizing"
+  chmod +x "$REPO_ROOT/tools/release/build_sign_notarize_release.sh"
+  TEAM_ID="$TEAM_ID" NOTARY_PROFILE="$NOTARY_PROFILE" TAG="$TAG" VERSION="$VERSION" DEV_ID_APP="$DEV_ID_APP" \
+    "$REPO_ROOT/tools/release/build_sign_notarize_release.sh"
 
-DMG="$REPO_ROOT/dist/${APP_NAME}-${VERSION}.dmg"
-SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
+  DMG="$REPO_ROOT/dist/${APP_NAME}-${VERSION}.dmg"
+  SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
+
+  save_state "build_complete"
+fi
 
 # Pre-deployment smoke test
 log INFO "Running pre-deployment smoke test on DMG"
@@ -380,6 +393,11 @@ else
   red "ERROR: Failed to mount DMG for smoke testing"
   exit 2
 fi
+
+# Check if resuming and appcast already generated
+if [[ "${RESUME_FROM:-}" == "github_release" ]]; then
+  green "==> Skipping appcast/README updates (resuming from ${RESUME_FROM})"
+else
 
 green "==> Generating Sparkle appcast"
 # Sparkle 2: Generate appcast.xml with EdDSA signatures
@@ -571,6 +589,8 @@ PYEOF
     green "✓ All appcast validation checks passed"
     echo ""
 
+    save_state "appcast_generated"
+
     # Commit and push appcast to GitHub Pages (fail hard if push fails)
     git add "$REPO_ROOT/docs/appcast.xml"
     if ! git diff --staged --quiet; then
@@ -631,6 +651,8 @@ else
 fi
 
 # (labels/filenames normalized and validated above)
+
+fi  # End of RESUME_FROM check for appcast/README
 
 # Always update the tap via GitHub API (no local clone required)
 if [[ "${UPDATE_CASK}" == "1" ]]; then
@@ -825,6 +847,8 @@ else
   green "✓ Release $TAG created"
 fi
 
+save_state "github_release_created"
+
 green "==> Running post-deployment verification"
 echo ""
 
@@ -864,6 +888,9 @@ if [[ -x "$REPO_ROOT/tools/release/verify-deployment.sh" ]]; then
 else
   yellow "WARNING: verify-deployment.sh not found or not executable"
 fi
+
+# Clear deployment state after successful completion
+clear_state
 
 echo ""
 green "Done."

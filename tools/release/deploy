@@ -24,10 +24,41 @@ red(){ printf "\033[31m%s\033[0m\n" "$*"; }
 
 # Structured logging
 LOG_FILE=""
+STATE_FILE="/tmp/deploy-state.json"
+
 init_logging() {
   local context="${1:-deploy}"
   LOG_FILE="/tmp/${context}-$(date +%s).log"
   exec > >(tee -a "$LOG_FILE") 2>&1
+}
+
+# State management for resume capability
+save_state() {
+  local version="$1"
+  local step="$2"
+  local timestamp=$(date -Iseconds)
+  cat > "$STATE_FILE" <<EOF
+{
+  "version": "$version",
+  "last_step": "$step",
+  "timestamp": "$timestamp",
+  "log_file": "$LOG_FILE"
+}
+EOF
+  log INFO "Saved state: $step"
+}
+
+load_state() {
+  if [[ ! -f "$STATE_FILE" ]]; then
+    echo ""
+    return 1
+  fi
+  cat "$STATE_FILE"
+}
+
+clear_state() {
+  rm -f "$STATE_FILE"
+  log INFO "Cleared deployment state"
 }
 
 log() {
@@ -642,6 +673,91 @@ cmd_changelog() {
 }
 
 # ============================================================================
+# SUBCOMMAND: resume
+# ============================================================================
+
+cmd_resume() {
+  shift # remove 'resume' from args
+
+  check_dependencies git gh python3
+
+  # Load saved state
+  if ! state_json=$(load_state); then
+    red "ERROR: No deployment state found"
+    echo "Nothing to resume. Use 'deploy release VERSION' to start a new deployment."
+    exit 1
+  fi
+
+  local version=$(echo "$state_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))')
+  local last_step=$(echo "$state_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("last_step",""))')
+  local saved_log=$(echo "$state_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("log_file",""))')
+
+  if [[ -z "$version" ]] || [[ -z "$last_step" ]]; then
+    red "ERROR: Invalid state file"
+    exit 1
+  fi
+
+  echo "═══════════════════════════════════════════════════════════"
+  echo "  Resuming deployment for version $version"
+  echo "  Last completed step: $last_step"
+  if [[ -f "$saved_log" ]]; then
+    echo "  Previous log: $saved_log"
+  fi
+  echo "═══════════════════════════════════════════════════════════"
+  echo ""
+
+  # Determine next steps based on last completed step
+  case "$last_step" in
+    "notarization_submitted")
+      green "==> Checking notarization status..."
+      # Continue with deployment script - it will handle waiting/stapling
+      export VERSION="$version"
+      export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      export RESUME_FROM="notarization"
+      "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
+      ;;
+
+    "build_complete")
+      green "==> Continuing with appcast generation..."
+      export VERSION="$version"
+      export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      export RESUME_FROM="appcast"
+      "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
+      ;;
+
+    "appcast_generated")
+      green "==> Continuing with GitHub release..."
+      export VERSION="$version"
+      export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      export RESUME_FROM="github_release"
+      "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
+      ;;
+
+    "github_release_created")
+      green "==> GitHub release already created, running verification..."
+      export VERSION="$version"
+      export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      if [[ -x "$REPO_ROOT/tools/release/verify-deployment.sh" ]]; then
+        "$REPO_ROOT/tools/release/verify-deployment.sh" "$version"
+      else
+        yellow "WARNING: verify-deployment.sh not found"
+      fi
+      ;;
+
+    *)
+      yellow "Unknown step: $last_step"
+      echo "Attempting to continue full deployment..."
+      export VERSION="$version"
+      export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
+      ;;
+  esac
+
+  clear_state
+  green "Resume complete!"
+}
+
+# ============================================================================
 # HELP
 # ============================================================================
 
@@ -669,6 +785,9 @@ SUBCOMMANDS:
     changelog [FROM_TAG]        Generate CHANGELOG from conventional commits
                                 Auto-detects last tag if not specified
 
+    resume                      Resume failed deployment from last checkpoint
+                                Automatically continues from where it left off
+
 EXAMPLES:
     # Typical release workflow
     deploy changelog              # Review what changed
@@ -685,6 +804,9 @@ EXAMPLES:
 
     # Preview deployment without making changes
     deploy release 2.9 --dry-run
+
+    # Resume failed deployment
+    deploy resume                 # Continue from last checkpoint
 
     # Just verify existing release
     deploy verify 2.7.1
@@ -724,6 +846,9 @@ case "$SUBCOMMAND" in
     ;;
   changelog)
     cmd_changelog "$@"
+    ;;
+  resume)
+    cmd_resume "$@"
     ;;
   help|--help|-h)
     cmd_help
