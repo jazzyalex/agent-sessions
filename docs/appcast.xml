@@ -8,6 +8,18 @@
             <sparkle:version>14</sparkle:version>
             <sparkle:shortVersionString>2.9.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <h3>Added</h3>
+                <ul>
+                    <li><strong>Droid Support</strong>: Import Droid (Factory CLI) sessions (interactive store and stream-json logs) with a dedicated Preferences pane, toolbar filter, and Analytics support.</li>
+                </ul>
+                <h3>Improvements</h3>
+                <ul>
+                    <li><strong>Color View</strong>: Increased role contrast and added block spacing so user prompts stand out near tool calls.</li>
+                    <li><strong>Color View</strong>: Removed bold styling for Codex/Droid preamble blocks so system prompts are visually distinct from real user prompts.</li>
+                    <li><strong>Onboarding</strong>: Updated full and update tours to include Droid support and reflect the current agent lineup.</li>
+                </ul>
+            ]]></description>
             <enclosure url="https://jazzyalex.github.io/agent-sessions/AgentSessions-2.9.1.dmg" length="8882043" type="application/octet-stream" sparkle:edSignature="hiZjJauGr+xX62deY/U904cQZmWhyjWOfV7e6e0UtHgKwN1q4NuyA5gGyyz/NntoIelTWABmOU4z0fGO53wyDQ=="/>
         </item>
     </channel>
