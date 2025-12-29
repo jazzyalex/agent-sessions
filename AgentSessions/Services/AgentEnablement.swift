@@ -22,6 +22,8 @@ enum AgentEnablement {
             return defaults.object(forKey: PreferencesKey.Agents.openCodeEnabled) as? Bool ?? true
         case .copilot:
             return defaults.object(forKey: PreferencesKey.Agents.copilotEnabled) as? Bool ?? true
+        case .droid:
+            return defaults.object(forKey: PreferencesKey.Agents.droidEnabled) as? Bool ?? true
         }
     }
 
@@ -77,6 +79,7 @@ enum AgentEnablement {
             setEnabledInternal(.gemini, enabled: gemini, defaults: defaults)
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
             setEnabledInternal(.copilot, enabled: true, defaults: defaults)
+            setEnabledInternal(.droid, enabled: isAvailable(.droid, defaults: defaults), defaults: defaults)
         } else {
             // Cold start: avoid spawning the user's login shell (can be slow with heavy rc files).
             // Prefer filesystem availability checks and fall back to a fast PATH/common-locations probe.
@@ -85,12 +88,14 @@ enum AgentEnablement {
             let gemini = isAvailable(.gemini, defaults: defaults)
             let opencode = isAvailable(.opencode, defaults: defaults)
             let copilot = isAvailable(.copilot, defaults: defaults)
+            let droid = isAvailable(.droid, defaults: defaults)
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
             setEnabledInternal(.gemini, enabled: gemini, defaults: defaults)
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
             setEnabledInternal(.copilot, enabled: copilot, defaults: defaults)
+            setEnabledInternal(.droid, enabled: droid, defaults: defaults)
         }
 
         // Guarantee at least one enabled agent.
@@ -121,8 +126,22 @@ enum AgentEnablement {
         case .copilot:
             let custom = defaults.string(forKey: PreferencesKey.Paths.copilotSessionsRootOverride) ?? ""
             root = CopilotSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
+        case .droid:
+            let sessionsCustom = defaults.string(forKey: PreferencesKey.Paths.droidSessionsRootOverride) ?? ""
+            let projectsCustom = defaults.string(forKey: PreferencesKey.Paths.droidProjectsRootOverride) ?? ""
+            root = DroidSessionDiscovery(customSessionsRoot: sessionsCustom.isEmpty ? nil : sessionsCustom,
+                                         customProjectsRoot: projectsCustom.isEmpty ? nil : projectsCustom).sessionsRoot()
         }
         if fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue { return true }
+        if source == .droid {
+            let sessionsCustom = defaults.string(forKey: PreferencesKey.Paths.droidSessionsRootOverride) ?? ""
+            let projectsCustom = defaults.string(forKey: PreferencesKey.Paths.droidProjectsRootOverride) ?? ""
+            let disc = DroidSessionDiscovery(customSessionsRoot: sessionsCustom.isEmpty ? nil : sessionsCustom,
+                                             customProjectsRoot: projectsCustom.isEmpty ? nil : projectsCustom)
+            let projectsRoot = disc.projectsRoot()
+            var isProjectsDir: ObjCBool = false
+            if fm.fileExists(atPath: projectsRoot.path, isDirectory: &isProjectsDir), isProjectsDir.boolValue { return true }
+        }
         return binaryInstalled(for: source)
     }
 
@@ -133,6 +152,7 @@ enum AgentEnablement {
         case .gemini: return binaryDetectedCached("gemini")
         case .opencode: return binaryDetectedCached("opencode")
         case .copilot: return binaryDetectedCached("copilot")
+        case .droid: return binaryDetectedCached("droid")
         }
     }
 
@@ -148,6 +168,8 @@ enum AgentEnablement {
             defaults.set(enabled, forKey: PreferencesKey.Agents.openCodeEnabled)
         case .copilot:
             defaults.set(enabled, forKey: PreferencesKey.Agents.copilotEnabled)
+        case .droid:
+            defaults.set(enabled, forKey: PreferencesKey.Agents.droidEnabled)
         }
     }
 

@@ -269,7 +269,6 @@ private struct ClaudeSessionsListView: View {
                     .onTapGesture(count: 2) {
                         if let name = s.repoName {
                             indexer.projectFilter = name
-                            indexer.recomputeNow()
                         }
                     }
             }
@@ -398,7 +397,6 @@ private struct ClaudeSessionsListView: View {
                 Divider()
                 Button("Filter by Project: \(name)") {
                     indexer.projectFilter = name
-                    indexer.recomputeNow()
                 }
             } else {
                 Divider()
@@ -477,7 +475,6 @@ private struct ClaudeSearchFiltersView: View {
                     Button(action: {
                         indexer.queryDraft = ""
                         indexer.query = ""
-                        indexer.recomputeNow()
                     }) {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
@@ -499,7 +496,6 @@ private struct ClaudeSearchFiltersView: View {
                         .lineLimit(1)
                     Button(action: {
                         indexer.projectFilter = nil
-                        indexer.recomputeNow()
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)

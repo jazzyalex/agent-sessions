@@ -12,6 +12,7 @@ struct UnifiedSessionsView: View {
     @ObservedObject var geminiIndexer: GeminiSessionIndexer
     @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
     @ObservedObject var copilotIndexer: CopilotSessionIndexer
+    @ObservedObject var droidIndexer: DroidSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @EnvironmentObject var updaterController: UpdaterController
@@ -40,6 +41,7 @@ struct UnifiedSessionsView: View {
     @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
     @State private var autoSelectEnabled: Bool = true
     @State private var programmaticSelectionUpdate: Bool = false
     @State private var isAutoSelectingFromSearch: Bool = false
@@ -67,6 +69,7 @@ struct UnifiedSessionsView: View {
          geminiIndexer: GeminiSessionIndexer,
          opencodeIndexer: OpenCodeSessionIndexer,
          copilotIndexer: CopilotSessionIndexer,
+         droidIndexer: DroidSessionIndexer,
          analyticsReady: Bool,
          layoutMode: LayoutMode,
          onToggleLayout: @escaping () -> Void) {
@@ -76,6 +79,7 @@ struct UnifiedSessionsView: View {
         self.geminiIndexer = geminiIndexer
         self.opencodeIndexer = opencodeIndexer
         self.copilotIndexer = copilotIndexer
+        self.droidIndexer = droidIndexer
         self.analyticsReady = analyticsReady
         self.layoutMode = layoutMode
         self.onToggleLayout = onToggleLayout
@@ -83,7 +87,8 @@ struct UnifiedSessionsView: View {
                                                                          claudeIndexer: claudeIndexer,
                                                                          geminiIndexer: geminiIndexer,
                                                                          opencodeIndexer: opencodeIndexer,
-                                                                         copilotIndexer: copilotIndexer))
+                                                                         copilotIndexer: copilotIndexer,
+                                                                         droidIndexer: droidIndexer))
     }
 
     private var preferredColorScheme: ColorScheme? {
@@ -206,6 +211,8 @@ struct UnifiedSessionsView: View {
                 opencodeIndexer.reloadSession(id: id)
             } else if s.source == .copilot, let exist = copilotIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
                 copilotIndexer.reloadSession(id: id)
+            } else if s.source == .droid, let exist = droidIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+                droidIndexer.reloadSession(id: id)
             }
         }
         .onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
@@ -213,6 +220,7 @@ struct UnifiedSessionsView: View {
         .onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeOpenCode) { _, _ in restartSearchIfRunning() }
         .onChange(of: unified.includeCopilot) { _, _ in restartSearchIfRunning() }
+        .onChange(of: unified.includeDroid) { _, _ in restartSearchIfRunning() }
         .onChange(of: codexAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
         .onChange(of: claudeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
         .onChange(of: geminiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
@@ -468,7 +476,8 @@ struct UnifiedSessionsView: View {
                                claudeIndexer: claudeIndexer,
                                geminiIndexer: geminiIndexer,
                                opencodeIndexer: opencodeIndexer,
-                               copilotIndexer: copilotIndexer)
+                               copilotIndexer: copilotIndexer,
+                               droidIndexer: droidIndexer)
                 .environmentObject(focusCoordinator)
                 .id("transcript-host")
 
@@ -476,7 +485,16 @@ struct UnifiedSessionsView: View {
                 launchBlockingTranscriptOverlay()
             } else if let s = selectedSession {
                 if !FileManager.default.fileExists(atPath: s.filePath) {
-                    let providerName: String = (s.source == .codex ? "Codex" : (s.source == .claude ? "Claude" : "Gemini"))
+                    let providerName: String = {
+                        switch s.source {
+                        case .codex: return "Codex"
+                        case .claude: return "Claude"
+                        case .gemini: return "Gemini"
+                        case .opencode: return "OpenCode"
+                        case .copilot: return "Copilot"
+                        case .droid: return "Droid"
+                        }
+                    }()
                     let accent: Color = sourceAccent(s)
                     VStack(spacing: 12) {
                         Label("Session file not found", systemImage: "exclamationmark.triangle.fill")
@@ -582,6 +600,17 @@ struct UnifiedSessionsView: View {
                     .toggleStyle(.button)
                     .help("Show or hide Copilot sessions in the list (⌘5)")
                     .keyboardShortcut("5", modifiers: .command)
+                }
+
+                if droidAgentEnabled {
+                    Toggle(isOn: $unified.includeDroid) {
+                        Text("Droid")
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeDroid ? Color.agentDroid : .primary))
+                            .fixedSize()
+                    }
+                    .toggleStyle(.button)
+                    .help("Show or hide Droid sessions in the list (⌘6)")
+                    .keyboardShortcut("6", modifiers: .command)
                 }
             }
         }
@@ -754,6 +783,7 @@ struct UnifiedSessionsView: View {
         case .gemini: label = "Gemini"
         case .opencode: label = "OpenCode"
         case .copilot: label = "Copilot"
+        case .droid: label = "Droid"
         }
         return HStack(spacing: 6) {
             Text(label)
@@ -861,11 +891,12 @@ struct UnifiedSessionsView: View {
                                 includeGemini: unified.includeGemini && geminiAgentEnabled,
                                 includeOpenCode: unified.includeOpenCode && openCodeAgentEnabled,
                                 includeCopilot: unified.includeCopilot && copilotAgentEnabled,
+                                includeDroid: unified.includeDroid && droidAgentEnabled,
                                 all: unified.allSessions)
     }
 
     private func flashAgentEnablementNoticeIfNeeded() {
-        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled)
+        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled && droidAgentEnabled)
         guard anyDisabled else {
             withAnimation { showAgentEnablementNotice = false }
             return
@@ -884,6 +915,7 @@ struct UnifiedSessionsView: View {
         case .gemini: return Color.teal
         case .opencode: return Color.purple
         case .copilot: return Color.agentCopilot
+        case .droid: return Color.agentDroid
         }
     }
 
@@ -920,6 +952,7 @@ private struct TranscriptHostView: View {
     @ObservedObject var geminiIndexer: GeminiSessionIndexer
     @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
     @ObservedObject var copilotIndexer: CopilotSessionIndexer
+    @ObservedObject var droidIndexer: DroidSessionIndexer
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -934,6 +967,8 @@ private struct TranscriptHostView: View {
                 .opacity(kind == .opencode ? 1 : 0)
             CopilotTranscriptView(indexer: copilotIndexer, sessionID: selection)
                 .opacity(kind == .copilot ? 1 : 0)
+            DroidTranscriptView(indexer: droidIndexer, sessionID: selection)
+                .opacity(kind == .droid ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -1137,6 +1172,7 @@ private struct UnifiedSearchFiltersView: View {
                      includeGemini: unified.includeGemini,
                      includeOpenCode: unified.includeOpenCode,
                      includeCopilot: unified.includeCopilot,
+                     includeDroid: unified.includeDroid,
                      all: unified.allSessions)
     }
 
@@ -1165,6 +1201,7 @@ private struct UnifiedSearchFiltersView: View {
                          includeGemini: unified.includeGemini,
                          includeOpenCode: unified.includeOpenCode,
                          includeCopilot: unified.includeCopilot,
+                         includeDroid: unified.includeDroid,
                          all: unified.allSessions)
         }
         searchDebouncer = work

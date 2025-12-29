@@ -9,6 +9,7 @@ struct AnalyticsView: View {
     @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
 
     @State private var dateRange: AnalyticsDateRange = .last7Days
     @State private var agentFilter: AnalyticsAgentFilter = .all
@@ -48,6 +49,7 @@ struct AnalyticsView: View {
         .onChange(of: geminiAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: openCodeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: copilotAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onChange(of: droidAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: service.isParsingSessions) { _, isParsing in
             // Refresh analytics when parsing completes
             if !isParsing {
@@ -265,7 +267,7 @@ struct AnalyticsView: View {
     }
 
     private var anyAgentDisabled: Bool {
-        !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled)
+        !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled && droidAgentEnabled)
     }
 
     private var availableAgentFilters: [AnalyticsAgentFilter] {
@@ -275,6 +277,7 @@ struct AnalyticsView: View {
         if geminiAgentEnabled { out.append(.geminiOnly) }
         if openCodeAgentEnabled { out.append(.opencodeOnly) }
         if copilotAgentEnabled { out.append(.copilotOnly) }
+        if droidAgentEnabled { out.append(.droidOnly) }
         return out
     }
 

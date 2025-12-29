@@ -51,13 +51,14 @@ extension PreferencesView {
 
             sectionHeader("Active CLI agents")
             VStack(alignment: .leading, spacing: 6) {
-                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, copilotAgentEnabled].filter { $0 }.count
+                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, copilotAgentEnabled, droidAgentEnabled].filter { $0 }.count
 
                 agentEnableToggle(title: "Codex", source: .codex, isOn: $codexAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Claude", source: .claude, isOn: $claudeAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Gemini", source: .gemini, isOn: $geminiAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "OpenCode", source: .opencode, isOn: $openCodeAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Copilot", source: .copilot, isOn: $copilotAgentEnabled, enabledCount: enabledCount)
+                agentEnableToggle(title: "Droid", source: .droid, isOn: $droidAgentEnabled, enabledCount: enabledCount)
 
                 Text("Disabled agents are hidden across the app and background work is paused.")
                     .font(.caption)
@@ -221,6 +222,7 @@ private extension PreferencesView {
         let isCurrentlyOn = isOn.wrappedValue
         let canDisable = !(enabledCount == 1 && isCurrentlyOn)
         let canEnable = available || isCurrentlyOn
+        let accent = Color.agentColor(for: source, monochrome: stripMonochromeGlobal)
 
         return Toggle(isOn: Binding(
             get: { isOn.wrappedValue },
@@ -230,6 +232,8 @@ private extension PreferencesView {
         )) {
             HStack {
                 Text(title)
+                    .foregroundStyle(accent)
+                    .opacity(isCurrentlyOn ? 1.0 : 0.6)
                 Spacer()
                 Text(statusText)
                     .font(.caption)

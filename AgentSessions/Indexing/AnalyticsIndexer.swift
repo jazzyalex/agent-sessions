@@ -12,6 +12,7 @@ actor AnalyticsIndexer {
     private let gemini = GeminiSessionDiscovery()
     private let opencode = OpenCodeSessionDiscovery()
     private let copilot = CopilotSessionDiscovery()
+    private let droid = DroidSessionDiscovery()
 
     init(db: IndexDB, enabledSources: Set<String>) {
         self.db = db
@@ -39,7 +40,8 @@ actor AnalyticsIndexer {
             ("claude", { self.claude.discoverSessionFiles() }),
             ("gemini", { self.gemini.discoverSessionFiles() }),
             ("opencode", { self.opencode.discoverSessionFiles() }),
-            ("copilot", { self.copilot.discoverSessionFiles() })
+            ("copilot", { self.copilot.discoverSessionFiles() }),
+            ("droid", { self.droid.discoverSessionFiles() })
         ]
 
         for (source, enumerate) in sources {
@@ -136,6 +138,8 @@ actor AnalyticsIndexer {
             return await Task.detached(priority: .utility) { OpenCodeSessionParser.parseFileFull(at: url) }.value
         case "copilot":
             return await Task.detached(priority: .utility) { CopilotSessionParser.parseFileFull(at: url) }.value
+        case "droid":
+            return await Task.detached(priority: .utility) { DroidSessionParser.parseFileFull(at: url) }.value
         default:
             return nil
         }

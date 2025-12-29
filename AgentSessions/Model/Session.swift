@@ -205,6 +205,8 @@ public struct Session: Identifiable, Equatable, Codable {
         if lower.hasPrefix("# agents.md instructions for ") { return true }
         if lower.contains("\n# agents.md instructions for ") { return true }
         if lower.contains("<instructions>") || lower.contains("</instructions>") { return true }
+        // Droid / Factory: some logs embed <system-reminder>...</system-reminder> blocks before the first real prompt.
+        if lower.contains("<system-reminder") || lower.contains("</system-reminder>") { return true }
         // Strong anchors commonly seen in agents.md-driven openings
         let anchors = [
             "<user_instructions>",
@@ -318,6 +320,10 @@ public struct Session: Identifiable, Equatable, Codable {
         }
         // 0) Claude sessions: use cwd extracted during parsing
         if source == .claude, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
+            return lightCwd
+        }
+        // 0b) Droid sessions: use cwd extracted during parsing
+        if source == .droid, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
             return lightCwd
         }
 

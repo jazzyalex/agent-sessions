@@ -16,6 +16,8 @@ extension Color {
     static let agentOpenCode = Color.purple
     /// Copilot brand color
     static let agentCopilot = Color(red: 0.90, green: 0.20, blue: 0.60)
+    /// Droid brand color
+    static let agentDroid = Color(red: 0.16, green: 0.68, blue: 0.28)
 
     // MARK: - Monochrome Support
 
@@ -25,6 +27,7 @@ extension Color {
     static let agentGeminiGray = Color(white: 0.6)  // Lighter gray
     static let agentOpenCodeGray = Color(white: 0.7) // Lightest gray
     static let agentCopilotGray = Color(white: 0.75) // Very light gray
+    static let agentDroidGray = Color(white: 0.8)
 
     /// Get the brand color for a given session source
     static func agentColor(for source: SessionSource) -> Color {
@@ -34,6 +37,7 @@ extension Color {
         case .gemini: return .agentGemini
         case .opencode: return .agentOpenCode
         case .copilot: return .agentCopilot
+        case .droid: return .agentDroid
         }
     }
 
@@ -46,6 +50,7 @@ extension Color {
             case .gemini: return .agentGeminiGray
             case .opencode: return .agentOpenCodeGray
             case .copilot: return .agentCopilotGray
+            case .droid: return .agentDroidGray
             }
         } else {
             return agentColor(for: source)
@@ -65,6 +70,8 @@ extension Color {
             return .agentOpenCode
         } else if lower.contains("copilot") {
             return .agentCopilot
+        } else if lower.contains("droid") {
+            return .agentDroid
         } else {
             return .accentColor
         }
@@ -84,6 +91,8 @@ extension Color {
                 return .agentOpenCodeGray
             } else if lower.contains("copilot") {
                 return .agentCopilotGray
+            } else if lower.contains("droid") {
+                return .agentDroidGray
             } else {
                 return .secondary
             }

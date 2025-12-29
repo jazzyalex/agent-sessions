@@ -18,6 +18,7 @@ struct AgentSessionsApp: App {
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @StateObject private var geminiIndexer = GeminiSessionIndexer()
     @StateObject private var copilotIndexer = CopilotSessionIndexer()
+    @StateObject private var droidIndexer = DroidSessionIndexer()
     @StateObject private var updaterController = {
         let controller = UpdaterController()
         UpdaterController.shared = controller
@@ -63,7 +64,8 @@ struct AgentSessionsApp: App {
                 claudeIndexer: claudeIndexer,
                 geminiIndexer: geminiIndexer,
                 opencodeIndexer: opencodeIndexer,
-                copilotIndexer: copilotIndexer
+                copilotIndexer: copilotIndexer,
+                droidIndexer: droidIndexer
             )
             let layoutMode = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
             UnifiedSessionsView(
@@ -73,6 +75,7 @@ struct AgentSessionsApp: App {
                 geminiIndexer: geminiIndexer,
                 opencodeIndexer: opencodeIndexer,
                 copilotIndexer: copilotIndexer,
+                droidIndexer: droidIndexer,
                 analyticsReady: analyticsReady,
                 layoutMode: layoutMode,
                 onToggleLayout: {
@@ -181,7 +184,8 @@ struct AgentSessionsApp: App {
                     claudeIndexer: claudeIndexer,
                     geminiIndexer: geminiIndexer,
                     opencodeIndexer: opencodeIndexer,
-                    copilotIndexer: copilotIndexer
+                    copilotIndexer: copilotIndexer,
+                    droidIndexer: droidIndexer
                 )
             )
             .environmentObject(archiveManager)
@@ -201,13 +205,15 @@ final class _UnifiedHolder: ObservableObject {
                      claudeIndexer: ClaudeSessionIndexer,
                      geminiIndexer: GeminiSessionIndexer,
                      opencodeIndexer: OpenCodeSessionIndexer,
-                     copilotIndexer: CopilotSessionIndexer) -> UnifiedSessionIndexer {
+                     copilotIndexer: CopilotSessionIndexer,
+                     droidIndexer: DroidSessionIndexer) -> UnifiedSessionIndexer {
         if let u = unified { return u }
         let u = UnifiedSessionIndexer(codexIndexer: codexIndexer,
                                       claudeIndexer: claudeIndexer,
                                       geminiIndexer: geminiIndexer,
                                       opencodeIndexer: opencodeIndexer,
-                                      copilotIndexer: copilotIndexer)
+                                      copilotIndexer: copilotIndexer,
+                                      droidIndexer: droidIndexer)
         unified = u
         return u
     }

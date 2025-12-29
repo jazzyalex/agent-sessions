@@ -49,12 +49,14 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.geminiCLIAvailable) var geminiCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.openCodeCLIAvailable) var openCodeCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.copilotCLIAvailable) var copilotCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.droidCLIAvailable) var droidCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.geminiEnabled) var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) var copilotAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.droidEnabled) var droidAgentEnabled: Bool = true
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -137,15 +139,23 @@ struct PreferencesView: View {
     @State var copilotSessionsPathValid: Bool = true
     @State var copilotSessionsPathDebounce: DispatchWorkItem? = nil
 
+    // Droid sessions/projects roots
+    @AppStorage(PreferencesKey.Paths.droidSessionsRootOverride) var droidSessionsPath: String = ""
+    @State var droidSessionsPathValid: Bool = true
+    @State var droidSessionsPathDebounce: DispatchWorkItem? = nil
+    @AppStorage(PreferencesKey.Paths.droidProjectsRootOverride) var droidProjectsPath: String = ""
+    @State var droidProjectsPathValid: Bool = true
+    @State var droidProjectsPathDebounce: DispatchWorkItem? = nil
+
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selectedTab) {
-                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .copilotCLI }, id: \.self) { tab in
+                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .copilotCLI && $0 != .droidCLI }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
                 Divider()
-                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI], id: \.self) { tab in
+                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -262,6 +272,8 @@ struct PreferencesView: View {
                 geminiCLITab
             case .copilotCLI:
                 copilotCLITab
+            case .droidCLI:
+                droidCLITab
             case .about:
                 aboutTab
             }
@@ -537,6 +549,10 @@ struct PreferencesView: View {
 
         // Reset agent storage overrides
         copilotSessionsPath = ""
+        droidSessionsPath = ""
+        droidProjectsPath = ""
+        validateDroidSessionsPath()
+        validateDroidProjectsPath()
 
         // Reset usage strip preferences
         UserDefaults.standard.set(false, forKey: PreferencesKey.showClaudeUsageStrip)
@@ -569,6 +585,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case opencode
     case geminiCLI
     case copilotCLI
+    case droidCLI
     case about
 
     var id: String { rawValue }
@@ -586,6 +603,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .opencode: return "OpenCode"
         case .geminiCLI: return "Gemini CLI"
         case .copilotCLI: return "GitHub Copilot CLI"
+        case .droidCLI: return "Droid"
         case .about: return "About"
         }
     }
@@ -603,6 +621,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .opencode: return "chevron.left.slash.chevron.right"
         case .geminiCLI: return "g.circle"
         case .copilotCLI: return "bolt.horizontal.circle"
+        case .droidCLI: return "d.circle"
         case .about: return "info.circle"
         }
     }
@@ -610,7 +629,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Unified Window → Usage Tracking → Usage Probes → Menu Bar → [4 Agents] → About
-    var visibleTabs: [PreferencesTab] { [.general, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .about] }
+    var visibleTabs: [PreferencesTab] { [.general, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI, .about] }
 }
 
 // MARK: - Probe helpers
@@ -709,6 +728,8 @@ extension PreferencesView {
             if geminiVersionString == nil && geminiProbeState != .probing { probeGemini() }
         case .copilotCLI:
             if copilotVersionString == nil && copilotProbeState != .probing { probeCopilot() }
+        case .droidCLI:
+            break
         case .menuBar, .usageProbes, .general, .unified, .advanced, .about:
             break
         }
