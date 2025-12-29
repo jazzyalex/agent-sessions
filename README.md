@@ -32,7 +32,7 @@
 
 ##  Overview
 
-Agent Sessions 2 brings **Codex CLI**, **Claude Code**, **Gemini CLI**, and **GitHub Copilot CLI** together in one interface.
+Agent Sessions 2 brings **Codex CLI**, **Claude Code**, **Gemini CLI**, **GitHub Copilot CLI**, and **Droid (Factory CLI)** together in one interface.
 Look up any past session — even the ancient ones `/resume` can't show — or browse visually to find that perfect prompt or code snippet, then instantly copy or resume it.
 
 <div align="center">

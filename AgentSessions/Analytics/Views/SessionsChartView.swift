@@ -123,7 +123,8 @@ struct SessionsChartView: View {
             SessionSource.claude.displayName: Color.agentColor(for: .claude, monochrome: stripMonochrome),
             SessionSource.gemini.displayName: Color.agentColor(for: .gemini, monochrome: stripMonochrome),
             SessionSource.opencode.displayName: Color.agentColor(for: .opencode, monochrome: stripMonochrome),
-            SessionSource.copilot.displayName: Color.agentColor(for: .copilot, monochrome: stripMonochrome)
+            SessionSource.copilot.displayName: Color.agentColor(for: .copilot, monochrome: stripMonochrome),
+            SessionSource.droid.displayName: Color.agentColor(for: .droid, monochrome: stripMonochrome)
         ])
         .chartLegend(.hidden)
         .chartXAxis {

@@ -37,6 +37,7 @@ final class SearchCoordinator: ObservableObject {
     private let geminiIndexer: GeminiSessionIndexer
     private let opencodeIndexer: OpenCodeSessionIndexer
     private let copilotIndexer: CopilotSessionIndexer
+    private let droidIndexer: DroidSessionIndexer
     // Promotion support for large-queue preemption
     private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
@@ -48,12 +49,14 @@ final class SearchCoordinator: ObservableObject {
          claudeIndexer: ClaudeSessionIndexer,
          geminiIndexer: GeminiSessionIndexer,
          opencodeIndexer: OpenCodeSessionIndexer,
-         copilotIndexer: CopilotSessionIndexer) {
+         copilotIndexer: CopilotSessionIndexer,
+         droidIndexer: DroidSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
         self.opencodeIndexer = opencodeIndexer
         self.copilotIndexer = copilotIndexer
+        self.droidIndexer = droidIndexer
     }
 
     // Get appropriate transcript cache based on session source
@@ -64,6 +67,7 @@ final class SearchCoordinator: ObservableObject {
         case .gemini: return geminiIndexer.searchTranscriptCache
         case .opencode: return opencodeIndexer.searchTranscriptCache
         case .copilot: return copilotIndexer.searchTranscriptCache
+        case .droid: return droidIndexer.searchTranscriptCache
         }
     }
 
@@ -94,6 +98,7 @@ final class SearchCoordinator: ObservableObject {
                includeGemini: Bool,
                includeOpenCode: Bool,
                includeCopilot: Bool,
+               includeDroid: Bool,
                all: [Session]) {
         // Cancel any in-flight search
         currentTask?.cancel()
@@ -108,6 +113,7 @@ final class SearchCoordinator: ObservableObject {
             if includeGemini { set.insert(.gemini) }
             if includeOpenCode { set.insert(.opencode) }
             if includeCopilot { set.insert(.copilot) }
+            if includeDroid { set.insert(.droid) }
             return set
         }()
         
@@ -209,6 +215,8 @@ final class SearchCoordinator: ObservableObject {
                                 self.opencodeIndexer.updateSession(parsed)
                             case .copilot:
                                 self.copilotIndexer.updateSession(parsed)
+                            case .droid:
+                                self.droidIndexer.updateSession(parsed)
                             }
                         }
                     }
@@ -335,6 +343,8 @@ final class SearchCoordinator: ObservableObject {
                 return OpenCodeSessionParser.parseFileFull(at: url)
             case .copilot:
                 return CopilotSessionParser.parseFileFull(at: url)
+            case .droid:
+                return DroidSessionParser.parseFileFull(at: url, forcedID: s.id)
             }
         }.value
     }

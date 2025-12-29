@@ -385,6 +385,16 @@ final class SessionArchiveManager: ObservableObject {
                     map[String(base.dropFirst("ses_".count))] = url
                 }
             }
+        case .droid:
+            let sessionsCustom = defaults.string(forKey: PreferencesKey.Paths.droidSessionsRootOverride)
+            let projectsCustom = defaults.string(forKey: PreferencesKey.Paths.droidProjectsRootOverride)
+            let discovery = DroidSessionDiscovery(customSessionsRoot: sessionsCustom?.isEmpty == false ? sessionsCustom : nil,
+                                                 customProjectsRoot: projectsCustom?.isEmpty == false ? projectsCustom : nil)
+            for url in discovery.discoverSessionFiles() {
+                if let s = DroidSessionParser.parseFile(at: url), !s.id.isEmpty {
+                    map[s.id] = url
+                }
+            }
         }
 
         return map
@@ -404,6 +414,8 @@ final class SessionArchiveManager: ObservableObject {
             // SessionIndexer’s lightweight parsing helpers are currently private; for backfill we only need
             // a stable upstream path so the archive can be created. Metadata will be refreshed on later scans.
             return minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .droid:
+            return DroidSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         }
     }
 

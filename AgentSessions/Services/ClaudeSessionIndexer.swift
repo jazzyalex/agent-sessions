@@ -54,10 +54,10 @@ final class ClaudeSessionIndexer: ObservableObject {
 
     @AppStorage("ClaudeSessionsRootOverride") var sessionsRootOverride: String = ""
     @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true {
-        didSet { recomputeNow() }
+        didSet { filterEpoch &+= 1 }
     }
     @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = true {
-        didSet { recomputeNow() }
+        didSet { filterEpoch &+= 1 }
     }
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
@@ -72,6 +72,7 @@ final class ClaudeSessionIndexer: ObservableObject {
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
     private var refreshToken = UUID()
     private var lastPrewarmSignatureByID: [String: Int] = [:]
+    @Published private var filterEpoch: Int = 0
 
     init() {
         // Initialize discovery with current override (if any)
@@ -86,15 +87,23 @@ final class ClaudeSessionIndexer: ObservableObject {
             $dateTo.removeDuplicates(by: Self.dateEq),
             $selectedModel.removeDuplicates()
         )
-        Publishers.CombineLatest3(
+
+        let inputsWithProjectAndEpoch = Publishers.CombineLatest3(
             inputs,
+            $projectFilter.removeDuplicates(),
+            $filterEpoch.removeDuplicates()
+        )
+
+        Publishers.CombineLatest3(
+            inputsWithProjectAndEpoch,
             $selectedKinds.removeDuplicates(),
             $allSessions
         )
         .receive(on: FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
-        .map { [weak self] input, kinds, all -> [Session] in
+        .map { [weak self] combined, kinds, all -> [Session] in
+            let (input, repoName, _) = combined
             let (q, from, to, model) = input
-            let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
+            let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: repoName, pathContains: nil)
             var results = FilterEngine.filterSessions(all,
                                                      filters: filters,
                                                      transcriptCache: self?.transcriptCache,
@@ -124,7 +133,7 @@ final class ClaudeSessionIndexer: ObservableObject {
                     self.lastShowSystemProbeSessions = show
                     self.refresh()
                 }
-                self.recomputeNow()
+                self.filterEpoch &+= 1
             }
             .store(in: &cancellables)
 
@@ -373,18 +382,7 @@ final class ClaudeSessionIndexer: ObservableObject {
 
     func applySearch() {
         query = queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        recomputeNow()
-    }
-
-    func recomputeNow() {
-        let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
-        var results = FilterEngine.filterSessions(allSessions,
-                                                 filters: filters,
-                                                 transcriptCache: transcriptCache,
-                                                 allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
-        if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
-        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
-        DispatchQueue.main.async { self.sessions = results }
+        // Sessions list is driven by the Combine pipeline.
     }
 
     var modelsSeen: [String] {

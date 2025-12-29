@@ -7,6 +7,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case gemini = "gemini"
     case opencode = "opencode"
     case copilot = "copilot"
+    case droid = "droid"
 
     public var displayName: String {
         switch self {
@@ -15,6 +16,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .gemini: return "Gemini"
         case .opencode: return "OpenCode"
         case .copilot: return "Copilot CLI"
+        case .droid: return "Droid"
         }
     }
 
@@ -25,6 +27,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .gemini: return "sparkles"
         case .opencode: return "chevron.left.slash.chevron.right"
         case .copilot: return "bolt.horizontal.circle"
+        case .droid: return "d.circle"
         }
     }
 }

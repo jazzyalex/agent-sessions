@@ -45,6 +45,7 @@ struct SessionTerminalView: View {
     @State private var conversationStartLineID: Int? = nil
     @State private var scrollTargetLineID: Int? = nil
     @State private var scrollTargetToken: Int = 0
+    @State private var preambleUserBlockIndexes: Set<Int> = []
 
     // Derived agent label for legend chips (Codex / Claude / Gemini)
     private var agentLegendLabel: String {
@@ -54,6 +55,7 @@ struct SessionTerminalView: View {
         case .gemini: return "Gemini"
         case .opencode: return "OpenCode"
         case .copilot: return "Copilot"
+        case .droid: return "Droid"
         }
     }
 
@@ -157,6 +159,7 @@ struct SessionTerminalView: View {
                     currentMatchLineID: currentMatchLineID,
                     scrollTargetLineID: scrollTargetLineID,
                     scrollTargetToken: scrollTargetToken,
+                    preambleUserBlockIndexes: preambleUserBlockIndexes,
                     colorScheme: colorScheme,
                     monochrome: stripMonochrome
                 )
@@ -171,9 +174,10 @@ struct SessionTerminalView: View {
     private func rebuildLines() {
         let built = TerminalBuilder.buildLines(for: session, showMeta: false)
         let skip = skipAgentsPreambleEnabled()
-        let (decorated, dividerID) = applyConversationStartDividerIfNeeded(lines: built, enabled: skip)
+        let (decorated, dividerID) = applyConversationStartDividerIfNeeded(session: session, lines: built, enabled: skip)
         lines = decorated
         conversationStartLineID = dividerID
+        preambleUserBlockIndexes = computePreambleUserBlockIndexes(session: session)
 
         // Collapse multi-line blocks into single navigable/message entries per role.
         var firstLineForBlock: [Int: Int] = [:]       // blockIndex -> first line id
@@ -211,6 +215,22 @@ struct SessionTerminalView: View {
         if skip, findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             jumpToFirstPrompt()
         }
+    }
+
+    private func computePreambleUserBlockIndexes(session: Session) -> Set<Int> {
+        // Only style preamble differently for Codex + Droid, where the "system prompt" is commonly embedded
+        // as a user-authored-looking block.
+        guard session.source == .codex || session.source == .droid else { return [] }
+
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        var out: Set<Int> = []
+        out.reserveCapacity(4)
+        for (idx, block) in blocks.enumerated() where block.kind == .user {
+            if Session.isAgentsPreambleText(block.text) {
+                out.insert(idx)
+            }
+        }
+        return out
     }
 
     private func loadRoleToggles() {
@@ -456,8 +476,40 @@ struct SessionTerminalView: View {
         scrollTargetToken &+= 1
     }
 
-    private func applyConversationStartDividerIfNeeded(lines: [TerminalLine], enabled: Bool) -> ([TerminalLine], Int?) {
+    private func applyConversationStartDividerIfNeeded(session: Session, lines: [TerminalLine], enabled: Bool) -> ([TerminalLine], Int?) {
         guard enabled else { return (lines, nil) }
+
+        // Droid: system reminders can be embedded in the first user message but should be hidden by default.
+        // When present, insert the divider above the first real user prompt while keeping the preamble
+        // visible above (Codex-style: auto-jump, but you can scroll up).
+        if session.source == .droid {
+            func firstNonEmptyLine(_ text: String) -> String? {
+                for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+                    let t = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !t.isEmpty { return t }
+                }
+                return nil
+            }
+
+            var sawPreamble = false
+            var promptLine: String? = nil
+            for ev in session.events where ev.kind == .user {
+                guard let raw = ev.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
+                if Session.isAgentsPreambleText(raw) {
+                    sawPreamble = true
+                    continue
+                }
+                guard sawPreamble else { break }
+                promptLine = firstNonEmptyLine(raw)
+                break
+            }
+            if let promptLine {
+                if let insertAt = lines.firstIndex(where: { $0.role == .user && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == promptLine }) {
+                    return insertConversationStartDivider(lines: lines, insertAt: insertAt)
+                }
+            }
+        }
+
         let marker = "</INSTRUCTIONS>"
         guard let closeIndex = lines.firstIndex(where: { $0.text.contains(marker) }) else {
             guard let insertAt = claudeConversationStartLineIndexIfNeeded(lines: lines) else { return (lines, nil) }
@@ -789,6 +841,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let currentMatchLineID: Int?
     let scrollTargetLineID: Int?
     let scrollTargetToken: Int
+    let preambleUserBlockIndexes: Set<Int>
     let colorScheme: ColorScheme
     let monochrome: Bool
 
@@ -934,10 +987,21 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let paragraph = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
             paragraph.paragraphSpacingBefore = paragraphSpacingBefore
 
+            let isPreambleUserLine: Bool = {
+                guard line.role == .user else { return false }
+                guard let blockIndex = line.blockIndex else { return false }
+                return preambleUserBlockIndexes.contains(blockIndex)
+            }()
+
+            let fontWeight: NSFont.Weight = {
+                if line.role == .user, !isPreambleUserLine { return .bold }
+                return .regular
+            }()
+
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.monospacedSystemFont(
                     ofSize: fontSize,
-                    weight: line.role == .user ? .bold : .regular
+                    weight: fontWeight
                 ),
                 .foregroundColor: swatch.foreground,
                 .paragraphStyle: paragraph

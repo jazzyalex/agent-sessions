@@ -30,6 +30,7 @@ enum PreferencesKey {
     static let geminiCLIAvailable = "GeminiCLIAvailable"
     static let openCodeCLIAvailable = "OpenCodeCLIAvailable"
     static let copilotCLIAvailable = "CopilotCLIAvailable"
+    static let droidCLIAvailable = "DroidCLIAvailable"
 
     enum Agents {
         static let didSeedEnabledAgents = "DidSeedEnabledAgents_v1"
@@ -38,6 +39,7 @@ enum PreferencesKey {
         static let geminiEnabled = "AgentEnabledGemini"
         static let openCodeEnabled = "AgentEnabledOpenCode"
         static let copilotEnabled = "AgentEnabledCopilot"
+        static let droidEnabled = "AgentEnabledDroid"
     }
 
     // Polling intervals
@@ -69,6 +71,8 @@ enum PreferencesKey {
     enum Paths {
         static let claudeSessionsRootOverride = "ClaudeSessionsRootOverride"
         static let copilotSessionsRootOverride = "CopilotSessionsRootOverride"
+        static let droidSessionsRootOverride = "DroidSessionsRootOverride"
+        static let droidProjectsRootOverride = "DroidProjectsRootOverride"
     }
 
     enum Archives {

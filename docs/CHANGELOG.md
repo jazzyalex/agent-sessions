@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Improvements
 
 - Transcript (Color view): Increase role contrast and add block spacing so user prompts stand out near tool calls.
+- Transcript (Color view): Avoid bold styling for Codex/Droid preamble blocks so system prompts are visually distinct from real user prompts.
+- Droid (Factory CLI): Import Droid sessions (interactive store and stream-json logs) with a dedicated Preferences pane, toolbar filter, and Analytics support.
 
 ## [2.9] - 2025-12-23
 
