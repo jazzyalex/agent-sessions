@@ -11,6 +11,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Deploy docs drift guard
+        shell: bash
+        run: scripts/check_deploy_drift.sh
       - name: Xcode version
         run: xcodebuild -version
       - name: Build (macOS, no signing)
