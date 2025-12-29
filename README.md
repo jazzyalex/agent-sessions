@@ -17,7 +17,7 @@
 </table>
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.9/AgentSessions-2.9.dmg"><b>Download Agent Sessions 2.9 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.9.1/AgentSessions-2.9.1.dmg"><b>Download Agent Sessions 2.9.1 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -179,7 +179,7 @@ No cloud uploads or telemetry — **read‑only by design.**
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.9.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.9/AgentSessions-2.9.dmg)
+1. [Download AgentSessions-2.9.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.9.1/AgentSessions-2.9.1.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew Tap
