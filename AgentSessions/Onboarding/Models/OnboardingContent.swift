@@ -86,11 +86,13 @@ extension OnboardingContent {
                         .init(symbolName: "c.circle.fill", title: "Claude Code"),
                         .init(symbolName: "sparkle", title: "Gemini CLI"),
                         .init(symbolName: "chevron.left.slash.chevron.right", title: "OpenCode"),
-                        .init(symbolName: "person.crop.circle.badge.checkmark", title: "GitHub Copilot")
+                        .init(symbolName: "bolt.horizontal.circle", title: "Copilot CLI"),
+                        .init(symbolName: "d.circle", title: "Droid")
                     ],
                     bullets: [
                         "Enable the agents you use in Settings. Agents you don’t use can stay disabled.",
-                        "You can keep indexing lightweight by only enabling what you use."
+                        "You can keep indexing lightweight by only enabling what you use.",
+                        "Droid support includes Factory CLI sessions (including stream-json logs)."
                     ]
                 ),
                 Screen(
@@ -201,6 +203,16 @@ extension OnboardingContent {
                     symbolName: "sparkles",
                     title: "Welcome to Agent Sessions 2.9",
                     body: "A short tour of what’s changed, so you can get productive faster."
+                ),
+                Screen(
+                    symbolName: "d.circle",
+                    title: "New agent: Droid",
+                    body: "Droid (Factory CLI) sessions are now indexed alongside your other agents.",
+                    bullets: [
+                        "Enable or configure Droid in Settings.",
+                        "Droid sessions support interactive store and stream-json logs.",
+                        "Use the toolbar filter to focus on Droid sessions (⌘6)."
+                    ]
                 ),
                 Screen(
                     symbolName: "person.crop.circle.badge.plus",

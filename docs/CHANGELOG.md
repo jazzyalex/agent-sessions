@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Transcript (Color view): Increase role contrast and add block spacing so user prompts stand out near tool calls.
 - Transcript (Color view): Avoid bold styling for Codex/Droid preamble blocks so system prompts are visually distinct from real user prompts.
 - Droid (Factory CLI): Import Droid sessions (interactive store and stream-json logs) with a dedicated Preferences pane, toolbar filter, and Analytics support.
+- Onboarding: Update the full and update tours to include Droid support and reflect the current agent lineup.
 
 ## [2.9] - 2025-12-23
 
@@ -51,8 +52,6 @@ All notable changes to this project will be documented in this file.
 - **Gemini CLI Detection**: Enhanced Gemini binary detection via login-shell PATH fallback, matching other CLI probes. "Auto" detection now reliably finds the `gemini` binary (npm `@google/gemini-cli`).
 - **Cleanup UX**: Claude auto-cleanup now shows non-intrusive flash notifications instead of modal dialogs for better user experience.
 
-
-## [Unreleased]
 
 ## [2.8] - 2025-11-27
 
