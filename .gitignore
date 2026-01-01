@@ -48,3 +48,15 @@ docs/Sonnet-4.5-review.md
 
 # Backup files created during development
 *.backup-*
+
+# Local scan outputs (can contain absolute paths / private data)
+scripts/probe_scan_output/
+
+# Local release artifacts (use GitHub Releases instead of tracking binaries)
+*.dmg
+
+# Xcode project backup/working copies (keep only the canonical project.pbxproj)
+AgentSessions.xcodeproj/project.pbxproj.backup*
+AgentSessions.xcodeproj/project.pbxproj.bak*
+AgentSessions.xcodeproj/project.pbxproj.fix*
+AgentSessions.xcodeproj/project.pbxproj.final
