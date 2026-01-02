@@ -38,6 +38,29 @@ green(){ printf "\033[32m%s\033[0m\n" "$*"; }
 yellow(){ printf "\033[33m%s\033[0m\n" "$*"; }
 red(){ printf "\033[31m%s\033[0m\n" "$*"; }
 
+# State management (for resume/diagnostics)
+STATE_FILE="/tmp/deploy-state.json"
+
+save_state() {
+  local step="$1"
+  local timestamp
+  timestamp=$(date -Iseconds)
+  cat > "$STATE_FILE" <<EOF
+{
+  "version": "${VERSION:-}",
+  "tag": "${TAG:-}",
+  "last_step": "$step",
+  "timestamp": "$timestamp"
+}
+EOF
+  log INFO "Saved state: $step ($STATE_FILE)"
+}
+
+clear_state() {
+  rm -f "$STATE_FILE"
+  log INFO "Cleared deployment state ($STATE_FILE)"
+}
+
 # Structured logging
 LOG_FILE="/tmp/deploy-${VERSION:-unknown}-$(date +%s).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
