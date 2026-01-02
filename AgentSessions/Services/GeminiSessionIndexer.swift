@@ -4,23 +4,6 @@ import SwiftUI
 
 /// Session indexer for Gemini CLI sessions (ephemeral, read-only)
 final class GeminiSessionIndexer: ObservableObject {
-    // Throttler for coalescing progress UI updates
-    final class ProgressThrottler {
-        private var lastFlush = DispatchTime.now()
-        private var pendingFiles = 0
-        private let intervalMs: Int = 100
-        func incrementAndShouldFlush() -> Bool {
-            pendingFiles += 1
-            let now = DispatchTime.now()
-            if now.uptimeNanoseconds - lastFlush.uptimeNanoseconds > UInt64(intervalMs) * 1_000_000 {
-                lastFlush = now
-                pendingFiles = 0
-                return true
-            }
-            if pendingFiles >= 50 { pendingFiles = 0; return true }
-            return false
-        }
-    }
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
@@ -62,8 +45,8 @@ final class GeminiSessionIndexer: ObservableObject {
         // Debounced filtering similar to Claude indexer
         let inputs = Publishers.CombineLatest4(
             $query.removeDuplicates(),
-            $dateFrom.removeDuplicates(by: Self.dateEq),
-            $dateTo.removeDuplicates(by: Self.dateEq),
+            $dateFrom.removeDuplicates(by: OptionalDateEquality.eq),
+            $dateTo.removeDuplicates(by: OptionalDateEquality.eq),
             $selectedModel.removeDuplicates()
         )
         Publishers.CombineLatest3(inputs, $selectedKinds.removeDuplicates(), $allSessions)
@@ -386,13 +369,6 @@ final class GeminiSessionIndexer: ObservableObject {
         transcriptCache.set(updated.id, transcript: transcript)
     }
 
-    private static func dateEq(_ lhs: Date?, _ rhs: Date?) -> Bool {
-        switch (lhs, rhs) {
-        case (nil, nil): return true
-        case let (l?, r?): return abs(l.timeIntervalSince1970 - r.timeIntervalSince1970) < 0.5
-        default: return false
-        }
-    }
 }
 
 // MARK: - SessionIndexerProtocol Conformance

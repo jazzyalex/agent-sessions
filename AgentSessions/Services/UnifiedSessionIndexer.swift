@@ -261,8 +261,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Debounced filtering and sorting pipeline (runs off main thread)
         let inputs = Publishers.CombineLatest4(
             $query.removeDuplicates(),
-            $dateFrom.removeDuplicates(by: Self.dateEq),
-            $dateTo.removeDuplicates(by: Self.dateEq),
+            $dateFrom.removeDuplicates(by: OptionalDateEquality.eq),
+            $dateTo.removeDuplicates(by: OptionalDateEquality.eq),
             $selectedModel.removeDuplicates()
         )
         let includes = Publishers.CombineLatest(
@@ -706,14 +706,6 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let r = rhs.source.rawValue
                 return descriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
             }
-        }
-    }
-
-    private static func dateEq(_ lhs: Date?, _ rhs: Date?) -> Bool {
-        switch (lhs, rhs) {
-        case (nil, nil): return true
-        case let (l?, r?): return abs(l.timeIntervalSince1970 - r.timeIntervalSince1970) < 0.5
-        default: return false
         }
     }
 
