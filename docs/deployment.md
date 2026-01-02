@@ -14,6 +14,13 @@ This runbook provides a **fully automated deployment process** with comprehensiv
 - `tools/release/deploy release <VERSION>`
 - `tools/release/deploy verify <VERSION>`
 
+## Sparkle Update Integrity (Appcast + Signatures)
+
+- **Appcast file**: `docs/appcast.xml` (committed to `main`)
+- **Served from**: GitHub Pages over HTTPS at `https://jazzyalex.github.io/agent-sessions/appcast.xml`
+- **Update payloads**: DMGs are hosted on GitHub Releases over HTTPS (the appcast `enclosure url` should point to `https://github.com/jazzyalex/agent-sessions/releases/...`)
+- **Signing (recommended by Sparkle)**: Appcast generation uses Sparkle’s `generate_appcast`, which produces EdDSA signatures for update enclosures.
+
 **Key environment flags**:
 - `SKIP_CONFIRM=1` — make bump and release flows unattended (suppresses confirmation prompts where supported).
 - `NOTARIZE_SYNC=1` — use legacy blocking notarization instead of background polling.
@@ -72,7 +79,7 @@ Full deployment pipeline with enhanced safety:
 - ✅ **Enhanced pre-flight checks** (git state, version validation, build numbers)
 - ✅ **Build, sign, and notarize** (Apple Developer ID)
 - ✅ **DMG smoke testing** (mount, verify signature, check version)
-- ✅ **Sparkle appcast generation** (EdDSA signatures)
+- ✅ **Sparkle appcast generation** (Sparkle `generate_appcast`, EdDSA signatures)
 - ✅ **GitHub release creation** (idempotent, can re-run)
 - ✅ **Homebrew cask update** (via GitHub API)
 - ✅ **Network retry logic** (3 attempts, 5s backoff)
