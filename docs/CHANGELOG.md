@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
+- Parsing: Ignore empty JSONL lines during scanning for improved robustness.
+
 ## [2.9.2] - 2026-01-01
 
 ### Improvements

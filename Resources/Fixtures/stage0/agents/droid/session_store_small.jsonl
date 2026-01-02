@@ -1,0 +1,5 @@
+{"type":"session_start","id":"droid_s1","title":"Stage0 Droid Small","cwd":"/tmp"}
+{"type":"message","id":"m1","timestamp":"2025-12-26T23:50:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Run a command"}]}}
+{"type":"message","id":"m2","timestamp":"2025-12-26T23:50:01.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu1","name":"Execute","input":{"command":"ls /nope"}}]}}
+{"type":"message","id":"m3","timestamp":"2025-12-26T23:50:02.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"Error: Command failed (exit code: 1)\nls: /nope: No such file or directory"}]}}
+

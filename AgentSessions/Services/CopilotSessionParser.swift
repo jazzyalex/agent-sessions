@@ -9,6 +9,14 @@ final class CopilotSessionParser {
     private static let previewScanLimit = 2_000
     private static let maxRawResultContentBytes = 8_192
 
+    private static func normalizeEscapes(_ s: String?) -> String? {
+        guard let s else { return nil }
+        return s
+            .replacingOccurrences(of: "\\r\\n", with: "\r\n")
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\t", with: "\t")
+    }
+
     static func parseFile(at url: URL, forcedID: String? = nil) -> Session? {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
@@ -246,7 +254,7 @@ final class CopilotSessionParser {
                     let toolCallId = data["toolCallId"] as? String
                     let success = (data["success"] as? Bool) ?? true
                     let result = data["result"] as? [String: Any]
-                    let output = result?["content"] as? String
+                    let output = normalizeEscapes(result?["content"] as? String)
 
                     let toolMeta = toolCallId.flatMap { toolByCallID[$0] }
                     let toolName = toolMeta?.name

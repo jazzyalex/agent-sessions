@@ -1,0 +1,6 @@
+{"type":"system","sessionId":"sid_stage0_drift","timestamp":"2025-12-26T01:00:00.000Z","model":"droid-model","cwd":"/tmp/drift","id":"sys1"}
+{"type":"message","sessionId":"sid_stage0_drift","timestamp":"2025-12-26T01:00:01.000Z","role":"user","text":"<system-reminder>\nBe safe.\n</system-reminder>\n\nList files","id":"m1"}
+{"type":"tool_call","sessionId":"sid_stage0_drift","timestamp":"2025-12-26T01:00:02.000Z","toolCallId":"c1","toolName":"Shell","parameters":{"command":"ls"},"id":"tc1"}
+{"type":"tool_result","sessionId":"sid_stage0_drift","timestamp":"2025-12-26T01:00:03.000Z","toolCallId":"c1","value":{"stdout":"a\nb\n","exitCode":0},"id":"tr1"}
+{"type":"completion","sessionId":"sid_stage0_drift","timestamp":"2025-12-26T01:00:04.000Z","finalText":"Ok","id":"end"}
+

@@ -1,0 +1,6 @@
+{"timestamp":"2025-12-17T23:27:49.405Z","type":"session_meta","payload":{"id":"019b2ea4-2a8d-76e2-9cd8-58208e1f2837","timestamp":"2025-12-17T23:27:49.389Z","cwd":"/tmp/repo","originator":"codex_cli_rs","cli_version":"0.73.0","git":{"branch":"main"},"instructions":"short"}}
+{"timestamp":"2025-12-17T23:27:50.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"List the files"}]}}
+{"timestamp":"2025-12-17T23:27:51.000Z","type":"response_item","payload":{"type":"tool_call","function":{"name":"run_shell_command"},"arguments":{"command":"ls","cwd":"/tmp/repo"}}}
+{"timestamp":"2025-12-17T23:27:52.000Z","type":"response_item","payload":{"type":"tool_result","name":"run_shell_command","result":{"stdout":"a.txt\nb.txt\n","stderr":"","exitCode":0}}}
+{"timestamp":"2025-12-17T23:27:53.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Found 2 files."}]}}
+

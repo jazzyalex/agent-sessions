@@ -1,0 +1,2 @@
+{"id":"p_tool_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"success","input":{"command":"ls","cwd":"/tmp/repo"},"output":"a.txt\nb.txt\n","time":{"start":1730000002500,"end":1730000003000}}}
+

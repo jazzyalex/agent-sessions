@@ -1,0 +1,9 @@
+{"type":"session_start","id":"droid_large","title":"Stage0 Droid Large","cwd":"/tmp/large"}
+{"type":"message","id":"m1","timestamp":"2025-12-26T00:10:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Step 1"}]}}
+{"type":"message","id":"m2","timestamp":"2025-12-26T00:10:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Ok"}]}}
+{"type":"message","id":"m3","timestamp":"2025-12-26T00:10:02.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu1","name":"Execute","input":{"command":"printf 'line1\\nline2\\nline3\\n'"}}]}}
+{"type":"message","id":"m4","timestamp":"2025-12-26T00:10:03.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"line1\nline2\nline3\n"}]}}
+{"type":"message","id":"m5","timestamp":"2025-12-26T00:10:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Captured multiline output."}]}}
+{"type":"message","id":"m6","timestamp":"2025-12-26T00:10:05.000Z","message":{"role":"user","content":[{"type":"text","text":"Step 2"}]}}
+{"type":"message","id":"m7","timestamp":"2025-12-26T00:10:06.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Ok"}]}}
+

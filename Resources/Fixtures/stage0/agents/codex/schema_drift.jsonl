@@ -1,0 +1,5 @@
+{"created_at":"2025-09-10T12:00:00Z","role":"user","message":"Translate 'hello' to Spanish","model":"gpt-4o-mini"}
+{"created_at":"2025-09-10T12:00:01Z","type":"function_call","function":{"name":"translate"},"arguments":{"text":"hello","to":"es"}}
+{"created_at":"2025-09-10T12:00:01Z","type":"function_result","name":"translate","result":"hola"}
+{"created_at":"2025-09-10T12:00:02Z","role":"assistant","content":"\"hola\""}
+

@@ -23,7 +23,7 @@ final class SessionParserTests: XCTestCase {
     func testBuildsSessionMetadata() throws {
         let url = fixtureURL("session_toolcall")
         let indexer = SessionIndexer()
-        let session = indexer.parseFile(at: url)
+        let session = indexer.parseFileFull(at: url)
         XCTAssertNotNil(session)
         guard let s = session else { return }
         XCTAssertEqual(s.eventCount, 4)
@@ -36,8 +36,8 @@ final class SessionParserTests: XCTestCase {
     func testSearchAndFilters() throws {
         // Build two sample sessions from fixtures
         let idx = SessionIndexer()
-        let s1 = idx.parseFile(at: fixtureURL("session_simple"))!
-        let s2 = idx.parseFile(at: fixtureURL("session_toolcall"))!
+        let s1 = idx.parseFileFull(at: fixtureURL("session_simple"))!
+        let s2 = idx.parseFileFull(at: fixtureURL("session_toolcall"))!
         let all = [s1, s2]
         // Query should match assistant text in s1
         var filters = Filters(query: "sunny", dateFrom: nil, dateTo: nil, model: nil, kinds: Set(SessionEventKind.allCases))

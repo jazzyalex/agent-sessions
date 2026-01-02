@@ -1,0 +1,5 @@
+{"type":"user","sessionId":"ses_stage0_drift","version":"1.9.0","project":"/tmp/project","message":{"role":"user","content":"Open README"},"uuid":"u1","timestamp":"2025-12-16T01:00:00.000Z"}
+{"type":"tool_use","sessionId":"ses_stage0_drift","name":"bash","input":{"command":"cat README.md"},"uuid":"t1","timestamp":"2025-12-16T01:00:01.000Z"}
+{"type":"tool_result","sessionId":"ses_stage0_drift","name":"bash","output":"# Title\n\nBody\n","uuid":"r1","timestamp":"2025-12-16T01:00:02.000Z"}
+{"type":"assistant","sessionId":"ses_stage0_drift","version":"1.9.0","message":{"role":"assistant","content":"Read README and extracted the title."},"uuid":"a1","timestamp":"2025-12-16T01:00:03.000Z"}
+
