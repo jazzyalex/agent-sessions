@@ -38,10 +38,30 @@
 Agent Sessions 2 brings **Codex CLI**, **Claude Code**, **Gemini CLI**, **GitHub Copilot CLI**, and **Droid (Factory CLI)** together in one interface.
 Look up any past session — even the ancient ones `/resume` can't show — or browse visually to find that perfect prompt or code snippet, then instantly copy or resume it.
 
-## Trust
+## Trust & Privacy
+
+All processing runs on your Mac.
+Reads `~/.codex/sessions`, `~/.claude/sessions`, `~/.gemini/tmp`, `~/.copilot/session-state`, and `~/.local/share/opencode/storage/session` (all read‑only).
+No cloud uploads or telemetry — **read‑only by design.**
+
 - `docs/PRIVACY.md`
 - `docs/security.md`
 - `LICENSE`
+
+## Install
+
+### Option A — Download DMG
+1. [Download AgentSessions-2.9.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.9.2/AgentSessions-2.9.2.dmg)
+2. Drag **Agent Sessions.app** into Applications.
+
+### Option B — Homebrew Tap
+```bash
+# install with Homebrew
+brew tap jazzyalex/agent-sessions
+brew install --cask agent-sessions
+```
+
+---
 
 <div align="center">
 
@@ -63,9 +83,6 @@ Local-first, open source, and built for terminal vibe warriors.
 
   <p style="margin:0 0 0px 0;"><em>Analytics dashboard with session trends and agent breakdown (Dark Mode)</em></p>
   <img src="docs/assets/analytics-dark.png" alt="Analytics dashboard with session trends and agent breakdown (Dark Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
-
-  <p style="margin:0 0 15px 0;"><em>Git Context Inspector showing repository state and historical diffs (Light Mode)</em></p>
-  <img src="docs/assets/git-context-light.png" alt="Git Context Inspector showing repository state and historical diffs (Light Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px auto;display:block;"/>
 </div>
 
 ---
@@ -135,9 +152,6 @@ SQLite-backed indexing brings **dramatically faster** session loading and filter
 ### Analytics Dashboard (v1)
 Visualize your AI coding patterns with comprehensive analytics. Track session trends, compare agent usage, discover your most productive hours with time-of-day heatmaps, and view key metrics—all in a dedicated analytics window.
 
-### Git Context Inspector
-Deep-dive into the git context of any Codex session. See repository state, branch info, and historical diffs—understand exactly what code changes were visible to Codex during each session. Right-click any Codex session → **Show Git Context**.
-
 ### Updated Usage Tracking
 Usage limit tracking and reset times now properly support Codex 0.50+ session format changes. The strip and menu show a "Stale data" warning when rate‑limit information is older than the freshness threshold, even if token‑only events or UI refreshes occurred meanwhile. Flexible timestamp parsing handles both old and new session formats.
 
@@ -169,35 +183,9 @@ Visualize your AI coding patterns with comprehensive analytics:
 
 Access via **Window → Analytics** or the toolbar analytics icon.
 
-### Git Context Inspector (Codex CLI)
-Deep-dive into the git context of any Codex session:
-- **Repository state**: See branch, commit, and working tree status at session time
-- **Historical diffs**: Review exact code changes that were visible to Codex
-- **Context timeline**: Understand what git context influenced each session
-
-Right-click any Codex session → **Show Git Context** to open the inspector.
-
-### Local, Private & Safe
-All processing runs on your Mac.
-Reads `~/.codex/sessions`, `~/.claude/sessions`, `~/.gemini/tmp`, `~/.copilot/session-state`, and `~/.local/share/opencode/storage/session` (all read‑only).
-No cloud uploads or telemetry — **read‑only by design.**
-
 ---
 
-## Install
-
-### Option A — Download DMG
-1. [Download AgentSessions-2.9.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.9.2/AgentSessions-2.9.2.dmg)
-2. Drag **Agent Sessions.app** into Applications.
-
-### Option B — Homebrew Tap
-```bash
-# install with Homebrew
-brew tap jazzyalex/agent-sessions
-brew install --cask agent-sessions
-```
-
-### Automatic Updates
+## Automatic Updates
 
 Agent Sessions includes **Sparkle 2** for automatic updates:
 - **Background checks**: The app checks for updates every 24 hours (customizable in Settings)
