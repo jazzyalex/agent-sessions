@@ -54,10 +54,18 @@ final class ClaudeSessionIndexer: ObservableObject {
 
     @AppStorage("ClaudeSessionsRootOverride") var sessionsRootOverride: String = ""
     @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true {
-        didSet { filterEpoch &+= 1 }
+        didSet {
+            publishAfterCurrentUpdate { [weak self] in
+                self?.filterEpoch &+= 1
+            }
+        }
     }
     @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = true {
-        didSet { filterEpoch &+= 1 }
+        didSet {
+            publishAfterCurrentUpdate { [weak self] in
+                self?.filterEpoch &+= 1
+            }
+        }
     }
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
@@ -115,25 +123,33 @@ final class ClaudeSessionIndexer: ObservableObject {
             return results
         }
         .receive(on: DispatchQueue.main)
-        .assign(to: &$sessions)
+        .sink { [weak self] value in
+            self?.publishAfterCurrentUpdate { [weak self] in
+                self?.sessions = value
+            }
+        }
+        .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self = self else { return }
-                // React to Sessions root override changes from Preferences
-                let current = UserDefaults.standard.string(forKey: "ClaudeSessionsRootOverride") ?? ""
-                if current != self.lastSessionsRootOverride {
-                    self.lastSessionsRootOverride = current
-                    self.discovery = ClaudeSessionDiscovery(customRoot: current.isEmpty ? nil : current)
-                    self.refresh()
+                guard let self else { return }
+                self.publishAfterCurrentUpdate { [weak self] in
+                    guard let self else { return }
+                    // React to Sessions root override changes from Preferences
+                    let current = UserDefaults.standard.string(forKey: "ClaudeSessionsRootOverride") ?? ""
+                    if current != self.lastSessionsRootOverride {
+                        self.lastSessionsRootOverride = current
+                        self.discovery = ClaudeSessionDiscovery(customRoot: current.isEmpty ? nil : current)
+                        self.refresh()
+                    }
+                    let show = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
+                    if show != self.lastShowSystemProbeSessions {
+                        self.lastShowSystemProbeSessions = show
+                        self.refresh()
+                    }
+                    self.filterEpoch &+= 1
                 }
-                let show = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
-                if show != self.lastShowSystemProbeSessions {
-                    self.lastShowSystemProbeSessions = show
-                    self.refresh()
-                }
-                self.filterEpoch &+= 1
             }
             .store(in: &cancellables)
 
@@ -165,14 +181,17 @@ final class ClaudeSessionIndexer: ObservableObject {
 
         let token = UUID()
         refreshToken = token
-        launchPhase = .hydrating
-        isIndexing = true
-        isProcessingTranscripts = false
-        progressText = "Scanning…"
-        filesProcessed = 0
-        totalFiles = 0
-        indexingError = nil
-        hasEmptyDirectory = false
+        publishAfterCurrentUpdate { [weak self] in
+            guard let self else { return }
+            self.launchPhase = .hydrating
+            self.isIndexing = true
+            self.isProcessingTranscripts = false
+            self.progressText = "Scanning…"
+            self.filesProcessed = 0
+            self.totalFiles = 0
+            self.indexingError = nil
+            self.hasEmptyDirectory = false
+        }
 
         let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
         ioQueue.async {
@@ -224,7 +243,8 @@ final class ClaudeSessionIndexer: ObservableObject {
             #endif
             LaunchProfiler.log("Claude.refresh: file enumeration done (files=\(files.count))")
 
-            DispatchQueue.main.async {
+            self.publishAfterCurrentUpdate { [weak self] in
+                guard let self else { return }
                 self.totalFiles = files.count
                 self.hasEmptyDirectory = files.isEmpty
                 if self.refreshToken == token {
@@ -243,13 +263,15 @@ final class ClaudeSessionIndexer: ObservableObject {
 
                 if FeatureFlags.throttleIndexingUIUpdates {
                     if self.progressThrottler.incrementAndShouldFlush() {
-                        DispatchQueue.main.async {
+                        self.publishAfterCurrentUpdate { [weak self] in
+                            guard let self else { return }
                             self.filesProcessed = i + 1
                             self.progressText = "Indexed \(i + 1)/\(files.count)"
                         }
                     }
                 } else {
-                    DispatchQueue.main.async {
+                    self.publishAfterCurrentUpdate { [weak self] in
+                        guard let self else { return }
                         self.filesProcessed = i + 1
                         self.progressText = "Indexed \(i + 1)/\(files.count)"
                     }
@@ -263,7 +285,8 @@ final class ClaudeSessionIndexer: ObservableObject {
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .claude)
 
-            DispatchQueue.main.async {
+            self.publishAfterCurrentUpdate { [weak self] in
+                guard let self else { return }
                 LaunchProfiler.log("Claude.refresh: sessions merged (total=\(mergedWithArchives.count))")
                 self.allSessions = mergedWithArchives
                 self.isIndexing = false
@@ -299,17 +322,21 @@ final class ClaudeSessionIndexer: ObservableObject {
                         await cache.generateAndCache(sessions: delta)
                         await MainActor.run {
                             LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
-                            self.isProcessingTranscripts = false
-                            self.progressText = "Ready"
-                            if self.refreshToken == token {
-                                self.launchPhase = .ready
+                            self.publishAfterCurrentUpdate {
+                                self.isProcessingTranscripts = false
+                                self.progressText = "Ready"
+                                if self.refreshToken == token {
+                                    self.launchPhase = .ready
+                                }
                             }
                         }
                     }
                 } else {
-                    self.progressText = "Ready"
-                    if self.refreshToken == token {
-                        self.launchPhase = .ready
+                    self.publishAfterCurrentUpdate {
+                        self.progressText = "Ready"
+                        if self.refreshToken == token {
+                            self.launchPhase = .ready
+                        }
                     }
                 }
             }
@@ -423,7 +450,8 @@ final class ClaudeSessionIndexer: ObservableObject {
                 print("  ⏱️ Parse took \(String(format: "%.1f", elapsed))s - events=\(fullSession.events.count)")
                 #endif
 
-                DispatchQueue.main.async {
+                self.publishAfterCurrentUpdate { [weak self] in
+                    guard let self else { return }
                     if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                         self.allSessions[idx] = fullSession
 
@@ -446,9 +474,19 @@ final class ClaudeSessionIndexer: ObservableObject {
                 #if DEBUG
                 print("  ❌ Full parse failed")
                 #endif
-                DispatchQueue.main.async {
-                    self.isLoadingSession = false
-                    self.loadingSessionID = nil
+                self.publishAfterCurrentUpdate { [weak self] in
+                    self?.isLoadingSession = false
+                    self?.loadingSessionID = nil
+                }
+            }
+        }
+    }
+
+    private func publishAfterCurrentUpdate(_ work: @escaping @MainActor () -> Void) {
+        DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                Task { @MainActor in
+                    work()
                 }
             }
         }
