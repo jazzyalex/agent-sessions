@@ -16,6 +16,9 @@
 </tr>
 </table>
 
+- License: MIT
+- Security & Privacy: Local-only. No telemetry. Details: `docs/security.md`
+
 <p align="center">
   <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.9.1/AgentSessions-2.9.1.dmg"><b>Download Agent Sessions 2.9.1 (DMG)</b></a>
   •
@@ -34,6 +37,11 @@
 
 Agent Sessions 2 brings **Codex CLI**, **Claude Code**, **Gemini CLI**, **GitHub Copilot CLI**, and **Droid (Factory CLI)** together in one interface.
 Look up any past session — even the ancient ones `/resume` can't show — or browse visually to find that perfect prompt or code snippet, then instantly copy or resume it.
+
+## Trust
+- `docs/PRIVACY.md`
+- `docs/security.md`
+- `LICENSE`
 
 <div align="center">
 
