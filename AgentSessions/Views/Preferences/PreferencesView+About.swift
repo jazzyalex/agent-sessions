@@ -35,6 +35,20 @@ extension PreferencesView {
                     }
                 }
 
+                labeledRow("Security & Privacy:") {
+                    Button("Security & Privacy") {
+                        UpdateCheckModel.shared.openURL("https://github.com/jazzyalex/agent-sessions/blob/main/docs/security.md")
+                    }
+                    .buttonStyle(.link)
+                }
+
+                labeledRow("License:") {
+                    Button("MIT License") {
+                        UpdateCheckModel.shared.openURL("https://github.com/jazzyalex/agent-sessions/blob/main/LICENSE")
+                    }
+                    .buttonStyle(.link)
+                }
+
                 labeledRow("Website:") {
                     Button("jazzyalex.github.io/agent-sessions") {
                         UpdateCheckModel.shared.openURL("https://jazzyalex.github.io/agent-sessions/")
