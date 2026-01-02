@@ -91,93 +91,83 @@ final class GeminiSessionIndexer: ObservableObject {
         indexingError = nil
         hasEmptyDirectory = false
 
-        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
-        ioQueue.async {
-            // Fast path: hydrate from SQLite index if available (bridge async)
-            var indexed: [Session]? = nil
-            let sema = DispatchSemaphore(value: 0)
-            Task.detached(priority: .utility) {
-                indexed = try? await self.hydrateFromIndexDBIfAvailable()
-                if (indexed?.isEmpty ?? true) {
-                    try? await Task.sleep(nanoseconds: 250_000_000)
-                    let retry = try? await self.hydrateFromIndexDBIfAvailable()
-                    if let r = retry, !r.isEmpty { indexed = r }
-                }
-                sema.signal()
-            }
-            sema.wait()
-            if let sessions = indexed, !sessions.isEmpty {
-                DispatchQueue.main.async {
-                    LaunchProfiler.log("Gemini.refresh: DB hydrate hit (sessions=\(sessions.count))")
-                    self.allSessions = sessions
-                    self.isIndexing = false
-                    self.filesProcessed = sessions.count
-                    self.totalFiles = sessions.count
-                    self.progressText = "Loaded \(sessions.count) from index"
-                    if self.refreshToken == token {
-                        self.launchPhase = .ready
-                    }
-                    #if DEBUG
-                    print("[Launch] Hydrated Gemini sessions from DB: count=\(sessions.count)")
-                    #endif
-                }
-                return
-            }
-            #if DEBUG
-            print("[Launch] DB hydration returned nil for Gemini – falling back to filesystem scan")
-            #endif
-            let files = self.discovery.discoverSessionFiles()
-            LaunchProfiler.log("Gemini.refresh: file enumeration done (files=\(files.count))")
-            DispatchQueue.main.async {
-                self.totalFiles = files.count
-                self.hasEmptyDirectory = files.isEmpty
-                if self.refreshToken == token {
-                    self.launchPhase = .scanning
-                }
-            }
+        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+        Task.detached(priority: prio) { [weak self, token] in
+            guard let self else { return }
 
-            var sessions: [Session] = []
-            sessions.reserveCapacity(files.count)
+            var previewMTimeByIDLocal: [String: Date] = [:]
 
-            for (i, url) in files.enumerated() {
-                if let session = GeminiSessionParser.parseFile(at: url) {
-                    sessions.append(session)
-                    // Record preview build mtime for staleness detection
-                    if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
-                       let m = rv.contentModificationDate {
-                        self.previewMTimeByID[session.id] = m
-                    }
-                }
-                if FeatureFlags.throttleIndexingUIUpdates {
-                    if self.progressThrottler.incrementAndShouldFlush() {
-                        DispatchQueue.main.async {
-                            self.filesProcessed = i + 1
-                            self.progressText = "Indexed \(i + 1)/\(files.count)"
+            let config = SessionIndexingEngine.ScanConfig(
+                source: .gemini,
+                discoverFiles: {
+                    let files = self.discovery.discoverSessionFiles()
+                    LaunchProfiler.log("Gemini.refresh: file enumeration done (files=\(files.count))")
+                    return files
+                },
+                parseLightweight: { GeminiSessionParser.parseFile(at: $0) },
+                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+                throttler: self.progressThrottler,
+                onProgress: { processed, total in
+                    DispatchQueue.main.async {
+                        self.totalFiles = total
+                        self.hasEmptyDirectory = (total == 0)
+                        self.filesProcessed = processed
+                        if processed > 0 {
+                            self.progressText = "Indexed \(processed)/\(total)"
+                        }
+                        if self.refreshToken == token, self.launchPhase == .hydrating {
+                            self.launchPhase = .scanning
                         }
                     }
-                } else {
-                    DispatchQueue.main.async {
-                        self.filesProcessed = i + 1
-                        self.progressText = "Indexed \(i + 1)/\(files.count)"
+                },
+                didParseSession: { session, url in
+                    if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+                       let m = rv.contentModificationDate {
+                        previewMTimeByIDLocal[session.id] = m
                     }
                 }
-            }
+            )
 
-            let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
-            let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sorted, source: .gemini)
-            DispatchQueue.main.async {
-                LaunchProfiler.log("Gemini.refresh: sessions merged (total=\(mergedWithArchives.count))")
-                self.allSessions = mergedWithArchives
+            let result = await SessionIndexingEngine.hydrateOrScan(
+                hydrate: { try await self.hydrateFromIndexDBIfAvailable() },
+                config: config
+            )
+
+            await MainActor.run {
+                guard self.refreshToken == token else { return }
+                switch result.kind {
+                case .hydrated:
+                    LaunchProfiler.log("Gemini.refresh: DB hydrate hit (sessions=\(result.sessions.count))")
+                    self.allSessions = result.sessions
+                    self.isIndexing = false
+                    self.filesProcessed = result.sessions.count
+                    self.totalFiles = result.sessions.count
+                    self.progressText = "Loaded \(result.sessions.count) from index"
+                    self.launchPhase = .ready
+                    #if DEBUG
+                    print("[Launch] Hydrated Gemini sessions from DB: count=\(result.sessions.count)")
+                    #endif
+                    return
+                case .scanned:
+                    break
+                }
+
+                LaunchProfiler.log("Gemini.refresh: sessions merged (total=\(result.sessions.count))")
+                self.previewMTimeByID = previewMTimeByIDLocal
+                self.allSessions = result.sessions
                 self.isIndexing = false
                 if FeatureFlags.throttleIndexingUIUpdates {
                     self.filesProcessed = self.totalFiles
-                    self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"
+                    if self.totalFiles > 0 {
+                        self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"
+                    }
                 }
                 #if DEBUG
-                print("✅ GEMINI INDEXING DONE: total=\(sessions.count)")
+                print("✅ GEMINI INDEXING DONE: total=\(self.totalFiles)")
                 #endif
 
                 // Background transcript cache generation for accurate search (bounded batch).
+                let mergedWithArchives = result.sessions
                 let delta: [Session] = {
                     var out: [Session] = []
                     out.reserveCapacity(mergedWithArchives.count)
@@ -192,27 +182,22 @@ final class GeminiSessionIndexer: ObservableObject {
                 if !delta.isEmpty {
                     self.isProcessingTranscripts = true
                     self.progressText = "Processing transcripts..."
-                    if self.refreshToken == token {
-                        self.launchPhase = .transcripts
-                    }
+                    self.launchPhase = .transcripts
                     let cache = self.transcriptCache
-                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
+                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self, token] in
                         LaunchProfiler.log("Gemini.refresh: transcript prewarm start (delta=\(delta.count))")
                         await cache.generateAndCache(sessions: delta)
                         await MainActor.run {
+                            guard let self, self.refreshToken == token else { return }
                             LaunchProfiler.log("Gemini.refresh: transcript prewarm complete")
                             self.isProcessingTranscripts = false
                             self.progressText = "Ready"
-                            if self.refreshToken == token {
-                                self.launchPhase = .ready
-                            }
+                            self.launchPhase = .ready
                         }
                     }
                 } else {
                     self.progressText = "Ready"
-                    if self.refreshToken == token {
-                        self.launchPhase = .ready
-                    }
+                    self.launchPhase = .ready
                 }
             }
         }
