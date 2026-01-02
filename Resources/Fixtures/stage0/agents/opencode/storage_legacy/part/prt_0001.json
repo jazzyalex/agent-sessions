@@ -1,0 +1,2 @@
+{"messageID":"m_assistant_drift","id":"prt_tool_1","type":"tool","callID":"call_legacy_1","tool":"bash","state":{"status":"success","input":{"command":"cat README.md","cwd":"/tmp/drift"},"output":"# Title\n\nBody\n","time":{"start":1730000202500,"end":1730000203000}}}
+

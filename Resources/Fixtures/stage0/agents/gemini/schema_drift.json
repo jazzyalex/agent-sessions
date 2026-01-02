@@ -1,0 +1,10 @@
+{
+  "history": [
+    {"role":"user","parts":[{"text":"Describe this image:"},{"inlineData":{"mimeType":"image/png","data":"AAAA"}}],"ts":1695000000},
+    {"role":"gemini","parts":[{"text":"It looks like..."}],"ts":1695000005}
+  ],
+  "meta": {"model":"gmini-pro"},
+  "start_time": "2025-12-16T23:47:00.000Z",
+  "lastUpdated": "2025-12-16T23:48:00.000Z"
+}
+

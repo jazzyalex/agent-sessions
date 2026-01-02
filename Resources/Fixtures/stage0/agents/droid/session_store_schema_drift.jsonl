@@ -1,0 +1,4 @@
+{"type":"session_start","id":"droid_drift","title":"Stage0 Droid Drift","cwd":"/tmp"}
+{"type":"message","id":"m1","timestamp":"2025-12-26T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>\nBe concise.\n</system-reminder>\n\nDo the thing"}]}}
+{"type":"message","id":"m2","timestamp":"2025-12-26T00:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Ok"}]}}
+

@@ -86,7 +86,12 @@ final class JSONLReader {
                     let lineData = buffer.subdata(in: range.lowerBound..<nlRange.lowerBound)
 
                     if let line = String(data: lineData, encoding: .utf8) {
-                        if !shouldContinue(line.trimmingCharacters(in: .newlines)) {
+                        let trimmed = line.trimmingCharacters(in: .newlines)
+                        if trimmed.isEmpty {
+                            range = nlRange.upperBound..<buffer.endIndex
+                            continue
+                        }
+                        if !shouldContinue(trimmed) {
                             stoppedEarly = true
                             return false
                         }
@@ -107,7 +112,10 @@ final class JSONLReader {
             buffer.removeAll()
         } else if !buffer.isEmpty {
             if let line = String(data: buffer, encoding: .utf8) {
-                _ = shouldContinue(line.trimmingCharacters(in: .newlines))
+                let trimmed = line.trimmingCharacters(in: .newlines)
+                if !trimmed.isEmpty {
+                    _ = shouldContinue(trimmed)
+                }
             }
         }
         return true

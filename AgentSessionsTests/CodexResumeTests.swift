@@ -60,8 +60,8 @@ final class CodexResumeTests: XCTestCase {
                                               fallbackPath: fallback,
                                               attemptResumeFirst: false)
         XCTAssertEqual(package.displayCommand, "'/opt/codex' -c experimental_resume='/logs/session.jsonl'")
-        XCTAssertEqual(package.shellCommand, "'/opt/codex' -c experimental_resume='/logs/session.jsonl'")
-        XCTAssertNil(package.workingDirectory)
+        XCTAssertEqual(package.shellCommand, "cd '/tmp/work' && '/opt/codex' -c experimental_resume='/logs/session.jsonl'")
+        XCTAssertEqual(package.workingDirectory?.path, "/tmp/work")
     }
 
     func testCommandBuilderCombinesResumeAndFallback() throws {
@@ -80,7 +80,7 @@ final class CodexResumeTests: XCTestCase {
 
         XCTAssertTrue(package.displayCommand.contains("resume 'ghi789'"))
         XCTAssertTrue(package.displayCommand.contains("experimental_resume='/tmp/session.jsonl'"))
-        XCTAssertFalse(package.displayCommand.contains("experimental_resume='/tmp/session.jsonl' resume"))
+        XCTAssertTrue(package.displayCommand.hasPrefix("'/usr/bin/codex' resume 'ghi789' || "))
         XCTAssertTrue(package.shellCommand.contains("||"))
     }
 
@@ -117,10 +117,11 @@ final class CodexResumeTests: XCTestCase {
     private func sampleSession(id: String, fileName: String, cwd: String?) -> Session {
         let event: SessionEvent
         if let cwd {
-            let raw = "{\\\"cwd\\\":\\\"\(cwd)\\\"}"
+            let raw = #"{"session_id":"\#(id)","cwd":"\#(cwd)"}"#
             event = SessionEvent(id: "evt-\(id)", timestamp: nil, kind: .meta, role: nil, text: nil, toolName: nil, toolInput: nil, toolOutput: nil, messageID: nil, parentID: nil, isDelta: false, rawJSON: raw)
         } else {
-            event = SessionEvent(id: "evt-\(id)", timestamp: nil, kind: .meta, role: nil, text: nil, toolName: nil, toolInput: nil, toolOutput: nil, messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
+            let raw = #"{"session_id":"\#(id)"}"#
+            event = SessionEvent(id: "evt-\(id)", timestamp: nil, kind: .meta, role: nil, text: nil, toolName: nil, toolInput: nil, toolOutput: nil, messageID: nil, parentID: nil, isDelta: false, rawJSON: raw)
         }
         let events: [SessionEvent] = [event]
         return Session(id: id,

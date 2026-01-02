@@ -1,0 +1,2 @@
+{"id":"p_tool_large_1","type":"tool","callID":"call_large_1","tool":"bash","state":{"status":"success","input":{"command":"printf 'line1\\nline2\\nline3\\n'","cwd":"/tmp/large"},"output":"line1\nline2\nline3\n","time":{"start":1730000102500,"end":1730000103000}}}
+

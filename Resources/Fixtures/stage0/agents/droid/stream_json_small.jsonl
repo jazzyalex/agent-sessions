@@ -1,0 +1,5 @@
+{"type":"message","session_id":"sid_stage0_small","timestamp":"2025-12-26T00:00:00.000Z","role":"user","text":"Do thing"}
+{"type":"tool_call","session_id":"sid_stage0_small","timestamp":"2025-12-26T00:00:01.000Z","toolCallId":"c1","toolName":"Shell","parameters":{"command":"echo hi"}}
+{"type":"tool_result","session_id":"sid_stage0_small","timestamp":"2025-12-26T00:00:02.000Z","toolCallId":"c1","value":{"stdout":"hi\n","exitCode":0}}
+{"type":"completion","session_id":"sid_stage0_small","timestamp":"2025-12-26T00:00:03.000Z","finalText":"Done","id":"end"}
+

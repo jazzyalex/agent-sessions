@@ -1,0 +1,66 @@
+{
+  "startTime": "2025-12-16T23:47:00.000Z",
+  "lastUpdated": "2025-12-16T23:48:00.000Z",
+  "projectHash": "205016864bd110904e9ad8314192344ab398d043e779da15bedbb9ee9be00da2",
+  "sessionId": "session-2025-12-16T23-47-b4f17607",
+  "meta": {"model":"gmini-pro"},
+  "messages": [
+    {
+      "id": "m1",
+      "timestamp": "2025-12-16T23:47:01.000Z",
+      "type": "user",
+      "content": "Run a command"
+    },
+    {
+      "id": "m2",
+      "timestamp": "2025-12-16T23:47:02.000Z",
+      "type": "gemini",
+      "content": "",
+      "toolCalls": [
+        {
+          "id": "run_shell_command-1",
+          "name": "run_shell_command",
+          "displayName": "Shell",
+          "args": { "command": "printf 'line1\\nline2\\nline3\\n'", "cwd": "/tmp" },
+          "status": "success",
+          "timestamp": "2025-12-16T23:47:03.000Z",
+          "resultDisplay": "Output: line1\\nline2\\nline3\\n",
+          "result": [
+            {
+              "functionResponse": {
+                "id": "run_shell_command-1",
+                "name": "run_shell_command",
+                "response": { "output": "Output: line1\\nline2\\nline3\\n" }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "m3",
+      "timestamp": "2025-12-16T23:47:04.000Z",
+      "type": "info",
+      "content": "Request cancelled."
+    },
+    {
+      "id": "m4",
+      "timestamp": "2025-12-16T23:47:05.000Z",
+      "type": "model",
+      "parts": [{"text":"Captured multiline output."}]
+    },
+    {
+      "id": "m5",
+      "timestamp": "2025-12-16T23:47:06.000Z",
+      "type": "user",
+      "content": "Step 1"
+    },
+    {
+      "id": "m6",
+      "timestamp": "2025-12-16T23:47:07.000Z",
+      "type": "model",
+      "parts": [{"text":"Ok"}]
+    }
+  ]
+}
+

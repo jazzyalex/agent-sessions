@@ -1,0 +1,7 @@
+{"type":"system","session_id":"sid_stage0_large","timestamp":"2025-12-26T02:00:00.000Z","model":"droid-model","cwd":"/tmp/large","id":"sys1"}
+{"type":"message","session_id":"sid_stage0_large","timestamp":"2025-12-26T02:00:01.000Z","role":"user","text":"Step 1","id":"m1"}
+{"type":"message","session_id":"sid_stage0_large","timestamp":"2025-12-26T02:00:02.000Z","role":"assistant","text":"Ok","id":"m2"}
+{"type":"tool_call","session_id":"sid_stage0_large","timestamp":"2025-12-26T02:00:03.000Z","toolCallId":"c1","toolName":"Shell","parameters":{"command":"printf 'line1\\nline2\\nline3\\n'"},"id":"tc1"}
+{"type":"tool_result","session_id":"sid_stage0_large","timestamp":"2025-12-26T02:00:04.000Z","toolCallId":"c1","value":{"stdout":"line1\nline2\nline3\n","exitCode":0},"id":"tr1"}
+{"type":"completion","session_id":"sid_stage0_large","timestamp":"2025-12-26T02:00:05.000Z","finalText":"Captured multiline output.","id":"end"}
+

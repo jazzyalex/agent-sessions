@@ -1,0 +1,18 @@
+{"timestamp":"2025-12-18T10:00:00.000Z","type":"session_meta","payload":{"id":"019b2ea4-aaaa-bbbb-cccc-58208e1f0000","timestamp":"2025-12-18T10:00:00.000Z","cwd":"/tmp/large","originator":"codex_cli_rs","cli_version":"0.73.0","instructions":"large"}}
+{"timestamp":"2025-12-18T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Start"}]}}
+{"timestamp":"2025-12-18T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Acknowledged."}]}}
+{"timestamp":"2025-12-18T10:00:03.000Z","type":"response_item","payload":{"type":"tool_call","function":{"name":"run_shell_command"},"arguments":{"command":"printf 'line1\\nline2\\nline3\\n'","cwd":"/tmp/large"}}}
+{"timestamp":"2025-12-18T10:00:04.000Z","type":"response_item","payload":{"type":"tool_result","name":"run_shell_command","result":{"stdout":"line1\nline2\nline3\n","stderr":"","exitCode":0}}}
+{"timestamp":"2025-12-18T10:00:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Captured multiline output."}]}}
+{"timestamp":"2025-12-18T10:00:06.000Z","role":"user","content":"<environment_context><cwd>/tmp/large</cwd><project_name>large</project_name></environment_context>"}
+{"timestamp":"2025-12-18T10:00:07.000Z","role":"user","content":"Step 1"}
+{"timestamp":"2025-12-18T10:00:08.000Z","role":"assistant","content":"Ok"}
+{"timestamp":"2025-12-18T10:00:09.000Z","role":"user","content":"Step 2"}
+{"timestamp":"2025-12-18T10:00:10.000Z","role":"assistant","content":"Ok"}
+{"timestamp":"2025-12-18T10:00:11.000Z","role":"user","content":"Step 3"}
+{"timestamp":"2025-12-18T10:00:12.000Z","role":"assistant","content":"Ok"}
+{"timestamp":"2025-12-18T10:00:13.000Z","role":"user","content":"Step 4"}
+{"timestamp":"2025-12-18T10:00:14.000Z","role":"assistant","content":"Ok"}
+{"timestamp":"2025-12-18T10:00:15.000Z","role":"user","content":"Step 5"}
+{"timestamp":"2025-12-18T10:00:16.000Z","role":"assistant","content":"Ok"}
+

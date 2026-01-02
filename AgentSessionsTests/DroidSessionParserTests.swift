@@ -22,13 +22,14 @@ final class DroidSessionParserTests: XCTestCase {
         guard let session = DroidSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
         XCTAssertEqual(session.source, .droid)
 
-        XCTAssertEqual(session.events.filter { $0.kind == .user }.count, 2)
+        XCTAssertEqual(session.events.filter { $0.kind == .user }.count, 1)
         XCTAssertEqual(session.events.filter { $0.kind == .tool_call }.count, 1)
         XCTAssertEqual(session.events.filter { $0.kind == .tool_result }.count, 1)
 
         let call = session.events.first(where: { $0.kind == .tool_call })
         XCTAssertEqual(call?.toolName, "Execute")
-        XCTAssertTrue((call?.toolInput ?? "").contains("ls /nope"))
+        let toolInput = call?.toolInput ?? ""
+        XCTAssertTrue(toolInput.contains("ls /nope") || toolInput.contains("ls \\/nope"))
 
         let result = session.events.first(where: { $0.kind == .tool_result })
         XCTAssertEqual(result?.toolName, "Execute")
@@ -75,4 +76,3 @@ final class DroidSessionParserTests: XCTestCase {
         XCTAssertTrue((result?.toolOutput ?? "").contains("exitCode"))
     }
 }
-

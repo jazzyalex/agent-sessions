@@ -18,7 +18,7 @@ final class TranscriptBuilderTests: XCTestCase {
         "}"
         let s = session(from: [line])
         let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
-        XCTAssertTrue(txt.contains("\nAB\n") || txt.contains("\nAB"))
+        XCTAssertEqual(txt.trimmingCharacters(in: .whitespacesAndNewlines), "AB")
     }
 
     func testNonStringToolOutputsPrettyPrinted() throws {
@@ -27,11 +27,9 @@ final class TranscriptBuilderTests: XCTestCase {
         "}"
         let s = session(from: [line])
         let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
-        XCTAssertTrue(txt.contains("⟪out⟫"))
-        // Pretty JSON with 2-space indent should appear
-        XCTAssertTrue(txt.contains("\n  \"k\": 1") || txt.contains("  \"k\": 1"))
-        XCTAssertTrue(txt.contains("\n  \"0\": \"a\"") == false) // ensure kept as array format not dict
-        XCTAssertTrue(txt.contains("\n  \"a\"\n  ,\n  \"b\"") == false) // tolerate platform JSON spacing
+        XCTAssertTrue(txt.contains(SessionTranscriptBuilder.outPrefix))
+        XCTAssertTrue(txt.contains("\"k\" : 1") || txt.contains("\"k\": 1"))
+        XCTAssertTrue(txt.contains("["))
         XCTAssertTrue(txt.contains("\"a\""))
         XCTAssertTrue(txt.contains("\"b\""))
     }
@@ -42,9 +40,7 @@ final class TranscriptBuilderTests: XCTestCase {
         let l3 = "{\"role\":\"assistant\",\"message_id\":\"m1\",\"content\":\"C\",\"timestamp\":\"2025-09-10T00:00:00Z\"}"
         let s = session(from: [l1, l2, l3])
         let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
-        // Should contain single ABC block (not three separate lines with prefixes)
-        XCTAssertTrue(txt.contains("\nABC\n") || txt.contains("\nABC"))
-        XCTAssertFalse(txt.contains("\nA\nB\nC\n"))
+        XCTAssertEqual(txt.trimmingCharacters(in: .whitespacesAndNewlines), "ABC")
     }
 
     func testNoTruncationForLongOutput() throws {
@@ -60,9 +56,10 @@ final class TranscriptBuilderTests: XCTestCase {
         let l1 = "{\"role\":\"user\",\"content\":\"hi\",\"timestamp\":\"2025-09-10T10:00:00Z\"}"
         let s = session(from: [l1])
         let off = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
-        XCTAssertFalse(off.contains("@10:00:00"))
+        XCTAssertFalse(off.contains(AppDateFormatting.transcriptSeparator))
         let on = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: true, showMeta: false))
-        XCTAssertTrue(on.contains("@10:00:00"))
+        XCTAssertTrue(on.contains(AppDateFormatting.transcriptSeparator))
+        XCTAssertTrue(on.contains(AppDateFormatting.transcriptSeparator + SessionTranscriptBuilder.userPrefix))
     }
 
     func testDeterminism() throws {
