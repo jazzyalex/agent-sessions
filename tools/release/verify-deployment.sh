@@ -112,7 +112,7 @@ echo ""
 
 # 5. Homebrew cask check
 echo "Homebrew Cask:"
-CASK_VERSION=$(gh api -H "Accept: application/vnd.github+json" "/repos/jazzyalex/homebrew-agent-sessions/contents/Casks/agent-sessions.rb" --jq '.content' 2>/dev/null | tr -d '\n' | base64 --decode | grep 'version' | cut -d'"' -f2 || echo "")
+CASK_VERSION=$(gh api -H "Accept: application/vnd.github+json" "/repos/jazzyalex/homebrew-agent-sessions/contents/Casks/agent-sessions.rb" --jq '.content' 2>/dev/null | tr -d '\n' | base64 --decode | grep -E '^[[:space:]]*version "' | head -1 | cut -d'"' -f2 || echo "")
 if [[ "$CASK_VERSION" == "$VERSION" ]]; then
     green "Cask version is $VERSION"
 else
@@ -133,11 +133,11 @@ echo ""
 # 6. DMG download check
 echo "DMG Download:"
 DMG_URL="https://github.com/jazzyalex/agent-sessions/releases/download/v$VERSION/AgentSessions-$VERSION.dmg"
-if curl -sfI "$DMG_URL" | grep -q "HTTP/2 302\|HTTP/2 200"; then
+if curl -fsSLI "$DMG_URL" >/dev/null 2>&1; then
     green "DMG is downloadable"
 
     # Check DMG size (should be > 1MB)
-    DMG_SIZE=$(curl -sI "$DMG_URL" | grep -i content-length | awk '{print $2}' | tr -d '\r' || echo "0")
+    DMG_SIZE=$(curl -fsSLI "$DMG_URL" | awk 'tolower($1)=="content-length:"{print $2}' | tr -d '\r' | tail -1 || echo "0")
     if [[ "$DMG_SIZE" -gt 1048576 ]]; then
         green "DMG size is reasonable ($(numfmt --to=iec $DMG_SIZE 2>/dev/null || echo $DMG_SIZE bytes))"
     else
@@ -155,7 +155,7 @@ echo ""
 echo "SHA256 Verification:"
 if [[ -f "dist/AgentSessions-$VERSION.dmg" ]]; then
     LOCAL_SHA=$(shasum -a 256 "dist/AgentSessions-$VERSION.dmg" | awk '{print $1}')
-    REMOTE_SHA=$(curl -sf "https://github.com/jazzyalex/agent-sessions/releases/download/v$VERSION/AgentSessions-$VERSION.dmg.sha256" | awk '{print $1}' || echo "")
+    REMOTE_SHA=$(curl -fsSL "https://github.com/jazzyalex/agent-sessions/releases/download/v$VERSION/AgentSessions-$VERSION.dmg.sha256" | awk '{print $1}' || echo "")
 
     if [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]]; then
         green "SHA256 matches (${LOCAL_SHA:0:16}...)"
