@@ -191,7 +191,12 @@ print(data.get("id", ""), end="")
       exit 7
     fi
 
-    status=$(python3 <<'PYEOF'
+    if command -v jq >/dev/null 2>&1; then
+      status=$(echo "$info_json" | jq -r '.status // empty' 2>/dev/null)
+    fi
+
+    if [[ -z "${status:-}" ]]; then
+      status=$(python3 -c '
 import json, re, sys
 text = sys.stdin.read().strip()
 data = {}
@@ -201,7 +206,7 @@ try:
 except Exception:
     try:
         # Second try: find JSON object with status field
-        match = re.search(r'\{[^{}]*"status"[^{}]*\}', text)
+        match = re.search(r"\{[^{}]*\"status\"[^{}]*\}", text)
         if match:
             data = json.loads(match.group(0))
     except Exception:
@@ -211,11 +216,11 @@ except Exception:
             depth = 0
             start = -1
             for i, c in enumerate(text):
-                if c == '{':
+                if c == "{":
                     if depth == 0:
                         start = i
                     depth += 1
-                elif c == '}':
+                elif c == "}":
                     depth -= 1
                     if depth == 0 and start >= 0:
                         objects.append(text[start:i+1])
@@ -224,9 +229,9 @@ except Exception:
                 data = json.loads(objects[-1])
         except Exception:
             pass
-print(data.get("status", ""))
-PYEOF
-<<< "$info_json")
+print(data.get("status", ""), end="")
+' <<< "$info_json" 2>/dev/null || true)
+    fi
 
     echo "Notarization status: ${status:-unknown} (elapsed ${elapsed}s)" | tee -a "$log_file"
 
