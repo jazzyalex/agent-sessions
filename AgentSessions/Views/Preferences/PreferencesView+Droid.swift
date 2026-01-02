@@ -161,7 +161,7 @@ extension PreferencesView {
                                     droidProjectsPathDebounce = work
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
                                 }
-                                .help("Optional: scan for exported `droid exec --output-format stream-json` logs stored as JSONL")
+                                .help(Text(verbatim: "Optional: scan for exported droid exec --output-format stream-json logs stored as JSONL"))
                             Button("Choose…", action: pickDroidProjectsFolder)
                                 .buttonStyle(.bordered)
                                 .help("Pick a projects folder to scan for stream-json logs")

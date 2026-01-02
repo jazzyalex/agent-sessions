@@ -171,7 +171,12 @@ final class UnifiedSessionIndexer: ObservableObject {
                 }
             }
             .receive(on: DispatchQueue.main)
-            .assign(to: &$allSessions)
+            .sink { [weak self] value in
+                self?.publishAfterCurrentUpdate { [weak self] in
+                    self?.allSessions = value
+                }
+            }
+            .store(in: &cancellables)
 
         let agentEnabledFlags = Publishers.CombineLatest(
             Publishers.CombineLatest4($codexAgentEnabled, $claudeAgentEnabled, $geminiAgentEnabled, $openCodeAgentEnabled),
@@ -193,7 +198,13 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let (eCopilot, eDroid) = tailFlags
                 return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eCopilot && copilotState) || (eDroid && droidState)
             }
-            .assign(to: &$isIndexing)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] value in
+                self?.publishAfterCurrentUpdate { [weak self] in
+                    self?.isIndexing = value
+                }
+            }
+            .store(in: &cancellables)
 
         // isProcessingTranscripts reflects any enabled indexer processing transcripts
         Publishers.CombineLatest(
@@ -210,7 +221,13 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let (eCopilot, eDroid) = tailFlags
                 return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eCopilot && copilotState) || (eDroid && droidState)
             }
-            .assign(to: &$isProcessingTranscripts)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] value in
+                self?.publishAfterCurrentUpdate { [weak self] in
+                    self?.isProcessingTranscripts = value
+                }
+            }
+            .store(in: &cancellables)
 
         // Forward errors (preference order codex → claude → gemini → opencode → copilot), ignoring disabled agents
         Publishers.CombineLatest(
@@ -233,7 +250,13 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let f = eDroid ? droidErr : nil
                 return a ?? b ?? c ?? d ?? e ?? f
             }
-            .assign(to: &$indexingError)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] value in
+                self?.publishAfterCurrentUpdate { [weak self] in
+                    self?.indexingError = value
+                }
+            }
+            .store(in: &cancellables)
 
         // Debounced filtering and sorting pipeline (runs off main thread)
         let inputs = Publishers.CombineLatest4(
@@ -302,11 +325,13 @@ final class UnifiedSessionIndexer: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] results in
                 guard let self else { return }
-                self.sessions = results
-                if !self.hasPublishedInitialSessions {
-                    self.hasPublishedInitialSessions = true
+                self.publishAfterCurrentUpdate {
+                    self.sessions = results
+                    if !self.hasPublishedInitialSessions {
+                        self.hasPublishedInitialSessions = true
+                    }
+                    self.updateLaunchState()
                 }
-                self.updateLaunchState()
             }
             .store(in: &cancellables)
 
@@ -569,12 +594,25 @@ final class UnifiedSessionIndexer: ObservableObject {
             phase < .ready ? source : nil
         }
 
-        launchState = LaunchState(
+        let newState = LaunchState(
             sourcePhases: phases,
             overallPhase: overall,
             blockingSources: blocking,
             hasDisplayedSessions: hasPublishedInitialSessions
         )
+        publishAfterCurrentUpdate { [weak self] in
+            self?.launchState = newState
+        }
+    }
+
+    private func publishAfterCurrentUpdate(_ work: @escaping @MainActor () -> Void) {
+        DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                Task { @MainActor in
+                    work()
+                }
+            }
+        }
     }
 
     /// Apply current UI filters and sort preferences to a list of sessions.
