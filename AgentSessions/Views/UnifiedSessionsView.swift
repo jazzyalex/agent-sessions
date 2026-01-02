@@ -18,6 +18,7 @@ struct UnifiedSessionsView: View {
     @EnvironmentObject var updaterController: UpdaterController
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var systemColorScheme
 
     let layoutMode: LayoutMode
     let analyticsReady: Bool
@@ -669,6 +670,16 @@ struct UnifiedSessionsView: View {
             }
             .keyboardShortcut("l", modifiers: .command)
             .help("Toggle between vertical and horizontal layout modes (⌘L)")
+        }
+        ToolbarItem(placement: .automatic) {
+            let current = AppAppearance(rawValue: appAppearanceRaw) ?? .system
+            let effective = current.effectiveColorScheme(systemScheme: systemColorScheme)
+            let next = current.toggledDarkLight(systemScheme: systemColorScheme)
+            Button(action: { codexIndexer.setAppearance(next) }) {
+                Label("Toggle Dark/Light", systemImage: (effective == .dark) ? "sun.max" : "moon")
+                    .labelStyle(.iconOnly)
+            }
+            .help((effective == .dark) ? "Switch to Light Mode" : "Switch to Dark Mode")
         }
         ToolbarItem(placement: .automatic) {
             Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController) }) {

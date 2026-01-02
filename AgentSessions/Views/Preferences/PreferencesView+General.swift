@@ -11,15 +11,15 @@ extension PreferencesView {
             sectionHeader("Appearance")
             VStack(alignment: .leading, spacing: 12) {
                 labeledRow("Theme") {
-                    Picker("", selection: $appearance) {
+                    Picker("", selection: Binding(
+                        get: { indexer.appAppearance },
+                        set: { indexer.setAppearance($0) }
+                    )) {
                         ForEach(AppAppearance.allCases) { option in
                             Text(option.title).tag(option)
                         }
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: appearance) { _, newValue in
-                        indexer.setAppearance(newValue)
-                    }
                     .help("Choose the overall app appearance")
                 }
             }

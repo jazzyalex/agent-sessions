@@ -181,6 +181,16 @@ final class SessionIndexer: ObservableObject {
     func setTheme(_ t: TranscriptTheme) { themeRaw = t.rawValue }
     var appAppearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .system }
     func setAppearance(_ a: AppAppearance) { appearanceRaw = a.rawValue }
+    func toggleDarkLight(systemScheme: ColorScheme) {
+        let current = appAppearance
+        setAppearance(current.toggledDarkLight(systemScheme: systemScheme))
+    }
+    func toggleDarkLightUsingSystemAppearance() {
+        toggleDarkLight(systemScheme: AppAppearance.systemColorSchemeFallback())
+    }
+    func useSystemAppearance() {
+        setAppearance(.system)
+    }
 
     enum ModifiedDisplay: String, CaseIterable, Identifiable {
         case relative

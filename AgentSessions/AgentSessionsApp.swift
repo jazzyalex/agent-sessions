@@ -33,6 +33,7 @@ struct AgentSessionsApp: App {
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.horizontal.rawValue
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
+    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("CodexUsageEnabled") private var codexUsageEnabledPref: Bool = false
     @AppStorage("ClaudeUsageEnabled") private var claudeUsageEnabledPref: Bool = false
     @AppStorage("ShowClaudeUsageStrip") private var showClaudeUsageStrip: Bool = false
@@ -164,6 +165,10 @@ struct AgentSessionsApp: App {
             }
             // View menu with Saved Only toggle (stateful)
             CommandMenu("View") {
+                Button("Toggle Dark/Light") { indexer.toggleDarkLightUsingSystemAppearance() }
+                Button("Use System Appearance") { indexer.useSystemAppearance() }
+                    .disabled((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .system)
+                Divider()
                 // Bind through UserDefaults so it persists; also forward to unified when it changes
                 FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
                 Divider()
