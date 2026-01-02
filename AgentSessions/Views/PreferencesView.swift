@@ -80,7 +80,6 @@ struct PreferencesView: View {
     }
 
     // General tab state
-    @State var appearance: AppAppearance = .system
     @State var modifiedDisplay: SessionIndexer.ModifiedDisplay = .relative
 
     // Codex CLI tab state
@@ -363,7 +362,6 @@ struct PreferencesView: View {
         let cp = UserDefaults.standard.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride) ?? ""
         claudePath = cp
         validateClaudePath()
-        appearance = indexer.appAppearance
         modifiedDisplay = indexer.modifiedDisplay
         codexBinaryOverride = resumeSettings.binaryOverride
         validateBinaryOverride()
@@ -525,7 +523,6 @@ struct PreferencesView: View {
         indexer.sessionsRootOverride = ""
         validateCodexPath()
 
-        appearance = .system
         indexer.setAppearance(.system)
 
         modifiedDisplay = .relative
