@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 - Dates: Normalize timestamps (usage reset times, session dates, analytics labels, and transcript timestamps) to follow system locale and 12/24-hour settings.
 - Appearance: Add a toolbar toggle for Dark/Light mode and View menu actions for Toggle Dark/Light and Use System Appearance.
 - Preferences: Add quick links to Security & Privacy and License in Settings → About.
+- Preferences: Make the Settings → About updates section more compact.
+- Preferences: Droid pane now includes binary detection and a version check, consistent with other agents.
 
 ## [2.9.1] - 2025-12-29
 
