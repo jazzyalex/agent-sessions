@@ -15,6 +15,93 @@ extension PreferencesView {
             }
 
             Group {
+                sectionHeader("Droid CLI Binary")
+                VStack(alignment: .leading, spacing: 10) {
+                    labeledRow("Binary Source") {
+                        Picker("", selection: Binding(
+                            get: { droidSettings.binaryPath.isEmpty ? 0 : 1 },
+                            set: { idx in
+                                if idx == 0 {
+                                    droidSettings.setBinaryPath("")
+                                    scheduleDroidProbe()
+                                } else {
+                                    pickDroidBinary()
+                                }
+                            }
+                        )) {
+                            Text("Auto").tag(0)
+                            Text("Custom").tag(1)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 220)
+                        .help("Use the auto-detected Droid CLI or supply a custom path")
+                    }
+
+                    if droidSettings.binaryPath.isEmpty {
+                        HStack {
+                            Text("Detected:").font(.caption)
+                            Text(droidVersionString ?? "unknown").font(.caption).monospaced()
+                        }
+                        if let path = droidResolvedPath {
+                            Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+
+                        if droidProbeState == .failure && droidVersionString == nil {
+                            PreferenceCallout {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Droid CLI not found")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                    Text("Install Droid (Factory CLI) and ensure `droid` is available on your PATH, or set a custom binary path here.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 12) {
+                            Button("Check Version") { probeDroid() }
+                                .buttonStyle(.bordered)
+                                .help("Query the detected Droid CLI for its version")
+                            Button("Copy Path") {
+                                if let p = droidResolvedPath {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(p, forType: .string)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Copy the detected Droid CLI path to clipboard")
+                            .disabled(droidResolvedPath == nil)
+                            Button("Reveal") {
+                                if let p = droidResolvedPath {
+                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Reveal the detected Droid CLI binary in Finder")
+                            .disabled(droidResolvedPath == nil)
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            TextField("/path/to/droid", text: Binding(get: { droidSettings.binaryPath }, set: { droidSettings.setBinaryPath($0) }))
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 360)
+                                .onSubmit { scheduleDroidProbe() }
+                                .onChange(of: droidSettings.binaryPath) { _, _ in scheduleDroidProbe() }
+                                .help("Enter the full path to a custom Droid CLI binary")
+                            Button("Choose…", action: pickDroidBinary)
+                                .buttonStyle(.borderedProminent)
+                                .help("Select the Droid CLI binary from the filesystem")
+                        }
+
+                        if droidProbeState == .failure {
+                            Text("Unable to execute the specified binary. Check the path and try again.")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+
                 sectionHeader("Sessions Directory")
                 VStack(alignment: .leading, spacing: 8) {
                     labeledRow("Storage Root") {
@@ -98,10 +185,30 @@ extension PreferencesView {
             }
             .disabled(!droidAgentEnabled)
         }
+        .onAppear {
+            scheduleDroidProbe()
+        }
     }
 }
 
 extension PreferencesView {
+    func pickDroidBinary() {
+        let panel = NSOpenPanel()
+        panel.title = "Select Droid CLI Binary"
+        panel.message = "Choose the droid executable file"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = false
+
+        panel.directoryURL = URL(fileURLWithPath: "/opt/homebrew/bin", isDirectory: true)
+
+        if panel.runModal() == .OK, let url = panel.url {
+            droidSettings.setBinaryPath(url.path)
+            scheduleDroidProbe()
+        }
+    }
+
     func pickDroidSessionsFolder() {
         let panel = NSOpenPanel()
         panel.title = "Select Droid Sessions Directory"
@@ -180,4 +287,3 @@ extension PreferencesView {
         // @AppStorage persists automatically; indexers update on refresh.
     }
 }
-

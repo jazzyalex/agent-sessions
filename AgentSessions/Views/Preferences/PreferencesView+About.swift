@@ -73,10 +73,6 @@ extension PreferencesView {
 
             sectionHeader("Updates")
             VStack(alignment: .leading, spacing: 12) {
-                Text("Agent Sessions uses automatic updates to keep you up to date with the latest features and bug fixes.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
                 if updaterController.hasGentleReminder {
                     PreferenceCallout(
                         iconName: "exclamationmark.circle.fill",
@@ -88,8 +84,6 @@ extension PreferencesView {
                             .foregroundStyle(.blue)
                     }
                 }
-
-                Divider()
 
                 Button("Check for Updates...") {
                     updaterController.checkForUpdates(nil)

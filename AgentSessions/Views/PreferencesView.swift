@@ -138,6 +138,13 @@ struct PreferencesView: View {
     @State var copilotSessionsPathValid: Bool = true
     @State var copilotSessionsPathDebounce: DispatchWorkItem? = nil
 
+    // Droid probe state
+    @ObservedObject var droidSettings = DroidSettings.shared
+    @State var droidProbeState: ProbeState = .idle
+    @State var droidVersionString: String? = nil
+    @State var droidResolvedPath: String? = nil
+    @State var droidProbeDebounce: DispatchWorkItem? = nil
+
     // Droid sessions/projects roots
     @AppStorage(PreferencesKey.Paths.droidSessionsRootOverride) var droidSessionsPath: String = ""
     @State var droidSessionsPathValid: Bool = true
@@ -543,6 +550,7 @@ struct PreferencesView: View {
 
         geminiSettings.setBinaryOverride("")
         copilotSettings.setBinaryPath("")
+        droidSettings.setBinaryPath("")
 
         // Reset agent storage overrides
         copilotSessionsPath = ""
@@ -560,6 +568,7 @@ struct PreferencesView: View {
         scheduleClaudeProbe()
         scheduleGeminiProbe()
         scheduleCopilotProbe()
+        scheduleDroidProbe()
     }
 
     func closeWindow() {
@@ -712,6 +721,32 @@ extension PreferencesView {
         }
     }
 
+    func probeDroid() {
+        if droidProbeState == .probing { return }
+        droidProbeState = .probing
+        droidVersionString = nil
+        droidResolvedPath = nil
+        let override = droidSettings.binaryPath.isEmpty ? nil : droidSettings.binaryPath
+        DispatchQueue.global(qos: .userInitiated).async {
+            let env = DroidCLIEnvironment()
+            let result = env.probe(customPath: override)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let res):
+                    self.droidVersionString = res.versionString
+                    self.droidResolvedPath = res.binaryURL.path
+                    self.droidProbeState = .success
+                    self.droidCLIAvailable = true
+                case .failure:
+                    self.droidVersionString = nil
+                    self.droidResolvedPath = nil
+                    self.droidProbeState = .failure
+                    self.droidCLIAvailable = false
+                }
+            }
+        }
+    }
+
     // Trigger background probes only when a relevant pane is active
     func maybeProbe(for tab: PreferencesTab) {
         switch tab {
@@ -726,7 +761,7 @@ extension PreferencesView {
         case .copilotCLI:
             if copilotVersionString == nil && copilotProbeState != .probing { probeCopilot() }
         case .droidCLI:
-            break
+            if droidVersionString == nil && droidProbeState != .probing { probeDroid() }
         case .menuBar, .usageProbes, .general, .unified, .advanced, .about:
             break
         }
@@ -757,6 +792,13 @@ extension PreferencesView {
         copilotProbeDebounce?.cancel()
         let work = DispatchWorkItem { probeCopilot() }
         copilotProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleDroidProbe() {
+        droidProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeDroid() }
+        droidProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 }
