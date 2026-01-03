@@ -66,6 +66,7 @@ enum PreferencesKey {
 
     enum Advanced {
         static let enableGitInspector = "EnableGitInspector"
+        static let enableDeepToolOutputSearch = "EnableDeepToolOutputSearch"
     }
 
     enum Paths {

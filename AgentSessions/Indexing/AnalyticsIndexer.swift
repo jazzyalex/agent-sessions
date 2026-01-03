@@ -107,12 +107,14 @@ actor AnalyticsIndexer {
             messages: messages,
             commands: commands
         )
+        let searchText = SessionSearchTextBuilder.build(session: session)
 
         // Commit to DB atomically
         do {
             try await db.begin()
             try await db.upsertFile(path: session.filePath, mtime: mtime, size: size, source: source)
             try await db.upsertSessionMeta(meta)
+            try await db.upsertSessionSearch(sessionID: session.id, source: source, mtime: mtime, size: size, text: searchText)
             try await db.deleteSessionDays(sessionID: session.id, source: source)
             try await db.insertSessionDayRows(dayRows)
             // Recompute rollups for affected days

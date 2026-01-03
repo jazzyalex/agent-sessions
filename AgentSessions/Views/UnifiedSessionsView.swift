@@ -56,7 +56,8 @@ struct UnifiedSessionsView: View {
     @StateObject private var searchCoordinator: SearchCoordinator
     @StateObject private var focusCoordinator = WindowFocusCoordinator()
     private var rows: [Session] {
-        if searchCoordinator.isRunning || !searchCoordinator.results.isEmpty {
+        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !q.isEmpty || searchCoordinator.isRunning {
             // Apply current UI filters and sort to search results
             return unified.applyFiltersAndSort(to: searchCoordinator.results)
         } else {
@@ -910,14 +911,16 @@ struct UnifiedSessionsView: View {
     
     private func restartSearchIfRunning() {
         guard searchCoordinator.isRunning else { return }
-        let filters = Filters(query: unified.query,
+        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { searchCoordinator.cancel(); return }
+        let filters = Filters(query: q,
                               dateFrom: unified.dateFrom,
                               dateTo: unified.dateTo,
                               model: unified.selectedModel,
                               kinds: unified.selectedKinds,
                               repoName: unified.projectFilter,
                               pathContains: nil)
-        searchCoordinator.start(query: unified.query,
+        searchCoordinator.start(query: q,
                                 filters: filters,
                                 includeCodex: unified.includeCodex && codexAgentEnabled,
                                 includeClaude: unified.includeClaude && claudeAgentEnabled,
