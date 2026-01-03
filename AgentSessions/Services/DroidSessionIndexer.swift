@@ -120,48 +120,39 @@ final class DroidSessionIndexer: ObservableObject, SessionIndexerProtocol {
         indexingError = nil
         hasEmptyDirectory = false
 
-        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
-        ioQueue.async {
-            let files = self.discovery.discoverSessionFiles()
-            DispatchQueue.main.async {
-                self.totalFiles = files.count
-                self.hasEmptyDirectory = files.isEmpty
-                if self.refreshToken == token { self.launchPhase = .scanning }
-            }
+        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+        Task.detached(priority: prio) { [weak self, token] in
+            guard let self else { return }
 
-            var sessions: [Session] = []
-            sessions.reserveCapacity(files.count)
-
-            for (i, url) in files.enumerated() {
-                if token != self.refreshToken { return }
-                if let s = DroidSessionParser.parseFile(at: url) {
-                    sessions.append(s)
-                }
-
-                if FeatureFlags.throttleIndexingUIUpdates {
-                    if self.progressThrottler.incrementAndShouldFlush() {
-                        DispatchQueue.main.async {
-                            self.filesProcessed = i + 1
-                            self.progressText = "Indexed \(i + 1)/\(files.count)"
-                        }
-                    }
-                } else {
+            let config = SessionIndexingEngine.ScanConfig(
+                source: .droid,
+                discoverFiles: { self.discovery.discoverSessionFiles() },
+                parseLightweight: { DroidSessionParser.parseFile(at: $0) },
+                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+                throttler: self.progressThrottler,
+                shouldContinue: { self.refreshToken == token },
+                onProgress: { processed, total in
                     DispatchQueue.main.async {
-                        self.filesProcessed = i + 1
-                        self.progressText = "Indexed \(i + 1)/\(files.count)"
+                        guard self.refreshToken == token else { return }
+                        self.totalFiles = total
+                        self.filesProcessed = processed
+                        self.hasEmptyDirectory = (total == 0)
+                        if processed > 0 {
+                            self.progressText = "Indexed \(processed)/\(total)"
+                        }
+                        if self.launchPhase == .hydrating { self.launchPhase = .scanning }
                     }
                 }
-            }
+            )
 
-            let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
-            let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sorted, source: .droid)
-
-            DispatchQueue.main.async {
-                self.allSessions = mergedWithArchives
+            let result = await SessionIndexingEngine.hydrateOrScan(config: config)
+            await MainActor.run {
+                guard self.refreshToken == token else { return }
+                self.allSessions = result.sessions
                 self.isIndexing = false
                 self.filesProcessed = self.totalFiles
                 self.progressText = "Ready"
-                if self.refreshToken == token { self.launchPhase = .ready }
+                self.launchPhase = .ready
             }
         }
     }

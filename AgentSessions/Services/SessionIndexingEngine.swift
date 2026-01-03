@@ -15,26 +15,35 @@ enum SessionIndexingEngine {
     struct ScanConfig {
         var source: SessionSource
         var discoverFiles: () -> [URL]
+        var shouldParseFile: (URL) -> Bool
         var parseLightweight: (URL) -> Session?
         var shouldThrottleProgress: Bool
         var throttler: ProgressThrottler
+        var shouldContinue: () -> Bool
+        var shouldMergeArchives: Bool
         var onProgress: (Int, Int) -> Void
         var didParseSession: (Session, URL) -> Void
 
         init(
             source: SessionSource,
             discoverFiles: @escaping () -> [URL],
+            shouldParseFile: @escaping (URL) -> Bool = { _ in true },
             parseLightweight: @escaping (URL) -> Session?,
             shouldThrottleProgress: Bool,
             throttler: ProgressThrottler,
+            shouldContinue: @escaping () -> Bool = { true },
+            shouldMergeArchives: Bool = true,
             onProgress: @escaping (Int, Int) -> Void,
             didParseSession: @escaping (Session, URL) -> Void = { _, _ in }
         ) {
             self.source = source
             self.discoverFiles = discoverFiles
+            self.shouldParseFile = shouldParseFile
             self.parseLightweight = parseLightweight
             self.shouldThrottleProgress = shouldThrottleProgress
             self.throttler = throttler
+            self.shouldContinue = shouldContinue
+            self.shouldMergeArchives = shouldMergeArchives
             self.onProgress = onProgress
             self.didParseSession = didParseSession
         }
@@ -63,10 +72,13 @@ enum SessionIndexingEngine {
         sessions.reserveCapacity(files.count)
 
         for (index, url) in files.enumerated() {
+            if !config.shouldContinue() { break }
             if Task.isCancelled { break }
-            if let session = config.parseLightweight(url) {
-                sessions.append(session)
-                config.didParseSession(session, url)
+            if config.shouldParseFile(url) {
+                if let session = config.parseLightweight(url) {
+                    sessions.append(session)
+                    config.didParseSession(session, url)
+                }
             }
 
             if config.shouldThrottleProgress {
@@ -79,7 +91,9 @@ enum SessionIndexingEngine {
         }
 
         let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
-        let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sorted, source: config.source)
-        return Result(kind: .scanned, sessions: mergedWithArchives, totalFiles: files.count)
+        let final = config.shouldMergeArchives
+            ? SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sorted, source: config.source)
+            : sorted
+        return Result(kind: .scanned, sessions: final, totalFiles: files.count)
     }
 }

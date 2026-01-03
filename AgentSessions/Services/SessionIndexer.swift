@@ -511,47 +511,40 @@ final class SessionIndexer: ObservableObject {
         hasEmptyDirectory = false
 
         let fm = FileManager.default
-        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
-        ioQueue.async {
-            // Fast path: hydrate from SQLite index if available (bridge async)
-            var indexed: [Session]? = nil
-            var indexedPaths: Set<String> = []
-            let sema = DispatchSemaphore(value: 0)
-            Task.detached(priority: .utility) {
-                // Try immediate hydration, then a brief grace retry to catch
-                // the AnalyticsIndexer writing session_meta at launch.
-                do {
-                    if let hydrated = try await self.hydrateFromIndexDBIfAvailable() {
-                        indexed = hydrated
-                    }
-                    // Also consult the analytics files table so we treat
-                    // low-message / probe sessions as already indexed and
-                    // avoid reprocessing them on every launch.
-                    let db = try IndexDB()
-                    let repo = SessionMetaRepository(db: db)
-                    indexedPaths = try await repo.fetchIndexedFilePaths(for: .codex)
-                } catch {
-                    // Ignore DB errors here; fallback to filesystem-only scan.
-                }
-                if (indexed?.isEmpty ?? true) && indexedPaths.isEmpty {
-                    try? await Task.sleep(nanoseconds: 250_000_000) // 250ms
-                    do {
-                        if let retry = try await self.hydrateFromIndexDBIfAvailable(), !retry.isEmpty {
-                            indexed = retry
-                        }
-                    } catch {
-                        // Still no DB hydrate; fall through to filesystem.
-                    }
-                }
-                sema.signal()
-            }
-            sema.wait()
+        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+        Task.detached(priority: prio) { [weak self, token, root] in
+            guard let self else { return }
 
-            // NEW: Even if we have indexed sessions, scan for NEW files and parse them
-            let existingSessions = indexed ?? []
+            // Fast path: hydrate from SQLite index if available.
+            var indexed: [Session] = []
+            var indexedPaths: Set<String> = []
+            do {
+                if let hydrated = try await self.hydrateFromIndexDBIfAvailable() {
+                    indexed = hydrated
+                }
+                // Also consult the analytics files table so we treat
+                // low-message / probe sessions as already indexed and
+                // avoid reprocessing them on every launch.
+                let db = try IndexDB()
+                let repo = SessionMetaRepository(db: db)
+                indexedPaths = try await repo.fetchIndexedFilePaths(for: .codex)
+            } catch {
+                // Ignore DB errors here; fallback to filesystem-only scan.
+            }
+            if indexed.isEmpty && indexedPaths.isEmpty {
+                try? await Task.sleep(nanoseconds: 250_000_000) // 250ms
+                do {
+                    if let retry = try await self.hydrateFromIndexDBIfAvailable(), !retry.isEmpty {
+                        indexed = retry
+                    }
+                } catch {
+                    // Still no DB hydrate; fall through to filesystem.
+                }
+            }
+
+            // Even if we have indexed sessions, scan for NEW files and parse them.
+            let existingSessions = indexed
             var existingPaths = Set(existingSessions.map { $0.filePath })
-            // Merge in any paths seen by analytics even when not represented
-            // in session_meta (e.g., probe sessions or low-message sessions).
             existingPaths.formUnion(indexedPaths)
 
             #if DEBUG
@@ -562,16 +555,16 @@ final class SessionIndexer: ObservableObject {
             }
             LaunchProfiler.log("Codex.refresh: DB hydrate complete (existing=\(existingSessions.count))")
             #endif
+
             // Check if directory exists and is accessible
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
-                DispatchQueue.main.async {
+                await MainActor.run {
+                    guard self.refreshToken == token else { return }
                     self.isIndexing = false
                     self.indexingError = "Sessions directory not found: \(root.path)"
                     self.progressText = "Error"
-                    if self.refreshToken == token {
-                        self.launchPhase = .error
-                    }
+                    self.launchPhase = .error
                 }
                 return
             }
@@ -592,39 +585,37 @@ final class SessionIndexer: ObservableObject {
             LaunchProfiler.log("Codex.refresh: file enumeration done (found=\(found.count), new=\(newFiles.count))")
 
             let sortedFiles = newFiles.sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
-            DispatchQueue.main.async {
+            await MainActor.run {
+                guard self.refreshToken == token else { return }
                 self.totalFiles = existingSessions.count + sortedFiles.count
                 self.hasEmptyDirectory = found.isEmpty
                 if !existingSessions.isEmpty {
                     self.progressText = "Scanning \(sortedFiles.count) new files..."
                 }
-                if self.refreshToken == token {
-                    self.launchPhase = .scanning
-                }
+                self.launchPhase = .scanning
             }
 
-            var newSessions: [Session] = []
-            newSessions.reserveCapacity(sortedFiles.count)
-
-            for (i, url) in sortedFiles.enumerated() {
-                if let session = self.parseFile(at: url) {
-                    newSessions.append(session)
-                }
-                // Update progress counter but don't replace allSessions yet (causes flicker)
-                if FeatureFlags.throttleIndexingUIUpdates {
-                    if self.progressThrottler.incrementAndShouldFlush() {
-                        DispatchQueue.main.async {
-                            self.filesProcessed = i + 1
-                            self.progressText = "Indexed \(i + 1)/\(sortedFiles.count)"
+            let config = SessionIndexingEngine.ScanConfig(
+                source: .codex,
+                discoverFiles: { sortedFiles },
+                parseLightweight: { self.parseFile(at: $0) },
+                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+                throttler: self.progressThrottler,
+                shouldContinue: { self.refreshToken == token },
+                shouldMergeArchives: false,
+                onProgress: { processed, total in
+                    DispatchQueue.main.async {
+                        guard self.refreshToken == token else { return }
+                        self.filesProcessed = processed
+                        if processed > 0 {
+                            self.progressText = "Indexed \(processed)/\(total)"
                         }
                     }
-                } else {
-                    DispatchQueue.main.async {
-                        self.filesProcessed = i + 1
-                        self.progressText = "Indexed \(i + 1)/\(sortedFiles.count)"
-                    }
                 }
-            }
+            )
+
+            let scanResult = await SessionIndexingEngine.hydrateOrScan(config: config)
+            let newSessions = scanResult.sessions
 
             // Merge existing sessions with newly parsed ones, then prune files that no longer exist
             let fmExists: (Session) -> Bool = { s in
@@ -635,7 +626,9 @@ final class SessionIndexer: ObservableObject {
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 .filter { hideProbes ? !CodexProbeConfig.isProbeSession($0) : true }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .codex)
-            DispatchQueue.main.async {
+
+            await MainActor.run {
+                guard self.refreshToken == token else { return }
                 LaunchProfiler.log("Codex.refresh: sessions merged (total=\(mergedWithArchives.count))")
                 self.allSessions = mergedWithArchives
                 self.isIndexing = false
@@ -669,27 +662,22 @@ final class SessionIndexer: ObservableObject {
                 if !delta.isEmpty {
                     self.isProcessingTranscripts = true
                     self.progressText = "Processing transcripts..."
-                    if self.refreshToken == token {
-                        self.launchPhase = .transcripts
-                    }
+                    self.launchPhase = .transcripts
                     let cache = self.transcriptCache
-                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
+                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self, token] in
                         LaunchProfiler.log("Codex.refresh: transcript prewarm start (delta=\(delta.count))")
                         await cache.generateAndCache(sessions: delta)
                         await MainActor.run {
+                            guard let self, self.refreshToken == token else { return }
                             LaunchProfiler.log("Codex.refresh: transcript prewarm complete")
                             self.isProcessingTranscripts = false
                             self.progressText = "Ready"
-                            if self.refreshToken == token {
-                                self.launchPhase = .ready
-                            }
+                            self.launchPhase = .ready
                         }
                     }
                 } else {
                     self.progressText = "Ready"
-                    if self.refreshToken == token {
-                        self.launchPhase = .ready
-                    }
+                    self.launchPhase = .ready
                 }
 
                 // Show lightweight sessions details (only for newly parsed ones)
