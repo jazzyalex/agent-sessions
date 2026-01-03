@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Improvements
 
 - Search: Use SQLite full-text indexing to speed up global search after analytics indexing completes.
-- Search: Add an optional Deep Search mode (Settings → Advanced) to include large tool outputs when needed.
+- Search: Global search now continues scanning large tool outputs in the background after showing indexed results (can be disabled in Settings → Advanced).
 
 ### Fixed
 

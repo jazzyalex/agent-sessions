@@ -959,10 +959,20 @@ struct UnifiedSessionsView: View {
         switch p.phase {
         case .idle:
             return "Searching…"
-        case .small:
-            return "Scanning small… \(p.scannedSmall)/\(p.totalSmall)"
-        case .large:
-            return "Scanning large… \(p.scannedLarge)/\(p.totalLarge)"
+        case .indexed:
+            return "Searching indexed text…"
+        case .legacySmall:
+            return "Scanning sessions… \(p.scannedSmall)/\(p.totalSmall)"
+        case .legacyLarge:
+            return "Scanning sessions (large)… \(p.scannedLarge)/\(p.totalLarge)"
+        case .unindexedSmall:
+            return "Completing results (not yet indexed)… \(p.scannedSmall)/\(p.totalSmall)"
+        case .unindexedLarge:
+            return "Completing results (not yet indexed, large)… \(p.scannedLarge)/\(p.totalLarge)"
+        case .toolOutputsSmall:
+            return "Searching tool outputs… \(p.scannedSmall)/\(p.totalSmall)"
+        case .toolOutputsLarge:
+            return "Searching tool outputs (large)… \(p.scannedLarge)/\(p.totalLarge)"
         }
     }
 

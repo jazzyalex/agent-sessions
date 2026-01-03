@@ -11,10 +11,16 @@ struct Filters: Equatable {
 }
 
 enum FilterEngine {
+    enum TextScope {
+        case all
+        case toolOutputsOnly
+    }
+
     static func sessionMatches(_ session: Session,
                                filters: Filters,
                                transcriptCache: TranscriptCache? = nil,
-                               allowTranscriptGeneration: Bool = true) -> Bool {
+                               allowTranscriptGeneration: Bool = true,
+                               textScope: TextScope = .all) -> Bool {
         // Parse query operators repo: and path:
         let parsed = parseOperators(filters.query)
         let effectiveRepo = filters.repoName ?? parsed.repo
@@ -46,6 +52,14 @@ enum FilterEngine {
         let q = parsed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
         if q.isEmpty { return true }
         let qLower = q.lowercased()
+
+        if textScope == .toolOutputsOnly {
+            if session.events.isEmpty { return false }
+            for e in session.events {
+                if let to = e.toolOutput, !to.isEmpty, to.localizedCaseInsensitiveContains(q) { return true }
+            }
+            return false
+        }
 
         // Priority 1: Search transcript if available
         if let cache = transcriptCache {

@@ -18,7 +18,16 @@ private actor PromotionState {
 
 final class SearchCoordinator: ObservableObject {
     struct Progress: Equatable {
-        enum Phase { case idle, small, large }
+        enum Phase {
+            case idle
+            case indexed
+            case legacySmall
+            case legacyLarge
+            case unindexedSmall
+            case unindexedLarge
+            case toolOutputsSmall
+            case toolOutputsLarge
+        }
         var phase: Phase = .idle
         var scannedSmall: Int = 0
         var totalSmall: Int = 0
@@ -48,6 +57,14 @@ final class SearchCoordinator: ObservableObject {
     // Get appropriate transcript cache based on session source
     private func transcriptCache(for source: SessionSource) -> TranscriptCache? {
         store.transcriptCache(for: source)
+    }
+
+    private func deepToolOutputsEnabled() -> Bool {
+        // Default ON unless the user explicitly opts out.
+        if UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch)
     }
 
     func cancel() {
@@ -101,7 +118,7 @@ final class SearchCoordinator: ObservableObject {
             guard let self, self.runID == newRunID else { return }
             self.isRunning = true
             self.results = []
-            self.progress = .init() // phase .idle → spinner shows without counts
+            self.progress = .init(phase: .indexed, scannedSmall: 0, totalSmall: 0, scannedLarge: 0, totalLarge: 0)
         }
 
         // Phase 0: fast path via SQLite FTS if available.
@@ -163,9 +180,9 @@ final class SearchCoordinator: ObservableObject {
                     )) ?? []
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
-                    let deepEnabled = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch)
+                    let deepEnabled = self.deepToolOutputsEnabled()
                     let out = ids.compactMap { byID[$0] }
-                    let seen = Set(out.map(\.id))
+                    var seen = Set(out.map(\.id))
                     let needsUnindexedScan = candidates.contains(where: { !indexedIDs.contains($0.id) })
                     await MainActor.run {
                         guard self.runID == newRunID else { return }
@@ -187,15 +204,18 @@ final class SearchCoordinator: ObservableObject {
                             filters: filters,
                             candidates: unindexedCandidates,
                             initialSeen: seen,
-                            finishWhenDone: !deepEnabled
+                            finishWhenDone: !deepEnabled,
+                            progressPhases: (.unindexedSmall, .unindexedLarge),
+                            textScope: .all
                         )
+                        if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+                        seen = await MainActor.run { Set(self.results.map(\.id)) }
                     }
 
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
                     guard deepEnabled else { return }
 
-                    let currentSeen = await MainActor.run { Set(self.results.map(\.id)) }
-                    let deepCandidates = candidates.filter { indexedIDs.contains($0.id) && !currentSeen.contains($0.id) && Self.shouldDeepScan(session: $0) }
+                    let deepCandidates = candidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
                     if deepCandidates.isEmpty {
                         await MainActor.run {
                             guard self.runID == newRunID else { return }
@@ -210,8 +230,10 @@ final class SearchCoordinator: ObservableObject {
                         query: query,
                         filters: filters,
                         candidates: deepCandidates,
-                        initialSeen: currentSeen,
-                        finishWhenDone: true
+                        initialSeen: seen,
+                        finishWhenDone: true,
+                        progressPhases: (.toolOutputsSmall, .toolOutputsLarge),
+                        textScope: .toolOutputsOnly
                     )
                     return
                 }
@@ -282,7 +304,7 @@ final class SearchCoordinator: ObservableObject {
             let largeCount = large.count
             await MainActor.run {
                 guard self.runID == runID else { return }
-                self.progress = .init(phase: .small, scannedSmall: 0, totalSmall: nonLargeCount, scannedLarge: 0, totalLarge: largeCount)
+                self.progress = .init(phase: .legacySmall, scannedSmall: 0, totalSmall: nonLargeCount, scannedLarge: 0, totalLarge: largeCount)
             }
 
             // Phase 1: nonLarge batched
@@ -292,7 +314,7 @@ final class SearchCoordinator: ObservableObject {
                 if Task.isCancelled { await self.finishCanceled(runID: runID); return }
                 let end = min(start + batchSize, nonLarge.count)
                 let batch = Array(nonLarge[start..<end])
-                let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold)
+                let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold, textScope: .all)
                 if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
                 // Filter out duplicates before entering MainActor
@@ -318,7 +340,7 @@ final class SearchCoordinator: ObservableObject {
             if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
             // Phase 2: large sequential
-            await MainActor.run { if self.runID == runID { self.progress.phase = .large } }
+            await MainActor.run { if self.runID == runID { self.progress.phase = .legacyLarge } }
             var idx = 0
             var staged: [Session] = []
             var lastResultsFlush = DispatchTime.now()
@@ -417,7 +439,9 @@ final class SearchCoordinator: ObservableObject {
                                      filters: Filters,
                                      candidates: [Session],
                                      initialSeen: Set<String>,
-                                     finishWhenDone: Bool) async {
+                                     finishWhenDone: Bool,
+                                     progressPhases: (Progress.Phase, Progress.Phase),
+                                     textScope: FilterEngine.TextScope) async {
         let threshold = FeatureFlags.searchSmallSizeBytes
         var nonLarge: [Session] = []
         var large: [Session] = []
@@ -434,7 +458,7 @@ final class SearchCoordinator: ObservableObject {
         let largeCount = large.count
         await MainActor.run {
             guard self.runID == runID else { return }
-            self.progress = .init(phase: .small, scannedSmall: 0, totalSmall: nonLargeCount, scannedLarge: 0, totalLarge: largeCount)
+            self.progress = .init(phase: progressPhases.0, scannedSmall: 0, totalSmall: nonLargeCount, scannedLarge: 0, totalLarge: largeCount)
         }
 
         var seen = initialSeen
@@ -445,7 +469,7 @@ final class SearchCoordinator: ObservableObject {
             if Task.isCancelled { await self.finishCanceled(runID: runID); return }
             let end = min(start + batchSize, nonLarge.count)
             let batch = Array(nonLarge[start..<end])
-            let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold)
+            let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold, textScope: textScope)
             if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
             let newHits = hits.filter { !seen.contains($0.id) }
@@ -470,7 +494,7 @@ final class SearchCoordinator: ObservableObject {
         if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
         // Phase 2: large sequential
-        await MainActor.run { if self.runID == runID { self.progress.phase = .large } }
+        await MainActor.run { if self.runID == runID { self.progress.phase = progressPhases.1 } }
         var idx = 0
         var staged: [Session] = []
         var lastResultsFlush = DispatchTime.now()
@@ -489,27 +513,54 @@ final class SearchCoordinator: ObservableObject {
                     self.store.updateSession(parsed)
                 }
 
-                let cache = self.transcriptCache(for: parsed.source)
-                if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
-                    let shouldAdd = !seen.contains(parsed.id)
-                    if shouldAdd {
-                        seen.insert(parsed.id)
-                        if FeatureFlags.coalesceSearchResults {
-                            staged.append(parsed)
-                            let now = DispatchTime.now()
-                            if now.uptimeNanoseconds - lastResultsFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
-                                let toFlush = staged
-                                staged.removeAll(keepingCapacity: true)
-                                lastResultsFlush = now
+                if textScope == .all {
+                    let cache = self.transcriptCache(for: parsed.source)
+                    if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
+                        let shouldAdd = !seen.contains(parsed.id)
+                        if shouldAdd {
+                            seen.insert(parsed.id)
+                            if FeatureFlags.coalesceSearchResults {
+                                staged.append(parsed)
+                                let now = DispatchTime.now()
+                                if now.uptimeNanoseconds - lastResultsFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
+                                    let toFlush = staged
+                                    staged.removeAll(keepingCapacity: true)
+                                    lastResultsFlush = now
+                                    await MainActor.run {
+                                        guard self.runID == runID else { return }
+                                        self.results.append(contentsOf: toFlush)
+                                    }
+                                }
+                            } else {
                                 await MainActor.run {
                                     guard self.runID == runID else { return }
-                                    self.results.append(contentsOf: toFlush)
+                                    self.results.append(parsed)
                                 }
                             }
-                        } else {
-                            await MainActor.run {
-                                guard self.runID == runID else { return }
-                                self.results.append(parsed)
+                        }
+                    }
+                } else {
+                    if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: nil, allowTranscriptGeneration: false, textScope: .toolOutputsOnly) {
+                        let shouldAdd = !seen.contains(parsed.id)
+                        if shouldAdd {
+                            seen.insert(parsed.id)
+                            if FeatureFlags.coalesceSearchResults {
+                                staged.append(parsed)
+                                let now = DispatchTime.now()
+                                if now.uptimeNanoseconds - lastResultsFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
+                                    let toFlush = staged
+                                    staged.removeAll(keepingCapacity: true)
+                                    lastResultsFlush = now
+                                    await MainActor.run {
+                                        guard self.runID == runID else { return }
+                                        self.results.append(contentsOf: toFlush)
+                                    }
+                                }
+                            } else {
+                                await MainActor.run {
+                                    guard self.runID == runID else { return }
+                                    self.results.append(parsed)
+                                }
                             }
                         }
                     }
@@ -562,24 +613,34 @@ final class SearchCoordinator: ObservableObject {
         }
     }
 
-    private func searchBatch(batch: [Session], query: String, filters: Filters, threshold: Int) async -> [Session] {
+    private func searchBatch(batch: [Session],
+                             query: String,
+                             filters: Filters,
+                             threshold: Int,
+                             textScope: FilterEngine.TextScope) async -> [Session] {
         var out: [Session] = []
         out.reserveCapacity(batch.count / 4)
         for var s in batch {
             if Task.isCancelled { return out }
-	            if s.events.isEmpty {
-	                // For non-large sessions only, parse quickly if needed
-	                let size = Self.sizeBytes(for: s)
-	                if size < threshold, let parsed = await parseFullIfNeeded(session: s, threshold: threshold) {
-	                    s = parsed
-	                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
-	                        self.store.updateSession(parsed)
-	                    }
-	                }
-	            }
-	            let cache = self.transcriptCache(for: s.source)
-	            if FilterEngine.sessionMatches(s, filters: filters, transcriptCache: cache) { out.append(s) }
-	        }
+            if s.events.isEmpty {
+                // For non-large sessions only, parse quickly if needed
+                let size = Self.sizeBytes(for: s)
+                if size < threshold, let parsed = await parseFullIfNeeded(session: s, threshold: threshold) {
+                    s = parsed
+                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
+                        self.store.updateSession(parsed)
+                    }
+                }
+            }
+            let cache: TranscriptCache? = (textScope == .all) ? self.transcriptCache(for: s.source) : nil
+            if FilterEngine.sessionMatches(s,
+                                          filters: filters,
+                                          transcriptCache: cache,
+                                          allowTranscriptGeneration: textScope == .all,
+                                          textScope: textScope) {
+                out.append(s)
+            }
+        }
         return out
     }
 
