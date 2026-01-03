@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Search: Prevent missing results while the search index is still warming by falling back to legacy matching for unindexed sessions.
 - Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
 

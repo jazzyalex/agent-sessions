@@ -182,18 +182,14 @@ final class ClaudeSessionIndexer: ObservableObject {
 
             // Fast path: hydrate from SQLite index if available.
             var indexed: [Session] = []
-            var indexedPaths: Set<String> = []
             do {
                 if let hydrated = try await self.hydrateFromIndexDBIfAvailable() {
                     indexed = hydrated
                 }
-                let db = try IndexDB()
-                let repo = SessionMetaRepository(db: db)
-                indexedPaths = try await repo.fetchIndexedFilePaths(for: .claude)
             } catch {
                 // DB errors are non-fatal for UI; fall back to filesystem only.
             }
-            if indexed.isEmpty && indexedPaths.isEmpty {
+            if indexed.isEmpty {
                 try? await Task.sleep(nanoseconds: 250_000_000)
                 do {
                     if let retry = try await self.hydrateFromIndexDBIfAvailable(), !retry.isEmpty {
@@ -208,7 +204,6 @@ final class ClaudeSessionIndexer: ObservableObject {
             let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
             let existingSessions = indexed.filter(exists)
             var existingPaths = Set(existingSessions.map { $0.filePath })
-            existingPaths.formUnion(indexedPaths)
 
             #if DEBUG
             if !existingSessions.isEmpty {

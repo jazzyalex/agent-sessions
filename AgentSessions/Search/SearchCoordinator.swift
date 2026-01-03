@@ -124,7 +124,33 @@ final class SearchCoordinator: ObservableObject {
                     return
                 }
 
+                let candidates = all.filter { allowed.contains($0.source) }
+                var byID: [String: Session] = [:]
+                byID.reserveCapacity(candidates.count)
+                for s in candidates { byID[s.id] = s }
+
+                // If there's no free-text component, prefer in-memory filtering for correctness even
+                // when the DB is only partially populated.
+                if freeText.isEmpty, hasMetaFilters {
+                    let out = FilterEngine.filterSessions(candidates, filters: filters, transcriptCache: nil, allowTranscriptGeneration: false)
+                    await MainActor.run {
+                        guard self.runID == newRunID else { return }
+                        self.results = out
+                        self.isRunning = false
+                        self.progress.phase = .idle
+                    }
+                    return
+                }
+
                 if !freeText.isEmpty {
+                    // The analytics-backed DB can be partially populated during warmup.
+                    // Use FTS for indexed sessions, then fall back to legacy matching for unindexed ones.
+                    let indexedIDs = Set((try? await db.indexedSessionIDs(sources: allowedRaw)) ?? [])
+                    if indexedIDs.isEmpty {
+                        await self.startLegacySearch(runID: newRunID, query: query, filters: filters, allowed: allowed, all: all)
+                        return
+                    }
+
                     let ids = (try? await db.searchSessionIDsFTS(
                         sources: allowedRaw,
                         model: filters.model,
@@ -137,26 +163,39 @@ final class SearchCoordinator: ObservableObject {
                     )) ?? []
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
-                    var byID: [String: Session] = [:]
-                    byID.reserveCapacity(all.count)
-                    for s in all { byID[s.id] = s }
-                    let out = ids.compactMap { byID[$0] }
-
                     let deepEnabled = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch)
+                    let out = ids.compactMap { byID[$0] }
+                    let seen = Set(out.map(\.id))
+                    let needsUnindexedScan = candidates.contains(where: { !indexedIDs.contains($0.id) })
                     await MainActor.run {
                         guard self.runID == newRunID else { return }
                         self.results = out
-                        if !deepEnabled {
+                        if !deepEnabled && !needsUnindexedScan {
                             self.isRunning = false
                             self.progress.phase = .idle
                         }
                     }
 
-                    if !deepEnabled { return }
+                    if !deepEnabled && !needsUnindexedScan { return }
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
-                    let seen = Set(out.map(\.id))
-                    let deepCandidates = all.filter { allowed.contains($0.source) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
+                    let unindexedCandidates = candidates.filter { !indexedIDs.contains($0.id) && !seen.contains($0.id) }
+                    if !unindexedCandidates.isEmpty {
+                        await self.runDeepSearchAppend(
+                            runID: newRunID,
+                            query: query,
+                            filters: filters,
+                            candidates: unindexedCandidates,
+                            initialSeen: seen,
+                            finishWhenDone: !deepEnabled
+                        )
+                    }
+
+                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+                    guard deepEnabled else { return }
+
+                    let currentSeen = await MainActor.run { Set(self.results.map(\.id)) }
+                    let deepCandidates = candidates.filter { indexedIDs.contains($0.id) && !currentSeen.contains($0.id) && Self.shouldDeepScan(session: $0) }
                     if deepCandidates.isEmpty {
                         await MainActor.run {
                             guard self.runID == newRunID else { return }
@@ -166,7 +205,14 @@ final class SearchCoordinator: ObservableObject {
                         return
                     }
 
-                    await self.runDeepSearchAppend(runID: newRunID, query: query, filters: filters, candidates: deepCandidates, initialSeen: seen)
+                    await self.runDeepSearchAppend(
+                        runID: newRunID,
+                        query: query,
+                        filters: filters,
+                        candidates: deepCandidates,
+                        initialSeen: currentSeen,
+                        finishWhenDone: true
+                    )
                     return
                 }
 
@@ -370,7 +416,8 @@ final class SearchCoordinator: ObservableObject {
                                      query: String,
                                      filters: Filters,
                                      candidates: [Session],
-                                     initialSeen: Set<String>) async {
+                                     initialSeen: Set<String>,
+                                     finishWhenDone: Bool) async {
         let threshold = FeatureFlags.searchSmallSizeBytes
         var nonLarge: [Session] = []
         var large: [Session] = []
@@ -496,10 +543,12 @@ final class SearchCoordinator: ObservableObject {
         }
 
         if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-        await MainActor.run {
-            guard self.runID == runID else { return }
-            self.isRunning = false
-            self.progress.phase = .idle
+        if finishWhenDone {
+            await MainActor.run {
+                guard self.runID == runID else { return }
+                self.isRunning = false
+                self.progress.phase = .idle
+            }
         }
     }
 
