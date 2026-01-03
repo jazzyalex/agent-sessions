@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+
+- Search: Use SQLite full-text indexing to speed up global search after analytics indexing completes.
+- Search: Add an optional Deep Search mode (Settings → Advanced) to include large tool outputs when needed.
+
 ### Fixed
 
 - Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
@@ -19,9 +24,6 @@ All notable changes to this project will be documented in this file.
 - Preferences: Make the Settings → About updates section more compact.
 - Preferences: Droid pane now includes binary detection and a version check, consistent with other agents.
 
-
-## [Unreleased]
-
 ## [2.9.1] - 2025-12-29
 
 ### Added
@@ -36,7 +38,7 @@ All notable changes to this project will be documented in this file.
 
 ## [2.9] - 2025-12-23
 
-🎄 **Agent Sessions 2.9 Christmas Edition**
+**Agent Sessions 2.9 Christmas Edition**
 
 ### New Features
 
@@ -78,7 +80,7 @@ All notable changes to this project will be documented in this file.
 
 ## [2.8] - 2025-11-27
 
-🦃 **My thanks to the OpenCode community - Agent Sessions now supports OpenCode!** (Resume and usage tracking are on the roadmap.)
+**My thanks to the OpenCode community - Agent Sessions now supports OpenCode!** (Resume and usage tracking are on the roadmap.)
 
 ### Added
 - **OpenCode Support**: Full session browser integration with Claude Code OpenCode sessions, including transcript viewing, analytics, and favorites. Sessions appear in the unified list with source filtering.

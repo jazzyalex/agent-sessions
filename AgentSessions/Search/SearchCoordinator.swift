@@ -33,6 +33,7 @@ final class SearchCoordinator: ObservableObject {
 
     private var currentTask: Task<Void, Never>? = nil
     private let store: SearchSessionStoring
+    private let db: IndexDB? = try? IndexDB()
     // Promotion support for large-queue preemption
     private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
@@ -103,9 +104,118 @@ final class SearchCoordinator: ObservableObject {
             self.progress = .init() // phase .idle → spinner shows without counts
         }
 
+        // Phase 0: fast path via SQLite FTS if available.
+        if FeatureFlags.enableFTSSearch, let db = db {
+            let allowedRaw = allowed.map { $0.rawValue }
+            let parsed = FilterEngine.parseOperators(filters.query)
+            let freeText = parsed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let effectiveRepo = filters.repoName ?? parsed.repo
+            let effectivePath = filters.pathContains ?? parsed.path
+            let hasMetaFilters = (filters.model != nil) || (filters.dateFrom != nil) || (filters.dateTo != nil) || (effectiveRepo != nil) || (effectivePath != nil)
+
+            let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+            currentTask = Task.detached(priority: prio) { [weak self, newRunID] in
+                guard let self else { return }
+                let hasData = (try? await db.hasSearchData(sources: allowedRaw)) ?? false
+                if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+                guard hasData else {
+                    // Fall back to legacy search until the DB is warmed.
+                    await self.startLegacySearch(runID: newRunID, query: query, filters: filters, allowed: allowed, all: all)
+                    return
+                }
+
+                if !freeText.isEmpty {
+                    let ids = (try? await db.searchSessionIDsFTS(
+                        sources: allowedRaw,
+                        model: filters.model,
+                        repoSubstr: effectiveRepo,
+                        pathSubstr: effectivePath,
+                        dateFrom: filters.dateFrom,
+                        dateTo: filters.dateTo,
+                        query: freeText,
+                        limit: FeatureFlags.ftsSearchLimit
+                    )) ?? []
+                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+
+                    var byID: [String: Session] = [:]
+                    byID.reserveCapacity(all.count)
+                    for s in all { byID[s.id] = s }
+                    let out = ids.compactMap { byID[$0] }
+
+                    let deepEnabled = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch)
+                    await MainActor.run {
+                        guard self.runID == newRunID else { return }
+                        self.results = out
+                        if !deepEnabled {
+                            self.isRunning = false
+                            self.progress.phase = .idle
+                        }
+                    }
+
+                    if !deepEnabled { return }
+                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+
+                    let seen = Set(out.map(\.id))
+                    let deepCandidates = all.filter { allowed.contains($0.source) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
+                    if deepCandidates.isEmpty {
+                        await MainActor.run {
+                            guard self.runID == newRunID else { return }
+                            self.isRunning = false
+                            self.progress.phase = .idle
+                        }
+                        return
+                    }
+
+                    await self.runDeepSearchAppend(runID: newRunID, query: query, filters: filters, candidates: deepCandidates, initialSeen: seen)
+                    return
+                }
+
+                if hasMetaFilters {
+                    let ids = (try? await db.prefilterSessionIDs(
+                        sources: allowedRaw,
+                        model: filters.model,
+                        repoSubstr: effectiveRepo,
+                        pathSubstr: effectivePath,
+                        dateFrom: filters.dateFrom,
+                        dateTo: filters.dateTo,
+                        limit: FeatureFlags.ftsSearchLimit
+                    )) ?? []
+                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+
+                    var byID: [String: Session] = [:]
+                    byID.reserveCapacity(all.count)
+                    for s in all { byID[s.id] = s }
+                    let out = ids.compactMap { byID[$0] }
+                    await MainActor.run {
+                        guard self.runID == newRunID else { return }
+                        self.results = out
+                        self.isRunning = false
+                        self.progress.phase = .idle
+                    }
+                    return
+                }
+
+                // Nothing to search.
+                await MainActor.run {
+                    guard self.runID == newRunID else { return }
+                    self.results = []
+                    self.isRunning = false
+                    self.progress.phase = .idle
+                }
+            }
+            return
+        }
+
         // Launch orchestration
+        Task { [weak self] in
+            guard let self else { return }
+            await self.startLegacySearch(runID: newRunID, query: query, filters: filters, allowed: allowed, all: all)
+        }
+    }
+
+    private func startLegacySearch(runID: UUID, query: String, filters: Filters, allowed: Set<SessionSource>, all: [Session]) async {
         let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-        currentTask = Task.detached(priority: prio) { [weak self, newRunID] in
+        currentTask = Task.detached(priority: prio) { [weak self, runID] in
             guard let self else { return }
             // Restore pre-index candidate building: all allowed sessions, no DB/hybrid tiers
             let threshold = FeatureFlags.searchSmallSizeBytes
@@ -125,7 +235,7 @@ final class SearchCoordinator: ObservableObject {
             let nonLargeCount = nonLarge.count
             let largeCount = large.count
             await MainActor.run {
-                guard self.runID == newRunID else { return }
+                guard self.runID == runID else { return }
                 self.progress = .init(phase: .small, scannedSmall: 0, totalSmall: nonLargeCount, scannedLarge: 0, totalLarge: largeCount)
             }
 
@@ -133,18 +243,18 @@ final class SearchCoordinator: ObservableObject {
             let batchSize = 64
             var seen = Set<String>()
             for start in stride(from: 0, to: nonLarge.count, by: batchSize) {
-                if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+                if Task.isCancelled { await self.finishCanceled(runID: runID); return }
                 let end = min(start + batchSize, nonLarge.count)
                 let batch = Array(nonLarge[start..<end])
                 let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold)
-                if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+                if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
                 // Filter out duplicates before entering MainActor
                 let newHits = hits.filter { !seen.contains($0.id) }
                 for s in newHits { seen.insert(s.id) }
 
                 await MainActor.run {
-                    guard self.runID == newRunID else { return }
+                    guard self.runID == runID else { return }
                     self.results.append(contentsOf: newHits)
                     if FeatureFlags.throttleSearchUIUpdates {
                         let now = DispatchTime.now()
@@ -159,10 +269,10 @@ final class SearchCoordinator: ObservableObject {
                 if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
             }
 
-            if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+            if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
             // Phase 2: large sequential
-            await MainActor.run { if self.runID == newRunID { self.progress.phase = .large } }
+            await MainActor.run { if self.runID == runID { self.progress.phase = .large } }
             var idx = 0
             var staged: [Session] = []
             var lastResultsFlush = DispatchTime.now()
@@ -175,19 +285,19 @@ final class SearchCoordinator: ObservableObject {
                 }
 
                 let s = large[idx]
-                if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-	                if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
-	                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+                if Task.isCancelled { await self.finishCanceled(runID: runID); return }
+                if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
+                    if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
-	                    // Optionally persist parsed session back to indexers for accuracy outside search
-	                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
-	                        self.store.updateSession(parsed)
-	                    }
+                    // Optionally persist parsed session back to indexers for accuracy outside search
+                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
+                        self.store.updateSession(parsed)
+                    }
 
-	                    let cache = self.transcriptCache(for: parsed.source)
-	                    if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
-	                        // Check and update seen outside MainActor
-	                        let shouldAdd = !seen.contains(parsed.id)
+                    let cache = self.transcriptCache(for: parsed.source)
+                    if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
+                        // Check and update seen outside MainActor
+                        let shouldAdd = !seen.contains(parsed.id)
                         if shouldAdd {
                             seen.insert(parsed.id)
                             if FeatureFlags.coalesceSearchResults {
@@ -198,13 +308,13 @@ final class SearchCoordinator: ObservableObject {
                                     staged.removeAll(keepingCapacity: true)
                                     lastResultsFlush = now
                                     await MainActor.run {
-                                        guard self.runID == newRunID else { return }
+                                        guard self.runID == runID else { return }
                                         self.results.append(contentsOf: toFlush)
                                     }
                                 }
                             } else {
                                 await MainActor.run {
-                                    guard self.runID == newRunID else { return }
+                                    guard self.runID == runID else { return }
                                     self.results.append(parsed)
                                 }
                             }
@@ -216,13 +326,13 @@ final class SearchCoordinator: ObservableObject {
                     if now.uptimeNanoseconds - self.progressThrottleLastFlush.uptimeNanoseconds > 100_000_000 {
                         let currentIdx = idx
                         await MainActor.run {
-                            if self.runID == newRunID { self.progress.scannedLarge = currentIdx + 1 }
+                            if self.runID == runID { self.progress.scannedLarge = currentIdx + 1 }
                             self.progressThrottleLastFlush = now
                         }
                     }
                 } else {
                     let currentIdx = idx
-                    await MainActor.run { if self.runID == newRunID { self.progress.scannedLarge = currentIdx + 1 } }
+                    await MainActor.run { if self.runID == runID { self.progress.scannedLarge = currentIdx + 1 } }
                 }
                 if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
                 idx += 1
@@ -232,17 +342,164 @@ final class SearchCoordinator: ObservableObject {
                 let toFlush = staged
                 staged.removeAll()
                 await MainActor.run {
-                    guard self.runID == newRunID else { return }
+                    guard self.runID == runID else { return }
                     self.results.append(contentsOf: toFlush)
                 }
             }
 
-            if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+            if Task.isCancelled { await self.finishCanceled(runID: runID); return }
             await MainActor.run {
-                guard self.runID == newRunID else { return }
+                guard self.runID == runID else { return }
                 self.isRunning = false
                 self.progress.phase = .idle
             }
+        }
+        await currentTask?.value
+    }
+
+    private static func shouldDeepScan(session: Session) -> Bool {
+        let estimatedCommands: Int = {
+            if let c = session.lightweightCommands { return c }
+            if session.events.isEmpty { return 0 }
+            return session.events.filter { $0.kind == .tool_call }.count
+        }()
+        return estimatedCommands > 0
+    }
+
+    private func runDeepSearchAppend(runID: UUID,
+                                     query: String,
+                                     filters: Filters,
+                                     candidates: [Session],
+                                     initialSeen: Set<String>) async {
+        let threshold = FeatureFlags.searchSmallSizeBytes
+        var nonLarge: [Session] = []
+        var large: [Session] = []
+        nonLarge.reserveCapacity(candidates.count)
+        large.reserveCapacity(max(1, candidates.count / 2))
+        for s in candidates {
+            let size = Self.sizeBytes(for: s)
+            if size >= threshold { large.append(s) } else { nonLarge.append(s) }
+        }
+        nonLarge.sort { $0.modifiedAt > $1.modifiedAt }
+        large.sort { $0.modifiedAt > $1.modifiedAt }
+
+        let nonLargeCount = nonLarge.count
+        let largeCount = large.count
+        await MainActor.run {
+            guard self.runID == runID else { return }
+            self.progress = .init(phase: .small, scannedSmall: 0, totalSmall: nonLargeCount, scannedLarge: 0, totalLarge: largeCount)
+        }
+
+        var seen = initialSeen
+
+        // Phase 1: nonLarge batched
+        let batchSize = 64
+        for start in stride(from: 0, to: nonLarge.count, by: batchSize) {
+            if Task.isCancelled { await self.finishCanceled(runID: runID); return }
+            let end = min(start + batchSize, nonLarge.count)
+            let batch = Array(nonLarge[start..<end])
+            let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold)
+            if Task.isCancelled { await self.finishCanceled(runID: runID); return }
+
+            let newHits = hits.filter { !seen.contains($0.id) }
+            for s in newHits { seen.insert(s.id) }
+
+            await MainActor.run {
+                guard self.runID == runID else { return }
+                self.results.append(contentsOf: newHits)
+                if FeatureFlags.throttleSearchUIUpdates {
+                    let now = DispatchTime.now()
+                    if now.uptimeNanoseconds - self.progressThrottleLastFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
+                        self.progress.scannedSmall = min(self.progress.totalSmall, self.progress.scannedSmall + batch.count)
+                        self.progressThrottleLastFlush = now
+                    }
+                } else {
+                    self.progress.scannedSmall = min(self.progress.totalSmall, self.progress.scannedSmall + batch.count)
+                }
+            }
+            if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
+        }
+
+        if Task.isCancelled { await self.finishCanceled(runID: runID); return }
+
+        // Phase 2: large sequential
+        await MainActor.run { if self.runID == runID { self.progress.phase = .large } }
+        var idx = 0
+        var staged: [Session] = []
+        var lastResultsFlush = DispatchTime.now()
+        while idx < large.count {
+            let want = await self.promotionState.consumePromoted()
+            if let want, let pos = large[idx...].firstIndex(where: { $0.id == want }) {
+                if pos != idx { large.swapAt(idx, pos) }
+            }
+
+            let s = large[idx]
+            if Task.isCancelled { await self.finishCanceled(runID: runID); return }
+            if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
+                if Task.isCancelled { await self.finishCanceled(runID: runID); return }
+
+                if !FeatureFlags.disableSessionUpdatesDuringSearch {
+                    self.store.updateSession(parsed)
+                }
+
+                let cache = self.transcriptCache(for: parsed.source)
+                if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
+                    let shouldAdd = !seen.contains(parsed.id)
+                    if shouldAdd {
+                        seen.insert(parsed.id)
+                        if FeatureFlags.coalesceSearchResults {
+                            staged.append(parsed)
+                            let now = DispatchTime.now()
+                            if now.uptimeNanoseconds - lastResultsFlush.uptimeNanoseconds > 100_000_000 { // ~10 Hz
+                                let toFlush = staged
+                                staged.removeAll(keepingCapacity: true)
+                                lastResultsFlush = now
+                                await MainActor.run {
+                                    guard self.runID == runID else { return }
+                                    self.results.append(contentsOf: toFlush)
+                                }
+                            }
+                        } else {
+                            await MainActor.run {
+                                guard self.runID == runID else { return }
+                                self.results.append(parsed)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if FeatureFlags.throttleSearchUIUpdates {
+                let now = DispatchTime.now()
+                if now.uptimeNanoseconds - self.progressThrottleLastFlush.uptimeNanoseconds > 100_000_000 {
+                    let currentIdx = idx
+                    await MainActor.run {
+                        if self.runID == runID { self.progress.scannedLarge = currentIdx + 1 }
+                        self.progressThrottleLastFlush = now
+                    }
+                }
+            } else {
+                let currentIdx = idx
+                await MainActor.run { if self.runID == runID { self.progress.scannedLarge = currentIdx + 1 } }
+            }
+            if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
+            idx += 1
+        }
+
+        if FeatureFlags.coalesceSearchResults && !staged.isEmpty {
+            let toFlush = staged
+            staged.removeAll()
+            await MainActor.run {
+                guard self.runID == runID else { return }
+                self.results.append(contentsOf: toFlush)
+            }
+        }
+
+        if Task.isCancelled { await self.finishCanceled(runID: runID); return }
+        await MainActor.run {
+            guard self.runID == runID else { return }
+            self.isRunning = false
+            self.progress.phase = .idle
         }
     }
 

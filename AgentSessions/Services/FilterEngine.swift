@@ -84,8 +84,8 @@ enum FilterEngine {
         sessions.filter { sessionMatches($0, filters: filters, transcriptCache: transcriptCache, allowTranscriptGeneration: allowTranscriptGeneration) }
     }
 
-    private struct ParsedQuery { let freeText: String; let repo: String?; let path: String? }
-    private static func parseOperators(_ q: String) -> ParsedQuery {
+    struct ParsedQuery { let freeText: String; let repo: String?; let path: String? }
+    static func parseOperators(_ q: String) -> ParsedQuery {
         guard !q.isEmpty else { return ParsedQuery(freeText: "", repo: nil, path: nil) }
         var repo: String? = nil
         var path: String? = nil
@@ -105,4 +105,3 @@ enum FilterEngine {
         return ParsedQuery(freeText: remaining.joined(separator: " "), repo: repo, path: path)
     }
 }
-

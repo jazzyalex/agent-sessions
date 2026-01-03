@@ -88,6 +88,19 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
             }
 
+            sectionHeader("Search")
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Enable Deep Search (includes tool outputs)", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) },
+                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) }
+                ))
+                .help("When enabled, global search runs a second pass that scans full tool outputs. This can be slower on large histories.")
+
+                Text("Deep Search can find matches inside large tool outputs (e.g., long command results) that Instant search skips for performance.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             sectionHeader("Saved Sessions")
             VStack(alignment: .leading, spacing: 12) {
                 Toggle("Save also keeps locally", isOn: $starPinsSessions)

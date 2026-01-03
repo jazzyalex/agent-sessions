@@ -124,6 +124,50 @@ actor IndexDB {
             );
             """
         )
+
+        // Per-session search corpus (stored even if FTS is unavailable).
+        try exec(db,
+            """
+            CREATE TABLE IF NOT EXISTS session_search (
+              session_id TEXT PRIMARY KEY,
+              source TEXT NOT NULL,
+              mtime INTEGER,
+              size INTEGER,
+              updated_at INTEGER NOT NULL,
+              text TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_search_source ON session_search(source);
+            """
+        )
+
+        // Full-text search (FTS5) over per-session searchable text.
+        // External content table lets us upsert via regular SQL + triggers.
+        do {
+            try exec(db,
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS session_search_fts
+                USING fts5(
+                  text,
+                  content='session_search',
+                  content_rowid='rowid',
+                  tokenize='unicode61'
+                );
+
+                CREATE TRIGGER IF NOT EXISTS session_search_ai AFTER INSERT ON session_search BEGIN
+                  INSERT INTO session_search_fts(rowid, text) VALUES (new.rowid, new.text);
+                END;
+                CREATE TRIGGER IF NOT EXISTS session_search_ad AFTER DELETE ON session_search BEGIN
+                  INSERT INTO session_search_fts(session_search_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+                END;
+                CREATE TRIGGER IF NOT EXISTS session_search_au AFTER UPDATE ON session_search BEGIN
+                  INSERT INTO session_search_fts(session_search_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+                  INSERT INTO session_search_fts(rowid, text) VALUES (new.rowid, new.text);
+                END;
+                """
+            )
+        } catch {
+            // FTS is optional. If unavailable, search falls back to the legacy transcript-based path.
+        }
     }
 
     // MARK: - Exec helpers
@@ -665,6 +709,7 @@ actor IndexDB {
         try exec("DELETE FROM rollups_daily WHERE source='\(source)'")
         try exec("DELETE FROM session_days WHERE source='\(source)'")
         try exec("DELETE FROM session_meta WHERE source='\(source)'")
+        try exec("DELETE FROM session_search WHERE source='\(source)'")
     }
 
     // MARK: - Upserts
@@ -706,6 +751,166 @@ actor IndexDB {
         sqlite3_bind_int64(stmt, 12, Int64(m.messages))
         sqlite3_bind_int64(stmt, 13, Int64(m.commands))
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
+    }
+
+    func upsertSessionSearch(sessionID: String, source: String, mtime: Int64, size: Int64, text: String) throws {
+        let now = Int64(Date().timeIntervalSince1970)
+        let sql = """
+        INSERT INTO session_search(session_id, source, mtime, size, updated_at, text)
+        VALUES(?,?,?,?,?,?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          source=excluded.source,
+          mtime=excluded.mtime,
+          size=excluded.size,
+          updated_at=excluded.updated_at,
+          text=excluded.text;
+        """
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, sessionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(stmt, 3, mtime)
+        sqlite3_bind_int64(stmt, 4, size)
+        sqlite3_bind_int64(stmt, 5, now)
+        sqlite3_bind_text(stmt, 6, text, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_search") }
+    }
+
+    func hasSearchData(sources: [String]) throws -> Bool {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = "SELECT EXISTS(SELECT 1 FROM session_search\(whereSQL) LIMIT 1);"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return sqlite3_column_int(stmt, 0) == 1
+        }
+        return false
+    }
+
+    func searchSessionIDsFTS(
+        sources: [String],
+        model: String?,
+        repoSubstr: String?,
+        pathSubstr: String?,
+        dateFrom: Date?,
+        dateTo: Date?,
+        query: String,
+        limit: Int
+    ) throws -> [String] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+
+        clauses.append("session_search_fts MATCH ?")
+        binds.append(query)
+
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("sm.source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let m = model, !m.isEmpty { clauses.append("sm.model = ?"); binds.append(m) }
+        if let r = repoSubstr, !r.isEmpty { clauses.append("sm.repo LIKE ?"); binds.append("%\(r)%") }
+        if let p = pathSubstr, !p.isEmpty { clauses.append("sm.cwd LIKE ?"); binds.append("%\(p)%") }
+        if let df = dateFrom { clauses.append("COALESCE(sm.end_ts, sm.mtime) >= ?"); binds.append(Int64(df.timeIntervalSince1970)) }
+        if let dt = dateTo { clauses.append("COALESCE(sm.end_ts, sm.mtime) <= ?"); binds.append(Int64(dt.timeIntervalSince1970)) }
+
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = """
+        SELECT sm.session_id
+        FROM session_search_fts f
+        JOIN session_search s ON s.rowid = f.rowid
+        JOIN session_meta sm ON sm.session_id = s.session_id
+        \(whereSQL)
+        ORDER BY bm25(session_search_fts)
+        LIMIT ?;
+        """
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            else if let i = b as? Int64 { sqlite3_bind_int64(stmt, idx, i) }
+            idx += 1
+        }
+        sqlite3_bind_int(stmt, idx, Int32(limit))
+
+        var ids: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { ids.append(String(cString: c)) }
+        }
+        return ids
+    }
+
+    func prefilterSessionIDs(
+        sources: [String],
+        model: String?,
+        repoSubstr: String?,
+        pathSubstr: String?,
+        dateFrom: Date?,
+        dateTo: Date?,
+        limit: Int?
+    ) throws -> [String] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let m = model, !m.isEmpty { clauses.append("model = ?"); binds.append(m) }
+        if let r = repoSubstr, !r.isEmpty { clauses.append("repo LIKE ?"); binds.append("%\(r)%") }
+        if let p = pathSubstr, !p.isEmpty { clauses.append("cwd LIKE ?"); binds.append("%\(p)%") }
+        if let df = dateFrom { clauses.append("COALESCE(end_ts, mtime) >= ?"); binds.append(Int64(df.timeIntervalSince1970)) }
+        if let dt = dateTo { clauses.append("COALESCE(end_ts, mtime) <= ?"); binds.append(Int64(dt.timeIntervalSince1970)) }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let limitSQL = limit == nil ? "" : " LIMIT ?"
+        let sql = "SELECT session_id FROM session_meta\(whereSQL) ORDER BY COALESCE(end_ts, mtime) DESC\(limitSQL);"
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            else if let i = b as? Int64 { sqlite3_bind_int64(stmt, idx, i) }
+            idx += 1
+        }
+        if let limit {
+            sqlite3_bind_int(stmt, idx, Int32(limit))
+        }
+
+        var ids: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { ids.append(String(cString: c)) }
+        }
+        return ids
     }
 
     func updateSessionMetaTitle(sessionID: String, source: String, title: String?) throws {
