@@ -90,13 +90,17 @@ extension PreferencesView {
 
             sectionHeader("Search")
             VStack(alignment: .leading, spacing: 12) {
-                Toggle("Enable Deep Search (includes tool outputs)", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) },
+                Toggle("Include tool outputs in global search", isOn: Binding(
+                    get: {
+                        UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) == nil
+                            ? true
+                            : UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch)
+                    },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) }
                 ))
-                .help("When enabled, global search runs a second pass that scans full tool outputs. This can be slower on large histories.")
+                .help("When enabled, global search continues scanning full tool outputs in the background after showing indexed results. This can be slower on large histories.")
 
-                Text("Deep Search can find matches inside large tool outputs (e.g., long command results) that Instant search skips for performance.")
+                Text("This finds matches inside large tool outputs (e.g., long command results) that Instant search skips for performance.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
