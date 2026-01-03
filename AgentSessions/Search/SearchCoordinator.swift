@@ -32,12 +32,7 @@ final class SearchCoordinator: ObservableObject {
     @Published private(set) var progress: Progress = .init()
 
     private var currentTask: Task<Void, Never>? = nil
-    private let codexIndexer: SessionIndexer
-    private let claudeIndexer: ClaudeSessionIndexer
-    private let geminiIndexer: GeminiSessionIndexer
-    private let opencodeIndexer: OpenCodeSessionIndexer
-    private let copilotIndexer: CopilotSessionIndexer
-    private let droidIndexer: DroidSessionIndexer
+    private let store: SearchSessionStoring
     // Promotion support for large-queue preemption
     private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
@@ -45,30 +40,13 @@ final class SearchCoordinator: ObservableObject {
     // Throttle guards for progress updates
     private var progressThrottleLastFlush = DispatchTime.now()
 
-    init(codexIndexer: SessionIndexer,
-         claudeIndexer: ClaudeSessionIndexer,
-         geminiIndexer: GeminiSessionIndexer,
-         opencodeIndexer: OpenCodeSessionIndexer,
-         copilotIndexer: CopilotSessionIndexer,
-         droidIndexer: DroidSessionIndexer) {
-        self.codexIndexer = codexIndexer
-        self.claudeIndexer = claudeIndexer
-        self.geminiIndexer = geminiIndexer
-        self.opencodeIndexer = opencodeIndexer
-        self.copilotIndexer = copilotIndexer
-        self.droidIndexer = droidIndexer
+    init(store: SearchSessionStoring) {
+        self.store = store
     }
 
     // Get appropriate transcript cache based on session source
-    private func transcriptCache(for source: SessionSource) -> TranscriptCache {
-        switch source {
-        case .codex: return codexIndexer.searchTranscriptCache
-        case .claude: return claudeIndexer.searchTranscriptCache
-        case .gemini: return geminiIndexer.searchTranscriptCache
-        case .opencode: return opencodeIndexer.searchTranscriptCache
-        case .copilot: return copilotIndexer.searchTranscriptCache
-        case .droid: return droidIndexer.searchTranscriptCache
-        }
+    private func transcriptCache(for source: SessionSource) -> TranscriptCache? {
+        store.transcriptCache(for: source)
     }
 
     func cancel() {
@@ -198,33 +176,18 @@ final class SearchCoordinator: ObservableObject {
 
                 let s = large[idx]
                 if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-                if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
-                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+	                if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
+	                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
-                    // Optionally persist parsed session back to indexers for accuracy outside search
-                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
-                        await MainActor.run {
-                            switch parsed.source {
-                            case .codex:
-                                self.codexIndexer.updateSession(parsed)
-                            case .claude:
-                                self.claudeIndexer.updateSession(parsed)
-                            case .gemini:
-                                self.geminiIndexer.updateSession(parsed)
-                            case .opencode:
-                                self.opencodeIndexer.updateSession(parsed)
-                            case .copilot:
-                                self.copilotIndexer.updateSession(parsed)
-                            case .droid:
-                                self.droidIndexer.updateSession(parsed)
-                            }
-                        }
-                    }
+	                    // Optionally persist parsed session back to indexers for accuracy outside search
+	                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
+	                        self.store.updateSession(parsed)
+	                    }
 
-                    let cache = self.transcriptCache(for: parsed.source)
-                    if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
-                        // Check and update seen outside MainActor
-                        let shouldAdd = !seen.contains(parsed.id)
+	                    let cache = self.transcriptCache(for: parsed.source)
+	                    if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
+	                        // Check and update seen outside MainActor
+	                        let shouldAdd = !seen.contains(parsed.id)
                         if shouldAdd {
                             seen.insert(parsed.id)
                             if FeatureFlags.coalesceSearchResults {
@@ -298,55 +261,24 @@ final class SearchCoordinator: ObservableObject {
         out.reserveCapacity(batch.count / 4)
         for var s in batch {
             if Task.isCancelled { return out }
-            if s.events.isEmpty {
-                // For non-large sessions only, parse quickly if needed
-                let size = Self.sizeBytes(for: s)
-                if size < threshold, let parsed = await parseFullIfNeeded(session: s, threshold: threshold) {
-                    s = parsed
-                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
-                        await MainActor.run {
-                            if parsed.source == .codex { self.codexIndexer.updateSession(parsed) }
-                            else if parsed.source == .claude { self.claudeIndexer.updateSession(parsed) }
-                            else if parsed.source == .gemini { self.geminiIndexer.updateSession(parsed) }
-                            else if parsed.source == .opencode { self.opencodeIndexer.updateSession(parsed) }
-                            else if parsed.source == .copilot { self.copilotIndexer.updateSession(parsed) }
-                        }
-                    }
-                }
-            }
-            let cache = self.transcriptCache(for: s.source)
-            if FilterEngine.sessionMatches(s, filters: filters, transcriptCache: cache) { out.append(s) }
-        }
+	            if s.events.isEmpty {
+	                // For non-large sessions only, parse quickly if needed
+	                let size = Self.sizeBytes(for: s)
+	                if size < threshold, let parsed = await parseFullIfNeeded(session: s, threshold: threshold) {
+	                    s = parsed
+	                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
+	                        self.store.updateSession(parsed)
+	                    }
+	                }
+	            }
+	            let cache = self.transcriptCache(for: s.source)
+	            if FilterEngine.sessionMatches(s, filters: filters, transcriptCache: cache) { out.append(s) }
+	        }
         return out
     }
 
     private func parseFullIfNeeded(session s: Session, threshold: Int) async -> Session? {
-        if !s.events.isEmpty { return s }
-        let url = URL(fileURLWithPath: s.filePath)
-        let source = s.source
-
-        // Capture indexer as nonisolated(unsafe) for use in detached task
-        // This is safe because parseFileFull is a stateless operation
-        nonisolated(unsafe) let codex = self.codexIndexer
-
-        // Parse on background queue using Task instead of DispatchQueue to maintain isolation
-        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-        return await Task.detached(priority: prio) {
-            switch source {
-            case .codex:
-                return codex.parseFileFull(at: url)
-            case .claude:
-                return ClaudeSessionParser.parseFileFull(at: url)
-            case .gemini:
-                return GeminiSessionParser.parseFileFull(at: url)
-            case .opencode:
-                return OpenCodeSessionParser.parseFileFull(at: url)
-            case .copilot:
-                return CopilotSessionParser.parseFileFull(at: url)
-            case .droid:
-                return DroidSessionParser.parseFileFull(at: url, forcedID: s.id)
-            }
-        }.value
+        await store.parseFull(session: s)
     }
 
     private static func sizeBytes(for s: Session) -> Int {

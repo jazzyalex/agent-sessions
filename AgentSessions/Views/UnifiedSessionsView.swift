@@ -84,12 +84,39 @@ struct UnifiedSessionsView: View {
         self.analyticsReady = analyticsReady
         self.layoutMode = layoutMode
         self.onToggleLayout = onToggleLayout
-        _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(codexIndexer: codexIndexer,
-                                                                         claudeIndexer: claudeIndexer,
-                                                                         geminiIndexer: geminiIndexer,
-                                                                         opencodeIndexer: opencodeIndexer,
-                                                                         copilotIndexer: copilotIndexer,
-                                                                         droidIndexer: droidIndexer))
+        let store = SearchSessionStore(adapters: [
+            .codex: .init(
+                transcriptCache: codexIndexer.searchTranscriptCache,
+                update: { codexIndexer.updateSession($0) },
+                parseFull: { url, forcedID in codexIndexer.parseFileFull(at: url, forcedID: forcedID) }
+            ),
+            .claude: .init(
+                transcriptCache: claudeIndexer.searchTranscriptCache,
+                update: { claudeIndexer.updateSession($0) },
+                parseFull: { url, forcedID in ClaudeSessionParser.parseFileFull(at: url, forcedID: forcedID) }
+            ),
+            .gemini: .init(
+                transcriptCache: geminiIndexer.searchTranscriptCache,
+                update: { geminiIndexer.updateSession($0) },
+                parseFull: { url, forcedID in GeminiSessionParser.parseFileFull(at: url, forcedID: forcedID) }
+            ),
+            .opencode: .init(
+                transcriptCache: opencodeIndexer.searchTranscriptCache,
+                update: { opencodeIndexer.updateSession($0) },
+                parseFull: { url, _ in OpenCodeSessionParser.parseFileFull(at: url) }
+            ),
+            .copilot: .init(
+                transcriptCache: copilotIndexer.searchTranscriptCache,
+                update: { copilotIndexer.updateSession($0) },
+                parseFull: { url, forcedID in CopilotSessionParser.parseFileFull(at: url, forcedID: forcedID) }
+            ),
+            .droid: .init(
+                transcriptCache: droidIndexer.searchTranscriptCache,
+                update: { droidIndexer.updateSession($0) },
+                parseFull: { url, forcedID in DroidSessionParser.parseFileFull(at: url, forcedID: forcedID) }
+            ),
+        ])
+        _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(store: store))
     }
 
     private var preferredColorScheme: ColorScheme? {
