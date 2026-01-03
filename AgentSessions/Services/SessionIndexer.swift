@@ -517,21 +517,14 @@ final class SessionIndexer: ObservableObject {
 
             // Fast path: hydrate from SQLite index if available.
             var indexed: [Session] = []
-            var indexedPaths: Set<String> = []
             do {
                 if let hydrated = try await self.hydrateFromIndexDBIfAvailable() {
                     indexed = hydrated
                 }
-                // Also consult the analytics files table so we treat
-                // low-message / probe sessions as already indexed and
-                // avoid reprocessing them on every launch.
-                let db = try IndexDB()
-                let repo = SessionMetaRepository(db: db)
-                indexedPaths = try await repo.fetchIndexedFilePaths(for: .codex)
             } catch {
                 // Ignore DB errors here; fallback to filesystem-only scan.
             }
-            if indexed.isEmpty && indexedPaths.isEmpty {
+            if indexed.isEmpty {
                 try? await Task.sleep(nanoseconds: 250_000_000) // 250ms
                 do {
                     if let retry = try await self.hydrateFromIndexDBIfAvailable(), !retry.isEmpty {
@@ -545,7 +538,6 @@ final class SessionIndexer: ObservableObject {
             // Even if we have indexed sessions, scan for NEW files and parse them.
             let existingSessions = indexed
             var existingPaths = Set(existingSessions.map { $0.filePath })
-            existingPaths.formUnion(indexedPaths)
 
             #if DEBUG
             if !existingSessions.isEmpty {
