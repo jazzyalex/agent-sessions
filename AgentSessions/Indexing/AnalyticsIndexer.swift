@@ -55,10 +55,12 @@ actor AnalyticsIndexer {
 
             // Incremental refresh: skip unchanged files and delete rows for removed files.
             var indexedByPath: [String: IndexedFileRow] = [:]
+            var searchReadyPaths = Set<String>()
             if incremental {
                 let indexed = (try? await db.fetchIndexedFiles(for: source)) ?? []
                 indexedByPath.reserveCapacity(indexed.count)
                 for row in indexed { indexedByPath[row.path] = row }
+                searchReadyPaths = (try? await db.fetchSearchReadyPaths(for: source)) ?? []
 
                 let currentPaths = Set(files.map(\.path))
                 let deletedPaths = indexedByPath.keys.filter { !currentPaths.contains($0) }
@@ -83,7 +85,7 @@ actor AnalyticsIndexer {
                     for url in slice {
                         group.addTask { [weak self] in
                             guard let self else { return }
-                            await self.indexFileIfNeeded(url: url, source: source, incremental: incremental, indexedByPath: indexedByPath)
+                            await self.indexFileIfNeeded(url: url, source: source, incremental: incremental, indexedByPath: indexedByPath, searchReadyPaths: searchReadyPaths)
                         }
                     }
                     await group.waitForAll()
@@ -93,13 +95,17 @@ actor AnalyticsIndexer {
         LaunchProfiler.log("Analytics.indexAll complete (incremental=\(incremental))")
     }
 
-    private func indexFileIfNeeded(url: URL, source: String, incremental: Bool, indexedByPath: [String: IndexedFileRow]) async {
+    private func indexFileIfNeeded(url: URL, source: String, incremental: Bool, indexedByPath: [String: IndexedFileRow], searchReadyPaths: Set<String>) async {
         // Stat
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = Int64((attrs[.size] as? NSNumber)?.int64Value ?? 0)
         let mtime = Int64(((attrs[.modificationDate] as? Date) ?? Date()).timeIntervalSince1970)
 
-        if incremental, let existing = indexedByPath[url.path], existing.mtime == mtime, existing.size == size {
+        if incremental,
+           let existing = indexedByPath[url.path],
+           existing.mtime == mtime,
+           existing.size == size,
+           searchReadyPaths.contains(url.path) {
             return
         }
 
