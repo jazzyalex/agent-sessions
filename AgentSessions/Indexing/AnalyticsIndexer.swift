@@ -47,9 +47,35 @@ actor AnalyticsIndexer {
         for (source, enumerate) in sources {
             if !enabledSources.contains(source) { continue }
             let files = enumerate()
-            // Purge previous rows for this source so refresh reflects file deletions as well
-            do { try await db.purgeSource(source) } catch { /* non-fatal */ }
+            if !incremental {
+                // Full rebuild: purge everything for the source and reindex.
+                do { try await db.purgeSource(source) } catch { /* non-fatal */ }
+            }
             if files.isEmpty { continue }
+
+            // Incremental refresh: skip unchanged files and delete rows for removed files.
+            var indexedByPath: [String: IndexedFileRow] = [:]
+            if incremental {
+                let indexed = (try? await db.fetchIndexedFiles(for: source)) ?? []
+                indexedByPath.reserveCapacity(indexed.count)
+                for row in indexed { indexedByPath[row.path] = row }
+
+                let currentPaths = Set(files.map(\.path))
+                let deletedPaths = indexedByPath.keys.filter { !currentPaths.contains($0) }
+                if !deletedPaths.isEmpty {
+                    do {
+                        try await db.begin()
+                        let affectedDays = try await db.deleteSessionsForPaths(source: source, paths: deletedPaths)
+                        for day in Set(affectedDays) {
+                            try await db.recomputeRollups(day: day, source: source)
+                        }
+                        try await db.commit()
+                    } catch {
+                        await db.rollbackSilently()
+                    }
+                }
+            }
+
             // Bound concurrency to keep CPU/IO modest
             let chunk = 8
             for slice in stride(from: 0, to: files.count, by: chunk).map({ Array(files[$0..<min($0+chunk, files.count)]) }) {
@@ -57,7 +83,7 @@ actor AnalyticsIndexer {
                     for url in slice {
                         group.addTask { [weak self] in
                             guard let self else { return }
-                            await self.indexFileIfNeeded(url: url, source: source, incremental: incremental)
+                            await self.indexFileIfNeeded(url: url, source: source, incremental: incremental, indexedByPath: indexedByPath)
                         }
                     }
                     await group.waitForAll()
@@ -67,15 +93,18 @@ actor AnalyticsIndexer {
         LaunchProfiler.log("Analytics.indexAll complete (incremental=\(incremental))")
     }
 
-    private func indexFileIfNeeded(url: URL, source: String, incremental: Bool) async {
+    private func indexFileIfNeeded(url: URL, source: String, incremental: Bool, indexedByPath: [String: IndexedFileRow]) async {
         // Stat
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = Int64((attrs[.size] as? NSNumber)?.int64Value ?? 0)
         let mtime = Int64(((attrs[.modificationDate] as? Date) ?? Date()).timeIntervalSince1970)
 
-        // For incremental pass, we still re-parse because we don't have file diffing here.
+        if incremental, let existing = indexedByPath[url.path], existing.mtime == mtime, existing.size == size {
+            return
+        }
+
         // A simple 60s stability guard for append-only Codex JSONL (skip very hot file)
-        if source == "codex" {
+        if incremental, source == "codex" {
             let now = Int64(Date().timeIntervalSince1970)
             if now - mtime < 60 { return }
         }
