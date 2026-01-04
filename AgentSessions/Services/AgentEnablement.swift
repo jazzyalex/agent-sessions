@@ -2,7 +2,7 @@ import Foundation
 
 enum AgentEnablement {
     static let didChangeNotification = Notification.Name("AgentEnablementDidChange")
-    private static var cachedBinaryPresence: [String: Bool] = [:]
+    private static let cachedBinaryPresence = Locked<[String: Bool]>([:])
     private static let fastBinarySearchPaths: [String] = [
         "/opt/homebrew/bin",
         "/usr/local/bin",
@@ -174,9 +174,9 @@ enum AgentEnablement {
     }
 
     private static func binaryDetectedCached(_ command: String) -> Bool {
-        if let v = cachedBinaryPresence[command] { return v }
+        if let v = cachedBinaryPresence.withLock({ $0[command] }) { return v }
         let v = binaryDetected(command)
-        cachedBinaryPresence[command] = v
+        cachedBinaryPresence.withLock { $0[command] = v }
         return v
     }
 

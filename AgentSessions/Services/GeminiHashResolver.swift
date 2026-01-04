@@ -8,7 +8,7 @@ import CryptoKit
 /// without a trailing slash. Example:
 /// sha256("/Users/alexm/Repository/Codex-History")
 ///   = 205016864bd110904e9ad8314192344ab398d043e779da15bedbb9ee9be00da2
-final class GeminiHashResolver {
+final class GeminiHashResolver: @unchecked Sendable {
     static let shared = GeminiHashResolver()
 
     private let queue = DispatchQueue(label: "GeminiHashResolver", qos: .utility)
@@ -51,4 +51,3 @@ final class GeminiHashResolver {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
-

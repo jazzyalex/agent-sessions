@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 /// Session indexer for GitHub Copilot CLI agent sessions (read-only, local storage).
-final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol {
+final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol, @unchecked Sendable {
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
@@ -115,25 +115,25 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol {
         Task.detached(priority: prio) { [weak self, token] in
             guard let self else { return }
 
-            let config = SessionIndexingEngine.ScanConfig(
-                source: .copilot,
-                discoverFiles: { self.discovery.discoverSessionFiles() },
-                parseLightweight: { CopilotSessionParser.parseFile(at: $0) },
-                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
-                throttler: self.progressThrottler,
-                onProgress: { processed, total in
-                    DispatchQueue.main.async {
-                        guard self.refreshToken == token else { return }
-                        self.totalFiles = total
-                        self.filesProcessed = processed
-                        self.hasEmptyDirectory = (total == 0)
-                        if processed > 0 {
-                            self.progressText = "Indexed \(processed)/\(total)"
-                        }
-                        if self.launchPhase == .hydrating { self.launchPhase = .scanning }
-                    }
-                }
-            )
+	            let config = SessionIndexingEngine.ScanConfig(
+	                source: .copilot,
+	                discoverFiles: { self.discovery.discoverSessionFiles() },
+	                parseLightweight: { CopilotSessionParser.parseFile(at: $0) },
+	                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+	                throttler: self.progressThrottler,
+	                onProgress: { processed, total in
+	                    Task { @MainActor [weak self] in
+	                        guard let self, self.refreshToken == token else { return }
+	                        self.totalFiles = total
+	                        self.filesProcessed = processed
+	                        self.hasEmptyDirectory = (total == 0)
+	                        if processed > 0 {
+	                            self.progressText = "Indexed \(processed)/\(total)"
+	                        }
+	                        if self.launchPhase == .hydrating { self.launchPhase = .scanning }
+	                    }
+	                }
+	            )
 
             let result = await SessionIndexingEngine.hydrateOrScan(config: config)
             await MainActor.run {
@@ -161,11 +161,13 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol {
                               kinds: selectedKinds,
                               repoName: projectFilter,
                               pathContains: nil)
-        var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache, allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
-        if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
-        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
-        DispatchQueue.main.async { self.sessions = results }
-    }
+	        var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache, allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
+	        if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
+	        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
+	        Task { @MainActor [weak self] in
+	            self?.sessions = results
+	        }
+	    }
 
     func updateSession(_ updated: Session) {
         if let idx = allSessions.firstIndex(where: { $0.id == updated.id }) {
@@ -180,40 +182,41 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol {
         guard let existing = allSessions.first(where: { $0.id == id }) else { return }
         let url = URL(fileURLWithPath: existing.filePath)
         isLoadingSession = true
-        loadingSessionID = id
-        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
-        ioQueue.async {
-            let parsed = CopilotSessionParser.parseFileFull(at: url) ?? existing
-            DispatchQueue.main.async {
-                if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
-                    let current = self.allSessions[idx]
-                    let merged = Session(
-                        id: parsed.id,
-                        source: parsed.source,
-                        startTime: parsed.startTime ?? current.startTime,
-                        endTime: parsed.endTime ?? current.endTime,
-                        model: parsed.model ?? current.model,
-                        filePath: parsed.filePath,
-                        fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
-                        eventCount: max(current.eventCount, parsed.nonMetaCount),
-                        events: parsed.events,
-                        cwd: current.lightweightCwd ?? parsed.cwd,
-                        repoName: current.repoName,
-                        lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
-                        lightweightCommands: current.lightweightCommands
-                    )
-                    self.allSessions[idx] = merged
+	        loadingSessionID = id
+	        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+	        ioQueue.async {
+	            let parsed = CopilotSessionParser.parseFileFull(at: url) ?? existing
+	            Task { @MainActor [weak self] in
+	                guard let self else { return }
+	                if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+	                    let current = self.allSessions[idx]
+	                    let merged = Session(
+	                        id: parsed.id,
+	                        source: parsed.source,
+	                        startTime: parsed.startTime ?? current.startTime,
+	                        endTime: parsed.endTime ?? current.endTime,
+	                        model: parsed.model ?? current.model,
+	                        filePath: parsed.filePath,
+	                        fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
+	                        eventCount: max(current.eventCount, parsed.nonMetaCount),
+	                        events: parsed.events,
+	                        cwd: current.lightweightCwd ?? parsed.cwd,
+	                        repoName: current.repoName,
+	                        lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
+	                        lightweightCommands: current.lightweightCommands
+	                    )
+	                    self.allSessions[idx] = merged
 
-                    let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
-                    let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: merged, filters: filters, mode: .normal)
-                    self.transcriptCache.set(merged.id, transcript: transcript)
-                }
-                self.recomputeNow()
-                self.isLoadingSession = false
-                self.loadingSessionID = nil
-            }
-        }
-    }
+	                    let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
+	                    let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: merged, filters: filters, mode: .normal)
+	                    self.transcriptCache.set(merged.id, transcript: transcript)
+	                }
+	                self.recomputeNow()
+	                self.isLoadingSession = false
+	                self.loadingSessionID = nil
+	            }
+	        }
+	    }
 
     // Parse all lightweight sessions (for Analytics or full-index use cases)
     func parseAllSessionsFull(progress: @escaping (Int, Int) -> Void) async {

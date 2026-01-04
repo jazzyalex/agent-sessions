@@ -28,6 +28,49 @@ enum SessionSearchTextBuilder {
             remaining -= value.count
         }
 
+        func appendSampledLargeText(_ raw: String, maxOut: Int, into out: inout [String], remaining: inout Int) {
+            guard remaining > 0 else { return }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let budget = min(maxOut, remaining)
+            guard budget > 0 else { return }
+
+            if trimmed.count <= budget {
+                append(trimmed, limit: budget, into: &out, remaining: &remaining)
+                return
+            }
+
+            // Include head + middle + tail so Instant can match terms that only appear
+            // in the middle of long assistant messages or tool inputs without indexing the full blob.
+            if budget < 32 {
+                append(String(trimmed.prefix(budget)), limit: budget, into: &out, remaining: &remaining)
+                return
+            }
+
+            let usable = max(0, budget - 2) // reserve for two separators
+            let headCount = max(0, usable / 3)
+            let middleCount = max(0, usable / 3)
+            let tailCount = max(0, usable - headCount - middleCount)
+
+            if headCount > 0 {
+                append(String(trimmed.prefix(headCount)), limit: headCount, into: &out, remaining: &remaining)
+            }
+            if remaining > 0 { out.append("…"); remaining -= 1 }
+
+            if middleCount > 0, remaining > 0 {
+                let total = trimmed.count
+                let midStart = max(0, min(total, (total / 2) - (middleCount / 2)))
+                let start = trimmed.index(trimmed.startIndex, offsetBy: midStart)
+                let end = trimmed.index(start, offsetBy: min(middleCount, total - midStart))
+                append(String(trimmed[start..<end]), limit: middleCount, into: &out, remaining: &remaining)
+            }
+            if remaining > 0 { out.append("…"); remaining -= 1 }
+
+            if tailCount > 0, remaining > 0 {
+                append(String(trimmed.suffix(tailCount)), limit: tailCount, into: &out, remaining: &remaining)
+            }
+        }
+
         var remaining = maxCharacters
         append(session.title, into: &parts, remaining: &remaining)
         append(session.repoName, into: &parts, remaining: &remaining)
@@ -55,49 +98,17 @@ enum SessionSearchTextBuilder {
             guard remaining > 0 else { return }
             let maxOut = min(toolOutputMax, remaining)
             guard maxOut > 0 else { return }
-            let trimmed = toolOut.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-
-            if trimmed.count <= maxOut {
-                append(trimmed, limit: maxOut, into: &out, remaining: &remaining)
-                return
-            }
-
-            // Include head + middle + tail so "Instant" can match terms that only appear
-            // in the middle of a long tool output (without indexing the full blob).
-            if maxOut < 32 {
-                append(String(trimmed.prefix(maxOut)), limit: maxOut, into: &out, remaining: &remaining)
-                return
-            }
-
-            let usable = max(0, maxOut - 2) // reserve for two separators
-            let headCount = max(0, usable / 3)
-            let middleCount = max(0, usable / 3)
-            let tailCount = max(0, usable - headCount - middleCount)
-
-            if headCount > 0 {
-                append(String(trimmed.prefix(headCount)), limit: headCount, into: &out, remaining: &remaining)
-            }
-            if remaining > 0 { out.append("…"); remaining -= 1 }
-
-            if middleCount > 0, remaining > 0 {
-                let total = trimmed.count
-                let midStart = max(0, min(total, (total / 2) - (middleCount / 2)))
-                let start = trimmed.index(trimmed.startIndex, offsetBy: midStart)
-                let end = trimmed.index(start, offsetBy: min(middleCount, total - midStart))
-                append(String(trimmed[start..<end]), limit: middleCount, into: &out, remaining: &remaining)
-            }
-            if remaining > 0 { out.append("…"); remaining -= 1 }
-
-            if tailCount > 0, remaining > 0 {
-                append(String(trimmed.suffix(tailCount)), limit: tailCount, into: &out, remaining: &remaining)
-            }
+            appendSampledLargeText(toolOut, maxOut: maxOut, into: &out, remaining: &remaining)
         }
 
         func appendEventFields(_ ev: SessionEvent, into out: inout [String], remaining: inout Int) {
-            append(ev.text, into: &out, remaining: &remaining)
+            if let t = ev.text, !t.isEmpty {
+                appendSampledLargeText(t, maxOut: perFieldLimit, into: &out, remaining: &remaining)
+            }
             append(ev.toolName, into: &out, remaining: &remaining)
-            append(ev.toolInput, into: &out, remaining: &remaining)
+            if let ti = ev.toolInput, !ti.isEmpty {
+                appendSampledLargeText(ti, maxOut: perFieldLimit, into: &out, remaining: &remaining)
+            }
             if let toolOut = ev.toolOutput {
                 appendToolOutput(toolOut, into: &out, remaining: &remaining)
             }
@@ -146,6 +157,47 @@ enum SessionSearchTextBuilder {
             parts.append(contentsOf: tailParts.reversed())
         }
 
+        return parts.joined(separator: "\n")
+    }
+
+    /// Builds a tool-only corpus intended for FTS indexing (no head/middle/tail sampling).
+    /// Bounded by `maxCharacters` to avoid unbounded DB growth.
+    static func buildToolIO(session: Session, maxCharacters: Int = FeatureFlags.toolIOIndexMaxCharsPerSession, perFieldLimit: Int = FeatureFlags.toolIOIndexMaxCharsPerEvent) -> String {
+        guard !session.events.isEmpty else { return "" }
+        var parts: [String] = []
+        parts.reserveCapacity(256)
+
+        func normalized(_ value: String?, limit: Int) -> String? {
+            guard var value, !value.isEmpty else { return nil }
+            value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { return nil }
+            if value.count > limit { value = String(value.prefix(limit)) }
+            return value.isEmpty ? nil : value
+        }
+
+        func append(_ value: String?, limit: Int = perFieldLimit, into out: inout [String], remaining: inout Int) {
+            guard remaining > 0 else { return }
+            guard var value = normalized(value, limit: limit) else { return }
+            if value.count > remaining { value = String(value.prefix(remaining)) }
+            guard !value.isEmpty else { return }
+            out.append(value)
+            remaining -= value.count
+        }
+
+        var remaining = maxCharacters
+        for ev in session.events {
+            guard remaining > 0 else { break }
+            switch ev.kind {
+            case .tool_call:
+                append(ev.toolName, into: &parts, remaining: &remaining)
+                append(ev.toolInput, into: &parts, remaining: &remaining)
+            case .tool_result:
+                append(ev.toolName, into: &parts, remaining: &remaining)
+                append(ev.toolOutput ?? ev.text, into: &parts, remaining: &remaining)
+            default:
+                continue
+            }
+        }
         return parts.joined(separator: "\n")
     }
 }

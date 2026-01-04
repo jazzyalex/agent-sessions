@@ -10,6 +10,6 @@ final class DBSmokeTests: XCTestCase {
         try await db.exec("SELECT name FROM sqlite_master WHERE name='files';")
         try await db.exec("SELECT name FROM sqlite_master WHERE name='session_days';")
         try await db.exec("SELECT name FROM sqlite_master WHERE name='rollups_daily';")
+        try await db.exec("SELECT name FROM sqlite_master WHERE name='session_tool_io';")
     }
 }
-

@@ -60,11 +60,17 @@ final class SearchCoordinator: ObservableObject {
     }
 
     private func deepToolOutputsEnabled() -> Bool {
+        // Default OFF unless the user explicitly opts in.
+        if UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) == nil { return false }
+        return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch)
+    }
+
+    private func toolIOIndexEnabled() -> Bool {
         // Default ON unless the user explicitly opts out.
-        if UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) == nil {
+        if UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil {
             return true
         }
-        return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch)
+        return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
     }
 
     func cancel() {
@@ -126,9 +132,11 @@ final class SearchCoordinator: ObservableObject {
             let allowedRaw = allowed.map { $0.rawValue }
             let parsed = FilterEngine.parseOperators(filters.query)
             let freeText = parsed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let effectiveFTSQuery = Self.makeInstantFTSQuery(from: freeText)
             let effectiveRepo = filters.repoName ?? parsed.repo
             let effectivePath = filters.pathContains ?? parsed.path
             let hasMetaFilters = (filters.model != nil) || (filters.dateFrom != nil) || (filters.dateTo != nil) || (effectiveRepo != nil) || (effectivePath != nil)
+            let includeSystemProbes = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
 
             let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
             currentTask = Task.detached(priority: prio) { [weak self, newRunID] in
@@ -175,25 +183,64 @@ final class SearchCoordinator: ObservableObject {
                         pathSubstr: effectivePath,
                         dateFrom: filters.dateFrom,
                         dateTo: filters.dateTo,
-                        query: freeText,
+                        query: effectiveFTSQuery,
+                        includeSystemProbes: includeSystemProbes,
                         limit: FeatureFlags.ftsSearchLimit
                     )) ?? []
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
                     let deepEnabled = self.deepToolOutputsEnabled()
-                    let out = ids.compactMap { byID[$0] }
+                    var mergedIDs = ids
+                    var mergedSet = Set(ids)
+                    var out = mergedIDs.compactMap { byID[$0] }
                     var seen = Set(out.map(\.id))
                     let needsUnindexedScan = candidates.contains(where: { !indexedIDs.contains($0.id) })
                     await MainActor.run {
                         guard self.runID == newRunID else { return }
                         self.results = out
-                        if !deepEnabled && !needsUnindexedScan {
-                            self.isRunning = false
-                            self.progress.phase = .idle
+                    }
+                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+
+                    // Append tool I/O FTS hits after the initial UI update to keep Instant responsive.
+                    if self.toolIOIndexEnabled(), mergedIDs.count < FeatureFlags.ftsSearchLimit {
+                        let toolIDs = (try? await db.searchSessionIDsToolIOFTS(
+                            sources: allowedRaw,
+                            model: filters.model,
+                            repoSubstr: effectiveRepo,
+                            pathSubstr: effectivePath,
+                            dateFrom: filters.dateFrom,
+                            dateTo: filters.dateTo,
+                            query: effectiveFTSQuery,
+                            includeSystemProbes: includeSystemProbes,
+                            limit: FeatureFlags.ftsSearchLimit
+                        )) ?? []
+                        var addedAny = false
+                        for id in toolIDs {
+                            if mergedIDs.count >= FeatureFlags.ftsSearchLimit { break }
+                            if mergedSet.insert(id).inserted {
+                                mergedIDs.append(id)
+                                addedAny = true
+                            }
+                        }
+                        if addedAny {
+                            let updated = mergedIDs.compactMap { byID[$0] }
+                            await MainActor.run {
+                                guard self.runID == newRunID else { return }
+                                self.results = updated
+                            }
+                            out = updated
+                            seen = Set(updated.map(\.id))
                         }
                     }
 
-                    if !deepEnabled && !needsUnindexedScan { return }
+                    if !deepEnabled && !needsUnindexedScan {
+                        await MainActor.run {
+                            guard self.runID == newRunID else { return }
+                            self.isRunning = false
+                            self.progress.phase = .idle
+                        }
+                        return
+                    }
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
                     let unindexedCandidates = candidates.filter { !indexedIDs.contains($0.id) && !seen.contains($0.id) }
@@ -432,6 +479,49 @@ final class SearchCoordinator: ObservableObject {
             return session.events.filter { $0.kind == .tool_call }.count
         }()
         return estimatedCommands > 0
+    }
+
+    /// Builds an FTS5 query for Instant search.
+    ///
+    /// We avoid trigram/substr indexing, but we can still improve recall (especially for identifiers)
+    /// by using FTS prefix queries when the user's input is a simple space-delimited term list.
+    private static func makeInstantFTSQuery(from freeText: String) -> String {
+        let q = freeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return q }
+
+        // If the user already wrote an explicit FTS query (quotes, boolean ops, prefix, etc),
+        // do not rewrite it.
+        let lower = q.lowercased()
+        if q.contains("\"") { return q }
+        if q.contains("*") { return q }
+        if q.contains("(") || q.contains(")") { return q }
+        if q.contains(":") { return q }
+        if lower.contains(" near ") || lower.hasPrefix("near ") || lower.hasSuffix(" near") { return q }
+        if lower.contains(" and ") || lower.contains(" or ") || lower.contains(" not ") { return q }
+
+        let rawTerms = q.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !rawTerms.isEmpty else { return q }
+
+        func isSimpleTerm(_ s: String) -> Bool {
+            guard !s.isEmpty else { return false }
+            // Restrict to ASCII letters/digits/underscore to avoid breaking FTS syntax.
+            for u in s.unicodeScalars {
+                let v = u.value
+                let isAZ = (v >= 65 && v <= 90) || (v >= 97 && v <= 122)
+                let is09 = (v >= 48 && v <= 57)
+                let isUnderscore = (v == 95)
+                if !(isAZ || is09 || isUnderscore) { return false }
+            }
+            return true
+        }
+
+        // Only auto-prefix longer, simple terms; short prefixes get noisy.
+        let rewritten = rawTerms.map { term -> String in
+            guard term.count >= 3 else { return term }
+            guard isSimpleTerm(term) else { return term }
+            return term + "*"
+        }
+        return rewritten.joined(separator: " ")
     }
 
     private func runDeepSearchAppend(runID: UUID,

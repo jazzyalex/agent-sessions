@@ -88,22 +88,38 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
             }
 
-            sectionHeader("Search")
-            VStack(alignment: .leading, spacing: 12) {
-                Toggle("Include tool outputs in global search", isOn: Binding(
-                    get: {
-                        UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) == nil
+	            sectionHeader("Search")
+	            VStack(alignment: .leading, spacing: 12) {
+                    let toolIOIndexEnabled: Bool = {
+                        UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil
                             ? true
-                            : UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch)
-                    },
-                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) }
-                ))
-                .help("When enabled, global search continues scanning full tool outputs in the background after showing indexed results. This can be slower on large histories.")
+                            : UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
+                    }()
 
-                Text("This finds matches inside large tool outputs (e.g., long command results) that Instant search skips for performance.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                    Toggle("Index full tool I/O for recent sessions", isOn: Binding(
+                        get: {
+                            UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil
+                                ? true
+                                : UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
+                        },
+                        set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) }
+                    ))
+                    .help("Build a token-based index over tool inputs and outputs for sessions from the last 90 days. Improves Instant search but may increase disk usage and indexing time. Older indexed tool I/O is retained up to 25 MB.")
+
+	                Toggle("Include large tool outputs in global search", isOn: Binding(
+	                    get: {
+	                        UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) == nil
+	                            ? false
+	                            : UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch)
+	                    },
+	                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableDeepToolOutputSearch) }
+	                ))
+	                .help("When enabled, global search continues scanning large tool outputs in the background after showing indexed results. This can be noticeably slower on large histories.")
+
+	                Text("This finds additional matches inside large tool outputs that may not appear in Instant search. Leaving this off keeps search more responsive.")
+	                    .font(.caption)
+	                    .foregroundStyle(.secondary)
+	            }
 
             sectionHeader("Saved Sessions")
             VStack(alignment: .leading, spacing: 12) {

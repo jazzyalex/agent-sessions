@@ -1,6 +1,6 @@
 import Foundation
 
-final class TypingActivity {
+final class TypingActivity: @unchecked Sendable {
     static let shared = TypingActivity()
     private var lastType = Date.distantPast
     private let lock = NSLock()
@@ -14,4 +14,3 @@ final class TypingActivity {
         return Date().timeIntervalSince(lastType) < 0.8 // 800ms quiet window
     }
 }
-
