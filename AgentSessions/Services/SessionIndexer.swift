@@ -354,21 +354,37 @@ final class SessionIndexer: ObservableObject {
                 DispatchQueue.main.async {
                     // Replace in allSessions
                     if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+                        let current = self.allSessions[idx]
+                        let merged = Session(
+                            id: fullSession.id,
+                            source: fullSession.source,
+                            startTime: fullSession.startTime ?? current.startTime,
+                            endTime: fullSession.endTime ?? current.endTime,
+                            model: fullSession.model ?? current.model,
+                            filePath: fullSession.filePath,
+                            fileSizeBytes: fullSession.fileSizeBytes ?? current.fileSizeBytes,
+                            eventCount: max(current.eventCount, fullSession.nonMetaCount),
+                            events: fullSession.events,
+                            cwd: current.lightweightCwd ?? fullSession.cwd,
+                            repoName: current.repoName,
+                            lightweightTitle: current.lightweightTitle,
+                            lightweightCommands: current.lightweightCommands
+                        )
                         var updated = self.allSessions
-                        updated[idx] = fullSession
+                        updated[idx] = merged
                         self.allSessions = updated
-                        DBG("✅ Reloaded: \(filename) events=\(fullSession.events.count) nonMeta=\(fullSession.nonMetaCount) msgCount=\(fullSession.messageCount)")
+                        DBG("✅ Reloaded: \(filename) events=\(merged.events.count) nonMeta=\(merged.nonMetaCount) msgCount=\(merged.messageCount)")
 
                         // Update transcript cache for accurate search
                         let cache = self.transcriptCache
                         Task.detached(priority: .utility) {
                             let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
                             let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
-                                session: fullSession,
+                                session: merged,
                                 filters: filters,
                                 mode: .normal
                             )
-                            cache.set(fullSession.id, transcript: transcript)
+                            cache.set(merged.id, transcript: transcript)
                         }
 
                         // Clear loading state AFTER updating allSessions, with small delay for UI to render
@@ -798,6 +814,7 @@ final class SessionIndexer: ObservableObject {
             }
         }
         let id = forcedID ?? Self.hash(path: url.path)
+        let nonMetaCount = events.filter { $0.kind != .meta }.count
         let session = Session(id: id,
                               source: .codex,
                               startTime: start,
@@ -805,7 +822,7 @@ final class SessionIndexer: ObservableObject {
                               model: modelSeen,
                               filePath: url.path,
                               fileSizeBytes: size >= 0 ? size : nil,
-                              eventCount: events.count,
+                              eventCount: nonMetaCount,
                               events: events)
 
         if size > 5_000_000 {  // Log full parse of files >5MB

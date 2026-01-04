@@ -396,6 +396,7 @@ final class DroidSessionParser {
         }
 
         let sid = sessionID ?? forcedID ?? sha256(path: url.path)
+        let nonMetaCount = events.filter { $0.kind != .meta }.count
         return Session(
             id: sid,
             source: .droid,
@@ -404,7 +405,7 @@ final class DroidSessionParser {
             model: model,
             filePath: url.path,
             fileSizeBytes: size >= 0 ? size : nil,
-            eventCount: events.count,
+            eventCount: nonMetaCount,
             events: events,
             cwd: cwd,
             repoName: nil,
@@ -697,6 +698,7 @@ final class DroidSessionParser {
         }
 
         let sid = sessionID ?? forcedID ?? sha256(path: url.path)
+        let nonMetaCount = events.filter { $0.kind != .meta }.count
         return Session(
             id: sid,
             source: .droid,
@@ -705,7 +707,7 @@ final class DroidSessionParser {
             model: model,
             filePath: url.path,
             fileSizeBytes: size >= 0 ? size : nil,
-            eventCount: events.count,
+            eventCount: nonMetaCount,
             events: events,
             cwd: cwd,
             repoName: nil,

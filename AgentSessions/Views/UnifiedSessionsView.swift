@@ -210,6 +210,7 @@ struct UnifiedSessionsView: View {
         .onAppear {
             if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }
             updateCachedRows()
+            updateSelectionBridge()
         }
         .onChange(of: analyticsReady) { _, ready in
             if ready {
@@ -441,17 +442,20 @@ struct UnifiedSessionsView: View {
             updateSelectionBridge()
             updateCachedRows()
         }
-        .onChange(of: tableSelection) { _, newSel in
+        .onChange(of: tableSelection) { oldSel, newSel in
             // Allow empty selection when user clicks whitespace; do not force reselection.
             selection = newSel.first
-            if !programmaticSelectionUpdate {
-                // User interacted with the table; mark as manually selected
-                hasUserManuallySelected = true
-                autoSelectEnabled = false
-            }
-            if !programmaticSelectionUpdate {
-                NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
-            }
+
+            if programmaticSelectionUpdate { return }
+
+            // SwiftUI Table sometimes emits an initial "empty selection" change during mount.
+            // Do not treat that as user interaction or it disables initial auto-select.
+            if oldSel.isEmpty, newSel.isEmpty { return }
+
+            // User interacted with the table; mark as manually selected
+            hasUserManuallySelected = true
+            autoSelectEnabled = false
+            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         }
         .onChange(of: unified.sessions) { _, _ in
             // Update cached rows first, then reconcile selection so auto-select uses fresh data.
@@ -750,7 +754,12 @@ struct UnifiedSessionsView: View {
         // If current selection disappeared from list, auto-select first row
         if let sel = selection, !cachedRows.contains(where: { $0.id == sel }) {
             selection = cachedRows.first?.id
-            tableSelection = selection.map { [$0] } ?? []
+            let desired: Set<String> = selection.map { [$0] } ?? []
+            if tableSelection != desired {
+                programmaticSelectionUpdate = true
+                tableSelection = desired
+                DispatchQueue.main.async { programmaticSelectionUpdate = false }
+            }
         }
     }
 

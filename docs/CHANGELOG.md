@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 
 - Search: Prevent missing results while the search index is still warming by falling back to legacy matching for unindexed sessions.
 - Search: Backfill missing per-session search data during incremental refresh so sessions don’t remain “not yet indexed” indefinitely.
+- Sessions: Auto-select the first session on launch so the transcript pane isn’t blank.
+- Sessions: Stabilize message counts for large sessions while full parsing completes to reduce list row jumps.
 - Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
 

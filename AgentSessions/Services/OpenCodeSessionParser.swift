@@ -171,6 +171,7 @@ final class OpenCodeSessionParser {
         let warningEvents = storageDiagnosticsEvents(storageRoot: storageRootURL)
         let allEvents = warningEvents + events
 
+        let nonMetaCount = allEvents.filter { $0.kind != .meta }.count
         return Session(
             id: obj.id,
             source: .opencode,
@@ -179,7 +180,7 @@ final class OpenCodeSessionParser {
             model: modelID,
             filePath: url.path,
             fileSizeBytes: (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue,
-            eventCount: allEvents.count,
+            eventCount: nonMetaCount,
             events: allEvents,
             cwd: obj.directory,
             repoName: nil,

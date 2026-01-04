@@ -249,7 +249,23 @@ final class GeminiSessionIndexer: ObservableObject {
 
             DispatchQueue.main.async {
                 if let full, let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
-                    self.allSessions[idx] = full
+                    let current = self.allSessions[idx]
+                    let merged = Session(
+                        id: full.id,
+                        source: full.source,
+                        startTime: full.startTime ?? current.startTime,
+                        endTime: full.endTime ?? current.endTime,
+                        model: full.model ?? current.model,
+                        filePath: full.filePath,
+                        fileSizeBytes: full.fileSizeBytes ?? current.fileSizeBytes,
+                        eventCount: max(current.eventCount, full.nonMetaCount),
+                        events: full.events,
+                        cwd: current.lightweightCwd ?? full.cwd,
+                        repoName: current.repoName,
+                        lightweightTitle: current.lightweightTitle ?? full.lightweightTitle,
+                        lightweightCommands: current.lightweightCommands
+                    )
+                    self.allSessions[idx] = merged
                     self.unreadableSessionIDs.remove(id)
                     if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
                        let m = rv.contentModificationDate {
