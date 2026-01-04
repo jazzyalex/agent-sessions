@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Search: Prevent missing results while the search index is still warming by falling back to legacy matching for unindexed sessions.
+- Search: Backfill missing per-session search data during incremental refresh so sessions don’t remain “not yet indexed” indefinitely.
 - Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
 

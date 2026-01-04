@@ -260,6 +260,35 @@ actor IndexDB {
         return out
     }
 
+    /// Fetch file paths that are fully populated for search (files + session_meta + session_search).
+    /// Used to avoid skipping stale file rows left behind by previous builds where files were tracked
+    /// but session meta/search were not.
+    func fetchSearchReadyPaths(for source: String) throws -> Set<String> {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = """
+        SELECT f.path
+        FROM files f
+        JOIN session_meta m ON m.source = f.source AND m.path = f.path
+        JOIN session_search s ON s.source = m.source AND s.session_id = m.session_id
+        WHERE f.source = ?
+          AND s.mtime = f.mtime
+          AND s.size = f.size;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        var out = Set<String>()
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) {
+                out.insert(String(cString: c))
+            }
+        }
+        return out
+    }
+
     // Fetch session_meta rows for a source (used to hydrate sessions list quickly)
     func fetchSessionMeta(for source: String) throws -> [SessionMetaRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
