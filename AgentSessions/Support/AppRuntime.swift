@@ -11,15 +11,15 @@ enum AppRuntime {
 /// Only active in DEBUG builds; no-ops in Release.
 enum LaunchProfiler {
     #if DEBUG
-    private static var start: Date?
+    private static let start = Locked<Date?>(nil)
 
     static func reset(_ label: String = "launch") {
-        start = Date()
+        start.withLock { $0 = Date() }
         print("[Launch] reset \(label)")
     }
 
     static func log(_ label: String) {
-        guard let t0 = start else {
+        guard let t0 = start.withLock({ $0 }) else {
             print("[Launch] \(label) (no t0)")
             return
         }
@@ -31,4 +31,19 @@ enum LaunchProfiler {
     static func reset(_ label: String = "launch") {}
     static func log(_ label: String) {}
     #endif
+}
+
+final class Locked<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func withLock<R>(_ body: (inout Value) -> R) -> R {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&value)
+    }
 }

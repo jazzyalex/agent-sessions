@@ -964,26 +964,26 @@ struct UnifiedSessionsView: View {
         }
     }
 
-    private func progressLineText(_ p: SearchCoordinator.Progress) -> String {
-        switch p.phase {
-        case .idle:
-            return "Searching…"
-        case .indexed:
-            return "Searching indexed text…"
-        case .legacySmall:
-            return "Scanning sessions… \(p.scannedSmall)/\(p.totalSmall)"
-        case .legacyLarge:
-            return "Scanning sessions (large)… \(p.scannedLarge)/\(p.totalLarge)"
-        case .unindexedSmall:
-            return "Completing results (not yet indexed)… \(p.scannedSmall)/\(p.totalSmall)"
-        case .unindexedLarge:
-            return "Completing results (not yet indexed, large)… \(p.scannedLarge)/\(p.totalLarge)"
-        case .toolOutputsSmall:
-            return "Searching tool outputs… \(p.scannedSmall)/\(p.totalSmall)"
-        case .toolOutputsLarge:
-            return "Searching tool outputs (large)… \(p.scannedLarge)/\(p.totalLarge)"
-        }
-    }
+	    private func progressLineText(_ p: SearchCoordinator.Progress) -> String {
+	        switch p.phase {
+	        case .idle:
+	            return "Searching…"
+	        case .indexed:
+	            return "Searching indexed text…"
+	        case .legacySmall:
+	            return "Scanning sessions… \(p.scannedSmall)/\(p.totalSmall)"
+	        case .legacyLarge:
+	            return "Scanning sessions (large)… \(p.scannedLarge)/\(p.totalLarge)"
+	        case .unindexedSmall:
+	            return "Searching sessions not indexed yet… \(p.scannedSmall)/\(p.totalSmall)"
+	        case .unindexedLarge:
+	            return "Searching sessions not indexed yet (large)… \(p.scannedLarge)/\(p.totalLarge)"
+	        case .toolOutputsSmall:
+	            return "Searching full tool outputs… \(p.scannedSmall)/\(p.totalSmall)"
+	        case .toolOutputsLarge:
+	            return "Searching large tool outputs… \(p.scannedLarge)/\(p.totalLarge)"
+	        }
+	    }
 
     private func starHelpText(isStarred: Bool) -> String {
         let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
@@ -1058,13 +1058,10 @@ private struct SessionTitleCell: View {
     }
 }
 
-// Stable, equatable cell to prevent Table reuse glitches in Project column
-private struct ProjectCellView: View, Equatable {
+// Stable cell to prevent Table reuse glitches in Project column
+private struct ProjectCellView: View {
     let id: String
     let display: String
-    static func == (lhs: ProjectCellView, rhs: ProjectCellView) -> Bool {
-        lhs.id == rhs.id && lhs.display == rhs.display
-    }
     var body: some View {
         Text(display)
             .font(.system(size: 13))

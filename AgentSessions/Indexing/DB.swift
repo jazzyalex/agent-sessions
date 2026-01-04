@@ -175,6 +175,52 @@ actor IndexDB {
         } catch {
             // FTS is optional. If unavailable, search falls back to the legacy transcript-based path.
         }
+
+        // Per-session tool IO corpus (inputs + outputs), used to make tool matches show up instantly.
+        try exec(db,
+            """
+            CREATE TABLE IF NOT EXISTS session_tool_io (
+              session_id TEXT PRIMARY KEY,
+              source TEXT NOT NULL,
+              mtime INTEGER,
+              size INTEGER,
+              ref_ts INTEGER,
+              updated_at INTEGER NOT NULL,
+              text TEXT NOT NULL,
+              format_version INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_tool_io_source ON session_tool_io(source);
+            CREATE INDEX IF NOT EXISTS idx_session_tool_io_ref_ts ON session_tool_io(ref_ts);
+            """
+        )
+
+        // Tool IO full-text search (FTS5). Optional, same rationale as session_search_fts.
+        do {
+            try exec(db,
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS session_tool_io_fts
+                USING fts5(
+                  text,
+                  content='session_tool_io',
+                  content_rowid='rowid',
+                  tokenize='unicode61'
+                );
+
+                CREATE TRIGGER IF NOT EXISTS session_tool_io_ai AFTER INSERT ON session_tool_io BEGIN
+                  INSERT INTO session_tool_io_fts(rowid, text) VALUES (new.rowid, new.text);
+                END;
+                CREATE TRIGGER IF NOT EXISTS session_tool_io_ad AFTER DELETE ON session_tool_io BEGIN
+                  INSERT INTO session_tool_io_fts(session_tool_io_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+                END;
+                CREATE TRIGGER IF NOT EXISTS session_tool_io_au AFTER UPDATE ON session_tool_io BEGIN
+                  INSERT INTO session_tool_io_fts(session_tool_io_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+                  INSERT INTO session_tool_io_fts(rowid, text) VALUES (new.rowid, new.text);
+                END;
+                """
+            )
+        } catch {
+            // Optional.
+        }
     }
 
     // MARK: - Exec helpers
@@ -335,6 +381,24 @@ actor IndexDB {
             out.append(row)
         }
         return out
+    }
+
+    /// Fetch COALESCE(end_ts, mtime) for a session identified by its file path.
+    /// Used to gate date-based behaviors without re-parsing the raw session file.
+    func sessionRefTSForPath(source: String, path: String) throws -> Int64? {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = "SELECT COALESCE(end_ts, mtime) FROM session_meta WHERE source=? AND path=? LIMIT 1;"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, path, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return sqlite3_column_type(stmt, 0) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 0)
+        }
+        return nil
     }
 
     // Prefilter by metadata to reduce search candidates
@@ -749,6 +813,7 @@ actor IndexDB {
         try exec("DELETE FROM session_days WHERE source='\(source)'")
         try exec("DELETE FROM session_meta WHERE source='\(source)'")
         try exec("DELETE FROM session_search WHERE source='\(source)'")
+        try exec("DELETE FROM session_tool_io WHERE source='\(source)'")
         try exec("DELETE FROM files WHERE source='\(source)'")
     }
 
@@ -841,6 +906,27 @@ actor IndexDB {
             }
             if sqlite3_step(delSearchStmt) != SQLITE_DONE { throw DBError.execFailed("delete session_search by path") }
 
+            // Delete tool corpus.
+            let delToolSQL = """
+            DELETE FROM session_tool_io
+            WHERE source = ?
+              AND session_id IN (
+                SELECT session_id
+                FROM session_meta
+                WHERE source = ? AND path IN (\(inSQL))
+              );
+            """
+            let delToolStmt = try prepare(delToolSQL)
+            defer { sqlite3_finalize(delToolStmt) }
+            bindIdx = 1
+            sqlite3_bind_text(delToolStmt, bindIdx, source, -1, SQLITE_TRANSIENT); bindIdx += 1
+            sqlite3_bind_text(delToolStmt, bindIdx, source, -1, SQLITE_TRANSIENT); bindIdx += 1
+            for p in slice {
+                sqlite3_bind_text(delToolStmt, bindIdx, p, -1, SQLITE_TRANSIENT)
+                bindIdx += 1
+            }
+            if sqlite3_step(delToolStmt) != SQLITE_DONE { throw DBError.execFailed("delete session_tool_io by path") }
+
             // Delete meta and file tracking rows.
             let delMetaSQL = "DELETE FROM session_meta WHERE source = ? AND path IN (\(inSQL));"
             let delMetaStmt = try prepare(delMetaSQL)
@@ -866,6 +952,35 @@ actor IndexDB {
         }
 
         return Array(affectedDays)
+    }
+
+    /// Fetch file paths that are fully populated for tool IO search (files + session_meta + session_tool_io).
+    func fetchToolIOReadyPaths(for source: String, formatVersion: Int = FeatureFlags.sessionToolIOFormatVersion) throws -> Set<String> {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = """
+        SELECT f.path
+        FROM files f
+        JOIN session_meta m ON m.source = f.source AND m.path = f.path
+        JOIN session_tool_io t ON t.source = m.source AND t.session_id = m.session_id
+        WHERE f.source = ?
+          AND t.mtime = f.mtime
+          AND t.size = f.size
+          AND t.format_version = ?;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(stmt, 2, Int32(formatVersion))
+        var out = Set<String>()
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) {
+                out.insert(String(cString: c))
+            }
+        }
+        return out
     }
 
     // MARK: - Upserts
@@ -934,6 +1049,33 @@ actor IndexDB {
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_search") }
     }
 
+    func upsertSessionToolIO(sessionID: String, source: String, mtime: Int64, size: Int64, refTS: Int64, text: String, formatVersion: Int = FeatureFlags.sessionToolIOFormatVersion) throws {
+        let now = Int64(Date().timeIntervalSince1970)
+        let sql = """
+        INSERT INTO session_tool_io(session_id, source, mtime, size, ref_ts, updated_at, text, format_version)
+        VALUES(?,?,?,?,?,?,?,?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          source=excluded.source,
+          mtime=excluded.mtime,
+          size=excluded.size,
+          ref_ts=excluded.ref_ts,
+          updated_at=excluded.updated_at,
+          text=excluded.text,
+          format_version=excluded.format_version;
+        """
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, sessionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(stmt, 3, mtime)
+        sqlite3_bind_int64(stmt, 4, size)
+        sqlite3_bind_int64(stmt, 5, refTS)
+        sqlite3_bind_int64(stmt, 6, now)
+        sqlite3_bind_text(stmt, 7, text, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(stmt, 8, Int32(formatVersion))
+        if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_tool_io") }
+    }
+
     func hasSearchData(sources: [String]) throws -> Bool {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []
@@ -992,6 +1134,22 @@ actor IndexDB {
         return ids
     }
 
+    func fetchSessionMetaPaths(for source: String) throws -> [String] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = "SELECT path FROM session_meta WHERE source = ?;"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        var out: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { out.append(String(cString: c)) }
+        }
+        return out
+    }
+
     func searchSessionIDsFTS(
         sources: [String],
         model: String?,
@@ -1000,6 +1158,7 @@ actor IndexDB {
         dateFrom: Date?,
         dateTo: Date?,
         query: String,
+        includeSystemProbes: Bool,
         limit: Int
     ) throws -> [String] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
@@ -1019,6 +1178,11 @@ actor IndexDB {
         if let p = pathSubstr, !p.isEmpty { clauses.append("sm.cwd LIKE ?"); binds.append("%\(p)%") }
         if let df = dateFrom { clauses.append("COALESCE(sm.end_ts, sm.mtime) >= ?"); binds.append(Int64(df.timeIntervalSince1970)) }
         if let dt = dateTo { clauses.append("COALESCE(sm.end_ts, sm.mtime) <= ?"); binds.append(Int64(dt.timeIntervalSince1970)) }
+        if !includeSystemProbes {
+            // Exclude Agent Sessions' Claude probe sessions; these are hidden by default in the UI.
+            clauses.append("NOT (sm.source = 'claude' AND sm.path LIKE ?)")
+            binds.append("%AgentSessions-ClaudeProbeProject%")
+        }
 
         let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
         let sql = """
@@ -1050,6 +1214,121 @@ actor IndexDB {
             if let c = sqlite3_column_text(stmt, 0) { ids.append(String(cString: c)) }
         }
         return ids
+    }
+
+    func searchSessionIDsToolIOFTS(
+        sources: [String],
+        model: String?,
+        repoSubstr: String?,
+        pathSubstr: String?,
+        dateFrom: Date?,
+        dateTo: Date?,
+        query: String,
+        includeSystemProbes: Bool,
+        limit: Int
+    ) throws -> [String] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+
+        clauses.append("session_tool_io_fts MATCH ?")
+        binds.append(query)
+
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("sm.source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        if let m = model, !m.isEmpty { clauses.append("sm.model = ?"); binds.append(m) }
+        if let r = repoSubstr, !r.isEmpty { clauses.append("sm.repo LIKE ?"); binds.append("%\(r)%") }
+        if let p = pathSubstr, !p.isEmpty { clauses.append("sm.cwd LIKE ?"); binds.append("%\(p)%") }
+        if let df = dateFrom { clauses.append("COALESCE(sm.end_ts, sm.mtime) >= ?"); binds.append(Int64(df.timeIntervalSince1970)) }
+        if let dt = dateTo { clauses.append("COALESCE(sm.end_ts, sm.mtime) <= ?"); binds.append(Int64(dt.timeIntervalSince1970)) }
+        if !includeSystemProbes {
+            clauses.append("NOT (sm.source = 'claude' AND sm.path LIKE ?)")
+            binds.append("%AgentSessions-ClaudeProbeProject%")
+        }
+
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = """
+        SELECT sm.session_id
+        FROM session_tool_io_fts f
+        JOIN session_tool_io t ON t.rowid = f.rowid
+        JOIN session_meta sm ON sm.session_id = t.session_id
+        \(whereSQL)
+        ORDER BY bm25(session_tool_io_fts)
+        LIMIT ?;
+        """
+
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            else if let i = b as? Int64 { sqlite3_bind_int64(stmt, idx, i) }
+            idx += 1
+        }
+        sqlite3_bind_int(stmt, idx, Int32(limit))
+
+        var ids: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { ids.append(String(cString: c)) }
+        }
+        return ids
+    }
+
+    func pruneOldToolIO(cutoffTS: Int64, oldBytesCap: Int64, batchSize: Int = 64) throws {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        guard oldBytesCap > 0 else { return }
+
+        func oldBytes() -> Int64 {
+            let sql = "SELECT COALESCE(SUM(length(CAST(text AS BLOB))), 0) FROM session_tool_io WHERE COALESCE(ref_ts, 0) < ?;"
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { return 0 }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int64(stmt, 1, cutoffTS)
+            if sqlite3_step(stmt) == SQLITE_ROW { return sqlite3_column_int64(stmt, 0) }
+            return 0
+        }
+
+        var currentOldBytes = oldBytes()
+        if currentOldBytes <= oldBytesCap { return }
+
+        do {
+            try begin()
+            var iterations = 0
+            while currentOldBytes > oldBytesCap {
+                if iterations > 200 { break }
+                iterations += 1
+
+                let delSQL = """
+                DELETE FROM session_tool_io
+                WHERE rowid IN (
+                  SELECT rowid
+                  FROM session_tool_io
+                  WHERE COALESCE(ref_ts, 0) < ?
+                  ORDER BY COALESCE(ref_ts, 0) ASC
+                  LIMIT ?
+                );
+                """
+                let stmt = try prepare(delSQL)
+                defer { sqlite3_finalize(stmt) }
+                sqlite3_bind_int64(stmt, 1, cutoffTS)
+                sqlite3_bind_int(stmt, 2, Int32(batchSize))
+                if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("prune session_tool_io") }
+
+                currentOldBytes = oldBytes()
+                if sqlite3_changes(db) == 0 { break }
+            }
+            try commit()
+        } catch {
+            rollbackSilently()
+            throw error
+        }
     }
 
     func prefilterSessionIDs(

@@ -552,13 +552,10 @@ extension Array where Element == Session {
 }
 
 extension ISO8601DateFormatter {
-    static let day: ISO8601DateFormatter = {
+    static func cachedDayString(from date: Date) -> String {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withYear, .withMonth, .withDay]
-        return f
-    }()
-    static func cachedDayString(from date: Date) -> String {
-        return day.string(from: date)
+        return f.string(from: date)
     }
 }
 

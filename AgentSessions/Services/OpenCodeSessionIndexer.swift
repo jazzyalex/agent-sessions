@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 /// Session indexer for OpenCode sessions (read-only, local storage)
-final class OpenCodeSessionIndexer: ObservableObject {
+final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
@@ -120,26 +120,27 @@ final class OpenCodeSessionIndexer: ObservableObject {
         Task.detached(priority: prio) { [weak self, token] in
             guard let self else { return }
 
-            let config = SessionIndexingEngine.ScanConfig(
-                source: .opencode,
-                discoverFiles: { self.discovery.discoverSessionFiles() },
-                parseLightweight: { OpenCodeSessionParser.parseFile(at: $0) },
-                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
-                throttler: self.progressThrottler,
-                onProgress: { processed, total in
-                    DispatchQueue.main.async {
-                        self.totalFiles = total
-                        self.filesProcessed = processed
-                        self.hasEmptyDirectory = (total == 0)
-                        if total > 0 {
-                            self.progressText = "Indexed \(processed)/\(total)"
-                        }
-                        if self.refreshToken == token, self.launchPhase == .hydrating {
-                            self.launchPhase = .scanning
-                        }
-                    }
-                }
-            )
+	            let config = SessionIndexingEngine.ScanConfig(
+	                source: .opencode,
+	                discoverFiles: { self.discovery.discoverSessionFiles() },
+	                parseLightweight: { OpenCodeSessionParser.parseFile(at: $0) },
+	                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+	                throttler: self.progressThrottler,
+	                onProgress: { processed, total in
+	                    Task { @MainActor [weak self] in
+	                        guard let self else { return }
+	                        self.totalFiles = total
+	                        self.filesProcessed = processed
+	                        self.hasEmptyDirectory = (total == 0)
+	                        if total > 0 {
+	                            self.progressText = "Indexed \(processed)/\(total)"
+	                        }
+	                        if self.refreshToken == token, self.launchPhase == .hydrating {
+	                            self.launchPhase = .scanning
+	                        }
+	                    }
+	                }
+	            )
 
             let result = await SessionIndexingEngine.hydrateOrScan(config: config)
             await MainActor.run {
@@ -172,11 +173,13 @@ final class OpenCodeSessionIndexer: ObservableObject {
                               kinds: selectedKinds,
                               repoName: projectFilter,
                               pathContains: nil)
-        var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache, allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
-        if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
-        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
-        DispatchQueue.main.async { self.sessions = results }
-    }
+	        var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache, allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
+	        if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
+	        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
+	        Task { @MainActor [weak self] in
+	            self?.sessions = results
+	        }
+	    }
 
     // Update an existing session in allSessions (used by SearchCoordinator to persist parsed sessions)
     func updateSession(_ updated: Session) {
@@ -189,37 +192,38 @@ final class OpenCodeSessionIndexer: ObservableObject {
         guard let existing = allSessions.first(where: { $0.id == id }) else { return }
         let url = URL(fileURLWithPath: existing.filePath)
         isLoadingSession = true
-        loadingSessionID = id
-        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
-        ioQueue.async {
-            let parsed = OpenCodeSessionParser.parseFileFull(at: url) ?? existing
-            DispatchQueue.main.async {
-                if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
-                    let current = self.allSessions[idx]
-                    // Preserve or increase eventCount estimate to keep messageCount stable.
-                    let merged = Session(
-                        id: parsed.id,
-                        source: parsed.source,
-                        startTime: parsed.startTime ?? current.startTime,
-                        endTime: parsed.endTime ?? current.endTime,
-                        model: parsed.model ?? current.model,
-                        filePath: parsed.filePath,
-                        fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
-                        eventCount: max(current.eventCount, parsed.nonMetaCount),
-                        events: parsed.events,
-                        cwd: current.lightweightCwd ?? parsed.cwd,
-                        repoName: current.repoName,
-                        lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
-                        lightweightCommands: current.lightweightCommands
-                    )
-                    self.allSessions[idx] = merged
-                }
-                self.recomputeNow()
-                self.isLoadingSession = false
-                self.loadingSessionID = nil
-            }
-        }
-    }
+	        loadingSessionID = id
+	        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+	        ioQueue.async {
+	            let parsed = OpenCodeSessionParser.parseFileFull(at: url) ?? existing
+	            Task { @MainActor [weak self] in
+	                guard let self else { return }
+	                if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+	                    let current = self.allSessions[idx]
+	                    // Preserve or increase eventCount estimate to keep messageCount stable.
+	                    let merged = Session(
+	                        id: parsed.id,
+	                        source: parsed.source,
+	                        startTime: parsed.startTime ?? current.startTime,
+	                        endTime: parsed.endTime ?? current.endTime,
+	                        model: parsed.model ?? current.model,
+	                        filePath: parsed.filePath,
+	                        fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
+	                        eventCount: max(current.eventCount, parsed.nonMetaCount),
+	                        events: parsed.events,
+	                        cwd: current.lightweightCwd ?? parsed.cwd,
+	                        repoName: current.repoName,
+	                        lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
+	                        lightweightCommands: current.lightweightCommands
+	                    )
+	                    self.allSessions[idx] = merged
+	                }
+	                self.recomputeNow()
+	                self.isLoadingSession = false
+	                self.loadingSessionID = nil
+	            }
+	        }
+	    }
 
 }
 

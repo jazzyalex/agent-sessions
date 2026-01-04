@@ -2,7 +2,7 @@ import Foundation
 
 /// Thread-safe cache for generated transcripts used in search filtering.
 /// Generates transcripts in background on app launch to ensure accurate search results.
-final class TranscriptCache {
+final class TranscriptCache: @unchecked Sendable {
     private let lock = NSLock()
     private var cache: [String: String] = [:]
     private var indexingInProgress = false

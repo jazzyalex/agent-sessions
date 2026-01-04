@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 /// Session indexer for Gemini CLI sessions (ephemeral, read-only)
-final class GeminiSessionIndexer: ObservableObject {
+final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
@@ -91,71 +91,75 @@ final class GeminiSessionIndexer: ObservableObject {
         indexingError = nil
         hasEmptyDirectory = false
 
-        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-        Task.detached(priority: prio) { [weak self, token] in
-            guard let self else { return }
+	        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+	        Task.detached(priority: prio) { [weak self, token] in
+	            guard let self else { return }
 
-            var previewMTimeByIDLocal: [String: Date] = [:]
-
-            let config = SessionIndexingEngine.ScanConfig(
-                source: .gemini,
-                discoverFiles: {
-                    let files = self.discovery.discoverSessionFiles()
+	            let config = SessionIndexingEngine.ScanConfig(
+	                source: .gemini,
+	                discoverFiles: {
+	                    let files = self.discovery.discoverSessionFiles()
                     LaunchProfiler.log("Gemini.refresh: file enumeration done (files=\(files.count))")
                     return files
                 },
                 parseLightweight: { GeminiSessionParser.parseFile(at: $0) },
-                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
-                throttler: self.progressThrottler,
-                onProgress: { processed, total in
-                    DispatchQueue.main.async {
-                        self.totalFiles = total
-                        self.hasEmptyDirectory = (total == 0)
-                        self.filesProcessed = processed
-                        if processed > 0 {
-                            self.progressText = "Indexed \(processed)/\(total)"
-                        }
-                        if self.refreshToken == token, self.launchPhase == .hydrating {
-                            self.launchPhase = .scanning
-                        }
-                    }
-                },
-                didParseSession: { session, url in
-                    if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
-                       let m = rv.contentModificationDate {
-                        previewMTimeByIDLocal[session.id] = m
-                    }
-                }
-            )
+	                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+	                throttler: self.progressThrottler,
+	                onProgress: { processed, total in
+	                    Task { @MainActor [weak self] in
+	                        guard let self else { return }
+	                        self.totalFiles = total
+	                        self.hasEmptyDirectory = (total == 0)
+	                        self.filesProcessed = processed
+	                        if processed > 0 {
+	                            self.progressText = "Indexed \(processed)/\(total)"
+	                        }
+	                        if self.refreshToken == token, self.launchPhase == .hydrating {
+	                            self.launchPhase = .scanning
+	                        }
+	                    }
+	                }
+	            )
 
             let result = await SessionIndexingEngine.hydrateOrScan(
-                hydrate: { try await self.hydrateFromIndexDBIfAvailable() },
-                config: config
-            )
+	                hydrate: { try await self.hydrateFromIndexDBIfAvailable() },
+	                config: config
+	            )
 
-            await MainActor.run {
-                guard self.refreshToken == token else { return }
-                switch result.kind {
-                case .hydrated:
+	            var previewTimes: [String: Date] = [:]
+	            previewTimes.reserveCapacity(result.sessions.count)
+	            for s in result.sessions {
+	                let url = URL(fileURLWithPath: s.filePath)
+	                if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+	                   let m = rv.contentModificationDate {
+	                    previewTimes[s.id] = m
+	                }
+	            }
+
+	            await MainActor.run {
+	                guard self.refreshToken == token else { return }
+	                switch result.kind {
+	                case .hydrated:
                     LaunchProfiler.log("Gemini.refresh: DB hydrate hit (sessions=\(result.sessions.count))")
                     self.allSessions = result.sessions
                     self.isIndexing = false
-                    self.filesProcessed = result.sessions.count
-                    self.totalFiles = result.sessions.count
-                    self.progressText = "Loaded \(result.sessions.count) from index"
-                    self.launchPhase = .ready
-                    #if DEBUG
-                    print("[Launch] Hydrated Gemini sessions from DB: count=\(result.sessions.count)")
-                    #endif
-                    return
-                case .scanned:
-                    break
-                }
+	                    self.filesProcessed = result.sessions.count
+	                    self.totalFiles = result.sessions.count
+	                    self.progressText = "Loaded \(result.sessions.count) from index"
+	                    self.launchPhase = .ready
+	                    self.previewMTimeByID = previewTimes
+	                    #if DEBUG
+	                    print("[Launch] Hydrated Gemini sessions from DB: count=\(result.sessions.count)")
+	                    #endif
+	                    return
+	                case .scanned:
+	                    break
+	                }
 
-                LaunchProfiler.log("Gemini.refresh: sessions merged (total=\(result.sessions.count))")
-                self.previewMTimeByID = previewMTimeByIDLocal
-                self.allSessions = result.sessions
-                self.isIndexing = false
+	                LaunchProfiler.log("Gemini.refresh: sessions merged (total=\(result.sessions.count))")
+	                self.previewMTimeByID = previewTimes
+	                self.allSessions = result.sessions
+	                self.isIndexing = false
                 if FeatureFlags.throttleIndexingUIUpdates {
                     self.filesProcessed = self.totalFiles
                     if self.totalFiles > 0 {
@@ -181,26 +185,27 @@ final class GeminiSessionIndexer: ObservableObject {
                 }()
                 if !delta.isEmpty {
                     self.isProcessingTranscripts = true
-                    self.progressText = "Processing transcripts..."
-                    self.launchPhase = .transcripts
-                    let cache = self.transcriptCache
-                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self, token] in
-                        LaunchProfiler.log("Gemini.refresh: transcript prewarm start (delta=\(delta.count))")
-                        await cache.generateAndCache(sessions: delta)
-                        await MainActor.run {
-                            guard let self, self.refreshToken == token else { return }
-                            LaunchProfiler.log("Gemini.refresh: transcript prewarm complete")
-                            self.isProcessingTranscripts = false
-                            self.progressText = "Ready"
-                            self.launchPhase = .ready
-                        }
-                    }
-                } else {
-                    self.progressText = "Ready"
-                    self.launchPhase = .ready
-                }
-            }
-        }
+	                    self.progressText = "Processing transcripts..."
+	                    self.launchPhase = .transcripts
+	                    let cache = self.transcriptCache
+	                    let finishPrewarm: @Sendable @MainActor () -> Void = { [weak self, token] in
+	                        guard let self, self.refreshToken == token else { return }
+	                        LaunchProfiler.log("Gemini.refresh: transcript prewarm complete")
+	                        self.isProcessingTranscripts = false
+	                        self.progressText = "Ready"
+	                        self.launchPhase = .ready
+	                    }
+	                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [delta, cache, finishPrewarm] in
+	                        LaunchProfiler.log("Gemini.refresh: transcript prewarm start (delta=\(delta.count))")
+	                        await cache.generateAndCache(sessions: delta)
+	                        await finishPrewarm()
+	                    }
+	                } else {
+	                    self.progressText = "Ready"
+	                    self.launchPhase = .ready
+	                }
+	            }
+	        }
     }
 
     private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {
@@ -221,11 +226,13 @@ final class GeminiSessionIndexer: ObservableObject {
         let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
         var results = FilterEngine.filterSessions(allSessions, filters: filters)
         let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
-        let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? true
-        if hideZero { results = results.filter { $0.messageCount > 0 } }
-        if hideLow { results = results.filter { $0.messageCount > 2 } }
-        DispatchQueue.main.async { self.sessions = results }
-    }
+	        let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? true
+	        if hideZero { results = results.filter { $0.messageCount > 0 } }
+	        if hideLow { results = results.filter { $0.messageCount > 2 } }
+	        Task { @MainActor [weak self] in
+	            self?.sessions = results
+	        }
+	    }
 
     // Reload a specific lightweight session with a parse pass
     func reloadSession(id: String) {
@@ -238,46 +245,47 @@ final class GeminiSessionIndexer: ObservableObject {
         isLoadingSession = true
         loadingSessionID = id
 
-        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
-        bgQueue.async {
-            let start = Date()
-            let full = GeminiSessionParser.parseFileFull(at: url, forcedID: id)
+	        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+	        bgQueue.async {
+	            let start = Date()
+	            let full = GeminiSessionParser.parseFileFull(at: url, forcedID: id)
             let elapsed = Date().timeIntervalSince(start)
             #if DEBUG
             print("  ⏱️ Gemini parse took \(String(format: "%.1f", elapsed))s - events=\(full?.events.count ?? 0)")
             #endif
 
-            DispatchQueue.main.async {
-                if let full, let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
-                    let current = self.allSessions[idx]
-                    let merged = Session(
-                        id: full.id,
-                        source: full.source,
-                        startTime: full.startTime ?? current.startTime,
-                        endTime: full.endTime ?? current.endTime,
-                        model: full.model ?? current.model,
-                        filePath: full.filePath,
-                        fileSizeBytes: full.fileSizeBytes ?? current.fileSizeBytes,
-                        eventCount: max(current.eventCount, full.nonMetaCount),
-                        events: full.events,
-                        cwd: current.lightweightCwd ?? full.cwd,
-                        repoName: current.repoName,
-                        lightweightTitle: current.lightweightTitle ?? full.lightweightTitle,
-                        lightweightCommands: current.lightweightCommands
-                    )
-                    self.allSessions[idx] = merged
-                    self.unreadableSessionIDs.remove(id)
-                    if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
-                       let m = rv.contentModificationDate {
-                        self.previewMTimeByID[id] = m
-                    }
-                }
-                self.isLoadingSession = false
-                self.loadingSessionID = nil
-                if full == nil { self.unreadableSessionIDs.insert(id) }
-            }
-        }
-    }
+	            Task { @MainActor [weak self] in
+	                guard let self else { return }
+	                if let full, let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+	                    let current = self.allSessions[idx]
+	                    let merged = Session(
+	                        id: full.id,
+	                        source: full.source,
+	                        startTime: full.startTime ?? current.startTime,
+	                        endTime: full.endTime ?? current.endTime,
+	                        model: full.model ?? current.model,
+	                        filePath: full.filePath,
+	                        fileSizeBytes: full.fileSizeBytes ?? current.fileSizeBytes,
+	                        eventCount: max(current.eventCount, full.nonMetaCount),
+	                        events: full.events,
+	                        cwd: current.lightweightCwd ?? full.cwd,
+	                        repoName: current.repoName,
+	                        lightweightTitle: current.lightweightTitle ?? full.lightweightTitle,
+	                        lightweightCommands: current.lightweightCommands
+	                    )
+	                    self.allSessions[idx] = merged
+	                    self.unreadableSessionIDs.remove(id)
+	                    if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+	                       let m = rv.contentModificationDate {
+	                        self.previewMTimeByID[id] = m
+	                    }
+	                }
+	                self.isLoadingSession = false
+	                self.loadingSessionID = nil
+	                if full == nil { self.unreadableSessionIDs.insert(id) }
+	            }
+	        }
+	    }
 
     func isPreviewStale(id: String) -> Bool {
         guard let existing = allSessions.first(where: { $0.id == id }) else { return false }
@@ -290,22 +298,23 @@ final class GeminiSessionIndexer: ObservableObject {
 
     func refreshPreview(id: String) {
         guard let existing = allSessions.first(where: { $0.id == id }) else { return }
-        let url = URL(fileURLWithPath: existing.filePath)
-        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
-        bgQueue.async {
-            if let light = GeminiSessionParser.parseFile(at: url, forcedID: id) {
-                DispatchQueue.main.async {
-                    if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
-                        self.allSessions[idx] = light
-                        if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
-                           let m = rv.contentModificationDate {
-                            self.previewMTimeByID[id] = m
-                        }
-                    }
-                }
-            }
-        }
-    }
+	        let url = URL(fileURLWithPath: existing.filePath)
+	        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+	        bgQueue.async {
+	            if let light = GeminiSessionParser.parseFile(at: url, forcedID: id) {
+	                Task { @MainActor [weak self] in
+	                    guard let self else { return }
+	                    if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+	                        self.allSessions[idx] = light
+	                        if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+	                           let m = rv.contentModificationDate {
+	                            self.previewMTimeByID[id] = m
+	                        }
+	                    }
+	                }
+	            }
+	        }
+	    }
 
     // Parse all lightweight sessions (for Analytics or full-index use cases)
     func parseAllSessionsFull(progress: @escaping (Int, Int) -> Void) async {

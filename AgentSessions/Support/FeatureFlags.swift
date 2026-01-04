@@ -17,7 +17,14 @@ enum FeatureFlags {
     static let enableFTSSearch = true
     static let ftsSearchLimit: Int = 2_000
     static let instantToolOutputIndexMaxChars: Int = 32_000
-    static let sessionSearchFormatVersion: Int = 3
+    static let sessionSearchFormatVersion: Int = 4
+    static let sessionToolIOFormatVersion: Int = 1
+
+    // Tool I/O FTS index (recent window + retention cap for older rows).
+    static let toolIOIndexRecentDays: Int = 90
+    static let toolIOIndexOldBytesCap: Int64 = 25 * 1024 * 1024
+    static let toolIOIndexMaxCharsPerSession: Int = 500_000
+    static let toolIOIndexMaxCharsPerEvent: Int = 200_000
 
     static let searchSmallSizeBytes: Int = 10 * 1024 * 1024
 

@@ -49,7 +49,7 @@ struct SessionArchiveManifest: Codable, Equatable {
     var entries: [Entry]
 }
 
-final class SessionArchiveManager: ObservableObject {
+final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     static let shared = SessionArchiveManager()
 
     @Published private(set) var infoByKey: [String: SessionArchiveInfo] = [:]

@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 /// Session indexer for Claude Code sessions
-final class ClaudeSessionIndexer: ObservableObject {
+final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
@@ -203,7 +203,7 @@ final class ClaudeSessionIndexer: ObservableObject {
             let fm = FileManager.default
             let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
             let existingSessions = indexed.filter(exists)
-            var existingPaths = Set(existingSessions.map { $0.filePath })
+	            let existingPaths = Set(existingSessions.map { $0.filePath })
 
             #if DEBUG
             if !existingSessions.isEmpty {
@@ -278,28 +278,29 @@ final class ClaudeSessionIndexer: ObservableObject {
                     }
                     return out
                 }()
-                if !delta.isEmpty {
-                    self.isProcessingTranscripts = true
-                    self.progressText = "Processing transcripts..."
-                    self.launchPhase = .transcripts
-                    let cache = self.transcriptCache
-                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self, token] in
-                        LaunchProfiler.log("Claude.refresh: transcript prewarm start (delta=\(delta.count))")
-                        await cache.generateAndCache(sessions: delta)
-                        await MainActor.run {
-                            guard let self, self.refreshToken == token else { return }
-                            LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
-                            self.publishAfterCurrentUpdate {
-                                self.isProcessingTranscripts = false
-                                self.progressText = "Ready"
-                                self.launchPhase = .ready
-                            }
-                        }
-                    }
-                } else {
-                    self.progressText = "Ready"
-                    self.launchPhase = .ready
-                }
+	                if !delta.isEmpty {
+	                    self.isProcessingTranscripts = true
+	                    self.progressText = "Processing transcripts..."
+	                    self.launchPhase = .transcripts
+	                    let cache = self.transcriptCache
+	                    let finishPrewarm: @Sendable @MainActor () -> Void = { [weak self, token] in
+	                        guard let self, self.refreshToken == token else { return }
+	                        LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
+	                        self.publishAfterCurrentUpdate {
+	                            self.isProcessingTranscripts = false
+	                            self.progressText = "Ready"
+	                            self.launchPhase = .ready
+	                        }
+	                    }
+	                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [delta, cache, finishPrewarm] in
+	                        LaunchProfiler.log("Claude.refresh: transcript prewarm start (delta=\(delta.count))")
+	                        await cache.generateAndCache(sessions: delta)
+	                        await finishPrewarm()
+	                    }
+	                } else {
+	                    self.progressText = "Ready"
+	                    self.launchPhase = .ready
+	                }
             }
         }
     }

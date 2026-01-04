@@ -31,6 +31,8 @@ actor AnalyticsIndexer {
     // MARK: - Core
     private func indexAll(incremental: Bool) async {
         LaunchProfiler.log("Analytics.indexAll start (incremental=\(incremental))")
+        let toolIOEnabled = toolIOIndexEnabled()
+        let toolIOCutoffTS = Int64(Date().addingTimeInterval(-Double(FeatureFlags.toolIOIndexRecentDays) * 24 * 60 * 60).timeIntervalSince1970)
         // One-time migration: switch Claude sessions to stable logical IDs based on in-file sessionId.
         // Purge old Claude rows (which used path-hash IDs) once, then rebuild.
         // No destructive purges at startup; rely on refresh to reconcile
@@ -46,7 +48,12 @@ actor AnalyticsIndexer {
 
         for (source, enumerate) in sources {
             if !enabledSources.contains(source) { continue }
-            let files = enumerate()
+            var files = enumerate()
+            if source == "claude" {
+                // Never index Agent Sessions' Claude probe project sessions; they are hidden by default
+                // and contain large synthetic payloads that slow search and grow the DB.
+                files.removeAll { $0.path.contains("AgentSessions-ClaudeProbeProject") }
+            }
             if !incremental {
                 // Full rebuild: purge everything for the source and reindex.
                 do { try await db.purgeSource(source) } catch { /* non-fatal */ }
@@ -56,18 +63,24 @@ actor AnalyticsIndexer {
             // Incremental refresh: skip unchanged files and delete rows for removed files.
             var indexedByPath: [String: IndexedFileRow] = [:]
             var searchReadyPaths = Set<String>()
+            var toolIOReadyPaths = Set<String>()
             if incremental {
                 let indexed = (try? await db.fetchIndexedFiles(for: source)) ?? []
                 indexedByPath.reserveCapacity(indexed.count)
                 for row in indexed { indexedByPath[row.path] = row }
                 searchReadyPaths = (try? await db.fetchSearchReadyPaths(for: source, formatVersion: FeatureFlags.sessionSearchFormatVersion)) ?? []
+                if toolIOEnabled {
+                    toolIOReadyPaths = (try? await db.fetchToolIOReadyPaths(for: source, formatVersion: FeatureFlags.sessionToolIOFormatVersion)) ?? []
+                }
 
                 let currentPaths = Set(files.map(\.path))
-                let deletedPaths = indexedByPath.keys.filter { !currentPaths.contains($0) }
-                if !deletedPaths.isEmpty {
+                // Clean up any stale DB rows even if they predate the `files` table (e.g., older index versions).
+                let knownMetaPaths = Set((try? await db.fetchSessionMetaPaths(for: source)) ?? [])
+                let stalePaths = Array(knownMetaPaths.subtracting(currentPaths))
+                if !stalePaths.isEmpty {
                     do {
                         try await db.begin()
-                        let affectedDays = try await db.deleteSessionsForPaths(source: source, paths: deletedPaths)
+                        let affectedDays = try await db.deleteSessionsForPaths(source: source, paths: stalePaths)
                         for day in Set(affectedDays) {
                             try await db.recomputeRollups(day: day, source: source)
                         }
@@ -85,17 +98,35 @@ actor AnalyticsIndexer {
                     for url in slice {
                         group.addTask { [weak self] in
                             guard let self else { return }
-                            await self.indexFileIfNeeded(url: url, source: source, incremental: incremental, indexedByPath: indexedByPath, searchReadyPaths: searchReadyPaths)
+                            await self.indexFileIfNeeded(url: url,
+                                                         source: source,
+                                                         incremental: incremental,
+                                                         indexedByPath: indexedByPath,
+                                                         searchReadyPaths: searchReadyPaths,
+                                                         toolIOReadyPaths: toolIOReadyPaths,
+                                                         toolIOEnabled: toolIOEnabled,
+                                                         toolIOCutoffTS: toolIOCutoffTS)
                         }
                     }
                     await group.waitForAll()
                 }
             }
         }
+
+        if toolIOEnabled {
+            try? await db.pruneOldToolIO(cutoffTS: toolIOCutoffTS, oldBytesCap: FeatureFlags.toolIOIndexOldBytesCap)
+        }
         LaunchProfiler.log("Analytics.indexAll complete (incremental=\(incremental))")
     }
 
-    private func indexFileIfNeeded(url: URL, source: String, incremental: Bool, indexedByPath: [String: IndexedFileRow], searchReadyPaths: Set<String>) async {
+    private func indexFileIfNeeded(url: URL,
+                                   source: String,
+                                   incremental: Bool,
+                                   indexedByPath: [String: IndexedFileRow],
+                                   searchReadyPaths: Set<String>,
+                                   toolIOReadyPaths: Set<String>,
+                                   toolIOEnabled: Bool,
+                                   toolIOCutoffTS: Int64) async {
         // Stat
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = Int64((attrs[.size] as? NSNumber)?.int64Value ?? 0)
@@ -106,7 +137,10 @@ actor AnalyticsIndexer {
            existing.mtime == mtime,
            existing.size == size,
            searchReadyPaths.contains(url.path) {
-            return
+            if !toolIOEnabled { return }
+            if toolIOReadyPaths.contains(url.path) { return }
+            let refTS = (try? await db.sessionRefTSForPath(source: source, path: url.path)) ?? nil
+            if let refTS, refTS < toolIOCutoffTS { return }
         }
 
         // Codex JSONL is append-only and can be "hot" while the CLI is actively running.
@@ -133,6 +167,7 @@ actor AnalyticsIndexer {
         let commands = session.events.filter { $0.kind == .tool_call }.count
         let start = session.startTime ?? session.events.compactMap { $0.timestamp }.min() ?? Date(timeIntervalSince1970: TimeInterval(mtime))
         let end = session.endTime ?? session.events.compactMap { $0.timestamp }.max() ?? Date(timeIntervalSince1970: TimeInterval(mtime))
+        let refTS = Int64(end.timeIntervalSince1970)
 
         // Per-day splits
         let dayRows = Self.splitIntoDays(session: session, start: start, end: end)
@@ -152,6 +187,11 @@ actor AnalyticsIndexer {
             commands: commands
         )
         let searchText = SessionSearchTextBuilder.build(session: session)
+        let toolIOText: String? = {
+            guard toolIOEnabled else { return nil }
+            guard refTS >= toolIOCutoffTS else { return nil }
+            return SessionSearchTextBuilder.buildToolIO(session: session)
+        }()
 
         // Commit to DB atomically
         do {
@@ -159,6 +199,9 @@ actor AnalyticsIndexer {
             try await db.upsertFile(path: session.filePath, mtime: mtime, size: size, source: source)
             try await db.upsertSessionMeta(meta)
             try await db.upsertSessionSearch(sessionID: session.id, source: source, mtime: mtime, size: size, text: searchText)
+            if let toolIOText {
+                try await db.upsertSessionToolIO(sessionID: session.id, source: source, mtime: mtime, size: size, refTS: refTS, text: toolIOText)
+            }
             try await db.deleteSessionDays(sessionID: session.id, source: source)
             try await db.insertSessionDayRows(dayRows)
             // Recompute rollups for affected days
@@ -167,6 +210,14 @@ actor AnalyticsIndexer {
         } catch {
             await db.rollbackSilently()
         }
+    }
+
+    private func toolIOIndexEnabled() -> Bool {
+        // Default ON unless the user explicitly opts out.
+        if UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
     }
 
     // MARK: - Parsers

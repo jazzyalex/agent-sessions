@@ -18,12 +18,6 @@ final class DroidSessionParser {
     private static let sniffScanLimit = 50
     private static let maxRawResultContentBytes = 8_192
 
-    private static let iso: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
     private static let systemReminderOpenTag = "<system-reminder>"
     private static let systemReminderCloseTag = "</system-reminder>"
 
@@ -731,8 +725,13 @@ final class DroidSessionParser {
     }
 
     private static func decodeDate(_ any: Any?) -> Date? {
-        if let s = any as? String { return iso.date(from: s) }
-        return nil
+        guard let s = any as? String else { return nil }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        let f2 = ISO8601DateFormatter()
+        f2.formatOptions = [.withInternetDateTime]
+        return f2.date(from: s)
     }
 
     private static func extractUserPromptFromSystemReminder(_ text: String) -> (reminder: String?, prompt: String) {

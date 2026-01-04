@@ -580,7 +580,7 @@ final class SessionIndexer: ObservableObject {
                     self.launchPhase = .ready
                 }
             }
-            var existingPaths = Set(existingSessions.map { $0.filePath })
+	            let existingPaths = Set(existingSessions.map { $0.filePath })
 
             #if DEBUG
             if !existingSessions.isEmpty {
