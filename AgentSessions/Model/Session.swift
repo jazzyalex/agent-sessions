@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Session: Identifiable, Equatable, Codable {
+public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let id: String
     public let source: SessionSource
     public let startTime: Date?

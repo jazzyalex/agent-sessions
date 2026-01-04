@@ -1,6 +1,6 @@
 import Foundation
 
-public enum SessionEventKind: String, Codable, CaseIterable {
+public enum SessionEventKind: String, Codable, CaseIterable, Sendable {
     case user
     case assistant
     case tool_call
@@ -9,7 +9,7 @@ public enum SessionEventKind: String, Codable, CaseIterable {
     case meta
 }
 
-public struct SessionEvent: Identifiable, Codable, Equatable {
+public struct SessionEvent: Identifiable, Codable, Equatable, Sendable {
     public let id: String
     public let timestamp: Date?
     public let kind: SessionEventKind

@@ -493,6 +493,19 @@ final class SessionIndexer: ObservableObject {
         return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex/sessions")
     }
 
+    // `FileManager.DirectoryEnumerator` uses APIs marked `noasync` in newer SDKs, so enumerate in a sync context.
+    private static func enumerateCodexSessionFiles(root: URL, fileManager: FileManager) -> [URL] {
+        var found: [URL] = []
+        if let en = fileManager.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+            for case let url as URL in en {
+                if url.lastPathComponent.hasPrefix("rollout-") && url.pathExtension.lowercased() == "jsonl" {
+                    found.append(url)
+                }
+            }
+        }
+        return found
+    }
+
     func refresh() {
         if !AgentEnablement.isEnabled(.codex) { return }
         let root = sessionsRoot()
@@ -561,14 +574,8 @@ final class SessionIndexer: ObservableObject {
                 return
             }
 
-            var found: [URL] = []
-            if let en = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
-                for case let url as URL in en {
-                    if url.lastPathComponent.hasPrefix("rollout-") && url.pathExtension.lowercased() == "jsonl" {
-                        found.append(url)
-                    }
-                }
-            }
+            let found = Self.enumerateCodexSessionFiles(root: root, fileManager: fm)
+            let foundIsEmpty = found.isEmpty
 
             // Filter out files that are already indexed
             let newFiles = found.filter { !existingPaths.contains($0.path) }
@@ -580,7 +587,7 @@ final class SessionIndexer: ObservableObject {
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 self.totalFiles = existingSessions.count + sortedFiles.count
-                self.hasEmptyDirectory = found.isEmpty
+                self.hasEmptyDirectory = foundIsEmpty
                 if !existingSessions.isEmpty {
                     self.progressText = "Scanning \(sortedFiles.count) new files..."
                 }
@@ -656,15 +663,17 @@ final class SessionIndexer: ObservableObject {
                     self.progressText = "Processing transcripts..."
                     self.launchPhase = .transcripts
                     let cache = self.transcriptCache
+                    let deltaToWarm = delta
                     Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self, token] in
-                        LaunchProfiler.log("Codex.refresh: transcript prewarm start (delta=\(delta.count))")
-                        await cache.generateAndCache(sessions: delta)
+                        LaunchProfiler.log("Codex.refresh: transcript prewarm start (delta=\(deltaToWarm.count))")
+                        await cache.generateAndCache(sessions: deltaToWarm)
+                        guard let strongSelf = self else { return }
                         await MainActor.run {
-                            guard let self, self.refreshToken == token else { return }
+                            guard strongSelf.refreshToken == token else { return }
                             LaunchProfiler.log("Codex.refresh: transcript prewarm complete")
-                            self.isProcessingTranscripts = false
-                            self.progressText = "Ready"
-                            self.launchPhase = .ready
+                            strongSelf.isProcessingTranscripts = false
+                            strongSelf.progressText = "Ready"
+                            strongSelf.launchPhase = .ready
                         }
                     }
                 } else {
@@ -1331,6 +1340,10 @@ final class SessionIndexer: ObservableObject {
     }
 
 }
+
+// `SessionIndexer` is UI-owned and mutations are funneled back through the main queue/MainActor.
+// Mark as unchecked Sendable to allow progress/reporting closures that require `@Sendable`.
+extension SessionIndexer: @unchecked Sendable {}
 // swiftlint:enable type_body_length
 
 // (Codex picker parity helpers temporarily disabled while focusing on title parity.)

@@ -710,6 +710,123 @@ actor IndexDB {
         try exec("DELETE FROM session_days WHERE source='\(source)'")
         try exec("DELETE FROM session_meta WHERE source='\(source)'")
         try exec("DELETE FROM session_search WHERE source='\(source)'")
+        try exec("DELETE FROM files WHERE source='\(source)'")
+    }
+
+    /// Delete DB rows for sessions whose file paths were removed.
+    /// Returns the distinct days affected (so callers can recompute rollups).
+    func deleteSessionsForPaths(source: String, paths: [String]) throws -> [String] {
+        guard !paths.isEmpty else { return [] }
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+
+        var affectedDays = Set<String>()
+
+        // Chunk to stay under SQLite variable limits.
+        let chunkSize = 200
+        var i = 0
+        while i < paths.count {
+            let end = min(i + chunkSize, paths.count)
+            let slice = Array(paths[i..<end])
+            i = end
+
+            let inSQL = Array(repeating: "?", count: slice.count).joined(separator: ",")
+
+            // Capture affected days before deleting.
+            let daysSQL = """
+            SELECT DISTINCT day
+            FROM session_days
+            WHERE source = ?
+              AND session_id IN (
+                SELECT session_id
+                FROM session_meta
+                WHERE source = ? AND path IN (\(inSQL))
+              );
+            """
+            var daysStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, daysSQL, -1, &daysStmt, nil) != SQLITE_OK {
+                throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+            }
+            defer { sqlite3_finalize(daysStmt) }
+            var bindIdx: Int32 = 1
+            sqlite3_bind_text(daysStmt, bindIdx, source, -1, SQLITE_TRANSIENT); bindIdx += 1
+            sqlite3_bind_text(daysStmt, bindIdx, source, -1, SQLITE_TRANSIENT); bindIdx += 1
+            for p in slice {
+                sqlite3_bind_text(daysStmt, bindIdx, p, -1, SQLITE_TRANSIENT)
+                bindIdx += 1
+            }
+            while sqlite3_step(daysStmt) == SQLITE_ROW {
+                if let c = sqlite3_column_text(daysStmt, 0) {
+                    affectedDays.insert(String(cString: c))
+                }
+            }
+
+            // Delete per-day contributions.
+            let delDaysSQL = """
+            DELETE FROM session_days
+            WHERE source = ?
+              AND session_id IN (
+                SELECT session_id
+                FROM session_meta
+                WHERE source = ? AND path IN (\(inSQL))
+              );
+            """
+            let delDaysStmt = try prepare(delDaysSQL)
+            defer { sqlite3_finalize(delDaysStmt) }
+            bindIdx = 1
+            sqlite3_bind_text(delDaysStmt, bindIdx, source, -1, SQLITE_TRANSIENT); bindIdx += 1
+            sqlite3_bind_text(delDaysStmt, bindIdx, source, -1, SQLITE_TRANSIENT); bindIdx += 1
+            for p in slice {
+                sqlite3_bind_text(delDaysStmt, bindIdx, p, -1, SQLITE_TRANSIENT)
+                bindIdx += 1
+            }
+            if sqlite3_step(delDaysStmt) != SQLITE_DONE { throw DBError.execFailed("delete session_days by path") }
+
+            // Delete search corpus.
+            let delSearchSQL = """
+            DELETE FROM session_search
+            WHERE source = ?
+              AND session_id IN (
+                SELECT session_id
+                FROM session_meta
+                WHERE source = ? AND path IN (\(inSQL))
+              );
+            """
+            let delSearchStmt = try prepare(delSearchSQL)
+            defer { sqlite3_finalize(delSearchStmt) }
+            bindIdx = 1
+            sqlite3_bind_text(delSearchStmt, bindIdx, source, -1, SQLITE_TRANSIENT); bindIdx += 1
+            sqlite3_bind_text(delSearchStmt, bindIdx, source, -1, SQLITE_TRANSIENT); bindIdx += 1
+            for p in slice {
+                sqlite3_bind_text(delSearchStmt, bindIdx, p, -1, SQLITE_TRANSIENT)
+                bindIdx += 1
+            }
+            if sqlite3_step(delSearchStmt) != SQLITE_DONE { throw DBError.execFailed("delete session_search by path") }
+
+            // Delete meta and file tracking rows.
+            let delMetaSQL = "DELETE FROM session_meta WHERE source = ? AND path IN (\(inSQL));"
+            let delMetaStmt = try prepare(delMetaSQL)
+            defer { sqlite3_finalize(delMetaStmt) }
+            bindIdx = 1
+            sqlite3_bind_text(delMetaStmt, bindIdx, source, -1, SQLITE_TRANSIENT); bindIdx += 1
+            for p in slice {
+                sqlite3_bind_text(delMetaStmt, bindIdx, p, -1, SQLITE_TRANSIENT)
+                bindIdx += 1
+            }
+            if sqlite3_step(delMetaStmt) != SQLITE_DONE { throw DBError.execFailed("delete session_meta by path") }
+
+            let delFilesSQL = "DELETE FROM files WHERE source = ? AND path IN (\(inSQL));"
+            let delFilesStmt = try prepare(delFilesSQL)
+            defer { sqlite3_finalize(delFilesStmt) }
+            bindIdx = 1
+            sqlite3_bind_text(delFilesStmt, bindIdx, source, -1, SQLITE_TRANSIENT); bindIdx += 1
+            for p in slice {
+                sqlite3_bind_text(delFilesStmt, bindIdx, p, -1, SQLITE_TRANSIENT)
+                bindIdx += 1
+            }
+            if sqlite3_step(delFilesStmt) != SQLITE_DONE { throw DBError.execFailed("delete files by path") }
+        }
+
+        return Array(affectedDays)
     }
 
     // MARK: - Upserts
