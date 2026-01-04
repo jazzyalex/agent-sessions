@@ -134,11 +134,18 @@ actor IndexDB {
               mtime INTEGER,
               size INTEGER,
               updated_at INTEGER NOT NULL,
-              text TEXT NOT NULL
+              text TEXT NOT NULL,
+              format_version INTEGER NOT NULL DEFAULT 1
             );
             CREATE INDEX IF NOT EXISTS idx_session_search_source ON session_search(source);
             """
         )
+
+        // Best-effort migration for existing installs.
+        // If the column already exists, SQLite will throw and we can ignore it.
+        do {
+            try exec(db, "ALTER TABLE session_search ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1;")
+        } catch { }
 
         // Full-text search (FTS5) over per-session searchable text.
         // External content table lets us upsert via regular SQL + triggers.
@@ -237,7 +244,7 @@ actor IndexDB {
     func fetchIndexedFiles(for source: String) throws -> [IndexedFileRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         let sql = """
-        SELECT path, mtime, size
+        SELECT path, mtime, size, indexed_at
         FROM files
         WHERE source = ?
         """
@@ -253,7 +260,8 @@ actor IndexDB {
             let row = IndexedFileRow(
                 path: String(cString: sqlite3_column_text(stmt, 0)),
                 mtime: sqlite3_column_int64(stmt, 1),
-                size: sqlite3_column_int64(stmt, 2)
+                size: sqlite3_column_int64(stmt, 2),
+                indexedAt: sqlite3_column_int64(stmt, 3)
             )
             out.append(row)
         }
@@ -263,7 +271,7 @@ actor IndexDB {
     /// Fetch file paths that are fully populated for search (files + session_meta + session_search).
     /// Used to avoid skipping stale file rows left behind by previous builds where files were tracked
     /// but session meta/search were not.
-    func fetchSearchReadyPaths(for source: String) throws -> Set<String> {
+    func fetchSearchReadyPaths(for source: String, formatVersion: Int = FeatureFlags.sessionSearchFormatVersion) throws -> Set<String> {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         let sql = """
         SELECT f.path
@@ -272,7 +280,8 @@ actor IndexDB {
         JOIN session_search s ON s.source = m.source AND s.session_id = m.session_id
         WHERE f.source = ?
           AND s.mtime = f.mtime
-          AND s.size = f.size;
+          AND s.size = f.size
+          AND s.format_version = ?;
         """
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
@@ -280,6 +289,7 @@ actor IndexDB {
         }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(stmt, 2, Int32(formatVersion))
         var out = Set<String>()
         while sqlite3_step(stmt) == SQLITE_ROW {
             if let c = sqlite3_column_text(stmt, 0) {
@@ -899,17 +909,18 @@ actor IndexDB {
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
-    func upsertSessionSearch(sessionID: String, source: String, mtime: Int64, size: Int64, text: String) throws {
+    func upsertSessionSearch(sessionID: String, source: String, mtime: Int64, size: Int64, text: String, formatVersion: Int = FeatureFlags.sessionSearchFormatVersion) throws {
         let now = Int64(Date().timeIntervalSince1970)
         let sql = """
-        INSERT INTO session_search(session_id, source, mtime, size, updated_at, text)
-        VALUES(?,?,?,?,?,?)
+        INSERT INTO session_search(session_id, source, mtime, size, updated_at, text, format_version)
+        VALUES(?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source,
           mtime=excluded.mtime,
           size=excluded.size,
           updated_at=excluded.updated_at,
-          text=excluded.text;
+          text=excluded.text,
+          format_version=excluded.format_version;
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -919,6 +930,7 @@ actor IndexDB {
         sqlite3_bind_int64(stmt, 4, size)
         sqlite3_bind_int64(stmt, 5, now)
         sqlite3_bind_text(stmt, 6, text, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(stmt, 7, Int32(formatVersion))
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_search") }
     }
 
@@ -1185,6 +1197,7 @@ struct IndexedFileRow {
     let path: String
     let mtime: Int64
     let size: Int64
+    let indexedAt: Int64
 }
 
 // MARK: - SQLite helper

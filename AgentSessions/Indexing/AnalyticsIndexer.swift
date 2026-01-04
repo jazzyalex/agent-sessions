@@ -60,7 +60,7 @@ actor AnalyticsIndexer {
                 let indexed = (try? await db.fetchIndexedFiles(for: source)) ?? []
                 indexedByPath.reserveCapacity(indexed.count)
                 for row in indexed { indexedByPath[row.path] = row }
-                searchReadyPaths = (try? await db.fetchSearchReadyPaths(for: source)) ?? []
+                searchReadyPaths = (try? await db.fetchSearchReadyPaths(for: source, formatVersion: FeatureFlags.sessionSearchFormatVersion)) ?? []
 
                 let currentPaths = Set(files.map(\.path))
                 let deletedPaths = indexedByPath.keys.filter { !currentPaths.contains($0) }
@@ -109,10 +109,19 @@ actor AnalyticsIndexer {
             return
         }
 
-        // A simple 60s stability guard for append-only Codex JSONL (skip very hot file)
+        // Codex JSONL is append-only and can be "hot" while the CLI is actively running.
+        // Instead of skipping indefinitely, throttle updates so search/index data stays fresh
+        // without constantly re-parsing the active file.
         if incremental, source == "codex" {
             let now = Int64(Date().timeIntervalSince1970)
-            if now - mtime < 60 { return }
+            let age = now - mtime
+            if age < 60 {
+                // Avoid reading while the file may still be mid-write.
+                if age < 3 { return }
+                // Reindex hot files at most once every ~30s.
+                let lastIndexedAt = indexedByPath[url.path]?.indexedAt ?? 0
+                if now - lastIndexedAt < 30 { return }
+            }
         }
 
         // Parse fully on a background task

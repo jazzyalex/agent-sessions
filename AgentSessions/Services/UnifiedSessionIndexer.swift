@@ -115,6 +115,14 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let analyticsRefreshTTLSeconds: TimeInterval = 5 * 60  // 5 minutes
     private let analyticsStartDelaySeconds: TimeInterval = 2.0     // small delay to avoid launch contention
 
+    // Periodic Codex search-corpus warmup while the app is open.
+    // Keeps the actively updating session searchable without manual refresh.
+    private var codexSearchWarmupTimer: DispatchSourceTimer? = nil
+    private var codexSearchWarmupTask: Task<Void, Never>? = nil
+    private var lastCodexSearchWarmupStartedAt: Date? = nil
+    private let codexSearchWarmupIntervalSeconds: TimeInterval = 20
+    private let codexSearchWarmupTTLSeconds: TimeInterval = 20
+
     // Debouncing for expensive operations
     private var recomputeDebouncer: DispatchWorkItem? = nil
     
@@ -434,6 +442,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             .store(in: &cancellables)
 
         updateLaunchState()
+        startCodexSearchWarmupTimerIfNeeded()
 
         // When probe cleanups succeed, refresh underlying providers and analytics rollups
         NotificationCenter.default.addObserver(forName: CodexProbeCleanup.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
@@ -446,6 +455,47 @@ final class UnifiedSessionIndexer: ObservableObject {
             guard let self = self else { return }
             if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
                 self.refresh()
+            }
+        }
+    }
+
+    private func startCodexSearchWarmupTimerIfNeeded() {
+        guard codexSearchWarmupTimer == nil else { return }
+        let queue = DispatchQueue.global(qos: .utility)
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + codexSearchWarmupIntervalSeconds,
+                       repeating: codexSearchWarmupIntervalSeconds,
+                       leeway: .seconds(5))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.kickCodexSearchWarmupIfNeeded()
+            }
+        }
+        timer.resume()
+        codexSearchWarmupTimer = timer
+    }
+
+    @MainActor
+    private func kickCodexSearchWarmupIfNeeded() {
+        guard codexAgentEnabled, includeCodex else { return }
+        if codex.isIndexing { return }
+        guard codexSearchWarmupTask == nil else { return }
+
+        let now = Date()
+        if let last = lastCodexSearchWarmupStartedAt, now.timeIntervalSince(last) < codexSearchWarmupTTLSeconds {
+            return
+        }
+        lastCodexSearchWarmupStartedAt = now
+
+        codexSearchWarmupTask = Task { [weak self] in
+            defer { Task { @MainActor [weak self] in self?.codexSearchWarmupTask = nil } }
+            do {
+                let db = try IndexDB()
+                let indexer = AnalyticsIndexer(db: db, enabledSources: ["codex"])
+                await indexer.refresh()
+            } catch {
+                // Non-fatal: search warmup is best-effort.
             }
         }
     }

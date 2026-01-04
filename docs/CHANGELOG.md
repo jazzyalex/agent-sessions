@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Search: Global search now continues scanning large tool outputs in the background after showing indexed results (can be disabled in Settings → Advanced).
 - Indexing: Analytics refresh is now incremental (skips unchanged files and removes deleted ones) to reduce startup work and keep search data current.
 - Startup: When Codex sessions are already indexed, the app now shows the hydrated list immediately while scanning for newly created sessions in the background.
+- Search: Instant indexing now captures more of long tool outputs (head + middle + tail slices) and keeps active Codex sessions searchable while they are updating.
 
 ### Fixed
 

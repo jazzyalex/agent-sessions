@@ -16,7 +16,8 @@ enum FeatureFlags {
     static let offloadTranscriptBuildInView = true
     static let enableFTSSearch = true
     static let ftsSearchLimit: Int = 2_000
-    static let instantToolOutputIndexMaxChars: Int = 8_000
+    static let instantToolOutputIndexMaxChars: Int = 32_000
+    static let sessionSearchFormatVersion: Int = 3
 
     static let searchSmallSizeBytes: Int = 10 * 1024 * 1024
 
