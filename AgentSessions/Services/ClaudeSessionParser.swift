@@ -84,6 +84,7 @@ final class ClaudeSessionParser {
 
         // Use per-file stable ID to match Sessions list expectations
         let fileID = forcedID ?? hash(path: url.path)
+        let nonMetaCount = events.filter { $0.kind != .meta }.count
         return Session(
             id: fileID,
             source: .claude,
@@ -92,7 +93,7 @@ final class ClaudeSessionParser {
             model: model,
             filePath: url.path,
             fileSizeBytes: size >= 0 ? size : nil,
-            eventCount: events.count,
+            eventCount: nonMetaCount,
             events: events,
             cwd: cwd,
             repoName: nil,

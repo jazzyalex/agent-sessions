@@ -207,7 +207,7 @@ final class DroidSessionIndexer: ObservableObject, SessionIndexerProtocol {
                         model: parsed.model ?? current.model,
                         filePath: parsed.filePath,
                         fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
-                        eventCount: max(current.eventCount, parsed.events.count),
+                        eventCount: max(current.eventCount, parsed.nonMetaCount),
                         events: parsed.events,
                         cwd: current.lightweightCwd ?? parsed.cwd,
                         repoName: current.repoName,

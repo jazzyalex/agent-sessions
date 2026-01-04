@@ -390,6 +390,7 @@ final class CopilotSessionParser {
         }
 
         let id = forcedID ?? sessionID ?? fallbackID(for: url)
+        let nonMetaCount = events.filter { $0.kind != .meta }.count
         return Session(
             id: id,
             source: .copilot,
@@ -398,7 +399,7 @@ final class CopilotSessionParser {
             model: model,
             filePath: url.path,
             fileSizeBytes: size >= 0 ? size : nil,
-            eventCount: events.count,
+            eventCount: nonMetaCount,
             events: events,
             cwd: cwd,
             repoName: nil,

@@ -414,18 +414,34 @@ final class ClaudeSessionIndexer: ObservableObject {
                 self.publishAfterCurrentUpdate { [weak self] in
                     guard let self else { return }
                     if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
-                        self.allSessions[idx] = fullSession
+                        let current = self.allSessions[idx]
+                        let merged = Session(
+                            id: fullSession.id,
+                            source: fullSession.source,
+                            startTime: fullSession.startTime ?? current.startTime,
+                            endTime: fullSession.endTime ?? current.endTime,
+                            model: fullSession.model ?? current.model,
+                            filePath: fullSession.filePath,
+                            fileSizeBytes: fullSession.fileSizeBytes ?? current.fileSizeBytes,
+                            eventCount: max(current.eventCount, fullSession.nonMetaCount),
+                            events: fullSession.events,
+                            cwd: current.lightweightCwd ?? fullSession.cwd,
+                            repoName: current.repoName,
+                            lightweightTitle: current.lightweightTitle ?? fullSession.lightweightTitle,
+                            lightweightCommands: current.lightweightCommands
+                        )
+                        self.allSessions[idx] = merged
 
                         // Update transcript cache for accurate search
                         let cache = self.transcriptCache
                         Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) {
                             let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
                             let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
-                                session: fullSession,
+                                session: merged,
                                 filters: filters,
                                 mode: .normal
                             )
-                            cache.set(fullSession.id, transcript: transcript)
+                            cache.set(merged.id, transcript: transcript)
                         }
                     }
                     self.isLoadingSession = false
