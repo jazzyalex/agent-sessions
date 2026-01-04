@@ -549,7 +549,21 @@ final class SessionIndexer: ObservableObject {
             }
 
             // Even if we have indexed sessions, scan for NEW files and parse them.
+            // If DB hydration succeeded, publish those sessions immediately so the UI is usable
+            // while we continue scanning for any newly created files in the background.
             let existingSessions = indexed
+            let presentedHydration = !existingSessions.isEmpty
+            if presentedHydration {
+                await MainActor.run {
+                    guard self.refreshToken == token else { return }
+                    self.allSessions = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: existingSessions, source: .codex)
+                    self.totalFiles = existingSessions.count
+                    self.filesProcessed = existingSessions.count
+                    self.isIndexing = false
+                    self.progressText = "Ready"
+                    self.launchPhase = .ready
+                }
+            }
             var existingPaths = Set(existingSessions.map { $0.filePath })
 
             #if DEBUG
@@ -588,10 +602,12 @@ final class SessionIndexer: ObservableObject {
                 guard self.refreshToken == token else { return }
                 self.totalFiles = existingSessions.count + sortedFiles.count
                 self.hasEmptyDirectory = foundIsEmpty
-                if !existingSessions.isEmpty {
-                    self.progressText = "Scanning \(sortedFiles.count) new files..."
+                if !presentedHydration {
+                    if !existingSessions.isEmpty {
+                        self.progressText = "Scanning \(sortedFiles.count) new files..."
+                    }
+                    self.launchPhase = .scanning
                 }
-                self.launchPhase = .scanning
             }
 
             let config = SessionIndexingEngine.ScanConfig(
@@ -603,6 +619,7 @@ final class SessionIndexer: ObservableObject {
                 shouldContinue: { self.refreshToken == token },
                 shouldMergeArchives: false,
                 onProgress: { processed, total in
+                    guard !presentedHydration else { return }
                     DispatchQueue.main.async {
                         guard self.refreshToken == token else { return }
                         self.filesProcessed = processed
@@ -639,46 +656,52 @@ final class SessionIndexer: ObservableObject {
                     DBG("✅ INDEXING DONE: total=\(allParsedSessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
                 }
 
-                // Start background transcript indexing for accurate search (delta-based).
-                // Only warm sessions that have real events, are not trivially empty/low,
-                // and whose (size,eventCount) signature changed since last prewarm.
-                let delta: [Session] = {
-                    let all = mergedWithArchives
-                    var out: [Session] = []
-                    out.reserveCapacity(all.count)
-                    for s in all {
-                        if s.events.isEmpty { continue }
-                        if s.messageCount <= 2 { continue }
-                        let size = s.fileSizeBytes ?? 0
-                        let sig = size ^ (s.eventCount << 16)
-                        if self.lastPrewarmSignatureByID[s.id] == sig { continue }
-                        self.lastPrewarmSignatureByID[s.id] = sig
-                        out.append(s)
-                        if out.count >= 256 { break } // bound initial work per refresh
-                    }
-                    return out
-                }()
-                if !delta.isEmpty {
-                    self.isProcessingTranscripts = true
-                    self.progressText = "Processing transcripts..."
-                    self.launchPhase = .transcripts
-                    let cache = self.transcriptCache
-                    let deltaToWarm = delta
-                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self, token] in
-                        LaunchProfiler.log("Codex.refresh: transcript prewarm start (delta=\(deltaToWarm.count))")
-                        await cache.generateAndCache(sessions: deltaToWarm)
-                        guard let strongSelf = self else { return }
-                        await MainActor.run {
-                            guard strongSelf.refreshToken == token else { return }
-                            LaunchProfiler.log("Codex.refresh: transcript prewarm complete")
-                            strongSelf.isProcessingTranscripts = false
-                            strongSelf.progressText = "Ready"
-                            strongSelf.launchPhase = .ready
-                        }
-                    }
-                } else {
+                if presentedHydration {
+                    self.isProcessingTranscripts = false
                     self.progressText = "Ready"
                     self.launchPhase = .ready
+                } else {
+                    // Start background transcript indexing for accurate search (delta-based).
+                    // Only warm sessions that have real events, are not trivially empty/low,
+                    // and whose (size,eventCount) signature changed since last prewarm.
+                    let delta: [Session] = {
+                        let all = mergedWithArchives
+                        var out: [Session] = []
+                        out.reserveCapacity(all.count)
+                        for s in all {
+                            if s.events.isEmpty { continue }
+                            if s.messageCount <= 2 { continue }
+                            let size = s.fileSizeBytes ?? 0
+                            let sig = size ^ (s.eventCount << 16)
+                            if self.lastPrewarmSignatureByID[s.id] == sig { continue }
+                            self.lastPrewarmSignatureByID[s.id] = sig
+                            out.append(s)
+                            if out.count >= 256 { break } // bound initial work per refresh
+                        }
+                        return out
+                    }()
+                    if !delta.isEmpty {
+                        self.isProcessingTranscripts = true
+                        self.progressText = "Processing transcripts..."
+                        self.launchPhase = .transcripts
+                        let cache = self.transcriptCache
+                        let deltaToWarm = delta
+                        Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self, token] in
+                            LaunchProfiler.log("Codex.refresh: transcript prewarm start (delta=\(deltaToWarm.count))")
+                            await cache.generateAndCache(sessions: deltaToWarm)
+                            guard let strongSelf = self else { return }
+                            await MainActor.run {
+                                guard strongSelf.refreshToken == token else { return }
+                                LaunchProfiler.log("Codex.refresh: transcript prewarm complete")
+                                strongSelf.isProcessingTranscripts = false
+                                strongSelf.progressText = "Ready"
+                                strongSelf.launchPhase = .ready
+                            }
+                        }
+                    } else {
+                        self.progressText = "Ready"
+                        self.launchPhase = .ready
+                    }
                 }
 
                 // Show lightweight sessions details (only for newly parsed ones)
