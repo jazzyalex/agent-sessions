@@ -92,34 +92,32 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
         hasEmptyDirectory = false
 
 	        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-	        Task.detached(priority: prio) { [weak self, token] in
-	            guard let self else { return }
+		        Task.detached(priority: prio) { [weak self, token] in
+		            guard let self else { return }
 
-	            let config = SessionIndexingEngine.ScanConfig(
-	                source: .gemini,
-	                discoverFiles: {
-	                    let files = self.discovery.discoverSessionFiles()
-                    LaunchProfiler.log("Gemini.refresh: file enumeration done (files=\(files.count))")
-                    return files
-                },
-                parseLightweight: { GeminiSessionParser.parseFile(at: $0) },
-	                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
-	                throttler: self.progressThrottler,
-	                onProgress: { processed, total in
-	                    Task { @MainActor [weak self] in
-	                        guard let self else { return }
-	                        self.totalFiles = total
-	                        self.hasEmptyDirectory = (total == 0)
-	                        self.filesProcessed = processed
-	                        if processed > 0 {
-	                            self.progressText = "Indexed \(processed)/\(total)"
-	                        }
-	                        if self.refreshToken == token, self.launchPhase == .hydrating {
-	                            self.launchPhase = .scanning
-	                        }
-	                    }
-	                }
-	            )
+		            let config = SessionIndexingEngine.ScanConfig(
+		                source: .gemini,
+		                discoverFiles: {
+		                    let files = self.discovery.discoverSessionFiles()
+	                    LaunchProfiler.log("Gemini.refresh: file enumeration done (files=\(files.count))")
+	                    return files
+	                },
+	                parseLightweight: { GeminiSessionParser.parseFile(at: $0) },
+		                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+		                throttler: self.progressThrottler,
+		                onProgress: { processed, total in
+		                    guard self.refreshToken == token else { return }
+		                    self.totalFiles = total
+		                    self.hasEmptyDirectory = (total == 0)
+		                    self.filesProcessed = processed
+		                    if processed > 0 {
+		                        self.progressText = "Indexed \(processed)/\(total)"
+		                    }
+		                    if self.launchPhase == .hydrating {
+		                        self.launchPhase = .scanning
+		                    }
+		                }
+		            )
 
             let result = await SessionIndexingEngine.hydrateOrScan(
 	                hydrate: { try await self.hydrateFromIndexDBIfAvailable() },
@@ -128,39 +126,40 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
 
 	            var previewTimes: [String: Date] = [:]
 	            previewTimes.reserveCapacity(result.sessions.count)
-	            for s in result.sessions {
-	                let url = URL(fileURLWithPath: s.filePath)
-	                if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
-	                   let m = rv.contentModificationDate {
-	                    previewTimes[s.id] = m
-	                }
-	            }
+		            for s in result.sessions {
+		                let url = URL(fileURLWithPath: s.filePath)
+		                if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+		                   let m = rv.contentModificationDate {
+		                    previewTimes[s.id] = m
+		                }
+		            }
+		            let previewTimesByID = previewTimes
 
-	            await MainActor.run {
-	                guard self.refreshToken == token else { return }
-	                switch result.kind {
+		            await MainActor.run {
+		                guard self.refreshToken == token else { return }
+		                switch result.kind {
 	                case .hydrated:
                     LaunchProfiler.log("Gemini.refresh: DB hydrate hit (sessions=\(result.sessions.count))")
                     self.allSessions = result.sessions
                     self.isIndexing = false
 	                    self.filesProcessed = result.sessions.count
-	                    self.totalFiles = result.sessions.count
-	                    self.progressText = "Loaded \(result.sessions.count) from index"
-	                    self.launchPhase = .ready
-	                    self.previewMTimeByID = previewTimes
-	                    #if DEBUG
-	                    print("[Launch] Hydrated Gemini sessions from DB: count=\(result.sessions.count)")
-	                    #endif
-	                    return
+		                    self.totalFiles = result.sessions.count
+		                    self.progressText = "Loaded \(result.sessions.count) from index"
+		                    self.launchPhase = .ready
+		                    self.previewMTimeByID = previewTimesByID
+		                    #if DEBUG
+		                    print("[Launch] Hydrated Gemini sessions from DB: count=\(result.sessions.count)")
+		                    #endif
+		                    return
 	                case .scanned:
 	                    break
 	                }
 
-	                LaunchProfiler.log("Gemini.refresh: sessions merged (total=\(result.sessions.count))")
-	                self.previewMTimeByID = previewTimes
-	                self.allSessions = result.sessions
-	                self.isIndexing = false
-                if FeatureFlags.throttleIndexingUIUpdates {
+		                LaunchProfiler.log("Gemini.refresh: sessions merged (total=\(result.sessions.count))")
+		                self.previewMTimeByID = previewTimesByID
+		                self.allSessions = result.sessions
+		                self.isIndexing = false
+	                if FeatureFlags.throttleIndexingUIUpdates {
                     self.filesProcessed = self.totalFiles
                     if self.totalFiles > 0 {
                         self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"

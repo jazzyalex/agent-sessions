@@ -1,7 +1,7 @@
 import Foundation
 
-enum SessionIndexingEngine {
-    struct Result {
+	enum SessionIndexingEngine {
+	    struct Result {
         enum Kind {
             case hydrated
             case scanned
@@ -12,42 +12,42 @@ enum SessionIndexingEngine {
         var totalFiles: Int
     }
 
-    struct ScanConfig {
-        var source: SessionSource
-        var discoverFiles: () -> [URL]
-        var shouldParseFile: (URL) -> Bool
-        var parseLightweight: (URL) -> Session?
-        var shouldThrottleProgress: Bool
-        var throttler: ProgressThrottler
-        var shouldContinue: () -> Bool
-        var shouldMergeArchives: Bool
-        var onProgress: (Int, Int) -> Void
-        var didParseSession: (Session, URL) -> Void
+	    struct ScanConfig {
+	        var source: SessionSource
+	        var discoverFiles: () -> [URL]
+	        var shouldParseFile: (URL) -> Bool
+	        var parseLightweight: (URL) -> Session?
+	        var shouldThrottleProgress: Bool
+	        var throttler: ProgressThrottler
+	        var shouldContinue: () -> Bool
+	        var shouldMergeArchives: Bool
+	        var onProgress: @MainActor (Int, Int) -> Void
+	        var didParseSession: (Session, URL) -> Void
 
-        init(
-            source: SessionSource,
-            discoverFiles: @escaping () -> [URL],
-            shouldParseFile: @escaping (URL) -> Bool = { _ in true },
-            parseLightweight: @escaping (URL) -> Session?,
-            shouldThrottleProgress: Bool,
-            throttler: ProgressThrottler,
-            shouldContinue: @escaping () -> Bool = { true },
-            shouldMergeArchives: Bool = true,
-            onProgress: @escaping (Int, Int) -> Void,
-            didParseSession: @escaping (Session, URL) -> Void = { _, _ in }
-        ) {
-            self.source = source
-            self.discoverFiles = discoverFiles
-            self.shouldParseFile = shouldParseFile
-            self.parseLightweight = parseLightweight
-            self.shouldThrottleProgress = shouldThrottleProgress
-            self.throttler = throttler
-            self.shouldContinue = shouldContinue
-            self.shouldMergeArchives = shouldMergeArchives
-            self.onProgress = onProgress
-            self.didParseSession = didParseSession
-        }
-    }
+	        init(
+	            source: SessionSource,
+	            discoverFiles: @escaping () -> [URL],
+	            shouldParseFile: @escaping (URL) -> Bool = { _ in true },
+	            parseLightweight: @escaping (URL) -> Session?,
+	            shouldThrottleProgress: Bool,
+	            throttler: ProgressThrottler,
+	            shouldContinue: @escaping () -> Bool = { true },
+	            shouldMergeArchives: Bool = true,
+	            onProgress: @escaping @MainActor (Int, Int) -> Void,
+	            didParseSession: @escaping (Session, URL) -> Void = { _, _ in }
+	        ) {
+	            self.source = source
+	            self.discoverFiles = discoverFiles
+	            self.shouldParseFile = shouldParseFile
+	            self.parseLightweight = parseLightweight
+	            self.shouldThrottleProgress = shouldThrottleProgress
+	            self.throttler = throttler
+	            self.shouldContinue = shouldContinue
+	            self.shouldMergeArchives = shouldMergeArchives
+	            self.onProgress = onProgress
+	            self.didParseSession = didParseSession
+	        }
+	    }
 
     static func hydrateOrScan(
         hydrate: (() async throws -> [Session]?)? = nil,
@@ -63,10 +63,10 @@ enum SessionIndexingEngine {
             if let indexed, !indexed.isEmpty {
                 return Result(kind: .hydrated, sessions: indexed, totalFiles: indexed.count)
             }
-        }
+	        }
 
-        let files = config.discoverFiles()
-        config.onProgress(0, files.count)
+	        let files = config.discoverFiles()
+	        await config.onProgress(0, files.count)
 
         var sessions: [Session] = []
         sessions.reserveCapacity(files.count)
@@ -81,14 +81,14 @@ enum SessionIndexingEngine {
                 }
             }
 
-            if config.shouldThrottleProgress {
-                if config.throttler.incrementAndShouldFlush() {
-                    config.onProgress(index + 1, files.count)
-                }
-            } else {
-                config.onProgress(index + 1, files.count)
-            }
-        }
+	            if config.shouldThrottleProgress {
+	                if config.throttler.incrementAndShouldFlush() {
+	                    await config.onProgress(index + 1, files.count)
+	                }
+	            } else {
+	                await config.onProgress(index + 1, files.count)
+	            }
+	        }
 
         let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
         let final = config.shouldMergeArchives
