@@ -112,28 +112,26 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol, @un
         hasEmptyDirectory = false
 
         let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-        Task.detached(priority: prio) { [weak self, token] in
-            guard let self else { return }
+	        Task.detached(priority: prio) { [weak self, token] in
+	            guard let self else { return }
 
-	            let config = SessionIndexingEngine.ScanConfig(
-	                source: .copilot,
-	                discoverFiles: { self.discovery.discoverSessionFiles() },
-	                parseLightweight: { CopilotSessionParser.parseFile(at: $0) },
-	                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
-	                throttler: self.progressThrottler,
-	                onProgress: { processed, total in
-	                    Task { @MainActor [weak self] in
-	                        guard let self, self.refreshToken == token else { return }
-	                        self.totalFiles = total
-	                        self.filesProcessed = processed
-	                        self.hasEmptyDirectory = (total == 0)
-	                        if processed > 0 {
-	                            self.progressText = "Indexed \(processed)/\(total)"
-	                        }
-	                        if self.launchPhase == .hydrating { self.launchPhase = .scanning }
-	                    }
-	                }
-	            )
+		            let config = SessionIndexingEngine.ScanConfig(
+		                source: .copilot,
+		                discoverFiles: { self.discovery.discoverSessionFiles() },
+		                parseLightweight: { CopilotSessionParser.parseFile(at: $0) },
+		                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+		                throttler: self.progressThrottler,
+		                onProgress: { processed, total in
+		                    guard self.refreshToken == token else { return }
+		                    self.totalFiles = total
+		                    self.filesProcessed = processed
+		                    self.hasEmptyDirectory = (total == 0)
+		                    if processed > 0 {
+		                        self.progressText = "Indexed \(processed)/\(total)"
+		                    }
+		                    if self.launchPhase == .hydrating { self.launchPhase = .scanning }
+		                }
+		            )
 
             let result = await SessionIndexingEngine.hydrateOrScan(config: config)
             await MainActor.run {

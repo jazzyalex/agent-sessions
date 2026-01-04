@@ -88,18 +88,12 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
             }
 
-	            sectionHeader("Search")
-	            VStack(alignment: .leading, spacing: 12) {
-                    let toolIOIndexEnabled: Bool = {
-                        UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil
-                            ? true
-                            : UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
-                    }()
-
-                    Toggle("Index full tool I/O for recent sessions", isOn: Binding(
-                        get: {
-                            UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil
-                                ? true
+		            sectionHeader("Search")
+		            VStack(alignment: .leading, spacing: 12) {
+	                    Toggle("Index full tool I/O for recent sessions", isOn: Binding(
+	                        get: {
+	                            UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil
+	                                ? true
                                 : UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
                         },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) }

@@ -190,16 +190,17 @@ final class SearchCoordinator: ObservableObject {
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
                     let deepEnabled = self.deepToolOutputsEnabled()
-                    var mergedIDs = ids
-                    var mergedSet = Set(ids)
-                    var out = mergedIDs.compactMap { byID[$0] }
-                    var seen = Set(out.map(\.id))
-                    let needsUnindexedScan = candidates.contains(where: { !indexedIDs.contains($0.id) })
-                    await MainActor.run {
-                        guard self.runID == newRunID else { return }
-                        self.results = out
-                    }
-                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
+	                    var mergedIDs = ids
+	                    var mergedSet = Set(ids)
+	                    var out = mergedIDs.compactMap { byID[$0] }
+	                    var seen = Set(out.map(\.id))
+	                    let needsUnindexedScan = candidates.contains(where: { !indexedIDs.contains($0.id) })
+	                    let initialOut = out
+	                    await MainActor.run {
+	                        guard self.runID == newRunID else { return }
+	                        self.results = initialOut
+	                    }
+	                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
                     // Append tool I/O FTS hits after the initial UI update to keep Instant responsive.
                     if self.toolIOIndexEnabled(), mergedIDs.count < FeatureFlags.ftsSearchLimit {

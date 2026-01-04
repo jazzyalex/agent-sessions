@@ -200,9 +200,9 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 }
             }
 
-            let fm = FileManager.default
-            let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
-            let existingSessions = indexed.filter(exists)
+	            let fm = FileManager.default
+	            let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
+	            let existingSessions = indexed.filter(exists)
 	            let existingPaths = Set(existingSessions.map { $0.filePath })
 
             #if DEBUG
@@ -283,15 +283,16 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 	                    self.progressText = "Processing transcripts..."
 	                    self.launchPhase = .transcripts
 	                    let cache = self.transcriptCache
-	                    let finishPrewarm: @Sendable @MainActor () -> Void = { [weak self, token] in
-	                        guard let self, self.refreshToken == token else { return }
-	                        LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
-	                        self.publishAfterCurrentUpdate {
-	                            self.isProcessingTranscripts = false
-	                            self.progressText = "Ready"
-	                            self.launchPhase = .ready
-	                        }
-	                    }
+		                    let finishPrewarm: @Sendable @MainActor () -> Void = { [weak self, token] in
+		                        guard let self, self.refreshToken == token else { return }
+		                        LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
+		                        self.publishAfterCurrentUpdate { [weak self, token] in
+		                            guard let self, self.refreshToken == token else { return }
+		                            self.isProcessingTranscripts = false
+		                            self.progressText = "Ready"
+		                            self.launchPhase = .ready
+		                        }
+		                    }
 	                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [delta, cache, finishPrewarm] in
 	                        LaunchProfiler.log("Claude.refresh: transcript prewarm start (delta=\(delta.count))")
 	                        await cache.generateAndCache(sessions: delta)
