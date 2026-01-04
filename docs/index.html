@@ -133,6 +133,19 @@
       border: 1px dashed #d0d7de;
     }
 
+    .card.double-width {
+      grid-column: span 2;
+    }
+
+    @media (max-width: 600px) {
+      .card.double-width {
+        grid-column: span 1;
+      }
+      .card.double-width ul {
+        column-count: 1;
+      }
+    }
+
     footer {
       text-align: center;
       margin: 40px 0 20px;
@@ -225,13 +238,18 @@
 brew install --cask agent-sessions</code></pre>
 
     <div class="features">
-      <div class="card">
-        <h3>Onboarding Tours 🎄</h3>
-        <p>Interactive onboarding for new users and skippable update tours for major releases. Learn key features through guided walkthroughs.</p>
-      </div>
-      <div class="card">
+
+      <div class="card double-width">
         <h3>6 Agents Supported</h3>
-        <p>Browse Codex CLI, Claude Code, Gemini CLI, GitHub Copilot CLI, Droid (Factory CLI), and OpenCode side-by-side. Star favorites and filter by source.</p>
+        <p>Browse all your agent sessions in a unified window. Enable only your favorite agents and then filter sessions by agent instantly.</p>
+        <ul style="margin: 12px 0 0 0; padding-left: 20px; line-height: 1.8; column-count: 2; column-gap: 20px;">
+          <li><strong>Codex CLI</strong></li>
+          <li><strong>Claude Code</strong></li>
+          <li><strong>OpenCode</strong></li>
+          <li><strong>Factory Droid CLI</strong></li>
+          <li><strong>GitHub Copilot CLI</strong></li>
+          <li><strong>Gemini CLI</strong></li>
+        </ul>
       </div>
       <div class="card">
         <h3>Unified Search</h3>
