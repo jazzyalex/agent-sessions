@@ -359,36 +359,21 @@ struct UnifiedSessionsView: View {
             .width(min: showSizeColumn ? 72 : 0, ideal: showSizeColumn ? 80 : 0, max: showSizeColumn ? 100 : 0)
 
             // Removed separate Refresh column to avoid churn
-        }
-        .id(columnLayoutID)
-        .tableStyle(.inset(alternatesRowBackgrounds: true))
-        .environment(\.defaultMinListRowHeight, 22)
-        .simultaneousGesture(TapGesture().onEnded {
-            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
-        })
-        }
-        // Bottom overlay to avoid changing intrinsic size of the list pane
-        .overlay(alignment: .bottom) {
-            if searchCoordinator.isRunning {
-                let p = searchCoordinator.progress
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text(progressLineText(p))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color(nsColor: .underPageBackgroundColor))
-                .overlay(Divider(), alignment: .top)
-                .allowsHitTesting(false)
-            }
-        }
-        .contextMenu(forSelectionType: String.self) { ids in
-            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
-                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
-                Divider()
+	        }
+	        .id(columnLayoutID)
+	        .tableStyle(.inset(alternatesRowBackgrounds: true))
+	        .environment(\.defaultMinListRowHeight, 22)
+	        .simultaneousGesture(TapGesture().onEnded {
+	            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+	        })
+	        }
+	        .safeAreaInset(edge: .bottom, spacing: 0) {
+	            listStatusBar
+	        }
+	        .contextMenu(forSelectionType: String.self) { ids in
+	            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
+	                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
+	                Divider()
                 if s.source == .codex || s.source == .claude {
                     Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
                         .keyboardShortcut("r", modifiers: [.command, .control])
@@ -482,13 +467,53 @@ struct UnifiedSessionsView: View {
                 // Reset the flag on the next runloop to ensure onChange handlers have observed it
                 DispatchQueue.main.async { isAutoSelectingFromSearch = false }
             }
-        }
-    }
+	        }
+	    }
 
-    // MARK: - Git Inspector Integration (Unified View)
-    private var isGitInspectorEnabled: Bool {
-        let flagEnabled = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector)
-        if flagEnabled { return true }
+	    private var listStatusBar: some View {
+	        let searchQuery = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+	        let isSearchActive = !searchQuery.isEmpty || searchCoordinator.isRunning
+
+	        let visibleCount = cachedRows.count
+	        let countLabel: String = {
+	            if isSearchActive { return "\(visibleCount) results" }
+	            return "Showing \(visibleCount) session" + (visibleCount == 1 ? "" : "s")
+	        }()
+
+	        return HStack(spacing: 8) {
+	            if searchCoordinator.isRunning {
+	                let p = searchCoordinator.progress
+	                ProgressView().controlSize(.small)
+	                Text(progressLineText(p))
+	                    .lineLimit(1)
+	            } else if unified.launchState.overallPhase < .ready {
+	                ProgressView().controlSize(.small)
+	                Text(unified.launchState.overallPhase.statusDescription)
+	                    .lineLimit(1)
+	            } else if unified.isIndexing || unified.isProcessingTranscripts {
+	                ProgressView().controlSize(.small)
+	                Text(unified.isProcessingTranscripts ? "Processing transcripts…" : "Indexing sessions…")
+	                    .lineLimit(1)
+	            }
+
+	            Spacer()
+
+	            Text(countLabel)
+	                .monospacedDigit()
+	        }
+	        .font(.system(size: 12))
+	        .foregroundStyle(.secondary)
+	        .padding(.horizontal, 8)
+	        .padding(.vertical, 4)
+	        .background(Color(nsColor: .underPageBackgroundColor))
+	        .overlay(Divider(), alignment: .top)
+	        .allowsHitTesting(false)
+	    }
+
+	    // MARK: - Git Inspector Integration (Unified View)
+	    private var isGitInspectorEnabled: Bool {
+	        let flagEnabled = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector)
+	        if flagEnabled { return true }
         if let env = ProcessInfo.processInfo.environment["AGENTSESSIONS_FEATURES"], env.contains("gitInspector") { return true }
         return false
     }
