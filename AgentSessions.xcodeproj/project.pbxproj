@@ -20,6 +20,7 @@
 		1AB05D2296DC475580CB52EF /* CodexResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */; };
 		1B537F76060E9F6BAE9BBF7E /* Stage0PerfHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 812D088A294DD367D06A8842 /* Stage0PerfHarnessTests.swift */; };
 		1D0AD620E3E044DB875B125B /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B86A8EFF02D440EADEB98F0 /* UpdateChecker.swift */; };
+		1F48C51A005A11E7E6AA9E8C /* CockpitFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8CF4F3DCC199AB22C442D83 /* CockpitFooterView.swift */; };
 		209078C2EE7C8AB87C8E61A8 /* ClaudeProbeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A27D0637DFF720558181BE5D /* ClaudeProbeConfig.swift */; };
 		22047AEA4AB1CEB601B2D6D9 /* PreferencesView+Layout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FDF7F775847439915BB0C6C /* PreferencesView+Layout.swift */; };
 		24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */; };
@@ -402,6 +403,7 @@
 		E401FF3CCED67F77E3FD9521 /* OnboardingSheetView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Onboarding/Views/OnboardingSheetView.swift; sourceTree = SOURCE_ROOT; };
 		E6D01D75E98CEA8938D4C108 /* ColumnVisibilityStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColumnVisibilityStoreTests.swift; path = AgentSessionsTests/ColumnVisibilityStoreTests.swift; sourceTree = SOURCE_ROOT; };
 		E8BC1E7E1250DBB8C91387AC /* UsageResetText.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/UsageResetText.swift; sourceTree = SOURCE_ROOT; };
+		E8CF4F3DCC199AB22C442D83 /* CockpitFooterView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/CockpitFooterView.swift; sourceTree = SOURCE_ROOT; };
 		EAD4071F08354BC681A6E5D9 /* GitHubClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GitHubClient.swift; path = AgentSessions/Update/GitHubClient.swift; sourceTree = SOURCE_ROOT; };
 		F14273196C77AAA12FFDF3CE /* PreferencesView+General.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "PreferencesView+General.swift"; path = "AgentSessions/Views/Preferences/PreferencesView+General.swift"; sourceTree = SOURCE_ROOT; };
 		F188663773714C61A568F7AA /* LoadingAnimationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LoadingAnimationView.swift; path = AgentSessions/Views/LoadingAnimationView.swift; sourceTree = SOURCE_ROOT; };
@@ -859,6 +861,7 @@
 				1F6B29196A4FDB37934D43CC /* PinnedSessionsView.swift */,
 				815DCA7C60A7B56BC748C548 /* CopilotTranscriptView.swift */,
 				ADAFE9DA5E86250005634F7A /* DroidTranscriptView.swift */,
+				E8CF4F3DCC199AB22C442D83 /* CockpitFooterView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -1389,6 +1392,7 @@
 				A9BAC4A46E953DF0B8B146C3 /* SessionIndexingEngine.swift in Sources */,
 				B64A52F807828E9701BC3739 /* SearchSessionStore.swift in Sources */,
 				279FB3EB9AA895168F8BC9C9 /* SessionSearchTextBuilder.swift in Sources */,
+				1F48C51A005A11E7E6AA9E8C /* CockpitFooterView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
