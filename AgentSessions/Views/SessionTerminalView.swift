@@ -845,13 +845,131 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let colorScheme: ColorScheme
     let monochrome: Bool
 
-    class Coordinator {
+    final class Coordinator: NSObject, NSTextViewDelegate, NSSpeechSynthesizerDelegate {
         var lineRanges: [Int: NSRange] = [:]
         var lastLinesSignature: Int = 0
         var lastMatchSignature: Int = 0
         var lastFontSize: CGFloat = 0
         var lastMonochrome: Bool = false
         var lastScrollToken: Int = 0
+
+        var lines: [TerminalLine] = []
+        var orderedLineRanges: [NSRange] = []
+
+        private weak var activeTextView: NSTextView?
+        private var activeBlockText: String = ""
+        private let synthesizer: NSSpeechSynthesizer = NSSpeechSynthesizer()
+
+        override init() {
+            super.init()
+            synthesizer.delegate = self
+        }
+
+        func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+            self.activeTextView = textView
+            self.activeBlockText = blockText(at: charIndex) ?? ""
+
+            let out = NSMenu(title: "Transcript")
+
+            let copySelection = NSMenuItem(title: "Copy", action: #selector(copySelectionOnly(_:)), keyEquivalent: "")
+            copySelection.target = self
+            copySelection.isEnabled = textView.selectedRange().length > 0
+            out.addItem(copySelection)
+
+            let copyBlock = NSMenuItem(title: "Copy Block", action: #selector(copyBlock(_:)), keyEquivalent: "")
+            copyBlock.target = self
+            copyBlock.isEnabled = !activeBlockText.isEmpty
+            out.addItem(copyBlock)
+
+            out.addItem(.separator())
+
+            let speak = NSMenuItem(title: "Speak", action: #selector(speakSelectionOrBlock(_:)), keyEquivalent: "")
+            speak.target = self
+            speak.isEnabled = textView.selectedRange().length > 0 || !activeBlockText.isEmpty
+            out.addItem(speak)
+
+            let stop = NSMenuItem(title: "Stop Speaking", action: #selector(stopSpeaking(_:)), keyEquivalent: "")
+            stop.target = self
+            stop.isEnabled = synthesizer.isSpeaking
+            out.addItem(stop)
+
+            return out
+        }
+
+        @objc private func copySelectionOnly(_ sender: Any?) {
+            guard let tv = activeTextView else { return }
+            guard tv.selectedRange().length > 0 else { return }
+            tv.copy(sender)
+        }
+
+        @objc private func copyBlock(_ sender: Any?) {
+            guard !activeBlockText.isEmpty else { return }
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(activeBlockText, forType: .string)
+        }
+
+        @objc private func speakSelectionOrBlock(_ sender: Any?) {
+            guard let tv = activeTextView else { return }
+            let selection = tv.selectedRange()
+            let text: String = {
+                if selection.length > 0, let s = (tv.string as NSString?)?.substring(with: selection) {
+                    return s
+                }
+                return activeBlockText
+            }()
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+            if synthesizer.isSpeaking {
+                synthesizer.stopSpeaking()
+            }
+            synthesizer.startSpeaking(text)
+        }
+
+        @objc private func stopSpeaking(_ sender: Any?) {
+            synthesizer.stopSpeaking()
+        }
+
+        private func blockText(at charIndex: Int) -> String? {
+            guard !lines.isEmpty else { return nil }
+            guard let lineIndex = lineIndex(at: charIndex) else { return nil }
+            let block = lines[lineIndex].blockIndex
+
+            var start = lineIndex
+            while start > 0, lines[start - 1].blockIndex == block {
+                start -= 1
+            }
+            var end = lineIndex
+            while end + 1 < lines.count, lines[end + 1].blockIndex == block {
+                end += 1
+            }
+
+            let chunk = lines[start...end].map(\.text).joined(separator: "\n")
+            let trimmed = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        private func lineIndex(at charIndex: Int) -> Int? {
+            let ranges = orderedLineRanges
+            guard !ranges.isEmpty else { return nil }
+
+            var low = 0
+            var high = ranges.count - 1
+            while low <= high {
+                let mid = (low + high) / 2
+                let r = ranges[mid]
+                if charIndex < r.location {
+                    high = mid - 1
+                    continue
+                }
+                if charIndex >= (r.location + r.length) {
+                    low = mid + 1
+                    continue
+                }
+                return mid
+            }
+            return nil
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -867,6 +985,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         textView.isEditable = false
         textView.isSelectable = true
         textView.usesFindPanel = true
+        textView.delegate = context.coordinator
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.textContainer?.widthTracksTextView = true
         textView.isHorizontallyResizable = false
@@ -938,6 +1057,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     private func applyContent(to textView: NSTextView, context: Context) {
         let (attr, ranges) = buildAttributedString()
         context.coordinator.lineRanges = ranges
+        context.coordinator.lines = lines
+        context.coordinator.orderedLineRanges = lines.compactMap { ranges[$0.id] }
         textView.textStorage?.setAttributedString(attr)
 
         // Ensure container tracks width
