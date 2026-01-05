@@ -93,7 +93,7 @@ struct CockpitFooterView: View {
         .background(colorScheme == .dark ? Color(hex: "252526") : Color(hex: "007acc"))
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.3))
+                .fill(Color.black.opacity(0.3))
                 .frame(height: 1)
         }
     }
@@ -135,15 +135,30 @@ private struct QuotaWidget: View {
     let data: QuotaData
     let isDarkMode: Bool
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
 
-    private var fiveHourUsedPercent: Int { mode.barUsedPercent(fromLeft: data.fiveHourRemainingPercent) }
-    private var weekUsedPercent: Int { mode.barUsedPercent(fromLeft: data.weekRemainingPercent) }
+    private var fiveHourLeftPercent: Int { clampPercent(data.fiveHourRemainingPercent) }
+    private var weekLeftPercent: Int { clampPercent(data.weekRemainingPercent) }
+    private var fiveHourUsedPercent: Int { clampPercent(100 - fiveHourLeftPercent) }
+    private var weekUsedPercent: Int { clampPercent(100 - weekLeftPercent) }
     private var bottleneckUsedPercent: Int { max(fiveHourUsedPercent, weekUsedPercent) }
 
     private enum BottleneckKind { case fiveHour, week }
     private var bottleneckKind: BottleneckKind { (fiveHourUsedPercent >= weekUsedPercent) ? .fiveHour : .week }
+    private var bottleneckLeftPercent: Int {
+        switch bottleneckKind {
+        case .fiveHour: return fiveHourLeftPercent
+        case .week: return weekLeftPercent
+        }
+    }
+    private var bottleneckFillPercent: Int {
+        switch mode {
+        case .left: return bottleneckLeftPercent
+        case .used: return bottleneckUsedPercent
+        }
+    }
     private var isCritical: Bool {
         switch bottleneckKind {
         case .fiveHour:
@@ -162,11 +177,17 @@ private struct QuotaWidget: View {
     }
 
     private var fiveHourResetDisplayText: String {
-        "↻5h \(formatRelativeTimeUntil(fiveHourResetDate))"
+        let rel = formatRelativeTimeUntil(fiveHourResetDate)
+        if rel != "—" { return "↻5h \(rel)" }
+        let fallback = UsageResetText.displayText(kind: "5h", source: data.provider.usageSource, raw: data.fiveHourResetText)
+        return fallback.isEmpty ? "↻5h —" : "↻5h \(fallback)"
     }
 
     private var weekResetDisplayText: String {
-        "↻Wk \(formatWeeklyReset(weekResetDate))"
+        let s = formatWeeklyReset(weekResetDate)
+        if s != "—" { return "↻Wk \(s)" }
+        let fallback = UsageResetText.displayText(kind: "Wk", source: data.provider.usageSource, raw: data.weekResetText)
+        return fallback.isEmpty ? "↻Wk —" : "↻Wk \(fallback)"
     }
 
     private var fiveHourTimeRemainingText: String {
@@ -184,8 +205,7 @@ private struct QuotaWidget: View {
 
     private var barFillColor: Color {
         if isCritical { return .red }
-        if data.provider == .codex { return .white }
-        return data.provider.tint
+        return .white
     }
 
     var body: some View {
@@ -194,9 +214,11 @@ private struct QuotaWidget: View {
                 .frame(width: 14, height: 14)
 
             MiniUsageBar(
+                percentFill: bottleneckFillPercent,
                 percentUsed: bottleneckUsedPercent,
                 tint: barFillColor,
-                isDarkMode: isDarkMode
+                isDarkMode: isDarkMode,
+                reduceMotion: reduceMotion
             )
 
             HStack(spacing: 6) {
@@ -208,18 +230,22 @@ private struct QuotaWidget: View {
                 DividerText()
                 Text(weekResetDisplayText)
             }
-            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
             .foregroundStyle(metricForeground)
             .lineLimit(1)
         }
         .padding(.horizontal, 8)
         .frame(height: 20)
-        .background(Color.white.opacity(isDarkMode ? 0.10 : 0.08))
+        .background(Color.white.opacity(isDarkMode ? 0.14 : 0.08))
         .overlay(
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .stroke(Color.white.opacity(isDarkMode ? 0.08 : 0.05), lineWidth: 1)
+                .stroke(Color.white.opacity(isDarkMode ? 0.10 : 0.05), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+    }
+
+    private func clampPercent(_ value: Int) -> Int {
+        max(0, min(100, value))
     }
 
     private func formatHoursUntilReset(_ date: Date?, now: Date = Date()) -> String {
@@ -270,11 +296,22 @@ private struct DividerText: View {
 }
 
 private struct MiniUsageBar: View {
+    let percentFill: Int
     let percentUsed: Int
     let tint: Color
     let isDarkMode: Bool
+    let reduceMotion: Bool
 
-    private var clamped: CGFloat { CGFloat(max(0, min(100, percentUsed))) / 100.0 }
+    @State private var isBlinking: Bool = false
+
+    private var clampedFill: CGFloat { CGFloat(max(0, min(100, percentFill))) / 100.0 }
+    private var blinkDuration: Double? {
+        if reduceMotion { return nil }
+        if percentUsed >= 95 { return 0.35 }
+        if percentUsed >= 90 { return 0.55 }
+        if percentUsed >= 80 { return 0.9 }
+        return nil
+    }
 
     var body: some View {
         Capsule(style: .continuous)
@@ -283,7 +320,18 @@ private struct MiniUsageBar: View {
             .overlay(alignment: .leading) {
                 Capsule(style: .continuous)
                     .fill(tint)
-                    .frame(width: max(1, 24 * clamped), height: 4)
+                    .frame(width: max(0, 24 * clampedFill), height: 4)
+                    .opacity((blinkDuration == nil) ? 1 : (isBlinking ? 0.35 : 1))
+                    .task(id: blinkDuration) {
+                        guard let d = blinkDuration else {
+                            isBlinking = false
+                            return
+                        }
+                        isBlinking = false
+                        withAnimation(.easeInOut(duration: d).repeatForever(autoreverses: true)) {
+                            isBlinking = true
+                        }
+                    }
             }
     }
 }
@@ -294,15 +342,15 @@ private struct SessionCountView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if let freshnessText, !freshnessText.isEmpty {
-                Text(freshnessText)
-                    .monospacedDigit()
-                DividerText()
-            }
             Text(text)
                 .monospacedDigit()
+            if let freshnessText, !freshnessText.isEmpty {
+                DividerText()
+                Text(freshnessText)
+                    .monospacedDigit()
+            }
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(.system(size: 12, weight: .medium))
         .foregroundStyle(Color.white.opacity(0.6))
         .lineLimit(1)
     }
@@ -337,7 +385,7 @@ private struct CockpitFooterPreviewHost: View {
             Spacer()
             CockpitFooterView(
                 isBusy: isBusy,
-                statusText: isBusy ? "Indexing sessions…" : "Ready",
+                statusText: isBusy ? "Indexing sessions…" : "",
                 quotas: [
                     QuotaData(provider: .codex, fiveHourRemainingPercent: 20, fiveHourResetText: "resets 14:00", weekRemainingPercent: 8, weekResetText: "resets 2/9/2026, 2:00 PM"),
                     QuotaData(provider: .claude, fiveHourRemainingPercent: 55, fiveHourResetText: "Jan 5 at 2pm", weekRemainingPercent: 45, weekResetText: "Jan 9 at 2pm"),
