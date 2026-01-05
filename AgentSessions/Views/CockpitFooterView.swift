@@ -1,5 +1,19 @@
 import SwiftUI
 
+private enum CockpitFooterTheme {
+    static let height: CGFloat = 26
+    static let horizontalPadding: CGFloat = 10
+
+    static let lightBackground = Color(hex: "007acc")
+    static let darkBackground = Color(hex: "252526")
+
+    static let topBorder = Color.black.opacity(0.3)
+
+    static func quotaBackgroundOpacity(isDark: Bool) -> Double { isDark ? 0.14 : 0.08 }
+    static func quotaBorderOpacity(isDark: Bool) -> Double { isDark ? 0.10 : 0.05 }
+    static func barTrackOpacity(isDark: Bool) -> Double { isDark ? 0.25 : 0.20 }
+}
+
 struct QuotaData: Equatable {
     enum Provider: Equatable {
         case codex
@@ -27,6 +41,14 @@ struct QuotaData: Equatable {
     /// Stored as percent remaining (\"left\"), consistent with usage models.
     var weekRemainingPercent: Int
     var weekResetText: String
+
+    func resetDate(kind: String, raw: String) -> Date? {
+        UsageResetText.resetDate(kind: kind, source: provider.usageSource, raw: raw)
+    }
+
+    func resetDisplayFallback(kind: String, raw: String) -> String {
+        UsageResetText.displayText(kind: kind, source: provider.usageSource, raw: raw)
+    }
 
     @MainActor
     static func codex(from model: CodexUsageModel) -> QuotaData {
@@ -59,17 +81,20 @@ struct CockpitFooterView: View {
     let quotas: [QuotaData]
     let sessionCountText: String
     let freshnessText: String?
+    let usageDisplayModeOverride: UsageDisplayMode?
 
     init(isBusy: Bool,
          statusText: String,
          quotas: [QuotaData],
          sessionCountText: String,
-         freshnessText: String? = nil) {
+         freshnessText: String? = nil,
+         usageDisplayModeOverride: UsageDisplayMode? = nil) {
         self.isBusy = isBusy
         self.statusText = statusText
         self.quotas = quotas
         self.sessionCountText = sessionCountText
         self.freshnessText = freshnessText
+        self.usageDisplayModeOverride = usageDisplayModeOverride
     }
 
     var body: some View {
@@ -80,7 +105,7 @@ struct CockpitFooterView: View {
 
             HStack(spacing: 10) {
                 ForEach(Array(quotas.enumerated()), id: \.offset) { _, q in
-                    QuotaWidget(data: q, isDarkMode: colorScheme == .dark)
+                    QuotaWidget(data: q, isDarkMode: colorScheme == .dark, modeOverride: usageDisplayModeOverride)
                 }
             }
 
@@ -88,12 +113,12 @@ struct CockpitFooterView: View {
 
             SessionCountView(text: sessionCountText, freshnessText: freshnessText)
         }
-        .padding(.horizontal, 10)
-        .frame(height: 26)
-        .background(colorScheme == .dark ? Color(hex: "252526") : Color(hex: "007acc"))
+        .padding(.horizontal, CockpitFooterTheme.horizontalPadding)
+        .frame(height: CockpitFooterTheme.height)
+        .background(colorScheme == .dark ? CockpitFooterTheme.darkBackground : CockpitFooterTheme.lightBackground)
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(Color.black.opacity(0.3))
+                .fill(CockpitFooterTheme.topBorder)
                 .frame(height: 1)
         }
     }
@@ -134,78 +159,77 @@ private struct IndexingIndicator: View {
 private struct QuotaWidget: View {
     let data: QuotaData
     let isDarkMode: Bool
+    let modeOverride: UsageDisplayMode?
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
-
-    private var fiveHourLeftPercent: Int { clampPercent(data.fiveHourRemainingPercent) }
-    private var weekLeftPercent: Int { clampPercent(data.weekRemainingPercent) }
-    private var fiveHourUsedPercent: Int { clampPercent(100 - fiveHourLeftPercent) }
-    private var weekUsedPercent: Int { clampPercent(100 - weekLeftPercent) }
-    private var bottleneckUsedPercent: Int { max(fiveHourUsedPercent, weekUsedPercent) }
+    private var mode: UsageDisplayMode { modeOverride ?? (UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left) }
 
     private enum BottleneckKind { case fiveHour, week }
-    private var bottleneckKind: BottleneckKind { (fiveHourUsedPercent >= weekUsedPercent) ? .fiveHour : .week }
-    private var bottleneckLeftPercent: Int {
-        switch bottleneckKind {
-        case .fiveHour: return fiveHourLeftPercent
-        case .week: return weekLeftPercent
-        }
-    }
-    private var bottleneckFillPercent: Int {
-        switch mode {
-        case .left: return bottleneckLeftPercent
-        case .used: return bottleneckUsedPercent
-        }
-    }
-    private var isCritical: Bool {
-        switch bottleneckKind {
-        case .fiveHour:
-            return fiveHourUsedPercent >= 80
-        case .week:
-            return weekUsedPercent >= 90
-        }
+    private struct Presentation: Equatable {
+        var barFillPercent: Int
+        var barFillColor: Color
+        var metricForeground: Color
+
+        var bottleneckUsedPercent: Int
+
+        var fiveHourTimeRemainingText: String
+        var weekPercentLabelText: String
+        var fiveHourResetDisplayText: String
+        var weekResetDisplayText: String
     }
 
-    private var fiveHourResetDate: Date? {
-        UsageResetText.resetDate(kind: "5h", source: data.provider.usageSource, raw: data.fiveHourResetText)
-    }
+    private var presentation: Presentation {
+        let fiveLeft = clampPercent(data.fiveHourRemainingPercent)
+        let weekLeft = clampPercent(data.weekRemainingPercent)
+        let fiveUsed = clampPercent(100 - fiveLeft)
+        let weekUsed = clampPercent(100 - weekLeft)
 
-    private var weekResetDate: Date? {
-        UsageResetText.resetDate(kind: "Wk", source: data.provider.usageSource, raw: data.weekResetText)
-    }
+        let bottleneckKind: BottleneckKind = (fiveUsed >= weekUsed) ? .fiveHour : .week
+        let bottleneckUsed = max(fiveUsed, weekUsed)
+        let bottleneckLeft = (bottleneckKind == .fiveHour) ? fiveLeft : weekLeft
 
-    private var fiveHourResetDisplayText: String {
-        let rel = formatRelativeTimeUntil(fiveHourResetDate)
-        if rel != "—" { return "↻5h \(rel)" }
-        let fallback = UsageResetText.displayText(kind: "5h", source: data.provider.usageSource, raw: data.fiveHourResetText)
-        return fallback.isEmpty ? "↻5h —" : "↻5h \(fallback)"
-    }
+        let isCritical: Bool = {
+            switch bottleneckKind {
+            case .fiveHour: return fiveUsed >= 80
+            case .week: return weekUsed >= 90
+            }
+        }()
 
-    private var weekResetDisplayText: String {
-        let s = formatWeeklyReset(weekResetDate)
-        if s != "—" { return "↻Wk \(s)" }
-        let fallback = UsageResetText.displayText(kind: "Wk", source: data.provider.usageSource, raw: data.weekResetText)
-        return fallback.isEmpty ? "↻Wk —" : "↻Wk \(fallback)"
-    }
+        let barFillPercent: Int = {
+            switch mode {
+            case .left: return bottleneckLeft
+            case .used: return bottleneckUsed
+            }
+        }()
 
-    private var fiveHourTimeRemainingText: String {
-        formatHoursUntilReset(fiveHourResetDate)
-    }
+        let fiveResetDate = data.resetDate(kind: "5h", raw: data.fiveHourResetText)
+        let weekResetDate = data.resetDate(kind: "Wk", raw: data.weekResetText)
 
-    private var weekPercentLabelText: String {
-        let numeric = mode.numericPercent(fromLeft: data.weekRemainingPercent)
-        return "Wk: \(numeric)%"
-    }
+        let fiveResetDisplayText: String = {
+            let rel = formatRelativeTimeUntil(fiveResetDate)
+            if rel != "—" { return "↻5h \(rel)" }
+            let fallback = data.resetDisplayFallback(kind: "5h", raw: data.fiveHourResetText)
+            return fallback.isEmpty ? "↻5h —" : "↻5h \(fallback)"
+        }()
 
-    private var metricForeground: Color {
-        isCritical ? .red : .white
-    }
+        let weekResetDisplayText: String = {
+            let s = formatWeeklyReset(weekResetDate)
+            if s != "—" { return "↻Wk \(s)" }
+            let fallback = data.resetDisplayFallback(kind: "Wk", raw: data.weekResetText)
+            return fallback.isEmpty ? "↻Wk —" : "↻Wk \(fallback)"
+        }()
 
-    private var barFillColor: Color {
-        if isCritical { return .red }
-        return .white
+        return Presentation(
+            barFillPercent: barFillPercent,
+            barFillColor: isCritical ? .red : .white,
+            metricForeground: isCritical ? .red : .white,
+            bottleneckUsedPercent: bottleneckUsed,
+            fiveHourTimeRemainingText: formatHoursUntilReset(fiveResetDate),
+            weekPercentLabelText: "Wk: \(mode.numericPercent(fromLeft: weekLeft))%",
+            fiveHourResetDisplayText: fiveResetDisplayText,
+            weekResetDisplayText: weekResetDisplayText
+        )
     }
 
     var body: some View {
@@ -214,32 +238,32 @@ private struct QuotaWidget: View {
                 .frame(width: 14, height: 14)
 
             MiniUsageBar(
-                percentFill: bottleneckFillPercent,
-                percentUsed: bottleneckUsedPercent,
-                tint: barFillColor,
+                percentFill: presentation.barFillPercent,
+                percentUsed: presentation.bottleneckUsedPercent,
+                tint: presentation.barFillColor,
                 isDarkMode: isDarkMode,
                 reduceMotion: reduceMotion
             )
 
             HStack(spacing: 6) {
-                Text("5h: \(fiveHourTimeRemainingText)")
+                Text("5h: \(presentation.fiveHourTimeRemainingText)")
                 DividerText()
-                Text(weekPercentLabelText)
+                Text(presentation.weekPercentLabelText)
                 DividerText()
-                Text(fiveHourResetDisplayText)
+                Text(presentation.fiveHourResetDisplayText)
                 DividerText()
-                Text(weekResetDisplayText)
+                Text(presentation.weekResetDisplayText)
             }
             .font(.system(size: 12, weight: .medium, design: .monospaced))
-            .foregroundStyle(metricForeground)
+            .foregroundStyle(presentation.metricForeground)
             .lineLimit(1)
         }
         .padding(.horizontal, 8)
         .frame(height: 20)
-        .background(Color.white.opacity(isDarkMode ? 0.14 : 0.08))
+        .background(Color.white.opacity(CockpitFooterTheme.quotaBackgroundOpacity(isDark: isDarkMode)))
         .overlay(
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .stroke(Color.white.opacity(isDarkMode ? 0.10 : 0.05), lineWidth: 1)
+                .stroke(Color.white.opacity(CockpitFooterTheme.quotaBorderOpacity(isDark: isDarkMode)), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
     }
@@ -315,7 +339,7 @@ private struct MiniUsageBar: View {
 
     var body: some View {
         Capsule(style: .continuous)
-            .fill(Color.white.opacity(isDarkMode ? 0.25 : 0.2))
+            .fill(Color.white.opacity(CockpitFooterTheme.barTrackOpacity(isDark: isDarkMode)))
             .frame(width: 24, height: 4)
             .overlay(alignment: .leading) {
                 Capsule(style: .continuous)
@@ -379,27 +403,91 @@ private struct ProviderIcon: View {
 
 #if DEBUG
 private struct CockpitFooterPreviewHost: View {
-    @State private var isBusy: Bool = true
+    let isBusy: Bool
+    let isCritical: Bool
+    let modeOverride: UsageDisplayMode
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
-            CockpitFooterView(
-                isBusy: isBusy,
-                statusText: isBusy ? "Indexing sessions…" : "",
-                quotas: [
-                    QuotaData(provider: .codex, fiveHourRemainingPercent: 20, fiveHourResetText: "resets 14:00", weekRemainingPercent: 8, weekResetText: "resets 2/9/2026, 2:00 PM"),
-                    QuotaData(provider: .claude, fiveHourRemainingPercent: 55, fiveHourResetText: "Jan 5 at 2pm", weekRemainingPercent: 45, weekResetText: "Jan 9 at 2pm"),
-                ],
-                sessionCountText: "42 Sessions"
-            )
-            .onTapGesture { isBusy.toggle() }
-        }
-        .frame(width: 1200, height: 140)
+        CockpitFooterView(
+            isBusy: isBusy,
+            statusText: isBusy ? "Indexing sessions…" : "",
+            quotas: [
+                QuotaData(provider: .codex,
+                          fiveHourRemainingPercent: isCritical ? 10 : 55,
+                          fiveHourResetText: "resets 14:00",
+                          weekRemainingPercent: isCritical ? 8 : 45,
+                          weekResetText: "resets 2/9/2026, 2:00 PM"),
+                QuotaData(provider: .claude,
+                          fiveHourRemainingPercent: isCritical ? 15 : 55,
+                          fiveHourResetText: "Jan 5 at 2pm",
+                          weekRemainingPercent: isCritical ? 9 : 45,
+                          weekResetText: "Jan 9 at 2pm"),
+            ],
+            sessionCountText: "12 / 42 Sessions",
+            freshnessText: "Last: 2m ago",
+            usageDisplayModeOverride: modeOverride
+        )
     }
 }
 
-#Preview("CockpitFooterView") {
-    CockpitFooterPreviewHost()
+private struct CockpitFooterPreviewMatrix: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            VStack(spacing: 6) {
+                CockpitFooterPreviewHost(isBusy: true, isCritical: false, modeOverride: .left)
+                CockpitFooterPreviewHost(isBusy: false, isCritical: false, modeOverride: .left)
+                CockpitFooterPreviewHost(isBusy: true, isCritical: true, modeOverride: .left)
+            }
+            .environment(\.colorScheme, .light)
+            .overlay(alignment: .topLeading) {
+                Text("Light • Left")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+            }
+
+            VStack(spacing: 6) {
+                CockpitFooterPreviewHost(isBusy: true, isCritical: false, modeOverride: .used)
+                CockpitFooterPreviewHost(isBusy: false, isCritical: false, modeOverride: .used)
+                CockpitFooterPreviewHost(isBusy: true, isCritical: true, modeOverride: .used)
+            }
+            .environment(\.colorScheme, .light)
+            .overlay(alignment: .topLeading) {
+                Text("Light • Used")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+            }
+
+            VStack(spacing: 6) {
+                CockpitFooterPreviewHost(isBusy: true, isCritical: false, modeOverride: .left)
+                CockpitFooterPreviewHost(isBusy: false, isCritical: false, modeOverride: .left)
+                CockpitFooterPreviewHost(isBusy: true, isCritical: true, modeOverride: .left)
+            }
+            .environment(\.colorScheme, .dark)
+            .overlay(alignment: .topLeading) {
+                Text("Dark • Left")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+            }
+
+            VStack(spacing: 6) {
+                CockpitFooterPreviewHost(isBusy: true, isCritical: false, modeOverride: .used)
+                CockpitFooterPreviewHost(isBusy: false, isCritical: false, modeOverride: .used)
+                CockpitFooterPreviewHost(isBusy: true, isCritical: true, modeOverride: .used)
+            }
+            .environment(\.colorScheme, .dark)
+            .overlay(alignment: .topLeading) {
+                Text("Dark • Used")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+            }
+        }
+        .padding()
+    }
 }
+
+#Preview("CockpitFooterView") { CockpitFooterPreviewMatrix() }
 #endif
