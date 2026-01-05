@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Foundation
+import AVFoundation
 
 /// Terminal-style session view with filters, optional gutter, and legend toggles.
 struct SessionTerminalView: View {
@@ -845,7 +846,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let colorScheme: ColorScheme
     let monochrome: Bool
 
-    final class Coordinator: NSObject, NSTextViewDelegate, NSSpeechSynthesizerDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate {
         var lineRanges: [Int: NSRange] = [:]
         var lastLinesSignature: Int = 0
         var lastMatchSignature: Int = 0
@@ -858,11 +859,25 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         private weak var activeTextView: NSTextView?
         private var activeBlockText: String = ""
-        private let synthesizer: NSSpeechSynthesizer = NSSpeechSynthesizer()
+        private let speechSynthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer()
 
         override init() {
             super.init()
-            synthesizer.delegate = self
+        }
+
+        func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange oldSelectedCharRange: NSRange, toCharacterRange newSelectedCharRange: NSRange) -> NSRange {
+            guard let event = NSApp.currentEvent else { return newSelectedCharRange }
+            let isContextClick =
+                event.type == .rightMouseDown ||
+                event.type == .rightMouseUp ||
+                event.type == .otherMouseDown ||
+                event.type == .otherMouseUp ||
+                (event.type == .leftMouseDown && event.modifierFlags.contains(.control)) ||
+                (event.type == .leftMouseUp && event.modifierFlags.contains(.control))
+            if isContextClick {
+                return oldSelectedCharRange
+            }
+            return newSelectedCharRange
         }
 
         func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
@@ -892,7 +907,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
             let stop = NSMenuItem(title: "Stop Speaking", action: #selector(stopSpeaking(_:)), keyEquivalent: "")
             stop.target = self
-            stop.isEnabled = synthesizer.isSpeaking
+            stop.isEnabled = speechSynthesizer.isSpeaking
             out.addItem(stop)
 
             return out
@@ -915,21 +930,26 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             guard let tv = activeTextView else { return }
             let selection = tv.selectedRange()
             let text: String = {
-                if selection.length > 0, let s = (tv.string as NSString?)?.substring(with: selection) {
-                    return s
+                if selection.length > 0 {
+                    return (tv.string as NSString).substring(with: selection)
                 }
                 return activeBlockText
             }()
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
-            if synthesizer.isSpeaking {
-                synthesizer.stopSpeaking()
+            if speechSynthesizer.isSpeaking {
+                speechSynthesizer.stopSpeaking(at: .immediate)
             }
-            synthesizer.startSpeaking(text)
+
+            let utterance = AVSpeechUtterance(string: text)
+            utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.identifier) ?? AVSpeechSynthesisVoice()
+            utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+            utterance.volume = 1.0
+            speechSynthesizer.speak(utterance)
         }
 
         @objc private func stopSpeaking(_ sender: Any?) {
-            synthesizer.stopSpeaking()
+            speechSynthesizer.stopSpeaking(at: .immediate)
         }
 
         private func blockText(at charIndex: Int) -> String? {
