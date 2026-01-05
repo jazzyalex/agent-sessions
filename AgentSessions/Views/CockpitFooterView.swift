@@ -169,7 +169,6 @@ private struct QuotaWidget: View {
     private struct Presentation: Equatable {
         var barFillPercent: Int
         var barFillColor: Color
-        var metricForeground: Color
 
         var bottleneckUsedPercent: Int
 
@@ -227,7 +226,6 @@ private struct QuotaWidget: View {
         return Presentation(
             barFillPercent: barFillPercent,
             barFillColor: isCritical ? .red : .white,
-            metricForeground: isCritical ? .red : .white,
             bottleneckUsedPercent: hasResetInfo ? bottleneckUsed : 0,
             fiveHourPercentLabelText: "\(mode.numericPercent(fromLeft: fiveLeft))%",
             weekPercentLabelText: "\(mode.numericPercent(fromLeft: weekLeft))%",
@@ -259,7 +257,7 @@ private struct QuotaWidget: View {
                 Text(presentation.weekResetDisplayText)
             }
             .font(.system(size: 12, weight: .medium, design: .monospaced))
-            .foregroundStyle(presentation.metricForeground)
+            .foregroundStyle(.white)
             .lineLimit(1)
         }
         .padding(.horizontal, 8)

@@ -872,9 +872,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let out = NSMenu(title: "Transcript")
             out.autoenablesItems = false
 
-            let copySelection = NSMenuItem(title: "Copy", action: #selector(copySelectionOnly(_:)), keyEquivalent: "")
-            copySelection.target = self
-            copySelection.isEnabled = textView.selectedRange().length > 0
+            let hasSelection = textView.selectedRange().length > 0
+            let copySelection = NSMenuItem(title: "Copy", action: hasSelection ? #selector(copySelectionOnly(_:)) : nil, keyEquivalent: "")
+            copySelection.target = hasSelection ? self : nil
+            copySelection.isEnabled = hasSelection
             out.addItem(copySelection)
 
             let copyBlock = NSMenuItem(title: "Copy Block", action: #selector(copyBlock(_:)), keyEquivalent: "")
