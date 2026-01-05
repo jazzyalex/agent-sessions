@@ -182,7 +182,7 @@ private struct QuotaWidget: View {
     private var presentation: Presentation {
         let fiveResetRaw = data.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
         let weekResetRaw = data.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let isLoaded = !(fiveResetRaw.isEmpty && weekResetRaw.isEmpty)
+        let hasResetInfo = !(fiveResetRaw.isEmpty && weekResetRaw.isEmpty)
 
         let fiveLeft = clampPercent(data.fiveHourRemainingPercent)
         let weekLeft = clampPercent(data.weekRemainingPercent)
@@ -190,22 +190,22 @@ private struct QuotaWidget: View {
         let weekUsed = clampPercent(100 - weekLeft)
 
         let bottleneckKind: BottleneckKind = (fiveUsed >= weekUsed) ? .fiveHour : .week
-        let bottleneckUsed = isLoaded ? max(fiveUsed, weekUsed) : 0
+        let bottleneckUsed = max(fiveUsed, weekUsed)
         let bottleneckLeft = (bottleneckKind == .fiveHour) ? fiveLeft : weekLeft
 
-        let isCritical: Bool = isLoaded && {
+        let isCritical: Bool = hasResetInfo && {
             switch bottleneckKind {
             case .fiveHour: return fiveUsed >= 80
             case .week: return weekUsed >= 90
             }
         }()
 
-        let barFillPercent: Int = isLoaded ? {
+        let barFillPercent: Int = {
             switch mode {
             case .left: return bottleneckLeft
             case .used: return bottleneckUsed
             }
-        }() : 0
+        }()
 
         let fiveResetDate = data.resetDate(kind: "5h", raw: data.fiveHourResetText)
         let weekResetDate = data.resetDate(kind: "Wk", raw: data.weekResetText)
@@ -227,10 +227,10 @@ private struct QuotaWidget: View {
         return Presentation(
             barFillPercent: barFillPercent,
             barFillColor: isCritical ? .red : .white,
-            metricForeground: isCritical ? .red : (isLoaded ? .white : .white.opacity(0.75)),
-            bottleneckUsedPercent: bottleneckUsed,
-            fiveHourPercentLabelText: isLoaded ? "\(mode.numericPercent(fromLeft: fiveLeft))%" : "—%",
-            weekPercentLabelText: isLoaded ? "\(mode.numericPercent(fromLeft: weekLeft))%" : "—%",
+            metricForeground: isCritical ? .red : .white,
+            bottleneckUsedPercent: hasResetInfo ? bottleneckUsed : 0,
+            fiveHourPercentLabelText: "\(mode.numericPercent(fromLeft: fiveLeft))%",
+            weekPercentLabelText: "\(mode.numericPercent(fromLeft: weekLeft))%",
             fiveHourResetDisplayText: fiveResetDisplayText,
             weekResetDisplayText: weekResetDisplayText
         )
