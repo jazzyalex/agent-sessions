@@ -358,6 +358,7 @@ private struct SessionCountView: View {
 
 private struct ProviderIcon: View {
     let provider: QuotaData.Provider
+    @Environment(\.colorScheme) private var colorScheme
 
     @ViewBuilder
     var body: some View {
@@ -371,7 +372,7 @@ private struct ProviderIcon: View {
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .foregroundStyle(Color.white)
+                .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
         }
     }
 }
