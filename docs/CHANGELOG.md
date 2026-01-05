@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Startup: When Codex sessions are already indexed, the app now shows the hydrated list immediately while scanning for newly created sessions in the background.
 - Search: Instant indexing now captures more of long tool outputs (head + middle + tail slices) and keeps active Codex sessions searchable while they are updating.
 - Sessions: Show a live session count in the unified list that updates while indexing and when filters/search change.
+- UI: Consolidate unified-window status indicators into a single cockpit-style footer.
 
 ### Fixed
 

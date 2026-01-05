@@ -26,22 +26,22 @@ struct UnifiedSessionsView: View {
 
     @State private var selection: String?
     @State private var tableSelection: Set<String> = []
-    @State private var sortOrder: [KeyPathComparator<Session>] = []
-    @State private var cachedRows: [Session] = []
-    @State private var columnLayoutID: UUID = UUID()
-    @AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
-    @AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
-    @AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
-    @AppStorage("UnifiedShowCodexStrip") private var showCodexStrip: Bool = false
-    @AppStorage("UnifiedShowClaudeStrip") private var showClaudeStrip: Bool = false
-    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
-    @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
-    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
-    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
+	@State private var sortOrder: [KeyPathComparator<Session>] = []
+	@State private var cachedRows: [Session] = []
+	@State private var columnLayoutID: UUID = UUID()
+	@AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
+	@AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
+	@AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
+	@AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
+	@AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
+	@AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+	@AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
+	@AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
+	@AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
+	@AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
+	@AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
+	@AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
+	@AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
     @State private var autoSelectEnabled: Bool = true
     @State private var programmaticSelectionUpdate: Bool = false
@@ -128,154 +128,170 @@ struct UnifiedSessionsView: View {
         }
     }
 
-    var body: some View {
-        VStack(spacing: 0) {
-            // Cap ETA banner disabled (calculations retained; UI disabled)
-            if layoutMode == .vertical {
-                HSplitView {
-                    listPane
-                        .frame(minWidth: 320, maxWidth: 1200)
-                    transcriptPane
-                        .frame(minWidth: 450)
-                }
-                .background(SplitViewAutosave(key: "UnifiedSplit-H"))
-                .transaction { $0.animation = nil }
-            } else {
-                VSplitView {
-                    listPane
-                        .frame(minHeight: 180)
-                    transcriptPane
-                        .frame(minHeight: 240)
-                }
-                .background(SplitViewAutosave(key: "UnifiedSplit-V"))
-                .transaction { $0.animation = nil }
-            }
+	var body: some View {
+		let base = AnyView(
+			rootContent
+				.preferredColorScheme(preferredColorScheme)
+				.toolbar { toolbarContent }
+				.overlay(alignment: .topTrailing) { topTrailingNotices }
+		)
 
-            // Usage strips
-            let shouldShowCodexStrip = codexAgentEnabled && showCodexStrip
-            let shouldShowClaudeStrip = claudeAgentEnabled && showClaudeStrip && UserDefaults.standard.bool(forKey: "ShowClaudeUsageStrip")
-            if shouldShowCodexStrip || shouldShowClaudeStrip {
-                VStack(spacing: 0) {
-                    if shouldShowCodexStrip {
-                        UsageStripView(codexStatus: codexUsageModel,
-                                       label: "Codex",
-                                       brandColor: .blue,
-                                       verticalPadding: 4,
-                                       drawBackground: false,
-                                       collapseTop: false,
-                                       collapseBottom: shouldShowClaudeStrip)
-                    }
-                    if shouldShowClaudeStrip {
-                        ClaudeUsageStripView(status: claudeUsageModel,
-                                             label: "Claude",
-                                             brandColor: Color(red: 204/255, green: 121/255, blue: 90/255),
-                                             verticalPadding: 4,
-                                             drawBackground: false,
-                                             collapseTop: shouldShowCodexStrip,
-                                             collapseBottom: false)
-                    }
-                }
-                .background(.thickMaterial)
-            }
-        }
-        // Honor app-wide theme selection from Preferences → General.
-        .preferredColorScheme(preferredColorScheme)
-        .toolbar { toolbarContent }
-        .overlay(alignment: .topTrailing) {
-            VStack(alignment: .trailing, spacing: 8) {
-                if showAnalyticsWarmupNotice {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Analytics is warming up… try again in ~1–2 minutes")
-                            .font(.footnote)
-                    }
-                    .padding(10)
-                    .background(.regularMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                if showAgentEnablementNotice {
-                    Text("Showing active agents only")
-                        .font(.footnote)
-                        .padding(10)
-                        .background(.regularMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .padding(.top, 8)
-            .padding(.trailing, 8)
-        }
-        .onAppear {
-            if sortOrder.isEmpty { sortOrder = [ KeyPathComparator(\Session.modifiedAt, order: .reverse) ] }
-            updateCachedRows()
-            updateSelectionBridge()
-        }
-        .onChange(of: analyticsReady) { _, ready in
-            if ready {
-                withAnimation { showAnalyticsWarmupNotice = false }
-            }
-        }
-        .onChange(of: selection) { _, id in
-            guard let id, let s = cachedRows.first(where: { $0.id == id }) else { return }
-            // When selection is changed due to search auto-selection, do not steal focus or collapse inline search
-            if !isAutoSelectingFromSearch {
-                // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
-                focusCoordinator.perform(.selectSession(id: id))
-                NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
-            }
-            // If a large, unparsed session is clicked during an active search, promote it in the coordinator.
-            let sizeBytes = s.fileSizeBytes ?? 0
-            if searchCoordinator.isRunning, s.events.isEmpty, sizeBytes >= 10 * 1024 * 1024 {
-                searchCoordinator.promote(id: s.id)
-            }
-            // Lazy load full session per source
-            if s.source == .codex, let exist = codexIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-                codexIndexer.reloadSession(id: id)
-            } else if s.source == .claude, let exist = claudeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-                claudeIndexer.reloadSession(id: id)
-            } else if s.source == .gemini, let exist = geminiIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-                geminiIndexer.reloadSession(id: id)
-            } else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-                opencodeIndexer.reloadSession(id: id)
-            } else if s.source == .copilot, let exist = copilotIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-                copilotIndexer.reloadSession(id: id)
-            } else if s.source == .droid, let exist = droidIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-                droidIndexer.reloadSession(id: id)
-            }
-        }
-        .onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
-        .onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
-        .onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
-        .onChange(of: unified.includeOpenCode) { _, _ in restartSearchIfRunning() }
-        .onChange(of: unified.includeCopilot) { _, _ in restartSearchIfRunning() }
-        .onChange(of: unified.includeDroid) { _, _ in restartSearchIfRunning() }
-        .onChange(of: codexAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-        .onChange(of: claudeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-        .onChange(of: geminiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-        .onChange(of: openCodeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-        .onChange(of: copilotAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-        .onReceive(unified.$sessions) { sessions in
-            if !sessions.isEmpty {
-                hasEverHadSessions = true
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openSessionsSearchFromMenu)) { _ in
-            focusCoordinator.perform(.openSessionSearch)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openTranscriptFindFromMenu)) { _ in
-            focusCoordinator.perform(.openTranscriptFind)
-        }
-    }
+		let lifecycle = AnyView(
+			base
+				.onAppear {
+					updateFooterUsageVisibility()
+					if sortOrder.isEmpty { sortOrder = [KeyPathComparator(\Session.modifiedAt, order: .reverse)] }
+					updateCachedRows()
+					updateSelectionBridge()
+				}
+				.onDisappear {
+					codexUsageModel.setStripVisible(false)
+					claudeUsageModel.setStripVisible(false)
+				}
+		)
 
-    private var listPane: some View {
-        let showTitle = columnVisibility.showTitleColumn
-        let showModified = columnVisibility.showModifiedColumn
+		return AnyView(
+			lifecycle
+				.onChange(of: analyticsReady) { _, ready in
+					if ready {
+						withAnimation { showAnalyticsWarmupNotice = false }
+					}
+				}
+				.onChange(of: selection) { _, id in
+					guard let id, let s = cachedRows.first(where: { $0.id == id }) else { return }
+					// When selection is changed due to search auto-selection, do not steal focus or collapse inline search
+					if !isAutoSelectingFromSearch {
+						// CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
+						focusCoordinator.perform(.selectSession(id: id))
+						NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+					}
+					// If a large, unparsed session is clicked during an active search, promote it in the coordinator.
+					let sizeBytes = s.fileSizeBytes ?? 0
+					if searchCoordinator.isRunning, s.events.isEmpty, sizeBytes >= 10 * 1024 * 1024 {
+						searchCoordinator.promote(id: s.id)
+					}
+					// Lazy load full session per source
+					if s.source == .codex, let exist = codexIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+						codexIndexer.reloadSession(id: id)
+					} else if s.source == .claude, let exist = claudeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+						claudeIndexer.reloadSession(id: id)
+					} else if s.source == .gemini, let exist = geminiIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+						geminiIndexer.reloadSession(id: id)
+					} else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+						opencodeIndexer.reloadSession(id: id)
+					} else if s.source == .copilot, let exist = copilotIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+						copilotIndexer.reloadSession(id: id)
+					} else if s.source == .droid, let exist = droidIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+						droidIndexer.reloadSession(id: id)
+					}
+				}
+				.onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
+				.onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
+				.onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
+				.onChange(of: unified.includeOpenCode) { _, _ in restartSearchIfRunning() }
+				.onChange(of: unified.includeCopilot) { _, _ in restartSearchIfRunning() }
+				.onChange(of: unified.includeDroid) { _, _ in restartSearchIfRunning() }
+				.onChange(of: codexUsageEnabled) { _, _ in updateFooterUsageVisibility() }
+				.onChange(of: claudeUsageEnabled) { _, _ in updateFooterUsageVisibility() }
+				.onChange(of: codexAgentEnabled) { _, _ in
+					flashAgentEnablementNoticeIfNeeded()
+					updateFooterUsageVisibility()
+				}
+				.onChange(of: claudeAgentEnabled) { _, _ in
+					flashAgentEnablementNoticeIfNeeded()
+					updateFooterUsageVisibility()
+				}
+				.onChange(of: geminiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+				.onChange(of: openCodeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+				.onChange(of: copilotAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+				.onReceive(unified.$sessions) { sessions in
+					if !sessions.isEmpty {
+						hasEverHadSessions = true
+					}
+				}
+				.onReceive(NotificationCenter.default.publisher(for: .openSessionsSearchFromMenu)) { _ in
+					focusCoordinator.perform(.openSessionSearch)
+				}
+				.onReceive(NotificationCenter.default.publisher(for: .openTranscriptFindFromMenu)) { _ in
+					focusCoordinator.perform(.openTranscriptFind)
+				}
+		)
+	}
+
+	private var topTrailingNotices: some View {
+		VStack(alignment: .trailing, spacing: 8) {
+			if showAnalyticsWarmupNotice {
+				HStack(spacing: 8) {
+					ProgressView()
+						.controlSize(.small)
+					Text("Analytics is warming up… try again in ~1–2 minutes")
+						.font(.footnote)
+				}
+				.padding(10)
+				.background(.regularMaterial)
+				.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+				.transition(.move(edge: .top).combined(with: .opacity))
+			}
+			if showAgentEnablementNotice {
+				Text("Showing active agents only")
+					.font(.footnote)
+					.padding(10)
+					.background(.regularMaterial)
+					.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+					.transition(.move(edge: .top).combined(with: .opacity))
+			}
+		}
+		.padding(.top, 8)
+		.padding(.trailing, 8)
+	}
+
+	    private var rootContent: some View {
+	        VStack(spacing: 0) {
+	            // Cap ETA banner disabled (calculations retained; UI disabled)
+	            mainSplitView
+	            cockpitFooter
+	        }
+	    }
+
+	    @ViewBuilder
+	    private var mainSplitView: some View {
+	        if layoutMode == .vertical {
+	            HSplitView {
+	                listPane
+	                    .frame(minWidth: 320, maxWidth: 1200)
+	                transcriptPane
+	                    .frame(minWidth: 450)
+	            }
+	            .background(SplitViewAutosave(key: "UnifiedSplit-H"))
+	            .transaction { $0.animation = nil }
+	        } else {
+	            VSplitView {
+	                listPane
+	                    .frame(minHeight: 180)
+	                transcriptPane
+	                    .frame(minHeight: 240)
+	            }
+	            .background(SplitViewAutosave(key: "UnifiedSplit-V"))
+	            .transaction { $0.animation = nil }
+	        }
+	    }
+
+	    private var cockpitFooter: some View {
+	        CockpitFooterView(
+	            isBusy: footerIsBusy,
+	            statusText: footerStatusText,
+	            quotas: footerQuotas,
+	            sessionCountText: footerSessionCountText
+	        )
+	    }
+
+	    private var listPane: some View {
+	        let showTitle = columnVisibility.showTitleColumn
+	        let showModified = columnVisibility.showModifiedColumn
         let showProject = columnVisibility.showProjectColumn
         let showMsgs = columnVisibility.showMsgsColumn
         return ZStack(alignment: .bottom) {
-        Table(cachedRows, selection: $tableSelection, sortOrder: $sortOrder) {
+	        Table(cachedRows, selection: $tableSelection, sortOrder: $sortOrder) {
             TableColumn("★") { cellFavorite(for: $0) }
                 .width(min: showStarColumn ? 36 : 0,
                        ideal: showStarColumn ? 40 : 0,
@@ -363,17 +379,14 @@ struct UnifiedSessionsView: View {
 	        .id(columnLayoutID)
 	        .tableStyle(.inset(alternatesRowBackgrounds: true))
 	        .environment(\.defaultMinListRowHeight, 22)
-	        .simultaneousGesture(TapGesture().onEnded {
-	            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
-	        })
-	        }
-	        .safeAreaInset(edge: .bottom, spacing: 0) {
-	            listStatusBar
-	        }
-	        .contextMenu(forSelectionType: String.self) { ids in
-	            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
-	                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
-	                Divider()
+		        .simultaneousGesture(TapGesture().onEnded {
+		            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+		        })
+		        }
+		        .contextMenu(forSelectionType: String.self) { ids in
+		            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
+		                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
+		                Divider()
                 if s.source == .codex || s.source == .claude {
                     Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
                         .keyboardShortcut("r", modifiers: [.command, .control])
@@ -470,44 +483,45 @@ struct UnifiedSessionsView: View {
 	        }
 	    }
 
-	    private var listStatusBar: some View {
-	        let searchQuery = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-	        let isSearchActive = !searchQuery.isEmpty || searchCoordinator.isRunning
+	    private var footerIsBusy: Bool {
+	        unified.isIndexing
+	        || unified.isProcessingTranscripts
+	        || searchCoordinator.isRunning
+	        || unified.launchState.overallPhase < .ready
+	    }
 
-	        let visibleCount = cachedRows.count
-	        let countLabel: String = {
-	            if isSearchActive { return "\(visibleCount) results" }
-	            return "Showing \(visibleCount) session" + (visibleCount == 1 ? "" : "s")
-	        }()
-
-	        return HStack(spacing: 8) {
-	            if searchCoordinator.isRunning {
-	                let p = searchCoordinator.progress
-	                ProgressView().controlSize(.small)
-	                Text(progressLineText(p))
-	                    .lineLimit(1)
-	            } else if unified.launchState.overallPhase < .ready {
-	                ProgressView().controlSize(.small)
-	                Text(unified.launchState.overallPhase.statusDescription)
-	                    .lineLimit(1)
-	            } else if unified.isIndexing || unified.isProcessingTranscripts {
-	                ProgressView().controlSize(.small)
-	                Text(unified.isProcessingTranscripts ? "Processing transcripts…" : "Indexing sessions…")
-	                    .lineLimit(1)
-	            }
-
-	            Spacer()
-
-	            Text(countLabel)
-	                .monospacedDigit()
+	    private var footerStatusText: String {
+	        if unified.launchState.overallPhase < .ready {
+	            return unified.launchState.overallPhase.statusDescription
 	        }
-	        .font(.system(size: 12))
-	        .foregroundStyle(.secondary)
-	        .padding(.horizontal, 8)
-	        .padding(.vertical, 4)
-	        .background(Color(nsColor: .underPageBackgroundColor))
-	        .overlay(Divider(), alignment: .top)
-	        .allowsHitTesting(false)
+	        if unified.isIndexing || unified.isProcessingTranscripts {
+	            return unified.isProcessingTranscripts ? "Processing sessions…" : "Indexing sessions…"
+	        }
+	        if searchCoordinator.isRunning {
+	            return "Searching…"
+	        }
+	        return ""
+	    }
+
+	    private var footerSessionCountText: String {
+	        "\(cachedRows.count) Sessions"
+	    }
+
+	    private var footerQuotas: [QuotaData] {
+	        var out: [QuotaData] = []
+	        if codexAgentEnabled && codexUsageEnabled {
+	            out.append(.codex(from: codexUsageModel))
+	        }
+	        if claudeAgentEnabled && claudeUsageEnabled {
+	            out.append(.claude(from: claudeUsageModel))
+	        }
+	        return out
+	    }
+
+	    @MainActor
+	    private func updateFooterUsageVisibility() {
+	        codexUsageModel.setStripVisible(codexAgentEnabled && codexUsageEnabled)
+	        claudeUsageModel.setStripVisible(claudeAgentEnabled && claudeUsageEnabled)
 	    }
 
 	    // MARK: - Git Inspector Integration (Unified View)

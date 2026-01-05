@@ -22,6 +22,16 @@ enum UsageResetText {
         return "resets \(s)"
     }
 
+    /// Parses the underlying reset time as a `Date` when possible.
+    /// Returns `nil` when the string is empty or cannot be parsed.
+    static func resetDate(kind: String, source: UsageTrackingSource, raw: String, now: Date = Date()) -> Date? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackDisplay = trimResetCopy(trimmed)
+        guard !fallbackDisplay.isEmpty else { return nil }
+        let parseInput = stripResetPrefix(trimmed)
+        return parse(kind: kind, source: source, text: parseInput, now: now)
+    }
+
     private static func parse(kind: String, source: UsageTrackingSource, text: String, now: Date) -> Date? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return nil }
@@ -38,8 +48,35 @@ enum UsageResetText {
         // 2) Claude: "MMM d at 2pm" / "MMM d, yyyy at 2pm" / time-only like "1am"
         if let d = parseClaude(trimmed, now: now) { return d }
 
+        // 2.5) Localized numeric date/time (output from Date.FormatStyle(.numeric, .shortened))
+        if let d = parseLocalizedNumericDateTime(base, tz: tz) { return d }
+
         // 3) Time-only "HH:mm" (Codex)
         if let d = parseTimeOnly(base, now: now, tz: tz) { return d }
+
+        return nil
+    }
+
+    private static func parseLocalizedNumericDateTime(_ text: String, tz: TimeZone) -> Date? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let df = DateFormatter()
+        df.locale = .current
+        df.timeZone = tz
+
+        // Try the most likely locale formats first.
+        let attempts: [(DateFormatter.Style, DateFormatter.Style)] = [
+            (.short, .short),
+            (.short, .medium),
+            (.medium, .short),
+            (.medium, .medium),
+        ]
+        for (dateStyle, timeStyle) in attempts {
+            df.dateStyle = dateStyle
+            df.timeStyle = timeStyle
+            if let d = df.date(from: trimmed) { return d }
+        }
 
         return nil
     }
