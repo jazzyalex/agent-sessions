@@ -179,7 +179,7 @@ private struct QuotaWidget: View {
     }
 
     private var metricForeground: Color {
-        isCritical ? .red : Color.white.opacity(0.9)
+        isCritical ? .red : .white
     }
 
     private var barFillColor: Color {
@@ -294,13 +294,13 @@ private struct SessionCountView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(text)
-                .monospacedDigit()
             if let freshnessText, !freshnessText.isEmpty {
-                DividerText()
                 Text(freshnessText)
                     .monospacedDigit()
+                DividerText()
             }
+            Text(text)
+                .monospacedDigit()
         }
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(Color.white.opacity(0.6))

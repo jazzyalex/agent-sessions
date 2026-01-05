@@ -506,33 +506,17 @@ struct UnifiedSessionsView: View {
 
 	    private var footerSessionCountText: String {
 	        let visible = cachedRows.count
-	        let total = unified.allSessions.count
-	        if footerHasActiveFilters {
+	        let total = unified.sessions.count
+	        if visible != total {
 	            return "\(visible) / \(total) Sessions"
 	        }
 	        return "\(total) Sessions"
 	    }
 
 	    private var footerFreshnessText: String? {
-	        let date = cachedRows.map(\.modifiedAt).max() ?? unified.allSessions.map(\.modifiedAt).max()
+	        let date = unified.sessions.map(\.modifiedAt).max() ?? cachedRows.map(\.modifiedAt).max()
 	        guard let date else { return nil }
 	        return "Last: \(timeAgoShort(date))"
-	    }
-
-	    private var footerHasActiveFilters: Bool {
-	        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-	        if !q.isEmpty { return true }
-	        if searchCoordinator.isRunning { return true }
-	        if unified.projectFilter != nil { return true }
-	        if unified.dateFrom != nil || unified.dateTo != nil { return true }
-	        if unified.selectedModel != nil { return true }
-	        if unified.selectedKinds.count != SessionEventKind.allCases.count { return true }
-	        if unified.hasCommandsOnly { return true }
-	        if unified.showFavoritesOnly { return true }
-	        if !unified.includeCodex || !unified.includeClaude || !unified.includeGemini || !unified.includeOpenCode || !unified.includeCopilot || !unified.includeDroid {
-	            return true
-	        }
-	        return false
 	    }
 
 	    private func timeAgoShort(_ date: Date, now: Date = Date()) -> String {
