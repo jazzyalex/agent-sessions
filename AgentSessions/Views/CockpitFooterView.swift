@@ -173,60 +173,64 @@ private struct QuotaWidget: View {
 
         var bottleneckUsedPercent: Int
 
-        var fiveHourTimeRemainingText: String
+        var fiveHourPercentLabelText: String
         var weekPercentLabelText: String
         var fiveHourResetDisplayText: String
         var weekResetDisplayText: String
     }
 
     private var presentation: Presentation {
+        let fiveResetRaw = data.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let weekResetRaw = data.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isLoaded = !(fiveResetRaw.isEmpty && weekResetRaw.isEmpty)
+
         let fiveLeft = clampPercent(data.fiveHourRemainingPercent)
         let weekLeft = clampPercent(data.weekRemainingPercent)
         let fiveUsed = clampPercent(100 - fiveLeft)
         let weekUsed = clampPercent(100 - weekLeft)
 
         let bottleneckKind: BottleneckKind = (fiveUsed >= weekUsed) ? .fiveHour : .week
-        let bottleneckUsed = max(fiveUsed, weekUsed)
+        let bottleneckUsed = isLoaded ? max(fiveUsed, weekUsed) : 0
         let bottleneckLeft = (bottleneckKind == .fiveHour) ? fiveLeft : weekLeft
 
-        let isCritical: Bool = {
+        let isCritical: Bool = isLoaded && {
             switch bottleneckKind {
             case .fiveHour: return fiveUsed >= 80
             case .week: return weekUsed >= 90
             }
         }()
 
-        let barFillPercent: Int = {
+        let barFillPercent: Int = isLoaded ? {
             switch mode {
             case .left: return bottleneckLeft
             case .used: return bottleneckUsed
             }
-        }()
+        }() : 0
 
         let fiveResetDate = data.resetDate(kind: "5h", raw: data.fiveHourResetText)
         let weekResetDate = data.resetDate(kind: "Wk", raw: data.weekResetText)
 
         let fiveResetDisplayText: String = {
             let rel = formatRelativeTimeUntil(fiveResetDate)
-            if rel != "—" { return "↻5h \(rel)" }
+            if rel != "—" { return "↻ \(rel)" }
             let fallback = data.resetDisplayFallback(kind: "5h", raw: data.fiveHourResetText)
-            return fallback.isEmpty ? "↻5h —" : "↻5h \(fallback)"
+            return fallback.isEmpty ? "↻ —" : "↻ \(fallback)"
         }()
 
         let weekResetDisplayText: String = {
             let s = formatWeeklyReset(weekResetDate)
-            if s != "—" { return "↻Wk \(s)" }
+            if s != "—" { return "↻ \(s)" }
             let fallback = data.resetDisplayFallback(kind: "Wk", raw: data.weekResetText)
-            return fallback.isEmpty ? "↻Wk —" : "↻Wk \(fallback)"
+            return fallback.isEmpty ? "↻ —" : "↻ \(fallback)"
         }()
 
         return Presentation(
             barFillPercent: barFillPercent,
             barFillColor: isCritical ? .red : .white,
-            metricForeground: isCritical ? .red : .white,
+            metricForeground: isCritical ? .red : (isLoaded ? .white : .white.opacity(0.75)),
             bottleneckUsedPercent: bottleneckUsed,
-            fiveHourTimeRemainingText: formatHoursUntilReset(fiveResetDate),
-            weekPercentLabelText: "Wk: \(mode.numericPercent(fromLeft: weekLeft))%",
+            fiveHourPercentLabelText: isLoaded ? "\(mode.numericPercent(fromLeft: fiveLeft))%" : "—%",
+            weekPercentLabelText: isLoaded ? "\(mode.numericPercent(fromLeft: weekLeft))%" : "—%",
             fiveHourResetDisplayText: fiveResetDisplayText,
             weekResetDisplayText: weekResetDisplayText
         )
@@ -246,11 +250,11 @@ private struct QuotaWidget: View {
             )
 
             HStack(spacing: 6) {
-                Text("5h: \(presentation.fiveHourTimeRemainingText)")
-                DividerText()
-                Text(presentation.weekPercentLabelText)
+                Text("5h: \(presentation.fiveHourPercentLabelText)")
                 DividerText()
                 Text(presentation.fiveHourResetDisplayText)
+                DividerText()
+                Text("Wk: \(presentation.weekPercentLabelText)")
                 DividerText()
                 Text(presentation.weekResetDisplayText)
             }
@@ -270,18 +274,6 @@ private struct QuotaWidget: View {
 
     private func clampPercent(_ value: Int) -> Int {
         max(0, min(100, value))
-    }
-
-    private func formatHoursUntilReset(_ date: Date?, now: Date = Date()) -> String {
-        guard let date else { return "—" }
-        let interval = max(0, date.timeIntervalSince(now))
-        if interval < 60 { return "<1m" }
-        let totalMinutes = Int(ceil(interval / 60.0))
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        if hours <= 0 { return "\(minutes)m" }
-        if minutes <= 0 { return "\(hours)h" }
-        return "\(hours)h \(minutes)m"
     }
 
     private func formatRelativeTimeUntil(_ date: Date?, now: Date = Date()) -> String {
