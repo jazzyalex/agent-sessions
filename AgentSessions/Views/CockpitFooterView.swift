@@ -58,15 +58,18 @@ struct CockpitFooterView: View {
     let statusText: String
     let quotas: [QuotaData]
     let sessionCountText: String
+    let freshnessText: String?
 
     init(isBusy: Bool,
          statusText: String,
          quotas: [QuotaData],
-         sessionCountText: String) {
+         sessionCountText: String,
+         freshnessText: String? = nil) {
         self.isBusy = isBusy
         self.statusText = statusText
         self.quotas = quotas
         self.sessionCountText = sessionCountText
+        self.freshnessText = freshnessText
     }
 
     var body: some View {
@@ -83,7 +86,7 @@ struct CockpitFooterView: View {
 
             Spacer(minLength: 0)
 
-            SessionCountView(text: sessionCountText)
+            SessionCountView(text: sessionCountText, freshnessText: freshnessText)
         }
         .padding(.horizontal, 10)
         .frame(height: 26)
@@ -287,12 +290,21 @@ private struct MiniUsageBar: View {
 
 private struct SessionCountView: View {
     let text: String
+    let freshnessText: String?
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(Color.white.opacity(0.6))
-            .lineLimit(1)
+        HStack(spacing: 6) {
+            Text(text)
+                .monospacedDigit()
+            if let freshnessText, !freshnessText.isEmpty {
+                DividerText()
+                Text(freshnessText)
+                    .monospacedDigit()
+            }
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(Color.white.opacity(0.6))
+        .lineLimit(1)
     }
 }
 
