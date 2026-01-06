@@ -21,6 +21,8 @@ All notable changes to this project will be documented in this file.
 - Sessions list: The Size column can now be sorted.
 - Search: The unified sessions toolbar now shows the global search field by default and displays its keyboard shortcut inline.
 - Search: The Search Sessions menu item and ⌥⌘F shortcut now reliably focus the global search field.
+- Transcript: The Find field now shows its ⌘F shortcut hint when empty.
+- Analytics: The By Agent card now auto-scales rows and falls back to an internal scroll when space is tight.
 - UI: Consolidate unified-window status indicators into a single cockpit-style footer.
 - UI: In dark mode, the cockpit footer now uses a transparent HUD style with crisp borders instead of a solid fill.
 - UI: Menu bar usage now uses the same monospace, logo-forward cockpit styling as the footer.

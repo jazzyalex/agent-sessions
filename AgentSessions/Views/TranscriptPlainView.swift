@@ -415,6 +415,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         .onSubmit { performFind(resetIndex: true) }
                         .accessibilityLabel("Find in transcript")
                         .frame(minWidth: 120, idealWidth: 220, maxWidth: 360)
+                    if findText.isEmpty {
+                        Text("⌘F")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
                     if !findText.isEmpty {
                         Button(action: { findText = ""; performFind(resetIndex: true) }) {
                             Image(systemName: "xmark.circle.fill")

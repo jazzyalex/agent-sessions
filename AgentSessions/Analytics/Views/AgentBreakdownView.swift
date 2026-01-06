@@ -83,18 +83,7 @@ struct AgentBreakdownView: View {
             if breakdown.isEmpty {
                 emptyState
             } else {
-                // Agent rows with dividers
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(breakdown.enumerated()), id: \.element.id) { index, agent in
-                        AgentRow(agent: agent, metric: metric, monochrome: stripMonochrome)
-                            .padding(.vertical, 9)
-
-                        if index < breakdown.count - 1 {
-                            Divider()
-                                .opacity(0.3)
-                        }
-                    }
-                }
+                agentRowsSection
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -165,6 +154,31 @@ struct AgentBreakdownView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+
+    private var agentRowsSection: some View {
+        ViewThatFits(in: .vertical) {
+            agentRowsView(style: .regular)
+            agentRowsView(style: .compact)
+            ScrollView {
+                agentRowsView(style: .compact)
+                    .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func agentRowsView(style: AgentRowStyle) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(breakdown.enumerated()), id: \.element.id) { index, agent in
+                AgentRow(agent: agent, metric: metric, monochrome: stripMonochrome, style: style)
+                    .padding(.vertical, style.rowPadding)
+
+                if index < breakdown.count - 1 {
+                    Divider()
+                        .opacity(0.3)
                 }
             }
         }
@@ -351,16 +365,17 @@ private struct AgentRow: View {
     let agent: AnalyticsAgentBreakdown
     let metric: AnalyticsAggregationMetric
     let monochrome: Bool
+    let style: AgentRowStyle
 
     var body: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: style.rowSpacing) {
+            VStack(alignment: .leading, spacing: style.labelSpacing) {
                 Text(agent.agent.displayName)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: style.nameSize, weight: .semibold))
                     .foregroundStyle(.primary)
 
                 Text(agent.details(for: metric))
-                    .font(.system(size: 12))
+                    .font(.system(size: style.detailSize))
                     .foregroundStyle(.secondary)
             }
             .frame(minWidth: 80, alignment: .leading)
@@ -378,16 +393,49 @@ private struct AgentRow: View {
                         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: agent.percentage(for: metric))
                 }
             }
-            .frame(height: 12)
+            .frame(height: style.barHeight)
             .frame(maxWidth: .infinity)
 
             Text("\(Int(agent.percentage(for: metric)))%")
-                .font(.system(size: 14, weight: .medium))
-                .frame(width: 45, alignment: .trailing)
+                .font(.system(size: style.percentSize, weight: .medium))
+                .frame(width: style.percentWidth, alignment: .trailing)
                 .foregroundStyle(.secondary)
                 .animation(.easeInOut(duration: 0.3), value: agent.percentage(for: metric))
         }
     }
+}
+
+private struct AgentRowStyle {
+    let nameSize: CGFloat
+    let detailSize: CGFloat
+    let percentSize: CGFloat
+    let barHeight: CGFloat
+    let rowPadding: CGFloat
+    let rowSpacing: CGFloat
+    let labelSpacing: CGFloat
+    let percentWidth: CGFloat
+
+    static let regular = AgentRowStyle(
+        nameSize: 15,
+        detailSize: 12,
+        percentSize: 14,
+        barHeight: 12,
+        rowPadding: 9,
+        rowSpacing: 16,
+        labelSpacing: 6,
+        percentWidth: 45
+    )
+
+    static let compact = AgentRowStyle(
+        nameSize: 13,
+        detailSize: 11,
+        percentSize: 12,
+        barHeight: 10,
+        rowPadding: 6,
+        rowSpacing: 12,
+        labelSpacing: 4,
+        percentWidth: 40
+    )
 }
 
 // MARK: - Previews
