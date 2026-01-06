@@ -108,19 +108,20 @@ struct CockpitFooterView: View {
                 IndexingStatusView(isBusy: true, text: statusText)
             }
 
-	            HStack(spacing: 10) {
-	                ForEach(Array(quotas.enumerated()), id: \.offset) { _, q in
-	                    CockpitQuotaWidget(
-	                        data: q,
-	                        isDarkMode: colorScheme == .dark,
-	                        scope: .both,
-	                        style: .bars,
-	                        modeOverride: usageDisplayModeOverride,
-	                        baseForeground: .white,
-	                        showResetIndicators: true
-	                    )
-	                }
-	            }
+		            HStack(spacing: 10) {
+		                ForEach(Array(quotas.enumerated()), id: \.offset) { _, q in
+		                    CockpitQuotaWidget(
+		                        data: q,
+		                        isDarkMode: colorScheme == .dark,
+		                        scope: .both,
+		                        style: .bars,
+		                        modeOverride: usageDisplayModeOverride,
+		                        baseForeground: .white,
+		                        showResetIndicators: true,
+		                        showPill: true
+		                    )
+		                }
+		            }
 
             Spacer(minLength: 0)
 
@@ -148,27 +149,29 @@ enum CockpitQuotaStyle: Equatable {
     case numbers
 }
 
-	struct CockpitQuotaWidget: View {
-	    let data: QuotaData
-	    let isDarkMode: Bool
-	    let scope: CockpitQuotaScope
-	    let style: CockpitQuotaStyle
-	    let modeOverride: UsageDisplayMode?
-	    let baseForeground: Color
-	    let showResetIndicators: Bool
+		struct CockpitQuotaWidget: View {
+		    let data: QuotaData
+		    let isDarkMode: Bool
+		    let scope: CockpitQuotaScope
+		    let style: CockpitQuotaStyle
+		    let modeOverride: UsageDisplayMode?
+		    let baseForeground: Color
+		    let showResetIndicators: Bool
+		    let showPill: Bool
 
-	    var body: some View {
-	        QuotaWidget(
-	            data: data,
-	            isDarkMode: isDarkMode,
-	            scope: scope,
-	            style: style,
-	            modeOverride: modeOverride,
-	            baseForeground: baseForeground,
-	            showResetIndicators: showResetIndicators
-	        )
-	    }
-	}
+		    var body: some View {
+		        QuotaWidget(
+		            data: data,
+		            isDarkMode: isDarkMode,
+		            scope: scope,
+		            style: style,
+		            modeOverride: modeOverride,
+		            baseForeground: baseForeground,
+		            showResetIndicators: showResetIndicators,
+		            showPill: showPill
+		        )
+		    }
+		}
 
 private struct IndexingStatusView: View {
     let isBusy: Bool
@@ -202,16 +205,17 @@ private struct IndexingIndicator: View {
     }
 }
 
-	private struct QuotaWidget: View {
-	    let data: QuotaData
-	    let isDarkMode: Bool
-	    let scope: CockpitQuotaScope
-	    let style: CockpitQuotaStyle
-	    let modeOverride: UsageDisplayMode?
-	    let baseForeground: Color
-	    let showResetIndicators: Bool
-	    @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
-	    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+		private struct QuotaWidget: View {
+		    let data: QuotaData
+		    let isDarkMode: Bool
+		    let scope: CockpitQuotaScope
+		    let style: CockpitQuotaStyle
+		    let modeOverride: UsageDisplayMode?
+		    let baseForeground: Color
+		    let showResetIndicators: Bool
+		    let showPill: Bool
+		    @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
+		    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var mode: UsageDisplayMode { modeOverride ?? (UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left) }
 
@@ -284,10 +288,11 @@ private struct IndexingIndicator: View {
         )
     }
 
-    var body: some View {
-        HStack(spacing: 8) {
-            ProviderIcon(provider: data.provider)
-                .frame(width: 14, height: 14)
+	    @ViewBuilder
+	    private var inner: some View {
+	        HStack(spacing: 8) {
+	            ProviderIcon(provider: data.provider)
+	                .frame(width: 14, height: 14)
 
             if style == .bars {
                 MiniUsageBar(
@@ -332,16 +337,24 @@ private struct IndexingIndicator: View {
             .font(.system(size: 12, weight: .medium, design: .monospaced))
             .foregroundStyle(baseForeground)
             .lineLimit(1)
-        }
-        .padding(.horizontal, 8)
-        .frame(height: 20)
-        .background(baseForeground.opacity(CockpitFooterTheme.quotaBackgroundOpacity(isDark: isDarkMode)))
-        .overlay(
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .stroke(baseForeground.opacity(CockpitFooterTheme.quotaBorderOpacity(isDark: isDarkMode)), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-    }
+	        }
+	    }
+
+	    var body: some View {
+	        if showPill {
+	            inner
+	                .padding(.horizontal, 8)
+	                .frame(height: 20)
+	                .background(baseForeground.opacity(CockpitFooterTheme.quotaBackgroundOpacity(isDark: isDarkMode)))
+	                .overlay(
+	                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+	                        .stroke(baseForeground.opacity(CockpitFooterTheme.quotaBorderOpacity(isDark: isDarkMode)), lineWidth: 1)
+	                )
+	                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+	        } else {
+	            inner
+	        }
+	    }
 
     private func clampPercent(_ value: Int) -> Int {
         max(0, min(100, value))
