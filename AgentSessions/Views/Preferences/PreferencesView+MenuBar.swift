@@ -54,35 +54,27 @@ extension PreferencesView {
                     .accessibilityLabel(Text("Menu bar style"))
                 }
 
-                labeledRow("Label") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Show Codex reset indicators", isOn: Binding(
-                            get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true },
-                            set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showCodexResetTimes) }
-                        ))
-                        .toggleStyle(.switch)
-                        .disabled(!menuBarEnabled)
+                Toggle("Show Codex reset indicators", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showCodexResetTimes) }
+                ))
+                .toggleStyle(.switch)
+                .disabled(!menuBarEnabled)
 
-                        Toggle("Show Claude reset indicators", isOn: Binding(
-                            get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true },
-                            set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showClaudeResetTimes) }
-                        ))
-                        .toggleStyle(.switch)
-                        .disabled(!menuBarEnabled)
+                Toggle("Show Claude reset indicators", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showClaudeResetTimes) }
+                ))
+                .toggleStyle(.switch)
+                .disabled(!menuBarEnabled)
 
-                        Toggle("Show pills in menu bar", isOn: Binding(
-                            get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showPills) as? Bool ?? false },
-                            set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showPills) }
-                        ))
-                        .toggleStyle(.switch)
-                        .disabled(!menuBarEnabled)
-                        .help("Adds the pill containers used in the cockpit footer. Off by default to keep the menu bar compact.")
-                    }
-                }
-
-                Text("Source: Codex, Claude, or Both. Style: Bars or numbers. Scope: 5h, weekly, or both.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Toggle("Show pills in menu bar", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showPills) as? Bool ?? false },
+                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showPills) }
+                ))
+                .toggleStyle(.switch)
+                .disabled(!menuBarEnabled)
+                .help("Adds the pill containers used in the cockpit footer. Off by default to keep the menu bar compact.")
             }
         }
     }
