@@ -12,6 +12,7 @@ struct UsageMenuBarLabel: View {
 
     private let itemFont: Font = .system(size: 12, weight: .medium, design: .monospaced)
     private let itemHeight: CGFloat = NSStatusBar.system.thickness
+    private let iconSize: CGFloat = 13
 
     var body: some View {
         let scope = MenuBarScope(rawValue: scopeRaw) ?? .both
@@ -30,8 +31,7 @@ struct UsageMenuBarLabel: View {
             case .codex:
                 if codexAgentEnabled {
                     providerItem(
-                        iconName: "MenuIconCodex",
-                        iconTint: .blue,
+                        provider: .codex,
                         five: codexStatus.fiveHourRemainingPercent,
                         week: codexStatus.weekRemainingPercent,
                         scope: scope,
@@ -42,8 +42,7 @@ struct UsageMenuBarLabel: View {
             case .claude:
                 if claudeAgentEnabled && claudeEnabled {
                     providerItem(
-                        iconName: "MenuIconClaude",
-                        iconTint: .orange,
+                        provider: .claude,
                         five: claudeStatus.sessionRemainingPercent,
                         week: claudeStatus.weekAllModelsRemainingPercent,
                         scope: scope,
@@ -54,8 +53,7 @@ struct UsageMenuBarLabel: View {
             case .both:
                 if codexAgentEnabled {
                     providerItem(
-                        iconName: "MenuIconCodex",
-                        iconTint: .blue,
+                        provider: .codex,
                         five: codexStatus.fiveHourRemainingPercent,
                         week: codexStatus.weekRemainingPercent,
                         scope: scope,
@@ -68,8 +66,7 @@ struct UsageMenuBarLabel: View {
                         .fill(Color(nsColor: .separatorColor).opacity(0.6))
                         .frame(width: 1, height: 12)
                     providerItem(
-                        iconName: "MenuIconClaude",
-                        iconTint: .orange,
+                        provider: .claude,
                         five: claudeStatus.sessionRemainingPercent,
                         week: claudeStatus.weekAllModelsRemainingPercent,
                         scope: scope,
@@ -94,18 +91,34 @@ struct UsageMenuBarLabel: View {
     }
 
     @ViewBuilder
-    private func providerItem(iconName: String, iconTint: Color, five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, showSpinner: Bool) -> some View {
+    private func providerItem(provider: MenuBarSource, five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, showSpinner: Bool) -> some View {
         HStack(spacing: 4) {
-            Image(iconName)
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 13, height: 13)
-                .foregroundStyle(iconTint)
+            providerIcon(provider: provider)
             renderUsage(five: five, week: week, scope: scope, style: style)
             if showSpinner {
                 SpinningIcon()
             }
+        }
+    }
+
+    @ViewBuilder
+    private func providerIcon(provider: MenuBarSource) -> some View {
+        switch provider {
+        case .claude:
+            Image("FooterIconClaude")
+                .renderingMode(.original)
+                .resizable()
+                .scaledToFit()
+                .frame(width: iconSize, height: iconSize)
+        case .codex:
+            Image("FooterIconCodex")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: iconSize, height: iconSize)
+                .foregroundStyle(.primary)
+        case .both:
+            EmptyView()
         }
     }
 
