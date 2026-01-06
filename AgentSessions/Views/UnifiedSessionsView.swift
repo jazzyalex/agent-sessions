@@ -209,9 +209,12 @@ struct UnifiedSessionsView: View {
 						hasEverHadSessions = true
 					}
 				}
-				.onReceive(NotificationCenter.default.publisher(for: .openSessionsSearchFromMenu)) { _ in
-					focusCoordinator.perform(.openSessionSearch)
-				}
+					.onReceive(NotificationCenter.default.publisher(for: .openSessionsSearchFromMenu)) { _ in
+						// Force a focus transition even if Search is already active so the menu action
+						// reliably focuses the search field.
+						focusCoordinator.perform(.closeAllSearch)
+						focusCoordinator.perform(.openSessionSearch)
+					}
 				.onReceive(NotificationCenter.default.publisher(for: .openTranscriptFindFromMenu)) { _ in
 					focusCoordinator.perform(.openTranscriptFind)
 				}
@@ -1213,12 +1216,15 @@ private struct UnifiedSearchFiltersView: View {
                 }
             }
 
-            // Preserve the keyboard shortcut binding even though the search box is always visible.
-            Button(action: { focus.perform(.openSessionSearch) }) { EmptyView() }
-                .buttonStyle(.plain)
-                .keyboardShortcut("f", modifiers: [.command, .option])
-                .opacity(0.001)
-                .frame(width: 1, height: 1)
+	            // Preserve the keyboard shortcut binding even though the search box is always visible.
+	            Button(action: {
+	                focus.perform(.closeAllSearch)
+	                focus.perform(.openSessionSearch)
+	            }) { EmptyView() }
+	                .buttonStyle(.plain)
+	                .keyboardShortcut("f", modifiers: [.command, .option])
+	                .opacity(0.001)
+	                .frame(width: 1, height: 1)
 
             // Active project filter badge (Codex parity)
             if let projectFilter = unified.projectFilter, !projectFilter.isEmpty {
@@ -1305,6 +1311,7 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
 
     class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: ToolbarSearchTextField
+        var didRequestFocus: Bool = false
         init(parent: ToolbarSearchTextField) { self.parent = parent }
 
         func controlTextDidChange(_ obj: Notification) {
@@ -1341,18 +1348,25 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
         tf.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         tf.delegate = context.coordinator
         tf.lineBreakMode = .byTruncatingTail
-        // Force focus after the view is in the window
-        DispatchQueue.main.async { [weak tf] in
-            guard let tf, let window = tf.window else { return }
-            _ = window.makeFirstResponder(tf)
-        }
         return tf
     }
 
     func updateNSView(_ tf: NSTextField, context: Context) {
         if tf.stringValue != text { tf.stringValue = text }
         if tf.placeholderString != placeholder { tf.placeholderString = placeholder }
-        // Don't rely on isFirstResponder binding - already set in makeNSView
+        if isFirstResponder {
+            // `NSTextField` becomes first responder via a field editor, so we can't reliably compare
+            // against `window.firstResponder`. Instead, request focus once when asked.
+            if !context.coordinator.didRequestFocus {
+                context.coordinator.didRequestFocus = true
+                DispatchQueue.main.async { [weak tf] in
+                    guard let tf, let window = tf.window else { return }
+                    _ = window.makeFirstResponder(tf)
+                }
+            }
+        } else {
+            context.coordinator.didRequestFocus = false
+        }
     }
 }
 
