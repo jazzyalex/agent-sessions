@@ -5,13 +5,18 @@ private enum CockpitFooterTheme {
     static let horizontalPadding: CGFloat = 10
 
     static let lightBackground = Color(hex: "007acc")
-    static let darkBackground = Color(hex: "252526")
+    static let darkBackground = Color.clear
 
-    static let topBorder = Color.black.opacity(0.3)
+    static func topBorder(isDark: Bool) -> Color {
+        isDark ? Color.white.opacity(0.20) : Color.black.opacity(0.30)
+    }
 
-    static func quotaBackgroundOpacity(isDark: Bool) -> Double { isDark ? 0.14 : 0.08 }
-    static func quotaBorderOpacity(isDark: Bool) -> Double { isDark ? 0.10 : 0.05 }
-    static func barTrackOpacity(isDark: Bool) -> Double { isDark ? 0.25 : 0.20 }
+    static func quotaBackgroundOpacity(isDark: Bool) -> Double { isDark ? 0.00 : 0.08 }
+    static func quotaBorderOpacity(isDark: Bool) -> Double { isDark ? 0.20 : 0.05 }
+    static func barTrackColor(isDark: Bool) -> Color {
+        if isDark { return Color.black.opacity(0.30) }
+        return Color.white.opacity(0.20)
+    }
 }
 
 struct QuotaData: Equatable {
@@ -118,7 +123,7 @@ struct CockpitFooterView: View {
         .background(colorScheme == .dark ? CockpitFooterTheme.darkBackground : CockpitFooterTheme.lightBackground)
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(CockpitFooterTheme.topBorder)
+                .fill(CockpitFooterTheme.topBorder(isDark: colorScheme == .dark))
                 .frame(height: 1)
         }
     }
@@ -329,7 +334,7 @@ private struct MiniUsageBar: View {
 
     var body: some View {
         Capsule(style: .continuous)
-            .fill(Color.white.opacity(CockpitFooterTheme.barTrackOpacity(isDark: isDarkMode)))
+            .fill(CockpitFooterTheme.barTrackColor(isDark: isDarkMode))
             .frame(width: 24, height: 4)
             .overlay(alignment: .leading) {
                 Capsule(style: .continuous)
