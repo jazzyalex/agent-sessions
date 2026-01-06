@@ -8,74 +8,29 @@ extension PreferencesView {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            // Status item settings (no extra section header per request)
+            sectionHeader("Menu Bar Usage")
             VStack(alignment: .leading, spacing: 12) {
                 toggleRow("Show menu bar usage", isOn: $menuBarEnabled, help: "Add a menu bar item that displays usage meters")
+            }
 
-                labeledRow("Source") {
-                    Picker("", selection: Binding(
-                        get: { UserDefaults.standard.string(forKey: PreferencesKey.MenuBar.source) ?? MenuBarSource.codex.rawValue },
-                        set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.source) }
-                    )) {
-                        ForEach(MenuBarSource.allCases) { s in
-                            Text(s.title).tag(s.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!menuBarEnabled)
-                    .frame(maxWidth: 360)
-                    .help("Choose which agent usage the menu bar item displays")
-                    .accessibilityLabel(Text("Menu bar source"))
-                }
-
-                labeledRow("Scope") {
-                    Picker("", selection: $menuBarScopeRaw) {
-                        ForEach(MenuBarScope.allCases) { s in
-                            Text(s.title).tag(s.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!menuBarEnabled)
-                    .frame(maxWidth: 360)
-                    .help("Select whether the menu bar shows 5-hour, weekly, or both usage windows")
-                    .accessibilityLabel(Text("Menu bar scope"))
-                }
-
-                labeledRow("Style") {
-                    Picker("", selection: $menuBarStyleRaw) {
-                        ForEach(MenuBarStyleKind.allCases) { k in
-                            Text(k.title).tag(k.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!menuBarEnabled)
-                    .frame(maxWidth: 360)
-                    .help("Switch between bar graphs and numeric usage in the menu bar")
-                    .accessibilityLabel(Text("Menu bar style"))
-                }
-
-                Toggle("Show Codex reset indicators", isOn: Binding(
+            sectionHeader("Menu Bar Label")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow("Show Codex reset indicators", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showCodexResetTimes) }
-                ))
-                .toggleStyle(.switch)
-                .disabled(!menuBarEnabled)
+                ), help: "Show the ↻ reset indicator next to the Codex meter in the menu bar label")
 
-                Toggle("Show Claude reset indicators", isOn: Binding(
+                toggleRow("Show Claude reset indicators", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showClaudeResetTimes) }
-                ))
-                .toggleStyle(.switch)
-                .disabled(!menuBarEnabled)
+                ), help: "Show the ↻ reset indicator next to the Claude meter in the menu bar label")
 
-                Toggle("Show pills in menu bar", isOn: Binding(
+                toggleRow("Show pills in menu bar", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showPills) as? Bool ?? false },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showPills) }
-                ))
-                .toggleStyle(.switch)
-                .disabled(!menuBarEnabled)
-                .help("Adds the pill containers used in the cockpit footer. Off by default to keep the menu bar compact.")
+                ), help: "Add pill containers around meters. Off by default to keep the menu bar compact.")
             }
+            .disabled(!menuBarEnabled)
         }
     }
 
