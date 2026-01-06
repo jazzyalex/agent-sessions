@@ -239,6 +239,40 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(metaTexts.contains(where: { $0.localizedCaseInsensitiveContains("Rejected tool use:") }))
     }
 
+    func testClaudeToolResultEmbeddedImageIsSummarizedAndSanitized() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-Images-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let url = dir.appendingPathComponent("claude_images.jsonl")
+        let sessionID = "ses_testClaudeImages"
+
+        // Simulate Chrome MCP screenshots (tool_result content blocks with base64 image payloads).
+        let bigBase64 = String(repeating: "A", count: 120_000)
+        let line = #"""
+{"type":"user","sessionId":"\#(sessionID)","version":"2.0.76","cwd":"/tmp","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_img","content":[{"type":"text","text":"Captured screenshot."},{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"\#(bigBase64)"}}]}]},"uuid":"u1","timestamp":"2026-01-04T20:50:23.199Z"}
+"""#
+        try (line + "\n").data(using: .utf8)!.write(to: url)
+
+        let session = ClaudeSessionParser.parseFileFull(at: url)
+        XCTAssertNotNil(session)
+        guard let parsed = session else { return }
+
+        let toolResults = parsed.events.filter { $0.kind == .tool_result }
+        XCTAssertEqual(toolResults.count, 1)
+        let output = toolResults[0].toolOutput ?? ""
+        XCTAssertTrue(output.contains("Captured screenshot."))
+        XCTAssertTrue(output.contains("[image omitted:"), "Expected tool output to summarize embedded image payloads")
+        XCTAssertFalse(output.contains(String(bigBase64.prefix(64))), "Should not surface raw base64 image data in tool output")
+
+        // rawJSON is base64-wrapped JSON; decode and ensure large strings were sanitized.
+        let raw = toolResults[0].rawJSON
+        let decoded = Data(base64Encoded: raw).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        XCTAssertTrue(decoded.contains("[OMITTED bytes="), "Expected raw JSON to redact large embedded strings")
+        XCTAssertFalse(decoded.contains(String(bigBase64.prefix(64))), "Should not keep raw base64 image payloads in raw JSON")
+    }
+
     func testCopilotJoinsToolExecutionByToolCallId() throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-\(UUID().uuidString)", isDirectory: true)

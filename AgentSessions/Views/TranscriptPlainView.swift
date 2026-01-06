@@ -38,6 +38,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     // Plain transcript buffer
     @State private var transcript: String = ""
+    @State private var rebuildTask: Task<Void, Never>?
 
     // Find
     @State private var findText: String = ""
@@ -479,6 +480,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func rebuild(session: Session) {
+        rebuildTask?.cancel()
+        rebuildTask = nil
+
         syncRenderModeWithViewMode()
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
         let mode = viewMode.transcriptRenderMode
@@ -628,26 +632,63 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             let sessionHasCommands2 = session.events.contains { $0.kind == .tool_call }
             if viewMode == .json {
                 scheduleJSONBuild(session: session, key: buildKey, shouldCache: false, hasCommands: sessionHasCommands2)
-            } else if viewMode == .terminal && shouldColorize && sessionHasCommands2 {
-                let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
-                transcript = decorateTranscriptIfNeeded(built.0, session: session)
-                commandRanges = built.1
-                userRanges = built.2
-                assistantRanges = []
-                outputRanges = []
-                errorRanges = []
-                hasCommands = true
-                findAdditionalRanges()
-            } else {
-                transcript = decorateTranscriptIfNeeded(SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal), session: session)
-                commandRanges = []
-                userRanges = []
-                assistantRanges = []
-                outputRanges = []
-                errorRanges = []
-                hasCommands = sessionHasCommands2
-                computeNavigationRangesIfNeeded()
+                return
             }
+
+            // Build off-main to avoid UI stalls on heavy sessions (e.g., Chrome MCP screenshots).
+            let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+            let shouldColorizeSnapshot = shouldColorize
+            let modeSnapshot = mode
+            let keySnapshot = buildKey
+            let sessionSnapshot = session
+            rebuildTask = Task.detached(priority: prio) {
+                if modeSnapshot == .terminal && shouldColorizeSnapshot && sessionHasCommands2 {
+                    let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: sessionSnapshot, filters: filters)
+                    await MainActor.run {
+                        guard self.sessionID == sessionSnapshot.id else { return }
+                        guard !Task.isCancelled else { return }
+                        let decorated = self.decorateTranscriptIfNeeded(built.0, session: sessionSnapshot)
+                        self.transcript = decorated
+                        // In terminal mode, the UI uses SessionTerminalView; keep these empty to avoid extra scans.
+                        self.commandRanges = []
+                        self.userRanges = []
+                        self.assistantRanges = []
+                        self.outputRanges = []
+                        self.errorRanges = []
+                        self.hasCommands = true
+                        self.lastBuildKey = keySnapshot
+                        self.performFind(resetIndex: true)
+                        self.selectedNSRange = nil
+                        self.resetJumpCursors()
+                        self.updateSelectionToCurrentMatch()
+                        self.maybeAutoJumpToFirstPrompt(session: sessionSnapshot)
+                    }
+                } else {
+                    let t = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: sessionSnapshot, filters: filters, mode: .normal)
+                    await MainActor.run {
+                        guard self.sessionID == sessionSnapshot.id else { return }
+                        guard !Task.isCancelled else { return }
+                        let decorated = self.decorateTranscriptIfNeeded(t, session: sessionSnapshot)
+                        self.transcript = decorated
+                        self.commandRanges = []
+                        self.userRanges = []
+                        self.assistantRanges = []
+                        self.outputRanges = []
+                        self.errorRanges = []
+                        self.hasCommands = sessionHasCommands2
+                        if self.viewMode != .terminal && self.viewMode != .json {
+                            self.computeNavigationRangesIfNeeded()
+                        }
+                        self.lastBuildKey = keySnapshot
+                        self.performFind(resetIndex: true)
+                        self.selectedNSRange = nil
+                        self.resetJumpCursors()
+                        self.updateSelectionToCurrentMatch()
+                        self.maybeAutoJumpToFirstPrompt(session: sessionSnapshot)
+                    }
+                }
+            }
+            return
         }
 
         // Reset find state

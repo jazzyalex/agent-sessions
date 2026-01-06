@@ -3,6 +3,10 @@ import CryptoKit
 
 /// Parser for Claude Code session format
 final class ClaudeSessionParser {
+    // Keep per-event raw JSON bounded. Claude tool results can embed large base64 blobs
+    // (e.g., screenshots from Chrome MCP), which otherwise balloon memory and stall UI.
+    private static let maxRawJSONFieldBytes = 8_192
+    private static let maxFallbackStringifyBytes = 64_000
 
     /// Parse a Claude Code session file
     static func parseFile(at url: URL) -> Session? {
@@ -120,7 +124,7 @@ final class ClaudeSessionParser {
             messageID: obj["uuid"] as? String,
             parentID: obj["parentUuid"] as? String,
             isDelta: false,
-            rawJSON: (try? JSONSerialization.data(withJSONObject: obj, options: []).base64EncodedString()) ?? ""
+            rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
         )
     }
 
@@ -129,7 +133,7 @@ final class ClaudeSessionParser {
     /// We split these into separate `SessionEvent`s to avoid collapsing tool activity into a single line.
     private static func parseLineEvents(_ obj: [String: Any], baseEventID: String) -> [SessionEvent] {
         let timestamp = extractTimestamp(from: obj)
-        let rawJSON = (try? JSONSerialization.data(withJSONObject: obj, options: []).base64EncodedString()) ?? ""
+        let rawJSON = rawJSONBase64(sanitizeLargeStrings(in: obj))
         let messageID = obj["uuid"] as? String
         let parentID = obj["parentUuid"] as? String
 
@@ -137,7 +141,7 @@ final class ClaudeSessionParser {
         if let t = (obj["type"] as? String)?.lowercased() {
             if t == "tool_use" || t == "tool_call" {
                 let toolName = obj["name"] as? String ?? obj["tool"] as? String
-                let toolInput = obj["input"].flatMap(stringifyJSON)
+                let toolInput = obj["input"].flatMap(stringifyJSONBounded)
                 return [
                     SessionEvent(
                         id: baseEventID,
@@ -156,7 +160,7 @@ final class ClaudeSessionParser {
                 ]
             }
             if t == "tool_result" {
-                let toolOutput = obj["output"].flatMap(stringifyJSON)
+                let toolOutput = obj["output"].flatMap(stringifyJSONBounded)
                 return [
                     SessionEvent(
                         id: baseEventID,
@@ -471,7 +475,9 @@ final class ClaudeSessionParser {
             if let content = block["content"] as? String {
                 output = content
             } else if let content = block["content"] {
-                output = stringifyJSON(content)
+                // Some Claude tool results embed large base64 blobs (e.g., screenshots).
+                // Always summarize those instead of stringifying megabytes of JSON.
+                output = summarizeToolResultContentIfPossible(content) ?? stringifyJSONBounded(content)
             }
         }
 
@@ -544,6 +550,47 @@ final class ClaudeSessionParser {
         }
 
         return (output, .ok)
+    }
+
+    private static func summarizeToolResultContentIfPossible(_ content: Any) -> String? {
+        guard let parts = content as? [[String: Any]] else { return nil }
+
+        var out: [String] = []
+        out.reserveCapacity(min(parts.count, 8))
+
+        for part in parts {
+            let t = (part["type"] as? String)?.lowercased()
+            switch t {
+            case "text":
+                if let s = part["text"] as? String, !s.isEmpty {
+                    out.append(s)
+                }
+            case "image":
+                // Claude: { "type":"image", "source": { "type":"base64", "media_type":"image/jpeg", "data":"..." } }
+                if let src = part["source"] as? [String: Any],
+                   let data = src["data"] as? String,
+                   !data.isEmpty {
+                    let media = (src["media_type"] as? String) ?? "image"
+                    let approxBytes = approximateBase64Bytes(forLength: data.count)
+                    let approxKB = Int((Double(approxBytes) / 1024.0).rounded())
+                    out.append("[image omitted: \(media), approx \(approxKB) KB]")
+                } else {
+                    out.append("[image omitted]")
+                }
+            default:
+                if let s = stringifyJSONBounded(part), !s.isEmpty {
+                    out.append(s)
+                }
+            }
+        }
+
+        let joined = out.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return joined.isEmpty ? nil : joined
+    }
+
+    private static func approximateBase64Bytes(forLength length: Int) -> Int {
+        if length <= 0 { return 0 }
+        return max(0, (length * 3) / 4)
     }
 
     private static func parseExitCode(from text: String) -> Int? {
@@ -776,6 +823,47 @@ final class ClaudeSessionParser {
             }
         }
         return String(describing: any)
+    }
+
+    private static func stringifyJSONBounded(_ any: Any) -> String? {
+        if let str = any as? String { return str }
+        guard JSONSerialization.isValidJSONObject(any) else { return String(describing: any) }
+        guard let data = try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys]) else {
+            return String(describing: any)
+        }
+        if data.count > maxFallbackStringifyBytes {
+            return "[OMITTED large JSON payload bytes=\(data.count)]"
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func sanitizeLargeStrings(in any: Any) -> Any {
+        if let s = any as? String {
+            if s.utf8.count > maxRawJSONFieldBytes {
+                return "[OMITTED bytes=\(s.utf8.count)]"
+            }
+            return s
+        }
+        if let arr = any as? [Any] {
+            return arr.map { sanitizeLargeStrings(in: $0) }
+        }
+        if let dict = any as? [String: Any] {
+            var out: [String: Any] = [:]
+            out.reserveCapacity(dict.count)
+            for (k, v) in dict {
+                out[k] = sanitizeLargeStrings(in: v)
+            }
+            return out
+        }
+        return any
+    }
+
+    private static func rawJSONBase64(_ any: Any) -> String {
+        guard JSONSerialization.isValidJSONObject(any),
+              let data = try? JSONSerialization.data(withJSONObject: any, options: []) else {
+            return ""
+        }
+        return data.base64EncodedString()
     }
 
     private static func eventID(for url: URL, index: Int) -> String {
