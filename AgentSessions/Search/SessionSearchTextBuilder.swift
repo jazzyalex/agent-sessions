@@ -1,6 +1,136 @@
 import Foundation
 
 enum SessionSearchTextBuilder {
+    // Redact embedded binary-ish blobs (base64, data: URLs) from search corpora.
+    // This protects Instant search and Tool I/O FTS from ballooning DB size and from
+    // indexing meaningless tokens (e.g., screenshots from Chrome MCP).
+    private static let base64RunMinChars = 2_048
+    private static let dataURLMinChars = 256
+
+    private static func sanitizeForIndexing(_ text: String) -> String {
+        // Fast path: avoid scanning small strings.
+        if text.count < 512 { return text }
+
+        var out = text
+        out = redactDataURLs(in: out)
+        out = redactLongBase64Runs(in: out)
+        return out
+    }
+
+    private static func redactDataURLs(in text: String) -> String {
+        // Only bother if we see obvious markers.
+        if !(text.contains("data:") && text.contains(";base64,")) { return text }
+
+        var out = ""
+        out.reserveCapacity(min(text.utf16.count, 32_768))
+
+        var i = text.startIndex
+        while i < text.endIndex {
+            if text[i...].hasPrefix("data:"),
+               let base64Range = text.range(of: ";base64,", range: i..<text.endIndex) {
+                // Extract media type if present (data:<mediaType>;base64,...)
+                let mediaStart = text.index(i, offsetBy: 5, limitedBy: text.endIndex) ?? text.endIndex
+                let mediaType = (mediaStart < base64Range.lowerBound) ? String(text[mediaStart..<base64Range.lowerBound]) : "application/octet-stream"
+
+                let payloadStart = base64Range.upperBound
+                var end = payloadStart
+                var payloadChars = 0
+
+                func isTerminator(_ ch: Character) -> Bool {
+                    switch ch {
+                    case " ", "\t", "\n", "\r", "\"", "'", ")", "]", "}", ">":
+                        return true
+                    default:
+                        return false
+                    }
+                }
+
+                while end < text.endIndex {
+                    let ch = text[end]
+                    if isTerminator(ch) { break }
+                    payloadChars += 1
+                    end = text.index(after: end)
+                }
+
+                // Only redact when the payload is meaningfully large; keep tiny data URLs intact.
+                let totalLen = text.distance(from: i, to: end)
+                if totalLen >= dataURLMinChars {
+                    let approxBytes = max(0, (payloadChars * 3) / 4)
+                    let approxKB = Int((Double(approxBytes) / 1024.0).rounded())
+                    out += "[data-url omitted: \(mediaType), approx \(approxKB) KB]"
+                    i = end
+                    continue
+                }
+            }
+
+            out.append(text[i])
+            i = text.index(after: i)
+        }
+
+        return out
+    }
+
+    private static func redactLongBase64Runs(in text: String) -> String {
+        // If there are no base64-ish characters, bail quickly.
+        if text.count < base64RunMinChars { return text }
+
+        func isBase64Char(_ ch: Character) -> Bool {
+            switch ch {
+            case "A"..."Z", "a"..."z", "0"..."9", "+", "/", "=", "-", "_":
+                return true
+            default:
+                return false
+            }
+        }
+
+        func isSpecialBase64Marker(_ ch: Character) -> Bool {
+            switch ch {
+            case "+", "/", "=", "-", "_":
+                return true
+            default:
+                return false
+            }
+        }
+
+        var out = ""
+        out.reserveCapacity(min(text.utf16.count, 32_768))
+
+        var i = text.startIndex
+        while i < text.endIndex {
+            if isBase64Char(text[i]) {
+                let start = i
+                var end = i
+                var count = 0
+                var sawSpecial = false
+
+                while end < text.endIndex, isBase64Char(text[end]) {
+                    count += 1
+                    if isSpecialBase64Marker(text[end]) { sawSpecial = true }
+                    end = text.index(after: end)
+                }
+
+                // To avoid false positives, require both a long run and at least one
+                // base64 marker char that rarely appears in normal text/code.
+                if count >= base64RunMinChars && sawSpecial {
+                    let approxBytes = max(0, (count * 3) / 4)
+                    let approxKB = Int((Double(approxBytes) / 1024.0).rounded())
+                    out += "[base64 omitted: approx \(approxKB) KB]"
+                    i = end
+                    continue
+                }
+
+                out += text[start..<end]
+                i = end
+                continue
+            }
+
+            out.append(text[i])
+            i = text.index(after: i)
+        }
+
+        return out
+    }
+
     static func build(session: Session, maxCharacters: Int = 200_000, perFieldLimit: Int = 8_000) -> String {
         var parts: [String] = []
         parts.reserveCapacity(220)
@@ -13,6 +143,7 @@ enum SessionSearchTextBuilder {
             if value.count > limit {
                 value = String(value.prefix(limit))
             }
+            value = sanitizeForIndexing(value)
             guard !value.isEmpty else { return nil }
             return value
         }
@@ -172,6 +303,7 @@ enum SessionSearchTextBuilder {
             value = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else { return nil }
             if value.count > limit { value = String(value.prefix(limit)) }
+            value = sanitizeForIndexing(value)
             return value.isEmpty ? nil : value
         }
 
