@@ -99,11 +99,16 @@ final class ClaudeUsageModel: ObservableObject {
         let model = self
         let handler: @Sendable (ClaudeUsageSnapshot) -> Void = { snapshot in
             Task { @MainActor in
+                // Avoid publishing changes during SwiftUI view updates (can happen when the menu bar
+                // or strip visibility flips and the service immediately delivers a snapshot).
+                await Task.yield()
                 model.apply(snapshot)
             }
         }
         let availabilityHandler: @Sendable (ClaudeServiceAvailability) -> Void = { availability in
             Task { @MainActor in
+                // Avoid publishing changes during SwiftUI view updates.
+                await Task.yield()
                 model.cliUnavailable = availability.cliUnavailable
                 model.tmuxUnavailable = availability.tmuxUnavailable
                 model.loginRequired = availability.loginRequired
@@ -142,10 +147,16 @@ final class ClaudeUsageModel: ObservableObject {
                 return
             }
             let handler: @Sendable (ClaudeUsageSnapshot) -> Void = { snapshot in
-                Task { @MainActor in self.apply(snapshot) }
+                Task { @MainActor in
+                    // Avoid publishing changes during SwiftUI view updates.
+                    await Task.yield()
+                    self.apply(snapshot)
+                }
             }
             let availability: @Sendable (ClaudeServiceAvailability) -> Void = { availability in
                 Task { @MainActor in
+                    // Avoid publishing changes during SwiftUI view updates.
+                    await Task.yield()
                     self.cliUnavailable = availability.cliUnavailable
                     self.tmuxUnavailable = availability.tmuxUnavailable
                     self.loginRequired = availability.loginRequired
