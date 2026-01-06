@@ -44,6 +44,7 @@ All notable changes to this project will be documented in this file.
 - Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
 - Transcript: Clearing Find now immediately clears match highlights.
 - Transcript: Terminal view no longer leaves a stale find highlight when the Find query is empty.
+- Transcript: Toolbar filters now use dot + count labels with compact navigation chevrons.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
 
