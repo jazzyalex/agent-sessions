@@ -56,7 +56,8 @@ struct UsageMenuBarLabel: View {
                     style: style,
                     modeOverride: nil,
                     baseForeground: .primary,
-                    showResetIndicators: (q.provider == .codex) ? showCodexResetIndicators : showClaudeResetIndicators
+                    showResetIndicators: (q.provider == .codex) ? showCodexResetIndicators : showClaudeResetIndicators,
+                    showPill: false
                 )
             }
         }
