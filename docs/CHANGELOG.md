@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - Sessions: Stabilize message counts for large sessions while full parsing completes to reduce list row jumps.
 - Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
+- Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
 
 ## [2.9.2] - 2026-01-01
 
