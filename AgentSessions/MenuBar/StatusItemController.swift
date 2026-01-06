@@ -130,12 +130,16 @@ final class StatusItemController: NSObject {
         menu.addItem(makeTitleItem("Menu Bar Label"))
         let showCodexResetIndicators = d.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true
         let showClaudeResetIndicators = d.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true
+        let showPills = d.object(forKey: PreferencesKey.MenuBar.showPills) as? Bool ?? false
         let codexToggle = makeCheckboxItem(title: "Show Codex reset indicators", checked: showCodexResetIndicators, action: #selector(toggleShowCodexResetTimes))
         codexToggle.isEnabled = codexAgentEnabled
         menu.addItem(codexToggle)
         let claudeToggle = makeCheckboxItem(title: "Show Claude reset indicators", checked: showClaudeResetIndicators, action: #selector(toggleShowClaudeResetTimes))
         claudeToggle.isEnabled = claudeAgentEnabled && claudeEnabled
         menu.addItem(claudeToggle)
+        let pillToggle = makeCheckboxItem(title: "Show pills in menu bar label", checked: showPills, action: #selector(toggleShowMenuBarPills))
+        pillToggle.isEnabled = true
+        menu.addItem(pillToggle)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -219,6 +223,12 @@ final class StatusItemController: NSObject {
         let d = UserDefaults.standard
         let current = d.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true
         d.set(!current, forKey: PreferencesKey.MenuBar.showClaudeResetTimes)
+        updateLength()
+    }
+    @objc private func toggleShowMenuBarPills() {
+        let d = UserDefaults.standard
+        let current = d.object(forKey: PreferencesKey.MenuBar.showPills) as? Bool ?? false
+        d.set(!current, forKey: PreferencesKey.MenuBar.showPills)
         updateLength()
     }
     @objc private func openPreferences() {
