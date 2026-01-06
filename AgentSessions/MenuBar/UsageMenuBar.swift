@@ -10,6 +10,7 @@ struct UsageMenuBarLabel: View {
     @AppStorage("MenuBarSource") private var sourceRaw: String = MenuBarSource.codex.rawValue
     @AppStorage(PreferencesKey.MenuBar.showCodexResetTimes) private var showCodexResetIndicators: Bool = true
     @AppStorage(PreferencesKey.MenuBar.showClaudeResetTimes) private var showClaudeResetIndicators: Bool = true
+    @AppStorage(PreferencesKey.MenuBar.showPills) private var showPills: Bool = false
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
 
@@ -57,7 +58,7 @@ struct UsageMenuBarLabel: View {
                     modeOverride: nil,
                     baseForeground: .primary,
                     showResetIndicators: (q.provider == .codex) ? showCodexResetIndicators : showClaudeResetIndicators,
-                    showPill: false
+                    showPill: showPills
                 )
             }
         }
