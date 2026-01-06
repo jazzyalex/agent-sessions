@@ -8,6 +8,8 @@ struct UsageMenuBarLabel: View {
     @AppStorage("MenuBarScope") private var scopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var styleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("MenuBarSource") private var sourceRaw: String = MenuBarSource.codex.rawValue
+    @AppStorage(PreferencesKey.MenuBar.showCodexResetTimes) private var showCodexResetIndicators: Bool = true
+    @AppStorage(PreferencesKey.MenuBar.showClaudeResetTimes) private var showClaudeResetIndicators: Bool = true
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
 
@@ -53,7 +55,8 @@ struct UsageMenuBarLabel: View {
                     scope: scope,
                     style: style,
                     modeOverride: nil,
-                    baseForeground: .primary
+                    baseForeground: .primary,
+                    showResetIndicators: (q.provider == .codex) ? showCodexResetIndicators : showClaudeResetIndicators
                 )
             }
         }
