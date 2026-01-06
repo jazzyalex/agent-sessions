@@ -21,6 +21,8 @@ struct SessionTerminalView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var lines: [TerminalLine] = []
+    @State private var visibleLines: [TerminalLine] = []
+    @State private var rebuildTask: Task<Void, Never>?
 
     enum RoleToggle: CaseIterable {
         case user
@@ -61,21 +63,7 @@ struct SessionTerminalView: View {
     }
 
     private var filteredLines: [TerminalLine] {
-        guard !activeRoles.isEmpty else { return lines }
-        return lines.filter { line in
-            switch line.role {
-            case .user:
-                return activeRoles.contains(.user)
-            case .assistant:
-                return activeRoles.contains(.assistant)
-            case .toolInput, .toolOutput:
-                return activeRoles.contains(.tools)
-            case .error:
-                return activeRoles.contains(.errors)
-            case .meta:
-                return true
-            }
-        }
+        visibleLines
     }
 
     var body: some View {
@@ -86,10 +74,20 @@ struct SessionTerminalView: View {
         }
         .onAppear {
             loadRoleToggles()
-            rebuildLines()
+            rebuildLines(priority: .userInitiated)
+        }
+        .onDisappear {
+            rebuildTask?.cancel()
+            rebuildTask = nil
         }
         .onChange(of: jumpToken) { _, _ in
             jumpToFirstPrompt()
+        }
+        .onChange(of: session.id) { _, _ in
+            rebuildLines(priority: .userInitiated)
+        }
+        .onChange(of: activeRoles) { _, _ in
+            visibleLines = roleFilteredLines(from: lines)
         }
         .onChange(of: roleNavToken) { _, _ in
             // Keyboard navigation should reveal the target role even if the user filtered it off.
@@ -100,7 +98,7 @@ struct SessionTerminalView: View {
             navigateRole(roleNavRole, direction: roleNavDirection)
         }
         .onChange(of: session.events.count) { _, _ in
-            rebuildLines()
+            rebuildLines(priority: .utility, debounceNanoseconds: 150_000_000)
         }
     }
 
@@ -172,13 +170,78 @@ struct SessionTerminalView: View {
         }
     }
 
-    private func rebuildLines() {
+    private struct RebuildResult: Sendable {
+        let lines: [TerminalLine]
+        let conversationStartLineID: Int?
+        let preambleUserBlockIndexes: Set<Int>
+        let userLineIndices: [Int]
+        let assistantLineIndices: [Int]
+        let toolLineIndices: [Int]
+        let errorLineIndices: [Int]
+    }
+
+    private func rebuildLines(priority: TaskPriority, debounceNanoseconds: UInt64 = 0) {
+        rebuildTask?.cancel()
+
+        let sessionSnapshot = session
+        let skipAgentsPreamble = skipAgentsPreambleEnabled()
+
+        rebuildTask = Task(priority: priority) { @MainActor in
+            if debounceNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: debounceNanoseconds)
+            }
+
+            let result = await Task.detached(priority: priority) {
+                Self.buildRebuildResult(session: sessionSnapshot, skipAgentsPreamble: skipAgentsPreamble)
+            }.value
+
+            guard !Task.isCancelled else { return }
+
+            lines = result.lines
+            visibleLines = roleFilteredLines(from: result.lines)
+            conversationStartLineID = result.conversationStartLineID
+            preambleUserBlockIndexes = result.preambleUserBlockIndexes
+            userLineIndices = result.userLineIndices
+            assistantLineIndices = result.assistantLineIndices
+            toolLineIndices = result.toolLineIndices
+            errorLineIndices = result.errorLineIndices
+
+            // Reset local find state when rebuilding.
+            matchingLineIDs = []
+            matchIDSet = []
+            currentMatchLineID = nil
+            roleNavPositions = [:]
+            externalMatchCount = 0
+            externalCurrentMatchIndex = 0
+
+            if skipAgentsPreamble, findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                jumpToFirstPrompt()
+            }
+        }
+    }
+
+    private func roleFilteredLines(from lines: [TerminalLine]) -> [TerminalLine] {
+        guard !activeRoles.isEmpty else { return lines }
+        return lines.filter { line in
+            switch line.role {
+            case .user:
+                return activeRoles.contains(.user)
+            case .assistant:
+                return activeRoles.contains(.assistant)
+            case .toolInput, .toolOutput:
+                return activeRoles.contains(.tools)
+            case .error:
+                return activeRoles.contains(.errors)
+            case .meta:
+                return true
+            }
+        }
+    }
+
+    private static func buildRebuildResult(session: Session, skipAgentsPreamble: Bool) -> RebuildResult {
         let built = TerminalBuilder.buildLines(for: session, showMeta: false)
-        let skip = skipAgentsPreambleEnabled()
-        let (decorated, dividerID) = applyConversationStartDividerIfNeeded(session: session, lines: built, enabled: skip)
-        lines = decorated
-        conversationStartLineID = dividerID
-        preambleUserBlockIndexes = computePreambleUserBlockIndexes(session: session)
+        let (decorated, dividerID) = applyConversationStartDividerIfNeeded(session: session, lines: built, enabled: skipAgentsPreamble)
+        let preambleUserBlockIndexes = computePreambleUserBlockIndexes(session: session)
 
         // Collapse multi-line blocks into single navigable/message entries per role.
         var firstLineForBlock: [Int: Int] = [:]       // blockIndex -> first line id
@@ -200,25 +263,18 @@ struct SessionTerminalView: View {
             .sorted()
         }
 
-        userLineIndices = messageIDs { $0 == .user }
-        assistantLineIndices = messageIDs { $0 == .assistant }
-        toolLineIndices = messageIDs { role in
-            role == .toolInput || role == .toolOutput
-        }
-        errorLineIndices = messageIDs { $0 == .error }
-
-        // Reset local find state when rebuilding.
-        matchingLineIDs = []
-        matchIDSet = []
-        currentMatchLineID = nil
-        roleNavPositions = [:]
-
-        if skip, findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            jumpToFirstPrompt()
-        }
+        return RebuildResult(
+            lines: decorated,
+            conversationStartLineID: dividerID,
+            preambleUserBlockIndexes: preambleUserBlockIndexes,
+            userLineIndices: messageIDs { $0 == .user },
+            assistantLineIndices: messageIDs { $0 == .assistant },
+            toolLineIndices: messageIDs { role in role == .toolInput || role == .toolOutput },
+            errorLineIndices: messageIDs { $0 == .error }
+        )
     }
 
-    private func computePreambleUserBlockIndexes(session: Session) -> Set<Int> {
+    private static func computePreambleUserBlockIndexes(session: Session) -> Set<Int> {
         // Only style preamble differently for Codex + Droid, where the "system prompt" is commonly embedded
         // as a user-authored-looking block.
         guard session.source == .codex || session.source == .droid else { return [] }
@@ -425,10 +481,9 @@ struct SessionTerminalView: View {
         }
 
         // Recompute matches over the currently filtered lines.
-        let lowerQuery = query.lowercased()
         var ids: [Int] = []
         for line in filteredLines {
-            if line.text.range(of: lowerQuery, options: [.caseInsensitive]) != nil {
+            if line.text.range(of: query, options: [.caseInsensitive]) != nil {
                 ids.append(line.id)
             }
         }
@@ -477,7 +532,7 @@ struct SessionTerminalView: View {
         scrollTargetToken &+= 1
     }
 
-    private func applyConversationStartDividerIfNeeded(session: Session, lines: [TerminalLine], enabled: Bool) -> ([TerminalLine], Int?) {
+    private static func applyConversationStartDividerIfNeeded(session: Session, lines: [TerminalLine], enabled: Bool) -> ([TerminalLine], Int?) {
         guard enabled else { return (lines, nil) }
 
         // Droid: system reminders can be embedded in the first user message but should be hidden by default.
@@ -534,7 +589,7 @@ struct SessionTerminalView: View {
         return insertConversationStartDivider(lines: lines, insertAt: insertAt)
     }
 
-    private func insertConversationStartDivider(lines: [TerminalLine], insertAt: Int) -> ([TerminalLine], Int?) {
+    private static func insertConversationStartDivider(lines: [TerminalLine], insertAt: Int) -> ([TerminalLine], Int?) {
         // Avoid double insertion.
         if lines.contains(where: { $0.role == .meta && $0.text.contains("Conversation starts here") }) {
             return (lines, insertAt)
@@ -569,7 +624,7 @@ struct SessionTerminalView: View {
         return (out, insertAt)
     }
 
-    private func claudeConversationStartLineIndexIfNeeded(lines: [TerminalLine]) -> Int? {
+    private static func claudeConversationStartLineIndexIfNeeded(lines: [TerminalLine]) -> Int? {
         // Claude Code sometimes prefixes sessions with a "Caveat + local command transcript" block.
         // When present, jump to the first real prompt line (not the caveat or XML-like tags).
         let anchor = "caveat: the messages below were generated by the user while running local commands"
@@ -833,6 +888,17 @@ private extension TerminalLineRole {
         case .meta: return .meta
         }
     }
+
+    var signatureToken: Int {
+        switch self {
+        case .user: return 1
+        case .assistant: return 2
+        case .toolInput: return 3
+        case .toolOutput: return 4
+        case .error: return 5
+        case .meta: return 6
+        }
+    }
 }
 
 private struct TerminalTextScrollView: NSViewRepresentable {
@@ -846,13 +912,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let colorScheme: ColorScheme
     let monochrome: Bool
 
-    final class Coordinator: NSObject, NSTextViewDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate, AVSpeechSynthesizerDelegate {
         var lineRanges: [Int: NSRange] = [:]
+        var lineRoles: [Int: TerminalLineRole] = [:]
         var lastLinesSignature: Int = 0
-        var lastMatchSignature: Int = 0
         var lastFontSize: CGFloat = 0
         var lastMonochrome: Bool = false
+        var lastColorScheme: ColorScheme = .light
         var lastScrollToken: Int = 0
+
+        var lastMatchIDs: Set<Int> = []
+        var lastCurrentMatchLineID: Int? = nil
 
         var lines: [TerminalLine] = []
         var orderedLineRanges: [NSRange] = []
@@ -860,9 +930,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         private weak var activeTextView: NSTextView?
         private var activeBlockText: String = ""
         private let speechSynthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer()
+        private let speechQueue = DispatchQueue(label: "com.agentsessions.speechSynthesizer", qos: .default)
+        private var isSpeaking: Bool = false
 
         override init() {
             super.init()
+            speechSynthesizer.delegate = self
         }
 
         func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange oldSelectedCharRange: NSRange, toCharacterRange newSelectedCharRange: NSRange) -> NSRange {
@@ -907,7 +980,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
             let stop = NSMenuItem(title: "Stop Speaking", action: #selector(stopSpeaking(_:)), keyEquivalent: "")
             stop.target = self
-            stop.isEnabled = speechSynthesizer.isSpeaking
+            stop.isEnabled = isSpeaking
             out.addItem(stop)
 
             return out
@@ -937,19 +1010,41 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }()
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
-            if speechSynthesizer.isSpeaking {
-                speechSynthesizer.stopSpeaking(at: .immediate)
-            }
-
             let utterance = AVSpeechUtterance(string: text)
             utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.identifier) ?? AVSpeechSynthesisVoice()
             utterance.rate = AVSpeechUtteranceDefaultSpeechRate
             utterance.volume = 1.0
-            speechSynthesizer.speak(utterance)
+            speechQueue.async { [weak self] in
+                guard let self else { return }
+                if self.speechSynthesizer.isSpeaking {
+                    self.speechSynthesizer.stopSpeaking(at: .immediate)
+                }
+                self.speechSynthesizer.speak(utterance)
+            }
         }
 
         @objc private func stopSpeaking(_ sender: Any?) {
-            speechSynthesizer.stopSpeaking(at: .immediate)
+            speechQueue.async { [weak self] in
+                self?.speechSynthesizer.stopSpeaking(at: .immediate)
+            }
+        }
+
+        func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+            DispatchQueue.main.async { [weak self] in
+                self?.isSpeaking = true
+            }
+        }
+
+        func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+            DispatchQueue.main.async { [weak self] in
+                self?.isSpeaking = false
+            }
+        }
+
+        func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+            DispatchQueue.main.async { [weak self] in
+                self?.isSpeaking = false
+            }
         }
 
         private func blockText(at charIndex: Int) -> String? {
@@ -1023,6 +1118,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         scroll.documentView = textView
 
         applyContent(to: textView, context: context)
+        context.coordinator.lastLinesSignature = signature(for: lines)
+        context.coordinator.lastFontSize = fontSize
+        context.coordinator.lastMonochrome = monochrome
+        context.coordinator.lastColorScheme = colorScheme
+        context.coordinator.lastMatchIDs = matchIDs
+        context.coordinator.lastCurrentMatchLineID = currentMatchLineID
         return scroll
     }
 
@@ -1030,17 +1131,19 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         guard let tv = nsView.documentView as? NSTextView else { return }
 
         let lineSig = signature(for: lines)
-        let matchSig = signature(for: Array(matchIDs))
         let fontChanged = abs((context.coordinator.lastFontSize) - fontSize) > 0.1
         let monochromeChanged = context.coordinator.lastMonochrome != monochrome
-        let needsReload = lineSig != context.coordinator.lastLinesSignature || matchSig != context.coordinator.lastMatchSignature || fontChanged || monochromeChanged
+        let schemeChanged = context.coordinator.lastColorScheme != colorScheme
+        let needsReload = lineSig != context.coordinator.lastLinesSignature || fontChanged || monochromeChanged || schemeChanged
 
         if needsReload {
             applyContent(to: tv, context: context)
             context.coordinator.lastLinesSignature = lineSig
-            context.coordinator.lastMatchSignature = matchSig
             context.coordinator.lastFontSize = fontSize
             context.coordinator.lastMonochrome = monochrome
+            context.coordinator.lastColorScheme = colorScheme
+        } else if context.coordinator.lastMatchIDs != matchIDs || context.coordinator.lastCurrentMatchLineID != currentMatchLineID {
+            updateHighlights(in: tv, context: context)
         }
 
         if let target = currentMatchLineID, let range = context.coordinator.lineRanges[target] {
@@ -1079,8 +1182,11 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     private func applyContent(to textView: NSTextView, context: Context) {
         let (attr, ranges) = buildAttributedString()
         context.coordinator.lineRanges = ranges
+        context.coordinator.lineRoles = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0.role) })
         context.coordinator.lines = lines
         context.coordinator.orderedLineRanges = lines.compactMap { ranges[$0.id] }
+        context.coordinator.lastMatchIDs = matchIDs
+        context.coordinator.lastCurrentMatchLineID = currentMatchLineID
         textView.textStorage?.setAttributedString(attr)
 
         // Ensure container tracks width
@@ -1089,46 +1195,125 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
     }
 
+    private func updateHighlights(in textView: NSTextView, context: Context) {
+        let oldMatches = context.coordinator.lastMatchIDs
+        let newMatches = matchIDs
+        let oldCurrent = context.coordinator.lastCurrentMatchLineID
+        let newCurrent = currentMatchLineID
+
+        var affected = oldMatches.symmetricDifference(newMatches)
+        if let oldCurrent { affected.insert(oldCurrent) }
+        if let newCurrent { affected.insert(newCurrent) }
+        guard !affected.isEmpty else { return }
+
+        let currentHighlight = NSColor.systemYellow.withAlphaComponent(0.5)
+        let matchHighlight = NSColor.systemYellow.withAlphaComponent(0.25)
+
+        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
+        let assistantSwatch = TerminalRolePalette.appKit(role: .assistant, scheme: colorScheme, monochrome: monochrome)
+        let toolInputSwatch = TerminalRolePalette.appKit(role: .toolInput, scheme: colorScheme, monochrome: monochrome)
+        let toolOutputSwatch = TerminalRolePalette.appKit(role: .toolOutput, scheme: colorScheme, monochrome: monochrome)
+        let errorSwatch = TerminalRolePalette.appKit(role: .error, scheme: colorScheme, monochrome: monochrome)
+        let metaSwatch = TerminalRolePalette.appKit(role: .meta, scheme: colorScheme, monochrome: monochrome)
+
+        func swatch(for role: TerminalLineRole) -> TerminalRolePalette.AppKitSwatch {
+            switch role {
+            case .user: return userSwatch
+            case .assistant: return assistantSwatch
+            case .toolInput: return toolInputSwatch
+            case .toolOutput: return toolOutputSwatch
+            case .error: return errorSwatch
+            case .meta: return metaSwatch
+            }
+        }
+
+        for lineID in affected {
+            guard let range = context.coordinator.lineRanges[lineID] else { continue }
+            guard let role = context.coordinator.lineRoles[lineID] else { continue }
+            let baseBackground = swatch(for: role).background
+
+            if lineID == newCurrent {
+                textView.textStorage?.addAttribute(.backgroundColor, value: currentHighlight, range: range)
+            } else if newMatches.contains(lineID) {
+                textView.textStorage?.addAttribute(.backgroundColor, value: matchHighlight, range: range)
+            } else if let bg = baseBackground {
+                textView.textStorage?.addAttribute(.backgroundColor, value: bg, range: range)
+            } else {
+                textView.textStorage?.removeAttribute(.backgroundColor, range: range)
+            }
+        }
+
+        context.coordinator.lastMatchIDs = newMatches
+        context.coordinator.lastCurrentMatchLineID = newCurrent
+    }
+
     private func buildAttributedString() -> (NSAttributedString, [Int: NSRange]) {
         let attr = NSMutableAttributedString()
         var ranges: [Int: NSRange] = [:]
+        ranges.reserveCapacity(lines.count)
+
+        let regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
+        let currentHighlight = NSColor.systemYellow.withAlphaComponent(0.5)
+        let matchHighlight = NSColor.systemYellow.withAlphaComponent(0.25)
+
+        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
+        let assistantSwatch = TerminalRolePalette.appKit(role: .assistant, scheme: colorScheme, monochrome: monochrome)
+        let toolInputSwatch = TerminalRolePalette.appKit(role: .toolInput, scheme: colorScheme, monochrome: monochrome)
+        let toolOutputSwatch = TerminalRolePalette.appKit(role: .toolOutput, scheme: colorScheme, monochrome: monochrome)
+        let errorSwatch = TerminalRolePalette.appKit(role: .error, scheme: colorScheme, monochrome: monochrome)
+        let metaSwatch = TerminalRolePalette.appKit(role: .meta, scheme: colorScheme, monochrome: monochrome)
+
+        func swatch(for role: TerminalLineRole) -> TerminalRolePalette.AppKitSwatch {
+            switch role {
+            case .user: return userSwatch
+            case .assistant: return assistantSwatch
+            case .toolInput: return toolInputSwatch
+            case .toolOutput: return toolOutputSwatch
+            case .error: return errorSwatch
+            case .meta: return metaSwatch
+            }
+        }
 
         let baseParagraph = NSMutableParagraphStyle()
         baseParagraph.lineSpacing = 1.5
         baseParagraph.paragraphSpacing = 0
         baseParagraph.lineBreakMode = .byWordWrapping
 
+        func paragraph(spacingBefore: CGFloat) -> NSParagraphStyle {
+            let p = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
+            p.paragraphSpacingBefore = spacingBefore
+            return p
+        }
+
+        let paragraph0 = paragraph(spacingBefore: 0)
+        let paragraph8 = paragraph(spacingBefore: 8)
+        let paragraph10 = paragraph(spacingBefore: 10)
+        let paragraph14 = paragraph(spacingBefore: 14)
+
+        var previousBlockIndex: Int? = nil
+
         for (idx, line) in lines.enumerated() {
             let text = line.text
             let lineString = idx == lines.count - 1 ? text : text + "\n"
             let ns = lineString as NSString
             let range = NSRange(location: attr.length, length: ns.length)
+            ranges[line.id] = range
 
-            let swatch = TerminalRolePalette.appKit(role: line.role.paletteRole, scheme: colorScheme, monochrome: monochrome)
-            let isCurrent = (line.id == currentMatchLineID)
-            let isMatch = matchIDs.contains(line.id)
+            let isNewBlock = idx > 0 && previousBlockIndex != line.blockIndex
+            previousBlockIndex = line.blockIndex
 
-            let isNewBlock: Bool = {
-                guard idx > 0 else { return false }
-                return lines[idx - 1].blockIndex != line.blockIndex
-            }()
-
-            let paragraphSpacingBefore: CGFloat = {
-                guard isNewBlock else { return 0 }
+            let paragraphStyle: NSParagraphStyle = {
+                guard isNewBlock else { return paragraph0 }
                 switch line.role {
                 case .user:
-                    return 14
-                case .toolInput, .toolOutput, .error:
-                    return 10
+                    return paragraph14
                 case .assistant:
-                    return 8
-                case .meta:
-                    return 10
+                    return paragraph8
+                case .toolInput, .toolOutput, .error, .meta:
+                    return paragraph10
                 }
             }()
-
-            let paragraph = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
-            paragraph.paragraphSpacingBefore = paragraphSpacingBefore
 
             let isPreambleUserLine: Bool = {
                 guard line.role == .user else { return false }
@@ -1136,30 +1321,25 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 return preambleUserBlockIndexes.contains(blockIndex)
             }()
 
-            let fontWeight: NSFont.Weight = {
-                if line.role == .user, !isPreambleUserLine { return .bold }
-                return .regular
-            }()
+            let isCurrent = (line.id == currentMatchLineID)
+            let isMatch = matchIDs.contains(line.id)
+            let lineSwatch = swatch(for: line.role)
 
             var attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedSystemFont(
-                    ofSize: fontSize,
-                    weight: fontWeight
-                ),
-                .foregroundColor: swatch.foreground,
-                .paragraphStyle: paragraph
+                .font: (line.role == .user && !isPreambleUserLine) ? boldFont : regularFont,
+                .foregroundColor: lineSwatch.foreground,
+                .paragraphStyle: paragraphStyle
             ]
 
             if isCurrent {
-                attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.5)
+                attributes[.backgroundColor] = currentHighlight
             } else if isMatch {
-                attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.25)
-            } else if let bg = swatch.background {
+                attributes[.backgroundColor] = matchHighlight
+            } else if let bg = lineSwatch.background {
                 attributes[.backgroundColor] = bg
             }
 
             attr.append(NSAttributedString(string: lineString, attributes: attributes))
-            ranges[line.id] = range
         }
 
         return (attr, ranges)
@@ -1168,18 +1348,20 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     private func signature(for lines: [TerminalLine]) -> Int {
         var hasher = Hasher()
         hasher.combine(lines.count)
-        if let first = lines.first { hasher.combine(first.id); hasher.combine(first.text.count) }
-        if let last = lines.last { hasher.combine(last.id); hasher.combine(last.text.count) }
-        let totalChars = lines.reduce(0) { $0 + $1.text.count }
-        hasher.combine(totalChars)
-        return hasher.finalize()
-    }
 
-    private func signature(for ids: [Int]) -> Int {
-        var hasher = Hasher()
-        hasher.combine(ids.count)
-        if let first = ids.first { hasher.combine(first) }
-        if let last = ids.last { hasher.combine(last) }
+        func combine(_ line: TerminalLine) {
+            hasher.combine(line.id)
+            hasher.combine(line.role.signatureToken)
+            hasher.combine(line.text.count)
+        }
+
+        if let first = lines.first { combine(first) }
+        if let last = lines.last { combine(last) }
+        if lines.count >= 3 { combine(lines[lines.count / 2]) }
+        if lines.count >= 9 {
+            combine(lines[lines.count / 4])
+            combine(lines[(lines.count * 3) / 4])
+        }
         return hasher.finalize()
     }
 }

@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Search: Instant indexing now captures more of long tool outputs (head + middle + tail slices) and keeps active Codex sessions searchable while they are updating.
 - Sessions: Show a live session count in the unified list that updates while indexing and when filters/search change.
 - UI: Consolidate unified-window status indicators into a single cockpit-style footer.
+- Transcript: Reduce terminal-view stutter by debouncing rebuilds and avoiding full NSTextView reloads for match highlight updates.
 
 ### Fixed
 
