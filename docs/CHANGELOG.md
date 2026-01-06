@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - Preferences: The Menu Bar pane now groups label options into sections and aligns toggles consistently.
 - Transcript: Removed the duplicate Jump to First Prompt control from the transcript toolbar.
 - Sessions list: The Size column can now be sorted.
+- Search: The unified sessions toolbar now shows the global search field by default and displays its keyboard shortcut inline.
 - UI: Consolidate unified-window status indicators into a single cockpit-style footer.
 - UI: In dark mode, the cockpit footer now uses a transparent HUD style with crisp borders instead of a solid fill.
 - UI: Menu bar usage now uses the same monospace, logo-forward cockpit styling as the footer.
