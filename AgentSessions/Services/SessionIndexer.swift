@@ -132,7 +132,7 @@ final class SessionIndexer: ObservableObject {
 
     // Sorting (mirrors UI's column sort state)
     struct SessionSortDescriptor: Equatable {
-        enum Key: Equatable { case modified, msgs, repo, title }
+        enum Key: Equatable { case modified, msgs, repo, title, size }
         var key: Key
         var ascending: Bool
     }

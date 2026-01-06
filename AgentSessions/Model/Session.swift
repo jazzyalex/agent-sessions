@@ -408,6 +408,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // Sort helper for agent/source column
     public var sourceKey: String { source.rawValue }
 
+    // Sort helper for file size column (treat missing size as 0).
+    public var fileSizeSortKey: Int { fileSizeBytes ?? 0 }
+
     public var modifiedRelative: String {
         // Use modifiedAt which correctly uses filename timestamp
         let ref = modifiedAt

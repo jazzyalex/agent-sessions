@@ -79,7 +79,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var droidAgentEnabled: Bool = AgentEnablement.isEnabled(.droid)
 
     // Sorting
-    struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title, agent } }
+    struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title, agent, size } }
     @Published var sortDescriptor: SessionSortDescriptor = .init(key: .modified, ascending: false)
 
     // Indexing state aggregation
@@ -754,6 +754,12 @@ final class UnifiedSessionIndexer: ObservableObject {
             return list.sorted { lhs, rhs in
                 let l = lhs.source.rawValue
                 let r = rhs.source.rawValue
+                return descriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
+            }
+        case .size:
+            return list.sorted { lhs, rhs in
+                let l = lhs.fileSizeBytes ?? 0
+                let r = rhs.fileSizeBytes ?? 0
                 return descriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
             }
         }

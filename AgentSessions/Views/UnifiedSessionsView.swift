@@ -364,7 +364,7 @@ struct UnifiedSessionsView: View {
                    max: showMsgs ? 80 : 0)
 
             // File size column
-            TableColumn("Size") { s in
+            TableColumn("Size", value: \Session.fileSizeSortKey) { s in
                 let display: String = {
                     if let b = s.fileSizeBytes { return formattedSize(b) }
                     return "—"
@@ -432,6 +432,7 @@ struct UnifiedSessionsView: View {
                 if first.keyPath == \Session.modifiedAt { key = .modified }
                 else if first.keyPath == \Session.messageCount { key = .msgs }
                 else if first.keyPath == \Session.repoDisplay { key = .repo }
+                else if first.keyPath == \Session.fileSizeSortKey { key = .size }
                 else if first.keyPath == \Session.sourceKey { key = .agent }
                 else if first.keyPath == \Session.title { key = .title }
                 else { key = .title }
