@@ -384,16 +384,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
             // === TRAILING GROUP: Copy and Find Controls ===
             HStack(spacing: 12) {
-                if shouldShowJumpToFirstPrompt(session: session) {
-                    Button(action: { jumpToFirstPrompt(session: session) }) {
-                        Image(systemName: "arrow.down.to.line")
-                            .imageScale(.medium)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Jump to the first user prompt after </INSTRUCTIONS>")
-                    .accessibilityLabel("Jump to first prompt")
-                }
-
                 // Copy transcript button
                 Button("Copy") { copyAll() }
                     .buttonStyle(.borderless)
