@@ -5,7 +5,7 @@ struct ClaudeUsageStripView: View {
     @ObservedObject var status: ClaudeUsageModel
     // Optional label shown on the left (used in Unified window)
     var label: String? = nil
-    var brandColor: Color = Color(red: 204/255, green: 121/255, blue: 90/255)
+    var brandColor: Color = Color.agentClaude
     var labelWidth: CGFloat? = 56
     var verticalPadding: CGFloat = 6
     var drawBackground: Bool = true

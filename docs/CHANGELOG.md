@@ -31,6 +31,9 @@ All notable changes to this project will be documented in this file.
 - Usage: Time-only reset strings now roll forward to the next day to avoid showing stale "<1m" countdowns.
 - Transcript: Reduce terminal-view stutter by debouncing rebuilds and avoiding full NSTextView reloads for match highlight updates.
 - UI: Persist split-view divider positions per layout mode (horizontal vs vertical) so switching layouts doesn’t reset pane sizes.
+- UI: Session list typography now uses monospaced text with softer timestamp gray, taller rows, lighter message counts, and footer-blue selection accents.
+- UI: Agent colors are slightly softened (Codex coral, Claude lavender), the transcript toolbar spacing is tighter, and the terminal view adds a subtle top border.
+- Transcript: Toolbar controls now use monospaced typography to match the session list.
 
 ### Fixed
 
@@ -40,6 +43,7 @@ All notable changes to this project will be documented in this file.
 - Sessions: Stabilize message counts for large sessions while full parsing completes to reduce list row jumps.
 - Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
 - Transcript: Clearing Find now immediately clears match highlights.
+- Transcript: Terminal view no longer leaves a stale find highlight when the Find query is empty.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
 

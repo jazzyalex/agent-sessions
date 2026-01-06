@@ -1,6 +1,11 @@
 import SwiftUI
 import AppKit
 
+private enum SessionsListStyle {
+    static let selectionAccent = Color(hex: "007acc")
+    static let timestampColor = Color(hex: "8E8E93")
+}
+
 struct SessionsListView: View {
     @EnvironmentObject var indexer: SessionIndexer
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
@@ -21,7 +26,7 @@ struct SessionsListView: View {
             // Session (first column)
             TableColumn("Session", value: \Session.title) { s in
                 Text(s.codexDisplayTitle)
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -38,7 +43,7 @@ struct SessionsListView: View {
                 let helpText = (display == .relative) ? absoluteTime(s.modifiedAt) : s.modifiedRelative
                 Text(primary)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SessionsListStyle.timestampColor)
                     .help(helpText)
             }
             .width(
@@ -50,7 +55,7 @@ struct SessionsListView: View {
             // Project
             TableColumn("Project", value: \Session.repoDisplay) { s in
                 Text(s.repoDisplay)
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(projectTooltip(for: s))
@@ -71,6 +76,7 @@ struct SessionsListView: View {
             TableColumn("Msgs", value: \Session.messageCount) { s in
                 Text(String(s.messageCount))
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
             }
             .width(
                 min: columnVisibility.showMsgsColumn ? 64 : 0,
@@ -97,7 +103,8 @@ struct SessionsListView: View {
         }
         .id(columnVisibility.changeToken)
         .tableStyle(.inset(alternatesRowBackgrounds: true))
-        .environment(\.defaultMinListRowHeight, 22)
+        .tint(SessionsListStyle.selectionAccent)
+        .environment(\.defaultMinListRowHeight, 26)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .contextMenu(forSelectionType: String.self) { ids in

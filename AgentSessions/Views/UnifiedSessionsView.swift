@@ -5,6 +5,11 @@ private extension Notification.Name {
     static let collapseInlineSearchIfEmpty = Notification.Name("UnifiedSessionsCollapseInlineSearchIfEmpty")
 }
 
+private enum UnifiedSessionsStyle {
+    static let selectionAccent = Color(hex: "007acc")
+    static let timestampColor = Color(hex: "8E8E93")
+}
+
 struct UnifiedSessionsView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var codexIndexer: SessionIndexer
@@ -333,7 +338,7 @@ struct UnifiedSessionsView: View {
                 let helpText = (display == .relative) ? absoluteTimeUnified(s.modifiedAt) : s.modifiedRelative
                 Text(primary)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(UnifiedSessionsStyle.timestampColor)
                     .help(helpText)
             }
             .width(min: showModified ? 120 : 0,
@@ -361,6 +366,7 @@ struct UnifiedSessionsView: View {
             TableColumn("Msgs", value: \Session.messageCount) { s in
                 Text(String(s.messageCount))
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
             }
             .width(min: showMsgs ? 64 : 0,
                    ideal: showMsgs ? 64 : 0,
@@ -382,7 +388,8 @@ struct UnifiedSessionsView: View {
 	        }
 	        .id(columnLayoutID)
 	        .tableStyle(.inset(alternatesRowBackgrounds: true))
-	        .environment(\.defaultMinListRowHeight, 22)
+            .tint(UnifiedSessionsStyle.selectionAccent)
+	        .environment(\.defaultMinListRowHeight, 26)
 		        .simultaneousGesture(TapGesture().onEnded {
 		            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
 		        })
@@ -646,7 +653,7 @@ struct UnifiedSessionsView: View {
                 if codexAgentEnabled {
                     Toggle(isOn: $unified.includeCodex) {
                         Text("Codex")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.blue : .primary))
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.agentCodex : .primary))
                             .fixedSize()
                     }
                     .toggleStyle(.button)
@@ -657,7 +664,7 @@ struct UnifiedSessionsView: View {
                 if claudeAgentEnabled {
                     Toggle(isOn: $unified.includeClaude) {
                         Text("Claude")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color(red: 204/255, green: 121/255, blue: 90/255) : .primary))
+                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color.agentClaude : .primary))
                             .fixedSize()
                     }
                     .toggleStyle(.button)
@@ -709,6 +716,7 @@ struct UnifiedSessionsView: View {
                     .keyboardShortcut("6", modifiers: .command)
                 }
             }
+            .tint(UnifiedSessionsStyle.selectionAccent)
         }
         ToolbarItem(placement: .automatic) {
             UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator)
@@ -893,7 +901,7 @@ struct UnifiedSessionsView: View {
         }
         return HStack(spacing: 6) {
             Text(label)
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
                 .foregroundStyle(!stripMonochrome ? sourceAccent(session) : .secondary)
             Spacer(minLength: 4)
         }
@@ -1018,8 +1026,8 @@ struct UnifiedSessionsView: View {
 
     private func sourceAccent(_ s: Session) -> Color {
         switch s.source {
-        case .codex: return Color.blue
-        case .claude: return Color(red: 204/255, green: 121/255, blue: 90/255)
+        case .codex: return Color.agentCodex
+        case .claude: return Color.agentClaude
         case .gemini: return Color.teal
         case .opencode: return Color.purple
         case .copilot: return Color.agentCopilot
@@ -1102,14 +1110,14 @@ private struct SessionTitleCell: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             Text(session.title)
-                .font(.system(size: 13))
+                .font(.system(size: 13, weight: .regular, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .background(Color.clear)
             if session.source == .gemini, geminiIndexer.isPreviewStale(id: session.id) {
                 Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {
                     Text("Refresh")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                 }
                 .buttonStyle(.bordered)
                 .tint(.teal)
@@ -1127,7 +1135,7 @@ private struct ProjectCellView: View {
     let display: String
     var body: some View {
         Text(display)
-            .font(.system(size: 13))
+            .font(.system(size: 13, weight: .regular, design: .monospaced))
             .lineLimit(1)
             .truncationMode(.tail)
             .id("project-cell-\(id)")
@@ -1245,8 +1253,11 @@ private struct UnifiedSearchFiltersView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background((stripMonochrome ? Color.secondary : Color.blue).opacity(0.1))
-                .background(RoundedRectangle(cornerRadius: 6).stroke((stripMonochrome ? Color.secondary : Color.blue).opacity(0.3)))
+                .background((stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent).opacity(0.1))
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke((stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent).opacity(0.3))
+                )
             }
         }
     }
