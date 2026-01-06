@@ -44,17 +44,26 @@ private final class SplitFinderView: NSView {
             split.autosaveName = key
         }
 
-        // Apply saved absolute primary-pixel size if present; otherwise, apply a stable initial
-        // default without overriding an existing AppKit autosave.
-        if !applySavedPositionIfAvailable(split) {
-            applyInitialPositionIfNeeded(split)
-            seedSavedPositionFromCurrent(split)
-            // If initial couldn't apply yet (zero size), retry shortly to ensure it lands before first visible content swap.
-            scheduleInitialRetriesIfNeeded(split)
+        let defaults = UserDefaults.standard
+        let initKey = "SplitInit." + key
+        lastAxisLength = primaryAxisLength(split)
+
+        // Restore in this order:
+        // 1) Our own absolute pixel preference (most reliable across SwiftUI rebuilds).
+        // 2) AppKit autosave (if any) or initial default.
+        let hasSavedPixels = (savedPrimaryPixels() != nil)
+        if hasSavedPixels {
+            if applySavedPositionIfAvailable(split) {
+                defaults.set(true, forKey: initKey)
+            }
+            scheduleSavedRetriesIfNeeded(split)
         } else {
-            // If we had a saved pixel preference, mark initialized so defaults won't run later
-            UserDefaults.standard.set(true, forKey: "SplitInit." + key)
+            applyInitialPositionIfNeeded(split)
+            scheduleInitialRetriesIfNeeded(split)
         }
+        // Always seed our own saved pixel key once layout is meaningful, so future switches/launches
+        // don't depend on AppKit autosave internals.
+        seedSavedPositionFromCurrent(split)
 
 
         // One-time: observe resize to re-apply initial position if we missed the first valid size.
@@ -106,23 +115,43 @@ private final class SplitFinderView: NSView {
     }
 
     private func findSplitView(from start: NSView?) -> NSSplitView? {
-        // Ascend through ancestors first (fast path)
+        // SwiftUI's `.background` can host this NSView as a sibling of the actual NSSplitView,
+        // so we search upward and, at each step, scan that local subtree for the closest matching split.
+        let expectsHSplit = key.hasSuffix("-H") ? true : (key.hasSuffix("-V") ? false : nil)
         var v = start?.superview
         while let cur = v {
-            if let s = cur as? NSSplitView { return s }
+            if let s = cur as? NSSplitView, matchesExpectedOrientation(s, expectsHSplit: expectsHSplit) {
+                return s
+            }
+            if let found = findClosestSplitView(in: cur, expectsHSplit: expectsHSplit) {
+                return found
+            }
             v = cur.superview
         }
-        // Fallback: search the window's content view subtree (SwiftUI may wrap background as a sibling)
+        // Last resort: search the window's subtree (can still be wrong if multiple splits exist).
         if let root = self.window?.contentView {
-            return findSplitViewRecursively(in: root)
+            return findClosestSplitView(in: root, expectsHSplit: expectsHSplit)
         }
         return nil
     }
 
-    private func findSplitViewRecursively(in view: NSView) -> NSSplitView? {
-        if let s = view as? NSSplitView { return s }
-        for child in view.subviews {
-            if let found = findSplitViewRecursively(in: child) { return found }
+    private func matchesExpectedOrientation(_ split: NSSplitView, expectsHSplit: Bool?) -> Bool {
+        guard let expectsHSplit else { return true }
+        // HSplitView -> side-by-side -> NSSplitView.isVertical == true
+        return split.isVertical == expectsHSplit
+    }
+
+    private func findClosestSplitView(in view: NSView, expectsHSplit: Bool?) -> NSSplitView? {
+        // Breadth-first search to prefer the nearest split in this subtree.
+        var queue: [NSView] = [view]
+        var idx = 0
+        while idx < queue.count {
+            let cur = queue[idx]
+            idx += 1
+            if let s = cur as? NSSplitView, matchesExpectedOrientation(s, expectsHSplit: expectsHSplit), s.subviews.count >= 2 {
+                return s
+            }
+            queue.append(contentsOf: cur.subviews)
         }
         return nil
     }
@@ -186,7 +215,26 @@ private final class SplitFinderView: NSView {
         }
     }
 
+    private func scheduleSavedRetriesIfNeeded(_ split: NSSplitView) {
+        // When toggling layouts, the new split can briefly have a zero axis length.
+        // Retry applying the saved pixel position once layout becomes meaningful.
+        let delays: [TimeInterval] = [0.05, 0.12, 0.25, 0.5]
+        for d in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + d) { [weak self, weak split] in
+                guard let self, let split else { return }
+                _ = self.applySavedPositionIfAvailable(split)
+            }
+        }
+    }
+
     private func savedPrimaryKey() -> String { "SplitPrimaryPixels." + key }
+
+    private func savedPrimaryPixels() -> CGFloat? {
+        let defaults = UserDefaults.standard
+        guard let savedAny = defaults.object(forKey: savedPrimaryKey()) else { return nil }
+        let saved = CGFloat((savedAny as? NSNumber)?.doubleValue ?? 0)
+        return saved > 1 ? saved : nil
+    }
 
     private func primaryAxisLength(_ split: NSSplitView) -> CGFloat {
         let isHSplit = split.isVertical
@@ -215,17 +263,16 @@ private final class SplitFinderView: NSView {
     private func seedSavedPositionFromCurrent(_ split: NSSplitView) {
         let defaults = UserDefaults.standard
         let key = savedPrimaryKey()
-        if defaults.object(forKey: key) == nil {
-            let pos = primaryPosition(split)
-            defaults.set(Double(pos), forKey: key)
-        }
+        if savedPrimaryPixels() != nil { return }
+        let axisLen = primaryAxisLength(split)
+        guard axisLen > 10 else { return }
+        let pos = primaryPosition(split)
+        guard pos > 10 else { return }
+        defaults.set(Double(pos), forKey: key)
     }
 
     private func applySavedPositionIfAvailable(_ split: NSSplitView) -> Bool {
-        let defaults = UserDefaults.standard
-        let key = savedPrimaryKey()
-        guard let savedAny = defaults.object(forKey: key) else { return false }
-        let saved = CGFloat((savedAny as? NSNumber)?.doubleValue ?? 0)
+        guard let saved = savedPrimaryPixels() else { return false }
         let isHSplit = split.isVertical
         let axisLen = primaryAxisLength(split)
         guard axisLen > 10 else { return false }
@@ -242,60 +289,19 @@ private final class SplitFinderView: NSView {
 
     private func handleSplitResized(_ split: NSSplitView) {
         if isApplying { return }
-        // Ensure initial default lands as soon as layout becomes meaningful
-        let defaults = UserDefaults.standard
-        let initKey = "SplitInit." + key
-        if !defaults.bool(forKey: initKey) {
-            // If we already have a saved pixel size, prefer it and mark initialized
-            if hasSavedPosition() {
-                _ = applySavedPositionIfAvailable(split)
-                defaults.set(true, forKey: initKey)
-            } else {
-                applyInitialPositionIfNeeded(split)
-                if defaults.bool(forKey: initKey) {
-                    seedSavedPositionFromCurrent(split)
-                }
-            }
-        }
+        // Persist aggressively: SwiftUI can rebuild the split view when toggling layouts,
+        // so we always keep a recent pixel value for this key.
         let axisLen = primaryAxisLength(split)
+        guard axisLen > 10 else { return }
+        let defaults = UserDefaults.standard
         let current = primaryPosition(split)
-        let savedKey = savedPrimaryKey()
-        let savedVal = CGFloat((defaults.object(forKey: savedKey) as? NSNumber)?.doubleValue ?? 0)
-        let isHSplit = split.isVertical
-
-        // If the user is actively dragging, persist and don't re-apply
-        if isUserDraggingDivider {
-            let clamped = clamp(current, toAxisLength: axisLen, isHSplit: isHSplit)
-            defaults.set(Double(clamped), forKey: savedKey)
-            lastAxisLength = axisLen
-            return
-        }
-
-        // If the axis length hasn't changed, treat the resize as a divider drag and persist current position.
-        // This avoids relying on event monitors that can miss edge cases and ensures both up/down drags persist.
-        let axisDelta = abs(axisLen - lastAxisLength)
-        if axisDelta <= 0.5 {
-            let clamped = clamp(current, toAxisLength: axisLen, isHSplit: isHSplit)
-            defaults.set(Double(clamped), forKey: savedKey)
-            lastAxisLength = axisLen
-            return
-        }
-
-        // On container-driven resize: re-apply saved absolute position, if any.
-        if savedVal > 0 {
-            let clamped = clamp(savedVal, toAxisLength: axisLen, isHSplit: isHSplit)
-            // Only re-apply if drifted meaningfully or the axis length changed
-            if abs(current - clamped) > 0.5 || abs(axisLen - lastAxisLength) > 0.5 {
-                isApplying = true
-                split.setPosition(clamped, ofDividerAt: 0)
-                isApplying = false
-            }
-        }
+        let clamped = clamp(current, toAxisLength: axisLen, isHSplit: split.isVertical)
+        defaults.set(Double(clamped), forKey: savedPrimaryKey())
         lastAxisLength = axisLen
     }
 
     private func hasSavedPosition() -> Bool {
-        UserDefaults.standard.object(forKey: savedPrimaryKey()) != nil
+        savedPrimaryPixels() != nil
     }
 
     private func hitDivider(split: NSSplitView, event: NSEvent) -> Bool {
