@@ -155,7 +155,12 @@ enum UsageResetText {
                 today.minute = minute
                 today.second = 0
                 today.nanosecond = 0
-                return cal.date(from: today)
+                guard var out = cal.date(from: today) else { continue }
+                // If the computed time is already in the past, treat it as the next occurrence.
+                if out < now {
+                    out = cal.date(byAdding: .day, value: 1, to: out) ?? out
+                }
+                return out
             }
 
             // If the format doesn't include a year, assume current year (or next year if needed).
@@ -197,12 +202,22 @@ enum UsageResetText {
         if let (h, m) = parseHourMinute24(text) {
             var cal = Calendar(identifier: .gregorian)
             cal.timeZone = tz
-            return cal.date(bySettingHour: h, minute: m, second: 0, of: now)
+            guard var out = cal.date(bySettingHour: h, minute: m, second: 0, of: now) else { return nil }
+            // If the computed time is already in the past, treat it as the next occurrence.
+            if out < now {
+                out = cal.date(byAdding: .day, value: 1, to: out) ?? out
+            }
+            return out
         }
         if let (h, m) = parseHourMinute12(text) {
             var cal = Calendar(identifier: .gregorian)
             cal.timeZone = tz
-            return cal.date(bySettingHour: h, minute: m, second: 0, of: now)
+            guard var out = cal.date(bySettingHour: h, minute: m, second: 0, of: now) else { return nil }
+            // If the computed time is already in the past, treat it as the next occurrence.
+            if out < now {
+                out = cal.date(byAdding: .day, value: 1, to: out) ?? out
+            }
+            return out
         }
         return nil
     }

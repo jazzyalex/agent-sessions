@@ -105,4 +105,20 @@ final class TranscriptBuilderTests: XCTestCase {
         XCTAssertFalse(text.contains("data:image/jpeg;base64,"), "Should not include data URL payloads in indexed text")
         XCTAssertFalse(text.contains(String(base64.prefix(64))), "Should not include base64 payloads in indexed text")
     }
+
+    func testUsageResetTextTimeOnlyRollsForwardToNextDayWhenPast() throws {
+        let tz = TimeZone(identifier: "UTC")!
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = tz
+
+        let now = cal.date(from: DateComponents(timeZone: tz, year: 2026, month: 1, day: 5, hour: 20, minute: 21, second: 0))!
+        let reset = UsageResetText.resetDate(kind: "5h", source: .codex, raw: "resets 00:03 (UTC)", now: now)
+        let expected = cal.date(from: DateComponents(timeZone: tz, year: 2026, month: 1, day: 6, hour: 0, minute: 3, second: 0))!
+        XCTAssertEqual(reset, expected)
+
+        let now2 = cal.date(from: DateComponents(timeZone: tz, year: 2026, month: 1, day: 5, hour: 10, minute: 0, second: 0))!
+        let reset2 = UsageResetText.resetDate(kind: "5h", source: .codex, raw: "resets 23:00 (UTC)", now: now2)
+        let expected2 = cal.date(from: DateComponents(timeZone: tz, year: 2026, month: 1, day: 5, hour: 23, minute: 0, second: 0))!
+        XCTAssertEqual(reset2, expected2)
+    }
 }
