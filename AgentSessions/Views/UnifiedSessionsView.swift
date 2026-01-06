@@ -1136,102 +1136,89 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var search: SearchCoordinator
     @ObservedObject var focus: WindowFocusCoordinator
     @FocusState private var searchFocus: SearchFocusTarget?
-    @State private var showInlineSearch: Bool = false
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     private enum SearchFocusTarget: Hashable { case field, clear }
     var body: some View {
         HStack(spacing: 8) {
-            if showInlineSearch || !unified.queryDraft.isEmpty || search.isRunning {
-                // Inline search field within the toolbar
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
+            // Inline search field (always visible to keep global search front-and-center)
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .imageScale(.medium)
+
+                // Use an AppKit-backed text field to ensure focus works inside a toolbar
+                ToolbarSearchTextField(text: $unified.queryDraft,
+                                       placeholder: "Search",
+                                       isFirstResponder: Binding(get: { searchFocus == .field },
+                                                                 set: { want in
+                                                                     if want { searchFocus = .field }
+                                                                     else if searchFocus == .field { searchFocus = nil }
+                                                                 }),
+                                       onCommit: { startSearchImmediate() })
+                    .frame(minWidth: 220)
+
+                if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("⌥⌘F")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(.secondary)
-                        .imageScale(.medium)
-                    // Use an AppKit-backed text field to ensure focus works inside a toolbar
-                    ToolbarSearchTextField(text: $unified.queryDraft,
-                                           placeholder: "Search",
-                                           isFirstResponder: Binding(get: { searchFocus == .field },
-                                                                     set: { want in
-                                                                         if want { searchFocus = .field }
-                                                                         else if searchFocus == .field { searchFocus = nil }
-                                                                     }),
-                                           onCommit: { startSearchImmediate() })
-                        .frame(minWidth: 220)
-                    if !unified.queryDraft.isEmpty {
-                        Button(action: { unified.queryDraft = ""; unified.query = ""; unified.recomputeNow(); search.cancel(); showInlineSearch = false; searchFocus = nil }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .imageScale(.medium)
-                                .foregroundStyle(.secondary)
-                        }
-                        .focused($searchFocus, equals: .clear)
-                        .buttonStyle(.plain)
-                        .keyboardShortcut(.escape)
-                        .help("Clear search (⎋)")
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(nsColor: .textBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(searchFocus == .field ? Color.yellow : Color.gray.opacity(0.28), lineWidth: searchFocus == .field ? 2 : 1)
-                )
-                // If focus leaves the search controls and query is empty, collapse
-                .onChange(of: searchFocus) { _, target in
-                    if target == nil && unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !search.isRunning {
-                        showInlineSearch = false
-                    }
-                }
-                .onChange(of: unified.queryDraft) { _, newValue in
-                    TypingActivity.shared.bump()
-                    let q = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if q.isEmpty {
+                        .accessibilityHidden(true)
+                } else {
+                    Button(action: {
+                        unified.queryDraft = ""
+                        unified.query = ""
+                        unified.recomputeNow()
                         search.cancel()
-                    } else {
-                        if FeatureFlags.increaseDeepSearchDebounce {
-                            scheduleSearch()
-                        } else {
-                            startSearch()
-                        }
-                    }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .collapseInlineSearchIfEmpty)) { _ in
-                    if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !search.isRunning {
-                        showInlineSearch = false
                         searchFocus = nil
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .imageScale(.medium)
+                            .foregroundStyle(.secondary)
+                    }
+                    .focused($searchFocus, equals: .clear)
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.escape)
+                    .help("Clear search (⎋)")
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(searchFocus == .field ? Color.yellow : Color.gray.opacity(0.28), lineWidth: searchFocus == .field ? 2 : 1)
+            )
+            .help("Search sessions (⌥⌘F)")
+            .onChange(of: unified.queryDraft) { _, newValue in
+                TypingActivity.shared.bump()
+                let q = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if q.isEmpty {
+                    search.cancel()
+                } else {
+                    if FeatureFlags.increaseDeepSearchDebounce {
+                        scheduleSearch()
+                    } else {
+                        startSearch()
                     }
                 }
-                .onAppear {
-                    searchFocus = .field
-                }
-                .onChange(of: showInlineSearch) { _, shown in
-                    if shown {
-                        // Multiple attempts at different timings to ensure focus sticks
+            }
+            .onChange(of: focus.activeFocus) { _, newFocus in
+                if newFocus == .sessionSearch {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         searchFocus = .field
-                        DispatchQueue.main.async {
-                            searchFocus = .field
-                        }
                     }
                 }
-            } else {
-                // Compact loop button without border; inline search replaces it when active
-                Button(action: {
-                    focus.perform(.openSessionSearch)
-                }) {
-                    Image(systemName: "magnifyingglass")
-                        .symbolRenderingMode(.monochrome)
-                        .foregroundStyle(.secondary)
-                        .imageScale(.large)
-                        .font(.system(size: 14, weight: .regular))
-                }
+            }
+
+            // Preserve the keyboard shortcut binding even though the search box is always visible.
+            Button(action: { focus.perform(.openSessionSearch) }) { EmptyView() }
                 .buttonStyle(.plain)
                 .keyboardShortcut("f", modifiers: [.command, .option])
-                .help("Search sessions (⌥⌘F)")
-            }
+                .opacity(0.001)
+                .frame(width: 1, height: 1)
 
             // Active project filter badge (Codex parity)
             if let projectFilter = unified.projectFilter, !projectFilter.isEmpty {
@@ -1250,19 +1237,6 @@ private struct UnifiedSearchFiltersView: View {
                 .padding(.vertical, 4)
                 .background((stripMonochrome ? Color.secondary : Color.blue).opacity(0.1))
                 .background(RoundedRectangle(cornerRadius: 6).stroke((stripMonochrome ? Color.secondary : Color.blue).opacity(0.3)))
-            }
-        }
-        .onChange(of: focus.activeFocus) { _, newFocus in
-            if newFocus == .sessionSearch {
-                showInlineSearch = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    searchFocus = .field
-                }
-            } else if newFocus == .none || newFocus == .transcriptFind {
-                if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !search.isRunning {
-                    showInlineSearch = false
-                    searchFocus = nil
-                }
             }
         }
     }
