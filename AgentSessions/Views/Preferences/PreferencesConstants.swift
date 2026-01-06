@@ -62,6 +62,8 @@ enum PreferencesKey {
 
     enum MenuBar {
         static let source = "MenuBarSource"
+        static let showCodexResetTimes = "MenuBarShowCodexResetTimes"
+        static let showClaudeResetTimes = "MenuBarShowClaudeResetTimes"
     }
 
     enum Advanced {
