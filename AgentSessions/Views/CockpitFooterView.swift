@@ -110,7 +110,14 @@ struct CockpitFooterView: View {
 
             HStack(spacing: 10) {
                 ForEach(Array(quotas.enumerated()), id: \.offset) { _, q in
-                    QuotaWidget(data: q, isDarkMode: colorScheme == .dark, modeOverride: usageDisplayModeOverride)
+                    CockpitQuotaWidget(
+                        data: q,
+                        isDarkMode: colorScheme == .dark,
+                        scope: .both,
+                        style: .bars,
+                        modeOverride: usageDisplayModeOverride,
+                        baseForeground: .white
+                    )
                 }
             }
 
@@ -126,6 +133,37 @@ struct CockpitFooterView: View {
                 .fill(CockpitFooterTheme.topBorder(isDark: colorScheme == .dark))
                 .frame(height: 1)
         }
+    }
+}
+
+enum CockpitQuotaScope: Equatable {
+    case fiveHour
+    case week
+    case both
+}
+
+enum CockpitQuotaStyle: Equatable {
+    case bars
+    case numbers
+}
+
+struct CockpitQuotaWidget: View {
+    let data: QuotaData
+    let isDarkMode: Bool
+    let scope: CockpitQuotaScope
+    let style: CockpitQuotaStyle
+    let modeOverride: UsageDisplayMode?
+    let baseForeground: Color
+
+    var body: some View {
+        QuotaWidget(
+            data: data,
+            isDarkMode: isDarkMode,
+            scope: scope,
+            style: style,
+            modeOverride: modeOverride,
+            baseForeground: baseForeground
+        )
     }
 }
 
@@ -164,7 +202,10 @@ private struct IndexingIndicator: View {
 private struct QuotaWidget: View {
     let data: QuotaData
     let isDarkMode: Bool
+    let scope: CockpitQuotaScope
+    let style: CockpitQuotaStyle
     let modeOverride: UsageDisplayMode?
+    let baseForeground: Color
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -244,33 +285,46 @@ private struct QuotaWidget: View {
             ProviderIcon(provider: data.provider)
                 .frame(width: 14, height: 14)
 
-            MiniUsageBar(
-                percentFill: presentation.barFillPercent,
-                percentUsed: presentation.bottleneckUsedPercent,
-                tint: presentation.barFillColor,
-                isDarkMode: isDarkMode,
-                reduceMotion: reduceMotion
-            )
+            if style == .bars {
+                MiniUsageBar(
+                    percentFill: presentation.barFillPercent,
+                    percentUsed: presentation.bottleneckUsedPercent,
+                    tint: (presentation.barFillColor == .red) ? .red : baseForeground,
+                    isDarkMode: isDarkMode,
+                    reduceMotion: reduceMotion
+                )
+            }
 
             HStack(spacing: 6) {
-                Text("5h: \(presentation.fiveHourPercentLabelText)")
-                DividerText()
-                Text(presentation.fiveHourResetDisplayText)
-                DividerText()
-                Text("Wk: \(presentation.weekPercentLabelText)")
-                DividerText()
-                Text(presentation.weekResetDisplayText)
+                switch scope {
+                case .fiveHour:
+                    Text("5h: \(presentation.fiveHourPercentLabelText)")
+                    DividerText(baseForeground: baseForeground)
+                    Text(presentation.fiveHourResetDisplayText)
+                case .week:
+                    Text("Wk: \(presentation.weekPercentLabelText)")
+                    DividerText(baseForeground: baseForeground)
+                    Text(presentation.weekResetDisplayText)
+                case .both:
+                    Text("5h: \(presentation.fiveHourPercentLabelText)")
+                    DividerText(baseForeground: baseForeground)
+                    Text(presentation.fiveHourResetDisplayText)
+                    DividerText(baseForeground: baseForeground)
+                    Text("Wk: \(presentation.weekPercentLabelText)")
+                    DividerText(baseForeground: baseForeground)
+                    Text(presentation.weekResetDisplayText)
+                }
             }
             .font(.system(size: 12, weight: .medium, design: .monospaced))
-            .foregroundStyle(.white)
+            .foregroundStyle(baseForeground)
             .lineLimit(1)
         }
         .padding(.horizontal, 8)
         .frame(height: 20)
-        .background(Color.white.opacity(CockpitFooterTheme.quotaBackgroundOpacity(isDark: isDarkMode)))
+        .background(baseForeground.opacity(CockpitFooterTheme.quotaBackgroundOpacity(isDark: isDarkMode)))
         .overlay(
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .stroke(Color.white.opacity(CockpitFooterTheme.quotaBorderOpacity(isDark: isDarkMode)), lineWidth: 1)
+                .stroke(baseForeground.opacity(CockpitFooterTheme.quotaBorderOpacity(isDark: isDarkMode)), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
     }
@@ -307,10 +361,11 @@ private struct QuotaWidget: View {
 
 private struct DividerText: View {
     @Environment(\.colorScheme) private var colorScheme
+    let baseForeground: Color
 
     var body: some View {
         Text("|")
-            .foregroundStyle(Color.white.opacity(colorScheme == .dark ? 0.30 : 0.25))
+            .foregroundStyle(baseForeground.opacity(colorScheme == .dark ? 0.30 : 0.25))
     }
 }
 
@@ -364,7 +419,7 @@ private struct SessionCountView: View {
             Text(text)
                 .monospacedDigit()
             if let freshnessText, !freshnessText.isEmpty {
-                DividerText()
+                DividerText(baseForeground: .white)
                 Text(freshnessText)
                     .monospacedDigit()
             }

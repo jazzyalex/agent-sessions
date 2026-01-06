@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 @MainActor
 final class StatusItemController: NSObject {
@@ -8,6 +9,7 @@ final class StatusItemController: NSObject {
     private let indexer: SessionIndexer
     private let codexStatus: CodexUsageModel
     private let claudeStatus: ClaudeUsageModel
+    private var cancellables: Set<AnyCancellable> = []
 
     init(indexer: SessionIndexer,
          codexStatus: CodexUsageModel,
@@ -54,6 +56,17 @@ final class StatusItemController: NSObject {
             button.action = #selector(togglePopover(_:))
         }
 
+        // Keep width in sync with live usage changes.
+        cancellables.removeAll()
+        codexStatus.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateLength() }
+            .store(in: &cancellables)
+        claudeStatus.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateLength() }
+            .store(in: &cancellables)
+
         // No popover; we construct an NSMenu on demand in togglePopover
     }
 
@@ -68,6 +81,7 @@ final class StatusItemController: NSObject {
             NSStatusBar.system.removeStatusItem(item)
             statusItem = nil
         }
+        cancellables.removeAll()
         // nothing else
     }
 

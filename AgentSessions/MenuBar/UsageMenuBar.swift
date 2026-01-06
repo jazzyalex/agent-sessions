@@ -4,19 +4,16 @@ import AppKit
 struct UsageMenuBarLabel: View {
     @EnvironmentObject var codexStatus: CodexUsageModel
     @EnvironmentObject var claudeStatus: ClaudeUsageModel
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("MenuBarScope") private var scopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var styleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("MenuBarSource") private var sourceRaw: String = MenuBarSource.codex.rawValue
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
 
-    private let itemFont: Font = .system(size: 12, weight: .medium, design: .monospaced)
-    private let itemHeight: CGFloat = NSStatusBar.system.thickness
-    private let iconSize: CGFloat = 13
-
     var body: some View {
-        let scope = MenuBarScope(rawValue: scopeRaw) ?? .both
-        let style = MenuBarStyleKind(rawValue: styleRaw) ?? .bars
+        let menuScope = MenuBarScope(rawValue: scopeRaw) ?? .both
+        let menuStyle = MenuBarStyleKind(rawValue: styleRaw) ?? .bars
         let desiredSource = MenuBarSource(rawValue: sourceRaw) ?? .codex
         let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
         let source: MenuBarSource = {
@@ -26,59 +23,41 @@ struct UsageMenuBarLabel: View {
             return desiredSource
         }()
 
-        HStack(spacing: 12) {
-            switch source {
-            case .codex:
-                if codexAgentEnabled {
-                    providerItem(
-                        provider: .codex,
-                        five: codexStatus.fiveHourRemainingPercent,
-                        week: codexStatus.weekRemainingPercent,
-                        scope: scope,
-                        style: style,
-                        showSpinner: codexStatus.isUpdating
-                    )
-                }
-            case .claude:
-                if claudeAgentEnabled && claudeEnabled {
-                    providerItem(
-                        provider: .claude,
-                        five: claudeStatus.sessionRemainingPercent,
-                        week: claudeStatus.weekAllModelsRemainingPercent,
-                        scope: scope,
-                        style: style,
-                        showSpinner: claudeStatus.isUpdating
-                    )
-                }
-            case .both:
-                if codexAgentEnabled {
-                    providerItem(
-                        provider: .codex,
-                        five: codexStatus.fiveHourRemainingPercent,
-                        week: codexStatus.weekRemainingPercent,
-                        scope: scope,
-                        style: style,
-                        showSpinner: codexStatus.isUpdating
-                    )
-                }
-                if codexAgentEnabled && claudeAgentEnabled && claudeEnabled {
-                    Rectangle()
-                        .fill(Color(nsColor: .separatorColor).opacity(0.6))
-                        .frame(width: 1, height: 12)
-                    providerItem(
-                        provider: .claude,
-                        five: claudeStatus.sessionRemainingPercent,
-                        week: claudeStatus.weekAllModelsRemainingPercent,
-                        scope: scope,
-                        style: style,
-                        showSpinner: claudeStatus.isUpdating
-                    )
-                }
+        let quotas: [QuotaData] = {
+            var out: [QuotaData] = []
+            out.reserveCapacity(2)
+            if codexAgentEnabled, source == .codex || source == .both {
+                out.append(QuotaData.codex(from: codexStatus))
+            }
+            if claudeAgentEnabled, claudeEnabled, source == .claude || source == .both {
+                out.append(QuotaData.claude(from: claudeStatus))
+            }
+            return out
+        }()
+
+        let scope: CockpitQuotaScope = {
+            switch menuScope {
+            case .fiveHour: return .fiveHour
+            case .weekly: return .week
+            case .both: return .both
+            }
+        }()
+
+        let style: CockpitQuotaStyle = (menuStyle == .numbers) ? .numbers : .bars
+
+        HStack(spacing: 10) {
+            ForEach(Array(quotas.enumerated()), id: \.offset) { _, q in
+                CockpitQuotaWidget(
+                    data: q,
+                    isDarkMode: colorScheme == .dark,
+                    scope: scope,
+                    style: style,
+                    modeOverride: nil,
+                    baseForeground: .primary
+                )
             }
         }
-        .font(itemFont)
-        .frame(height: itemHeight)
-        .padding(.horizontal, 6)
+        .frame(height: NSStatusBar.system.thickness)
         .fixedSize(horizontal: true, vertical: false)
         .onAppear {
             codexStatus.setMenuVisible(codexAgentEnabled)
@@ -89,99 +68,6 @@ struct UsageMenuBarLabel: View {
             claudeStatus.setMenuVisible(false)
         }
     }
-
-    @ViewBuilder
-    private func providerItem(provider: MenuBarSource, five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, showSpinner: Bool) -> some View {
-        HStack(spacing: 4) {
-            providerIcon(provider: provider)
-            renderUsage(five: five, week: week, scope: scope, style: style)
-            if showSpinner {
-                SpinningIcon()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func providerIcon(provider: MenuBarSource) -> some View {
-        switch provider {
-        case .claude:
-            Image("FooterIconClaude")
-                .renderingMode(.original)
-                .resizable()
-                .scaledToFit()
-                .frame(width: iconSize, height: iconSize)
-        case .codex:
-            Image("FooterIconCodex")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: iconSize, height: iconSize)
-                .foregroundStyle(.primary)
-        case .both:
-            EmptyView()
-        }
-    }
-
-    private struct SpinningIcon: View {
-        @State private var rotate = false
-        var body: some View {
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.system(size: 11, weight: .regular))
-                .rotationEffect(.degrees(rotate ? 360 : 0))
-                .animation(.linear(duration: 1.2).repeatForever(autoreverses: false), value: rotate)
-                .onAppear { rotate = true }
-        }
-    }
-
-    private func renderUsage(five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind) -> Text {
-        let fiveColor: Color = .primary
-        let weekColor: Color = .primary
-
-        let mode = UsageDisplayMode.current()
-        let leftFive = max(0, min(100, five))
-        let leftWeek = max(0, min(100, week))
-        let barFive = mode.barUsedPercent(fromLeft: leftFive)
-        let barWeek = mode.barUsedPercent(fromLeft: leftWeek)
-        let displayFive = mode.numericPercent(fromLeft: leftFive)
-        let displayWeek = mode.numericPercent(fromLeft: leftWeek)
-
-        switch style {
-        case .bars:
-            let p5 = segmentBar(for: barFive)
-            let pw = segmentBar(for: barWeek)
-            let left = Text("5h ").foregroundColor(fiveColor)
-                + Text(p5).foregroundColor(fiveColor)
-                + Text(" \(displayFive)%").foregroundColor(fiveColor)
-            let right = Text("Wk ").foregroundColor(weekColor)
-                + Text(pw).foregroundColor(weekColor)
-                + Text(" \(displayWeek)%").foregroundColor(weekColor)
-            switch scope {
-            case .fiveHour: return left
-            case .weekly: return right
-            case .both: return left + Text("  ") + right
-            }
-        case .numbers:
-            let left = Text("5h \(displayFive)%").foregroundColor(fiveColor)
-            let right = Text("Wk \(displayWeek)%").foregroundColor(weekColor)
-            switch scope {
-            case .fiveHour: return left
-            case .weekly: return right
-            case .both: return left + Text("  ") + right
-            }
-        }
-    }
-
-    private func segmentBar(for percent: Int, segments: Int = 5) -> String {
-        let p = max(0, min(100, percent))
-        let filled = min(segments, Int(round(Double(p) / 100.0 * Double(segments))))
-        let empty = max(0, segments - filled)
-        return String(repeating: "▰", count: filled) + String(repeating: "▱", count: empty)
-    }
-
-    // TODO(Colorize): MenuBarExtra renders labels as template content, dropping custom colors.
-    // Proposal: implement a small NSStatusItem controller that sets a non-template attributedTitle
-    // with per-metric colors (green 0–74%, yellow 75–89%, red 90–100%), while keeping the SwiftUI
-    // menu content via NSHostingView embedded in an NSMenu. Then re-introduce a Preferences toggle.
 }
 
 struct UsageMenuBarMenuContent: View {
