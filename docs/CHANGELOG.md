@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file.
 - Sessions: Auto-select the first session on launch so the transcript pane isn’t blank.
 - Sessions: Stabilize message counts for large sessions while full parsing completes to reduce list row jumps.
 - Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
+- Transcript: Clearing Find now immediately clears match highlights.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
 

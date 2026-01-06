@@ -415,6 +415,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         .textFieldStyle(.plain)
                         .focused($findFocused)
                         .focusable(allowFindFocus)
+                        .onChange(of: findText) { oldValue, newValue in
+                            // If the user clears the field via typing/backspace (not the clear button),
+                            // ensure we immediately remove any painted highlights.
+                            if !oldValue.isEmpty, newValue.isEmpty {
+                                performFind(resetIndex: true)
+                            }
+                        }
                         .onSubmit { performFind(resetIndex: true) }
                         .accessibilityLabel("Find in transcript")
                         .frame(minWidth: 120, idealWidth: 220, maxWidth: 360)
@@ -711,29 +718,31 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         return nil
     }
 
-    private func performFind(resetIndex: Bool, direction: Int = 1) {
-        // Terminal mode uses a dedicated line-based search in SessionTerminalView.
-        if viewMode == .terminal {
-            let q = findText
-            guard !q.isEmpty else {
-                terminalFindMatchesCount = 0
-                terminalFindCurrentIndex = 0
-                terminalFindToken &+= 1
-                return
-            }
-            terminalFindDirection = direction
-            terminalFindResetFlag = resetIndex
-            terminalFindToken &+= 1
-            return
+	    private func performFind(resetIndex: Bool, direction: Int = 1) {
+	        // Terminal mode uses a dedicated line-based search in SessionTerminalView.
+	        if viewMode == .terminal {
+	            let q = findText
+	            guard !q.isEmpty else {
+	                terminalFindMatchesCount = 0
+	                terminalFindCurrentIndex = 0
+	                terminalFindToken &+= 1
+	                selectedNSRange = nil
+	                return
+	            }
+	            terminalFindDirection = direction
+	            terminalFindResetFlag = resetIndex
+	            terminalFindToken &+= 1
+	            return
         }
 
-        let q = findText
-        guard !q.isEmpty else {
-            findMatches = []
-            currentMatchIndex = 0
-            highlightRanges = []
-            return
-        }
+	        let q = findText
+	        guard !q.isEmpty else {
+	            findMatches = []
+	            currentMatchIndex = 0
+	            highlightRanges = []
+	            selectedNSRange = nil
+	            return
+	        }
         // Find matches directly on the original string using case-insensitive search
         var matches: [Range<String.Index>] = []
         var searchStart = transcript.startIndex
