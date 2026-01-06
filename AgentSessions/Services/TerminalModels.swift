@@ -1,7 +1,7 @@
 import Foundation
 
 /// High-level role for a line in the terminal-style transcript.
-enum TerminalLineRole {
+enum TerminalLineRole: Sendable {
     case user          // user prompt
     case assistant     // model narrative
     case toolInput     // tool command invocation
@@ -16,7 +16,7 @@ enum TerminalLineRole {
 /// - `text` is the visible content for this line (no hard-coded CLI prefixes).
 /// - `eventIndex` / `blockIndex` are optional back-links into the originating
 ///   `Session`/`LogicalBlock` structures when available.
-struct TerminalLine: Identifiable {
+struct TerminalLine: Identifiable, Sendable {
     let id: Int
     let text: String
     let role: TerminalLineRole
