@@ -1140,6 +1140,7 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var focus: WindowFocusCoordinator
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var searchDebouncer: DispatchWorkItem? = nil
+    @State private var focusRequestToken: Int = 0
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     private enum SearchFocusTarget: Hashable { case field, clear }
     var body: some View {
@@ -1158,6 +1159,7 @@ private struct UnifiedSearchFiltersView: View {
                                                                      if want { searchFocus = .field }
                                                                      else if searchFocus == .field { searchFocus = nil }
                                                                  }),
+                                       focusRequestToken: focusRequestToken,
                                        onCommit: { startSearchImmediate() })
                     .frame(minWidth: 220)
 
@@ -1210,21 +1212,23 @@ private struct UnifiedSearchFiltersView: View {
             }
             .onChange(of: focus.activeFocus) { _, newFocus in
                 if newFocus == .sessionSearch {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        searchFocus = .field
-                    }
+                    requestSearchFocus()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .openSessionsSearchFromMenu)) { _ in
+                requestSearchFocus()
+            }
 
-	            // Preserve the keyboard shortcut binding even though the search box is always visible.
-	            Button(action: {
-	                focus.perform(.closeAllSearch)
-	                focus.perform(.openSessionSearch)
-	            }) { EmptyView() }
-	                .buttonStyle(.plain)
-	                .keyboardShortcut("f", modifiers: [.command, .option])
-	                .opacity(0.001)
-	                .frame(width: 1, height: 1)
+            // Preserve the keyboard shortcut binding even though the search box is always visible.
+            Button(action: {
+                focus.perform(.closeAllSearch)
+                focus.perform(.openSessionSearch)
+                requestSearchFocus()
+            }) { EmptyView() }
+                .buttonStyle(.plain)
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .opacity(0.001)
+                .frame(width: 1, height: 1)
 
             // Active project filter badge (Codex parity)
             if let projectFilter = unified.projectFilter, !projectFilter.isEmpty {
@@ -1244,6 +1248,13 @@ private struct UnifiedSearchFiltersView: View {
                 .background((stripMonochrome ? Color.secondary : Color.blue).opacity(0.1))
                 .background(RoundedRectangle(cornerRadius: 6).stroke((stripMonochrome ? Color.secondary : Color.blue).opacity(0.3)))
             }
+        }
+    }
+
+    private func requestSearchFocus() {
+        focusRequestToken &+= 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            searchFocus = .field
         }
     }
 
@@ -1307,11 +1318,13 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     @Binding var isFirstResponder: Bool
+    var focusRequestToken: Int
     var onCommit: () -> Void
 
     class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: ToolbarSearchTextField
         var didRequestFocus: Bool = false
+        var lastFocusRequestToken: Int = 0
         init(parent: ToolbarSearchTextField) { self.parent = parent }
 
         func controlTextDidChange(_ obj: Notification) {
@@ -1354,18 +1367,26 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
     func updateNSView(_ tf: NSTextField, context: Context) {
         if tf.stringValue != text { tf.stringValue = text }
         if tf.placeholderString != placeholder { tf.placeholderString = placeholder }
-        if isFirstResponder {
+        if focusRequestToken != context.coordinator.lastFocusRequestToken {
+            context.coordinator.lastFocusRequestToken = focusRequestToken
+            context.coordinator.didRequestFocus = false
+            requestFocus(tf, coordinator: context.coordinator)
+        } else if isFirstResponder {
             // `NSTextField` becomes first responder via a field editor, so we can't reliably compare
             // against `window.firstResponder`. Instead, request focus once when asked.
             if !context.coordinator.didRequestFocus {
-                context.coordinator.didRequestFocus = true
-                DispatchQueue.main.async { [weak tf] in
-                    guard let tf, let window = tf.window else { return }
-                    _ = window.makeFirstResponder(tf)
-                }
+                requestFocus(tf, coordinator: context.coordinator)
             }
         } else {
             context.coordinator.didRequestFocus = false
+        }
+    }
+
+    private func requestFocus(_ tf: NSTextField, coordinator: Coordinator) {
+        coordinator.didRequestFocus = true
+        DispatchQueue.main.async { [weak tf] in
+            guard let tf, let window = tf.window else { return }
+            _ = window.makeFirstResponder(tf)
         }
     }
 }
