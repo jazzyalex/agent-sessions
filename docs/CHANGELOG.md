@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - Sessions: Show a live session count in the unified list that updates while indexing and when filters/search change.
 - UI: Consolidate unified-window status indicators into a single cockpit-style footer.
 - UI: In dark mode, the cockpit footer now uses a transparent HUD style with crisp borders instead of a solid fill.
+- UI: Menu bar usage now uses the same monospace, logo-forward cockpit styling as the footer.
 - Transcript: Reduce terminal-view stutter by debouncing rebuilds and avoiding full NSTextView reloads for match highlight updates.
 - UI: Persist split-view divider positions per layout mode (horizontal vs vertical) so switching layouts doesn’t reset pane sizes.
 

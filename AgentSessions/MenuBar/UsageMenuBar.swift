@@ -9,7 +9,9 @@ struct UsageMenuBarLabel: View {
     @AppStorage("MenuBarSource") private var sourceRaw: String = MenuBarSource.codex.rawValue
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-    // Colorization is currently disabled (see TODO below)
+
+    private let itemFont: Font = .system(size: 12, weight: .medium, design: .monospaced)
+    private let itemHeight: CGFloat = NSStatusBar.system.thickness
 
     var body: some View {
         let scope = MenuBarScope(rawValue: scopeRaw) ?? .both
@@ -23,47 +25,63 @@ struct UsageMenuBarLabel: View {
             return desiredSource
         }()
 
-        HStack(spacing: 0) {
+        HStack(spacing: 12) {
             switch source {
             case .codex:
                 if codexAgentEnabled {
-                    renderSourceView(prefix: "CX",
-                                     five: codexStatus.fiveHourRemainingPercent,
-                                     week: codexStatus.weekRemainingPercent,
-                                     scope: scope,
-                                     style: style,
-                                     showSpinner: codexStatus.isUpdating)
+                    providerItem(
+                        iconName: "MenuIconCodex",
+                        iconTint: .blue,
+                        five: codexStatus.fiveHourRemainingPercent,
+                        week: codexStatus.weekRemainingPercent,
+                        scope: scope,
+                        style: style,
+                        showSpinner: codexStatus.isUpdating
+                    )
                 }
             case .claude:
                 if claudeAgentEnabled && claudeEnabled {
-                    renderSourceView(prefix: "CL",
-                                     five: claudeStatus.sessionRemainingPercent,
-                                     week: claudeStatus.weekAllModelsRemainingPercent,
-                                     scope: scope,
-                                     style: style,
-                                     showSpinner: claudeStatus.isUpdating)
+                    providerItem(
+                        iconName: "MenuIconClaude",
+                        iconTint: .orange,
+                        five: claudeStatus.sessionRemainingPercent,
+                        week: claudeStatus.weekAllModelsRemainingPercent,
+                        scope: scope,
+                        style: style,
+                        showSpinner: claudeStatus.isUpdating
+                    )
                 }
             case .both:
                 if codexAgentEnabled {
-                    renderSourceView(prefix: "CX",
-                                     five: codexStatus.fiveHourRemainingPercent,
-                                     week: codexStatus.weekRemainingPercent,
-                                     scope: scope,
-                                     style: style,
-                                     showSpinner: codexStatus.isUpdating)
+                    providerItem(
+                        iconName: "MenuIconCodex",
+                        iconTint: .blue,
+                        five: codexStatus.fiveHourRemainingPercent,
+                        week: codexStatus.weekRemainingPercent,
+                        scope: scope,
+                        style: style,
+                        showSpinner: codexStatus.isUpdating
+                    )
                 }
                 if codexAgentEnabled && claudeAgentEnabled && claudeEnabled {
-                    Text(" │ ").font(.system(size: 12, weight: .regular, design: .monospaced))
-                    renderSourceView(prefix: "CL",
-                                     five: claudeStatus.sessionRemainingPercent,
-                                     week: claudeStatus.weekAllModelsRemainingPercent,
-                                     scope: scope,
-                                     style: style,
-                                     showSpinner: claudeStatus.isUpdating)
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor).opacity(0.6))
+                        .frame(width: 1, height: 12)
+                    providerItem(
+                        iconName: "MenuIconClaude",
+                        iconTint: .orange,
+                        five: claudeStatus.sessionRemainingPercent,
+                        week: claudeStatus.weekAllModelsRemainingPercent,
+                        scope: scope,
+                        style: style,
+                        showSpinner: claudeStatus.isUpdating
+                    )
                 }
             }
         }
-        .padding(.horizontal, 4)
+        .font(itemFont)
+        .frame(height: itemHeight)
+        .padding(.horizontal, 6)
         .fixedSize(horizontal: true, vertical: false)
         .onAppear {
             codexStatus.setMenuVisible(codexAgentEnabled)
@@ -76,10 +94,15 @@ struct UsageMenuBarLabel: View {
     }
 
     @ViewBuilder
-    private func renderSourceView(prefix: String, five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, showSpinner: Bool) -> some View {
+    private func providerItem(iconName: String, iconTint: Color, five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, showSpinner: Bool) -> some View {
         HStack(spacing: 4) {
-            renderSource(five: five, week: week, scope: scope, style: style, prefix: prefix)
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
+            Image(iconName)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 13, height: 13)
+                .foregroundStyle(iconTint)
+            renderUsage(five: five, week: week, scope: scope, style: style)
             if showSpinner {
                 SpinningIcon()
             }
@@ -97,7 +120,7 @@ struct UsageMenuBarLabel: View {
         }
     }
 
-    private func renderSource(five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind, prefix: String?) -> Text {
+    private func renderUsage(five: Int, week: Int, scope: MenuBarScope, style: MenuBarStyleKind) -> Text {
         let fiveColor: Color = .primary
         let weekColor: Color = .primary
 
@@ -108,18 +131,6 @@ struct UsageMenuBarLabel: View {
         let barWeek = mode.barUsedPercent(fromLeft: leftWeek)
         let displayFive = mode.numericPercent(fromLeft: leftFive)
         let displayWeek = mode.numericPercent(fromLeft: leftWeek)
-
-        // Create prefix with special styling applied via AttributedString
-        let prefixText: Text = {
-            if let pfx = prefix {
-                var attrStr = AttributedString(pfx.uppercased())
-                attrStr.font = .system(size: 11, weight: .semibold, design: .default)
-                attrStr.kern = -0.22 // -2% tracking at 11pt
-                return Text(attrStr) + Text(" ")
-            } else {
-                return Text("")
-            }
-        }()
 
         switch style {
         case .bars:
@@ -132,17 +143,17 @@ struct UsageMenuBarLabel: View {
                 + Text(pw).foregroundColor(weekColor)
                 + Text(" \(displayWeek)%").foregroundColor(weekColor)
             switch scope {
-            case .fiveHour: return prefixText + left
-            case .weekly: return prefixText + right
-            case .both: return prefixText + left + Text("  ") + right
+            case .fiveHour: return left
+            case .weekly: return right
+            case .both: return left + Text("  ") + right
             }
         case .numbers:
             let left = Text("5h \(displayFive)%").foregroundColor(fiveColor)
             let right = Text("Wk \(displayWeek)%").foregroundColor(weekColor)
             switch scope {
-            case .fiveHour: return prefixText + left
-            case .weekly: return prefixText + right
-            case .both: return prefixText + left + Text("  ") + right
+            case .fiveHour: return left
+            case .weekly: return right
+            case .both: return left + Text("  ") + right
             }
         }
     }
