@@ -72,6 +72,11 @@ struct SessionTerminalView: View {
             Divider()
             content
         }
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.6 : 0.35))
+                .frame(height: 1)
+        }
         .onAppear {
             loadRoleToggles()
             rebuildLines(priority: .userInitiated)
@@ -111,7 +116,7 @@ struct SessionTerminalView: View {
                     persistRoleToggles()
                 }) {
                     Text("All")
-                        .font(.caption)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(
@@ -125,7 +130,7 @@ struct SessionTerminalView: View {
                 legendToggle(label: "Tools", role: .tools)
                 legendToggle(label: "Errors", role: .errors)
             }
-            .font(.caption2)
+            .font(.system(size: 11, weight: .regular, design: .monospaced))
             .foregroundStyle(.secondary)
 
             Spacer()
@@ -139,7 +144,7 @@ struct SessionTerminalView: View {
                         }
                     }
                     .buttonStyle(.borderless)
-                    .font(.caption2)
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
                     .help("Jump to the first user prompt after the preamble")
                 }
             }
@@ -156,6 +161,7 @@ struct SessionTerminalView: View {
                     fontSize: CGFloat(transcriptFontSize),
                     matchIDs: matchIDSet,
                     currentMatchLineID: currentMatchLineID,
+                    highlightActive: !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     scrollTargetLineID: scrollTargetLineID,
                     scrollTargetToken: scrollTargetToken,
                     preambleUserBlockIndexes: preambleUserBlockIndexes,
@@ -906,6 +912,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let fontSize: CGFloat
     let matchIDs: Set<Int>
     let currentMatchLineID: Int?
+    let highlightActive: Bool
     let scrollTargetLineID: Int?
     let scrollTargetToken: Int
     let preambleUserBlockIndexes: Set<Int>
@@ -1091,6 +1098,14 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
+    private var effectiveMatchIDs: Set<Int> {
+        highlightActive ? matchIDs : []
+    }
+
+    private var effectiveCurrentMatchLineID: Int? {
+        highlightActive ? currentMatchLineID : nil
+    }
+
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
         scroll.drawsBackground = false
@@ -1122,8 +1137,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastFontSize = fontSize
         context.coordinator.lastMonochrome = monochrome
         context.coordinator.lastColorScheme = colorScheme
-        context.coordinator.lastMatchIDs = matchIDs
-        context.coordinator.lastCurrentMatchLineID = currentMatchLineID
+        context.coordinator.lastMatchIDs = effectiveMatchIDs
+        context.coordinator.lastCurrentMatchLineID = effectiveCurrentMatchLineID
         return scroll
     }
 
@@ -1142,8 +1157,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             context.coordinator.lastFontSize = fontSize
             context.coordinator.lastMonochrome = monochrome
             context.coordinator.lastColorScheme = colorScheme
-        } else if context.coordinator.lastMatchIDs != matchIDs || context.coordinator.lastCurrentMatchLineID != currentMatchLineID {
-            updateHighlights(in: tv, context: context)
+        } else if context.coordinator.lastMatchIDs != effectiveMatchIDs || context.coordinator.lastCurrentMatchLineID != effectiveCurrentMatchLineID {
+            updateHighlights(in: tv, context: context, matches: effectiveMatchIDs, currentLineID: effectiveCurrentMatchLineID)
         }
 
         if let target = currentMatchLineID, let range = context.coordinator.lineRanges[target] {
@@ -1180,13 +1195,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     }
 
     private func applyContent(to textView: NSTextView, context: Context) {
-        let (attr, ranges) = buildAttributedString()
+        let (attr, ranges) = buildAttributedString(matches: effectiveMatchIDs, currentLineID: effectiveCurrentMatchLineID)
         context.coordinator.lineRanges = ranges
         context.coordinator.lineRoles = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0.role) })
         context.coordinator.lines = lines
         context.coordinator.orderedLineRanges = lines.compactMap { ranges[$0.id] }
-        context.coordinator.lastMatchIDs = matchIDs
-        context.coordinator.lastCurrentMatchLineID = currentMatchLineID
+        context.coordinator.lastMatchIDs = effectiveMatchIDs
+        context.coordinator.lastCurrentMatchLineID = effectiveCurrentMatchLineID
         textView.textStorage?.setAttributedString(attr)
 
         // Ensure container tracks width
@@ -1195,11 +1210,11 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
     }
 
-    private func updateHighlights(in textView: NSTextView, context: Context) {
+    private func updateHighlights(in textView: NSTextView, context: Context, matches: Set<Int>, currentLineID: Int?) {
         let oldMatches = context.coordinator.lastMatchIDs
-        let newMatches = matchIDs
+        let newMatches = matches
         let oldCurrent = context.coordinator.lastCurrentMatchLineID
-        let newCurrent = currentMatchLineID
+        let newCurrent = currentLineID
 
         var affected = oldMatches.symmetricDifference(newMatches)
         if let oldCurrent { affected.insert(oldCurrent) }
@@ -1247,7 +1262,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastCurrentMatchLineID = newCurrent
     }
 
-    private func buildAttributedString() -> (NSAttributedString, [Int: NSRange]) {
+    private func buildAttributedString(matches: Set<Int>, currentLineID: Int?) -> (NSAttributedString, [Int: NSRange]) {
         let attr = NSMutableAttributedString()
         var ranges: [Int: NSRange] = [:]
         ranges.reserveCapacity(lines.count)
@@ -1321,8 +1336,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 return preambleUserBlockIndexes.contains(blockIndex)
             }()
 
-            let isCurrent = (line.id == currentMatchLineID)
-            let isMatch = matchIDs.contains(line.id)
+            let isCurrent = (line.id == currentLineID)
+            let isMatch = matches.contains(line.id)
             let lineSwatch = swatch(for: line.role)
 
             var attributes: [NSAttributedString.Key: Any] = [

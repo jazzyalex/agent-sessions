@@ -2,6 +2,12 @@ import SwiftUI
 import AppKit
 import Foundation
 
+private enum TranscriptToolbarStyle {
+    static let baseFont = Font.system(size: 13, weight: .regular, design: .monospaced)
+    static let compactFont = Font.system(size: 11, weight: .regular, design: .monospaced)
+    static let popoverFont = Font.system(size: 12, weight: .medium, design: .monospaced)
+}
+
 /// Codex transcript view - now a wrapper around UnifiedTranscriptView
 struct TranscriptPlainView: View {
     @EnvironmentObject var indexer: SessionIndexer
@@ -171,8 +177,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     // Show animation during lazy load OR full refresh
                     if shouldShowLoadingAnimation {
                         LoadingAnimationView(
-                            codexColor: .blue,
-                            claudeColor: Color(red: 204/255, green: 121/255, blue: 90/255)
+                            codexColor: Color.agentCodex,
+                            claudeColor: Color.agentClaude
                         )
                     }
                 }
@@ -291,76 +297,75 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .focusable(false)
                 .hidden()
 
-            // === LEADING GROUP: View Mode Segmented Control + JSON status ===
-            VStack(alignment: .leading, spacing: 2) {
+            // === LEADING GROUP: View Mode Segmented Control + JSON status + ID ===
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
                 Picker("View Style", selection: $viewModeRaw) {
                     Text("Plain")
                         .tag(SessionViewMode.transcript.rawValue)
                         .help("Plain view \u{2014} merged chat and tools. Cmd+Shift+T toggles between Plain and Color.")
                     Text("Color")
-                        .tag(SessionViewMode.terminal.rawValue)
-                        .help("Color view \u{2014} terminal-inspired output with colorized commands and tool output. Cmd+Shift+T toggles between Plain and Color.")
-                    Text("JSON")
-                        .tag(SessionViewMode.json.rawValue)
-                        .help("JSON view \u{2014} formatted session JSON for readability. Encrypted blobs and large text blocks are summarized; use the session file on disk for raw JSON.")
+                            .tag(SessionViewMode.terminal.rawValue)
+                            .help("Color view \u{2014} terminal-inspired output with colorized commands and tool output. Cmd+Shift+T toggles between Plain and Color.")
+                        Text("JSON")
+                            .tag(SessionViewMode.json.rawValue)
+                            .help("JSON view \u{2014} formatted session JSON for readability. Encrypted blobs and large text blocks are summarized; use the session file on disk for raw JSON.")
                 }
                 .pickerStyle(.segmented)
+                .font(TranscriptToolbarStyle.baseFont)
                 .labelsHidden()
                 .controlSize(.regular)
                 .frame(width: 200)
                 .accessibilityLabel("View Style")
 
-                if isJSONMode && isBuildingJSON {
+                    if isJSONMode && isBuildingJSON {
                     HStack(spacing: 6) {
                         Image(systemName: "hourglass")
                         Text("Building JSON view…")
                     }
-                    .font(.system(size: 11))
+                    .font(TranscriptToolbarStyle.compactFont)
                     .foregroundStyle(.secondary)
                 }
             }
-            .padding(.leading, 12)
 
-            // System flexible space pushes trailing group to the right
-            Spacer()
-
-            // === CENTER: Quiet secondary ID label (click-to-copy) ===
-            HStack(spacing: 10) {
-                if let fullID = sessionIDExtractor(session) {
-                    let displayLast4 = String(fullID.suffix(4))
-                    let short = extractShortID(for: session) ?? String(fullID.prefix(6))
-                    Button(action: { copySessionID(for: session) }) {
-                        HStack(spacing: 4) {
+                HStack(spacing: 10) {
+                    if let fullID = sessionIDExtractor(session) {
+                        let displayLast4 = String(fullID.suffix(4))
+                        let short = extractShortID(for: session) ?? String(fullID.prefix(6))
+                        Button(action: { copySessionID(for: session) }) {
+                            HStack(spacing: 4) {
                             Image(systemName: "doc.on.doc")
                                 .imageScale(.medium)
                             Text("ID \(displayLast4)")
-                                .font(.system(size: 13))
+                                .font(TranscriptToolbarStyle.baseFont)
                                 .foregroundStyle(.secondary)
                         }
                     }
                     .buttonStyle(.borderless)
                     .help("Copy session ID: \(short) (⌘⇧C)")
-                    .accessibilityLabel("Copy Session ID")
+                        .accessibilityLabel("Copy Session ID")
                     .keyboardShortcut("c", modifiers: [.command, .shift])
                     .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
                         Text("ID Copied!")
                             .padding(8)
-                            .font(.system(size: 12))
+                            .font(TranscriptToolbarStyle.popoverFont)
                     }
                 }
                 if StarredSessionsStore().contains(id: session.id, source: session.source) {
                     pinnedBadge(session: session)
+                    }
                 }
             }
+            .padding(.leading, 12)
 
-            Spacer(minLength: 24)
+            Spacer(minLength: 12)
 
             // MID: Text size controls (moved next to ID)
             HStack(spacing: 6) {
                 Button(action: { adjustFont(-1) }) {
                     HStack(spacing: 2) {
-                        Text("A").font(.system(size: 12, weight: .semibold))
-                        Text("−").font(.system(size: 12, weight: .semibold))
+                        Text("A").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        Text("−").font(.system(size: 12, weight: .semibold, design: .monospaced))
                     }
                 }
                 .buttonStyle(.borderless)
@@ -370,8 +375,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
                 Button(action: { adjustFont(1) }) {
                     HStack(spacing: 2) {
-                        Text("A").font(.system(size: 14, weight: .semibold))
-                        Text("+").font(.system(size: 14, weight: .semibold))
+                        Text("A").font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        Text("+").font(.system(size: 14, weight: .semibold, design: .monospaced))
                     }
                 }
                 .buttonStyle(.borderless)
@@ -387,7 +392,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 // Copy transcript button
                 Button("Copy") { copyAll() }
                     .buttonStyle(.borderless)
-                    .font(.system(size: 14))
+                    .font(TranscriptToolbarStyle.baseFont)
                     .help("Copy entire transcript to clipboard (⌥⌘C)")
                     .keyboardShortcut("c", modifiers: [.command, .option])
                     .accessibilityLabel("Copy Transcript")
@@ -403,6 +408,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         .imageScale(.medium)
                     TextField("Find", text: $findText)
                         .textFieldStyle(.plain)
+                        .font(TranscriptToolbarStyle.baseFont)
                         .focused($findFocused)
                         .focusable(allowFindFocus)
                         .onChange(of: findText) { oldValue, newValue in
