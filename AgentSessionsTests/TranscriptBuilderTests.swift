@@ -69,4 +69,40 @@ final class TranscriptBuilderTests: XCTestCase {
         let b = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: true))
         XCTAssertEqual(a, b)
     }
+
+    func testSearchToolIOSanitizesDataURLsAndBase64() throws {
+        let base64 = "/9j/" + String(repeating: "A", count: 20_000) + "=="
+        let dataURL = "data:image/jpeg;base64,\(base64)"
+        let toolOut = "Captured screenshot:\n\(dataURL)\nDone."
+
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .tool_result,
+                         role: "tool",
+                         text: nil,
+                         toolName: "chrome_screenshot",
+                         toolInput: "{\"tabId\":1}",
+                         toolOutput: toolOut,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-toolio",
+                        source: .claude,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/toolio.jsonl",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let text = SessionSearchTextBuilder.buildToolIO(session: s)
+        XCTAssertTrue(text.contains("Captured screenshot"))
+        XCTAssertTrue(text.contains("[data-url omitted:"), "Expected data URLs to be redacted for indexing")
+        XCTAssertFalse(text.contains("data:image/jpeg;base64,"), "Should not include data URL payloads in indexed text")
+        XCTAssertFalse(text.contains(String(base64.prefix(64))), "Should not include base64 payloads in indexed text")
+    }
 }

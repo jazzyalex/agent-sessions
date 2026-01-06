@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - Search: Use SQLite full-text indexing to speed up global search after analytics indexing completes.
 - Search: Instant search now indexes full tool inputs and outputs for recent sessions (last 90 days), reducing the need to wait for background scanning.
+- Search: Tool output indexing now redacts embedded base64/data URL blobs to keep search responsive and the index compact.
 - Search: Instant search now uses token-prefix matching by default (for example, `magic` behaves like `magic*`) to improve identifier and structured-text recall without trigram/substr indexing.
 - Search: Background scanning of large tool outputs is now opt-in by default, keeping Instant search more responsive (Settings → Advanced).
 - Search: Instant indexing now samples long assistant messages and tool inputs (head + middle + tail) to reduce false negatives without indexing the full transcript.
