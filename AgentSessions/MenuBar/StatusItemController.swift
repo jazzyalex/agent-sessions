@@ -110,21 +110,15 @@ final class StatusItemController: NSObject {
             return desiredSource
         }()
 
-        let showCodexResetTimes = d.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true
-        let showClaudeResetTimes = d.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true
-
         // Reset lines (clicking opens Preferences → Menu Bar)
-        if codexAgentEnabled && showCodexResetTimes && (source == .codex || source == .both) {
+        if codexAgentEnabled && (source == .codex || source == .both) {
             menu.addItem(makeTitleItem("Codex"))
             menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: codexStatus.fiveHourRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
             menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: codexStatus.weekRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
         }
         let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
-        if source == .both,
-           codexAgentEnabled, showCodexResetTimes,
-           claudeAgentEnabled, showClaudeResetTimes,
-           claudeEnabled { menu.addItem(NSMenuItem.separator()) }
-        if claudeAgentEnabled && showClaudeResetTimes && (source == .claude || source == .both) && claudeEnabled {
+        if source == .both && codexAgentEnabled && claudeAgentEnabled && claudeEnabled { menu.addItem(NSMenuItem.separator()) }
+        if claudeAgentEnabled && (source == .claude || source == .both) && claudeEnabled {
             menu.addItem(makeTitleItem("Claude"))
             menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
             menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
@@ -132,12 +126,14 @@ final class StatusItemController: NSObject {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Reset display toggles
-        menu.addItem(makeTitleItem("Reset Times"))
-        let codexToggle = makeCheckboxItem(title: "Show Codex reset times", checked: showCodexResetTimes, action: #selector(toggleShowCodexResetTimes))
+        // Menu bar label toggles (saves status-item width; does not affect these menu lines)
+        menu.addItem(makeTitleItem("Menu Bar Label"))
+        let showCodexResetIndicators = d.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true
+        let showClaudeResetIndicators = d.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true
+        let codexToggle = makeCheckboxItem(title: "Show Codex reset indicators", checked: showCodexResetIndicators, action: #selector(toggleShowCodexResetTimes))
         codexToggle.isEnabled = codexAgentEnabled
         menu.addItem(codexToggle)
-        let claudeToggle = makeCheckboxItem(title: "Show Claude reset times", checked: showClaudeResetTimes, action: #selector(toggleShowClaudeResetTimes))
+        let claudeToggle = makeCheckboxItem(title: "Show Claude reset indicators", checked: showClaudeResetIndicators, action: #selector(toggleShowClaudeResetTimes))
         claudeToggle.isEnabled = claudeAgentEnabled && claudeEnabled
         menu.addItem(claudeToggle)
 
@@ -217,11 +213,13 @@ final class StatusItemController: NSObject {
         let d = UserDefaults.standard
         let current = d.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true
         d.set(!current, forKey: PreferencesKey.MenuBar.showCodexResetTimes)
+        updateLength()
     }
     @objc private func toggleShowClaudeResetTimes() {
         let d = UserDefaults.standard
         let current = d.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true
         d.set(!current, forKey: PreferencesKey.MenuBar.showClaudeResetTimes)
+        updateLength()
     }
     @objc private func openPreferences() {
         if let updater = UpdaterController.shared {

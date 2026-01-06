@@ -108,18 +108,19 @@ struct CockpitFooterView: View {
                 IndexingStatusView(isBusy: true, text: statusText)
             }
 
-            HStack(spacing: 10) {
-                ForEach(Array(quotas.enumerated()), id: \.offset) { _, q in
-                    CockpitQuotaWidget(
-                        data: q,
-                        isDarkMode: colorScheme == .dark,
-                        scope: .both,
-                        style: .bars,
-                        modeOverride: usageDisplayModeOverride,
-                        baseForeground: .white
-                    )
-                }
-            }
+	            HStack(spacing: 10) {
+	                ForEach(Array(quotas.enumerated()), id: \.offset) { _, q in
+	                    CockpitQuotaWidget(
+	                        data: q,
+	                        isDarkMode: colorScheme == .dark,
+	                        scope: .both,
+	                        style: .bars,
+	                        modeOverride: usageDisplayModeOverride,
+	                        baseForeground: .white,
+	                        showResetIndicators: true
+	                    )
+	                }
+	            }
 
             Spacer(minLength: 0)
 
@@ -147,25 +148,27 @@ enum CockpitQuotaStyle: Equatable {
     case numbers
 }
 
-struct CockpitQuotaWidget: View {
-    let data: QuotaData
-    let isDarkMode: Bool
-    let scope: CockpitQuotaScope
-    let style: CockpitQuotaStyle
-    let modeOverride: UsageDisplayMode?
-    let baseForeground: Color
+	struct CockpitQuotaWidget: View {
+	    let data: QuotaData
+	    let isDarkMode: Bool
+	    let scope: CockpitQuotaScope
+	    let style: CockpitQuotaStyle
+	    let modeOverride: UsageDisplayMode?
+	    let baseForeground: Color
+	    let showResetIndicators: Bool
 
-    var body: some View {
-        QuotaWidget(
-            data: data,
-            isDarkMode: isDarkMode,
-            scope: scope,
-            style: style,
-            modeOverride: modeOverride,
-            baseForeground: baseForeground
-        )
-    }
-}
+	    var body: some View {
+	        QuotaWidget(
+	            data: data,
+	            isDarkMode: isDarkMode,
+	            scope: scope,
+	            style: style,
+	            modeOverride: modeOverride,
+	            baseForeground: baseForeground,
+	            showResetIndicators: showResetIndicators
+	        )
+	    }
+	}
 
 private struct IndexingStatusView: View {
     let isBusy: Bool
@@ -199,15 +202,16 @@ private struct IndexingIndicator: View {
     }
 }
 
-private struct QuotaWidget: View {
-    let data: QuotaData
-    let isDarkMode: Bool
-    let scope: CockpitQuotaScope
-    let style: CockpitQuotaStyle
-    let modeOverride: UsageDisplayMode?
-    let baseForeground: Color
-    @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+	private struct QuotaWidget: View {
+	    let data: QuotaData
+	    let isDarkMode: Bool
+	    let scope: CockpitQuotaScope
+	    let style: CockpitQuotaStyle
+	    let modeOverride: UsageDisplayMode?
+	    let baseForeground: Color
+	    let showResetIndicators: Bool
+	    @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
+	    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var mode: UsageDisplayMode { modeOverride ?? (UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left) }
 
@@ -295,26 +299,36 @@ private struct QuotaWidget: View {
                 )
             }
 
-            HStack(spacing: 6) {
-                switch scope {
-                case .fiveHour:
-                    Text("5h: \(presentation.fiveHourPercentLabelText)")
-                    DividerText(baseForeground: baseForeground)
-                    Text(presentation.fiveHourResetDisplayText)
-                case .week:
-                    Text("Wk: \(presentation.weekPercentLabelText)")
-                    DividerText(baseForeground: baseForeground)
-                    Text(presentation.weekResetDisplayText)
-                case .both:
-                    Text("5h: \(presentation.fiveHourPercentLabelText)")
-                    DividerText(baseForeground: baseForeground)
-                    Text(presentation.fiveHourResetDisplayText)
-                    DividerText(baseForeground: baseForeground)
-                    Text("Wk: \(presentation.weekPercentLabelText)")
-                    DividerText(baseForeground: baseForeground)
-                    Text(presentation.weekResetDisplayText)
-                }
-            }
+	            HStack(spacing: 6) {
+	                switch scope {
+	                case .fiveHour:
+	                    Text("5h: \(presentation.fiveHourPercentLabelText)")
+	                    if showResetIndicators {
+	                        DividerText(baseForeground: baseForeground)
+	                        Text(presentation.fiveHourResetDisplayText)
+	                    }
+	                case .week:
+	                    Text("Wk: \(presentation.weekPercentLabelText)")
+	                    if showResetIndicators {
+	                        DividerText(baseForeground: baseForeground)
+	                        Text(presentation.weekResetDisplayText)
+	                    }
+	                case .both:
+	                    Text("5h: \(presentation.fiveHourPercentLabelText)")
+	                    if showResetIndicators {
+	                        DividerText(baseForeground: baseForeground)
+	                        Text(presentation.fiveHourResetDisplayText)
+	                        DividerText(baseForeground: baseForeground)
+	                    } else {
+	                        DividerText(baseForeground: baseForeground)
+	                    }
+	                    Text("Wk: \(presentation.weekPercentLabelText)")
+	                    if showResetIndicators {
+	                        DividerText(baseForeground: baseForeground)
+	                        Text(presentation.weekResetDisplayText)
+	                    }
+	                }
+	            }
             .font(.system(size: 12, weight: .medium, design: .monospaced))
             .foregroundStyle(baseForeground)
             .lineLimit(1)
