@@ -110,27 +110,13 @@ struct SessionTerminalView: View {
     private var toolbar: some View {
         HStack {
             // Left: All + role toggles (legend chips act as toggles)
-            HStack(spacing: 14) {
-                Button(action: {
-                    activeRoles = Set(RoleToggle.allCases)
-                    persistRoleToggles()
-                }) {
-                    Text("All")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule().fill(activeRoles.count == RoleToggle.allCases.count ? Color.accentColor.opacity(0.2) : Color.clear)
-                        )
-                }
-                .buttonStyle(.borderless)
-
+            HStack(spacing: 16) {
+                allFilterButton()
                 legendToggle(label: "User", role: .user)
                 legendToggle(label: agentLegendLabel, role: .assistant)
                 legendToggle(label: "Tools", role: .tools)
                 legendToggle(label: "Errors", role: .errors)
             }
-            .font(.system(size: 11, weight: .regular, design: .monospaced))
             .foregroundStyle(.secondary)
 
             Spacer()
@@ -324,6 +310,25 @@ struct SessionTerminalView: View {
         roleToggleRaw = parts.joined(separator: ",")
     }
 
+    private func allFilterButton() -> some View {
+        let isActive = activeRoles.count == RoleToggle.allCases.count
+        return Button(action: {
+            activeRoles = Set(RoleToggle.allCases)
+            persistRoleToggles()
+        }) {
+            Text("All")
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(isActive ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.3), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
     private func legendToggle(label: String, role: RoleToggle) -> some View {
         let isOn = activeRoles.contains(role)
         let swatch = TerminalRolePalette.swiftUI(role: TerminalRolePalette.role(for: role), scheme: colorScheme, monochrome: stripMonochrome)
@@ -331,6 +336,8 @@ struct SessionTerminalView: View {
         let hasLines = !indices.isEmpty
         let navDisabled = !isOn || !hasLines
         let showCount = true
+        let status = navigationStatus(for: role)
+        let countText = "\(formattedCount(status.current))/\(formattedCount(status.total))"
 
         return HStack(spacing: 6) {
             Button(action: {
@@ -341,49 +348,43 @@ struct SessionTerminalView: View {
                 }
                 persistRoleToggles()
             }) {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Circle()
                         .fill(swatch.accent.opacity(isOn ? 1.0 : 0.35))
-                        .frame(width: 8, height: 8)
+                        .frame(width: 9, height: 9)
                     Text(label)
+                        .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(isOn ? .primary : .secondary)
+                    if showCount {
+                        Text(countText)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Color.secondary)
+                            .monospacedDigit()
+                    }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule()
-                        .fill(isOn ? (swatch.background ?? swatch.accent.opacity(0.2)) : Color.clear)
-                )
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
 
-            if showCount {
-                let status = navigationStatus(for: role)
-                Text("\(formattedCount(status.current))/\(formattedCount(status.total))")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(
-                        hasLines
-                        ? (isOn ? swatch.accent : swatch.accent.opacity(0.55))
-                        : Color.secondary.opacity(0.45)
-                    )
-            }
-
-            HStack(spacing: 2) {
+            HStack(spacing: 4) {
                 Button(action: { navigateRole(role, direction: -1) }) {
                     Image(systemName: "chevron.up")
-                        .frame(width: 22, height: 22)
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 16, height: 16)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(PillIconButtonStyle(tint: swatch.accent, disabled: navDisabled))
+                .buttonStyle(.plain)
+                .foregroundStyle(navDisabled ? Color.secondary.opacity(0.35) : Color.secondary)
                 .disabled(navDisabled)
                 .help(previousHelpText(for: role))
 
                 Button(action: { navigateRole(role, direction: 1) }) {
                     Image(systemName: "chevron.down")
-                        .frame(width: 22, height: 22)
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 16, height: 16)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(PillIconButtonStyle(tint: swatch.accent, disabled: navDisabled))
+                .buttonStyle(.plain)
+                .foregroundStyle(navDisabled ? Color.secondary.opacity(0.35) : Color.secondary)
                 .disabled(navDisabled)
                 .help(nextHelpText(for: role))
             }
@@ -713,37 +714,6 @@ private struct TerminalLineView: View {
 }
 
 // MARK: - Button Styles
-
-private struct PillIconButtonStyle: ButtonStyle {
-    let tint: Color
-    let disabled: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundColor(disabled ? Color.secondary.opacity(0.6) : tint)
-            .background(
-                Circle()
-                    .fill(backgroundColor(isPressed: configuration.isPressed))
-            )
-            .overlay(
-                Circle()
-                    .stroke(borderColor(isPressed: configuration.isPressed), lineWidth: 1)
-            )
-            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
-            .animation(.easeInOut(duration: 0.08), value: configuration.isPressed)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if disabled { return Color.clear }
-        if isPressed { return tint.opacity(0.25) }
-        return tint.opacity(0.12)
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if disabled { return Color.clear }
-        return tint.opacity(isPressed ? 0.55 : 0.35)
-    }
-}
 
 // MARK: - NSTextView-backed selectable terminal renderer
 
