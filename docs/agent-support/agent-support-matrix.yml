@@ -1,0 +1,53 @@
+agent_sessions_version: 2.9.2
+as_of_commit: b96da55
+as_of_date: 2026-01-07
+workflow_doc: "docs/agent-support/workflow.md"
+notes:
+  - "Max verified versions come from repo fixtures and documented format changes."
+  - "Some agents do not log their own CLI version; those are marked unknown."
+agents:
+  codex_cli:
+    max_verified_version: "0.73.0"
+    version_field: "payload.cli_version"
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
+      - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
+      - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
+  claude_code:
+    max_verified_version: "2.0.71"
+    version_field: "version"
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
+      - "Resources/Fixtures/stage0/agents/claude/large.jsonl"
+      - "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl"
+  gemini_cli:
+    max_verified_version: "unknown"
+    version_field: "not_logged"
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/gemini/small.json"
+      - "Resources/Fixtures/stage0/agents/gemini/large.json"
+      - "Resources/Fixtures/stage0/agents/gemini/schema_drift.json"
+  copilot_cli:
+    max_verified_version: "0.0.400"
+    version_field: "data.copilotVersion"
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
+      - "Resources/Fixtures/stage0/agents/copilot/large.jsonl"
+      - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
+  opencode:
+    max_verified_version: "0.2"
+    version_field: "session.version"
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
+      - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json"
+      - "Resources/Fixtures/stage0/agents/opencode/storage_legacy/session/proj_test/ses_s_stage0_drift.json"
+  droid:
+    max_verified_version: "unknown"
+    version_field: "not_logged"
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/droid/session_store_small.jsonl"
+      - "Resources/Fixtures/stage0/agents/droid/session_store_large.jsonl"
+      - "Resources/Fixtures/stage0/agents/droid/stream_json_small.jsonl"
+      - "Resources/Fixtures/stage0/agents/droid/stream_json_large.jsonl"
+      - "Resources/Fixtures/stage0/agents/droid/session_store_schema_drift.jsonl"
+      - "Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl"
