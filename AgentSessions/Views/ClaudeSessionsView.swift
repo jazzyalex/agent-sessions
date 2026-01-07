@@ -281,7 +281,7 @@ private struct ClaudeSessionsListView: View {
             .width(min: 64, ideal: 64, max: 80)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
-        .environment(\.defaultMinListRowHeight, 22)
+        .environment(\.defaultMinListRowHeight, 24)
         .contextMenu(forSelectionType: String.self) { ids in
             contextMenuContent(for: ids)
         }
