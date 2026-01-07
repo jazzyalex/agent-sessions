@@ -7,7 +7,7 @@ Update this file when:
 - Fixtures/tests are added or updated to cover format drift.
 
 ## Last Scan (Repo)
-- Repo commit: b96da55 (latest in this worktree)
+- Repo commit: 3429971 (latest in this worktree)
 - Parser/indexer commit scan (30 commits, parser/indexer files):
   - d75afd2: Codex parsing hardening
   - 8439b09: Claude error classification to avoid false positives
@@ -20,6 +20,8 @@ Update this file when:
 Record every upstream check, even if no changes are needed.
 - YYYY-MM-DD: Agents checked; sources (release notes or repos); result (no change, candidate,
   or format change) and evidence path.
+- 2026-01-07: Gemini CLI 0.23.0 + OpenCode CLI 1.1.6; confirmed tool-output drift (exit codes embedded in Gemini functionResponse output; OpenCode tool parts expose `state.metadata.exit`). Evidence: `Resources/Fixtures/stage0/agents/gemini/large.json`, `Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/001.json`.
+- 2026-01-07: Droid CLI 0.43.0; sources `https://app.factory.ai/cli`, `https://docs.factory.ai/changelog/cli-updates`, `https://github.com/factory-ai/factory`; stream-json now emits numeric epoch timestamps, `tool_call`/`tool_result` IDs via `id`, `isError` flags, and `completion.usage` fields. Evidence: `Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl`.
 
 ## Known Format Changes (From Docs)
 - 2025-12 summary: Claude sessions split embedded thinking/tool blocks into separate events.
@@ -75,6 +77,7 @@ Record every upstream check, even if no changes are needed.
   - Some entries embed tool calls; parser normalizes to SessionEvents.
 - Recent changes:
   - Tool calls extracted and type=info mapped to metadata (2025-12 summary).
+  - `run_shell_command` responses may embed structured output containing `Exit Code:`; parser prefers this path so terminal outputs preserve exit codes (2026-01-07 scan).
 - Parser entry points:
   - `AgentSessions/Services/GeminiSessionParser.swift`
   - `AgentSessions/Services/GeminiSessionDiscovery.swift`
@@ -90,6 +93,7 @@ Record every upstream check, even if no changes are needed.
 - Recent changes:
   - Migration=2 support and part parsing for user/assistant messages (2025-12 summary).
   - Older sessions: user messages read from `summary.title` (2.8.1 changelog).
+  - Tool parts may carry non-zero exit codes under `state.metadata.exit` while `state.status` remains `completed`; parser classifies these as errors and appends exit code to tool output (2026-01-07 scan).
 - Parser entry points:
   - `AgentSessions/Services/OpenCodeSessionParser.swift`
   - `AgentSessions/Services/OpenCodeSessionDiscovery.swift`
@@ -118,8 +122,10 @@ Record every upstream check, even if no changes are needed.
   - Two dialects:
     - Session store: `type=session_start` and `type=message` with `message.content[]` parts.
     - Stream-json: `type=system|message|tool_call|tool_result|completion`.
+  - Stream-json timestamps may be ISO strings or epoch milliseconds; `session_id`/`sessionId` and tool call IDs may use snake or camel keys.
 - Recent changes:
   - Support added in 2025-12 summary (no format changes noted yet).
+  - Stream-json now includes `system.subtype=init`, `reasoning_effort`, tool IDs via `id`, `isError`, and `completion.usage` (2026-01-07 scan).
 - Parser entry points:
   - `AgentSessions/Services/DroidSessionParser.swift`
   - `AgentSessions/Services/DroidSessionDiscovery.swift`

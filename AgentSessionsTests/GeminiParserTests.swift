@@ -144,4 +144,60 @@ final class GeminiParserTests: XCTestCase {
         XCTAssertEqual(preview.eventCount, 3)
         XCTAssertEqual(preview.messageCount, 3)
     }
+
+    func testToolCallStructuredOutputExtractsExitCode() throws {
+        let json = """
+        {
+          "startTime": "2026-01-07T17:27:00.000Z",
+          "lastUpdated": "2026-01-07T17:28:00.000Z",
+          "projectHash": "deadbeef",
+          "sessionId": "session-test-exitcode",
+          "messages": [
+            {
+              "id": "m1",
+              "timestamp": "2026-01-07T17:27:01.000Z",
+              "type": "user",
+              "content": "Run a failing command"
+            },
+            {
+              "id": "m2",
+              "timestamp": "2026-01-07T17:27:02.000Z",
+              "type": "gemini",
+              "content": "",
+              "toolCalls": [
+                {
+                  "id": "run_shell_command-1",
+                  "name": "run_shell_command",
+                  "displayName": "Shell",
+                  "args": { "command": "ls /non-existent-directory" },
+                  "status": "success",
+                  "timestamp": "2026-01-07T17:27:03.000Z",
+                  "resultDisplay": "ls: /non-existent-directory: No such file or directory",
+                  "result": [
+                    {
+                      "functionResponse": {
+                        "id": "run_shell_command-1",
+                        "name": "run_shell_command",
+                        "response": {
+                          "output": "Command: ls /non-existent-directory\\nDirectory: (root)\\nOutput: ls: /non-existent-directory: No such file or directory\\nError: (none)\\nExit Code: 1\\nSignal: 0"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        """
+        let url = try writeTemp(json)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        guard let session = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        XCTAssertEqual(session.events.filter { $0.kind == .tool_call }.count, 1)
+        XCTAssertEqual(session.events.filter { $0.kind == .error }.count, 1)
+        let toolError = session.events.first(where: { $0.kind == .error })
+        XCTAssertTrue((toolError?.text ?? "").localizedCaseInsensitiveContains("no such file") || (toolError?.text ?? "").localizedCaseInsensitiveContains("no such"), "Expected a human-readable error text (not raw base64 JSON)")
+        XCTAssertTrue((toolError?.toolOutput ?? "").contains("Exit Code: 1"))
+    }
 }

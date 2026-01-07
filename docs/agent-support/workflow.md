@@ -35,6 +35,8 @@ detect upstream session format changes that could break JSON or JSONL parsing.
 7. If medium or high risk, acquire sample logs.
    - Capture a minimal session log for the new agent version.
    - Add or update fixtures and ensure parser tests pass.
+   - Auto capture helper (Gemini/OpenCode): `./scripts/capture_latest_agent_sessions.py` writes the newest local session artifacts to `scripts/agent_captures/` for quick diffing and fixture updates.
+   - Auto capture helper (Droid): `./scripts/droid_stream_schema_probe.py` runs `droid exec --output-format stream-json` and writes stream logs plus a schema report to `scripts/agent_captures/`.
 8. Update documentation.
    - Update `docs/agent-json-tracking.md` with the change and evidence.
    - Update `docs/agent-support/agent-support-matrix.yml` with `max_verified_version`,

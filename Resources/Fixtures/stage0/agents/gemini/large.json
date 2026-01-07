@@ -30,7 +30,33 @@
               "functionResponse": {
                 "id": "run_shell_command-1",
                 "name": "run_shell_command",
-                "response": { "output": "Output: line1\\nline2\\nline3\\n" }
+                "response": { "output": "Command: printf 'line1\\nline2\\nline3\\n'\\nDirectory: /tmp\\nOutput: line1\\nline2\\nline3\\nError: (none)\\nExit Code: 0\\nSignal: 0\\nBackground PIDs: (none)\\nProcess Group PGID: 12345" }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "m2b",
+      "timestamp": "2025-12-16T23:47:03.500Z",
+      "type": "gemini",
+      "content": "",
+      "toolCalls": [
+        {
+          "id": "run_shell_command-2",
+          "name": "run_shell_command",
+          "displayName": "Shell",
+          "args": { "command": "ls /non-existent-directory", "cwd": "/tmp" },
+          "status": "success",
+          "timestamp": "2025-12-16T23:47:03.600Z",
+          "resultDisplay": "ls: /non-existent-directory: No such file or directory",
+          "result": [
+            {
+              "functionResponse": {
+                "id": "run_shell_command-2",
+                "name": "run_shell_command",
+                "response": { "output": "Command: ls /non-existent-directory\\nDirectory: /tmp\\nOutput: ls: /non-existent-directory: No such file or directory\\nError: (none)\\nExit Code: 1\\nSignal: 0\\nBackground PIDs: (none)\\nProcess Group PGID: 12346" }
               }
             }
           ]
@@ -63,4 +89,3 @@
     }
   ]
 }
-

@@ -502,6 +502,23 @@ final class OpenCodeSessionParser {
                 let inputStr = stringifyJSON(state["input"])
                 let outputStr = stringifyJSON(state["output"]) ?? stringifyJSON(state["stdout"])
                 let errorStr = stringifyJSON(state["error"]) ?? stringifyJSON(state["stderr"])
+                let exitCode: Int? = {
+                    let metadata = state["metadata"] as? [String: Any]
+                    let any = metadata?["exit"] ?? state["exit"] ?? state["exitCode"] ?? state["exit_code"]
+                    if let i = any as? Int { return i }
+                    if let d = any as? Double { return Int(d) }
+                    if let s = any as? String { return Int(s.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                    return nil
+                }()
+
+                func appendExitCode(_ text: String?, exitCode: Int?) -> String? {
+                    guard let exitCode else { return text }
+                    if let text, text.range(of: "Exit Code:", options: [.caseInsensitive]) != nil { return text }
+                    if let text, !text.isEmpty { return text + "\nExit Code: \(exitCode)" }
+                    return "Exit Code: \(exitCode)"
+                }
+
+                let outputWithExit = appendExitCode(outputStr, exitCode: exitCode)
 
                 let timeDict = state["time"] as? [String: Any]
                 let startDate = dateFromMillis(timeDict?["start"]) ?? fallbackTimestamp ?? part.start
@@ -523,11 +540,14 @@ final class OpenCodeSessionParser {
                 )
                 parts.tool.append(callEvent)
 
-                let isError = status == "error" || (errorStr?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                let isError = status == "error"
+                    || status == "failed"
+                    || (exitCode != nil && exitCode != 0)
+                    || (errorStr?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
                 let resultKind: SessionEventKind = isError ? .error : .tool_result
                 let resultText: String? = {
-                    if isError { return (errorStr?.isEmpty == false ? errorStr : outputStr) }
-                    return outputStr
+                    let base = (isError && (errorStr?.isEmpty == false)) ? errorStr : outputWithExit
+                    return appendExitCode(base, exitCode: exitCode)
                 }()
 
                 parts.tool.append(SessionEvent(
@@ -538,7 +558,7 @@ final class OpenCodeSessionParser {
                     text: resultText,
                     toolName: toolName,
                     toolInput: nil,
-                    toolOutput: outputStr,
+                    toolOutput: outputWithExit,
                     messageID: callID ?? msg.id,
                     parentID: callEvent.id,
                     isDelta: false,
