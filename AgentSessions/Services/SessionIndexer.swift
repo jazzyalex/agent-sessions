@@ -1062,6 +1062,30 @@ final class SessionIndexer: ObservableObject {
             // Treat any event whose text contains this block as meta regardless of role/type.
             if let t = text, t.contains("<environment_context>") { type = "environment_context" }
 
+            if text == nil, let t = type?.lowercased(), t == "thread_rolled_back" {
+                var numTurns: Int? = nil
+                if let n = workingObj["num_turns"] as? Int { numTurns = n }
+                if numTurns == nil, let n = workingObj["numTurns"] as? Int { numTurns = n }
+                if numTurns == nil, let n = workingObj["num_turns"] as? Double { numTurns = Int(n) }
+                if numTurns == nil, let n = workingObj["numTurns"] as? Double { numTurns = Int(n) }
+                if numTurns == nil, let n = workingObj["num_turns"] as? String, let parsed = Int(n) { numTurns = parsed }
+                if numTurns == nil, let n = workingObj["numTurns"] as? String, let parsed = Int(n) { numTurns = parsed }
+                if numTurns == nil, let payload = workingObj["payload"] as? [String: Any] {
+                    if let n = payload["num_turns"] as? Int { numTurns = n }
+                    if numTurns == nil, let n = payload["numTurns"] as? Int { numTurns = n }
+                    if numTurns == nil, let n = payload["num_turns"] as? Double { numTurns = Int(n) }
+                    if numTurns == nil, let n = payload["numTurns"] as? Double { numTurns = Int(n) }
+                    if numTurns == nil, let n = payload["num_turns"] as? String, let parsed = Int(n) { numTurns = parsed }
+                    if numTurns == nil, let n = payload["numTurns"] as? String, let parsed = Int(n) { numTurns = parsed }
+                }
+                if let n = numTurns {
+                    let suffix = (n == 1) ? "" : "s"
+                    text = "Thread rollback: removed \(n) user turn\(suffix)"
+                } else {
+                    text = "Thread rollback"
+                }
+            }
+
             // tool fields
             if let t = workingObj["tool"] as? String { toolName = t }
             if toolName == nil, let name = workingObj["name"] as? String { toolName = name }

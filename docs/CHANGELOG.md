@@ -32,6 +32,7 @@ All notable changes to this project will be documented in this file.
 - Transcript: Reduce terminal-view stutter by debouncing rebuilds and avoiding full NSTextView reloads for match highlight updates.
 - UI: Persist split-view divider positions per layout mode (horizontal vs vertical) so switching layouts doesn’t reset pane sizes.
 - UI: Session list typography now uses monospaced text with softer timestamp gray, taller rows, lighter message counts, and footer-blue selection accents.
+- UI: Increase session list row height to 48px for easier scanning.
 - UI: Agent colors are slightly softened (Codex coral, Claude lavender), the transcript toolbar spacing is tighter, and the terminal view adds a subtle top border.
 - Transcript: Toolbar controls now use monospaced typography to match the session list.
 
@@ -46,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - Transcript: Terminal view no longer leaves a stale find highlight when the Find query is empty.
 - Transcript: Toolbar filters now use dot + count labels with compact navigation chevrons.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
+- Parsing: Surface Codex thread rollback events with readable text in timelines.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
 
 ## [2.9.2] - 2026-01-01
