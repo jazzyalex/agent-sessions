@@ -35,7 +35,6 @@ All notable changes to this project will be documented in this file.
 - UI: Increase session list row height to 48px for easier scanning.
 - UI: Agent colors are slightly softened (Codex coral, Claude lavender), the transcript toolbar spacing is tighter, and the terminal view adds a subtle top border.
 - Transcript: Toolbar controls now use monospaced typography to match the session list.
-- Transcript (Color view): Natural-language text now uses the system font, while code/tool output and file paths remain monospace.
 
 ### Fixed
 

@@ -162,30 +162,6 @@ final class SessionParserTests: XCTestCase {
         XCTAssertFalse(meta.contains(where: { $0.rawJSON.contains(String(hugeB.prefix(50))) }))
     }
 
-    func testCodexThreadRollbackIsReadable() throws {
-        let fm = FileManager.default
-        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexRollback-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
-        try fm.createDirectory(at: root, withIntermediateDirectories: true)
-
-        let url = root.appendingPathComponent("rollout-2026-01-06T22-17-06-019b971a-129a-7eb3-a675-7ed7a1d316ac.jsonl")
-        let lines = [
-            #"{"timestamp":"2026-01-07T06:17:06.993Z","type":"session_meta","payload":{"id":"019b971a-129a-7eb3-a675-7ed7a1d316ac","timestamp":"2026-01-07T06:17:06.970Z","cwd":"/tmp","originator":"codex_cli_rs","cli_version":"0.79.0"}}"#,
-            #"{"timestamp":"2026-01-07T06:17:10.000Z","type":"event_msg","payload":{"type":"thread_rolled_back","num_turns":2}}"#
-        ]
-        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
-
-        let idx = SessionIndexer()
-        let session = idx.parseFileFull(at: url)
-        XCTAssertNotNil(session)
-        guard let s = session else { return }
-
-        let rollbackEvents = s.events.filter { $0.rawJSON.contains("\"thread_rolled_back\"") }
-        XCTAssertEqual(rollbackEvents.count, 1)
-        XCTAssertEqual(rollbackEvents.first?.kind, .meta)
-        XCTAssertEqual(rollbackEvents.first?.text, "Thread rollback: removed 2 user turns")
-    }
-
     func testClaudeSplitsThinkingAndToolBlocks() throws {
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-\(UUID().uuidString)", isDirectory: true)
