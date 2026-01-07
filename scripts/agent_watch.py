@@ -236,6 +236,46 @@ def _newest_file(roots: list[str], glob: str) -> Path | None:
     return newest
 
 
+def _jsonl_contains_any_type(path: Path, required_types: set[str], max_lines: int) -> bool:
+    try:
+        lines_seen = 0
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                lines_seen += 1
+                if lines_seen > max_lines:
+                    break
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                t = obj.get("type")
+                if isinstance(t, str) and t in required_types:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _newest_file_with_types(roots: list[str], glob: str, required_types: list[str], max_lines: int) -> Path | None:
+    candidates: list[Path] = []
+    for r in roots:
+        root = _expand_path(r)
+        if not root.exists():
+            continue
+        candidates.extend(root.glob(glob) if "*" in glob and "/" not in glob else root.rglob(glob))
+    candidates = [c for c in candidates if c.is_file()]
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    wanted = {t for t in required_types if isinstance(t, str) and t}
+    for p in candidates:
+        if _jsonl_contains_any_type(p, wanted, max_lines=max_lines):
+            return p
+    return None
+
+
 def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
     type_keys: dict[str, set[str]] = {}
     type_counts: dict[str, int] = {}
@@ -275,6 +315,55 @@ def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
         "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
         "parsed_lines": total_lines,
         "parse_errors": parse_errors,
+    }
+
+
+def _merge_type_keys(fingerprints: list[dict[str, Any]]) -> dict[str, list[str]]:
+    merged: dict[str, set[str]] = {}
+    for fp in fingerprints:
+        tk = fp.get("type_keys") if isinstance(fp, dict) else None
+        if not isinstance(tk, dict):
+            continue
+        for t, keys in tk.items():
+            if not isinstance(t, str):
+                continue
+            if not isinstance(keys, list):
+                continue
+            bucket = merged.setdefault(t, set())
+            for k in keys:
+                if isinstance(k, str):
+                    bucket.add(k)
+    return {t: sorted(list(keys)) for t, keys in sorted(merged.items())}
+
+
+def _schema_diff(
+    *, observed_type_keys: dict[str, list[str]], baseline_type_keys: dict[str, list[str]]
+) -> dict[str, Any]:
+    observed_types = set(observed_type_keys.keys())
+    baseline_types = set(baseline_type_keys.keys())
+    unknown_types = sorted(observed_types - baseline_types)
+    missing_types = sorted(baseline_types - observed_types)
+
+    unknown_keys: dict[str, list[str]] = {}
+    missing_keys: dict[str, list[str]] = {}
+    for t in sorted(observed_types | baseline_types):
+        o = set(observed_type_keys.get(t, []))
+        b = set(baseline_type_keys.get(t, []))
+        extra = sorted(o - b)
+        miss = sorted(b - o)
+        if extra:
+            unknown_keys[t] = extra
+        if miss:
+            missing_keys[t] = miss
+
+    unknown_only_is_empty = (not unknown_types and not unknown_keys)
+    return {
+        "unknown_types": unknown_types,
+        "missing_types": missing_types,
+        "unknown_keys": unknown_keys,
+        "missing_keys": missing_keys,
+        "unknown_only_is_empty": unknown_only_is_empty,
+        "is_empty": (not unknown_types and not missing_types and not unknown_keys and not missing_keys),
     }
 
 
@@ -428,6 +517,7 @@ def main(argv: list[str]) -> int:
     report_dir.mkdir(parents=True, exist_ok=True)
 
     matrix_versions = _read_verified_versions_from_matrix(Path("docs/agent-support/agent-support-matrix.yml"))
+    matrix_obj = Path("docs/agent-support/agent-support-matrix.yml").read_text(encoding="utf-8", errors="replace")
     # Map config agent names to matrix keys
     verified_map = {
         "codex": matrix_versions.get("codex_cli"),
@@ -437,6 +527,42 @@ def main(argv: list[str]) -> int:
         "gemini": matrix_versions.get("gemini_cli"),
         "copilot": matrix_versions.get("copilot_cli"),
     }
+
+    # Extract evidence fixtures from matrix YAML (minimal parser for `agents.*.evidence_fixtures:` lists).
+    evidence: dict[str, list[str]] = {}
+    in_agents = False
+    current_agent: str | None = None
+    in_evidence = False
+    for raw in matrix_obj.splitlines():
+        line = raw.rstrip("\n")
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.startswith("agents:"):
+            in_agents = True
+            current_agent = None
+            in_evidence = False
+            continue
+        if not in_agents:
+            continue
+        m_agent = re.match(r"^\s{2}([a-zA-Z0-9_]+):\s*$", line)
+        if m_agent:
+            current_agent = m_agent.group(1)
+            in_evidence = False
+            continue
+        if current_agent is None:
+            continue
+        if re.match(r"^\s{4}evidence_fixtures:\s*$", line):
+            in_evidence = True
+            evidence[current_agent] = []
+            continue
+        if in_evidence:
+            m_item = re.match(r'^\s{6}-\s+"?(.*?)"?\s*$', line)
+            if m_item:
+                evidence[current_agent].append(m_item.group(1))
+                continue
+            # Exit evidence block when indentation changes back to 4 spaces (new field) or 2 (new agent).
+            if re.match(r"^\s{4}\w+:", line) or re.match(r"^\s{2}\w+:", line):
+                in_evidence = False
 
     results: dict[str, Any] = {}
     summary_lines: list[str] = []
@@ -500,6 +626,8 @@ def main(argv: list[str]) -> int:
         weekly_details: dict[str, Any] | None = None
         probe_failed = False
         probe_failed_but_upstream_degraded = False
+        schema_matches_baseline: bool | None = None
+        schema_diff: dict[str, Any] | None = None
         if args.mode == "weekly":
             weekly_details = {}
             local_schema_cfg = (agent_cfg.get("weekly") or {}).get("local_schema")
@@ -507,9 +635,42 @@ def main(argv: list[str]) -> int:
                 roots = list(local_schema_cfg.get("roots") or [])
                 glob = str(local_schema_cfg.get("glob") or "**/*.jsonl")
                 max_lines = int(local_schema_cfg.get("max_lines") or 2500)
-                newest = _newest_file(roots, glob)
+                required_types = list(local_schema_cfg.get("required_types") or [])
+                if required_types:
+                    newest = _newest_file_with_types(roots, glob, required_types, max_lines=400)
+                else:
+                    newest = _newest_file(roots, glob)
                 if newest:
-                    weekly_details["local_schema"] = _jsonl_schema_fingerprint(newest, max_lines=max_lines)
+                    local_fp = _jsonl_schema_fingerprint(newest, max_lines=max_lines)
+                    weekly_details["local_schema"] = local_fp
+
+                    # Baseline schema from fixtures (when JSONL fixtures exist).
+                    matrix_key = {
+                        "codex": "codex_cli",
+                        "claude": "claude_code",
+                        "copilot": "copilot_cli",
+                        "droid": "droid",
+                    }.get(agent_name)
+                    baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
+                    # Baseline should represent the current "normal" format; ignore schema_drift fixtures.
+                    baseline_jsonl = [
+                        Path(p)
+                        for p in baseline_paths
+                        if p.endswith(".jsonl") and "schema_drift" not in p
+                    ]
+                    fps: list[dict[str, Any]] = []
+                    for bp in baseline_jsonl:
+                        if bp.exists():
+                            fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
+                    baseline_type_keys = _merge_type_keys(fps)
+                    if baseline_type_keys:
+                        schema_diff = _schema_diff(
+                            observed_type_keys=local_fp.get("type_keys") or {},
+                            baseline_type_keys=baseline_type_keys,
+                        )
+                        schema_matches_baseline = bool(schema_diff.get("unknown_only_is_empty"))
+                        weekly_details["baseline_schema"] = {"fixtures": [str(p) for p in baseline_jsonl], "type_keys": baseline_type_keys}
+                        weekly_details["schema_diff"] = schema_diff
                 else:
                     weekly_details["local_schema"] = {"error": "no_files_found", "roots": roots, "glob": glob}
 
@@ -547,6 +708,18 @@ def main(argv: list[str]) -> int:
             probe_failed_but_upstream_degraded=probe_failed_but_upstream_degraded,
         )
 
+        # If we have concrete evidence that the newest local schema matches our fixture baseline,
+        # downgrade "installed newer" to low and suggest bumping verified version.
+        if (
+            args.mode == "weekly"
+            and severity in ("medium", "low")
+            and installed_newer_than_verified
+            and schema_matches_baseline is True
+            and not probe_failed
+        ):
+            severity = "low"
+            recommendation = "bump_verified_version"
+
         # Daily runs should only bother the user when something looks risky/urgent.
         # Low severity (newer version with no risk signal) is recorded silently.
         if args.mode == "weekly":
@@ -579,6 +752,10 @@ def main(argv: list[str]) -> int:
                 "monitoring_failed": monitoring_failed,
             },
             "weekly": weekly_details,
+            "evidence": {
+                "schema_matches_baseline": schema_matches_baseline,
+                "schema_diff": schema_diff,
+            },
             "severity": severity,
             "recommendation": recommendation,
         }
