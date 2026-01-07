@@ -713,6 +713,9 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Favorites-only filter (AND with text search)
         if showFavoritesOnly { results = results.filter { $0.isFavorite } }
 
+        // Hide housekeeping-only sessions unless explicitly enabled in Settings.
+        if !showHousekeepingSessionsPref { results = results.filter { !$0.isHousekeeping } }
+
         // Filter by message count preferences
         if hideZeroMessageSessionsPref {
             results = results.filter { s in
