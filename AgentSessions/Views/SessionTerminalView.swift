@@ -666,7 +666,7 @@ private struct TerminalLineView: View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             prefixView
             Text(line.text)
-                .font(.system(size: fontSize, weight: .regular, design: .monospaced))
+                .font(.system(size: fontSize, weight: .regular, design: (line.role == .toolInput || line.role == .toolOutput || line.role == .error) ? .monospaced : .default))
                 .foregroundColor(swatch.foreground)
         }
         .textSelection(.enabled)
@@ -1237,8 +1237,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var ranges: [Int: NSRange] = [:]
         ranges.reserveCapacity(lines.count)
 
-        let regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
+        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+        let systemBoldFont = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
+        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let monoBoldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
         let currentHighlight = NSColor.systemYellow.withAlphaComponent(0.5)
         let matchHighlight = NSColor.systemYellow.withAlphaComponent(0.25)
 
@@ -1276,6 +1278,47 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         let paragraph10 = paragraph(spacingBefore: 10)
         let paragraph14 = paragraph(spacingBefore: 14)
 
+        let backtickRegex = try? NSRegularExpression(pattern: "`([^`\\n]+)`", options: [])
+        let pathRegex = try? NSRegularExpression(
+            pattern: "(?<![\\w.])(?:~/[^\\s]+|/(?:[^\\s]|\\\\ )+|[A-Za-z]:\\\\[^\\s]+)",
+            options: []
+        )
+
+        func trimTrailingPunctuation(_ r: NSRange, in s: NSString) -> NSRange {
+            guard r.length > 0 else { return r }
+            var end = r.location + r.length
+            while end > r.location {
+                let ch = s.character(at: end - 1)
+                // ) , . : ; ] } are common trailing punctuation after paths/backticks
+                if ch == 41 || ch == 44 || ch == 46 || ch == 58 || ch == 59 || ch == 93 || ch == 125 {
+                    end -= 1
+                    continue
+                }
+                break
+            }
+            return NSRange(location: r.location, length: max(0, end - r.location))
+        }
+
+        func applyInlineMonospace(to lineAttr: NSMutableAttributedString, lineText: NSString) {
+            if let pathRegex {
+                for m in pathRegex.matches(in: lineText as String, options: [], range: NSRange(location: 0, length: lineText.length)) {
+                    let r0 = trimTrailingPunctuation(m.range, in: lineText)
+                    if r0.length > 0 {
+                        lineAttr.addAttribute(.font, value: monoRegularFont, range: r0)
+                    }
+                }
+            }
+            if let backtickRegex {
+                for m in backtickRegex.matches(in: lineText as String, options: [], range: NSRange(location: 0, length: lineText.length)) {
+                    let r1 = m.range(at: 1)
+                    let rTrimmed = trimTrailingPunctuation(r1, in: lineText)
+                    if rTrimmed.length > 0 {
+                        lineAttr.addAttribute(.font, value: monoRegularFont, range: rTrimmed)
+                    }
+                }
+            }
+        }
+
         var previousBlockIndex: Int? = nil
 
         for (idx, line) in lines.enumerated() {
@@ -1310,8 +1353,15 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let isMatch = matches.contains(line.id)
             let lineSwatch = swatch(for: line.role)
 
+            let isToolish = (line.role == .toolInput || line.role == .toolOutput || line.role == .error)
+            let baseFont: NSFont = {
+                if isToolish { return monoRegularFont }
+                if line.role == .user && !isPreambleUserLine { return systemBoldFont }
+                return systemRegularFont
+            }()
+
             var attributes: [NSAttributedString.Key: Any] = [
-                .font: (line.role == .user && !isPreambleUserLine) ? boldFont : regularFont,
+                .font: baseFont,
                 .foregroundColor: lineSwatch.foreground,
                 .paragraphStyle: paragraphStyle
             ]
@@ -1324,7 +1374,41 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 attributes[.backgroundColor] = bg
             }
 
-            attr.append(NSAttributedString(string: lineString, attributes: attributes))
+            let lineAttr = NSMutableAttributedString(string: lineString, attributes: attributes)
+
+            // In non-tool text, keep narrative in system font but monospace inline code/path snippets.
+            if !isToolish {
+                applyInlineMonospace(to: lineAttr, lineText: ns)
+            }
+
+            // Special-case common tool-result labels so they read like UI text:
+            // - label in system font
+            // - value in monospace (when present)
+            func applyLabelValueFonts(label: String, labelFont: NSFont) {
+                let labelLength = min(ns.length, (label as NSString).length)
+                guard labelLength > 0 else { return }
+
+                lineAttr.addAttribute(.font, value: labelFont, range: NSRange(location: 0, length: labelLength))
+
+                var valueStart = labelLength
+                if valueStart < ns.length, ns.character(at: valueStart) == 32 /* space */ {
+                    valueStart += 1
+                }
+
+                let valueLength = max(0, ns.length - valueStart)
+                guard valueLength > 0 else { return }
+                lineAttr.addAttribute(.font, value: monoRegularFont, range: NSRange(location: valueStart, length: valueLength))
+            }
+
+            if ns.hasPrefix("Exit code:") {
+                applyLabelValueFonts(label: "Exit code:", labelFont: systemBoldFont)
+            } else if ns.hasPrefix("Wall time:") {
+                applyLabelValueFonts(label: "Wall time:", labelFont: systemRegularFont)
+            } else if ns.hasPrefix("Output:") {
+                applyLabelValueFonts(label: "Output:", labelFont: systemBoldFont)
+            }
+
+            attr.append(lineAttr)
         }
 
         return (attr, ranges)
