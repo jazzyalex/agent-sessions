@@ -22,6 +22,8 @@ Record every upstream check, even if no changes are needed.
   or format change) and evidence path.
 - 2026-01-07: Gemini CLI 0.23.0 + OpenCode CLI 1.1.6; confirmed tool-output drift (exit codes embedded in Gemini functionResponse output; OpenCode tool parts expose `state.metadata.exit`). Evidence: `Resources/Fixtures/stage0/agents/gemini/large.json`, `Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/001.json`.
 - 2026-01-07: Droid CLI 0.43.0; sources `https://app.factory.ai/cli`, `https://docs.factory.ai/changelog/cli-updates`, `https://github.com/factory-ai/factory`; stream-json now emits numeric epoch timestamps, `tool_call`/`tool_result` IDs via `id`, `isError` flags, and `completion.usage` fields. Evidence: `Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl`.
+- 2026-01-07: Verification bump (no schema drift observed in local sessions vs stage0 baselines): Codex CLI 0.79.0, Claude Code 2.0.76 (sessions), OpenCode 1.1.6, Gemini CLI 0.23.0, Droid CLI 0.43.0. Evidence: `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`, updated fixtures under `Resources/Fixtures/stage0/agents/`.
+  - Note: Claude usage/limits probes may fail when upstream has an active incident; monitoring records `status.claude.com` context via `scripts/claude-status`.
 
 ## Known Format Changes (From Docs)
 - 2025-12 summary: Claude sessions split embedded thinking/tool blocks into separate events.

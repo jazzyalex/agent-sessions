@@ -1,6 +1,9 @@
-{"timestamp":"2025-12-17T23:27:49.405Z","type":"session_meta","payload":{"id":"019b2ea4-2a8d-76e2-9cd8-58208e1f2837","timestamp":"2025-12-17T23:27:49.389Z","cwd":"/tmp/repo","originator":"codex_cli_rs","cli_version":"0.73.0","git":{"branch":"main"},"instructions":"short"}}
+{"timestamp":"2025-12-17T23:27:49.405Z","type":"session_meta","payload":{"id":"019b2ea4-2a8d-76e2-9cd8-58208e1f2837","timestamp":"2025-12-17T23:27:49.389Z","cwd":"/tmp/repo","originator":"codex_cli_rs","cli_version":"0.79.0","source":"cli","model_provider":"openai","git":{"branch":"main"},"instructions":"short"}}
+{"timestamp":"2025-12-17T23:27:49.600Z","type":"event_msg","payload":{"type":"user_message","message":"List the files","images":[]}}
+{"timestamp":"2025-12-17T23:27:49.700Z","type":"turn_context","payload":{"cwd":"/tmp/repo","approval_policy":"never","sandbox_policy":{"type":"danger-full-access"},"model":"gpt-5.2","effort":"high","summary":"auto","user_instructions":"(truncated)"}}
 {"timestamp":"2025-12-17T23:27:50.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"List the files"}]}}
 {"timestamp":"2025-12-17T23:27:51.000Z","type":"response_item","payload":{"type":"tool_call","function":{"name":"run_shell_command"},"arguments":{"command":"ls","cwd":"/tmp/repo"}}}
 {"timestamp":"2025-12-17T23:27:52.000Z","type":"response_item","payload":{"type":"tool_result","name":"run_shell_command","result":{"stdout":"a.txt\nb.txt\n","stderr":"","exitCode":0}}}
+{"timestamp":"2025-12-17T23:27:52.100Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":{"used_percent":1.0,"window_minutes":300,"resets_at":1761950223},"secondary":{"used_percent":7.0,"window_minutes":10080,"resets_at":1762458353}}}}
 {"timestamp":"2025-12-17T23:27:53.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Found 2 files."}]}}
-
+{"timestamp":"2025-12-17T23:27:54.000Z","type":"compacted","payload":{"message":"","replacement_history":[{"type":"message","role":"user","content":[{"type":"input_text","text":"(truncated)"}]}]}}

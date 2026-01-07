@@ -16,7 +16,8 @@
         "local_schema": {
           "kind": "jsonl_newest",
           "roots": ["$CODEX_HOME/sessions", "~/.codex/sessions"],
-          "glob": "**/*.jsonl",
+          "glob": "**/rollout-*.jsonl",
+          "required_types": ["session_meta"],
           "max_lines": 2500
         },
         "probes": [
@@ -46,6 +47,7 @@
           "kind": "jsonl_newest",
           "roots": ["~/.claude/projects"],
           "glob": "**/*.jsonl",
+          "required_types": ["user", "assistant"],
           "max_lines": 2500
         },
         "probes": [
