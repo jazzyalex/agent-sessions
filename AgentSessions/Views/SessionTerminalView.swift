@@ -662,15 +662,17 @@ private struct TerminalLineView: View {
     let monochrome: Bool
     @Environment(\.colorScheme) private var colorScheme
 
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            prefixView
-            Text(line.text)
-                .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                .foregroundColor(swatch.foreground)
-        }
-        .textSelection(.enabled)
-        .padding(.horizontal, 4)
+	    var body: some View {
+	        HStack(alignment: .firstTextBaseline, spacing: 4) {
+	            prefixView
+	            Text(line.text)
+	                .font(.system(size: fontSize,
+	                              weight: (line.role == .user) ? .medium : .regular,
+	                              design: (line.role == .toolInput) ? .monospaced : .default))
+	                .foregroundColor(swatch.foreground)
+	        }
+	        .textSelection(.enabled)
+	        .padding(.horizontal, 4)
         .padding(.vertical, 1)
         .background(background)
         .cornerRadius(4)
@@ -1232,15 +1234,16 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastCurrentMatchLineID = newCurrent
     }
 
-    private func buildAttributedString(matches: Set<Int>, currentLineID: Int?) -> (NSAttributedString, [Int: NSRange]) {
-        let attr = NSMutableAttributedString()
-        var ranges: [Int: NSRange] = [:]
-        ranges.reserveCapacity(lines.count)
+	    private func buildAttributedString(matches: Set<Int>, currentLineID: Int?) -> (NSAttributedString, [Int: NSRange]) {
+	        let attr = NSMutableAttributedString()
+	        var ranges: [Int: NSRange] = [:]
+	        ranges.reserveCapacity(lines.count)
 
-        let regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
-        let currentHighlight = NSColor.systemYellow.withAlphaComponent(0.5)
-        let matchHighlight = NSColor.systemYellow.withAlphaComponent(0.25)
+	        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+	        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .medium)
+	        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+	        let currentHighlight = NSColor.systemYellow.withAlphaComponent(0.5)
+	        let matchHighlight = NSColor.systemYellow.withAlphaComponent(0.25)
 
         let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
         let assistantSwatch = TerminalRolePalette.appKit(role: .assistant, scheme: colorScheme, monochrome: monochrome)
@@ -1307,14 +1310,20 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }()
 
             let isCurrent = (line.id == currentLineID)
-            let isMatch = matches.contains(line.id)
-            let lineSwatch = swatch(for: line.role)
+	            let isMatch = matches.contains(line.id)
+	            let lineSwatch = swatch(for: line.role)
 
-            var attributes: [NSAttributedString.Key: Any] = [
-                .font: (line.role == .user && !isPreambleUserLine) ? boldFont : regularFont,
-                .foregroundColor: lineSwatch.foreground,
-                .paragraphStyle: paragraphStyle
-            ]
+	            let baseFont: NSFont = {
+	                if line.role == .toolInput { return monoRegularFont }
+	                if line.role == .user && !isPreambleUserLine { return systemUserFont }
+	                return systemRegularFont
+	            }()
+
+	            var attributes: [NSAttributedString.Key: Any] = [
+	                .font: baseFont,
+	                .foregroundColor: lineSwatch.foreground,
+	                .paragraphStyle: paragraphStyle
+	            ]
 
             if isCurrent {
                 attributes[.backgroundColor] = currentHighlight
