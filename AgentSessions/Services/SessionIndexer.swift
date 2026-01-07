@@ -631,23 +631,29 @@ final class SessionIndexer: ObservableObject {
                 }
             }
 
-	            let config = SessionIndexingEngine.ScanConfig(
-	                source: .codex,
-	                discoverFiles: { sortedFiles },
-	                parseLightweight: { self.parseFile(at: $0) },
-	                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
-	                throttler: self.progressThrottler,
-	                shouldContinue: { self.refreshToken == token },
-	                shouldMergeArchives: false,
-	                onProgress: { processed, total in
-	                    guard !presentedHydration else { return }
-	                    guard self.refreshToken == token else { return }
-	                    self.filesProcessed = processed
-	                    if processed > 0 {
-	                        self.progressText = "Indexed \(processed)/\(total)"
-	                    }
-	                }
-	            )
+		            let config = SessionIndexingEngine.ScanConfig(
+		                source: .codex,
+		                discoverFiles: { sortedFiles },
+		                parseLightweight: { self.parseFile(at: $0) },
+		                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+		                throttler: self.progressThrottler,
+		                shouldContinue: { self.refreshToken == token },
+		                shouldMergeArchives: false,
+		                onProgress: { processed, total in
+		                    guard !presentedHydration else { return }
+		                    guard self.refreshToken == token else { return }
+		                    DispatchQueue.main.async {
+		                        Task { @MainActor in
+		                            await Task.yield()
+		                            guard self.refreshToken == token else { return }
+		                            self.filesProcessed = processed
+		                            if processed > 0 {
+		                                self.progressText = "Indexed \(processed)/\(total)"
+		                            }
+		                        }
+		                    }
+		                }
+		            )
 
             let scanResult = await SessionIndexingEngine.hydrateOrScan(config: config)
             let newSessions = scanResult.sessions
