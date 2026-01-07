@@ -1,0 +1,149 @@
+#!/bin/bash
+set -euo pipefail
+
+# Lightweight probe for https://status.claude.com (Statuspage API).
+#
+# This is used by monitoring to distinguish "AS parsing bug" from "Claude degraded/outage".
+#
+# Usage:
+#   ./scripts/claude-status            # human-readable output
+#   ./scripts/claude-status --json     # machine-readable JSON
+#
+# Exit codes:
+#   0: success (fresh fetch or cache)
+#   1: no data available (no fetch, no cache)
+
+CACHE_FILE="${CACHE_FILE:-$HOME/.cache/claude-status.json}"
+TIMEOUT_SECS="${TIMEOUT_SECS:-8}"
+
+mkdir -p "$(dirname "$CACHE_FILE")"
+
+MODE="text"
+for arg in "$@"; do
+  case "$arg" in
+    --json) MODE="json" ;;
+    *) ;;
+  esac
+done
+
+# Try the common Statuspage endpoints (some deployments expose only a subset).
+BASE="https://status.claude.com/api/v2"
+URLS=(
+  "$BASE/summary.json"
+  "$BASE/status.json"
+  "$BASE/incidents/unresolved.json"
+)
+
+json=""
+used_url=""
+from_cache=false
+
+for u in "${URLS[@]}"; do
+  if json="$(curl -fsSL --max-time "$TIMEOUT_SECS" "$u" 2>/dev/null)"; then
+    used_url="$u"
+    echo "$json" > "$CACHE_FILE"
+    break
+  fi
+done
+
+if [ -z "$json" ] && [ -f "$CACHE_FILE" ]; then
+  json="$(cat "$CACHE_FILE")"
+  from_cache=true
+fi
+
+if [ -z "$json" ]; then
+  if [ "$MODE" = "json" ]; then
+    printf '{"ok":false,"error":"no_data"}\n'
+  else
+    echo "Claude status: unknown"
+  fi
+  exit 1
+fi
+
+python3 - "$CACHE_FILE" "$MODE" "$used_url" "$from_cache" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+
+path = sys.argv[1]
+mode = sys.argv[2]
+used_url = sys.argv[3] or None
+from_cache = (sys.argv[4].strip().lower() == "true")
+
+def out_text(s: str) -> None:
+    print(s)
+
+def out_json(obj: dict) -> None:
+    print(json.dumps(obj, sort_keys=True))
+
+try:
+    data = json.load(open(path, "r", encoding="utf-8"))
+except Exception as exc:
+    if mode == "json":
+        out_json({"ok": False, "error": "parse_failed", "detail": str(exc)})
+    else:
+        out_text("Claude status: unknown")
+    raise SystemExit(0)
+
+now = datetime.now(timezone.utc).isoformat()
+
+def summarize_incidents(items):
+    out = []
+    if not isinstance(items, list):
+        return out
+    for incident in items[:5]:
+        if not isinstance(incident, dict):
+            continue
+        out.append(
+            {
+                "name": incident.get("name") or incident.get("title") or "Unknown",
+                "impact": incident.get("impact"),
+                "created_at": incident.get("created_at"),
+            }
+        )
+    return out
+
+indicator = "unknown"
+description = "unknown"
+incidents = []
+
+if isinstance(data, list):
+    # unresolved incidents list variant
+    incidents = summarize_incidents(data)
+    indicator = "unknown"
+    description = "unresolved_incidents"
+else:
+    status = data.get("status", {}) or {}
+    indicator = status.get("indicator", "unknown")
+    description = status.get("description", "unknown")
+    inc = data.get("incidents", [])
+    incidents = summarize_incidents(inc if isinstance(inc, list) else [])
+
+if mode == "json":
+    out_json(
+        {
+            "ok": True,
+            "checked_at_utc": now,
+            "source_url": used_url,
+            "from_cache": from_cache,
+            "indicator": indicator,
+            "description": description,
+            "incidents_count": len(incidents),
+            "incidents": incidents,
+        }
+    )
+else:
+    if incidents:
+        out_text(f"Claude status: {description} (indicator={indicator}, incidents={len(incidents)})")
+        out_text("")
+        out_text("Incidents:")
+        for i, inc in enumerate(incidents[:3], 1):
+            out_text(f"{i}. {inc.get('name','Unknown')}")
+            if inc.get("impact"):
+                out_text(f"   Impact: {inc.get('impact')}")
+            if inc.get("created_at"):
+                out_text(f"   Created: {inc.get('created_at')}")
+    else:
+        out_text(f"Claude status: {description} (indicator={indicator}, incidents=0)")
+PY
+

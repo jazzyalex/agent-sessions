@@ -1,0 +1,46 @@
+# Agent Support Ledger (Append-Only)
+#
+# This file is the durable, versioned record of what Agent Sessions (AS) verified.
+# Add a new entry for each AS release going forward. Do not rewrite history.
+#
+# Notes:
+# - Some agents do not embed their own version in sessions. For those, store the
+#   verified CLI version observed during evidence capture.
+# - Claude + Codex include separate "usage/limits" channels which must be monitored.
+#
+entries:
+  - agent_sessions_version: "2.9.2"
+    as_of_date_utc: "2026-01-07"
+    as_of_commit: "9289e47"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.73.0"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "Resources/Fixtures/stage0/agents/codex/large.jsonl", "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"]
+        usage_limits:
+          max_verified_version: "0.73.0"
+          evidence: ["Resources/Fixtures/codex_053_rate_limit.jsonl"]
+      claude:
+        sessions:
+          max_verified_version: "2.0.71"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "Resources/Fixtures/stage0/agents/claude/large.jsonl", "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl"]
+        usage_limits:
+          max_verified_version: "2.0.71"
+          evidence: ["AgentSessions/Resources/claude_usage_capture.sh"]
+      opencode:
+        sessions:
+          max_verified_version: "1.1.3"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json", "Resources/Fixtures/stage0/agents/opencode/storage_legacy/session/proj_test/ses_s_stage0_drift.json"]
+      droid:
+        sessions:
+          max_verified_version: "unknown"
+          evidence: ["Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl", "Resources/Fixtures/stage0/agents/droid/session_store_schema_drift.jsonl"]
+      gemini:
+        sessions:
+          max_verified_version: "unknown"
+          evidence: ["Resources/Fixtures/stage0/agents/gemini/small.json", "Resources/Fixtures/stage0/agents/gemini/large.json", "Resources/Fixtures/stage0/agents/gemini/schema_drift.json"]
+      copilot:
+        sessions:
+          max_verified_version: "0.0.400"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"]
+

@@ -21,26 +21,31 @@ detect upstream session format changes that could break JSON or JSONL parsing.
    - Use `MARKETING_VERSION` from `AgentSessions.xcodeproj/project.pbxproj`.
 2. Read the update checklist.
    - Use `docs/agent-support/update-checklist.md` to gate the work.
-3. Collect upstream agent versions.
+3. Run monitoring (preferred).
+   - Daily: release watch for `codex`, `claude`, `opencode`, `droid`.
+   - Weekly: release watch + probes for all agents.
+   - See `docs/agent-support/monitoring.md`.
+4. Collect upstream agent versions (manual fallback).
    - Record the latest available versions in a scratch note; do not update the matrix yet.
-4. Compare against the support matrix.
+5. Compare against the support matrix.
    - If no gaps, stop and record the check in `docs/agent-json-tracking.md`.
-5. Run an impact scan for each newer version.
+6. Run an impact scan for each newer version.
    - Inspect release notes or package diffs and search for storage paths, JSONL/JSON schema
      changes, migration flags, or renamed fields.
-6. Classify risk.
+7. Classify risk.
    - Low risk: No storage or schema changes found.
    - Medium risk: Potential format change without samples.
    - High risk: Confirmed format changes or new storage layout.
-7. If medium or high risk, acquire sample logs.
+8. If medium or high risk, acquire sample logs.
    - Capture a minimal session log for the new agent version.
    - Add or update fixtures and ensure parser tests pass.
    - Auto capture helper (Gemini/OpenCode): `./scripts/capture_latest_agent_sessions.py` writes the newest local session artifacts to `scripts/agent_captures/` for quick diffing and fixture updates.
    - Auto capture helper (Droid): `./scripts/droid_stream_schema_probe.py` runs `droid exec --output-format stream-json` and writes stream logs plus a schema report to `scripts/agent_captures/`.
-8. Update documentation.
+9. Update documentation.
    - Update `docs/agent-json-tracking.md` with the change and evidence.
    - Update `docs/agent-support/agent-support-matrix.yml` with `max_verified_version`,
      `as_of_commit`, and `as_of_date`.
+   - Append a new entry to `docs/agent-support/agent-support-ledger.yml`.
 
 ## Error-Proof Guardrails
 - Never bump `max_verified_version` without fixtures or sample logs plus passing parser tests.

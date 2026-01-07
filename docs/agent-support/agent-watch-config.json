@@ -1,0 +1,161 @@
+{
+  "report_root": "scripts/probe_scan_output/agent_watch",
+  "agents": {
+    "codex": {
+      "cadence": { "daily": true, "weekly": true },
+      "installed_version_cmd": ["codex", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.codex_cli.max_verified_version",
+      "upstream": [
+        { "kind": "github_latest_release", "repo": "openai/codex" }
+      ],
+      "risk_keywords": {
+        "schema": ["session", "transcript", "json", "jsonl", "format", "logging", "migration"],
+        "usage": ["usage", "token", "tokens", "rate", "limit", "quota", "status"]
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "jsonl_newest",
+          "roots": ["$CODEX_HOME/sessions", "~/.codex/sessions"],
+          "glob": "**/*.jsonl",
+          "max_lines": 2500
+        },
+        "probes": [
+          {
+            "kind": "script",
+            "label": "codex_status_probe",
+            "argv": ["./AgentSessions/Resources/codex_status_capture.sh"],
+            "timeout_seconds": 45,
+            "parse": "codex_status_json"
+          }
+        ]
+      }
+    },
+    "claude": {
+      "cadence": { "daily": true, "weekly": true },
+      "installed_version_cmd": ["claude", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.claude_code.max_verified_version",
+      "upstream": [
+        { "kind": "github_latest_release", "repo": "anthropics/claude-code" }
+      ],
+      "risk_keywords": {
+        "schema": ["session", "transcript", "json", "jsonl", "format", "storage", "migration"],
+        "usage": ["usage", "token", "tokens", "rate", "limit", "quota"]
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "jsonl_newest",
+          "roots": ["~/.claude/projects"],
+          "glob": "**/*.jsonl",
+          "max_lines": 2500
+        },
+        "probes": [
+          {
+            "kind": "script",
+            "label": "claude_status",
+            "argv": ["./scripts/claude-status", "--json"],
+            "timeout_seconds": 15,
+            "parse": "claude_status_json"
+          },
+          {
+            "kind": "script",
+            "label": "claude_usage_probe",
+            "argv": ["./AgentSessions/Resources/claude_usage_capture.sh"],
+            "timeout_seconds": 45,
+            "parse": "claude_usage_json"
+          }
+        ]
+      }
+    },
+    "opencode": {
+      "cadence": { "daily": true, "weekly": true },
+      "installed_version_cmd": ["opencode", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.opencode.max_verified_version",
+      "upstream": [
+        { "kind": "github_latest_release", "repo": "anomalyco/opencode" }
+      ],
+      "risk_keywords": {
+        "schema": ["storage", "migration", "schema", "format", "json", "jsonl", "session"],
+        "usage": ["usage", "token", "tokens", "limit", "quota"]
+      },
+      "weekly": {
+        "probes": [
+          {
+            "kind": "script",
+            "label": "opencode_capture",
+            "argv": ["./scripts/capture_latest_agent_sessions.py", "--agent", "opencode"],
+            "timeout_seconds": 60,
+            "parse": "capture_latest_sessions"
+          }
+        ]
+      }
+    },
+    "droid": {
+      "cadence": { "daily": true, "weekly": true },
+      "installed_version_cmd": ["droid", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.droid.max_verified_version",
+      "upstream": [
+        {
+          "kind": "url_regex_semver_max",
+          "url": "https://docs.factory.ai/changelog/cli-updates",
+          "pattern": "v(0\\.\\d+\\.\\d+)"
+        }
+      ],
+      "risk_keywords": {
+        "schema": ["stream-json", "json", "jsonl", "schema", "transcript", "session", "hooks", "migration", "storage"],
+        "usage": ["usage", "token", "tokens", "limit", "quota"]
+      },
+      "weekly": {
+        "probes": [
+          {
+            "kind": "script",
+            "label": "droid_stream_probe",
+            "argv": ["./scripts/droid_stream_schema_probe.py", "--out"],
+            "timeout_seconds": 120,
+            "parse": "droid_schema_report"
+          }
+        ]
+      }
+    },
+    "gemini": {
+      "cadence": { "daily": false, "weekly": true },
+      "installed_version_cmd": ["gemini", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.gemini_cli.max_verified_version",
+      "upstream": [
+        { "kind": "npm_latest", "package": "@google/gemini-cli" }
+      ],
+      "risk_keywords": {
+        "schema": ["session", "transcript", "json", "format"],
+        "usage": ["usage", "token", "tokens", "limit", "quota"]
+      },
+      "weekly": {
+        "probes": [
+          {
+            "kind": "script",
+            "label": "gemini_capture",
+            "argv": ["./scripts/capture_latest_agent_sessions.py", "--agent", "gemini"],
+            "timeout_seconds": 60,
+            "parse": "capture_latest_sessions"
+          }
+        ]
+      }
+    },
+    "copilot": {
+      "cadence": { "daily": false, "weekly": true },
+      "installed_version_cmd": ["copilot", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.copilot_cli.max_verified_version",
+      "upstream": [],
+      "risk_keywords": {
+        "schema": ["session", "jsonl", "format", "schema"],
+        "usage": ["usage", "token", "tokens", "limit", "quota"]
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "jsonl_newest",
+          "roots": ["~/.copilot/session-state"],
+          "glob": "*.jsonl",
+          "max_lines": 2500
+        }
+      }
+    }
+  }
+}
