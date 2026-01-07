@@ -219,11 +219,11 @@ extension PreferencesView {
                     Toggle("Show housekeeping-only sessions", isOn: $showHousekeepingSessions)
                         .onChange(of: showHousekeepingSessions) { _, _ in indexer.recomputeNow() }
                         .help("Show sessions that contain no assistant output and no meaningful prompt content (for example Codex rollouts and Claude local-command transcripts like /usage)")
-                    Toggle("Tool calls (Codex, Copilot & OpenCode)", isOn: Binding(
+                    Toggle("Only sessions with tool calls (strict)", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.hasCommandsOnly) },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.hasCommandsOnly) }
                     ))
-                    .help("Show only Codex, Copilot, and OpenCode sessions that contain recorded tool/command calls. Claude and Gemini are excluded when enabled.")
+                    .help("Show only sessions that contain recorded tool/command calls. Strict: Claude/Gemini are excluded unless tool calls are present in the parsed transcript.")
                 }
 
                 Divider()
