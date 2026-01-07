@@ -183,6 +183,7 @@ actor AnalyticsIndexer {
             cwd: session.cwd,
             repo: session.repoName,
             title: session.title,
+            isHousekeeping: session.isHousekeeping || (session.title == "No prompt" && (session.source == .codex || session.source == .claude)),
             messages: messages,
             commands: commands
         )

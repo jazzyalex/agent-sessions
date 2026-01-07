@@ -216,6 +216,9 @@ extension PreferencesView {
                     Toggle("1–2 messages", isOn: $hideLowMessageSessionsPref)
                         .onChange(of: hideLowMessageSessionsPref) { _, _ in indexer.recomputeNow() }
                         .help("Hide sessions with only one or two messages")
+                    Toggle("Show housekeeping", isOn: $showHousekeepingSessions)
+                        .onChange(of: showHousekeepingSessions) { _, _ in indexer.recomputeNow() }
+                        .help("Show sessions that contain no assistant output and no real prompt content (for example Codex rollouts or Claude /usage and local-command-only transcripts)")
                     Toggle("Tool calls (Codex, Copilot & OpenCode)", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.hasCommandsOnly) },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.hasCommandsOnly) }
