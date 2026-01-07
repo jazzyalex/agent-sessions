@@ -471,10 +471,12 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 
     private func publishAfterCurrentUpdate(_ work: @escaping @MainActor () -> Void) {
         DispatchQueue.main.async {
-            DispatchQueue.main.async {
-                Task { @MainActor in
-                    work()
-                }
+            Task { @MainActor in
+                // Avoid "Publishing changes from within view updates" warnings by yielding
+                // past the current render pass before mutating @Published state.
+                await Task.yield()
+                await Task.yield()
+                work()
             }
         }
     }
