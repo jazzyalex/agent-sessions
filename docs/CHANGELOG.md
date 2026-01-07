@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Improvements
 
+- Sessions: Hide housekeeping-only sessions (no assistant output and no real prompt content) by default; toggle in Settings → General.
 - Search: Use SQLite full-text indexing to speed up global search after analytics indexing completes.
 - Search: Instant search now indexes full tool inputs and outputs for recent sessions (last 90 days), reducing the need to wait for background scanning.
 - Search: Tool output indexing now redacts embedded base64/data URL blobs to keep search responsive and the index compact.

@@ -99,6 +99,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     @AppStorage("HideLowMessageSessions") private var hideLowMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }
     }
+    @AppStorage(PreferencesKey.showHousekeepingSessions) private var showHousekeepingSessionsPref: Bool = false {
+        didSet { recomputeNow() }
+    }
 
     private let codex: SessionIndexer
     private let claude: ClaudeSessionIndexer
@@ -325,6 +328,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 if self.showFavoritesOnly { results = results.filter { $0.isFavorite } }
                 if self.hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
                 if self.hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
+                if !self.showHousekeepingSessionsPref { results = results.filter { !$0.isHousekeeping } }
 
                 // Apply sort descriptor (now included in pipeline so changes trigger background re-sort)
                 results = self.applySort(results, descriptor: sortDesc)

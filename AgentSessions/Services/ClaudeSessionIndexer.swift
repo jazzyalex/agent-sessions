@@ -50,6 +50,13 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             }
         }
     }
+    @AppStorage(PreferencesKey.showHousekeepingSessions) var showHousekeepingSessionsPref: Bool = false {
+        didSet {
+            publishAfterCurrentUpdate { [weak self] in
+                self?.filterEpoch &+= 1
+            }
+        }
+    }
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     var appAppearance: AppAppearance {
@@ -102,6 +109,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 
             if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
             if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
+            if !(self?.showHousekeepingSessionsPref ?? false) { results = results.filter { !$0.isHousekeeping } }
 
             return results
         }

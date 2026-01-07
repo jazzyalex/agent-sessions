@@ -34,7 +34,8 @@ actor SessionMetaRepository {
                 events: [],
                 cwd: r.cwd,
                 repoName: r.repo,
-                lightweightTitle: r.title
+                lightweightTitle: r.title,
+                isHousekeeping: r.isHousekeeping || (r.title == "No prompt" && (source == .codex || source == .claude))
             )
             // Augment with commands count from DB for lightweight filtering
             var enriched = session
@@ -64,7 +65,8 @@ actor SessionMetaRepository {
                                cwd: enriched.lightweightCwd,
                                repoName: r.repo,
                                lightweightTitle: enriched.lightweightTitle,
-                               lightweightCommands: r.commands))
+                               lightweightCommands: r.commands,
+                               isHousekeeping: r.isHousekeeping || (r.title == "No prompt" && (source == .codex || source == .claude))))
         }
         return out
     }

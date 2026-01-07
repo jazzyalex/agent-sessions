@@ -146,6 +146,9 @@ final class SessionIndexer: ObservableObject {
     @AppStorage("HideLowMessageSessions") var hideLowMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }
     }
+    @AppStorage(PreferencesKey.showHousekeepingSessions) var showHousekeepingSessionsPref: Bool = false {
+        didSet { recomputeNow() }
+    }
     @AppStorage("SelectedKindsRaw") private var selectedKindsRaw: String = ""
     @AppStorage("AppAppearance") private var appearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = ModifiedDisplay.relative.rawValue
@@ -222,6 +225,7 @@ final class SessionIndexer: ObservableObject {
 
                 if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
                 if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
+                if !(self?.showHousekeepingSessionsPref ?? false) { results = results.filter { !$0.isHousekeeping } }
 
                 return results
             }
@@ -813,6 +817,7 @@ final class SessionIndexer: ObservableObject {
         }
         let id = forcedID ?? Self.hash(path: url.path)
         let nonMetaCount = events.filter { $0.kind != .meta }.count
+        let isHousekeeping = Session.computeIsHousekeeping(source: .codex, events: events)
         let session = Session(id: id,
                               source: .codex,
                               startTime: start,
@@ -821,7 +826,8 @@ final class SessionIndexer: ObservableObject {
                               filePath: url.path,
                               fileSizeBytes: size >= 0 ? size : nil,
                               eventCount: nonMetaCount,
-                              events: events)
+                              events: events,
+                              isHousekeeping: isHousekeeping)
 
         if size > 5_000_000 {  // Log full parse of files >5MB
             DBG("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
@@ -951,15 +957,17 @@ final class SessionIndexer: ObservableObject {
 
         let id = Self.hash(path: url.path)
         // Use sample events for title/cwd extraction, then create lightweight session
+        let tempIsHousekeeping = Session.computeIsHousekeeping(source: .codex, events: sampleEvents)
         let tempSession = Session(id: id,
-                                   source: .codex,
-                                   startTime: tmin,
-                                   endTime: tmax,
-                                   model: model,
-                                   filePath: url.path,
-                                   fileSizeBytes: fileSize,
-                                   eventCount: estEvents,
-                                   events: sampleEvents)
+                                  source: .codex,
+                                  startTime: tmin,
+                                  endTime: tmax,
+                                  model: model,
+                                  filePath: url.path,
+                                  fileSizeBytes: fileSize,
+                                  eventCount: estEvents,
+                                  events: sampleEvents,
+                                  isHousekeeping: tempIsHousekeeping)
 
         // Extract title from sample events using existing logic
         let title = tempSession.codexPreviewTitle ?? tempSession.title
@@ -976,7 +984,8 @@ final class SessionIndexer: ObservableObject {
                               events: [],
                               cwd: cwd,
                               repoName: nil,  // Will be computed from cwd
-                              lightweightTitle: title)
+                              lightweightTitle: title,
+                              isHousekeeping: tempIsHousekeeping || title == "No prompt")
         return session
     }
 

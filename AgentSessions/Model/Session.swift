@@ -10,6 +10,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let fileSizeBytes: Int?
     public let eventCount: Int
     public let events: [SessionEvent]
+    // True when a session is effectively "housekeeping": no assistant output and no meaningful prompt content
+    // (for example Codex rollouts that only captured preamble, or Claude local-command-only transcripts).
+    public var isHousekeeping: Bool = false
     // Lightweight commands count from DB (when events are not loaded)
     public let lightweightCommands: Int?
 
@@ -29,7 +32,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 filePath: String,
                 fileSizeBytes: Int? = nil,
                 eventCount: Int,
-                events: [SessionEvent]) {
+                events: [SessionEvent],
+                isHousekeeping: Bool = false) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -39,6 +43,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.fileSizeBytes = fileSizeBytes
         self.eventCount = eventCount
         self.events = events
+        self.isHousekeeping = isHousekeeping
         self.lightweightCwd = nil
         self.lightweightTitle = nil
         self.lightweightCommands = nil
@@ -58,7 +63,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 cwd: String?,
                 repoName: String?,
                 lightweightTitle: String?,
-                lightweightCommands: Int? = nil) {
+                lightweightCommands: Int? = nil,
+                isHousekeeping: Bool = false) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -68,6 +74,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.fileSizeBytes = fileSizeBytes
         self.eventCount = eventCount
         self.events = events
+        self.isHousekeeping = isHousekeeping
         self.lightweightCwd = cwd
         self.lightweightTitle = lightweightTitle
         self.lightweightCommands = lightweightCommands
@@ -88,6 +95,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case lightweightTitle
         case lightweightCommands
         // isFavorite intentionally excluded (runtime only)
+        // isHousekeeping intentionally excluded (derived at parse/index time)
     }
 
     public var shortID: String { String(id.prefix(6)) }
@@ -205,6 +213,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         if lower.hasPrefix("# agents.md instructions for ") { return true }
         if lower.contains("\n# agents.md instructions for ") { return true }
         if lower.contains("<instructions>") || lower.contains("</instructions>") { return true }
+        if lower.contains("<environment_context>") || lower.contains("</environment_context>") { return true }
         // Droid / Factory: some logs embed <system-reminder>...</system-reminder> blocks before the first real prompt.
         if lower.contains("<system-reminder") || lower.contains("</system-reminder>") { return true }
         // Strong anchors commonly seen in agents.md-driven openings
@@ -255,6 +264,36 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     /// Shared helper for transcript builders / views.
     static func isAgentsPreambleText(_ text: String) -> Bool {
         looksLikeAgentsPreamble(text)
+    }
+
+    /// Option B: stable classification for "housekeeping-only" session files.
+    /// This should be forward-compatible and independent from user preferences like "Skip preambles".
+    static func computeIsHousekeeping(source: SessionSource, events: [SessionEvent]) -> Bool {
+        switch source {
+        case .codex:
+            if events.contains(where: { $0.kind == .assistant }) { return false }
+            if events.contains(where: { $0.kind == .tool_call || $0.kind == .tool_result }) { return false }
+            let meaningfulUser = events.contains { e in
+                guard e.kind == .user else { return false }
+                guard let raw = e.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return false }
+                return !looksLikeAgentsPreamble(raw)
+            }
+            return !meaningfulUser
+        case .claude:
+            if events.contains(where: { $0.kind == .assistant }) { return false }
+            if events.contains(where: { $0.kind == .tool_call || $0.kind == .tool_result }) { return false }
+            let meaningfulUser = events.contains { e in
+                guard e.kind == .user else { return false }
+                guard let raw = e.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return false }
+                if let tail = claudeLocalCommandPromptTail(from: raw), !tail.isEmpty { return true }
+                if looksLikeClaudeLocalCommandTranscript(raw) { return false }
+                if looksLikeAgentsPreamble(raw) { return false }
+                return true
+            }
+            return !meaningfulUser
+        default:
+            return false
+        }
     }
 
     // Extract timestamp and UUID from rollout filename for Codex sort order.

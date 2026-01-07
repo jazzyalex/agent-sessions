@@ -11,6 +11,7 @@ enum PreferencesKey {
     static let claudeUsageEnabled = "ClaudeUsageEnabled"
     static let claudeProbeCleanupMode = "ClaudeProbeCleanupMode"
     static let showSystemProbeSessions = "ShowSystemProbeSessions"
+    static let showHousekeepingSessions = "ShowHousekeepingSessions"
     static let usageDisplayMode = "UsageDisplayMode"
 
     // Menu bar + strips

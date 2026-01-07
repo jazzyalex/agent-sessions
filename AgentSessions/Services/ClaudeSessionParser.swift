@@ -89,6 +89,7 @@ final class ClaudeSessionParser {
         // Use per-file stable ID to match Sessions list expectations
         let fileID = forcedID ?? hash(path: url.path)
         let nonMetaCount = events.filter { $0.kind != .meta }.count
+        let isHousekeeping = Session.computeIsHousekeeping(source: .claude, events: events)
         return Session(
             id: fileID,
             source: .claude,
@@ -101,7 +102,8 @@ final class ClaudeSessionParser {
             events: events,
             cwd: cwd,
             repoName: nil,
-            lightweightTitle: nil
+            lightweightTitle: nil,
+            isHousekeeping: isHousekeeping
         )
     }
 
@@ -710,6 +712,7 @@ final class ClaudeSessionParser {
             let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
 
             // Extract title from sample events (temp session; ID not used downstream for UI)
+            let tempIsHousekeeping = Session.computeIsHousekeeping(source: .claude, events: sampleEvents)
             let tempSession = Session(id: hash(path: url.path),
                                       source: .claude,
                                       startTime: tmin,
@@ -721,7 +724,8 @@ final class ClaudeSessionParser {
                                       events: sampleEvents,
                                       cwd: cwd,
                                       repoName: nil,
-                                      lightweightTitle: nil)
+                                      lightweightTitle: nil,
+                                      isHousekeeping: tempIsHousekeeping)
             let title = tempSession.title
 
             // Create final lightweight session with empty events
@@ -736,7 +740,8 @@ final class ClaudeSessionParser {
                            events: [],
                            cwd: cwd,
                            repoName: nil,
-                           lightweightTitle: title)
+                           lightweightTitle: title,
+                           isHousekeeping: tempIsHousekeeping || title == "No prompt")
         }
 
         guard let initial = build(headBytes: headBytesInitial) else { return nil }

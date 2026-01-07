@@ -70,14 +70,22 @@ actor IndexDB {
               cwd TEXT,
               repo TEXT,
               title TEXT,
+              is_housekeeping INTEGER NOT NULL DEFAULT 0,
               messages INTEGER DEFAULT 0,
               commands INTEGER DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_session_meta_source ON session_meta(source);
             CREATE INDEX IF NOT EXISTS idx_session_meta_model ON session_meta(model);
             CREATE INDEX IF NOT EXISTS idx_session_meta_time ON session_meta(start_ts, end_ts);
+            CREATE INDEX IF NOT EXISTS idx_session_meta_housekeeping ON session_meta(is_housekeeping);
             """
         )
+
+        // Best-effort migration for existing installs.
+        // If the column already exists, SQLite will throw and we can ignore it.
+        do {
+            try exec(db, "ALTER TABLE session_meta ADD COLUMN is_housekeeping INTEGER NOT NULL DEFAULT 0;")
+        } catch { }
 
         // session_days keeps per-session contributions split by day
         try exec(db,
@@ -349,7 +357,7 @@ actor IndexDB {
     func fetchSessionMeta(for source: String) throws -> [SessionMetaRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         let sql = """
-        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, messages, commands
+        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, is_housekeeping, messages, commands
         FROM session_meta
         WHERE source = ?
         ORDER BY COALESCE(end_ts, mtime) DESC
@@ -375,8 +383,9 @@ actor IndexDB {
                 cwd: sqlite3_column_type(stmt, 8) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 8)),
                 repo: sqlite3_column_type(stmt, 9) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 9)),
                 title: sqlite3_column_type(stmt, 10) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 10)),
-                messages: Int(sqlite3_column_int64(stmt, 11)),
-                commands: Int(sqlite3_column_int64(stmt, 12))
+                isHousekeeping: sqlite3_column_int64(stmt, 11) != 0,
+                messages: Int(sqlite3_column_int64(stmt, 12)),
+                commands: Int(sqlite3_column_int64(stmt, 13))
             )
             out.append(row)
         }
@@ -999,12 +1008,12 @@ actor IndexDB {
 
     func upsertSessionMeta(_ m: SessionMetaRow) throws {
         let sql = """
-        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, messages, commands)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, is_housekeeping, messages, commands)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
-          repo=excluded.repo, title=excluded.title, messages=excluded.messages, commands=excluded.commands;
+          repo=excluded.repo, title=excluded.title, is_housekeeping=excluded.is_housekeeping, messages=excluded.messages, commands=excluded.commands;
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -1019,8 +1028,9 @@ actor IndexDB {
         if let cwd = m.cwd { sqlite3_bind_text(stmt, 9, cwd, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 9) }
         if let repo = m.repo { sqlite3_bind_text(stmt, 10, repo, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 10) }
         if let title = m.title { sqlite3_bind_text(stmt, 11, title, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 11) }
-        sqlite3_bind_int64(stmt, 12, Int64(m.messages))
-        sqlite3_bind_int64(stmt, 13, Int64(m.commands))
+        sqlite3_bind_int64(stmt, 12, m.isHousekeeping ? 1 : 0)
+        sqlite3_bind_int64(stmt, 13, Int64(m.messages))
+        sqlite3_bind_int64(stmt, 14, Int64(m.commands))
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
@@ -1458,6 +1468,7 @@ struct SessionMetaRow {
     let cwd: String?
     let repo: String?
     let title: String?
+    let isHousekeeping: Bool
     let messages: Int
     let commands: Int
 }
