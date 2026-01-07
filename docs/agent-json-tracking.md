@@ -7,24 +7,19 @@ Update this file when:
 - Fixtures/tests are added or updated to cover format drift.
 
 ## Last Scan (Repo)
-- Repo commit: dc6684a (latest in this worktree)
-- Parser/indexer commit scan (since 2025-12-15, parser/indexer files):
+- Repo commit: b96da55 (latest in this worktree)
+- Parser/indexer commit scan (30 commits, parser/indexer files):
   - d75afd2: Codex parsing hardening
   - 8439b09: Claude error classification to avoid false positives
   - 7e902e3: Skip Agents.md preamble in Codex titles
   - 1d2703b/8abc49e: Claude title/preamble handling
-  - 0f96442: Gemini newer session JSON support
-  - b813a96/b8dff03: OpenCode migration=2 storage and text parts
   - 66c317e/6088617: Droid/Copilot session import
 - No additional format changes found in recent parser commits beyond the documented changes below.
 
 ## Upstream Version Check Log
 Record every upstream check, even if no changes are needed.
-- 2026-01-07: Codex CLI 0.73.0 fixtures revalidated; Claude Code 2.0.71 fixtures revalidated
-  (schema drift 1.9.0). Evidence: `Resources/Fixtures/stage0/agents/codex/{small,large}.jsonl`,
-  `Resources/Fixtures/stage0/agents/claude/{small,large,schema_drift}.jsonl`.
-- 2026-01-07: Started mid-Dec+ review for Gemini/Copilot/OpenCode/Droid; local parser commit
-  scan since 2025-12-15 complete; upstream release scans pending.
+- YYYY-MM-DD: Agents checked; sources (release notes or repos); result (no change, candidate,
+  or format change) and evidence path.
 
 ## Known Format Changes (From Docs)
 - 2025-12 summary: Claude sessions split embedded thinking/tool blocks into separate events.
@@ -45,7 +40,6 @@ Record every upstream check, even if no changes are needed.
 - Recent changes:
   - Skip Agents.md preamble in title parsing (2025-12 summary, commit 7e902e3).
   - Parsing hardening for schema drift (commit d75afd2).
-  - Fixtures revalidated on 2026-01-07 (cli_version 0.73.0).
 - Parser entry points:
   - `AgentSessions/Services/SessionIndexer.swift`
   - `AgentSessions/Model/Session.swift`
@@ -67,7 +61,6 @@ Record every upstream check, even if no changes are needed.
   - Split embedded thinking/tool blocks into separate events (2025-12 summary).
   - Improved parsing for modern format, titles, and error detection (docs changelog).
   - Error classification tuned to avoid false positives (commit 8439b09).
-  - Fixtures revalidated on 2026-01-07 (version 2.0.71; schema drift 1.9.0).
 - Parser entry points:
   - `AgentSessions/Services/ClaudeSessionParser.swift`
   - `docs/claude-code-session-format.md`

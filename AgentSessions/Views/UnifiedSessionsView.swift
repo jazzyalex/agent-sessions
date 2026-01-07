@@ -389,7 +389,7 @@ struct UnifiedSessionsView: View {
 	        .id(columnLayoutID)
 	        .tableStyle(.inset(alternatesRowBackgrounds: true))
             .tint(UnifiedSessionsStyle.selectionAccent)
-	        .environment(\.defaultMinListRowHeight, 32)
+	        .environment(\.defaultMinListRowHeight, 28)
 		        .simultaneousGesture(TapGesture().onEnded {
 		            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
 		        })

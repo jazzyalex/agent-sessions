@@ -104,7 +104,7 @@ struct SessionsListView: View {
         .id(columnVisibility.changeToken)
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .tint(SessionsListStyle.selectionAccent)
-        .environment(\.defaultMinListRowHeight, 32)
+        .environment(\.defaultMinListRowHeight, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .contextMenu(forSelectionType: String.self) { ids in
