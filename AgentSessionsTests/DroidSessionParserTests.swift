@@ -75,4 +75,28 @@ final class DroidSessionParserTests: XCTestCase {
         XCTAssertEqual(result?.toolName, "Shell")
         XCTAssertTrue((result?.toolOutput ?? "").contains("exitCode"))
     }
+
+    func testStreamJSONHandlesNumericTimestampsAndCallId() throws {
+        let lines = [
+            #"{"type":"system","subtype":"init","sessionId":"sid2","timestamp":1767812640310,"model":"droid-model","cwd":"/tmp"}"#,
+            #"{"type":"message","sessionId":"sid2","timestamp":1767812641000,"role":"user","text":"Do thing","id":"m1"}"#,
+            #"{"type":"tool_call","sessionId":"sid2","timestamp":1767812642000,"id":"call_1","messageId":"m1","toolId":"Execute","toolName":"Execute","parameters":{"command":"ls"}}"#,
+            #"{"type":"tool_result","sessionId":"sid2","timestamp":1767812643000,"id":"call_1","messageId":"m1","toolId":"Execute","isError":true,"value":"ls: /nope"}"#,
+            #"{"type":"completion","sessionId":"sid2","timestamp":1767812644000,"finalText":"Done","usage":{"input_tokens":1,"output_tokens":1}}"#
+        ]
+        let url = try writeTempJSONL(lines)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        guard let session = DroidSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        XCTAssertEqual(session.id, "sid2")
+        XCTAssertNotNil(session.startTime)
+
+        let call = session.events.first(where: { $0.kind == .tool_call })
+        XCTAssertEqual(call?.toolName, "Execute")
+        XCTAssertTrue((call?.toolInput ?? "").contains("\"ls\""))
+
+        let errors = session.events.filter { $0.kind == .error }
+        XCTAssertEqual(errors.count, 1)
+        XCTAssertTrue((errors.first?.text ?? "").contains("ls: /nope"))
+    }
 }

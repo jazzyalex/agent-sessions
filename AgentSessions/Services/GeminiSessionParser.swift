@@ -313,6 +313,96 @@ final class GeminiSessionParser {
         return []
     }
 
+    private static func toolNestedResponseOutput(from tc: [String: Any]) -> String? {
+        guard let result = tc["result"] as? [Any] else { return nil }
+        for item in result {
+            guard let dict = item as? [String: Any] else { continue }
+            if let fr = dict["functionResponse"] as? [String: Any],
+               let resp = fr["response"] as? [String: Any] {
+                for key in ["output", "stdout", "text", "content"] {
+                    if let out = resp[key] as? String, !out.isEmpty { return out }
+                }
+            }
+            if let out = dict["output"] as? String, !out.isEmpty { return out }
+            if let out = dict["stdout"] as? String, !out.isEmpty { return out }
+        }
+        return nil
+    }
+
+    private static func parseExitCode(from output: String) -> Int? {
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.lowercased().hasPrefix("exit code:") else { continue }
+            let rest = trimmed.dropFirst("exit code:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+            return Int(rest)
+        }
+        return nil
+    }
+
+    private static func parseStructuredShellOutput(from output: String) -> (stdout: String?, exitCode: Int?) {
+        // Gemini run_shell_command response output often includes:
+        // Command:, Directory:, Output:, Error:, Exit Code:, Signal:
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if lines.contains(where: { $0.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("exit code:") }) == false,
+           lines.contains(where: { $0.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("command:") }) == false {
+            return (nil, nil)
+        }
+
+        let stopPrefixes = ["error:", "exit code:", "signal:", "background pids:", "process group"]
+        var captured: [String] = []
+        var capturing = false
+        var exitCode: Int? = nil
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lower = trimmed.lowercased()
+
+            if let parsed = parseExitCode(from: trimmed) {
+                exitCode = parsed
+            }
+
+            if lower.hasPrefix("output:") {
+                capturing = true
+                let rest = trimmed.dropFirst("output:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !rest.isEmpty { captured.append(rest) }
+                continue
+            }
+
+            if capturing {
+                if stopPrefixes.contains(where: { lower.hasPrefix($0) }) {
+                    capturing = false
+                    continue
+                }
+                captured.append(line)
+            }
+        }
+
+        let stdout = captured.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (stdout.isEmpty ? nil : stdout, exitCode)
+    }
+
+    private static func toolCallOutputAndExitCode(from tc: [String: Any]) -> (output: String?, exitCode: Int?) {
+        // Prefer structured functionResponse output when it includes Exit Code details.
+        if let nested = toolNestedResponseOutput(from: tc), !nested.isEmpty {
+            let parsed = parseStructuredShellOutput(from: nested)
+            if parsed.stdout != nil || parsed.exitCode != nil {
+                var out = parsed.stdout
+                if let code = parsed.exitCode {
+                    if let cur = out, cur.range(of: "Exit Code:", options: [.caseInsensitive]) == nil {
+                        out = cur + "\nExit Code: \(code)"
+                    } else if out == nil {
+                        out = "Exit Code: \(code)"
+                    }
+                }
+                return (out, parsed.exitCode)
+            }
+        }
+
+        if let s = tc["resultDisplay"] as? String, !s.isEmpty { return (s, nil) }
+        if let s = tc["output"] as? String, !s.isEmpty { return (s, parseExitCode(from: s)) }
+        return (nil, nil)
+    }
+
     private static func toolCallName(from tc: [String: Any]) -> String? {
         if let s = tc["displayName"] as? String, !s.isEmpty { return s }
         if let s = tc["name"] as? String, !s.isEmpty { return s }
@@ -327,24 +417,7 @@ final class GeminiSessionParser {
     }
 
     private static func toolCallOutput(from tc: [String: Any]) -> String? {
-        if let s = tc["resultDisplay"] as? String, !s.isEmpty { return s }
-        if let s = tc["output"] as? String, !s.isEmpty { return s }
-        if let result = tc["result"] as? [Any] {
-            for item in result {
-                guard let dict = item as? [String: Any] else { continue }
-                // Common Gemini nesting: result[].functionResponse.response.output
-                if let fr = dict["functionResponse"] as? [String: Any],
-                   let resp = fr["response"] as? [String: Any] {
-                    if let out = resp["output"] as? String, !out.isEmpty { return out }
-                    if let out = resp["stdout"] as? String, !out.isEmpty { return out }
-                    if let out = resp["text"] as? String, !out.isEmpty { return out }
-                    if let out = resp["content"] as? String, !out.isEmpty { return out }
-                }
-                if let out = dict["output"] as? String, !out.isEmpty { return out }
-                if let out = dict["stdout"] as? String, !out.isEmpty { return out }
-            }
-        }
-        return nil
+        toolCallOutputAndExitCode(from: tc).output
     }
 
     private static func toolTimestamp(from tc: [String: Any]) -> Date? {
@@ -374,15 +447,20 @@ final class GeminiSessionParser {
     }
 
     private static func toolResultEvent(from tc: [String: Any], baseID: String) -> SessionEvent? {
-        guard let toolOutput = toolCallOutput(from: tc), !toolOutput.isEmpty else { return nil }
+        let (toolOutput, exitCode) = toolCallOutputAndExitCode(from: tc)
+        guard let toolOutput, !toolOutput.isEmpty else { return nil }
         let toolName = toolCallName(from: tc)
         let rawData = (try? JSONSerialization.data(withJSONObject: tc, options: [])) ?? Data()
+        let kind: SessionEventKind = {
+            if let exitCode, exitCode != 0 { return .error }
+            return .tool_result
+        }()
         return SessionEvent(
             id: baseID,
             timestamp: toolTimestamp(from: tc),
-            kind: .tool_result,
+            kind: kind,
             role: "tool",
-            text: nil,
+            text: (kind == .error) ? toolOutput : nil,
             toolName: toolName ?? (tc["id"] as? String),
             toolInput: nil,
             toolOutput: toolOutput,

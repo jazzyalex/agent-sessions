@@ -44,6 +44,8 @@ All notable changes to this project will be documented in this file.
 - Sessions: Auto-select the first session on launch so the transcript pane isn’t blank.
 - Sessions: Stabilize message counts for large sessions while full parsing completes to reduce list row jumps.
 - Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
+- Parsing: Preserve non-zero exit codes in Gemini/OpenCode tool outputs and classify them as errors for error navigation.
+- Parsing: Droid stream-json now handles numeric timestamps, tool call IDs, and error flags in tool results.
 - Transcript: Clearing Find now immediately clears match highlights.
 - Transcript: Terminal view no longer leaves a stale find highlight when the Find query is empty.
 - Transcript: Toolbar filters now use dot + count labels with compact navigation chevrons.

@@ -470,6 +470,61 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(metaTexts.contains(where: { $0.contains("OpenCode part: new-type") }), "Expected unknown OpenCode part type to be preserved as a meta event for JSON view")
     }
 
+    func testOpenCodeToolExitCodeClassifiesErrorAndAppendsExitCode() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-Exit-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let storageRoot = root.appendingPathComponent("storage", isDirectory: true)
+        let sessionDir = storageRoot.appendingPathComponent("session", isDirectory: true).appendingPathComponent("proj", isDirectory: true)
+        let messageRoot = storageRoot.appendingPathComponent("message", isDirectory: true)
+        let partRoot = storageRoot.appendingPathComponent("part", isDirectory: true)
+
+        try fm.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: messageRoot, withIntermediateDirectories: true)
+        try fm.createDirectory(at: partRoot, withIntermediateDirectories: true)
+        try "2".data(using: .utf8)!.write(to: storageRoot.appendingPathComponent("migration"))
+
+        let sessionID = "ses_exit_demo"
+        let sessionURL = sessionDir.appendingPathComponent("\(sessionID).json")
+        try #"{"id":"\#(sessionID)","version":"1.1.3","projectID":"proj","directory":"/tmp/repo","time":{"created":1730000000000,"updated":1730000001000}}"#.data(using: .utf8)!.write(to: sessionURL)
+
+        let messageDir = messageRoot.appendingPathComponent(sessionID, isDirectory: true)
+        try fm.createDirectory(at: messageDir, withIntermediateDirectories: true)
+
+        let msgID = "msg_tool_demo"
+        let msgURL = messageDir.appendingPathComponent("\(msgID).json")
+        try #"{"id":"\#(msgID)","sessionID":"\#(sessionID)","role":"assistant","time":{"created":1730000000000},"agent":"opencode","model":{"providerID":"openai","modelID":"gpt-4o-mini"}}"#.data(using: .utf8)!.write(to: msgURL)
+
+        let partDir = partRoot.appendingPathComponent(msgID, isDirectory: true)
+        try fm.createDirectory(at: partDir, withIntermediateDirectories: true)
+
+        let partJSON = """
+        {
+          "id": "prt_tool_0001",
+          "sessionID": "\(sessionID)",
+          "messageID": "\(msgID)",
+          "type": "tool",
+          "callID": "call_1",
+          "tool": "bash",
+          "state": {
+            "status": "completed",
+            "input": { "command": "ls /non-existent-directory" },
+            "output": "ls: /non-existent-directory: No such file or directory\\n",
+            "metadata": { "exit": 1 },
+            "time": { "start": 1730000000000, "end": 1730000000100 }
+          }
+        }
+        """
+        try partJSON.data(using: .utf8)!.write(to: partDir.appendingPathComponent("prt_0001.json"))
+
+        guard let session = OpenCodeSessionParser.parseFileFull(at: sessionURL) else { return XCTFail("parse returned nil") }
+        XCTAssertTrue(session.events.contains(where: { $0.kind == .tool_call }))
+        let errorEvents = session.events.filter { $0.kind == .error }
+        XCTAssertEqual(errorEvents.count, 1)
+        XCTAssertTrue((errorEvents.first?.toolOutput ?? "").contains("Exit Code: 1"))
+    }
+
     func testOpenCodeDiscoveryAcceptsStorageRootOverride() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-Discovery-\(UUID().uuidString)", isDirectory: true)

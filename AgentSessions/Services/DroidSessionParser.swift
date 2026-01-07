@@ -601,7 +601,7 @@ final class DroidSessionParser {
                     ))
 
                 case "tool_call":
-                    let callID = obj["toolCallId"] as? String
+                    let callID = (obj["toolCallId"] as? String) ?? (obj["id"] as? String)
                     let name = obj["toolName"] as? String
                     let params = obj["parameters"]
                     if let callID, !callID.isEmpty {
@@ -623,10 +623,21 @@ final class DroidSessionParser {
                     ))
 
                 case "tool_result":
-                    let callID = obj["toolCallId"] as? String
+                    let callID = (obj["toolCallId"] as? String) ?? (obj["id"] as? String)
                     let name = (obj["toolName"] as? String) ?? callID.flatMap { toolByCallID[$0]?.name }
                     let value = obj["value"]
                     let output = stringifyJSON(value)
+                    let isErrorFlag = (obj["isError"] as? Bool) ?? false
+                    let exitCode: Int? = {
+                        guard let dict = value as? [String: Any] else { return nil }
+                        let any = dict["exitCode"] ?? dict["exit_code"] ?? dict["status"]
+                        if let i = any as? Int { return i }
+                        if let d = any as? Double { return Int(d) }
+                        if let s = any as? String { return Int(s.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                        return nil
+                    }()
+                    let isError = isErrorFlag || (exitCode != nil && exitCode != 0)
+                    let kind: SessionEventKind = isError ? .error : .tool_result
 
                     var sanitized = obj
                     if let output, output.utf8.count > maxRawResultContentBytes {
@@ -636,9 +647,9 @@ final class DroidSessionParser {
                     events.append(SessionEvent(
                         id: baseID,
                         timestamp: ts,
-                        kind: .tool_result,
+                        kind: kind,
                         role: "tool",
-                        text: nil,
+                        text: isError ? output : nil,
                         toolName: name,
                         toolInput: callID.flatMap { stringifyJSON(toolByCallID[$0]?.params) },
                         toolOutput: output,
@@ -725,13 +736,24 @@ final class DroidSessionParser {
     }
 
     private static func decodeDate(_ any: Any?) -> Date? {
-        guard let s = any as? String else { return nil }
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: s) { return d }
-        let f2 = ISO8601DateFormatter()
-        f2.formatOptions = [.withInternetDateTime]
-        return f2.date(from: s)
+        guard let any else { return nil }
+        if let d = any as? Double { return Date(timeIntervalSince1970: normalizeEpochSeconds(d)) }
+        if let i = any as? Int { return Date(timeIntervalSince1970: normalizeEpochSeconds(Double(i))) }
+        if let s = any as? String {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = f.date(from: s) { return d }
+            let f2 = ISO8601DateFormatter()
+            f2.formatOptions = [.withInternetDateTime]
+            return f2.date(from: s)
+        }
+        return nil
+    }
+
+    private static func normalizeEpochSeconds(_ value: Double) -> Double {
+        if value > 1e14 { return value / 1_000_000 }
+        if value > 1e11 { return value / 1_000 }
+        return value
     }
 
     private static func extractUserPromptFromSystemReminder(_ text: String) -> (reminder: String?, prompt: String) {
