@@ -32,6 +32,8 @@ All notable changes to this project will be documented in this file.
 - Usage: Time-only reset strings now roll forward to the next day to avoid showing stale "<1m" countdowns.
 - Transcript: Reduce terminal-view stutter by debouncing rebuilds and avoiding full NSTextView reloads for match highlight updates.
 - Transcript (Color view): Use system font for narrative blocks; keep tool call blocks monospaced.
+- Transcript (Color view): Blocks now render as rounded cards with subtle tints and left accent borders.
+- Transcript (Color view): Find highlights now mark matched substrings and add a line indicator for easier scanning.
 - UI: Persist split-view divider positions per layout mode (horizontal vs vertical) so switching layouts doesn’t reset pane sizes.
 - UI: Session list typography now uses monospaced text with softer timestamp gray, taller rows, lighter message counts, and footer-blue selection accents.
 - UI: Increase session list row height to 48px for easier scanning.

@@ -145,6 +145,7 @@ struct SessionTerminalView: View {
                 TerminalTextScrollView(
                     lines: filteredLines,
                     fontSize: CGFloat(transcriptFontSize),
+                    findQuery: findQuery,
                     matchIDs: matchIDSet,
                     currentMatchLineID: currentMatchLineID,
                     highlightActive: !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -879,9 +880,268 @@ private extension TerminalLineRole {
     }
 }
 
+// MARK: - Terminal layout + decorations (Color view)
+
+private final class TerminalLayoutManager: NSLayoutManager {
+    enum BlockKind {
+        case user
+        case agent
+        case toolCall
+        case toolOutput
+        case error
+    }
+
+    struct BlockDecoration {
+        let range: NSRange
+        let kind: BlockKind
+    }
+
+    struct FindMatch {
+        let range: NSRange
+        let isCurrentLine: Bool
+    }
+
+    struct LineIndexEntry {
+        let id: Int
+        let range: NSRange
+    }
+
+    var isDark: Bool = false
+    var blocks: [BlockDecoration] = []
+    var lineIndex: [LineIndexEntry] = []
+    var matchLineIDs: Set<Int> = []
+    var currentMatchLineID: Int? = nil
+    var matches: [FindMatch] = []
+
+    private struct BlockStyle {
+        let fill: NSColor
+        let stroke: NSColor
+        let accent: NSColor?
+        let accentWidth: CGFloat
+    }
+
+    private func style(for kind: BlockKind) -> BlockStyle {
+        // Tuned for consistent contrast in light/dark:
+        // - subtle tint fill
+        // - optional left accent bar
+        // - thin stroke for definition
+        let dark = isDark
+
+        func rgba(_ color: NSColor, alpha: CGFloat) -> NSColor { color.withAlphaComponent(alpha) }
+
+        switch kind {
+        case .user:
+            let base = NSColor.systemIndigo
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.09 : 0.03),
+                stroke: rgba(base, alpha: dark ? 0.22 : 0.10),
+                accent: rgba(base, alpha: dark ? 0.55 : 0.35),
+                accentWidth: 2
+            )
+        case .agent:
+            // Neutral card (no accent)
+            return BlockStyle(
+                fill: rgba(NSColor.labelColor, alpha: dark ? 0.07 : 0.015),
+                stroke: rgba(NSColor.separatorColor, alpha: dark ? 0.75 : 0.55),
+                accent: nil,
+                accentWidth: 0
+            )
+        case .toolCall:
+            let base = NSColor.systemBlue
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
+                stroke: rgba(base, alpha: dark ? 0.26 : 0.12),
+                accent: rgba(base, alpha: dark ? 0.78 : 0.60),
+                accentWidth: 3
+            )
+        case .toolOutput:
+            let base = NSColor.systemGreen
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
+                stroke: rgba(base, alpha: dark ? 0.26 : 0.12),
+                accent: rgba(base, alpha: dark ? 0.78 : 0.60),
+                accentWidth: 3
+            )
+        case .error:
+            let base = NSColor.systemRed
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.14 : 0.05),
+                stroke: rgba(base, alpha: dark ? 0.30 : 0.14),
+                accent: rgba(base, alpha: dark ? 0.82 : 0.65),
+                accentWidth: 3
+            )
+        }
+    }
+
+    private func blockDecoration(containing charIndex: Int) -> BlockDecoration? {
+        // Binary search by character location (blocks are non-overlapping and sorted by construction).
+        var low = 0
+        var high = blocks.count - 1
+        while low <= high {
+            let mid = (low + high) / 2
+            let r = blocks[mid].range
+            if charIndex < r.location {
+                high = mid - 1
+                continue
+            }
+            if charIndex >= (r.location + r.length) {
+                low = mid + 1
+                continue
+            }
+            return blocks[mid]
+        }
+        return nil
+    }
+
+    private func lineID(at charIndex: Int) -> Int? {
+        var low = 0
+        var high = lineIndex.count - 1
+        while low <= high {
+            let mid = (low + high) / 2
+            let r = lineIndex[mid].range
+            if charIndex < r.location {
+                high = mid - 1
+                continue
+            }
+            if charIndex >= (r.location + r.length) {
+                low = mid + 1
+                continue
+            }
+            return lineIndex[mid].id
+        }
+        return nil
+    }
+
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
+        // Draw block cards + find highlights, then let AppKit draw any remaining backgrounds (including selection).
+
+        if let tc = textContainers.first {
+            drawBlockCards(forGlyphRange: glyphsToShow, in: tc, at: origin)
+            drawFindHighlights(forGlyphRange: glyphsToShow, in: tc, at: origin)
+            drawFindLineMarkers(forGlyphRange: glyphsToShow, in: tc, at: origin)
+        }
+
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+    }
+
+    private func drawBlockCards(forGlyphRange glyphsToShow: NSRange, in tc: NSTextContainer, at origin: CGPoint) {
+        guard !blocks.isEmpty else { return }
+
+        for block in blocks {
+            let blockGlyphs = glyphRange(forCharacterRange: block.range, actualCharacterRange: nil)
+            guard NSIntersectionRange(blockGlyphs, glyphsToShow).length > 0 else { continue }
+
+            var unionRect: CGRect? = nil
+            enumerateLineFragments(forGlyphRange: blockGlyphs) { rect, _, _, _, _ in
+                let r = rect.offsetBy(dx: origin.x, dy: origin.y)
+                unionRect = unionRect.map { $0.union(r) } ?? r
+            }
+            guard var cardRect = unionRect else { continue }
+
+            // Slight vertical breathing room so cards read like blocks, not line bands.
+            cardRect = cardRect.insetBy(dx: 0, dy: -6)
+
+            let style = style(for: block.kind)
+            let path = NSBezierPath(roundedRect: cardRect, xRadius: 6, yRadius: 6)
+
+            style.fill.setFill()
+            path.fill()
+
+            if let accent = style.accent, style.accentWidth > 0 {
+                NSGraphicsContext.saveGraphicsState()
+                path.addClip()
+                accent.setFill()
+                NSBezierPath(rect: CGRect(x: cardRect.minX, y: cardRect.minY, width: style.accentWidth, height: cardRect.height)).fill()
+                NSGraphicsContext.restoreGraphicsState()
+            }
+
+            style.stroke.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        }
+    }
+
+    private func drawFindHighlights(forGlyphRange glyphsToShow: NSRange, in tc: NSTextContainer, at origin: CGPoint) {
+        guard !matches.isEmpty else { return }
+
+        let yellow = NSColor.systemYellow
+        let fill = yellow.withAlphaComponent(isDark ? 0.32 : 0.22)
+        let stroke = yellow.withAlphaComponent(isDark ? 0.70 : 0.55)
+        let currentStroke = yellow.withAlphaComponent(isDark ? 0.90 : 0.85)
+
+        for m in matches {
+            let matchGlyphs = glyphRange(forCharacterRange: m.range, actualCharacterRange: nil)
+            guard NSIntersectionRange(matchGlyphs, glyphsToShow).length > 0 else { continue }
+
+            enumerateLineFragments(forGlyphRange: matchGlyphs) { _, _, container, glyphRange, _ in
+                guard container === tc else { return }
+                let g = NSIntersectionRange(glyphRange, matchGlyphs)
+                guard g.length > 0 else { return }
+                var r = self.boundingRect(forGlyphRange: g, in: tc)
+                r = r.offsetBy(dx: origin.x, dy: origin.y)
+                r = r.insetBy(dx: -1.5, dy: -0.5)
+
+                let radius: CGFloat = 3
+                let p = NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius)
+                fill.setFill()
+                p.fill()
+
+                if m.isCurrentLine {
+                    currentStroke.setStroke()
+                    p.lineWidth = 1
+                    p.stroke()
+
+                    // Stronger “underline” hint (bottom rule) for current match.
+                    let y = r.maxY - 2.0
+                    let underline = NSBezierPath()
+                    underline.move(to: CGPoint(x: r.minX + 1, y: y))
+                    underline.line(to: CGPoint(x: r.maxX - 1, y: y))
+                    underline.lineWidth = 2
+                    currentStroke.setStroke()
+                    underline.stroke()
+                } else {
+                    stroke.setStroke()
+                    p.lineWidth = 1
+                    p.stroke()
+                }
+            }
+        }
+    }
+
+    private func drawFindLineMarkers(forGlyphRange glyphsToShow: NSRange, in tc: NSTextContainer, at origin: CGPoint) {
+        guard !matchLineIDs.isEmpty else { return }
+
+        let yellow = NSColor.systemYellow
+        let anyFill = yellow.withAlphaComponent(isDark ? 0.65 : 0.50)
+        let currentFill = yellow.withAlphaComponent(isDark ? 0.85 : 0.75)
+
+        enumerateLineFragments(forGlyphRange: glyphsToShow) { rect, _, container, glyphRange, _ in
+            guard container === tc else { return }
+            let charIndex = self.characterIndexForGlyph(at: glyphRange.location)
+            guard let lineID = self.lineID(at: charIndex), self.matchLineIDs.contains(lineID) else { return }
+
+            let isCurrentLine = (lineID == self.currentMatchLineID)
+            let width: CGFloat = isCurrentLine ? 4 : 3
+            let height = max(2, rect.height - 4)
+            let y = rect.minY + 2 + origin.y
+
+            let blockAccentWidth: CGFloat = {
+                guard let b = self.blockDecoration(containing: charIndex) else { return 0 }
+                return self.style(for: b.kind).accentWidth
+            }()
+
+            let x = rect.minX + origin.x + blockAccentWidth + 6
+            let pill = NSBezierPath(roundedRect: CGRect(x: x, y: y, width: width, height: height), xRadius: width / 2, yRadius: width / 2)
+            (isCurrentLine ? currentFill : anyFill).setFill()
+            pill.fill()
+        }
+    }
+}
+
 private struct TerminalTextScrollView: NSViewRepresentable {
     let lines: [TerminalLine]
     let fontSize: CGFloat
+    let findQuery: String
     let matchIDs: Set<Int>
     let currentMatchLineID: Int?
     let highlightActive: Bool
@@ -900,13 +1160,16 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastColorScheme: ColorScheme = .light
         var lastScrollToken: Int = 0
 
+        var lastFindQuery: String = ""
         var lastMatchIDs: Set<Int> = []
         var lastCurrentMatchLineID: Int? = nil
 
         var lines: [TerminalLine] = []
         var orderedLineRanges: [NSRange] = []
+        var orderedLineIDs: [Int] = []
 
         private weak var activeTextView: NSTextView?
+        weak var activeLayoutManager: TerminalLayoutManager?
         private var activeBlockText: String = ""
         private let speechSynthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer()
         private let speechQueue = DispatchQueue(label: "com.agentsessions.speechSynthesizer", qos: .default)
@@ -1085,30 +1348,37 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
 
-        let textView = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize))
+        let textStorage = NSTextStorage()
+        let layoutManager = TerminalLayoutManager()
+        textStorage.addLayoutManager(layoutManager)
+        let container = NSTextContainer(size: NSSize(width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        container.lineFragmentPadding = 0
+        layoutManager.addTextContainer(container)
+
+        let textView = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize), textContainer: container)
         textView.isEditable = false
         textView.isSelectable = true
         textView.usesFindPanel = true
         textView.delegate = context.coordinator
         textView.textContainerInset = NSSize(width: 8, height: 8)
-        textView.textContainer?.widthTracksTextView = true
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = true
         textView.minSize = NSSize(width: 0, height: scroll.contentSize.height)
         textView.autoresizingMask = [.width]
-        textView.textContainer?.lineFragmentPadding = 0
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         textView.layoutManager?.allowsNonContiguousLayout = true
         textView.backgroundColor = NSColor.textBackgroundColor
 
         scroll.documentView = textView
 
+        context.coordinator.activeLayoutManager = layoutManager
         applyContent(to: textView, context: context)
         context.coordinator.lastLinesSignature = signature(for: lines)
         context.coordinator.lastFontSize = fontSize
         context.coordinator.lastMonochrome = monochrome
         context.coordinator.lastColorScheme = colorScheme
+        context.coordinator.lastFindQuery = findQuery
         context.coordinator.lastMatchIDs = effectiveMatchIDs
         context.coordinator.lastCurrentMatchLineID = effectiveCurrentMatchLineID
         return scroll
@@ -1129,8 +1399,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             context.coordinator.lastFontSize = fontSize
             context.coordinator.lastMonochrome = monochrome
             context.coordinator.lastColorScheme = colorScheme
-        } else if context.coordinator.lastMatchIDs != effectiveMatchIDs || context.coordinator.lastCurrentMatchLineID != effectiveCurrentMatchLineID {
-            updateHighlights(in: tv, context: context, matches: effectiveMatchIDs, currentLineID: effectiveCurrentMatchLineID)
+        } else if context.coordinator.lastMatchIDs != effectiveMatchIDs ||
+                    context.coordinator.lastCurrentMatchLineID != effectiveCurrentMatchLineID ||
+                    context.coordinator.lastFindQuery != findQuery {
+            updateHighlights(in: tv, context: context, findQuery: findQuery, matches: effectiveMatchIDs, currentLineID: effectiveCurrentMatchLineID)
         }
 
         if let target = currentMatchLineID, let range = context.coordinator.lineRanges[target] {
@@ -1167,14 +1439,23 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     }
 
     private func applyContent(to textView: NSTextView, context: Context) {
-        let (attr, ranges) = buildAttributedString(matches: effectiveMatchIDs, currentLineID: effectiveCurrentMatchLineID)
+        let (attr, ranges) = buildAttributedString()
         context.coordinator.lineRanges = ranges
         context.coordinator.lineRoles = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0.role) })
         context.coordinator.lines = lines
         context.coordinator.orderedLineRanges = lines.compactMap { ranges[$0.id] }
+        context.coordinator.orderedLineIDs = lines.map(\.id)
         context.coordinator.lastMatchIDs = effectiveMatchIDs
         context.coordinator.lastCurrentMatchLineID = effectiveCurrentMatchLineID
+        context.coordinator.lastFindQuery = findQuery
         textView.textStorage?.setAttributedString(attr)
+
+        if let lm = (textView.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager {
+            lm.isDark = (colorScheme == .dark)
+            lm.lineIndex = zip(lines.map(\.id), lines.compactMap { ranges[$0.id] }).map { TerminalLayoutManager.LineIndexEntry(id: $0.0, range: $0.1) }
+            lm.blocks = buildBlockDecorations(ranges: ranges)
+            updateLayoutManagerFind(lm, findQuery: findQuery, matches: effectiveMatchIDs, currentLineID: effectiveCurrentMatchLineID, ranges: ranges)
+        }
 
         // Ensure container tracks width
         let width = max(1, textView.enclosingScrollView?.contentSize.width ?? textView.bounds.width)
@@ -1182,75 +1463,137 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
     }
 
-    private func updateHighlights(in textView: NSTextView, context: Context, matches: Set<Int>, currentLineID: Int?) {
-        let oldMatches = context.coordinator.lastMatchIDs
-        let newMatches = matches
-        let oldCurrent = context.coordinator.lastCurrentMatchLineID
-        let newCurrent = currentLineID
-
-        var affected = oldMatches.symmetricDifference(newMatches)
-        if let oldCurrent { affected.insert(oldCurrent) }
-        if let newCurrent { affected.insert(newCurrent) }
-        guard !affected.isEmpty else { return }
-
-        let currentHighlight = NSColor.systemYellow.withAlphaComponent(0.5)
-        let matchHighlight = NSColor.systemYellow.withAlphaComponent(0.25)
-
-        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
-        let assistantSwatch = TerminalRolePalette.appKit(role: .assistant, scheme: colorScheme, monochrome: monochrome)
-        let toolInputSwatch = TerminalRolePalette.appKit(role: .toolInput, scheme: colorScheme, monochrome: monochrome)
-        let toolOutputSwatch = TerminalRolePalette.appKit(role: .toolOutput, scheme: colorScheme, monochrome: monochrome)
-        let errorSwatch = TerminalRolePalette.appKit(role: .error, scheme: colorScheme, monochrome: monochrome)
-        let metaSwatch = TerminalRolePalette.appKit(role: .meta, scheme: colorScheme, monochrome: monochrome)
-
-        func swatch(for role: TerminalLineRole) -> TerminalRolePalette.AppKitSwatch {
-            switch role {
-            case .user: return userSwatch
-            case .assistant: return assistantSwatch
-            case .toolInput: return toolInputSwatch
-            case .toolOutput: return toolOutputSwatch
-            case .error: return errorSwatch
-            case .meta: return metaSwatch
-            }
-        }
-
-        for lineID in affected {
-            guard let range = context.coordinator.lineRanges[lineID] else { continue }
-            guard let role = context.coordinator.lineRoles[lineID] else { continue }
-            let baseBackground = swatch(for: role).background
-
-            if lineID == newCurrent {
-                textView.textStorage?.addAttribute(.backgroundColor, value: currentHighlight, range: range)
-            } else if newMatches.contains(lineID) {
-                textView.textStorage?.addAttribute(.backgroundColor, value: matchHighlight, range: range)
-            } else if let bg = baseBackground {
-                textView.textStorage?.addAttribute(.backgroundColor, value: bg, range: range)
-            } else {
-                textView.textStorage?.removeAttribute(.backgroundColor, range: range)
-            }
-        }
-
-        context.coordinator.lastMatchIDs = newMatches
-        context.coordinator.lastCurrentMatchLineID = newCurrent
+    private func updateHighlights(in textView: NSTextView, context: Context, findQuery: String, matches: Set<Int>, currentLineID: Int?) {
+        guard let lm = (textView.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager else { return }
+        lm.isDark = (colorScheme == .dark)
+        updateLayoutManagerFind(lm, findQuery: findQuery, matches: matches, currentLineID: currentLineID, ranges: context.coordinator.lineRanges)
+        textView.setNeedsDisplay(textView.bounds)
+        context.coordinator.lastFindQuery = findQuery
+        context.coordinator.lastMatchIDs = matches
+        context.coordinator.lastCurrentMatchLineID = currentLineID
     }
 
-	    private func buildAttributedString(matches: Set<Int>, currentLineID: Int?) -> (NSAttributedString, [Int: NSRange]) {
-	        let attr = NSMutableAttributedString()
-	        var ranges: [Int: NSRange] = [:]
-	        ranges.reserveCapacity(lines.count)
+    private func buildBlockDecorations(ranges: [Int: NSRange]) -> [TerminalLayoutManager.BlockDecoration] {
+        var out: [TerminalLayoutManager.BlockDecoration] = []
+        out.reserveCapacity(64)
 
-	        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-	        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .medium)
-	        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-	        let currentHighlight = NSColor.systemYellow.withAlphaComponent(0.5)
-	        let matchHighlight = NSColor.systemYellow.withAlphaComponent(0.25)
+        var startIdx: Int? = nil
+        var currentBlock: Int? = nil
+        var rolesInBlock: Set<TerminalLineRole> = []
 
-        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
-        let assistantSwatch = TerminalRolePalette.appKit(role: .assistant, scheme: colorScheme, monochrome: monochrome)
-        let toolInputSwatch = TerminalRolePalette.appKit(role: .toolInput, scheme: colorScheme, monochrome: monochrome)
-        let toolOutputSwatch = TerminalRolePalette.appKit(role: .toolOutput, scheme: colorScheme, monochrome: monochrome)
-        let errorSwatch = TerminalRolePalette.appKit(role: .error, scheme: colorScheme, monochrome: monochrome)
-        let metaSwatch = TerminalRolePalette.appKit(role: .meta, scheme: colorScheme, monochrome: monochrome)
+        func finishBlock(endIdx: Int) {
+            guard let s = startIdx else { return }
+            guard currentBlock != nil else { return }
+            guard let startRange = ranges[lines[s].id] else { return }
+            guard let endRange = ranges[lines[endIdx].id] else { return }
+
+            let start = startRange.location
+            let end = endRange.location + endRange.length
+            guard end > start else { return }
+
+            let kind: TerminalLayoutManager.BlockKind? = {
+                if rolesInBlock.count == 1, rolesInBlock.contains(.meta) { return nil }
+                if rolesInBlock.contains(.error) { return .error }
+                if rolesInBlock.contains(.toolInput) { return .toolCall }
+                if rolesInBlock.contains(.toolOutput) { return .toolOutput }
+                if rolesInBlock.contains(.user) { return .user }
+                return .agent
+            }()
+
+            if let kind {
+                out.append(.init(range: NSRange(location: start, length: end - start), kind: kind))
+            }
+        }
+
+        for (idx, line) in lines.enumerated() {
+            guard let blockIndex = line.blockIndex else {
+                // Treat nil block index lines as a standalone “agent” block for consistent spacing, but only if non-empty.
+                if startIdx != nil {
+                    finishBlock(endIdx: idx - 1)
+                    startIdx = nil
+                    currentBlock = nil
+                    rolesInBlock = []
+                }
+                if line.role != .meta, let r = ranges[line.id], r.length > 0 {
+                    out.append(.init(range: r, kind: line.role == .user ? .user : .agent))
+                }
+                continue
+            }
+
+            if currentBlock == nil {
+                currentBlock = blockIndex
+                startIdx = idx
+                rolesInBlock = [line.role]
+                continue
+            }
+
+            if currentBlock != blockIndex {
+                finishBlock(endIdx: idx - 1)
+                currentBlock = blockIndex
+                startIdx = idx
+                rolesInBlock = [line.role]
+                continue
+            }
+
+            rolesInBlock.insert(line.role)
+        }
+
+        if startIdx != nil {
+            finishBlock(endIdx: lines.count - 1)
+        }
+
+        return out.sorted { $0.range.location < $1.range.location }
+    }
+
+    private func updateLayoutManagerFind(_ lm: TerminalLayoutManager, findQuery: String, matches: Set<Int>, currentLineID: Int?, ranges: [Int: NSRange]) {
+        let q = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, !matches.isEmpty else {
+            lm.matchLineIDs = []
+            lm.currentMatchLineID = nil
+            lm.matches = []
+            return
+        }
+
+        var out: [TerminalLayoutManager.FindMatch] = []
+        out.reserveCapacity(matches.count * 2)
+
+        for line in lines {
+            guard matches.contains(line.id) else { continue }
+            guard let base = ranges[line.id] else { continue }
+
+            let text = line.text as NSString
+            var search = NSRange(location: 0, length: text.length)
+            while search.length > 0 {
+                let found = text.range(of: q, options: [.caseInsensitive], range: search)
+                if found.location == NSNotFound { break }
+                out.append(.init(range: NSRange(location: base.location + found.location, length: found.length),
+                                 isCurrentLine: line.id == currentLineID))
+                let nextLoc = found.location + max(1, found.length)
+                if nextLoc >= text.length { break }
+                search = NSRange(location: nextLoc, length: text.length - nextLoc)
+            }
+        }
+
+        lm.matchLineIDs = matches
+        lm.currentMatchLineID = currentLineID
+        lm.matches = out.sorted { $0.range.location < $1.range.location }
+    }
+
+	private func buildAttributedString() -> (NSAttributedString, [Int: NSRange]) {
+		        let attr = NSMutableAttributedString()
+		        var ranges: [Int: NSRange] = [:]
+		        ranges.reserveCapacity(lines.count)
+
+		        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+		        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .medium)
+		        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+
+	        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
+	        let assistantSwatch = TerminalRolePalette.appKit(role: .assistant, scheme: colorScheme, monochrome: monochrome)
+	        let toolInputSwatch = TerminalRolePalette.appKit(role: .toolInput, scheme: colorScheme, monochrome: monochrome)
+	        let toolOutputSwatch = TerminalRolePalette.appKit(role: .toolOutput, scheme: colorScheme, monochrome: monochrome)
+	        let errorSwatch = TerminalRolePalette.appKit(role: .error, scheme: colorScheme, monochrome: monochrome)
+	        let metaSwatch = TerminalRolePalette.appKit(role: .meta, scheme: colorScheme, monochrome: monochrome)
 
         func swatch(for role: TerminalLineRole) -> TerminalRolePalette.AppKitSwatch {
             switch role {
@@ -1263,16 +1606,20 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-        let baseParagraph = NSMutableParagraphStyle()
-        baseParagraph.lineSpacing = 1.5
-        baseParagraph.paragraphSpacing = 0
-        baseParagraph.lineBreakMode = .byWordWrapping
+	        let baseParagraph = NSMutableParagraphStyle()
+	        baseParagraph.lineSpacing = 1.5
+	        baseParagraph.paragraphSpacing = 0
+	        baseParagraph.lineBreakMode = .byWordWrapping
 
-        func paragraph(spacingBefore: CGFloat) -> NSParagraphStyle {
-            let p = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
-            p.paragraphSpacingBefore = spacingBefore
-            return p
-        }
+	        func paragraph(spacingBefore: CGFloat) -> NSParagraphStyle {
+	            let p = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
+	            p.paragraphSpacingBefore = spacingBefore
+	            // “Card” padding: indent text away from the left accent, and add right padding.
+	            p.firstLineHeadIndent = 16
+	            p.headIndent = 16
+	            p.tailIndent = -16
+	            return p
+	        }
 
         let paragraph0 = paragraph(spacingBefore: 0)
         let paragraph8 = paragraph(spacingBefore: 8)
@@ -1309,8 +1656,6 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 return preambleUserBlockIndexes.contains(blockIndex)
             }()
 
-            let isCurrent = (line.id == currentLineID)
-	            let isMatch = matches.contains(line.id)
 	            let lineSwatch = swatch(for: line.role)
 
 	            let baseFont: NSFont = {
@@ -1319,25 +1664,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	                return systemRegularFont
 	            }()
 
-	            var attributes: [NSAttributedString.Key: Any] = [
-	                .font: baseFont,
-	                .foregroundColor: lineSwatch.foreground,
-	                .paragraphStyle: paragraphStyle
-	            ]
+		            let attributes: [NSAttributedString.Key: Any] = [
+		                .font: baseFont,
+		                .foregroundColor: lineSwatch.foreground,
+		                .paragraphStyle: paragraphStyle
+		            ]
 
-            if isCurrent {
-                attributes[.backgroundColor] = currentHighlight
-            } else if isMatch {
-                attributes[.backgroundColor] = matchHighlight
-            } else if let bg = lineSwatch.background {
-                attributes[.backgroundColor] = bg
-            }
+	            attr.append(NSAttributedString(string: lineString, attributes: attributes))
+	        }
 
-            attr.append(NSAttributedString(string: lineString, attributes: attributes))
-        }
-
-        return (attr, ranges)
-    }
+	        return (attr, ranges)
+	    }
 
     private func signature(for lines: [TerminalLine]) -> Int {
         var hasher = Hasher()
