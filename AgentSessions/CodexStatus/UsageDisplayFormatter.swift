@@ -58,7 +58,14 @@ func formatResetDisplay(kind: String,
                         lastUpdate: Date?,
                         eventTimestamp: Date?) -> String {
     let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate)
-    let isStale = isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff)
+    let isStale: Bool = {
+        switch source {
+        case .codex:
+            return isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff)
+        case .claude:
+            return isResetInfoStale(kind: kind, source: source, lastUpdate: eff)
+        }
+    }()
     if isStale || raw.isEmpty { return UsageStaleThresholds.outdatedCopy }
     return UsageResetText.displayText(kind: kind, source: source, raw: raw, now: Date())
 }
@@ -69,7 +76,14 @@ func formatResetDisplayForMenu(kind: String,
                                lastUpdate: Date?,
                                eventTimestamp: Date?) -> String {
     let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate)
-    let isStale = isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff)
+    let isStale: Bool = {
+        switch source {
+        case .codex:
+            return isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff)
+        case .claude:
+            return isResetInfoStale(kind: kind, source: source, lastUpdate: eff)
+        }
+    }()
     guard !isStale, !raw.isEmpty else { return UsageStaleThresholds.outdatedCopy }
 
     // Prefer a parsed reset date so we can show relative time (matches the cockpit widgets)

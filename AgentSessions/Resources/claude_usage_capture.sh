@@ -12,6 +12,7 @@
 #   14 - Claude CLI not found
 #   15 - tmux not found
 #   16 - Parsing failed
+#   17 - Claude Code needs one-time setup (terms prompt)
 #
 
 set -euo pipefail
@@ -111,18 +112,27 @@ iterations=0
 max_iterations=$((TIMEOUT_SECS * 10 / 4))  # Convert timeout to iterations
 booted=false
 
-while [ $iterations -lt $max_iterations ]; do
-    sleep "$SLEEP_BOOT"
-    ((iterations++))
+	while [ $iterations -lt $max_iterations ]; do
+	    sleep "$SLEEP_BOOT"
+	    ((iterations++))
 
     output=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p 2>/dev/null || echo "")
 
     # Check for trust prompt first (handle before boot check)
-    if echo "$output" | grep -q "Do you trust the files in this folder?"; then
-        "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter
-        sleep 1.0
-        continue  # Re-check in next iteration
-    fi
+	    if echo "$output" | grep -q "Do you trust the files in this folder?"; then
+	        "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter
+	        sleep 1.0
+	        continue  # Re-check in next iteration
+	    fi
+
+	    # Claude Code occasionally requires a one-time first-run confirmation after updates
+	    # (e.g., accepting terms). We intentionally do not auto-select an option.
+	    if echo "$output" | grep -q "Please select how you'd like to continue" || echo "$output" | grep -q "Help improve Claude"; then
+	        echo "$(error_json manual_setup_required "Claude Code needs one-time setup. Open Terminal and run: claude")"
+	        echo "ERROR: Claude Code needs one-time setup (accept terms prompt)" >&2
+	        echo "$output" >&2
+	        exit 17
+	    fi
 
     # Check for theme selection (first run)
     if echo "$output" | grep -qE '(Choose the text style|Dark mode|Light mode)'; then

@@ -120,6 +120,9 @@ final class StatusItemController: NSObject {
         if source == .both && codexAgentEnabled && claudeAgentEnabled && claudeEnabled { menu.addItem(NSMenuItem.separator()) }
         if claudeAgentEnabled && (source == .claude || source == .both) && claudeEnabled {
             menu.addItem(makeTitleItem("Claude"))
+            if claudeStatus.setupRequired {
+                menu.addItem(makeActionItem(title: "Copy setup command: claude", action: #selector(copyClaudeCommand)))
+            }
             menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
             menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openPreferences)))
         }
@@ -238,6 +241,11 @@ final class StatusItemController: NSObject {
         claudeStatus.hardProbeNowDiagnostics { diag in
             if !diag.success { self.presentFailureAlert(title: "Claude Probe Failed", diagnostics: diag) }
         }
+    }
+    @objc private func copyClaudeCommand() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString("claude", forType: .string)
     }
     @objc private func hideMenuBar() {
         UserDefaults.standard.set(false, forKey: "MenuBarEnabled")
