@@ -77,7 +77,6 @@ actor IndexDB {
             CREATE INDEX IF NOT EXISTS idx_session_meta_source ON session_meta(source);
             CREATE INDEX IF NOT EXISTS idx_session_meta_model ON session_meta(model);
             CREATE INDEX IF NOT EXISTS idx_session_meta_time ON session_meta(start_ts, end_ts);
-            CREATE INDEX IF NOT EXISTS idx_session_meta_housekeeping ON session_meta(is_housekeeping);
             """
         )
 
@@ -86,6 +85,11 @@ actor IndexDB {
         do {
             try exec(db, "ALTER TABLE session_meta ADD COLUMN is_housekeeping INTEGER NOT NULL DEFAULT 0;")
         } catch { }
+
+        // Create this index only after the column exists (older installs won't have it yet).
+        if tableHasColumn(db, table: "session_meta", column: "is_housekeeping") {
+            try exec(db, "CREATE INDEX IF NOT EXISTS idx_session_meta_housekeeping ON session_meta(is_housekeeping);")
+        }
 
         // session_days keeps per-session contributions split by day
         try exec(db,
@@ -232,6 +236,20 @@ actor IndexDB {
     }
 
     // MARK: - Exec helpers
+    private static func tableHasColumn(_ db: OpaquePointer?, table: String, column: String) -> Bool {
+        guard let db else { return false }
+        let escapedTable = table.replacingOccurrences(of: "'", with: "''")
+        let sql = "PRAGMA table_info('\(escapedTable)');"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { return false }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let name = sqlite3_column_text(stmt, 1) else { continue }
+            if String(cString: name) == column { return true }
+        }
+        return false
+    }
+
     private static func exec(_ db: OpaquePointer?, _ sql: String) throws {
         guard let db else { throw DBError.openFailed("db closed") }
         var err: UnsafeMutablePointer<Int8>?
