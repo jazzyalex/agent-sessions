@@ -41,6 +41,8 @@ final class ClaudeUsageModel: ObservableObject {
     @Published var cliUnavailable: Bool = false
     @Published var tmuxUnavailable: Bool = false
     @Published var loginRequired: Bool = false
+    @Published var setupRequired: Bool = false
+    @Published var setupHint: String? = nil
     @Published var isUpdating: Bool = false
     @Published var lastSuccessAt: Date? = nil
 
@@ -112,6 +114,8 @@ final class ClaudeUsageModel: ObservableObject {
                 model.cliUnavailable = availability.cliUnavailable
                 model.tmuxUnavailable = availability.tmuxUnavailable
                 model.loginRequired = availability.loginRequired
+                model.setupRequired = availability.setupRequired
+                model.setupHint = availability.setupHint
             }
         }
         let service = ClaudeStatusService(updateHandler: handler, availabilityHandler: availabilityHandler)
@@ -160,6 +164,8 @@ final class ClaudeUsageModel: ObservableObject {
                     self.cliUnavailable = availability.cliUnavailable
                     self.tmuxUnavailable = availability.tmuxUnavailable
                     self.loginRequired = availability.loginRequired
+                    self.setupRequired = availability.setupRequired
+                    self.setupHint = availability.setupHint
                 }
             }
             let svc = ClaudeStatusService(updateHandler: handler, availabilityHandler: availability)
@@ -193,4 +199,6 @@ struct ClaudeServiceAvailability {
     var cliUnavailable: Bool
     var tmuxUnavailable: Bool
     var loginRequired: Bool = false
+    var setupRequired: Bool = false
+    var setupHint: String? = nil
 }

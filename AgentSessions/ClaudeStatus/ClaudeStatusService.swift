@@ -152,12 +152,27 @@ actor ClaudeStatusService {
         }
     }
 
+    private func publishAvailability(loginRequired: Bool,
+                                     setupRequired: Bool,
+                                     setupHint: String?) {
+        let availability = ClaudeServiceAvailability(
+            cliUnavailable: !claudeAvailable,
+            tmuxUnavailable: !tmuxAvailable,
+            loginRequired: loginRequired,
+            setupRequired: setupRequired,
+            setupHint: setupHint
+        )
+        availabilityHandler(availability)
+    }
+
     // Hard-probe entry point: force a single /usage probe and return diagnostics.
     func forceProbeNow() async -> ClaudeProbeDiagnostics {
-        guard tmuxAvailable || checkTmuxAvailable() else {
+        tmuxAvailable = tmuxAvailable || checkTmuxAvailable()
+        guard tmuxAvailable else {
             return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: ClaudeProbeConfig.probeWorkingDirectory(), claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "tmux not found")
         }
-        guard claudeAvailable || checkClaudeAvailable() else {
+        claudeAvailable = claudeAvailable || checkClaudeAvailable()
+        guard claudeAvailable else {
             return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: ClaudeProbeConfig.probeWorkingDirectory(), claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Claude CLI not available")
         }
         guard let scriptURL = prepareScript() else {
@@ -200,8 +215,14 @@ actor ClaudeStatusService {
                 updateHandler(snapshot)
                 _ = ClaudeProbeProject.cleanupNowIfAuto()
             }
+            publishAvailability(loginRequired: false, setupRequired: false, setupHint: nil)
             return ClaudeProbeDiagnostics(success: true, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
         } else {
+            if process.terminationStatus == 13 {
+                publishAvailability(loginRequired: true, setupRequired: false, setupHint: nil)
+            } else if let hint = detectSetupRequiredHint(stdout: stdout, stderr: stderr) {
+                publishAvailability(loginRequired: false, setupRequired: true, setupHint: hint)
+            }
             return ClaudeProbeDiagnostics(success: false, exitCode: process.terminationStatus, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
         }
     }
@@ -278,20 +299,45 @@ actor ClaudeStatusService {
         // Check exit code
         let exitCode = process.terminationStatus
         if exitCode == 0 {
+            // Clear transient availability warnings on success.
+            publishAvailability(loginRequired: false, setupRequired: false, setupHint: nil)
             return output
         } else if exitCode == 13 {
             // Auth/login required - notify UI
-            let availability = ClaudeServiceAvailability(
-                cliUnavailable: false,
-                tmuxUnavailable: false,
-                loginRequired: true
-            )
-            availabilityHandler(availability)
+            publishAvailability(loginRequired: true, setupRequired: false, setupHint: nil)
             throw ClaudeServiceError.loginRequired
+        } else if let hint = detectSetupRequiredHint(stdout: output, stderr: errorOutput) {
+            publishAvailability(loginRequired: false, setupRequired: true, setupHint: hint)
+            throw ClaudeServiceError.setupRequired
         } else {
             // Script returned error JSON
             throw ClaudeServiceError.scriptFailed(exitCode: Int(exitCode), output: output)
         }
+    }
+
+    private struct ScriptErrorPayload {
+        let error: String
+        let hint: String?
+    }
+
+    private func parseScriptErrorPayload(_ stdout: String) -> ScriptErrorPayload? {
+        guard let data = stdout.data(using: .utf8) else { return nil }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        guard (obj["ok"] as? Bool) == false, let error = obj["error"] as? String else { return nil }
+        let hint = obj["hint"] as? String
+        return ScriptErrorPayload(error: error, hint: hint)
+    }
+
+    private func detectSetupRequiredHint(stdout: String, stderr: String) -> String? {
+        if let payload = parseScriptErrorPayload(stdout), payload.error == "manual_setup_required" {
+            return payload.hint ?? "Claude Code needs one-time setup. Open Terminal and run: claude"
+        }
+        // Backstop for older scripts: the terms prompt can cause a boot timeout.
+        let stderrLower = stderr.lowercased()
+        if stderrLower.contains("please select how you'd like to continue") || stderrLower.contains("help improve claude") {
+            return "Claude Code needs one-time setup. Open Terminal and run: claude"
+        }
+        return nil
     }
 
     private func prepareScript() -> URL? {
@@ -467,4 +513,5 @@ enum ClaudeServiceError: Error {
     case scriptNotFound
     case scriptFailed(exitCode: Int, output: String)
     case loginRequired
+    case setupRequired
 }

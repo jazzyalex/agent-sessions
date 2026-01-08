@@ -46,6 +46,8 @@ struct QuotaData: Equatable {
     /// Stored as percent remaining (\"left\"), consistent with usage models.
     var weekRemainingPercent: Int
     var weekResetText: String
+    var lastUpdate: Date? = nil
+    var eventTimestamp: Date? = nil
 
     func resetDate(kind: String, raw: String) -> Date? {
         UsageResetText.resetDate(kind: kind, source: provider.usageSource, raw: raw)
@@ -62,7 +64,9 @@ struct QuotaData: Equatable {
             fiveHourRemainingPercent: model.fiveHourRemainingPercent,
             fiveHourResetText: model.fiveHourResetText,
             weekRemainingPercent: model.weekRemainingPercent,
-            weekResetText: model.weekResetText
+            weekResetText: model.weekResetText,
+            lastUpdate: model.lastUpdate,
+            eventTimestamp: model.lastEventTimestamp
         )
     }
 
@@ -73,7 +77,9 @@ struct QuotaData: Equatable {
             fiveHourRemainingPercent: model.sessionRemainingPercent,
             fiveHourResetText: model.sessionResetText,
             weekRemainingPercent: model.weekAllModelsRemainingPercent,
-            weekResetText: model.weekAllModelsResetText
+            weekResetText: model.weekAllModelsResetText,
+            lastUpdate: model.lastUpdate,
+            eventTimestamp: nil
         )
     }
 }
@@ -232,10 +238,10 @@ private struct IndexingIndicator: View {
         var weekResetDisplayText: String
     }
 
-    private var presentation: Presentation {
-        let fiveResetRaw = data.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let weekResetRaw = data.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasResetInfo = !(fiveResetRaw.isEmpty && weekResetRaw.isEmpty)
+	    private var presentation: Presentation {
+	        let fiveResetRaw = data.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
+	        let weekResetRaw = data.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
+	        let hasResetInfo = !(fiveResetRaw.isEmpty && weekResetRaw.isEmpty)
 
         let fiveLeft = clampPercent(data.fiveHourRemainingPercent)
         let weekLeft = clampPercent(data.weekRemainingPercent)
@@ -260,22 +266,43 @@ private struct IndexingIndicator: View {
             }
         }()
 
-        let fiveResetDate = data.resetDate(kind: "5h", raw: data.fiveHourResetText)
-        let weekResetDate = data.resetDate(kind: "Wk", raw: data.weekResetText)
+	        let source = data.provider.usageSource
+	        let effectiveTimestamp = effectiveEventTimestamp(source: source, eventTimestamp: data.eventTimestamp, lastUpdate: data.lastUpdate)
+	        let fiveIsStale: Bool = {
+	            switch source {
+	            case .codex:
+	                return isResetInfoStale(kind: "5h", source: source, lastUpdate: data.lastUpdate, eventTimestamp: effectiveTimestamp)
+	            case .claude:
+	                return isResetInfoStale(kind: "5h", source: source, lastUpdate: effectiveTimestamp)
+	            }
+	        }()
+	        let weekIsStale: Bool = {
+	            switch source {
+	            case .codex:
+	                return isResetInfoStale(kind: "Wk", source: source, lastUpdate: data.lastUpdate, eventTimestamp: effectiveTimestamp)
+	            case .claude:
+	                return isResetInfoStale(kind: "Wk", source: source, lastUpdate: effectiveTimestamp)
+	            }
+	        }()
 
-        let fiveResetDisplayText: String = {
-            let rel = formatRelativeTimeUntil(fiveResetDate)
-            if rel != "—" { return "↻ \(rel)" }
-            let fallback = data.resetDisplayFallback(kind: "5h", raw: data.fiveHourResetText)
-            return fallback.isEmpty ? "↻ —" : "↻ \(fallback)"
-        }()
+	        let fiveResetDate = fiveIsStale ? nil : data.resetDate(kind: "5h", raw: data.fiveHourResetText)
+	        let weekResetDate = weekIsStale ? nil : data.resetDate(kind: "Wk", raw: data.weekResetText)
 
-        let weekResetDisplayText: String = {
-            let s = formatWeeklyReset(weekResetDate)
-            if s != "—" { return "↻ \(s)" }
-            let fallback = data.resetDisplayFallback(kind: "Wk", raw: data.weekResetText)
-            return fallback.isEmpty ? "↻ —" : "↻ \(fallback)"
-        }()
+	        let fiveResetDisplayText: String = {
+	            if fiveIsStale { return "↻ n/a" }
+	            let rel = formatRelativeTimeUntil(fiveResetDate)
+	            if rel != "—" { return "↻ \(rel)" }
+	            let fallback = data.resetDisplayFallback(kind: "5h", raw: data.fiveHourResetText)
+	            return fallback.isEmpty ? "↻ —" : "↻ \(fallback)"
+	        }()
+
+	        let weekResetDisplayText: String = {
+	            if weekIsStale { return "↻ n/a" }
+	            let s = formatWeeklyReset(weekResetDate)
+	            if s != "—" { return "↻ \(s)" }
+	            let fallback = data.resetDisplayFallback(kind: "Wk", raw: data.weekResetText)
+	            return fallback.isEmpty ? "↻ —" : "↻ \(fallback)"
+	        }()
 
         return Presentation(
             barFillPercent: barFillPercent,
@@ -493,12 +520,16 @@ private struct CockpitFooterPreviewHost: View {
                           fiveHourRemainingPercent: isCritical ? 10 : 55,
                           fiveHourResetText: "resets 14:00",
                           weekRemainingPercent: isCritical ? 8 : 45,
-                          weekResetText: "resets 2/9/2026, 2:00 PM"),
+                          weekResetText: "resets 2/9/2026, 2:00 PM",
+                          lastUpdate: Date(),
+                          eventTimestamp: Date()),
                 QuotaData(provider: .claude,
                           fiveHourRemainingPercent: isCritical ? 15 : 55,
                           fiveHourResetText: "Jan 5 at 2pm",
                           weekRemainingPercent: isCritical ? 9 : 45,
-                          weekResetText: "Jan 9 at 2pm"),
+                          weekResetText: "Jan 9 at 2pm",
+                          lastUpdate: Date(),
+                          eventTimestamp: nil),
             ],
             sessionCountText: "12 / 42 Sessions",
             freshnessText: "Last: 2m ago",

@@ -34,6 +34,11 @@ struct ClaudeUsageStripView: View {
             // Status text (right-aligned): only show problems/warnings
             if status.loginRequired {
                 Text("Login required").font(.caption).foregroundStyle(.red)
+            } else if status.setupRequired {
+                Text("Setup required")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .help(status.setupHint ?? "Claude Code needs one-time setup. Open Terminal and run: claude")
             } else if status.cliUnavailable {
                 Text("CLI not found").font(.caption).foregroundStyle(.red)
             } else if status.tmuxUnavailable {
@@ -94,6 +99,9 @@ struct ClaudeUsageStripView: View {
             parts.append("Claude: Not yet updated")
         }
 
+        if status.setupRequired {
+            parts.append(status.setupHint ?? "Claude Code needs one-time setup. Open Terminal and run: claude")
+        }
         parts.append("Double-click to refresh now")
 
         return parts.joined(separator: "\n")

@@ -55,6 +55,8 @@ All notable changes to this project will be documented in this file.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
 - Parsing: Surface Codex thread rollback events with readable text in timelines.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
+- Claude Usage: Detect the Claude Code first-run terms prompt and surface a “Setup required” state instead of timing out silently.
+- Menu Bar: When usage data is stale, reset indicators now show “n/a” instead of an incorrect countdown.
 
 ## [2.9.2] - 2026-01-01
 
