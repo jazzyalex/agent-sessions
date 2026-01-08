@@ -915,7 +915,6 @@ private final class TerminalLayoutManager: NSLayoutManager {
 
     private struct BlockStyle {
         let fill: NSColor
-        let stroke: NSColor
         let accent: NSColor?
         let accentWidth: CGFloat
     }
@@ -933,42 +932,37 @@ private final class TerminalLayoutManager: NSLayoutManager {
         case .user:
             let base = NSColor.systemIndigo
             return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.09 : 0.03),
-                stroke: rgba(base, alpha: dark ? 0.22 : 0.10),
+                fill: rgba(base, alpha: dark ? 0.08 : 0.02),
                 accent: rgba(base, alpha: dark ? 0.55 : 0.35),
-                accentWidth: 2
+                accentWidth: 4
             )
         case .agent:
             // Neutral card (no accent)
             return BlockStyle(
-                fill: rgba(NSColor.labelColor, alpha: dark ? 0.07 : 0.015),
-                stroke: rgba(NSColor.separatorColor, alpha: dark ? 0.75 : 0.55),
+                fill: rgba(NSColor.labelColor, alpha: dark ? 0.06 : 0.012),
                 accent: nil,
                 accentWidth: 0
             )
         case .toolCall:
             let base = NSColor.systemBlue
             return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
-                stroke: rgba(base, alpha: dark ? 0.26 : 0.12),
+                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
                 accent: rgba(base, alpha: dark ? 0.78 : 0.60),
-                accentWidth: 3
+                accentWidth: 4
             )
         case .toolOutput:
             let base = NSColor.systemGreen
             return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
-                stroke: rgba(base, alpha: dark ? 0.26 : 0.12),
+                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
                 accent: rgba(base, alpha: dark ? 0.78 : 0.60),
-                accentWidth: 3
+                accentWidth: 4
             )
         case .error:
             let base = NSColor.systemRed
             return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.14 : 0.05),
-                stroke: rgba(base, alpha: dark ? 0.30 : 0.14),
+                fill: rgba(base, alpha: dark ? 0.11 : 0.035),
                 accent: rgba(base, alpha: dark ? 0.82 : 0.65),
-                accentWidth: 3
+                accentWidth: 4
             )
         }
     }
@@ -1027,6 +1021,11 @@ private final class TerminalLayoutManager: NSLayoutManager {
     private func drawBlockCards(forGlyphRange glyphsToShow: NSRange, in tc: NSTextContainer, at origin: CGPoint) {
         guard !blocks.isEmpty else { return }
 
+        let cardCornerRadius: CGFloat = 8
+        let cardInsetX: CGFloat = 8
+        let cardPadY: CGFloat = 6
+        let stripInsetY: CGFloat = 8
+
         for block in blocks {
             let blockGlyphs = glyphRange(forCharacterRange: block.range, actualCharacterRange: nil)
             guard NSIntersectionRange(blockGlyphs, glyphsToShow).length > 0 else { continue }
@@ -1038,26 +1037,26 @@ private final class TerminalLayoutManager: NSLayoutManager {
             }
             guard var cardRect = unionRect else { continue }
 
-            // Slight vertical breathing room so cards read like blocks, not line bands.
-            cardRect = cardRect.insetBy(dx: 0, dy: -6)
+            // Card geometry: keep whitespace between blocks, but add internal padding.
+            cardRect = cardRect.insetBy(dx: cardInsetX, dy: 0)
+            cardRect = cardRect.insetBy(dx: 0, dy: -cardPadY)
 
             let style = style(for: block.kind)
-            let path = NSBezierPath(roundedRect: cardRect, xRadius: 6, yRadius: 6)
+            let path = NSBezierPath(roundedRect: cardRect, xRadius: cardCornerRadius, yRadius: cardCornerRadius)
 
             style.fill.setFill()
             path.fill()
 
             if let accent = style.accent, style.accentWidth > 0 {
-                NSGraphicsContext.saveGraphicsState()
-                path.addClip()
                 accent.setFill()
-                NSBezierPath(rect: CGRect(x: cardRect.minX, y: cardRect.minY, width: style.accentWidth, height: cardRect.height)).fill()
-                NSGraphicsContext.restoreGraphicsState()
+                let y0 = cardRect.minY + stripInsetY
+                let h = max(0, cardRect.height - (stripInsetY * 2))
+                if h > 0 {
+                    let stripRect = CGRect(x: cardRect.minX, y: y0, width: style.accentWidth, height: h)
+                    let radius = style.accentWidth / 2
+                    NSBezierPath(roundedRect: stripRect, xRadius: radius, yRadius: radius).fill()
+                }
             }
-
-            style.stroke.setStroke()
-            path.lineWidth = 1
-            path.stroke()
         }
     }
 
@@ -1614,17 +1613,22 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	        func paragraph(spacingBefore: CGFloat) -> NSParagraphStyle {
 	            let p = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
 	            p.paragraphSpacingBefore = spacingBefore
-	            // “Card” padding: indent text away from the left accent, and add right padding.
-	            p.firstLineHeadIndent = 16
-	            p.headIndent = 16
-	            p.tailIndent = -16
+	            // Card layout:
+	            // - keep a consistent left/right internal padding (accounts for 4px accent strip + 16px content padding)
+	            // - rely on paragraph spacing for whitespace between cards
+	            let cardInsetX: CGFloat = 8
+	            let leftPaddingFromCardEdge: CGFloat = 20 // 4px strip + 16px padding
+	            let rightPaddingFromCardEdge: CGFloat = 16
+	            p.firstLineHeadIndent = cardInsetX + leftPaddingFromCardEdge
+	            p.headIndent = cardInsetX + leftPaddingFromCardEdge
+	            p.tailIndent = -(cardInsetX + rightPaddingFromCardEdge)
 	            return p
 	        }
 
-        let paragraph0 = paragraph(spacingBefore: 0)
-        let paragraph8 = paragraph(spacingBefore: 8)
-        let paragraph10 = paragraph(spacingBefore: 10)
-        let paragraph14 = paragraph(spacingBefore: 14)
+	        let paragraph0 = paragraph(spacingBefore: 0)
+	        let blockGap: CGFloat = 18
+	        let paragraphGap = paragraph(spacingBefore: blockGap)
+	        let paragraphMetaGap = paragraph(spacingBefore: 10)
 
         var previousBlockIndex: Int? = nil
 
@@ -1638,17 +1642,11 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let isNewBlock = idx > 0 && previousBlockIndex != line.blockIndex
             previousBlockIndex = line.blockIndex
 
-            let paragraphStyle: NSParagraphStyle = {
-                guard isNewBlock else { return paragraph0 }
-                switch line.role {
-                case .user:
-                    return paragraph14
-                case .assistant:
-                    return paragraph8
-                case .toolInput, .toolOutput, .error, .meta:
-                    return paragraph10
-                }
-            }()
+	            let paragraphStyle: NSParagraphStyle = {
+	                guard isNewBlock else { return paragraph0 }
+	                if line.role == .meta { return paragraphMetaGap }
+	                return paragraphGap
+	            }()
 
             let isPreambleUserLine: Bool = {
                 guard line.role == .user else { return false }
