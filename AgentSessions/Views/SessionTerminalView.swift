@@ -812,49 +812,49 @@ private struct TerminalRolePalette {
                     accent: NSColor.secondaryLabelColor
                 )
             }
-        } else {
-            // Color mode: high-contrast palette tuned for scanning in both dark/light modes.
-            switch role {
-            case .user:
-                return AppKitSwatch(
-                    foreground: NSColor.labelColor,
-                    background: tinted(NSColor.systemBlue, light: 0.20, dark: 0.25),
-                    accent: NSColor.systemBlue
-                )
-            case .assistant:
-                return AppKitSwatch(
-                    foreground: NSColor.labelColor,
-                    background: tinted(NSColor.systemGreen, light: 0.08, dark: 0.12),
-                    accent: NSColor.systemGreen
-                )
-            case .toolInput:
-                return AppKitSwatch(
-                    foreground: NSColor.labelColor,
-                    background: tinted(NSColor.systemPurple, light: 0.16, dark: 0.18),
-                    accent: NSColor.systemPurple
-                )
-            case .toolOutput:
-                return AppKitSwatch(
-                    foreground: NSColor.labelColor,
-                    background: tinted(NSColor.systemTeal, light: 0.16, dark: 0.18),
-                    accent: NSColor.systemTeal
-                )
-            case .error:
-                return AppKitSwatch(
-                    foreground: NSColor.labelColor,
-                    background: tinted(NSColor.systemRed, light: 0.28, dark: 0.40),
-                    accent: NSColor.systemRed
-                )
-            case .meta:
-                return AppKitSwatch(
-                    foreground: NSColor.secondaryLabelColor,
-                    background: nil,
-                    accent: NSColor.secondaryLabelColor
-                )
-            }
-        }
-    }
-}
+	        } else {
+	            // Color mode: high-contrast palette tuned for scanning in both dark/light modes.
+	            switch role {
+	            case .user:
+	                return AppKitSwatch(
+	                    foreground: NSColor.labelColor,
+	                    background: tinted(NSColor.systemBlue, light: 0.20, dark: 0.25),
+	                    accent: NSColor.systemBlue
+	                )
+	            case .assistant:
+	                return AppKitSwatch(
+	                    foreground: NSColor.labelColor,
+	                    background: tinted(NSColor.systemGreen, light: 0.08, dark: 0.12),
+	                    accent: NSColor.systemGreen
+	                )
+	            case .toolInput:
+	                return AppKitSwatch(
+	                    foreground: NSColor.labelColor,
+	                    background: tinted(NSColor.systemPurple, light: 0.16, dark: 0.18),
+	                    accent: NSColor.systemPurple
+	                )
+	            case .toolOutput:
+	                return AppKitSwatch(
+	                    foreground: NSColor.labelColor,
+	                    background: tinted(NSColor.systemGreen, light: 0.10, dark: 0.14),
+	                    accent: NSColor.systemGreen
+	                )
+	            case .error:
+	                return AppKitSwatch(
+	                    foreground: NSColor.labelColor,
+	                    background: tinted(NSColor.systemRed, light: 0.28, dark: 0.40),
+	                    accent: NSColor.systemRed
+	                )
+	            case .meta:
+	                return AppKitSwatch(
+	                    foreground: NSColor.secondaryLabelColor,
+	                    background: nil,
+	                    accent: NSColor.secondaryLabelColor
+	                )
+	            }
+	        }
+	    }
+	}
 
 private extension TerminalLineRole {
     var paletteRole: TerminalRolePalette.Role {
@@ -930,7 +930,7 @@ private final class TerminalLayoutManager: NSLayoutManager {
 
         switch kind {
         case .user:
-            let base = NSColor.systemIndigo
+            let base = NSColor.systemBlue
             return BlockStyle(
                 fill: rgba(base, alpha: dark ? 0.08 : 0.02),
                 accent: rgba(base, alpha: dark ? 0.55 : 0.35),
@@ -944,7 +944,7 @@ private final class TerminalLayoutManager: NSLayoutManager {
                 accentWidth: 0
             )
         case .toolCall:
-            let base = NSColor.systemBlue
+            let base = NSColor.systemPurple
             return BlockStyle(
                 fill: rgba(base, alpha: dark ? 0.10 : 0.03),
                 accent: rgba(base, alpha: dark ? 0.78 : 0.60),

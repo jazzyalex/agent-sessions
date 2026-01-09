@@ -2124,23 +2124,23 @@ private struct PlainTextScrollView: NSViewRepresentable {
                     textStorage.addAttribute(.foregroundColor, value: gray, range: r)
                 }
             }
-            // Tool output colorization (teal/cyan family for contrast with orange)
-            if !outputRanges.isEmpty {
-                let isDark = isDarkMode
-                let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-                let color: NSColor = {
-                    if monochrome {
-                        return NSColor(white: 0.6, alpha: 1.0)  // Tool output in lighter gray
-                    } else {
-                        let baseTeal = NSColor.systemTeal
-                        if isDark || increaseContrast { return baseTeal }
-                        return baseTeal.withAlphaComponent(0.90)
-                    }
-                }()
-                    for r in outputRanges where NSMaxRange(r) <= full.length {
-                    textStorage.addAttribute(.foregroundColor, value: color, range: r)
-                }
-            }
+	            // Tool output colorization (green family)
+	            if !outputRanges.isEmpty {
+	                let isDark = isDarkMode
+	                let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+	                let color: NSColor = {
+	                    if monochrome {
+	                        return NSColor(white: 0.6, alpha: 1.0)  // Tool output in lighter gray
+	                    } else {
+	                        let baseGreen = NSColor.systemGreen
+	                        if isDark || increaseContrast { return baseGreen }
+	                        return baseGreen.withAlphaComponent(0.90)
+	                    }
+	                }()
+	                    for r in outputRanges where NSMaxRange(r) <= full.length {
+	                    textStorage.addAttribute(.foregroundColor, value: color, range: r)
+	                }
+	            }
             // Error colorization (red)
             if !errorRanges.isEmpty {
                 let isDark = isDarkMode
