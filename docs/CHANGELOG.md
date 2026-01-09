@@ -57,6 +57,8 @@ All notable changes to this project will be documented in this file.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
 - Claude Usage: Detect the Claude Code first-run terms prompt and surface a “Setup required” state instead of timing out silently.
 - Menu Bar: When usage data is stale, reset indicators now show “n/a” instead of an incorrect countdown.
+- Claude Usage: Refresh usage automatically after wake when the usage strip or menu bar label is visible.
+- Menu Bar: Show an updating spinner next to reset indicators while probes run.
 
 ## [2.9.2] - 2026-01-01
 
