@@ -5,19 +5,19 @@ import AppKit
 /// Uses existing agent brand colors from the main app
 extension Color {
     /// Codex CLI brand color (softened coral)
-    static let agentCodex = Color(hex: "D7745E")
+    static let agentCodex: Color = TranscriptColorSystem.agentBrandAccent(source: .codex)
 
     /// Claude Code brand color (muted lavender)
-    static let agentClaude = Color(hex: "8F86B8")
+    static let agentClaude: Color = TranscriptColorSystem.agentBrandAccent(source: .claude)
 
     /// Gemini brand color
-    static let agentGemini = Color.teal
+    static let agentGemini: Color = TranscriptColorSystem.agentBrandAccent(source: .gemini)
     /// OpenCode brand color
-    static let agentOpenCode = Color.purple
+    static let agentOpenCode: Color = TranscriptColorSystem.agentBrandAccent(source: .opencode)
     /// Copilot brand color
-    static let agentCopilot = Color(red: 0.90, green: 0.20, blue: 0.60)
+    static let agentCopilot: Color = TranscriptColorSystem.agentBrandAccent(source: .copilot)
     /// Droid brand color
-    static let agentDroid = Color(red: 0.16, green: 0.68, blue: 0.28)
+    static let agentDroid: Color = TranscriptColorSystem.agentBrandAccent(source: .droid)
 
     // MARK: - Monochrome Support
 
