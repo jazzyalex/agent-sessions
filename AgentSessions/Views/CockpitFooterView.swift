@@ -48,6 +48,7 @@ struct QuotaData: Equatable {
     var weekResetText: String
     var lastUpdate: Date? = nil
     var eventTimestamp: Date? = nil
+    var isUpdating: Bool = false
 
     func resetDate(kind: String, raw: String) -> Date? {
         UsageResetText.resetDate(kind: kind, source: provider.usageSource, raw: raw)
@@ -66,7 +67,8 @@ struct QuotaData: Equatable {
             weekRemainingPercent: model.weekRemainingPercent,
             weekResetText: model.weekResetText,
             lastUpdate: model.lastUpdate,
-            eventTimestamp: model.lastEventTimestamp
+            eventTimestamp: model.lastEventTimestamp,
+            isUpdating: model.isUpdating
         )
     }
 
@@ -79,7 +81,8 @@ struct QuotaData: Equatable {
             weekRemainingPercent: model.weekAllModelsRemainingPercent,
             weekResetText: model.weekAllModelsResetText,
             lastUpdate: model.lastUpdate,
-            eventTimestamp: nil
+            eventTimestamp: nil,
+            isUpdating: model.isUpdating
         )
     }
 }
@@ -226,17 +229,17 @@ private struct IndexingIndicator: View {
     private var mode: UsageDisplayMode { modeOverride ?? (UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left) }
 
     private enum BottleneckKind { case fiveHour, week }
-    private struct Presentation: Equatable {
-        var barFillPercent: Int
-        var barFillColor: Color
+	    private struct Presentation: Equatable {
+	        var barFillPercent: Int
+	        var barFillColor: Color
 
         var bottleneckUsedPercent: Int
 
-        var fiveHourPercentLabelText: String
-        var weekPercentLabelText: String
-        var fiveHourResetDisplayText: String
-        var weekResetDisplayText: String
-    }
+	        var fiveHourPercentLabelText: String
+	        var weekPercentLabelText: String
+	        var fiveHourResetLabelText: String
+	        var weekResetLabelText: String
+	    }
 
 	    private var presentation: Presentation {
 	        let fiveResetRaw = data.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -289,35 +292,47 @@ private struct IndexingIndicator: View {
 	        let weekResetDate = weekIsStale ? nil : data.resetDate(kind: "Wk", raw: data.weekResetText)
 
 	        let fiveResetDisplayText: String = {
-	            if fiveIsStale { return "↻ n/a" }
 	            let rel = formatRelativeTimeUntil(fiveResetDate)
-	            if rel != "—" { return "↻ \(rel)" }
+	            if fiveIsStale { return "n/a" }
+	            if rel != "—" { return rel }
 	            let fallback = data.resetDisplayFallback(kind: "5h", raw: data.fiveHourResetText)
-	            return fallback.isEmpty ? "↻ —" : "↻ \(fallback)"
+	            return fallback.isEmpty ? "—" : fallback
 	        }()
 
 	        let weekResetDisplayText: String = {
-	            if weekIsStale { return "↻ n/a" }
 	            let s = formatWeeklyReset(weekResetDate)
-	            if s != "—" { return "↻ \(s)" }
+	            if weekIsStale { return "n/a" }
+	            if s != "—" { return s }
 	            let fallback = data.resetDisplayFallback(kind: "Wk", raw: data.weekResetText)
-	            return fallback.isEmpty ? "↻ —" : "↻ \(fallback)"
+	            return fallback.isEmpty ? "—" : fallback
 	        }()
 
-        return Presentation(
-            barFillPercent: barFillPercent,
-            barFillColor: isCritical ? .red : .white,
-            bottleneckUsedPercent: hasResetInfo ? bottleneckUsed : 0,
-            fiveHourPercentLabelText: "\(mode.numericPercent(fromLeft: fiveLeft))%",
-            weekPercentLabelText: "\(mode.numericPercent(fromLeft: weekLeft))%",
-            fiveHourResetDisplayText: fiveResetDisplayText,
-            weekResetDisplayText: weekResetDisplayText
-        )
-    }
+	        return Presentation(
+	            barFillPercent: barFillPercent,
+	            barFillColor: isCritical ? .red : .white,
+	            bottleneckUsedPercent: hasResetInfo ? bottleneckUsed : 0,
+	            fiveHourPercentLabelText: "\(mode.numericPercent(fromLeft: fiveLeft))%",
+	            weekPercentLabelText: "\(mode.numericPercent(fromLeft: weekLeft))%",
+	            fiveHourResetLabelText: fiveResetDisplayText,
+	            weekResetLabelText: weekResetDisplayText
+	        )
+	    }
 
 	    @ViewBuilder
-	    private var inner: some View {
-	        HStack(spacing: 8) {
+	    private func resetIndicator(labelText: String) -> some View {
+	        HStack(spacing: 4) {
+	            if data.isUpdating {
+	                RefreshSpinner(tint: baseForeground)
+	            } else {
+	                Text("↻")
+	            }
+	            Text(labelText)
+	        }
+	    }
+
+		    @ViewBuilder
+		    private var inner: some View {
+		        HStack(spacing: 8) {
 	            ProviderIcon(provider: data.provider)
 	                .frame(width: 14, height: 14)
 
@@ -331,37 +346,37 @@ private struct IndexingIndicator: View {
                 )
             }
 
-	            HStack(spacing: 6) {
-	                switch scope {
-	                case .fiveHour:
-	                    Text("5h: \(presentation.fiveHourPercentLabelText)")
-	                    if showResetIndicators {
-	                        DividerText(baseForeground: baseForeground)
-	                        Text(presentation.fiveHourResetDisplayText)
-	                    }
-	                case .week:
-	                    Text("Wk: \(presentation.weekPercentLabelText)")
-	                    if showResetIndicators {
-	                        DividerText(baseForeground: baseForeground)
-	                        Text(presentation.weekResetDisplayText)
-	                    }
-	                case .both:
-	                    Text("5h: \(presentation.fiveHourPercentLabelText)")
-	                    if showResetIndicators {
-	                        DividerText(baseForeground: baseForeground)
-	                        Text(presentation.fiveHourResetDisplayText)
-	                        DividerText(baseForeground: baseForeground)
-	                    } else {
-	                        DividerText(baseForeground: baseForeground)
-	                    }
-	                    Text("Wk: \(presentation.weekPercentLabelText)")
-	                    if showResetIndicators {
-	                        DividerText(baseForeground: baseForeground)
-	                        Text(presentation.weekResetDisplayText)
-	                    }
-	                }
-	            }
-            .font(.system(size: 12, weight: .medium, design: .monospaced))
+		            HStack(spacing: 6) {
+		                switch scope {
+		                case .fiveHour:
+		                    Text("5h: \(presentation.fiveHourPercentLabelText)")
+		                    if showResetIndicators {
+		                        DividerText(baseForeground: baseForeground)
+		                        resetIndicator(labelText: presentation.fiveHourResetLabelText)
+		                    }
+		                case .week:
+		                    Text("Wk: \(presentation.weekPercentLabelText)")
+		                    if showResetIndicators {
+		                        DividerText(baseForeground: baseForeground)
+		                        resetIndicator(labelText: presentation.weekResetLabelText)
+		                    }
+		                case .both:
+		                    Text("5h: \(presentation.fiveHourPercentLabelText)")
+		                    if showResetIndicators {
+		                        DividerText(baseForeground: baseForeground)
+		                        resetIndicator(labelText: presentation.fiveHourResetLabelText)
+		                        DividerText(baseForeground: baseForeground)
+		                    } else {
+		                        DividerText(baseForeground: baseForeground)
+		                    }
+		                    Text("Wk: \(presentation.weekPercentLabelText)")
+		                    if showResetIndicators {
+		                        DividerText(baseForeground: baseForeground)
+		                        resetIndicator(labelText: presentation.weekResetLabelText)
+		                    }
+		                }
+		            }
+	            .font(.system(size: 12, weight: .medium, design: .monospaced))
             .foregroundStyle(baseForeground)
             .lineLimit(1)
 	        }
@@ -410,6 +425,20 @@ private struct IndexingIndicator: View {
             return formatter.string(from: date)
         }
         return AppDateFormatting.weekdayAbbrev(date)
+    }
+	}
+
+private struct RefreshSpinner: View {
+    let tint: Color
+    @State private var rotate: Bool = false
+
+    var body: some View {
+        Image(systemName: "arrow.triangle.2.circlepath")
+            .foregroundStyle(tint)
+            .font(.system(size: 11, weight: .semibold))
+            .rotationEffect(.degrees(rotate ? 360 : 0))
+            .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: rotate)
+            .onAppear { rotate = true }
     }
 }
 

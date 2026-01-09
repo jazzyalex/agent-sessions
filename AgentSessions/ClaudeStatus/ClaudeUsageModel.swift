@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 
 // Snapshot of parsed values from Claude CLI /usage
 struct ClaudeUsageSnapshot: Equatable {
@@ -50,6 +51,7 @@ final class ClaudeUsageModel: ObservableObject {
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
+    private var wakeObservers: [NSObjectProtocol] = []
 
     func setEnabled(_ enabled: Bool) {
         guard enabled != isEnabled else { return }
@@ -120,6 +122,7 @@ final class ClaudeUsageModel: ObservableObject {
         }
         let service = ClaudeStatusService(updateHandler: handler, availabilityHandler: availabilityHandler)
         self.service = service
+        installWakeObservers()
         Task.detached {
             await service.start()
         }
@@ -130,6 +133,37 @@ final class ClaudeUsageModel: ObservableObject {
             await service?.stop()
         }
         service = nil
+        removeWakeObservers()
+    }
+
+    private func installWakeObservers() {
+        guard wakeObservers.isEmpty else { return }
+        let nc = NSWorkspace.shared.notificationCenter
+        wakeObservers.append(
+            nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.handleWake()
+            }
+        )
+        wakeObservers.append(
+            nc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.handleWake()
+            }
+        )
+    }
+
+    private func removeWakeObservers() {
+        let nc = NSWorkspace.shared.notificationCenter
+        for token in wakeObservers {
+            nc.removeObserver(token)
+        }
+        wakeObservers.removeAll()
+    }
+
+    private func handleWake() {
+        guard isEnabled else { return }
+        guard stripVisible || menuVisible else { return }
+        if UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled") == false { return }
+        refreshNow()
     }
 
     // Hard-probe entry: run a one-off /usage probe and return diagnostics
