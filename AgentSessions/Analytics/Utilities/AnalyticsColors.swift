@@ -109,7 +109,7 @@ enum SyntaxColorType {
     // Terminal mode
     case command        // Orange
     case userInput      // Blue
-    case toolOutput     // Teal
+    case toolOutput     // Green
     case error          // Red
     case assistant      // Gray
 
@@ -141,7 +141,7 @@ extension NSColor {
             switch type {
             case .command: return NSColor.systemOrange
             case .userInput: return NSColor.systemBlue
-            case .toolOutput: return NSColor.systemTeal
+            case .toolOutput: return NSColor.systemGreen
             case .error: return NSColor.systemRed
             case .assistant: return NSColor.secondaryLabelColor
             case .jsonKey: return NSColor.systemPink
