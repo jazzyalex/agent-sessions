@@ -672,12 +672,12 @@ private struct TerminalLineView: View {
 	    var body: some View {
 	        HStack(alignment: .firstTextBaseline, spacing: 4) {
 	            prefixView
-	            Text(line.text)
-	                .font(.system(size: fontSize,
-	                              weight: (line.role == .user) ? .medium : .regular,
-	                              design: (line.role == .toolInput) ? .monospaced : .default))
-	                .foregroundColor(swatch.foreground)
-	        }
+		            Text(line.text)
+		                .font(.system(size: fontSize,
+		                              weight: .regular,
+		                              design: (line.role == .toolInput) ? .monospaced : .default))
+		                .foregroundColor(swatch.foreground)
+		        }
 	        .textSelection(.enabled)
 	        .padding(.horizontal, 4)
         .padding(.vertical, 1)
@@ -1609,7 +1609,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 		        ranges.reserveCapacity(lines.count)
 
 		        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-		        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .medium)
+			        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
 		        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
 	        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
