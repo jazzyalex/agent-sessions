@@ -145,6 +145,7 @@ struct SessionTerminalView: View {
                 TerminalTextScrollView(
                     lines: filteredLines,
                     fontSize: CGFloat(transcriptFontSize),
+                    sessionSource: session.source,
                     findQuery: findQuery,
                     matchIDs: matchIDSet,
                     currentMatchLineID: currentMatchLineID,
@@ -332,7 +333,12 @@ struct SessionTerminalView: View {
 
     private func legendToggle(label: String, role: RoleToggle) -> some View {
         let isOn = activeRoles.contains(role)
-        let swatch = TerminalRolePalette.swiftUI(role: TerminalRolePalette.role(for: role), scheme: colorScheme, monochrome: stripMonochrome)
+        let swatch = TerminalRolePalette.swiftUI(
+            role: TerminalRolePalette.role(for: role),
+            sessionSource: role == .assistant ? session.source : nil,
+            scheme: colorScheme,
+            monochrome: stripMonochrome
+        )
         let indices = indicesForRole(role)
         let hasLines = !indices.isEmpty
         let navDisabled = !isOn || !hasLines
@@ -752,8 +758,8 @@ private struct TerminalRolePalette {
         }
     }
 
-    static func swiftUI(role: Role, scheme: ColorScheme, monochrome: Bool = false) -> SwiftUISwatch {
-        let appKitColors = baseColors(for: role, scheme: scheme, monochrome: monochrome)
+    static func swiftUI(role: Role, sessionSource: SessionSource? = nil, scheme: ColorScheme, monochrome: Bool = false) -> SwiftUISwatch {
+        let appKitColors = baseColors(for: role, sessionSource: sessionSource, scheme: scheme, monochrome: monochrome)
         return SwiftUISwatch(
             foreground: Color(nsColor: appKitColors.foreground),
             background: appKitColors.background.map { Color(nsColor: $0) },
@@ -761,11 +767,11 @@ private struct TerminalRolePalette {
         )
     }
 
-    static func appKit(role: Role, scheme: ColorScheme, monochrome: Bool = false) -> AppKitSwatch {
-        baseColors(for: role, scheme: scheme, monochrome: monochrome)
+    static func appKit(role: Role, sessionSource: SessionSource? = nil, scheme: ColorScheme, monochrome: Bool = false) -> AppKitSwatch {
+        baseColors(for: role, sessionSource: sessionSource, scheme: scheme, monochrome: monochrome)
     }
 
-    private static func baseColors(for role: Role, scheme: ColorScheme, monochrome: Bool) -> AppKitSwatch {
+    private static func baseColors(for role: Role, sessionSource: SessionSource?, scheme: ColorScheme, monochrome: Bool) -> AppKitSwatch {
         let isDark = (scheme == .dark)
 
         func tinted(_ color: NSColor, light: CGFloat, dark: CGFloat) -> NSColor {
@@ -812,26 +818,27 @@ private struct TerminalRolePalette {
                     accent: NSColor.secondaryLabelColor
                 )
             }
-	        } else {
-	            // Color mode: high-contrast palette tuned for scanning in both dark/light modes.
-	            switch role {
-	            case .user:
-	                return AppKitSwatch(
-	                    foreground: NSColor.labelColor,
-	                    background: tinted(NSColor.systemBlue, light: 0.20, dark: 0.25),
-	                    accent: NSColor.systemBlue
-	                )
-	            case .assistant:
-	                return AppKitSwatch(
-	                    foreground: NSColor.labelColor,
-	                    background: tinted(NSColor.systemGreen, light: 0.08, dark: 0.12),
-	                    accent: NSColor.systemGreen
-	                )
-	            case .toolInput:
-	                return AppKitSwatch(
-	                    foreground: NSColor.labelColor,
-	                    background: tinted(NSColor.systemPurple, light: 0.16, dark: 0.18),
-	                    accent: NSColor.systemPurple
+        } else {
+            // Color mode: high-contrast palette tuned for scanning in both dark/light modes.
+            switch role {
+            case .user:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: tinted(NSColor.systemBlue, light: 0.20, dark: 0.25),
+                    accent: NSColor.systemBlue
+                )
+            case .assistant:
+                let accentBase = sessionSource.map { TranscriptColorSystem.agentBrandAccent(source: $0) } ?? NSColor.secondaryLabelColor
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: tinted(accentBase, light: 0.08, dark: 0.12),
+                    accent: accentBase
+                )
+            case .toolInput:
+                return AppKitSwatch(
+                    foreground: NSColor.labelColor,
+                    background: tinted(NSColor.systemPurple, light: 0.16, dark: 0.18),
+                    accent: NSColor.systemPurple
 	                )
 	            case .toolOutput:
 	                return AppKitSwatch(
@@ -907,6 +914,7 @@ private final class TerminalLayoutManager: NSLayoutManager {
     }
 
     var isDark: Bool = false
+    var agentBrandAccent: NSColor = NSColor.secondaryLabelColor
     var blocks: [BlockDecoration] = []
     var lineIndex: [LineIndexEntry] = []
     var matchLineIDs: Set<Int> = []
@@ -928,44 +936,44 @@ private final class TerminalLayoutManager: NSLayoutManager {
 
         func rgba(_ color: NSColor, alpha: CGFloat) -> NSColor { color.withAlphaComponent(alpha) }
 
-        switch kind {
-        case .user:
-            let base = NSColor.systemBlue
-            return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.08 : 0.02),
-                accent: rgba(base, alpha: dark ? 0.55 : 0.35),
-                accentWidth: 4
-            )
+	        switch kind {
+	        case .user:
+	            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
+	            return BlockStyle(
+	                fill: rgba(base, alpha: dark ? 0.08 : 0.02),
+	                accent: rgba(base, alpha: dark ? 0.55 : 0.35),
+	                accentWidth: 4
+	            )
         case .agent:
-            // Neutral card (no accent)
+            let base = agentBrandAccent
             return BlockStyle(
-                fill: rgba(NSColor.labelColor, alpha: dark ? 0.06 : 0.012),
-                accent: nil,
-                accentWidth: 0
-            )
-        case .toolCall:
-            let base = NSColor.systemPurple
-            return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
-                accent: rgba(base, alpha: dark ? 0.78 : 0.60),
+                fill: rgba(base, alpha: dark ? 0.06 : 0.012),
+                accent: rgba(base, alpha: dark ? 0.60 : 0.42),
                 accentWidth: 4
             )
-        case .toolOutput:
-            let base = NSColor.systemGreen
-            return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
-                accent: rgba(base, alpha: dark ? 0.78 : 0.60),
-                accentWidth: 4
-            )
-        case .error:
-            let base = NSColor.systemRed
-            return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.11 : 0.035),
-                accent: rgba(base, alpha: dark ? 0.82 : 0.65),
-                accentWidth: 4
-            )
-        }
-    }
+	        case .toolCall:
+	            let base: NSColor = TranscriptColorSystem.semanticAccent(.toolCall)
+	            return BlockStyle(
+	                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
+	                accent: rgba(base, alpha: dark ? 0.78 : 0.60),
+	                accentWidth: 4
+	            )
+	        case .toolOutput:
+	            let base: NSColor = TranscriptColorSystem.semanticAccent(.toolOutputSuccess)
+	            return BlockStyle(
+	                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
+	                accent: rgba(base, alpha: dark ? 0.78 : 0.60),
+	                accentWidth: 4
+	            )
+	        case .error:
+	            let base: NSColor = TranscriptColorSystem.semanticAccent(.error)
+	            return BlockStyle(
+	                fill: rgba(base, alpha: dark ? 0.11 : 0.035),
+	                accent: rgba(base, alpha: dark ? 0.82 : 0.65),
+	                accentWidth: 4
+	            )
+	        }
+	    }
 
     private func blockDecoration(containing charIndex: Int) -> BlockDecoration? {
         // Binary search by character location (blocks are non-overlapping and sorted by construction).
@@ -1054,7 +1062,22 @@ private final class TerminalLayoutManager: NSLayoutManager {
                 if h > 0 {
                     let stripRect = CGRect(x: cardRect.minX, y: y0, width: style.accentWidth, height: h)
                     let radius = style.accentWidth / 2
-                    NSBezierPath(roundedRect: stripRect, xRadius: radius, yRadius: radius).fill()
+                    if block.kind == .agent {
+                        // Agent strip: two-tone inset style so it won't be confused with semantic success strips.
+                        let outer = NSBezierPath(roundedRect: stripRect, xRadius: radius, yRadius: radius)
+                        accent.withAlphaComponent(min(1, accent.alphaComponent)).setFill()
+                        outer.fill()
+
+                        let innerRect = stripRect.insetBy(dx: 1.0, dy: 1.0)
+                        if innerRect.width > 0, innerRect.height > 0 {
+                            let innerRadius = max(0, (innerRect.width / 2))
+                            let inner = NSBezierPath(roundedRect: innerRect, xRadius: innerRadius, yRadius: innerRadius)
+                            accent.withAlphaComponent(min(1, accent.alphaComponent + 0.30)).setFill()
+                            inner.fill()
+                        }
+                    } else {
+                        NSBezierPath(roundedRect: stripRect, xRadius: radius, yRadius: radius).fill()
+                    }
                 }
             }
         }
@@ -1140,6 +1163,7 @@ private final class TerminalLayoutManager: NSLayoutManager {
 private struct TerminalTextScrollView: NSViewRepresentable {
     let lines: [TerminalLine]
     let fontSize: CGFloat
+    let sessionSource: SessionSource
     let findQuery: String
     let matchIDs: Set<Int>
     let currentMatchLineID: Int?
@@ -1451,6 +1475,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         if let lm = (textView.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager {
             lm.isDark = (colorScheme == .dark)
+            lm.agentBrandAccent = TranscriptColorSystem.agentBrandAccent(source: sessionSource)
             lm.lineIndex = zip(lines.map(\.id), lines.compactMap { ranges[$0.id] }).map { TerminalLayoutManager.LineIndexEntry(id: $0.0, range: $0.1) }
             lm.blocks = buildBlockDecorations(ranges: ranges)
             updateLayoutManagerFind(lm, findQuery: findQuery, matches: effectiveMatchIDs, currentLineID: effectiveCurrentMatchLineID, ranges: ranges)
