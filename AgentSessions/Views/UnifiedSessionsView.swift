@@ -57,9 +57,13 @@ struct UnifiedSessionsView: View {
     @State private var showAgentEnablementNotice: Bool = false
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
+    private enum SelectionChangeSource { case mouse }
 
     @StateObject private var searchCoordinator: SearchCoordinator
     @StateObject private var focusCoordinator = WindowFocusCoordinator()
+    @StateObject private var searchState = UnifiedSearchState()
+    @State private var selectionChangeSource: SelectionChangeSource? = nil
+    @State private var autoJumpWorkItem: DispatchWorkItem? = nil
     private var rows: [Session] {
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty || searchCoordinator.isRunning {
@@ -155,75 +159,74 @@ struct UnifiedSessionsView: View {
 				}
 		)
 
-		return AnyView(
-			lifecycle
-				.onChange(of: analyticsReady) { _, ready in
-					if ready {
-						withAnimation { showAnalyticsWarmupNotice = false }
-					}
+		let afterAnalytics = lifecycle
+			.onChange(of: analyticsReady) { _, ready in
+				if ready {
+					withAnimation { showAnalyticsWarmupNotice = false }
 				}
-				.onChange(of: selection) { _, id in
-					guard let id, let s = cachedRows.first(where: { $0.id == id }) else { return }
-					// When selection is changed due to search auto-selection, do not steal focus or collapse inline search
-					if !isAutoSelectingFromSearch {
-						// CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
-						focusCoordinator.perform(.selectSession(id: id))
-						NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
-					}
-					// If a large, unparsed session is clicked during an active search, promote it in the coordinator.
-					let sizeBytes = s.fileSizeBytes ?? 0
-					if searchCoordinator.isRunning, s.events.isEmpty, sizeBytes >= 10 * 1024 * 1024 {
-						searchCoordinator.promote(id: s.id)
-					}
-					// Lazy load full session per source
-					if s.source == .codex, let exist = codexIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-						codexIndexer.reloadSession(id: id)
-					} else if s.source == .claude, let exist = claudeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-						claudeIndexer.reloadSession(id: id)
-					} else if s.source == .gemini, let exist = geminiIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-						geminiIndexer.reloadSession(id: id)
-					} else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-						opencodeIndexer.reloadSession(id: id)
-					} else if s.source == .copilot, let exist = copilotIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-						copilotIndexer.reloadSession(id: id)
-					} else if s.source == .droid, let exist = droidIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-						droidIndexer.reloadSession(id: id)
-					}
+			}
+
+		let afterSelection = afterAnalytics
+			.onChange(of: selection) { _, id in
+				handleSelectionChange(id)
+			}
+
+		let afterCodex = afterSelection
+			.onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
+		let afterClaude = afterCodex
+			.onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
+		let afterGemini = afterClaude
+			.onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
+		let afterOpenCode = afterGemini
+			.onChange(of: unified.includeOpenCode) { _, _ in restartSearchIfRunning() }
+		let afterCopilot = afterOpenCode
+			.onChange(of: unified.includeCopilot) { _, _ in restartSearchIfRunning() }
+		let afterDroid = afterCopilot
+			.onChange(of: unified.includeDroid) { _, _ in restartSearchIfRunning() }
+
+		let afterUsage = afterDroid
+			.onChange(of: codexUsageEnabled) { _, _ in updateFooterUsageVisibility() }
+			.onChange(of: claudeUsageEnabled) { _, _ in updateFooterUsageVisibility() }
+			.onChange(of: searchState.query) { _, newValue in
+				if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+					cancelAutoJump()
 				}
-				.onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
-				.onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
-				.onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
-				.onChange(of: unified.includeOpenCode) { _, _ in restartSearchIfRunning() }
-				.onChange(of: unified.includeCopilot) { _, _ in restartSearchIfRunning() }
-				.onChange(of: unified.includeDroid) { _, _ in restartSearchIfRunning() }
-				.onChange(of: codexUsageEnabled) { _, _ in updateFooterUsageVisibility() }
-				.onChange(of: claudeUsageEnabled) { _, _ in updateFooterUsageVisibility() }
-				.onChange(of: codexAgentEnabled) { _, _ in
-					flashAgentEnablementNoticeIfNeeded()
-					updateFooterUsageVisibility()
+			}
+
+		let afterAgents = afterUsage
+			.onChange(of: codexAgentEnabled) { _, _ in
+				flashAgentEnablementNoticeIfNeeded()
+				updateFooterUsageVisibility()
+			}
+			.onChange(of: claudeAgentEnabled) { _, _ in
+				flashAgentEnablementNoticeIfNeeded()
+				updateFooterUsageVisibility()
+			}
+			.onChange(of: geminiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+			.onChange(of: openCodeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+			.onChange(of: copilotAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+
+		let afterSessions = afterAgents
+			.onReceive(unified.$sessions) { sessions in
+				if !sessions.isEmpty {
+					hasEverHadSessions = true
 				}
-				.onChange(of: claudeAgentEnabled) { _, _ in
-					flashAgentEnablementNoticeIfNeeded()
-					updateFooterUsageVisibility()
-				}
-				.onChange(of: geminiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-				.onChange(of: openCodeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-				.onChange(of: copilotAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-				.onReceive(unified.$sessions) { sessions in
-					if !sessions.isEmpty {
-						hasEverHadSessions = true
-					}
-				}
-					.onReceive(NotificationCenter.default.publisher(for: .openSessionsSearchFromMenu)) { _ in
-						// Force a focus transition even if Search is already active so the menu action
-						// reliably focuses the search field.
-						focusCoordinator.perform(.closeAllSearch)
-						focusCoordinator.perform(.openSessionSearch)
-					}
-				.onReceive(NotificationCenter.default.publisher(for: .openTranscriptFindFromMenu)) { _ in
-					focusCoordinator.perform(.openTranscriptFind)
-				}
-		)
+			}
+
+		let afterSessionSearch = afterSessions
+			.onReceive(NotificationCenter.default.publisher(for: .openSessionsSearchFromMenu)) { _ in
+				// Force a focus transition even if Search is already active so the menu action
+				// reliably focuses the search field.
+				focusCoordinator.perform(.closeAllSearch)
+				focusCoordinator.perform(.openSessionSearch)
+			}
+
+		let afterTranscriptFind = afterSessionSearch
+			.onReceive(NotificationCenter.default.publisher(for: .openTranscriptFindFromMenu)) { _ in
+				focusCoordinator.perform(.openTranscriptFind)
+			}
+
+		return AnyView(afterTranscriptFind)
 	}
 
 	private var topTrailingNotices: some View {
@@ -315,6 +318,7 @@ struct UnifiedSessionsView: View {
                 SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        selectionChangeSource = .mouse
                         // Explicitly select the tapped row to avoid relying solely on Table's mouse handling.
                         selection = s.id
                         let desired: Set<String> = [s.id]
@@ -582,6 +586,7 @@ struct UnifiedSessionsView: View {
                                copilotIndexer: copilotIndexer,
                                droidIndexer: droidIndexer)
                 .environmentObject(focusCoordinator)
+                .environmentObject(searchState)
                 .id("transcript-host")
 
             if shouldShowLaunchOverlay {
@@ -719,7 +724,7 @@ struct UnifiedSessionsView: View {
             .tint(UnifiedSessionsStyle.selectionAccent)
         }
         ToolbarItem(placement: .automatic) {
-            UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator)
+            UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator, searchState: searchState)
         }
         ToolbarItem(placement: .automatic) {
             Toggle(isOn: $unified.showFavoritesOnly) {
@@ -815,6 +820,41 @@ struct UnifiedSessionsView: View {
         }
     }
 
+    private func handleSelectionChange(_ id: String?) {
+        guard let id, let s = cachedRows.first(where: { $0.id == id }) else { return }
+        if !searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let immediate = consumeImmediateSelectionJump()
+            scheduleAutoJump(for: id, immediate: immediate)
+        } else {
+            cancelAutoJump()
+        }
+        // When selection is changed due to search auto-selection, do not steal focus or collapse inline search
+        if !isAutoSelectingFromSearch {
+            // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
+            focusCoordinator.perform(.selectSession(id: id))
+            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+        }
+        // If a large, unparsed session is clicked during an active search, promote it in the coordinator.
+        let sizeBytes = s.fileSizeBytes ?? 0
+        if searchCoordinator.isRunning, s.events.isEmpty, sizeBytes >= 10 * 1024 * 1024 {
+            searchCoordinator.promote(id: s.id)
+        }
+        // Lazy load full session per source
+        if s.source == .codex, let exist = codexIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+            codexIndexer.reloadSession(id: id)
+        } else if s.source == .claude, let exist = claudeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+            claudeIndexer.reloadSession(id: id)
+        } else if s.source == .gemini, let exist = geminiIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+            geminiIndexer.reloadSession(id: id)
+        } else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+            opencodeIndexer.reloadSession(id: id)
+        } else if s.source == .copilot, let exist = copilotIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+            copilotIndexer.reloadSession(id: id)
+        } else if s.source == .droid, let exist = droidIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+            droidIndexer.reloadSession(id: id)
+        }
+    }
+
     private func updateCachedRows() {
         if FeatureFlags.coalesceListResort {
             // unified.sessions is already sorted by the view model's descriptor
@@ -831,6 +871,38 @@ struct UnifiedSessionsView: View {
                 tableSelection = desired
                 DispatchQueue.main.async { programmaticSelectionUpdate = false }
             }
+        }
+    }
+
+    private func scheduleAutoJump(for sessionID: String, immediate: Bool) {
+        cancelAutoJump()
+        let q = searchState.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        let work = DispatchWorkItem { searchState.requestAutoJump(sessionID: sessionID) }
+        if immediate {
+            work.perform()
+        } else {
+            autoJumpWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+        }
+    }
+
+    private func cancelAutoJump() {
+        autoJumpWorkItem?.cancel()
+        autoJumpWorkItem = nil
+    }
+
+    private func consumeImmediateSelectionJump() -> Bool {
+        if selectionChangeSource == .mouse {
+            selectionChangeSource = nil
+            return true
+        }
+        guard let event = NSApp.currentEvent else { return false }
+        switch event.type {
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
+            return true
+        default:
+            return false
         }
     }
 
@@ -1146,6 +1218,7 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var search: SearchCoordinator
     @ObservedObject var focus: WindowFocusCoordinator
+    @ObservedObject var searchState: UnifiedSearchState
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
@@ -1205,8 +1278,16 @@ private struct UnifiedSearchFiltersView: View {
                     .stroke(searchFocus == .field ? Color.yellow : Color.gray.opacity(0.28), lineWidth: searchFocus == .field ? 2 : 1)
             )
             .help("Search sessions (⌥⌘F)")
+            .onAppear {
+                if searchState.query != unified.queryDraft {
+                    searchState.query = unified.queryDraft
+                }
+            }
             .onChange(of: unified.queryDraft) { _, newValue in
                 TypingActivity.shared.bump()
+                if searchState.query != newValue {
+                    searchState.query = newValue
+                }
                 let q = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 if q.isEmpty {
                     search.cancel()
@@ -1216,6 +1297,11 @@ private struct UnifiedSearchFiltersView: View {
                     } else {
                         startSearch()
                     }
+                }
+            }
+            .onChange(of: searchState.query) { _, newValue in
+                if unified.queryDraft != newValue {
+                    unified.queryDraft = newValue
                 }
             }
             .onChange(of: focus.activeFocus) { _, newFocus in

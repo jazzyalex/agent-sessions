@@ -100,14 +100,14 @@ extension OnboardingContent {
                     title: "Find sessions fast",
                     body: "The sessions list is the hub. Use search, filters, and Saved Only to stay focused.",
                     bullets: [
-                        "Search menu includes Search Sessions and Search in Transcript.",
+                        "Search menu includes Search Sessions and Find in Transcript, using the same query.",
                         "Filter by agent and project to reduce noise.",
                         "Use Saved Only when you want your curated set.",
                         "Open the Saved Sessions window to manage saved sessions."
                     ],
                     shortcuts: [
                         .init(keys: "⌥⌘F", label: "Search Sessions…"),
-                        .init(keys: "⌘F", label: "Search in Transcript…"),
+                        .init(keys: "⌘F", label: "Find in Transcript…"),
                         .init(keys: "⇧⌥⌘P", label: "Saved Sessions…")
                     ]
                 ),
@@ -240,12 +240,12 @@ extension OnboardingContent {
                     title: "Better keyboard shortcuts",
                     body: "Common actions have improved shortcuts throughout the app. You can reopen this tour anytime from the Help menu.",
                     bullets: [
-                        "Search Sessions and Search in Transcript are now in the Search menu.",
+                        "Search Sessions and Find in Transcript are now in the Search menu.",
                         "Saved Sessions has a dedicated shortcut in the View menu."
                     ],
                     shortcuts: [
                         .init(keys: "⌥⌘F", label: "Search Sessions…"),
-                        .init(keys: "⌘F", label: "Search in Transcript…"),
+                        .init(keys: "⌘F", label: "Find in Transcript…"),
                         .init(keys: "⌘⇧T", label: "Toggle Plain / Color"),
                         .init(keys: "⌥⌘↓ / ⌥⌘↑", label: "Next / Previous prompt"),
                         .init(keys: "⌥⌘→ / ⌥⌘←", label: "Next / Previous tool call or output"),

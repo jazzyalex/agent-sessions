@@ -35,6 +35,7 @@ struct TranscriptPlainView: View {
 struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @ObservedObject var indexer: Indexer
     @EnvironmentObject var focusCoordinator: WindowFocusCoordinator
+    @EnvironmentObject var searchState: UnifiedSearchState
     @EnvironmentObject var archiveManager: SessionArchiveManager
     @Environment(\.colorScheme) private var colorScheme
     let sessionID: String?
@@ -47,11 +48,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var rebuildTask: Task<Void, Never>?
 
     // Find
-    @State private var findText: String = ""
     @State private var findMatches: [Range<String.Index>] = []
     @State private var currentMatchIndex: Int = 0
-    @FocusState private var findFocused: Bool
-    @State private var allowFindFocus: Bool = false
+    @State private var navigatorFocused: Bool = false
     @State private var highlightRanges: [NSRange] = []
     @State private var commandRanges: [NSRange] = []
     @State private var userRanges: [NSRange] = []
@@ -66,6 +65,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var terminalFindToken: Int = 0
     @State private var terminalFindDirection: Int = 1
     @State private var terminalFindResetFlag: Bool = true
+    @State private var terminalAllowMatchAutoScroll: Bool = true
+    @State private var pendingAutoJumpToken: Int? = nil
+    @State private var pendingAutoJumpSessionID: String? = nil
+    @State private var lastHandledAutoJumpToken: Int = 0
 
     // Toggles (view-scoped)
     @State private var showTimestamps: Bool = false
@@ -100,6 +103,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private var isJSONMode: Bool {
         return viewMode == .json
+    }
+
+    private var searchQuery: String {
+        searchState.query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isSearchActive: Bool {
+        !searchQuery.isEmpty
     }
 
     // Raw sheet
@@ -143,10 +154,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     if viewMode == .terminal {
                         SessionTerminalView(
                             session: session,
-                            findQuery: findText,
+                            findQuery: searchQuery,
                             findToken: terminalFindToken,
                             findDirection: terminalFindDirection,
                             findReset: terminalFindResetFlag,
+                            allowMatchAutoScroll: terminalAllowMatchAutoScroll,
                             jumpToken: terminalJumpToken,
                             roleNavToken: terminalRoleNavToken,
                             roleNavRole: terminalRoleNavRole,
@@ -190,43 +202,28 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 rebuild(session: session)
             }
             .onChange(of: session.events.count) { _, _ in rebuild(session: session) }
-            .onChange(of: findFocused) { _, newValue in
-                #if DEBUG
-                print("🔍 FIND FOCUSED CHANGED: \(newValue) (allowFindFocus=\(allowFindFocus))")
-                #endif
+            .onChange(of: searchState.query) { _, newValue in
+                if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    pendingAutoJumpToken = nil
+                    pendingAutoJumpSessionID = nil
+                }
+                selectedNSRange = nil
+                performFind(resetIndex: true, shouldJump: false)
             }
-            .onChange(of: allowFindFocus) { _, newValue in
-                #if DEBUG
-                print("🔓 ALLOW FIND FOCUS CHANGED: \(newValue)")
-                #endif
+            .onChange(of: searchState.autoJumpToken) { _, newValue in
+                guard let sessionID, sessionID == searchState.autoJumpSessionID, isSearchActive else { return }
+                pendingAutoJumpToken = newValue
+                pendingAutoJumpSessionID = session.id
+                applyAutoJumpIfReady(session: session)
             }
             .onChange(of: focusCoordinator.activeFocus) { oldFocus, newFocus in
-                #if DEBUG
-                print("🎯 COORDINATOR FOCUS CHANGE: \(oldFocus) → \(newFocus)")
-                #endif
                 if newFocus == .transcriptFind {
-                    #if DEBUG
-                    print("  ↳ Setting allowFindFocus=true, findFocused=true")
-                    #endif
-                    allowFindFocus = true
-                    findFocused = true
+                    navigatorFocused = true
                 } else if oldFocus == .transcriptFind {
-                    #if DEBUG
-                    print("  ↳ Leaving transcriptFind: findFocused=false, allowFindFocus=false")
-                    #endif
-                    findFocused = false
-                    allowFindFocus = false
+                    navigatorFocused = false
                 } else if newFocus != .transcriptFind && newFocus != .none {
-                    #if DEBUG
-                    print("  ↳ Setting findFocused=false, allowFindFocus=false")
-                    #endif
                     // Another search UI became active - release focus
-                    findFocused = false
-                    allowFindFocus = false
-                } else {
-                    #if DEBUG
-                    print("  ↳ NO ACTION (newFocus=\(newFocus))")
-                    #endif
+                    navigatorFocused = false
                 }
             }
             .sheet(isPresented: $showRawSheet) { WholeSessionRawPrettySheet(session: session) }
@@ -399,87 +396,78 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
                 Divider().frame(height: 20)
 
-                // Find Controls (HIG-compliant placement)
+                // Match Navigator (single search)
                 HStack(spacing: 6) {
-                // Find search field
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                        .imageScale(.medium)
-                    TextField("Find", text: $findText)
-                        .textFieldStyle(.plain)
-                        .font(TranscriptToolbarStyle.baseFont)
-                        .focused($findFocused)
-                        .focusable(allowFindFocus)
-                        .onChange(of: findText) { oldValue, newValue in
-                            // If the user clears the field via typing/backspace (not the clear button),
-                            // ensure we immediately remove any painted highlights.
-                            if !oldValue.isEmpty, newValue.isEmpty {
-                                performFind(resetIndex: true)
-                            }
-                        }
-                        .onSubmit { performFind(resetIndex: true) }
-                        .accessibilityLabel("Find in transcript")
-                        .frame(minWidth: 120, idealWidth: 220, maxWidth: 360)
-                    if findText.isEmpty {
-                        Text("⌘F")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
                             .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
-                    }
-                    if !findText.isEmpty {
-                        Button(action: { findText = ""; performFind(resetIndex: true) }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .imageScale(.medium)
+                            .imageScale(.medium)
+                        Text(searchQuery.isEmpty ? "Search sessions" : searchState.query)
+                            .foregroundStyle(searchQuery.isEmpty ? .secondary : .primary)
+                            .font(TranscriptToolbarStyle.baseFont)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(minWidth: 120, idealWidth: 220, maxWidth: 360, alignment: .leading)
+                        if searchQuery.isEmpty {
+                            Text("⌥⌘F")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
                                 .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                        } else {
+                            Button(action: clearSearch) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .imageScale(.medium)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            .help("Clear search (⎋)")
+                            .keyboardShortcut(.escape)
                         }
-                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(nsColor: .textBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(navigatorFocused ? Color.accentColor.opacity(0.5) : Color.gray.opacity(0.25),
+                                    lineWidth: navigatorFocused ? 2 : 1)
+                    )
+                    .onTapGesture { focusCoordinator.perform(.openSessionSearch) }
+                    .accessibilityLabel("Search sessions")
+
+                    // Next/Previous controls group
+                    HStack(spacing: 2) {
+                        Button(action: { performFind(resetIndex: false, direction: -1, shouldJump: true) }) {
+                            Image(systemName: "chevron.up")
+                        }
+                        .buttonStyle(.borderless)
                         .focusable(false)
-                        .help("Clear search (⎋)")
-                        .keyboardShortcut(.escape)
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(nsColor: .textBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(findFocused ? Color.accentColor.opacity(0.5) : Color.gray.opacity(0.25), lineWidth: findFocused ? 2 : 1)
-                )
-                .onTapGesture { focusCoordinator.perform(.openTranscriptFind) }
+                        .disabled(isFindNavigationDisabled)
+                        .help("Previous match (⇧⌘G)")
+                        .keyboardShortcut("g", modifiers: [.command, .shift])
 
-                // Next/Previous controls group
-                HStack(spacing: 2) {
-                    Button(action: { performFind(resetIndex: false, direction: -1) }) {
-                        Image(systemName: "chevron.up")
+                        Button(action: { performFind(resetIndex: false, direction: 1, shouldJump: true) }) {
+                            Image(systemName: "chevron.down")
+                        }
+                        .buttonStyle(.borderless)
+                        .focusable(false)
+                        .disabled(isFindNavigationDisabled)
+                        .help("Next match (⌘G)")
+                        .keyboardShortcut("g", modifiers: .command)
                     }
-                    .buttonStyle(.borderless)
-                    .focusable(false)
-                    .disabled(isFindNavigationDisabled)
-                    .help("Previous match (⇧⌘G)")
-                    .keyboardShortcut("g", modifiers: [.command, .shift])
 
-                    Button(action: { performFind(resetIndex: false, direction: 1) }) {
-                        Image(systemName: "chevron.down")
+                    // Match count badge
+                    if isSearchActive {
+                        Text(findStatus())
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(isFindNavigationDisabled ? .red : .secondary)
+                            .frame(minWidth: 32, alignment: .trailing)
+                            .accessibilityLabel("Match \(findStatus())")
                     }
-                    .buttonStyle(.borderless)
-                    .focusable(false)
-                    .disabled(isFindNavigationDisabled)
-                    .help("Next match (⌘G)")
-                    .keyboardShortcut("g", modifiers: .command)
-                }
-                
-                // Match count badge
-                if !findText.isEmpty {
-                    Text(findStatus())
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(isFindNavigationDisabled ? .red : .secondary)
-                        .frame(minWidth: 32, alignment: .trailing)
-                        .accessibilityLabel("\(currentMatchIndex + 1) of \(findMatches.count) matches")
-                }
                 }
             }
             .padding(.trailing, 12)
@@ -526,10 +514,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
                 lastBuildKey = key
                 // Reset find state
-                performFind(resetIndex: true)
+                performFind(resetIndex: true, shouldJump: false)
                 selectedNSRange = nil
                 resetJumpCursors()
-                updateSelectionToCurrentMatch()
+                applyAutoJumpIfReady(session: session)
                 maybeAutoJumpToFirstPrompt(session: session)
                 return
             }
@@ -551,10 +539,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     computeNavigationRangesIfNeeded()
                     transcriptCache[key] = decorated
                     lastBuildKey = key
-                    performFind(resetIndex: true)
+                    performFind(resetIndex: true, shouldJump: false)
                     selectedNSRange = nil
                     resetJumpCursors()
-                    updateSelectionToCurrentMatch()
+                    applyAutoJumpIfReady(session: session)
                     maybeAutoJumpToFirstPrompt(session: session)
                     return
                 }
@@ -580,9 +568,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.terminalCommandRangesCache[key] = built.1
                             self.terminalUserRangesCache[key] = built.2
                             self.lastBuildKey = key
-                            self.performFind(resetIndex: true)
+                            self.performFind(resetIndex: true, shouldJump: false)
                             self.selectedNSRange = nil
-                            self.updateSelectionToCurrentMatch()
+                            self.applyAutoJumpIfReady(session: session)
                             self.maybeAutoJumpToFirstPrompt(session: session)
                         }
                     } else {
@@ -599,10 +587,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.computeNavigationRangesIfNeeded()
                             self.transcriptCache[key] = decorated
                             self.lastBuildKey = key
-                            self.performFind(resetIndex: true)
+                            self.performFind(resetIndex: true, shouldJump: false)
                             self.selectedNSRange = nil
                             self.resetJumpCursors()
-                            self.updateSelectionToCurrentMatch()
+                            self.applyAutoJumpIfReady(session: session)
                             self.maybeAutoJumpToFirstPrompt(session: session)
                         }
                     }
@@ -666,10 +654,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         self.errorRanges = []
                         self.hasCommands = true
                         self.lastBuildKey = keySnapshot
-                        self.performFind(resetIndex: true)
+                        self.performFind(resetIndex: true, shouldJump: false)
                         self.selectedNSRange = nil
                         self.resetJumpCursors()
-                        self.updateSelectionToCurrentMatch()
+                        self.applyAutoJumpIfReady(session: sessionSnapshot)
                         self.maybeAutoJumpToFirstPrompt(session: sessionSnapshot)
                     }
                 } else {
@@ -689,10 +677,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.computeNavigationRangesIfNeeded()
                         }
                         self.lastBuildKey = keySnapshot
-                        self.performFind(resetIndex: true)
+                        self.performFind(resetIndex: true, shouldJump: false)
                         self.selectedNSRange = nil
                         self.resetJumpCursors()
-                        self.updateSelectionToCurrentMatch()
+                        self.applyAutoJumpIfReady(session: sessionSnapshot)
                         self.maybeAutoJumpToFirstPrompt(session: sessionSnapshot)
                     }
                 }
@@ -701,10 +689,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
 
         // Reset find state
-        performFind(resetIndex: true)
+        performFind(resetIndex: true, shouldJump: false)
         selectedNSRange = nil
         resetJumpCursors()
-        updateSelectionToCurrentMatch()
+        applyAutoJumpIfReady(session: session)
         maybeAutoJumpToFirstPrompt(session: session)
     }
 
@@ -720,24 +708,26 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         return nil
     }
 
-	    private func performFind(resetIndex: Bool, direction: Int = 1) {
+	    private func performFind(resetIndex: Bool, direction: Int = 1, shouldJump: Bool = true) {
 	        // Terminal mode uses a dedicated line-based search in SessionTerminalView.
 	        if viewMode == .terminal {
-	            let q = findText
+	            let q = searchQuery
 	            guard !q.isEmpty else {
 	                terminalFindMatchesCount = 0
 	                terminalFindCurrentIndex = 0
+                    terminalAllowMatchAutoScroll = false
 	                terminalFindToken &+= 1
 	                selectedNSRange = nil
 	                return
 	            }
+                terminalAllowMatchAutoScroll = shouldJump
 	            terminalFindDirection = direction
 	            terminalFindResetFlag = resetIndex
 	            terminalFindToken &+= 1
 	            return
         }
 
-	        let q = findText
+	        let q = searchQuery
 	        guard !q.isEmpty else {
 	            findMatches = []
 	            currentMatchIndex = 0
@@ -792,8 +782,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             } else if currentMatchIndex >= highlightRanges.count {
                 currentMatchIndex = highlightRanges.count - 1
             }
-
-            updateSelectionToCurrentMatch()
+            if shouldJump {
+                updateSelectionToCurrentMatch()
+            } else {
+                selectedNSRange = nil
+            }
         }
     }
 
@@ -808,7 +801,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func findStatus() -> String {
-        if findText.isEmpty { return "" }
+        if searchQuery.isEmpty { return "" }
         if viewMode == .terminal {
             if terminalFindMatchesCount == 0 { return "0/0" }
             return "\(terminalFindCurrentIndex + 1)/\(terminalFindMatchesCount)"
@@ -819,9 +812,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private var isFindNavigationDisabled: Bool {
         if viewMode == .terminal {
-            return terminalFindMatchesCount == 0 || findText.isEmpty
+            return terminalFindMatchesCount == 0 || searchQuery.isEmpty
         }
-        return findMatches.isEmpty
+        return findMatches.isEmpty || searchQuery.isEmpty
     }
 
     private func adjustFont(_ delta: Int) {
@@ -832,6 +825,26 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func copyAll() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(transcript, forType: .string)
+    }
+
+    private func clearSearch() {
+        searchState.query = ""
+    }
+
+    private func applyAutoJumpIfReady(session: Session) {
+        guard let pending = pendingAutoJumpToken, pending > lastHandledAutoJumpToken else { return }
+        guard isSearchActive, sessionID == session.id else { return }
+        guard pendingAutoJumpSessionID == session.id else { return }
+        guard isTranscriptReady(for: session) else { return }
+        performFind(resetIndex: true, shouldJump: true)
+        lastHandledAutoJumpToken = pending
+        pendingAutoJumpToken = nil
+        pendingAutoJumpSessionID = nil
+    }
+
+    private func isTranscriptReady(for session: Session) -> Bool {
+        guard let key = lastBuildKey else { return false }
+        return key.hasPrefix("\(session.id)|")
     }
 
     private func extractShortID(for session: Session) -> String? {
@@ -1067,9 +1080,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     self.transcriptCache[key] = pretty
                 }
                 self.lastBuildKey = key
-                self.performFind(resetIndex: true)
+                self.performFind(resetIndex: true, shouldJump: false)
                 self.selectedNSRange = nil
-                self.updateSelectionToCurrentMatch()
+                self.applyAutoJumpIfReady(session: session)
                 self.isBuildingJSON = false
             }
         }
@@ -1171,7 +1184,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func maybeAutoJumpToFirstPrompt(session: Session) {
         guard skipAgentsPreambleEnabled() else { return }
-        guard findText.isEmpty else { return }
+        guard searchQuery.isEmpty else { return }
         guard selectedNSRange == nil else { return }
 
         // Terminal view handles its own jump via SessionTerminalView.

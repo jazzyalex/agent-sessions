@@ -12,6 +12,7 @@ struct ClaudeSessionsView: View {
     @State private var directoryAlert: DirectoryAlert?
     @State private var resumeAlert: DirectoryAlert?
     @StateObject private var claudeResumeSettings = ClaudeResumeSettings.shared
+    @StateObject private var searchState = UnifiedSearchState()
     @AppStorage("ShowClaudeUsageStrip") private var showUsageStrip: Bool = false
     @AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
 
@@ -51,6 +52,7 @@ struct ClaudeSessionsView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .environmentObject(searchState)
         // Apply preferredColorScheme only for explicit Light/Dark; omit for System to inherit.
         .applyIf(indexer.appAppearance == .light) { $0.preferredColorScheme(.light) }
         .applyIf(indexer.appAppearance == .dark) { $0.preferredColorScheme(.dark) }
@@ -448,6 +450,7 @@ struct ClaudeTranscriptView: View {
 // MARK: - Search Filters for Claude Sessions
 private struct ClaudeSearchFiltersView: View {
     @ObservedObject var indexer: ClaudeSessionIndexer
+    @EnvironmentObject var searchState: UnifiedSearchState
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
@@ -505,6 +508,25 @@ private struct ClaudeSearchFiltersView: View {
             }
 
             Spacer(minLength: 0)
+        }
+        .onAppear {
+            if searchState.query != indexer.query {
+                searchState.query = indexer.query
+            }
+        }
+        .onChange(of: indexer.query) { _, newValue in
+            if searchState.query != newValue {
+                searchState.query = newValue
+            }
+        }
+        .onChange(of: searchState.query) { _, newValue in
+            if indexer.queryDraft != newValue {
+                indexer.queryDraft = newValue
+            }
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if indexer.query != trimmed {
+                indexer.query = trimmed
+            }
         }
     }
 }
