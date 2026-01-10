@@ -10,6 +10,7 @@ struct SessionTerminalView: View {
     let findToken: Int
     let findDirection: Int
     let findReset: Bool
+    let allowMatchAutoScroll: Bool
     let jumpToken: Int
     let roleNavToken: Int
     let roleNavRole: RoleToggle
@@ -93,6 +94,9 @@ struct SessionTerminalView: View {
         }
         .onChange(of: activeRoles) { _, _ in
             visibleLines = roleFilteredLines(from: lines)
+            if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                recomputeMatches(resetIndex: true)
+            }
         }
         .onChange(of: roleNavToken) { _, _ in
             // Keyboard navigation should reveal the target role even if the user filtered it off.
@@ -150,6 +154,7 @@ struct SessionTerminalView: View {
                     matchIDs: matchIDSet,
                     currentMatchLineID: currentMatchLineID,
                     highlightActive: !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    allowMatchAutoScroll: allowMatchAutoScroll,
                     scrollTargetLineID: scrollTargetLineID,
                     scrollTargetToken: scrollTargetToken,
                     preambleUserBlockIndexes: preambleUserBlockIndexes,
@@ -207,6 +212,10 @@ struct SessionTerminalView: View {
             roleNavPositions = [:]
             externalMatchCount = 0
             externalCurrentMatchIndex = 0
+
+            if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                recomputeMatches(resetIndex: true)
+            }
 
             if skipAgentsPreamble, findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 jumpToFirstPrompt()
@@ -484,6 +493,10 @@ struct SessionTerminalView: View {
 
     /// Execute a find request driven by the unified toolbar.
     private func handleFindRequest() {
+        recomputeMatches(resetIndex: findReset, direction: findDirection)
+    }
+
+    private func recomputeMatches(resetIndex: Bool, direction: Int = 1) {
         let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             matchingLineIDs = []
@@ -512,10 +525,10 @@ struct SessionTerminalView: View {
         }
 
         // Determine which match to select.
-        if findReset {
+        if resetIndex {
             externalCurrentMatchIndex = 0
         } else {
-            var nextIndex = externalCurrentMatchIndex + (findDirection >= 0 ? 1 : -1)
+            var nextIndex = externalCurrentMatchIndex + (direction >= 0 ? 1 : -1)
             if nextIndex < 0 {
                 nextIndex = ids.count - 1
             } else if nextIndex >= ids.count {
@@ -1131,31 +1144,45 @@ private final class TerminalLayoutManager: NSLayoutManager {
     }
 
     private func drawFindLineMarkers(forGlyphRange glyphsToShow: NSRange, in tc: NSTextContainer, at origin: CGPoint) {
-        guard !matchLineIDs.isEmpty else { return }
+        guard !matches.isEmpty else { return }
 
         let yellow = NSColor.systemYellow
         let anyFill = yellow.withAlphaComponent(isDark ? 0.65 : 0.50)
         let currentFill = yellow.withAlphaComponent(isDark ? 0.85 : 0.75)
+        let cardInsetX: CGFloat = 8
+        var renderedGlyphStarts: Set<Int> = []
 
-        enumerateLineFragments(forGlyphRange: glyphsToShow) { rect, _, container, glyphRange, _ in
-            guard container === tc else { return }
-            let charIndex = self.characterIndexForGlyph(at: glyphRange.location)
-            guard let lineID = self.lineID(at: charIndex), self.matchLineIDs.contains(lineID) else { return }
+        for match in matches {
+            let matchGlyphs = glyphRange(forCharacterRange: match.range, actualCharacterRange: nil)
+            guard NSIntersectionRange(matchGlyphs, glyphsToShow).length > 0 else { continue }
 
-            let isCurrentLine = (lineID == self.currentMatchLineID)
-            let width: CGFloat = isCurrentLine ? 4 : 3
-            let height = max(2, rect.height - 4)
-            let y = rect.minY + 2 + origin.y
+            enumerateLineFragments(forGlyphRange: matchGlyphs) { rect, _, container, glyphRange, _ in
+                guard container === tc else { return }
+                let g = NSIntersectionRange(glyphRange, matchGlyphs)
+                guard g.length > 0 else { return }
+                if renderedGlyphStarts.contains(glyphRange.location) { return }
+                renderedGlyphStarts.insert(glyphRange.location)
 
-            let blockAccentWidth: CGFloat = {
-                guard let b = self.blockDecoration(containing: charIndex) else { return 0 }
-                return self.style(for: b.kind).accentWidth
-            }()
+                let charIndex = self.characterIndexForGlyph(at: g.location)
+                guard let lineID = self.lineID(at: charIndex) else { return }
 
-            let x = rect.minX + origin.x + blockAccentWidth + 6
-            let pill = NSBezierPath(roundedRect: CGRect(x: x, y: y, width: width, height: height), xRadius: width / 2, yRadius: width / 2)
-            (isCurrentLine ? currentFill : anyFill).setFill()
-            pill.fill()
+                let isCurrentLine = (lineID == self.currentMatchLineID)
+                let blockAccentWidth: CGFloat = {
+                    guard let b = self.blockDecoration(containing: charIndex) else { return 0 }
+                    return self.style(for: b.kind).accentWidth
+                }()
+
+                let width: CGFloat = max(isCurrentLine ? 4 : 3, blockAccentWidth)
+                let height = max(2, rect.height - 4)
+                let y = rect.minY + 2 + origin.y
+                let x = rect.minX + origin.x + cardInsetX
+
+                let pill = NSBezierPath(roundedRect: CGRect(x: x, y: y, width: width, height: height),
+                                        xRadius: width / 2,
+                                        yRadius: width / 2)
+                (isCurrentLine ? currentFill : anyFill).setFill()
+                pill.fill()
+            }
         }
     }
 }
@@ -1168,6 +1195,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let matchIDs: Set<Int>
     let currentMatchLineID: Int?
     let highlightActive: Bool
+    let allowMatchAutoScroll: Bool
     let scrollTargetLineID: Int?
     let scrollTargetToken: Int
     let preambleUserBlockIndexes: Set<Int>
@@ -1428,7 +1456,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             updateHighlights(in: tv, context: context, findQuery: findQuery, matches: effectiveMatchIDs, currentLineID: effectiveCurrentMatchLineID)
         }
 
-        if let target = currentMatchLineID, let range = context.coordinator.lineRanges[target] {
+        if allowMatchAutoScroll, let target = currentMatchLineID, let range = context.coordinator.lineRanges[target] {
             tv.scrollRangeToVisible(range)
         }
 

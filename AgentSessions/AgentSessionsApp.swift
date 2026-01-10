@@ -158,7 +158,7 @@ struct AgentSessionsApp: App {
                 }
                 .keyboardShortcut("f", modifiers: [.command, .option])
 
-                Button("Search in Transcript…") {
+                Button("Find in Transcript…") {
                     NotificationCenter.default.post(name: .openTranscriptFindFromMenu, object: nil)
                 }
                 .keyboardShortcut("f", modifiers: [.command])
