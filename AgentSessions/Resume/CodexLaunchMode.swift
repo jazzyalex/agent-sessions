@@ -7,6 +7,17 @@ enum CodexLaunchMode: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    static func selectedResumeTerminalTitle(defaults: UserDefaults = .standard) -> String {
+        if let raw = defaults.string(forKey: CodexResumeSettings.Keys.defaultLaunchMode),
+           let mode = CodexLaunchMode(rawValue: raw),
+           mode != .embedded {
+            return mode.title
+        }
+
+        let claudePrefersITerm = defaults.object(forKey: ClaudeResumeSettings.Keys.preferITerm) as? Bool ?? false
+        return claudePrefersITerm ? CodexLaunchMode.iterm.title : CodexLaunchMode.terminal.title
+    }
+
     var title: String {
         switch self {
         case .embedded:

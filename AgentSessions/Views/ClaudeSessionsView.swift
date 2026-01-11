@@ -366,7 +366,7 @@ private struct ClaudeSessionsListView: View {
            let id = selectedIDs.first,
            let session = session(for: id) {
             if isResumeEnabled {
-                Button("Resume in Claude Code") { onResume?(session) }
+                Button("Resume in Claude Code (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { onResume?(session) }
                 Divider()
             }
             Button("Open Working Directory") {
@@ -381,6 +381,10 @@ private struct ClaudeSessionsListView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
             }
+            Button("Copy Session ID") {
+                copySessionID(id)
+            }
+            .help("Copy the session ID to the clipboard")
 
             // Git Inspector for Claude (current-only)
             if isGitInspectorEnabled {
@@ -401,6 +405,7 @@ private struct ClaudeSessionsListView: View {
             }
         } else {
             Button("Open Working Directory") {}.disabled(true)
+            Button("Copy Session ID") {}.disabled(true)
             Button("Filter by Project") {}.disabled(true)
         }
     }
@@ -411,6 +416,12 @@ private struct ClaudeSessionsListView: View {
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func copySessionID(_ id: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(id, forType: .string)
     }
 }
 

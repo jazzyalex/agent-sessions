@@ -39,8 +39,10 @@ All notable changes to this project will be documented in this file.
 - UI: Persist split-view divider positions per layout mode (horizontal vs vertical) so switching layouts doesn’t reset pane sizes.
 - UI: Session list typography now uses monospaced text with softer timestamp gray, taller rows, lighter message counts, and footer-blue selection accents.
 - UI: Increase session list row height to 48px for easier scanning.
-- UI: Agent colors are slightly softened (Codex coral, Claude lavender), the transcript toolbar spacing is tighter, and the terminal view adds a subtle top border.
+- UI: Codex now uses a blue brand accent distinct from the cockpit footer tint; the transcript toolbar spacing is tighter, and the terminal view adds a subtle top border.
 - Transcript: Toolbar controls now use monospaced typography to match the session list.
+- Sessions list: Added a context menu action to copy the session ID to the clipboard.
+- Sessions: Resume context menu actions now include the selected terminal app (for example, Terminal or iTerm2).
 
 ### Fixed
 
