@@ -403,7 +403,7 @@ struct UnifiedSessionsView: View {
 		                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
 		                Divider()
                 if s.source == .codex || s.source == .claude {
-                    Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code")") { resume(s) }
+                    Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code") (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
                         .keyboardShortcut("r", modifiers: [.command, .control])
                         .help("Resume the selected session in its original CLI (⌃⌘R)")
                     Divider()
@@ -414,6 +414,8 @@ struct UnifiedSessionsView: View {
                 Button("Reveal Session Log") { revealSessionFile(s) }
                     .keyboardShortcut("l", modifiers: [.command, .option])
                     .help("Show session log file in Finder (⌥⌘L)")
+                Button("Copy Session ID") { copySessionID(id) }
+                    .help("Copy the session ID to the clipboard")
                 // Git Context Inspector (Codex + Claude; feature-flagged)
                 if isGitInspectorEnabled, (s.source == .codex || s.source == .claude) {
                     Divider()
@@ -435,6 +437,9 @@ struct UnifiedSessionsView: View {
                 Button("Reveal Session Log") {}
                     .disabled(true)
                     .help("Select a session to reveal its log file")
+                Button("Copy Session ID") {}
+                    .disabled(true)
+                    .help("Select exactly one session to copy its ID")
                 Button("Filter by Project") {}
                     .disabled(true)
                     .help("Select a session with project metadata to filter")
@@ -572,6 +577,12 @@ struct UnifiedSessionsView: View {
             // Reuse existing resume pipeline for Codex/Claude as appropriate
             self.resume(resumed)
         }
+    }
+
+    private func copySessionID(_ id: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(id, forType: .string)
     }
 
     private var transcriptPane: some View {

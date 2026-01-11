@@ -251,7 +251,7 @@ struct SessionsListView: View {
         if selectedIDs.count == 1,
            let id = selectedIDs.first,
            let session = session(for: id) {
-            Button("Resume in Codex CLI") {
+            Button("Resume in Codex CLI (\(CodexLaunchMode.selectedResumeTerminalTitle()))") {
                 tableSelection = [id]
                 selection = id
                 onLaunchTerminal(session)
@@ -270,6 +270,12 @@ struct SessionsListView: View {
                 revealSession(session)
             }
             .help("Show the raw session log file in Finder")
+            Button("Copy Session ID") {
+                tableSelection = [id]
+                selection = id
+                copySessionID(id)
+            }
+            .help("Copy the session ID to the clipboard")
 
             // Git Context Inspector (Codex only, feature-flagged)
             if isGitInspectorEnabled && session.source == .codex {
@@ -296,7 +302,7 @@ struct SessionsListView: View {
                     .help("Project information is unavailable for this session")
             }
         } else {
-            Button("Resume in Codex CLI") {}
+            Button("Resume in Codex CLI (\(CodexLaunchMode.selectedResumeTerminalTitle()))") {}
                 .disabled(true)
                 .help("Select exactly one session to attempt a Codex resume")
             Button("Open Working Directory") {}
@@ -305,10 +311,19 @@ struct SessionsListView: View {
             Button("Open Session in Folder") {}
                 .disabled(true)
                 .help("Select one session to reveal its JSONL log in Finder")
+            Button("Copy Session ID") {}
+                .disabled(true)
+                .help("Select exactly one session to copy its ID")
             Button("Filter by Project") {}
                 .disabled(true)
                 .help("Select a session that has project metadata to filter by")
         }
+    }
+
+    private func copySessionID(_ id: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(id, forType: .string)
     }
 }
 
