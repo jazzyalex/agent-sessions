@@ -20,7 +20,7 @@ All notable changes to this project will be documented in this file.
 - Preferences: The Menu Bar pane now groups label options into sections and aligns toggles consistently.
 - Transcript: Removed the duplicate Jump to First Prompt control from the transcript toolbar.
 - Sessions list: The Size column can now be sorted.
-- Search: The unified sessions toolbar now shows the global search field by default and displays its keyboard shortcut inline.
+- Search: Multi-word Unified Search queries now behave like phrase searches (for example, `exit code`) to match transcript navigation and avoid accidental boolean parsing.
 - Search: The Search Sessions menu item and ⌥⌘F shortcut now reliably focus the global search field.
 - Transcript: Replace the read-only search box with a Unified Search navigation pill that appears only when Unified Search is active.
 - Transcript: Find in Transcript (⌘F) now opens a local find bar with its own query and navigation.
