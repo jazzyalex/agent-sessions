@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - Search: The Search Sessions menu item and ⌥⌘F shortcut now reliably focus the global search field.
 - Transcript: Replace the read-only search box with a Unified Search navigation pill that appears only when Unified Search is active.
 - Transcript: Find in Transcript (⌘F) now opens a local find bar with its own query and navigation.
+- Transcript: The Unified Search navigation pill now embeds in the transcript toolbar when space allows, and local Find uses a stronger current-match marker for easier scanning.
 - Search: Unified Search highlights matches in the selected transcript and jumps to the first match when switching sessions.
 - Analytics: The By Agent card now auto-scales rows and falls back to an internal scroll when space is tight.
 - UI: Consolidate unified-window status indicators into a single cockpit-style footer.
