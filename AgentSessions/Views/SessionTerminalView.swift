@@ -1161,52 +1161,50 @@ private final class TerminalLayoutManager: NSLayoutManager {
 	        }
 	    }
 
-	    private func drawLocalFindLineMarker(forGlyphRange glyphsToShow: NSRange, in tc: NSTextContainer, at origin: CGPoint) {
-	        guard let currentID = localFindCurrentLineID else { return }
-	        guard let entry = lineIndex.first(where: { $0.id == currentID }) else { return }
+		    private func drawLocalFindLineMarker(forGlyphRange glyphsToShow: NSRange, in tc: NSTextContainer, at origin: CGPoint) {
+		        guard let currentID = localFindCurrentLineID else { return }
+		        guard let entry = lineIndex.first(where: { $0.id == currentID }) else { return }
 
-	        let lineGlyphs = glyphRange(forCharacterRange: entry.range, actualCharacterRange: nil)
-	        guard NSIntersectionRange(lineGlyphs, glyphsToShow).length > 0 else { return }
+		        let lineGlyphs = glyphRange(forCharacterRange: entry.range, actualCharacterRange: nil)
+		        guard NSIntersectionRange(lineGlyphs, glyphsToShow).length > 0 else { return }
 
-	        let blue = NSColor.systemBlue
-		        let fill = blue.withAlphaComponent(isDark ? 0.26 : 0.18)
-		        let stroke = blue.withAlphaComponent(isDark ? 0.95 : 0.90)
-		        let glow = blue.withAlphaComponent(isDark ? 0.65 : 0.35)
-	        let cardInsetX: CGFloat = 8
-	        var renderedGlyphStarts: Set<Int> = []
+		        let blue = NSColor.systemBlue
+		        let fill = blue.withAlphaComponent(isDark ? 0.78 : 0.70)
+		        let cardInsetX: CGFloat = 8
+		        var renderedGlyphStarts: Set<Int> = []
 
-	        enumerateLineFragments(forGlyphRange: lineGlyphs) { rect, _, container, glyphRange, _ in
-	            guard container === tc else { return }
-	            if renderedGlyphStarts.contains(glyphRange.location) { return }
-	            renderedGlyphStarts.insert(glyphRange.location)
+		        guard let firstMatch = localFindRanges.first else { return }
+		        let matchGlyphs = glyphRange(forCharacterRange: firstMatch, actualCharacterRange: nil)
+		        guard NSIntersectionRange(matchGlyphs, glyphsToShow).length > 0 else { return }
 
-	            let charIndex = self.characterIndexForGlyph(at: glyphRange.location)
-	            let blockAccentWidth: CGFloat = {
-	                guard let b = self.blockDecoration(containing: charIndex) else { return 0 }
-	                return self.style(for: b.kind).accentWidth
-	            }()
+		        enumerateLineFragments(forGlyphRange: matchGlyphs) { rect, _, container, glyphRange, _ in
+		            guard container === tc else { return }
+		            if renderedGlyphStarts.contains(glyphRange.location) { return }
+		            renderedGlyphStarts.insert(glyphRange.location)
 
-		            let width: CGFloat = max(8, blockAccentWidth + 4)
-	            let height = max(2, rect.height - 4)
-	            let y = rect.minY + 2 + origin.y
-	            let x = rect.minX + origin.x + cardInsetX
+		            let g = NSIntersectionRange(glyphRange, matchGlyphs)
+		            guard g.length > 0 else { return }
 
-	            let pillRect = CGRect(x: x, y: y, width: width, height: height)
-	            let pill = NSBezierPath(roundedRect: pillRect, xRadius: width / 2, yRadius: width / 2)
+		            var matchRect = self.boundingRect(forGlyphRange: g, in: tc)
+		            matchRect = matchRect.offsetBy(dx: origin.x, dy: origin.y)
 
-	            fill.setFill()
-	            pill.fill()
+		            let charIndex = self.characterIndexForGlyph(at: g.location)
+		            let blockAccentWidth: CGFloat = {
+		                guard let b = self.blockDecoration(containing: charIndex) else { return 0 }
+		                return self.style(for: b.kind).accentWidth
+		            }()
 
-	            NSGraphicsContext.saveGraphicsState()
-	            let shadow = NSShadow()
-	            shadow.shadowBlurRadius = 8
-	            shadow.shadowOffset = .zero
-	            shadow.shadowColor = glow
-	            shadow.set()
-	            stroke.setStroke()
-		            pill.lineWidth = 2.6
-		            pill.stroke()
-		            NSGraphicsContext.restoreGraphicsState()
+		            let width: CGFloat = max(5, blockAccentWidth + 1)
+		            let height = max(2, matchRect.height - 2)
+		            let y = matchRect.minY + 1
+		            let x = rect.minX + origin.x + cardInsetX
+
+		            let barRect = CGRect(x: x, y: y, width: width, height: height)
+		            let radius: CGFloat = min(width / 2, 3)
+		            let bar = NSBezierPath(roundedRect: barRect, xRadius: radius, yRadius: radius)
+
+		            fill.setFill()
+		            bar.fill()
 		        }
 		    }
 

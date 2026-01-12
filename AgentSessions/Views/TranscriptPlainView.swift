@@ -53,6 +53,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var unifiedHighlightRanges: [NSRange] = []
     @State private var pendingAutoJumpToken: Int? = nil
     @State private var pendingAutoJumpSessionID: String? = nil
+    @State private var unifiedSearchJumpWorkItem: DispatchWorkItem? = nil
     @State private var lastHandledAutoJumpToken: Int = 0
 
     // Find (⌘F): local to the selected session (standard find bar)
@@ -234,15 +235,28 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
             .onChange(of: session.events.count) { _, _ in rebuild(session: session) }
             .onChange(of: searchState.query) { _, newValue in
+                unifiedSearchJumpWorkItem?.cancel()
+                unifiedSearchJumpWorkItem = nil
                 if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     pendingAutoJumpToken = nil
                     pendingAutoJumpSessionID = nil
                 }
                 selectedNSRange = nil
-                performUnifiedFind(resetIndex: true, shouldJump: false)
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
+                    performUnifiedFind(resetIndex: true, shouldJump: false)
+                    return
+                }
+                let work = DispatchWorkItem { [trimmed] in
+                    let current = searchState.query.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard current == trimmed else { return }
+                    performUnifiedFind(resetIndex: true, shouldJump: true)
+                }
+                unifiedSearchJumpWorkItem = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
             }
             .onChange(of: searchState.autoJumpToken) { _, newValue in
-                guard let sessionID, sessionID == searchState.autoJumpSessionID, isUnifiedSearchActive else { return }
+                guard searchState.autoJumpSessionID == session.id, isUnifiedSearchActive else { return }
                 pendingAutoJumpToken = newValue
                 pendingAutoJumpSessionID = session.id
                 applyAutoJumpIfReady(session: session)
