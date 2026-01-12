@@ -1016,6 +1016,7 @@ private final class TerminalLayoutManager: NSLayoutManager {
 	    var currentMatchLineID: Int? = nil
 	    var matches: [FindMatch] = []
 	    var localFindRanges: [NSRange] = []
+	    var localFindCurrentLineID: Int? = nil
 
     private struct BlockStyle {
         let fill: NSColor
@@ -1110,13 +1111,14 @@ private final class TerminalLayoutManager: NSLayoutManager {
         return nil
     }
 
-    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
-        // Draw block cards + find highlights, then let AppKit draw any remaining backgrounds (including selection).
+	    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
+	        // Draw block cards + find highlights, then let AppKit draw any remaining backgrounds (including selection).
 
 	        if let tc = textContainers.first {
 	            drawBlockCards(forGlyphRange: glyphsToShow, in: tc, at: origin)
 	            drawFindHighlights(forGlyphRange: glyphsToShow, in: tc, at: origin)
 	            drawFindLineMarkers(forGlyphRange: glyphsToShow, in: tc, at: origin)
+	            drawLocalFindLineMarker(forGlyphRange: glyphsToShow, in: tc, at: origin)
 	            drawLocalFindOutlines(forGlyphRange: glyphsToShow, in: tc, at: origin)
 	        }
 
@@ -1158,6 +1160,55 @@ private final class TerminalLayoutManager: NSLayoutManager {
 	            }
 	        }
 	    }
+
+	    private func drawLocalFindLineMarker(forGlyphRange glyphsToShow: NSRange, in tc: NSTextContainer, at origin: CGPoint) {
+	        guard let currentID = localFindCurrentLineID else { return }
+	        guard let entry = lineIndex.first(where: { $0.id == currentID }) else { return }
+
+	        let lineGlyphs = glyphRange(forCharacterRange: entry.range, actualCharacterRange: nil)
+	        guard NSIntersectionRange(lineGlyphs, glyphsToShow).length > 0 else { return }
+
+	        let blue = NSColor.systemBlue
+		        let fill = blue.withAlphaComponent(isDark ? 0.26 : 0.18)
+		        let stroke = blue.withAlphaComponent(isDark ? 0.95 : 0.90)
+		        let glow = blue.withAlphaComponent(isDark ? 0.65 : 0.35)
+	        let cardInsetX: CGFloat = 8
+	        var renderedGlyphStarts: Set<Int> = []
+
+	        enumerateLineFragments(forGlyphRange: lineGlyphs) { rect, _, container, glyphRange, _ in
+	            guard container === tc else { return }
+	            if renderedGlyphStarts.contains(glyphRange.location) { return }
+	            renderedGlyphStarts.insert(glyphRange.location)
+
+	            let charIndex = self.characterIndexForGlyph(at: glyphRange.location)
+	            let blockAccentWidth: CGFloat = {
+	                guard let b = self.blockDecoration(containing: charIndex) else { return 0 }
+	                return self.style(for: b.kind).accentWidth
+	            }()
+
+		            let width: CGFloat = max(8, blockAccentWidth + 4)
+	            let height = max(2, rect.height - 4)
+	            let y = rect.minY + 2 + origin.y
+	            let x = rect.minX + origin.x + cardInsetX
+
+	            let pillRect = CGRect(x: x, y: y, width: width, height: height)
+	            let pill = NSBezierPath(roundedRect: pillRect, xRadius: width / 2, yRadius: width / 2)
+
+	            fill.setFill()
+	            pill.fill()
+
+	            NSGraphicsContext.saveGraphicsState()
+	            let shadow = NSShadow()
+	            shadow.shadowBlurRadius = 8
+	            shadow.shadowOffset = .zero
+	            shadow.shadowColor = glow
+	            shadow.set()
+	            stroke.setStroke()
+		            pill.lineWidth = 2.6
+		            pill.stroke()
+		            NSGraphicsContext.restoreGraphicsState()
+		        }
+		    }
 
     private func drawBlockCards(forGlyphRange glyphsToShow: NSRange, in tc: NSTextContainer, at origin: CGPoint) {
         guard !blocks.isEmpty else { return }
@@ -1818,14 +1869,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, let currentLineID else {
             lm.localFindRanges = []
+            lm.localFindCurrentLineID = nil
             return
         }
         guard let base = ranges[currentLineID] else {
             lm.localFindRanges = []
+            lm.localFindCurrentLineID = nil
             return
         }
         guard let line = lines.first(where: { $0.id == currentLineID }) else {
             lm.localFindRanges = []
+            lm.localFindCurrentLineID = nil
             return
         }
 
@@ -1842,6 +1896,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             search = NSRange(location: nextLoc, length: text.length - nextLoc)
         }
         lm.localFindRanges = out
+        lm.localFindCurrentLineID = out.isEmpty ? nil : currentLineID
     }
 
 	private func buildAttributedString() -> (NSAttributedString, [Int: NSRange]) {

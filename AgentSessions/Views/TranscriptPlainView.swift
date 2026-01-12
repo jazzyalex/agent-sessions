@@ -272,8 +272,36 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func toolbar(session: Session) -> some View {
+        ViewThatFits(in: .horizontal) {
+            toolbarLayout(session: session, placeUnifiedPillInline: true)
+            toolbarLayout(session: session, placeUnifiedPillInline: false)
+        }
+    }
+
+    private func toolbarLayout(session: Session, placeUnifiedPillInline: Bool) -> some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
+            toolbarTopRow(session: session, placeUnifiedPillInline: placeUnifiedPillInline)
+                .frame(height: 44)
+                .background(Color(NSColor.controlBackgroundColor))
+
+            if isFindBarVisible {
+                findBar
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(NSColor.controlBackgroundColor))
+            }
+
+            if isUnifiedSearchActive && !placeUnifiedPillInline {
+                unifiedNavigationPill
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                    .background(Color(NSColor.controlBackgroundColor))
+            }
+        }
+    }
+
+    private func toolbarTopRow(session: Session, placeUnifiedPillInline: Bool) -> some View {
+        HStack(spacing: 0) {
                 // Invisible button to capture Cmd+F shortcut
                 Button(action: { focusCoordinator.perform(.openTranscriptFind) }) { EmptyView() }
                     .keyboardShortcut("f", modifiers: .command)
@@ -399,35 +427,42 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
                 Spacer(minLength: 12)
 
-                // MID: Text size controls
-                HStack(spacing: 6) {
-                    Button(action: { adjustFont(-1) }) {
-                        HStack(spacing: 2) {
-                            Text("A").font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            Text("−").font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut("-", modifiers: .command)
-                    .help("Decrease text size (⌘−)")
-                    .accessibilityLabel("Decrease Text Size")
+	                if placeUnifiedPillInline && isUnifiedSearchActive {
+	                    unifiedNavigationPillBody
+	                        .frame(minWidth: 240, maxWidth: 520)
+	                        .layoutPriority(1)
+	                }
 
-                    Button(action: { adjustFont(1) }) {
-                        HStack(spacing: 2) {
-                            Text("A").font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            Text("+").font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut("+", modifiers: .command)
-                    .help("Increase text size (⌘+)")
-                    .accessibilityLabel("Increase Text Size")
-                }
-
-                Spacer()
+                Spacer(minLength: 12)
 
                 // === TRAILING GROUP: Copy + Find ===
                 HStack(spacing: 12) {
+                    HStack(spacing: 6) {
+                        Button(action: { adjustFont(-1) }) {
+                            HStack(spacing: 2) {
+                                Text("A").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                Text("−").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .keyboardShortcut("-", modifiers: .command)
+                        .help("Decrease text size (⌘−)")
+                        .accessibilityLabel("Decrease Text Size")
+
+                        Button(action: { adjustFont(1) }) {
+                            HStack(spacing: 2) {
+                                Text("A").font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                Text("+").font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .keyboardShortcut("+", modifiers: .command)
+                        .help("Increase text size (⌘+)")
+                        .accessibilityLabel("Increase Text Size")
+                    }
+
+                    Divider().frame(height: 20)
+
                     Button("Copy") { copyAll() }
                         .buttonStyle(.borderless)
                         .font(TranscriptToolbarStyle.baseFont)
@@ -461,32 +496,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .buttonStyle(.borderless)
                     .help("Find in session (⌘F)")
                     .accessibilityLabel("Find in session")
-                }
-                .padding(.trailing, 12)
-            }
-            .frame(height: 44)
-            .background(Color(NSColor.controlBackgroundColor))
+	                }
+	                .padding(.trailing, 12)
+	            }
+	        }
 
-            if isFindBarVisible {
-                findBar
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color(NSColor.controlBackgroundColor))
-            }
-
-            if isUnifiedSearchActive {
-                unifiedNavigationPill
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
-                    .background(Color(NSColor.controlBackgroundColor))
-            }
-        }
-    }
-
-    private var findBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+	    private var findBar: some View {
+	        HStack(spacing: 10) {
+	            Image(systemName: "magnifyingglass")
+	                .foregroundStyle(.secondary)
 
             TextField("Find in session", text: $findQueryDraft)
                 .textFieldStyle(.plain)
@@ -552,8 +570,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private var unifiedNavigationPill: some View {
         HStack {
             Spacer()
+            unifiedNavigationPillBody
+            Spacer()
+        }
+    }
+
+    private var unifiedNavigationPillBody: some View {
             HStack(spacing: 10) {
-                Text("\"\(unifiedQuery)\"")
+                Text(unifiedQuery)
                     .font(TranscriptToolbarStyle.baseFont)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -597,8 +621,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 Capsule(style: .continuous)
                     .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
             )
-            Spacer()
-        }
     }
 
     private func rebuild(session: Session) {
