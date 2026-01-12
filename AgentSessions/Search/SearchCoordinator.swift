@@ -502,7 +502,7 @@ final class SearchCoordinator: ObservableObject {
             if q.contains("(") || q.contains(")") { return q }
             if q.contains(":") { return q }
             if lower.contains(" near ") || lower.hasPrefix("near ") || lower.hasSuffix(" near") { return q }
-            if q.contains(" AND ") || q.contains(" OR ") || q.contains(" NOT ") { return q }
+            if lower.contains(" and ") || lower.contains(" or ") || lower.contains(" not ") { return q }
 
             let normalized = q.split(whereSeparator: \.isWhitespace).joined(separator: " ")
             return "\"\(normalized)\""
