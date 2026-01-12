@@ -490,6 +490,24 @@ final class SearchCoordinator: ObservableObject {
         let q = freeText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return q }
 
+        // Multi-word queries should behave like phrase searches by default (the same semantics
+        // used for transcript navigation), so users can distinguish "exit" from "exit code".
+        // Power users can still opt into explicit FTS query syntax by using quotes/operators/etc.
+        if q.contains(where: \.isWhitespace) {
+            // If the user already wrote an explicit FTS query (quotes, boolean ops, prefix, etc),
+            // do not rewrite it.
+            let lower = q.lowercased()
+            if q.contains("\"") { return q }
+            if q.contains("*") { return q }
+            if q.contains("(") || q.contains(")") { return q }
+            if q.contains(":") { return q }
+            if lower.contains(" near ") || lower.hasPrefix("near ") || lower.hasSuffix(" near") { return q }
+            if q.contains(" AND ") || q.contains(" OR ") || q.contains(" NOT ") { return q }
+
+            let normalized = q.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            return "\"\(normalized)\""
+        }
+
         // If the user already wrote an explicit FTS query (quotes, boolean ops, prefix, etc),
         // do not rewrite it.
         let lower = q.lowercased()
