@@ -47,11 +47,21 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var transcript: String = ""
     @State private var rebuildTask: Task<Void, Never>?
 
-    // Find
+    // Unified Search (⌥⌘F): window-level query used to filter sessions and navigate within transcript
+    @State private var unifiedMatches: [Range<String.Index>] = []
+    @State private var unifiedCurrentMatchIndex: Int = 0
+    @State private var unifiedHighlightRanges: [NSRange] = []
+    @State private var pendingAutoJumpToken: Int? = nil
+    @State private var pendingAutoJumpSessionID: String? = nil
+    @State private var lastHandledAutoJumpToken: Int = 0
+
+    // Find (⌘F): local to the selected session (standard find bar)
+    @State private var isFindBarVisible: Bool = false
+    @State private var findQueryDraft: String = ""
     @State private var findMatches: [Range<String.Index>] = []
-    @State private var currentMatchIndex: Int = 0
-    @State private var navigatorFocused: Bool = false
-    @State private var highlightRanges: [NSRange] = []
+    @State private var findCurrentMatchIndex: Int = 0
+    @State private var findCurrentRange: NSRange? = nil
+    @FocusState private var isFindFieldFocused: Bool
     @State private var commandRanges: [NSRange] = []
     @State private var userRanges: [NSRange] = []
     @State private var assistantRanges: [NSRange] = []
@@ -59,16 +69,21 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var errorRanges: [NSRange] = []
     @State private var hasCommands: Bool = false
     @State private var isBuildingJSON: Bool = false
-    // Terminal-specific find state (used when viewMode == .terminal)
+    // Terminal-specific unified search navigation state (used when viewMode == .terminal)
+    @State private var terminalUnifiedMatchesCount: Int = 0
+    @State private var terminalUnifiedCurrentIndex: Int = 0
+    @State private var terminalUnifiedFindToken: Int = 0
+    @State private var terminalUnifiedFindDirection: Int = 1
+    @State private var terminalUnifiedFindResetFlag: Bool = true
+    @State private var terminalUnifiedAllowMatchAutoScroll: Bool = true
+
+    // Terminal-specific local find state (used when viewMode == .terminal)
     @State private var terminalFindMatchesCount: Int = 0
     @State private var terminalFindCurrentIndex: Int = 0
     @State private var terminalFindToken: Int = 0
     @State private var terminalFindDirection: Int = 1
     @State private var terminalFindResetFlag: Bool = true
     @State private var terminalAllowMatchAutoScroll: Bool = true
-    @State private var pendingAutoJumpToken: Int? = nil
-    @State private var pendingAutoJumpSessionID: String? = nil
-    @State private var lastHandledAutoJumpToken: Int = 0
 
     // Toggles (view-scoped)
     @State private var showTimestamps: Bool = false
@@ -105,12 +120,20 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         return viewMode == .json
     }
 
-    private var searchQuery: String {
+    private var unifiedQuery: String {
         searchState.query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var isSearchActive: Bool {
-        !searchQuery.isEmpty
+    private var isUnifiedSearchActive: Bool {
+        !unifiedQuery.isEmpty
+    }
+
+    private var findQuery: String {
+        findQueryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isFindActive: Bool {
+        isFindBarVisible && !findQuery.isEmpty
     }
 
     // Raw sheet
@@ -150,34 +173,42 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .frame(maxWidth: .infinity)
                     .background(Color(NSColor.controlBackgroundColor))
                 Divider()
-                ZStack {
-                    if viewMode == .terminal {
-                        SessionTerminalView(
-                            session: session,
-                            findQuery: searchQuery,
-                            findToken: terminalFindToken,
-                            findDirection: terminalFindDirection,
-                            findReset: terminalFindResetFlag,
-                            allowMatchAutoScroll: terminalAllowMatchAutoScroll,
-                            jumpToken: terminalJumpToken,
-                            roleNavToken: terminalRoleNavToken,
-                            roleNavRole: terminalRoleNavRole,
-                            roleNavDirection: terminalRoleNavDirection,
-                            externalMatchCount: $terminalFindMatchesCount,
-                            externalCurrentMatchIndex: $terminalFindCurrentIndex
-                        )
-                    } else {
-                        PlainTextScrollView(
-                            text: transcript,
-                            selection: selectedNSRange,
-                            selectionScrollMode: selectionScrollMode,
-                            fontSize: CGFloat(transcriptFontSize),
-                            highlights: highlightRanges,
-                            currentIndex: currentMatchIndex,
-                            commandRanges: (shouldColorize || isJSONMode) ? commandRanges : [],
-                            userRanges: (shouldColorize || isJSONMode) ? userRanges : [],
-                            assistantRanges: (shouldColorize || isJSONMode) ? assistantRanges : [],
-                            outputRanges: (shouldColorize || isJSONMode) ? outputRanges : [],
+	                ZStack {
+	                    if viewMode == .terminal {
+	                        SessionTerminalView(
+	                            session: session,
+	                            unifiedQuery: unifiedQuery,
+	                            unifiedFindToken: terminalUnifiedFindToken,
+	                            unifiedFindDirection: terminalUnifiedFindDirection,
+	                            unifiedFindReset: terminalUnifiedFindResetFlag,
+	                            unifiedAllowMatchAutoScroll: terminalUnifiedAllowMatchAutoScroll,
+	                            unifiedExternalMatchCount: $terminalUnifiedMatchesCount,
+	                            unifiedExternalCurrentMatchIndex: $terminalUnifiedCurrentIndex,
+	                            findQuery: findQuery,
+	                            findToken: terminalFindToken,
+	                            findDirection: terminalFindDirection,
+	                            findReset: terminalFindResetFlag,
+	                            allowMatchAutoScroll: terminalAllowMatchAutoScroll,
+	                            jumpToken: terminalJumpToken,
+	                            roleNavToken: terminalRoleNavToken,
+	                            roleNavRole: terminalRoleNavRole,
+	                            roleNavDirection: terminalRoleNavDirection,
+	                            externalMatchCount: $terminalFindMatchesCount,
+	                            externalCurrentMatchIndex: $terminalFindCurrentIndex
+	                        )
+	                    } else {
+	                        PlainTextScrollView(
+	                            text: transcript,
+	                            selection: selectedNSRange,
+	                            selectionScrollMode: selectionScrollMode,
+	                            fontSize: CGFloat(transcriptFontSize),
+	                            highlights: unifiedHighlightRanges,
+	                            currentIndex: unifiedCurrentMatchIndex,
+	                            findCurrentRange: findCurrentRange,
+	                            commandRanges: (shouldColorize || isJSONMode) ? commandRanges : [],
+	                            userRanges: (shouldColorize || isJSONMode) ? userRanges : [],
+	                            assistantRanges: (shouldColorize || isJSONMode) ? assistantRanges : [],
+	                            outputRanges: (shouldColorize || isJSONMode) ? outputRanges : [],
                             errorRanges: (shouldColorize || isJSONMode) ? errorRanges : [],
                             isJSONMode: isJSONMode,
                             appAppearanceRaw: appAppearanceRaw,
@@ -208,22 +239,22 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     pendingAutoJumpSessionID = nil
                 }
                 selectedNSRange = nil
-                performFind(resetIndex: true, shouldJump: false)
+                performUnifiedFind(resetIndex: true, shouldJump: false)
             }
             .onChange(of: searchState.autoJumpToken) { _, newValue in
-                guard let sessionID, sessionID == searchState.autoJumpSessionID, isSearchActive else { return }
+                guard let sessionID, sessionID == searchState.autoJumpSessionID, isUnifiedSearchActive else { return }
                 pendingAutoJumpToken = newValue
                 pendingAutoJumpSessionID = session.id
                 applyAutoJumpIfReady(session: session)
             }
             .onChange(of: focusCoordinator.activeFocus) { oldFocus, newFocus in
                 if newFocus == .transcriptFind {
-                    navigatorFocused = true
+                    isFindBarVisible = true
+                    isFindFieldFocused = true
                 } else if oldFocus == .transcriptFind {
-                    navigatorFocused = false
+                    isFindFieldFocused = false
                 } else if newFocus != .transcriptFind && newFocus != .none {
-                    // Another search UI became active - release focus
-                    navigatorFocused = false
+                    isFindFieldFocused = false
                 }
             }
             .sheet(isPresented: $showRawSheet) { WholeSessionRawPrettySheet(session: session) }
@@ -241,239 +272,333 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func toolbar(session: Session) -> some View {
-        HStack(spacing: 0) {
-            // Invisible button to capture Cmd+F shortcut
-            Button(action: { focusCoordinator.perform(.openTranscriptFind) }) { EmptyView() }
-                .keyboardShortcut("f", modifiers: .command)
-                .focusable(false)
-                .hidden()
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                // Invisible button to capture Cmd+F shortcut
+                Button(action: { focusCoordinator.perform(.openTranscriptFind) }) { EmptyView() }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .focusable(false)
+                    .hidden()
 
-            // Invisible button to toggle Plain/Color with Cmd+Shift+T
-            Button(action: {
-                let current = SessionViewMode.from(TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal)
-                let next: SessionViewMode
-                switch current {
-                case .transcript:
-                    next = .terminal
-                case .terminal:
-                    next = .transcript
-                case .json:
-                    // From JSON, Cmd+Shift+T toggles back to Plain.
-                    next = .transcript
-                }
-                viewModeRaw = next.rawValue
-                renderModeRaw = next.transcriptRenderMode.rawValue
-            }) { EmptyView() }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
-                .focusable(false)
-                .hidden()
+                // Invisible buttons to capture Cmd+G / Shift+Cmd+G (routes to Find when active, otherwise Unified Search)
+                Button(action: { navigateNextMatch(direction: -1) }) { EmptyView() }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    .focusable(false)
+                    .hidden()
+                Button(action: { navigateNextMatch(direction: 1) }) { EmptyView() }
+                    .keyboardShortcut("g", modifiers: .command)
+                    .focusable(false)
+                    .hidden()
 
-            // Invisible buttons to capture arrow-based transcript navigation shortcuts.
-            Button(action: { jumpUser(direction: 1) }) { EmptyView() }
-                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
-                .focusable(false)
-                .hidden()
-            Button(action: { jumpUser(direction: -1) }) { EmptyView() }
-                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
-                .focusable(false)
-                .hidden()
-            Button(action: { jumpTools(direction: 1) }) { EmptyView() }
-                .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
-                .focusable(false)
-                .hidden()
-            Button(action: { jumpTools(direction: -1) }) { EmptyView() }
-                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
-                .focusable(false)
-                .hidden()
-            Button(action: { jumpErrors(direction: 1) }) { EmptyView() }
-                .keyboardShortcut(.downArrow, modifiers: [.command, .option, .shift])
-                .focusable(false)
-                .hidden()
-            Button(action: { jumpErrors(direction: -1) }) { EmptyView() }
-                .keyboardShortcut(.upArrow, modifiers: [.command, .option, .shift])
-                .focusable(false)
-                .hidden()
-
-            // === LEADING GROUP: View Mode Segmented Control + JSON status + ID ===
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                Picker("View Style", selection: $viewModeRaw) {
-                    Text("Plain")
-                        .tag(SessionViewMode.transcript.rawValue)
-                        .help("Plain view \u{2014} merged chat and tools. Cmd+Shift+T toggles between Plain and Color.")
-                    Text("Color")
-                            .tag(SessionViewMode.terminal.rawValue)
-                            .help("Color view \u{2014} terminal-inspired output with colorized commands and tool output. Cmd+Shift+T toggles between Plain and Color.")
-                        Text("JSON")
-                            .tag(SessionViewMode.json.rawValue)
-                            .help("JSON view \u{2014} formatted session JSON for readability. Encrypted blobs and large text blocks are summarized; use the session file on disk for raw JSON.")
-                }
-                .pickerStyle(.segmented)
-                .font(TranscriptToolbarStyle.baseFont)
-                .labelsHidden()
-                .controlSize(.regular)
-                .frame(width: 200)
-                .accessibilityLabel("View Style")
-
-                    if isJSONMode && isBuildingJSON {
-                    HStack(spacing: 6) {
-                        Image(systemName: "hourglass")
-                        Text("Building JSON view…")
+                // Invisible button to toggle Plain/Color with Cmd+Shift+T
+                Button(action: {
+                    let current = SessionViewMode.from(TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal)
+                    let next: SessionViewMode
+                    switch current {
+                    case .transcript:
+                        next = .terminal
+                    case .terminal:
+                        next = .transcript
+                    case .json:
+                        // From JSON, Cmd+Shift+T toggles back to Plain.
+                        next = .transcript
                     }
-                    .font(TranscriptToolbarStyle.compactFont)
-                    .foregroundStyle(.secondary)
-                }
-            }
+                    viewModeRaw = next.rawValue
+                    renderModeRaw = next.transcriptRenderMode.rawValue
+                }) { EmptyView() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .focusable(false)
+                    .hidden()
 
-                HStack(spacing: 10) {
-                    if let fullID = sessionIDExtractor(session) {
-                        let displayLast4 = String(fullID.suffix(4))
-                        let short = extractShortID(for: session) ?? String(fullID.prefix(6))
-                        Button(action: { copySessionID(for: session) }) {
-                            HStack(spacing: 4) {
-                            Image(systemName: "doc.on.doc")
-                                .imageScale(.medium)
-                            Text("ID \(displayLast4)")
-                                .font(TranscriptToolbarStyle.baseFont)
-                                .foregroundStyle(.secondary)
+                // Invisible buttons to capture arrow-based transcript navigation shortcuts.
+                Button(action: { jumpUser(direction: 1) }) { EmptyView() }
+                    .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                    .focusable(false)
+                    .hidden()
+                Button(action: { jumpUser(direction: -1) }) { EmptyView() }
+                    .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                    .focusable(false)
+                    .hidden()
+                Button(action: { jumpTools(direction: 1) }) { EmptyView() }
+                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                    .focusable(false)
+                    .hidden()
+                Button(action: { jumpTools(direction: -1) }) { EmptyView() }
+                    .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                    .focusable(false)
+                    .hidden()
+                Button(action: { jumpErrors(direction: 1) }) { EmptyView() }
+                    .keyboardShortcut(.downArrow, modifiers: [.command, .option, .shift])
+                    .focusable(false)
+                    .hidden()
+                Button(action: { jumpErrors(direction: -1) }) { EmptyView() }
+                    .keyboardShortcut(.upArrow, modifiers: [.command, .option, .shift])
+                    .focusable(false)
+                    .hidden()
+
+                // === LEADING GROUP: View mode + JSON status + ID ===
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Picker("View Style", selection: $viewModeRaw) {
+                            Text("Plain")
+                                .tag(SessionViewMode.transcript.rawValue)
+                                .help("Plain view — merged chat and tools. Cmd+Shift+T toggles between Plain and Color.")
+                            Text("Color")
+                                .tag(SessionViewMode.terminal.rawValue)
+                                .help("Color view — terminal-inspired output with colorized commands and tool output. Cmd+Shift+T toggles between Plain and Color.")
+                            Text("JSON")
+                                .tag(SessionViewMode.json.rawValue)
+                                .help("JSON view — formatted session JSON for readability. Encrypted blobs and large text blocks are summarized; use the session file on disk for raw JSON.")
                         }
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Copy session ID: \(short) (⌘⇧C)")
-                        .accessibilityLabel("Copy Session ID")
-                    .keyboardShortcut("c", modifiers: [.command, .shift])
-                    .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
-                        Text("ID Copied!")
-                            .padding(8)
-                            .font(TranscriptToolbarStyle.popoverFont)
-                    }
-                }
-                if StarredSessionsStore().contains(id: session.id, source: session.source) {
-                    pinnedBadge(session: session)
-                    }
-                }
-            }
-            .padding(.leading, 12)
+                        .pickerStyle(.segmented)
+                        .font(TranscriptToolbarStyle.baseFont)
+                        .labelsHidden()
+                        .controlSize(.regular)
+                        .frame(width: 200)
+                        .accessibilityLabel("View Style")
 
-            Spacer(minLength: 12)
-
-            // MID: Text size controls (moved next to ID)
-            HStack(spacing: 6) {
-                Button(action: { adjustFont(-1) }) {
-                    HStack(spacing: 2) {
-                        Text("A").font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        Text("−").font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    }
-                }
-                .buttonStyle(.borderless)
-                .keyboardShortcut("-", modifiers: .command)
-                .help("Decrease text size (⌘−)")
-                .accessibilityLabel("Decrease Text Size")
-
-                Button(action: { adjustFont(1) }) {
-                    HStack(spacing: 2) {
-                        Text("A").font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        Text("+").font(.system(size: 14, weight: .semibold, design: .monospaced))
-                    }
-                }
-                .buttonStyle(.borderless)
-                .keyboardShortcut("+", modifiers: .command)
-                .help("Increase text size (⌘+)")
-                .accessibilityLabel("Increase Text Size")
-            }
-
-            Spacer()
-
-            // === TRAILING GROUP: Copy and Find Controls ===
-            HStack(spacing: 12) {
-                // Copy transcript button
-                Button("Copy") { copyAll() }
-                    .buttonStyle(.borderless)
-                    .font(TranscriptToolbarStyle.baseFont)
-                    .help("Copy entire transcript to clipboard (⌥⌘C)")
-                    .keyboardShortcut("c", modifiers: [.command, .option])
-                    .accessibilityLabel("Copy Transcript")
-
-                Divider().frame(height: 20)
-
-                // Match Navigator (single search)
-                HStack(spacing: 6) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                            .imageScale(.medium)
-                        Text(searchQuery.isEmpty ? "Search sessions" : searchState.query)
-                            .foregroundStyle(searchQuery.isEmpty ? .secondary : .primary)
-                            .font(TranscriptToolbarStyle.baseFont)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(minWidth: 120, idealWidth: 220, maxWidth: 360, alignment: .leading)
-                        if searchQuery.isEmpty {
-                            Text("⌥⌘F")
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .accessibilityHidden(true)
-                        } else {
-                            Button(action: clearSearch) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .imageScale(.medium)
-                                    .foregroundStyle(.secondary)
+                        if isJSONMode && isBuildingJSON {
+                            HStack(spacing: 6) {
+                                Image(systemName: "hourglass")
+                                Text("Building JSON view…")
                             }
-                            .buttonStyle(.plain)
-                            .focusable(false)
-                            .help("Clear search (⎋)")
-                            .keyboardShortcut(.escape)
+                            .font(TranscriptToolbarStyle.compactFont)
+                            .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(nsColor: .textBackgroundColor))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(navigatorFocused ? Color.accentColor.opacity(0.5) : Color.gray.opacity(0.25),
-                                    lineWidth: navigatorFocused ? 2 : 1)
-                    )
-                    .onTapGesture { focusCoordinator.perform(.openSessionSearch) }
-                    .accessibilityLabel("Search sessions")
 
-                    // Next/Previous controls group
-                    HStack(spacing: 2) {
-                        Button(action: { performFind(resetIndex: false, direction: -1, shouldJump: true) }) {
-                            Image(systemName: "chevron.up")
+                    HStack(spacing: 10) {
+                        if let fullID = sessionIDExtractor(session) {
+                            let displayLast4 = String(fullID.suffix(4))
+                            let short = extractShortID(for: session) ?? String(fullID.prefix(6))
+                            Button(action: { copySessionID(for: session) }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "doc.on.doc")
+                                        .imageScale(.medium)
+                                    Text("ID \(displayLast4)")
+                                        .font(TranscriptToolbarStyle.baseFont)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Copy session ID: \(short) (⌘⇧C)")
+                            .accessibilityLabel("Copy Session ID")
+                            .keyboardShortcut("c", modifiers: [.command, .shift])
+                            .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
+                                Text("ID Copied!")
+                                    .padding(8)
+                                    .font(TranscriptToolbarStyle.popoverFont)
+                            }
                         }
-                        .buttonStyle(.borderless)
-                        .focusable(false)
-                        .disabled(isFindNavigationDisabled)
-                        .help("Previous match (⇧⌘G)")
-                        .keyboardShortcut("g", modifiers: [.command, .shift])
-
-                        Button(action: { performFind(resetIndex: false, direction: 1, shouldJump: true) }) {
-                            Image(systemName: "chevron.down")
+                        if StarredSessionsStore().contains(id: session.id, source: session.source) {
+                            pinnedBadge(session: session)
                         }
-                        .buttonStyle(.borderless)
-                        .focusable(false)
-                        .disabled(isFindNavigationDisabled)
-                        .help("Next match (⌘G)")
-                        .keyboardShortcut("g", modifiers: .command)
-                    }
-
-                    // Match count badge
-                    if isSearchActive {
-                        Text(findStatus())
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(isFindNavigationDisabled ? .red : .secondary)
-                            .frame(minWidth: 32, alignment: .trailing)
-                            .accessibilityLabel("Match \(findStatus())")
                     }
                 }
+                .padding(.leading, 12)
+
+                Spacer(minLength: 12)
+
+                // MID: Text size controls
+                HStack(spacing: 6) {
+                    Button(action: { adjustFont(-1) }) {
+                        HStack(spacing: 2) {
+                            Text("A").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            Text("−").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut("-", modifiers: .command)
+                    .help("Decrease text size (⌘−)")
+                    .accessibilityLabel("Decrease Text Size")
+
+                    Button(action: { adjustFont(1) }) {
+                        HStack(spacing: 2) {
+                            Text("A").font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            Text("+").font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut("+", modifiers: .command)
+                    .help("Increase text size (⌘+)")
+                    .accessibilityLabel("Increase Text Size")
+                }
+
+                Spacer()
+
+                // === TRAILING GROUP: Copy + Find ===
+                HStack(spacing: 12) {
+                    Button("Copy") { copyAll() }
+                        .buttonStyle(.borderless)
+                        .font(TranscriptToolbarStyle.baseFont)
+                        .help("Copy entire transcript to clipboard (⌥⌘C)")
+                        .keyboardShortcut("c", modifiers: [.command, .option])
+                        .accessibilityLabel("Copy Transcript")
+
+                    Divider().frame(height: 20)
+
+                    Button(action: {
+                        if isFindBarVisible {
+                            closeFind()
+                        } else {
+                            focusCoordinator.perform(.openTranscriptFind)
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                                .imageScale(.small)
+                            Text(isFindBarVisible ? "Done" : "Find")
+                                .font(TranscriptToolbarStyle.baseFont)
+                            if !isFindBarVisible {
+                                Text("⌘F")
+                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Find in session (⌘F)")
+                    .accessibilityLabel("Find in session")
+                }
+                .padding(.trailing, 12)
             }
-            .padding(.trailing, 12)
+            .frame(height: 44)
+            .background(Color(NSColor.controlBackgroundColor))
+
+            if isFindBarVisible {
+                findBar
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(NSColor.controlBackgroundColor))
+            }
+
+            if isUnifiedSearchActive {
+                unifiedNavigationPill
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                    .background(Color(NSColor.controlBackgroundColor))
+            }
         }
-        .frame(height: 44)
-        .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    private var findBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+
+            TextField("Find in session", text: $findQueryDraft)
+                .textFieldStyle(.plain)
+                .font(TranscriptToolbarStyle.baseFont)
+                .focused($isFindFieldFocused)
+                .onChange(of: findQueryDraft) { _, _ in
+                    performFind(resetIndex: true, shouldJump: true)
+                }
+                .onSubmit {
+                    performFind(resetIndex: false, direction: 1, shouldJump: true)
+                }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 6) {
+                Button(action: { performFind(resetIndex: false, direction: -1, shouldJump: true) }) {
+                    Image(systemName: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                .disabled(isFindNavigationDisabled)
+                .help("Previous match (⇧⌘G)")
+
+                Text(findQuery.isEmpty ? "0/0" : findStatus())
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(isFindNavigationDisabled ? .red : .secondary)
+                    .frame(minWidth: 44, alignment: .center)
+
+                Button(action: { performFind(resetIndex: false, direction: 1, shouldJump: true) }) {
+                    Image(systemName: "chevron.right")
+                }
+                .buttonStyle(.borderless)
+                .disabled(isFindNavigationDisabled)
+                .help("Next match (⌘G)")
+
+                Button(action: {
+                    if findQueryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        closeFind()
+                    } else {
+                        findQueryDraft = ""
+                        performFind(resetIndex: true, shouldJump: false)
+                    }
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(findQueryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Close Find (⎋)" : "Clear Find (⎋)")
+                .keyboardShortcut(.escape)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    private var unifiedNavigationPill: some View {
+        HStack {
+            Spacer()
+            HStack(spacing: 10) {
+                Text("\"\(unifiedQuery)\"")
+                    .font(TranscriptToolbarStyle.baseFont)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(minWidth: 80, idealWidth: 180, maxWidth: 360, alignment: .leading)
+
+                Divider().frame(height: 16)
+
+                Button(action: { performUnifiedFind(resetIndex: false, direction: -1, shouldJump: true) }) {
+                    Image(systemName: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                .disabled(isUnifiedNavigationDisabled)
+                .help("Previous Unified Search match")
+
+                Text(unifiedStatus())
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(isUnifiedNavigationDisabled ? .red : .secondary)
+                    .frame(minWidth: 44, alignment: .center)
+
+                Button(action: { performUnifiedFind(resetIndex: false, direction: 1, shouldJump: true) }) {
+                    Image(systemName: "chevron.right")
+                }
+                .buttonStyle(.borderless)
+                .disabled(isUnifiedNavigationDisabled)
+                .help("Next Unified Search match")
+
+                Button(action: clearSearch) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear Unified Search")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.accentColor.opacity(0.12))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+            )
+            Spacer()
+        }
     }
 
     private func rebuild(session: Session) {
@@ -513,8 +638,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     computeNavigationRangesIfNeeded()
                 }
                 lastBuildKey = key
-                // Reset find state
-                performFind(resetIndex: true, shouldJump: false)
+                // Reset Unified Search navigation state
+                performUnifiedFind(resetIndex: true, shouldJump: false)
                 selectedNSRange = nil
                 resetJumpCursors()
                 applyAutoJumpIfReady(session: session)
@@ -539,7 +664,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     computeNavigationRangesIfNeeded()
                     transcriptCache[key] = decorated
                     lastBuildKey = key
-                    performFind(resetIndex: true, shouldJump: false)
+                    performUnifiedFind(resetIndex: true, shouldJump: false)
                     selectedNSRange = nil
                     resetJumpCursors()
                     applyAutoJumpIfReady(session: session)
@@ -568,7 +693,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.terminalCommandRangesCache[key] = built.1
                             self.terminalUserRangesCache[key] = built.2
                             self.lastBuildKey = key
-                            self.performFind(resetIndex: true, shouldJump: false)
+	                            self.performUnifiedFind(resetIndex: true, shouldJump: false)
                             self.selectedNSRange = nil
                             self.applyAutoJumpIfReady(session: session)
                             self.maybeAutoJumpToFirstPrompt(session: session)
@@ -587,7 +712,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.computeNavigationRangesIfNeeded()
                             self.transcriptCache[key] = decorated
                             self.lastBuildKey = key
-                            self.performFind(resetIndex: true, shouldJump: false)
+	                            self.performUnifiedFind(resetIndex: true, shouldJump: false)
                             self.selectedNSRange = nil
                             self.resetJumpCursors()
                             self.applyAutoJumpIfReady(session: session)
@@ -651,14 +776,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         self.userRanges = []
                         self.assistantRanges = []
                         self.outputRanges = []
-                        self.errorRanges = []
-                        self.hasCommands = true
-                        self.lastBuildKey = keySnapshot
-                        self.performFind(resetIndex: true, shouldJump: false)
-                        self.selectedNSRange = nil
-                        self.resetJumpCursors()
-                        self.applyAutoJumpIfReady(session: sessionSnapshot)
-                        self.maybeAutoJumpToFirstPrompt(session: sessionSnapshot)
+	                        self.errorRanges = []
+	                        self.hasCommands = true
+	                        self.lastBuildKey = keySnapshot
+	                        self.performUnifiedFind(resetIndex: true, shouldJump: false)
+	                        self.selectedNSRange = nil
+	                        self.resetJumpCursors()
+	                        self.applyAutoJumpIfReady(session: sessionSnapshot)
+	                        self.maybeAutoJumpToFirstPrompt(session: sessionSnapshot)
                     }
                 } else {
                     let t = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: sessionSnapshot, filters: filters, mode: .normal)
@@ -675,26 +800,26 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         self.hasCommands = sessionHasCommands2
                         if self.viewMode != .terminal && self.viewMode != .json {
                             self.computeNavigationRangesIfNeeded()
-                        }
-                        self.lastBuildKey = keySnapshot
-                        self.performFind(resetIndex: true, shouldJump: false)
-                        self.selectedNSRange = nil
-                        self.resetJumpCursors()
-                        self.applyAutoJumpIfReady(session: sessionSnapshot)
-                        self.maybeAutoJumpToFirstPrompt(session: sessionSnapshot)
+	                        }
+	                        self.lastBuildKey = keySnapshot
+	                        self.performUnifiedFind(resetIndex: true, shouldJump: false)
+	                        self.selectedNSRange = nil
+	                        self.resetJumpCursors()
+	                        self.applyAutoJumpIfReady(session: sessionSnapshot)
+	                        self.maybeAutoJumpToFirstPrompt(session: sessionSnapshot)
                     }
                 }
             }
             return
         }
 
-        // Reset find state
-        performFind(resetIndex: true, shouldJump: false)
-        selectedNSRange = nil
-        resetJumpCursors()
-        applyAutoJumpIfReady(session: session)
-        maybeAutoJumpToFirstPrompt(session: session)
-    }
+	        // Reset Unified Search navigation state
+	        performUnifiedFind(resetIndex: true, shouldJump: false)
+	        selectedNSRange = nil
+	        resetJumpCursors()
+	        applyAutoJumpIfReady(session: session)
+	        maybeAutoJumpToFirstPrompt(session: session)
+	    }
 
     private func externalCachedTranscript(for id: String) -> String? {
         // Attempt to read from indexer-level caches (non-generating)
@@ -708,30 +833,30 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         return nil
     }
 
-	    private func performFind(resetIndex: Bool, direction: Int = 1, shouldJump: Bool = true) {
+	    private func performUnifiedFind(resetIndex: Bool, direction: Int = 1, shouldJump: Bool = true) {
 	        // Terminal mode uses a dedicated line-based search in SessionTerminalView.
 	        if viewMode == .terminal {
-	            let q = searchQuery
+	            let q = unifiedQuery
 	            guard !q.isEmpty else {
-	                terminalFindMatchesCount = 0
-	                terminalFindCurrentIndex = 0
-                    terminalAllowMatchAutoScroll = false
-	                terminalFindToken &+= 1
+	                terminalUnifiedMatchesCount = 0
+	                terminalUnifiedCurrentIndex = 0
+                    terminalUnifiedAllowMatchAutoScroll = false
+	                terminalUnifiedFindToken &+= 1
 	                selectedNSRange = nil
 	                return
 	            }
-                terminalAllowMatchAutoScroll = shouldJump
-	            terminalFindDirection = direction
-	            terminalFindResetFlag = resetIndex
-	            terminalFindToken &+= 1
+                terminalUnifiedAllowMatchAutoScroll = shouldJump
+	            terminalUnifiedFindDirection = direction
+	            terminalUnifiedFindResetFlag = resetIndex
+	            terminalUnifiedFindToken &+= 1
 	            return
         }
 
-	        let q = searchQuery
+	        let q = unifiedQuery
 	        guard !q.isEmpty else {
-	            findMatches = []
-	            currentMatchIndex = 0
-	            highlightRanges = []
+	            unifiedMatches = []
+	            unifiedCurrentMatchIndex = 0
+	            unifiedHighlightRanges = []
 	            selectedNSRange = nil
 	            return
 	        }
@@ -742,25 +867,24 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             matches.append(r)
             searchStart = r.upperBound
         }
-        findMatches = matches
+        unifiedMatches = matches
         if matches.isEmpty {
-            currentMatchIndex = 0
-            highlightRanges = []
+            unifiedCurrentMatchIndex = 0
+            unifiedHighlightRanges = []
         } else {
             if resetIndex {
-                currentMatchIndex = 0
+                unifiedCurrentMatchIndex = 0
             } else {
-                var newIdx = currentMatchIndex + direction
+                var newIdx = unifiedCurrentMatchIndex + direction
                 if newIdx < 0 { newIdx = matches.count - 1 }
                 if newIdx >= matches.count { newIdx = 0 }
-                currentMatchIndex = newIdx
+                unifiedCurrentMatchIndex = newIdx
             }
 
             // Convert to NSRange and validate bounds
             let transcriptLength = (transcript as NSString).length
             let validRanges = matches.compactMap { range -> NSRange? in
                 let nsRange = NSRange(range, in: transcript)
-                // Validate bounds
                 if NSMaxRange(nsRange) <= transcriptLength {
                     return nsRange
                 } else {
@@ -769,52 +893,134 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
             }
 
-            // Diagnostic logging for problematic sessions
             if validRanges.count != matches.count {
                 print("⚠️ FIND: Filtered \(matches.count - validRanges.count) out-of-bounds ranges (query: '\(q)', transcript: \(transcriptLength) chars)")
             }
 
-            highlightRanges = validRanges
+            unifiedHighlightRanges = validRanges
 
-            // Adjust currentMatchIndex if out of bounds after filtering
-            if highlightRanges.isEmpty {
-                currentMatchIndex = 0
-            } else if currentMatchIndex >= highlightRanges.count {
-                currentMatchIndex = highlightRanges.count - 1
+            // Adjust unifiedCurrentMatchIndex if out of bounds after filtering
+            if unifiedHighlightRanges.isEmpty {
+                unifiedCurrentMatchIndex = 0
+            } else if unifiedCurrentMatchIndex >= unifiedHighlightRanges.count {
+                unifiedCurrentMatchIndex = unifiedHighlightRanges.count - 1
             }
             if shouldJump {
-                updateSelectionToCurrentMatch()
+                updateSelectionToUnifiedCurrentMatch()
             } else {
                 selectedNSRange = nil
             }
         }
     }
 
-    private func updateSelectionToCurrentMatch() {
-        guard !highlightRanges.isEmpty, currentMatchIndex < highlightRanges.count else {
+    private func performFind(resetIndex: Bool, direction: Int = 1, shouldJump: Bool = true) {
+        // Terminal mode uses a dedicated line-based search in SessionTerminalView.
+        if viewMode == .terminal {
+            let q = findQuery
+            guard !q.isEmpty else {
+                terminalFindMatchesCount = 0
+                terminalFindCurrentIndex = 0
+                terminalAllowMatchAutoScroll = false
+                terminalFindToken &+= 1
+                findCurrentRange = nil
+                return
+            }
+            terminalAllowMatchAutoScroll = shouldJump
+            terminalFindDirection = direction
+            terminalFindResetFlag = resetIndex
+            terminalFindToken &+= 1
+            return
+        }
+
+        let q = findQuery
+        guard !q.isEmpty else {
+            findMatches = []
+            findCurrentMatchIndex = 0
+            findCurrentRange = nil
             selectedNSRange = nil
             return
         }
-        // Use selection only for scrolling, will be cleared immediately to avoid blue highlight
+
+        var matches: [Range<String.Index>] = []
+        var searchStart = transcript.startIndex
+        while let r = transcript.range(of: q, options: [.caseInsensitive], range: searchStart..<transcript.endIndex) {
+            matches.append(r)
+            searchStart = r.upperBound
+        }
+        findMatches = matches
+
+        if matches.isEmpty {
+            findCurrentMatchIndex = 0
+            findCurrentRange = nil
+            selectedNSRange = nil
+            return
+        }
+
+        if resetIndex {
+            findCurrentMatchIndex = 0
+        } else {
+            var newIdx = findCurrentMatchIndex + direction
+            if newIdx < 0 { newIdx = matches.count - 1 }
+            if newIdx >= matches.count { newIdx = 0 }
+            findCurrentMatchIndex = newIdx
+        }
+
+        // Clamp and convert to NSRange
+        let clampedIdx = min(max(0, findCurrentMatchIndex), matches.count - 1)
+        findCurrentMatchIndex = clampedIdx
+        let nsRange = NSRange(matches[clampedIdx], in: transcript)
+        findCurrentRange = nsRange
+        if shouldJump {
+            selectionScrollMode = .ensureVisible
+            selectedNSRange = nsRange
+        }
+    }
+
+    private func updateSelectionToUnifiedCurrentMatch() {
+        guard !unifiedHighlightRanges.isEmpty, unifiedCurrentMatchIndex < unifiedHighlightRanges.count else {
+            selectedNSRange = nil
+            return
+        }
         selectionScrollMode = .ensureVisible
-        selectedNSRange = highlightRanges[currentMatchIndex]
+        selectedNSRange = unifiedHighlightRanges[unifiedCurrentMatchIndex]
+    }
+
+    private func unifiedStatus() -> String {
+        guard isUnifiedSearchActive else { return "" }
+        if viewMode == .terminal {
+            let total = terminalUnifiedMatchesCount
+            if total == 0 { return "0/0" }
+            return "\(terminalUnifiedCurrentIndex + 1)/\(total)"
+        }
+        let total = unifiedMatches.count
+        if total == 0 { return "0/0" }
+        return "\(unifiedCurrentMatchIndex + 1)/\(total)"
     }
 
     private func findStatus() -> String {
-        if searchQuery.isEmpty { return "" }
+        guard !findQuery.isEmpty else { return "" }
         if viewMode == .terminal {
-            if terminalFindMatchesCount == 0 { return "0/0" }
-            return "\(terminalFindCurrentIndex + 1)/\(terminalFindMatchesCount)"
+            let total = terminalFindMatchesCount
+            if total == 0 { return "0/0" }
+            return "\(terminalFindCurrentIndex + 1)/\(total)"
         }
-        if findMatches.isEmpty { return "0/0" }
-        return "\(currentMatchIndex + 1)/\(findMatches.count)"
+        let total = findMatches.count
+        if total == 0 { return "0/0" }
+        return "\(findCurrentMatchIndex + 1)/\(total)"
+    }
+
+    private var isUnifiedNavigationDisabled: Bool {
+        if viewMode == .terminal {
+            return terminalUnifiedMatchesCount == 0 || unifiedQuery.isEmpty
+        }
+        return unifiedMatches.isEmpty || unifiedQuery.isEmpty
     }
 
     private var isFindNavigationDisabled: Bool {
         if viewMode == .terminal {
-            return terminalFindMatchesCount == 0 || searchQuery.isEmpty
+            return terminalFindMatchesCount == 0 || findQuery.isEmpty
         }
-        return findMatches.isEmpty || searchQuery.isEmpty
+        return findMatches.isEmpty || findQuery.isEmpty
     }
 
     private func adjustFont(_ delta: Int) {
@@ -827,16 +1033,35 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         NSPasteboard.general.setString(transcript, forType: .string)
     }
 
-    private func clearSearch() {
-        searchState.query = ""
-    }
+	    private func clearSearch() {
+	        searchState.query = ""
+	    }
+
+	    private func closeFind() {
+	        isFindFieldFocused = false
+	        isFindBarVisible = false
+	        findQueryDraft = ""
+	        findMatches = []
+	        findCurrentMatchIndex = 0
+	        findCurrentRange = nil
+	        focusCoordinator.perform(.closeAllSearch)
+	    }
+
+	    private func navigateNextMatch(direction: Int) {
+	        if isFindBarVisible, !findQuery.isEmpty {
+	            performFind(resetIndex: false, direction: direction, shouldJump: true)
+	            return
+	        }
+	        guard !unifiedQuery.isEmpty else { return }
+	        performUnifiedFind(resetIndex: false, direction: direction, shouldJump: true)
+	    }
 
     private func applyAutoJumpIfReady(session: Session) {
         guard let pending = pendingAutoJumpToken, pending > lastHandledAutoJumpToken else { return }
-        guard isSearchActive, sessionID == session.id else { return }
+        guard isUnifiedSearchActive, sessionID == session.id else { return }
         guard pendingAutoJumpSessionID == session.id else { return }
         guard isTranscriptReady(for: session) else { return }
-        performFind(resetIndex: true, shouldJump: true)
+        performUnifiedFind(resetIndex: true, shouldJump: true)
         lastHandledAutoJumpToken = pending
         pendingAutoJumpToken = nil
         pendingAutoJumpSessionID = nil
@@ -1080,7 +1305,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     self.transcriptCache[key] = pretty
                 }
                 self.lastBuildKey = key
-                self.performFind(resetIndex: true, shouldJump: false)
+                self.performUnifiedFind(resetIndex: true, shouldJump: false)
                 self.selectedNSRange = nil
                 self.applyAutoJumpIfReady(session: session)
                 self.isBuildingJSON = false
@@ -1182,10 +1407,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         selectedNSRange = r
     }
 
-    private func maybeAutoJumpToFirstPrompt(session: Session) {
-        guard skipAgentsPreambleEnabled() else { return }
-        guard searchQuery.isEmpty else { return }
-        guard selectedNSRange == nil else { return }
+	    private func maybeAutoJumpToFirstPrompt(session: Session) {
+	        guard skipAgentsPreambleEnabled() else { return }
+	        guard unifiedQuery.isEmpty else { return }
+	        guard findQuery.isEmpty else { return }
+	        guard selectedNSRange == nil else { return }
 
         // Terminal view handles its own jump via SessionTerminalView.
         if viewMode == .terminal { return }
@@ -1808,6 +2034,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
     let fontSize: CGFloat
     let highlights: [NSRange]
     let currentIndex: Int
+    let findCurrentRange: NSRange?
     let commandRanges: [NSRange]
     let userRanges: [NSRange]
     let assistantRanges: [NSRange]
@@ -1822,6 +2049,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         var lastWidth: CGFloat = 0
         var lastPaintedHighlights: [NSRange] = []
         var lastPaintedIndex: Int = -1
+        var lastFindRange: NSRange? = nil
         var lastAppearanceRaw: String = ""
         var lastColorScheme: ColorScheme?
         var lastIsJSONMode: Bool = false
@@ -1837,22 +2065,28 @@ private struct PlainTextScrollView: NSViewRepresentable {
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
 
-        let textView = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize))
+        let textStorage = NSTextStorage()
+        let layoutManager = PlainFindLayoutManager()
+        textStorage.addLayoutManager(layoutManager)
+        let container = NSTextContainer(size: NSSize(width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        container.lineFragmentPadding = 0
+        layoutManager.addTextContainer(container)
+
+        let textView = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize), textContainer: container)
         textView.isEditable = false
         textView.isSelectable = true
         textView.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         textView.textContainerInset = NSSize(width: 8, height: 8)
-        textView.textContainer?.widthTracksTextView = true
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = true
         textView.minSize = NSSize(width: 0, height: scroll.contentSize.height)
         textView.autoresizingMask = [.width]
-        textView.textContainer?.lineFragmentPadding = 0
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
 
         // Enable non-contiguous layout for better performance on large documents
-        textView.layoutManager?.allowsNonContiguousLayout = true
+        layoutManager.allowsNonContiguousLayout = true
 
         // Explicitly set appearance to match app preference
         let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
@@ -1869,6 +2103,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         }
         context.coordinator.lastAppearanceRaw = appAppearanceRaw
         context.coordinator.lastColorScheme = colorScheme
+        context.coordinator.lastFindRange = findCurrentRange
 
         // Set background with proper dark mode support
         let isDark = (textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
@@ -1882,6 +2117,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         }
 
         textView.string = text
+        layoutManager.findRange = findCurrentRange
         applySyntaxColors(textView)
         applyFindHighlights(textView, coordinator: context.coordinator)
 
@@ -1901,6 +2137,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             let schemeChanged = context.coordinator.lastColorScheme != colorScheme
             let modeChanged = context.coordinator.lastIsJSONMode != isJSONMode
             let monochromeChanged = context.coordinator.lastMonochrome != monochrome
+            let findRangeChanged = context.coordinator.lastFindRange != findCurrentRange
             let colorSignature = (
                 commandRanges.count,
                 userRanges.count,
@@ -1965,11 +2202,63 @@ private struct PlainTextScrollView: NSViewRepresentable {
 
             applyFindHighlights(tv, coordinator: context.coordinator)
 
+            // Update local Find overlay (blue outline) via the custom layout manager
+            if findRangeChanged, let lm = tv.layoutManager as? PlainFindLayoutManager {
+                lm.findRange = findCurrentRange
+                lm.isDark = isDark
+                tv.setNeedsDisplay(tv.visibleRect)
+                context.coordinator.lastFindRange = findCurrentRange
+            } else if let lm = tv.layoutManager as? PlainFindLayoutManager {
+                lm.isDark = isDark
+            }
+
             // Update last seen scheme at the end of the pass
             context.coordinator.lastColorScheme = colorScheme
             context.coordinator.lastIsJSONMode = isJSONMode
             context.coordinator.lastMonochrome = monochrome
             context.coordinator.lastColorSignature = colorSignature
+        }
+    }
+
+    private final class PlainFindLayoutManager: NSLayoutManager {
+        var findRange: NSRange? = nil
+        var isDark: Bool = false
+
+        override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
+            super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+
+            guard let findRange, findRange.location != NSNotFound, findRange.length > 0 else { return }
+            guard let tc = textContainers.first else { return }
+
+            let findGlyphs = glyphRange(forCharacterRange: findRange, actualCharacterRange: nil)
+            guard NSIntersectionRange(findGlyphs, glyphsToShow).length > 0 else { return }
+
+            let stroke = NSColor.systemBlue.withAlphaComponent(isDark ? 0.92 : 0.85)
+            let glow = NSColor.systemBlue.withAlphaComponent(isDark ? 0.55 : 0.30)
+
+            enumerateLineFragments(forGlyphRange: findGlyphs) { _, _, container, glyphRange, _ in
+                guard container === tc else { return }
+                let g = NSIntersectionRange(glyphRange, findGlyphs)
+                guard g.length > 0 else { return }
+
+                var rect = self.boundingRect(forGlyphRange: g, in: tc)
+                rect = rect.offsetBy(dx: origin.x, dy: origin.y)
+                rect = rect.insetBy(dx: -2.0, dy: -1.0)
+
+                let radius: CGFloat = 4
+                let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+
+                NSGraphicsContext.saveGraphicsState()
+                let shadow = NSShadow()
+                shadow.shadowBlurRadius = 8
+                shadow.shadowOffset = .zero
+                shadow.shadowColor = glow
+                shadow.set()
+                stroke.setStroke()
+                path.lineWidth = 1.6
+                path.stroke()
+                NSGraphicsContext.restoreGraphicsState()
+            }
         }
     }
 
@@ -2196,7 +2485,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
 
         if !highlightsChanged {
             // Just show indicator, attributes already correct
-            if !highlights.isEmpty && currentIndex < highlights.count {
+            if findCurrentRange == nil, !highlights.isEmpty, currentIndex < highlights.count {
                 tv.showFindIndicator(for: highlights[currentIndex])
             }
             return
@@ -2257,8 +2546,8 @@ private struct PlainTextScrollView: NSViewRepresentable {
         // Update cache
         coordinator.lastPaintedHighlights = highlights
 
-        // Show Apple Notes-style find indicator for current match
-        if !highlights.isEmpty && currentIndex < highlights.count {
+        // Show Apple Notes-style find indicator for current match when local Find is not active.
+        if findCurrentRange == nil, !highlights.isEmpty, currentIndex < highlights.count {
             tv.showFindIndicator(for: highlights[currentIndex])
         }
 

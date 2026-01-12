@@ -100,7 +100,7 @@ extension OnboardingContent {
                     title: "Find sessions fast",
                     body: "The sessions list is the hub. Use search, filters, and Saved Only to stay focused.",
                     bullets: [
-                        "Search menu includes Search Sessions and Find in Transcript, using the same query.",
+                        "Search menu includes Search Sessions (filters sessions) and Find in Transcript (searches within the current transcript).",
                         "Filter by agent and project to reduce noise.",
                         "Use Saved Only when you want your curated set.",
                         "Open the Saved Sessions window to manage saved sessions."
@@ -240,7 +240,7 @@ extension OnboardingContent {
                     title: "Better keyboard shortcuts",
                     body: "Common actions have improved shortcuts throughout the app. You can reopen this tour anytime from the Help menu.",
                     bullets: [
-                        "Search Sessions and Find in Transcript are now in the Search menu.",
+                        "Search Sessions (⌥⌘F) and Find in Transcript (⌘F) are in the Search menu.",
                         "Saved Sessions has a dedicated shortcut in the View menu."
                     ],
                     shortcuts: [

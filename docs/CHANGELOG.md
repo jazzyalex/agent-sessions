@@ -22,8 +22,9 @@ All notable changes to this project will be documented in this file.
 - Sessions list: The Size column can now be sorted.
 - Search: The unified sessions toolbar now shows the global search field by default and displays its keyboard shortcut inline.
 - Search: The Search Sessions menu item and ⌥⌘F shortcut now reliably focus the global search field.
-- Transcript: The match navigator shows the ⌥⌘F global search shortcut when empty.
-- Search: Single Search now highlights matches in the selected transcript and the transcript navigator jumps to the first match when switching sessions.
+- Transcript: Replace the read-only search box with a Unified Search navigation pill that appears only when Unified Search is active.
+- Transcript: Find in Transcript (⌘F) now opens a local find bar with its own query and navigation.
+- Search: Unified Search highlights matches in the selected transcript and jumps to the first match when switching sessions.
 - Analytics: The By Agent card now auto-scales rows and falls back to an internal scroll when space is tight.
 - UI: Consolidate unified-window status indicators into a single cockpit-style footer.
 - UI: In dark mode, the cockpit footer now uses a transparent HUD style with crisp borders instead of a solid fill.
@@ -49,7 +50,7 @@ All notable changes to this project will be documented in this file.
 - Search: Prevent missing results while the search index is still warming by falling back to legacy matching for unindexed sessions.
 - Search: Backfill missing per-session search data during incremental refresh so sessions don’t remain “not yet indexed” indefinitely.
 - Search: Claude sessions now keep transcript match highlights in sync with the active search query.
-- Transcript (Color view): Match counts now update when Single Search is active.
+- Transcript (Color view): Match counts now update when Unified Search is active.
 - Transcript (Color view): Search markers now appear only on matching wrapped lines and replace the block accent for that line.
 - Sessions: Auto-select the first session on launch so the transcript pane isn’t blank.
 - Sessions: Stabilize message counts for large sessions while full parsing completes to reduce list row jumps.
