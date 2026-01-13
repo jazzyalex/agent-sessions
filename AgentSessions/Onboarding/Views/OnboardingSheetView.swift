@@ -127,7 +127,7 @@ struct OnboardingSheetView: View {
                 icon: .appIcon,
                 iconGradient: palette.iconGradientPrimary,
                 title: "Sessions Found",
-                subtitle: "Your CLI agent history is ready to browse"
+                subtitle: "Your CLI agent history is ready to explore"
             )
 
             VStack(spacing: 10) {
@@ -139,16 +139,10 @@ struct OnboardingSheetView: View {
                         Text("sessions discovered")
                             .font(.system(size: 16, weight: .semibold, design: .default))
                             .foregroundStyle(.primary)
-                        Text("ready to browse")
-                            .font(.system(size: 14, weight: .regular, design: .default))
-                            .foregroundStyle(.secondary)
                     }
                 }
 
-                Text("Total sessions: \(totalSessions)")
-                    .font(.custom("JetBrains Mono", size: 12))
-                    .foregroundStyle(.secondary)
-                Text("Total includes zero-message, 1–2 message, and housekeeping sessions hidden by Preferences filters.")
+                Text("\(formattedCount(hiddenSessionsCount)) sessions hidden by filters (empty, housekeeping). Adjust in Settings.")
                     .font(.system(size: 11, weight: .regular, design: .default))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -410,6 +404,10 @@ struct OnboardingSheetView: View {
         realSessionsTotal
     }
 
+    private var hiddenSessionsCount: Int {
+        max(0, totalSessions - realSessionsTotal)
+    }
+
     private var discoveredAgents: [AgentCount] {
         agentCounts.filter { $0.realCount > 0 }
     }
@@ -449,6 +447,12 @@ struct OnboardingSheetView: View {
             break
         }
         return true
+    }
+
+    private func formattedCount(_ value: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 }
 

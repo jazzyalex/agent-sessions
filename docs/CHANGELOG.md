@@ -21,6 +21,8 @@ All notable changes to this project will be documented in this file.
 - Transcript: Removed the duplicate Jump to First Prompt control from the transcript toolbar.
 - Sessions list: The Size column can now be sorted.
 - Search: Multi-word Unified Search queries now behave like phrase searches (for example, `exit code`) to match transcript navigation and avoid accidental boolean parsing.
+- Search: Unified Search highlights now use token-phrase matching across punctuation/newlines, and Color view reports visible vs total match counts when role filters are active.
+- Search: Global search now accepts quoted `repo:` and `path:` filters, and background deep scans run at low priority with on-demand prewarming for opened sessions.
 - Search: The Search Sessions menu item and ⌥⌘F shortcut now reliably focus the global search field.
 - Transcript: Replace the read-only search box with a Unified Search navigation pill that appears only when Unified Search is active.
 - Transcript: Find in Transcript (⌘F) now opens a local find bar with its own query and navigation.
@@ -66,6 +68,7 @@ All notable changes to this project will be documented in this file.
 - Parsing: Surface Codex thread rollback events with readable text in timelines.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
 - Claude Usage: Detect the Claude Code first-run terms prompt and surface a “Setup required” state instead of timing out silently.
+- Toolbar: Restyled agent tabs into a pill group with 8px dots and reordered session action buttons.
 - Menu Bar: When usage data is stale, reset indicators now show “n/a” instead of an incorrect countdown.
 - Claude Usage: Refresh usage automatically after wake when the usage strip or menu bar label is visible.
 - Menu Bar: Show an updating spinner next to reset indicators while probes run.
