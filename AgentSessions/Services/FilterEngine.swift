@@ -493,23 +493,55 @@ enum FilterEngine {
         let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return ParsedQuery(freeText: "", repo: nil, path: nil) }
 
+        enum PendingKey {
+            case repo
+            case path
+        }
+
         var repo: String? = nil
         var path: String? = nil
         var remaining: [String] = []
+        var pending: PendingKey? = nil
 
         var lexer = QueryLexer(trimmed)
         while let token = lexer.nextToken() {
             let lower = token.value.lowercased()
-            if !token.startsWithQuote, lower.hasPrefix("repo:") {
+            let isRepoToken = lower.hasPrefix("repo:")
+            let isPathToken = lower.hasPrefix("path:")
+
+            if let pendingKey = pending, !isRepoToken, !isPathToken {
+                let v = token.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !v.isEmpty {
+                    switch pendingKey {
+                    case .repo: repo = v
+                    case .path: path = v
+                    }
+                }
+                pending = nil
+                continue
+            }
+
+            if isRepoToken {
                 let valueStart = token.value.index(token.value.startIndex, offsetBy: 5)
                 let v = String(token.value[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !v.isEmpty { repo = v; continue }
+                if !v.isEmpty {
+                    repo = v
+                } else {
+                    pending = .repo
+                }
+                continue
             }
-            if !token.startsWithQuote, lower.hasPrefix("path:") {
+            if isPathToken {
                 let valueStart = token.value.index(token.value.startIndex, offsetBy: 5)
                 let v = String(token.value[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !v.isEmpty { path = v; continue }
+                if !v.isEmpty {
+                    path = v
+                } else {
+                    pending = .path
+                }
+                continue
             }
+            pending = nil
             remaining.append(token.raw)
         }
 
