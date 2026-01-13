@@ -131,7 +131,16 @@ struct AgentSessionsApp: App {
                 .sheet(isPresented: $onboardingCoordinator.isPresented) {
                     Group {
                         if let content = onboardingCoordinator.content {
-                            OnboardingSheetView(content: content, coordinator: onboardingCoordinator)
+                            OnboardingSheetView(content: content,
+                                                coordinator: onboardingCoordinator,
+                                                codexIndexer: indexer,
+                                                claudeIndexer: claudeIndexer,
+                                                geminiIndexer: geminiIndexer,
+                                                opencodeIndexer: opencodeIndexer,
+                                                copilotIndexer: copilotIndexer,
+                                                droidIndexer: droidIndexer,
+                                                codexUsageModel: codexUsageModel,
+                                                claudeUsageModel: claudeUsageModel)
                         }
                     }
                 }
@@ -175,7 +184,7 @@ struct AgentSessionsApp: App {
                 OpenPinnedSessionsWindowButton()
             }
             CommandGroup(after: .help) {
-                Button("Onboarding…") {
+                Button("Show Onboarding") {
                     NotificationCenter.default.post(name: .showOnboardingFromMenu, object: nil)
                     NSApp.activate(ignoringOtherApps: true)
                 }
@@ -271,7 +280,8 @@ extension AgentSessionsApp {
             }
             return d.bool(forKey: "CodexUsageEnabled")
         }()
-        codexUsageModel.setEnabled(codexEnabled && codexAgentEnabled)
+        let codexTrackingEnabled = codexEnabled && codexAgentEnabled
+        codexUsageModel.setEnabled(codexTrackingEnabled)
 
         let claudeEnabled: Bool = {
             if d.object(forKey: "ClaudeUsageEnabled") == nil {
@@ -282,10 +292,11 @@ extension AgentSessionsApp {
             }
             return d.bool(forKey: "ClaudeUsageEnabled")
         }()
-        claudeUsageModel.setEnabled(claudeEnabled && claudeAgentEnabled)
+        let claudeTrackingEnabled = claudeEnabled && claudeAgentEnabled
+        claudeUsageModel.setEnabled(claudeTrackingEnabled)
 
-        let anyUsageAgentEnabled = (codexAgentEnabled || claudeAgentEnabled)
-        statusItemController?.setEnabled(menuBarEnabled && anyUsageAgentEnabled)
+        let anyUsageTrackingEnabled = codexTrackingEnabled || claudeTrackingEnabled
+        statusItemController?.setEnabled(menuBarEnabled && anyUsageTrackingEnabled)
     }
 
     private func setupAnalytics() {
