@@ -4,10 +4,10 @@ import AppKit
 /// Color utilities for Analytics feature
 /// Uses existing agent brand colors from the main app
 extension Color {
-    /// Codex CLI brand color (softened coral)
+    /// Codex CLI brand color (deep blue)
     static let agentCodex: Color = TranscriptColorSystem.agentBrandAccent(source: .codex)
 
-    /// Claude Code brand color (muted lavender)
+    /// Claude Code brand color (warm brown)
     static let agentClaude: Color = TranscriptColorSystem.agentBrandAccent(source: .claude)
 
     /// Gemini brand color

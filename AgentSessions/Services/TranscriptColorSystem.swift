@@ -40,11 +40,11 @@ enum TranscriptColorSystem {
         // Keep these stable across the app.
         switch source {
         case .codex:
-            // Softened coral
-            return NSColor(calibratedRed: 0.84, green: 0.46, blue: 0.37, alpha: 1.0)
+            // Deep blue
+            return NSColor(calibratedRed: 0.14, green: 0.30, blue: 0.60, alpha: 1.0)
         case .claude:
-            // Muted lavender
-            return NSColor(calibratedRed: 0.56, green: 0.53, blue: 0.72, alpha: 1.0)
+            // Warm brown
+            return NSColor(calibratedRed: 0.74, green: 0.46, blue: 0.22, alpha: 1.0)
         case .gemini:
             // Teal
             return NSColor.systemTeal
@@ -64,4 +64,3 @@ enum TranscriptColorSystem {
         Color(nsColor: agentBrandAccent(source: source))
     }
 }
-

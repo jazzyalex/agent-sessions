@@ -6,6 +6,7 @@ private enum TranscriptToolbarStyle {
     static let baseFont = Font.system(size: 13, weight: .regular, design: .monospaced)
     static let compactFont = Font.system(size: 11, weight: .regular, design: .monospaced)
     static let popoverFont = Font.system(size: 12, weight: .medium, design: .monospaced)
+    static let leadingPadding: CGFloat = 8
 }
 
 /// Codex transcript view - now a wrapper around UnifiedTranscriptView
@@ -43,7 +44,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     let sessionIDLabel: String  // "Codex" or "Claude"
     let enableCaching: Bool  // Codex uses cache, Claude doesn't
 
-    // Plain transcript buffer
+    // Text transcript buffer
     @State private var transcript: String = ""
     @State private var rebuildTask: Task<Void, Never>?
 
@@ -136,6 +137,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         !unifiedQuery.isEmpty
     }
 
+    private var isUnifiedNavigationVisible: Bool {
+        isUnifiedSearchActive && !unifiedFreeText.isEmpty
+    }
+
     private var findQuery: String {
         findQueryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -151,14 +156,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var selectionScrollMode: SelectionScrollMode = .ensureVisible
     // Ephemeral copy confirmation (popover)
     @State private var showIDCopiedPopover: Bool = false
-    // Terminal-only jump trigger (Color view uses SessionTerminalView, not NSTextView selection)
+    // Terminal-only jump trigger (Session view uses SessionTerminalView, not NSTextView selection)
     @State private var terminalJumpToken: Int = 0
     // Terminal-only role navigation trigger (User/Tools/Errors)
     @State private var terminalRoleNavToken: Int = 0
     @State private var terminalRoleNavRole: SessionTerminalView.RoleToggle = .user
     @State private var terminalRoleNavDirection: Int = 1
 
-    // Plain view navigation cursors (used for keyboard jumps)
+    // Text view navigation cursors (used for keyboard jumps)
     @State private var lastUserJumpLocation: Int? = nil
     @State private var lastToolsJumpLocation: Int? = nil
     @State private var lastErrorJumpLocation: Int? = nil
@@ -299,6 +304,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             toolbarLayout(session: session, placeUnifiedPillInline: true)
             toolbarLayout(session: session, placeUnifiedPillInline: false)
         }
+        .overlay(alignment: .topLeading) {
+            toolbarShortcutButtons
+        }
     }
 
     private func toolbarLayout(session: Session, placeUnifiedPillInline: Bool) -> some View {
@@ -314,7 +322,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .background(Color(NSColor.controlBackgroundColor))
             }
 
-            if isUnifiedSearchActive && !placeUnifiedPillInline {
+            if isUnifiedNavigationVisible && !placeUnifiedPillInline {
                 unifiedNavigationPill
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
@@ -325,204 +333,182 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func toolbarTopRow(session: Session, placeUnifiedPillInline: Bool) -> some View {
         HStack(spacing: 0) {
-                // Invisible button to capture Cmd+F shortcut
-                Button(action: { focusCoordinator.perform(.openTranscriptFind) }) { EmptyView() }
-                    .keyboardShortcut("f", modifiers: .command)
-                    .focusable(false)
-                    .hidden()
-
-                // Invisible buttons to capture Cmd+G / Shift+Cmd+G (routes to Find when active, otherwise Unified Search)
-                Button(action: { navigateNextMatch(direction: -1) }) { EmptyView() }
-                    .keyboardShortcut("g", modifiers: [.command, .shift])
-                    .focusable(false)
-                    .hidden()
-                Button(action: { navigateNextMatch(direction: 1) }) { EmptyView() }
-                    .keyboardShortcut("g", modifiers: .command)
-                    .focusable(false)
-                    .hidden()
-
-                // Invisible button to toggle Plain/Color with Cmd+Shift+T
-                Button(action: {
-                    let current = SessionViewMode.from(TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal)
-                    let next: SessionViewMode
-                    switch current {
-                    case .transcript:
-                        next = .terminal
-                    case .terminal:
-                        next = .transcript
-                    case .json:
-                        // From JSON, Cmd+Shift+T toggles back to Plain.
-                        next = .transcript
+            // === LEADING GROUP: View mode + JSON status + ID ===
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Picker("View Style", selection: $viewModeRaw) {
+                        Text("Session")
+                            .tag(SessionViewMode.terminal.rawValue)
+                            .help("Session view — terminal-inspired output with colorized commands and tool output. Cmd+Shift+T toggles between Text and Session.")
+                        Text("Text")
+                            .tag(SessionViewMode.transcript.rawValue)
+                            .help("Text view — merged chat and tools. Cmd+Shift+T toggles between Text and Session.")
+                        Text("JSON")
+                            .tag(SessionViewMode.json.rawValue)
+                            .help("JSON view — formatted session JSON for readability. Encrypted blobs and large text blocks are summarized; use the session file on disk for raw JSON.")
                     }
-                    viewModeRaw = next.rawValue
-                    renderModeRaw = next.transcriptRenderMode.rawValue
-                }) { EmptyView() }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
-                    .focusable(false)
-                    .hidden()
+                    .pickerStyle(.segmented)
+                    .font(TranscriptToolbarStyle.baseFont)
+                    .labelsHidden()
+                    .controlSize(.regular)
+                    .frame(width: 200)
+                    .accessibilityLabel("View Style")
 
-                // Invisible buttons to capture arrow-based transcript navigation shortcuts.
-                Button(action: { jumpUser(direction: 1) }) { EmptyView() }
-                    .keyboardShortcut(.downArrow, modifiers: [.command, .option])
-                    .focusable(false)
-                    .hidden()
-                Button(action: { jumpUser(direction: -1) }) { EmptyView() }
-                    .keyboardShortcut(.upArrow, modifiers: [.command, .option])
-                    .focusable(false)
-                    .hidden()
-                Button(action: { jumpTools(direction: 1) }) { EmptyView() }
-                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
-                    .focusable(false)
-                    .hidden()
-                Button(action: { jumpTools(direction: -1) }) { EmptyView() }
-                    .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
-                    .focusable(false)
-                    .hidden()
-                Button(action: { jumpErrors(direction: 1) }) { EmptyView() }
-                    .keyboardShortcut(.downArrow, modifiers: [.command, .option, .shift])
-                    .focusable(false)
-                    .hidden()
-                Button(action: { jumpErrors(direction: -1) }) { EmptyView() }
-                    .keyboardShortcut(.upArrow, modifiers: [.command, .option, .shift])
-                    .focusable(false)
-                    .hidden()
-
-                // === LEADING GROUP: View mode + JSON status + ID ===
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Picker("View Style", selection: $viewModeRaw) {
-                            Text("Plain")
-                                .tag(SessionViewMode.transcript.rawValue)
-                                .help("Plain view — merged chat and tools. Cmd+Shift+T toggles between Plain and Color.")
-                            Text("Color")
-                                .tag(SessionViewMode.terminal.rawValue)
-                                .help("Color view — terminal-inspired output with colorized commands and tool output. Cmd+Shift+T toggles between Plain and Color.")
-                            Text("JSON")
-                                .tag(SessionViewMode.json.rawValue)
-                                .help("JSON view — formatted session JSON for readability. Encrypted blobs and large text blocks are summarized; use the session file on disk for raw JSON.")
+                    if isJSONMode && isBuildingJSON {
+                        HStack(spacing: 6) {
+                            Image(systemName: "hourglass")
+                            Text("Building JSON view…")
                         }
-                        .pickerStyle(.segmented)
-                        .font(TranscriptToolbarStyle.baseFont)
-                        .labelsHidden()
-                        .controlSize(.regular)
-                        .frame(width: 200)
-                        .accessibilityLabel("View Style")
+                        .font(TranscriptToolbarStyle.compactFont)
+                        .foregroundStyle(.secondary)
+                    }
+                }
 
-                        if isJSONMode && isBuildingJSON {
-                            HStack(spacing: 6) {
-                                Image(systemName: "hourglass")
-                                Text("Building JSON view…")
+                HStack(spacing: 10) {
+                    if let fullID = sessionIDExtractor(session) {
+                        let displayLast4 = String(fullID.suffix(4))
+                        let short = extractShortID(for: session) ?? String(fullID.prefix(6))
+                        Button(action: { copySessionID(for: session) }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.on.doc")
+                                    .imageScale(.medium)
+                                Text("ID \(displayLast4)")
+                                    .font(TranscriptToolbarStyle.baseFont)
+                                    .foregroundStyle(.secondary)
                             }
-                            .font(TranscriptToolbarStyle.compactFont)
-                            .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy session ID: \(short) (⌘⇧C)")
+                        .accessibilityLabel("Copy Session ID")
+                        .keyboardShortcut("c", modifiers: [.command, .shift])
+                        .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
+                            Text("ID Copied!")
+                                .padding(8)
+                                .font(TranscriptToolbarStyle.popoverFont)
                         }
                     }
-
-                    HStack(spacing: 10) {
-                        if let fullID = sessionIDExtractor(session) {
-                            let displayLast4 = String(fullID.suffix(4))
-                            let short = extractShortID(for: session) ?? String(fullID.prefix(6))
-                            Button(action: { copySessionID(for: session) }) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "doc.on.doc")
-                                        .imageScale(.medium)
-                                    Text("ID \(displayLast4)")
-                                        .font(TranscriptToolbarStyle.baseFont)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Copy session ID: \(short) (⌘⇧C)")
-                            .accessibilityLabel("Copy Session ID")
-                            .keyboardShortcut("c", modifiers: [.command, .shift])
-                            .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
-                                Text("ID Copied!")
-                                    .padding(8)
-                                    .font(TranscriptToolbarStyle.popoverFont)
-                            }
-                        }
-                        if StarredSessionsStore().contains(id: session.id, source: session.source) {
-                            pinnedBadge(session: session)
-                        }
+                    if StarredSessionsStore().contains(id: session.id, source: session.source) {
+                        pinnedBadge(session: session)
                     }
                 }
                 .padding(.leading, 12)
+            }
+            .padding(.leading, TranscriptToolbarStyle.leadingPadding)
 
-                Spacer(minLength: 12)
+            Spacer(minLength: 12)
 
-	                if placeUnifiedPillInline && isUnifiedSearchActive {
-	                    unifiedNavigationPillBody
-	                        .frame(minWidth: 240, maxWidth: 520)
-	                        .layoutPriority(1)
-	                }
+            if placeUnifiedPillInline && isUnifiedNavigationVisible {
+                unifiedNavigationPillBody
+                    .frame(minWidth: 240, maxWidth: 520)
+                    .layoutPriority(1)
+            }
 
-                Spacer(minLength: 12)
+            Spacer(minLength: 12)
 
-                // === TRAILING GROUP: Copy + Find ===
-                HStack(spacing: 12) {
-                    HStack(spacing: 6) {
-                        Button(action: { adjustFont(-1) }) {
-                            HStack(spacing: 2) {
-                                Text("A").font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                Text("−").font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            }
-                        }
-                        .buttonStyle(.borderless)
-                        .keyboardShortcut("-", modifiers: .command)
-                        .help("Decrease text size (⌘−)")
-                        .accessibilityLabel("Decrease Text Size")
-
-                        Button(action: { adjustFont(1) }) {
-                            HStack(spacing: 2) {
-                                Text("A").font(.system(size: 14, weight: .semibold, design: .monospaced))
-                                Text("+").font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            }
-                        }
-                        .buttonStyle(.borderless)
-                        .keyboardShortcut("+", modifiers: .command)
-                        .help("Increase text size (⌘+)")
-                        .accessibilityLabel("Increase Text Size")
-                    }
-
-                    Divider().frame(height: 20)
-
-                    Button("Copy") { copyAll() }
-                        .buttonStyle(.borderless)
-                        .font(TranscriptToolbarStyle.baseFont)
-                        .help("Copy entire transcript to clipboard (⌥⌘C)")
-                        .keyboardShortcut("c", modifiers: [.command, .option])
-                        .accessibilityLabel("Copy Transcript")
-
-                    Divider().frame(height: 20)
-
-                    Button(action: {
-                        if isFindBarVisible {
-                            closeFind()
-                        } else {
-                            focusCoordinator.perform(.openTranscriptFind)
-                        }
-                    }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundStyle(.secondary)
-                                .imageScale(.small)
-                            Text(isFindBarVisible ? "Done" : "Find")
-                                .font(TranscriptToolbarStyle.baseFont)
-                            if !isFindBarVisible {
-                                Text("⌘F")
-                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .accessibilityHidden(true)
-                            }
+            // === TRAILING GROUP: Copy + Find ===
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Button(action: { adjustFont(-1) }) {
+                        HStack(spacing: 2) {
+                            Text("A").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            Text("−").font(.system(size: 12, weight: .semibold, design: .monospaced))
                         }
                     }
                     .buttonStyle(.borderless)
-                    .help("Find in session (⌘F)")
-                    .accessibilityLabel("Find in session")
-	                }
-	                .padding(.trailing, 12)
-	            }
-	        }
+                    .keyboardShortcut("-", modifiers: .command)
+                    .help("Decrease text size (⌘−)")
+                    .accessibilityLabel("Decrease Text Size")
+
+                    Button(action: { adjustFont(1) }) {
+                        HStack(spacing: 2) {
+                            Text("A").font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            Text("+").font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut("+", modifiers: .command)
+                    .help("Increase text size (⌘+)")
+                    .accessibilityLabel("Increase Text Size")
+                }
+
+                Divider().frame(height: 20)
+
+                Button("Copy") { copyAll() }
+                    .buttonStyle(.borderless)
+                    .font(TranscriptToolbarStyle.baseFont)
+                    .help("Copy entire transcript to clipboard (⌥⌘C)")
+                    .keyboardShortcut("c", modifiers: [.command, .option])
+                    .accessibilityLabel("Copy Transcript")
+
+                Divider().frame(height: 20)
+
+                Button(action: {
+                    if isFindBarVisible {
+                        closeFind()
+                    } else {
+                        focusCoordinator.perform(.openTranscriptFind)
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                            .imageScale(.small)
+                        Text(isFindBarVisible ? "Done" : "Find")
+                            .font(TranscriptToolbarStyle.baseFont)
+                        if !isFindBarVisible {
+                            Text("⌘F")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                }
+                .buttonStyle(.borderless)
+                .help("Find in session (⌘F)")
+                .accessibilityLabel("Find in session")
+            }
+            .padding(.trailing, 12)
+        }
+    }
+
+    @ViewBuilder
+    private var toolbarShortcutButtons: some View {
+        // Keyboard shortcuts only; keep them zero-size to avoid visual artifacts.
+        shortcutButton(action: { focusCoordinator.perform(.openTranscriptFind) }, key: "f", modifiers: .command)
+        shortcutButton(action: { navigateNextMatch(direction: -1) }, key: "g", modifiers: [.command, .shift])
+        shortcutButton(action: { navigateNextMatch(direction: 1) }, key: "g", modifiers: .command)
+        shortcutButton(action: {
+            let current = SessionViewMode.from(TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal)
+            let next: SessionViewMode
+            switch current {
+            case .transcript:
+                next = .terminal
+            case .terminal:
+                next = .transcript
+            case .json:
+                // From JSON, Cmd+Shift+T toggles back to Text.
+                next = .transcript
+            }
+            viewModeRaw = next.rawValue
+            renderModeRaw = next.transcriptRenderMode.rawValue
+        }, key: "t", modifiers: [.command, .shift])
+        shortcutButton(action: { jumpUser(direction: 1) }, key: .downArrow, modifiers: [.command, .option])
+        shortcutButton(action: { jumpUser(direction: -1) }, key: .upArrow, modifiers: [.command, .option])
+        shortcutButton(action: { jumpTools(direction: 1) }, key: .rightArrow, modifiers: [.command, .option])
+        shortcutButton(action: { jumpTools(direction: -1) }, key: .leftArrow, modifiers: [.command, .option])
+        shortcutButton(action: { jumpErrors(direction: 1) }, key: .downArrow, modifiers: [.command, .option, .shift])
+        shortcutButton(action: { jumpErrors(direction: -1) }, key: .upArrow, modifiers: [.command, .option, .shift])
+    }
+
+    private func shortcutButton(action: @escaping () -> Void,
+                                key: KeyEquivalent,
+                                modifiers: EventModifiers) -> some View {
+        Button(action: action) { EmptyView() }
+            .keyboardShortcut(key, modifiers: modifiers)
+            .buttonStyle(.plain)
+            .focusable(false)
+            .frame(width: 0, height: 0)
+    }
 
 	    private var findBar: some View {
 	        HStack(spacing: 10) {
@@ -533,6 +519,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .textFieldStyle(.plain)
                 .font(TranscriptToolbarStyle.baseFont)
                 .focused($isFindFieldFocused)
+                .help("Find in session (⌘F)")
                 .onChange(of: findQueryDraft) { _, _ in
                     performFind(resetIndex: true, shouldJump: true)
                 }
@@ -613,7 +600,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(isUnifiedNavigationDisabled)
-                .help("Previous Unified Search match")
+                .help("Previous Unified Search match (⇧⌘G)")
 
                 Text(unifiedStatus())
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
@@ -625,7 +612,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(isUnifiedNavigationDisabled)
-                .help("Next Unified Search match")
+                .help("Next Unified Search match (⌘G)")
 
                 Button(action: clearSearch) {
                     Image(systemName: "xmark.circle.fill")
@@ -644,6 +631,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 Capsule(style: .continuous)
                     .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
             )
+            .help("Unified Search matches (⌥⌘F, ⌘G, ⇧⌘G)")
     }
 
     private func rebuild(session: Session) {

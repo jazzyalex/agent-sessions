@@ -719,16 +719,6 @@ struct UnifiedSessionsView: View {
                         .keyboardShortcut("6", modifiers: .command)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(UnifiedSessionsStyle.agentPillFill)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
-            )
             .controlSize(.small)
             .tint(UnifiedSessionsStyle.selectionAccent)
         }
@@ -764,7 +754,7 @@ struct UnifiedSessionsView: View {
                     }
                     .keyboardShortcut("r", modifiers: [.command, .control])
                     .disabled(selectedSession == nil || !(selectedSession?.source == .codex || selectedSession?.source == .claude))
-                    .accessibilityLabel("Resume")
+                    .accessibilityLabel(Text("Resume"))
 
                     ToolbarIconButton(help: "Reveal the selected session's working directory in Finder (⌘⇧O)") { _ in
                         ToolbarIcon(systemName: "folder")
@@ -773,7 +763,7 @@ struct UnifiedSessionsView: View {
                     }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                     .disabled(selectedSession == nil)
-                    .accessibilityLabel("Open Working Directory")
+                    .accessibilityLabel(Text("Open Working Directory"))
 
                     ToolbarIconButton(help: "Re-run the session indexer to discover new logs (⌘R)") { _ in
                         ZStack {
@@ -788,7 +778,7 @@ struct UnifiedSessionsView: View {
                         unified.refresh()
                     }
                     .keyboardShortcut("r", modifiers: .command)
-                    .accessibilityLabel("Refresh")
+                    .accessibilityLabel(Text("Refresh"))
 
                     if isGitInspectorEnabled {
                         ToolbarIconButton(help: "Show historical and current git context with safety analysis (⌘⇧G)") { _ in
@@ -798,21 +788,21 @@ struct UnifiedSessionsView: View {
                         }
                         .keyboardShortcut("g", modifiers: [.command, .shift])
                         .disabled(selectedSession == nil)
-                        .accessibilityLabel("Git Context")
+                        .accessibilityLabel(Text("Git Context"))
                     }
                 }
 
                 ToolbarGroupDivider()
 
                 HStack(spacing: UnifiedSessionsStyle.toolbarItemSpacing) {
-                    LayoutTogglePill(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
+                    LayoutToggleButton(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
 
                     ToolbarIconButton(help: effectiveColorScheme == .dark ? "Switch to Light Mode" : "Switch to Dark Mode") { _ in
                         ToolbarIcon(systemName: effectiveColorScheme == .dark ? "sun.max" : "moon")
                     } action: {
                         codexIndexer.toggleDarkLight(systemScheme: systemColorScheme)
                     }
-                    .accessibilityLabel("Toggle Dark/Light")
+                    .accessibilityLabel(Text("Toggle Dark/Light"))
 
                     ToolbarIconButton(help: "Open preferences for appearance, indexing, and agents (⌘,)") { isHovering in
                         ToolbarIcon(systemName: "gearshape", opacity: isHovering ? 1 : 0.4)
@@ -820,7 +810,7 @@ struct UnifiedSessionsView: View {
                         PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController)
                     }
                     .keyboardShortcut(",", modifiers: .command)
-                    .accessibilityLabel("Settings")
+                    .accessibilityLabel(Text("Settings"))
                 }
             }
         }
@@ -1191,11 +1181,113 @@ private struct AgentTabToggle: View {
             }
             .font(UnifiedSessionsStyle.agentTabFont)
             .foregroundStyle(textColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(UnifiedSessionsStyle.agentPillFill)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(title))
         .accessibilityValue(Text(isOn ? "On" : "Off"))
+    }
+}
+
+private struct ToolbarIcon: View {
+    let systemName: String
+    var isActive: Bool = false
+    var activeColor: Color = UnifiedSessionsStyle.selectionAccent
+    var opacity: Double? = nil
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(UnifiedSessionsStyle.toolbarIconFont)
+            .frame(width: UnifiedSessionsStyle.toolbarIconSize, height: UnifiedSessionsStyle.toolbarIconSize)
+            .foregroundStyle(isActive ? activeColor : .primary)
+            .opacity((opacity ?? 1) * (isEnabled ? 1 : 0.4))
+    }
+}
+
+private struct ToolbarIconButton<Label: View>: View {
+    let help: String
+    let label: (Bool) -> Label
+    let action: () -> Void
+    @State private var isHovering: Bool = false
+
+    var body: some View {
+        Button(action: action) {
+            label(isHovering)
+                .frame(width: UnifiedSessionsStyle.toolbarButtonSize, height: UnifiedSessionsStyle.toolbarButtonSize)
+                .background(
+                    RoundedRectangle(cornerRadius: UnifiedSessionsStyle.toolbarButtonCornerRadius, style: .continuous)
+                        .fill(Color.black.opacity(isHovering ? UnifiedSessionsStyle.toolbarHoverOpacity : 0))
+                )
+                .contentShape(RoundedRectangle(cornerRadius: UnifiedSessionsStyle.toolbarButtonCornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { hovering in isHovering = hovering }
+        .animation(.easeInOut(duration: 0.15), value: isHovering)
+    }
+}
+
+private struct ToolbarIconToggle: View {
+    @Binding var isOn: Bool
+    let onSymbol: String
+    let offSymbol: String
+    let help: String
+    var activeColor: Color = UnifiedSessionsStyle.selectionAccent
+
+    var body: some View {
+        ToolbarIconButton(help: help) { _ in
+            ToolbarIcon(systemName: isOn ? onSymbol : offSymbol,
+                        isActive: isOn,
+                        activeColor: activeColor)
+        } action: {
+            isOn.toggle()
+        }
+        .accessibilityLabel(Text("Saved"))
+        .accessibilityValue(Text(isOn ? "On" : "Off"))
+    }
+}
+
+private struct ToolbarGroupDivider: View {
+    var body: some View {
+        Divider()
+            .frame(height: 18)
+    }
+}
+
+private struct LayoutToggleButton: View {
+    let layoutMode: LayoutMode
+    let onToggleLayout: () -> Void
+
+    private var targetMode: LayoutMode {
+        layoutMode == .vertical ? .horizontal : .vertical
+    }
+
+    private var iconName: String {
+        targetMode == .vertical ? "rectangle.split.1x2" : "rectangle.split.2x1"
+    }
+
+    private var helpText: String {
+        targetMode == .vertical ? "Switch to vertical split layout" : "Switch to horizontal split layout"
+    }
+
+    var body: some View {
+        ToolbarIconButton(help: helpText) { _ in
+            ToolbarIcon(systemName: iconName)
+        } action: {
+            onToggleLayout()
+        }
+        .accessibilityLabel(Text("Toggle Layout"))
     }
 }
 
@@ -1287,8 +1379,8 @@ private struct UnifiedSearchFiltersView: View {
             // Inline search field (always visible to keep global search front-and-center)
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .imageScale(.medium)
 
                 // Use an AppKit-backed text field to ensure focus works inside a toolbar
                 ToolbarSearchTextField(text: $unified.queryDraft,
@@ -1301,10 +1393,11 @@ private struct UnifiedSearchFiltersView: View {
                                        focusRequestToken: focusRequestToken,
                                        onCommit: { startSearchImmediate() })
                     .frame(minWidth: 220)
+                    .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\.")
 
                 if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text("⌥⌘F")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                 } else {
@@ -1316,7 +1409,7 @@ private struct UnifiedSearchFiltersView: View {
                         searchFocus = nil
                     }) {
                         Image(systemName: "xmark.circle.fill")
-                            .imageScale(.medium)
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
                     .focused($searchFocus, equals: .clear)
@@ -1333,7 +1426,8 @@ private struct UnifiedSearchFiltersView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(searchFocus == .field ? Color.yellow : Color.gray.opacity(0.28), lineWidth: searchFocus == .field ? 2 : 1)
+                    .stroke(searchFocus == .field ? UnifiedSessionsStyle.toolbarFocusRingColor : Color(nsColor: .separatorColor).opacity(0.6),
+                            lineWidth: searchFocus == .field ? 2 : 1)
             )
             .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\.")
             .onAppear {
@@ -1513,7 +1607,7 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
         tf.isBordered = false
         tf.drawsBackground = false
         tf.focusRingType = .none
-        tf.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        tf.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         tf.delegate = context.coordinator
         tf.lineBreakMode = .byTruncatingTail
         return tf
@@ -1555,25 +1649,25 @@ private struct AnalyticsButtonView: View {
 
     // Access via app-level notification instead of environment
     var body: some View {
-        Button(action: {
+        ToolbarIconButton(help: helpText) { _ in
+            ZStack {
+                ToolbarIcon(systemName: "chart.bar.xaxis")
+                    .opacity(isReady ? 1 : 0.35)
+                if !isReady {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+            }
+        } action: {
             if isReady {
                 NotificationCenter.default.post(name: .toggleAnalytics, object: nil)
             } else {
                 onWarmupTap()
             }
-        }) {
-            HStack(spacing: 6) {
-                if !isReady {
-                    ProgressView()
-                        .controlSize(.mini)
-                }
-                Label("Analytics", systemImage: "chart.bar.xaxis")
-            }
         }
-        .buttonStyle(.bordered)
         .keyboardShortcut("k", modifiers: .command)
+        .accessibilityLabel(Text("Analytics"))
         // Keep pressable; communicate readiness instead of disabling.
-        .help(helpText)
     }
 
     private var helpText: String {
