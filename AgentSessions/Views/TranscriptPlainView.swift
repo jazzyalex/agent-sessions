@@ -48,7 +48,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var rebuildTask: Task<Void, Never>?
 
     // Unified Search (⌥⌘F): window-level query used to filter sessions and navigate within transcript
-    @State private var unifiedMatches: [Range<String.Index>] = []
+    @State private var unifiedMatches: [NSRange] = []
     @State private var unifiedCurrentMatchIndex: Int = 0
     @State private var unifiedHighlightRanges: [NSRange] = []
     @State private var pendingAutoJumpToken: Int? = nil
@@ -72,6 +72,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var isBuildingJSON: Bool = false
     // Terminal-specific unified search navigation state (used when viewMode == .terminal)
     @State private var terminalUnifiedMatchesCount: Int = 0
+    @State private var terminalUnifiedTotalMatchesCount: Int = 0
     @State private var terminalUnifiedCurrentIndex: Int = 0
     @State private var terminalUnifiedFindToken: Int = 0
     @State private var terminalUnifiedFindDirection: Int = 1
@@ -80,6 +81,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     // Terminal-specific local find state (used when viewMode == .terminal)
     @State private var terminalFindMatchesCount: Int = 0
+    @State private var terminalFindTotalMatchesCount: Int = 0
     @State private var terminalFindCurrentIndex: Int = 0
     @State private var terminalFindToken: Int = 0
     @State private var terminalFindDirection: Int = 1
@@ -123,6 +125,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private var unifiedQuery: String {
         searchState.query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var unifiedFreeText: String {
+        let parsed = FilterEngine.parseOperators(unifiedQuery)
+        return parsed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var isUnifiedSearchActive: Bool {
@@ -178,12 +185,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	                    if viewMode == .terminal {
 	                        SessionTerminalView(
 	                            session: session,
-	                            unifiedQuery: unifiedQuery,
+	                            unifiedQuery: unifiedFreeText,
 	                            unifiedFindToken: terminalUnifiedFindToken,
 	                            unifiedFindDirection: terminalUnifiedFindDirection,
 	                            unifiedFindReset: terminalUnifiedFindResetFlag,
 	                            unifiedAllowMatchAutoScroll: terminalUnifiedAllowMatchAutoScroll,
 	                            unifiedExternalMatchCount: $terminalUnifiedMatchesCount,
+	                            unifiedExternalTotalMatchCount: $terminalUnifiedTotalMatchesCount,
 	                            unifiedExternalCurrentMatchIndex: $terminalUnifiedCurrentIndex,
 	                            findQuery: findQuery,
 	                            findToken: terminalFindToken,
@@ -195,6 +203,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	                            roleNavRole: terminalRoleNavRole,
 	                            roleNavDirection: terminalRoleNavDirection,
 	                            externalMatchCount: $terminalFindMatchesCount,
+	                            externalTotalMatchCount: $terminalFindTotalMatchesCount,
 	                            externalCurrentMatchIndex: $terminalFindCurrentIndex
 	                        )
 	                    } else {
@@ -872,14 +881,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	    private func performUnifiedFind(resetIndex: Bool, direction: Int = 1, shouldJump: Bool = true) {
 	        // Terminal mode uses a dedicated line-based search in SessionTerminalView.
 	        if viewMode == .terminal {
-	            let q = unifiedQuery
-	            guard !q.isEmpty else {
-	                terminalUnifiedMatchesCount = 0
-	                terminalUnifiedCurrentIndex = 0
-                    terminalUnifiedAllowMatchAutoScroll = false
-	                terminalUnifiedFindToken &+= 1
-	                selectedNSRange = nil
-	                return
+            let q = unifiedFreeText
+            guard !q.isEmpty else {
+                terminalUnifiedMatchesCount = 0
+                terminalUnifiedTotalMatchesCount = 0
+                terminalUnifiedCurrentIndex = 0
+                terminalUnifiedAllowMatchAutoScroll = false
+                terminalUnifiedFindToken &+= 1
+                selectedNSRange = nil
+                return
 	            }
                 terminalUnifiedAllowMatchAutoScroll = shouldJump
 	            terminalUnifiedFindDirection = direction
@@ -888,7 +898,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	            return
         }
 
-	        let q = unifiedQuery
+	        let q = unifiedFreeText
 	        guard !q.isEmpty else {
 	            unifiedMatches = []
 	            unifiedCurrentMatchIndex = 0
@@ -896,17 +906,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	            selectedNSRange = nil
 	            return
 	        }
-        // Find matches directly on the original string using case-insensitive search
-        var matches: [Range<String.Index>] = []
-        var searchStart = transcript.startIndex
-        while let r = transcript.range(of: q, options: [.caseInsensitive], range: searchStart..<transcript.endIndex) {
-            matches.append(r)
-            searchStart = r.upperBound
-        }
-        unifiedMatches = matches
+
+        let matches = SearchTextMatcher.matchRanges(in: transcript, query: q)
         if matches.isEmpty {
             unifiedCurrentMatchIndex = 0
             unifiedHighlightRanges = []
+            unifiedMatches = []
         } else {
             if resetIndex {
                 unifiedCurrentMatchIndex = 0
@@ -919,20 +924,19 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
             // Convert to NSRange and validate bounds
             let transcriptLength = (transcript as NSString).length
-            let validRanges = matches.compactMap { range -> NSRange? in
-                let nsRange = NSRange(range, in: transcript)
+            let validRanges = matches.filter { nsRange in
                 if NSMaxRange(nsRange) <= transcriptLength {
-                    return nsRange
-                } else {
-                    print("⚠️ FIND: Skipping out-of-bounds range \(nsRange) (transcript length: \(transcriptLength))")
-                    return nil
+                    return true
                 }
+                print("⚠️ FIND: Skipping out-of-bounds range \(nsRange) (transcript length: \(transcriptLength))")
+                return false
             }
 
             if validRanges.count != matches.count {
                 print("⚠️ FIND: Filtered \(matches.count - validRanges.count) out-of-bounds ranges (query: '\(q)', transcript: \(transcriptLength) chars)")
             }
 
+            unifiedMatches = validRanges
             unifiedHighlightRanges = validRanges
 
             // Adjust unifiedCurrentMatchIndex if out of bounds after filtering
@@ -955,6 +959,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             let q = findQuery
             guard !q.isEmpty else {
                 terminalFindMatchesCount = 0
+                terminalFindTotalMatchesCount = 0
                 terminalFindCurrentIndex = 0
                 terminalAllowMatchAutoScroll = false
                 terminalFindToken &+= 1
@@ -1024,9 +1029,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func unifiedStatus() -> String {
         guard isUnifiedSearchActive else { return "" }
         if viewMode == .terminal {
-            let total = terminalUnifiedMatchesCount
-            if total == 0 { return "0/0" }
-            return "\(terminalUnifiedCurrentIndex + 1)/\(total)"
+            return terminalStatus(currentIndex: terminalUnifiedCurrentIndex,
+                                  visible: terminalUnifiedMatchesCount,
+                                  total: terminalUnifiedTotalMatchesCount)
         }
         let total = unifiedMatches.count
         if total == 0 { return "0/0" }
@@ -1036,20 +1041,30 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func findStatus() -> String {
         guard !findQuery.isEmpty else { return "" }
         if viewMode == .terminal {
-            let total = terminalFindMatchesCount
-            if total == 0 { return "0/0" }
-            return "\(terminalFindCurrentIndex + 1)/\(total)"
+            return terminalStatus(currentIndex: terminalFindCurrentIndex,
+                                  visible: terminalFindMatchesCount,
+                                  total: terminalFindTotalMatchesCount)
         }
         let total = findMatches.count
         if total == 0 { return "0/0" }
         return "\(findCurrentMatchIndex + 1)/\(total)"
     }
 
+    private func terminalStatus(currentIndex: Int, visible: Int, total: Int) -> String {
+        if visible == 0 {
+            return total == 0 ? "0/0" : "0/0 (\(total))"
+        }
+        if total == visible {
+            return "\(currentIndex + 1)/\(visible)"
+        }
+        return "\(currentIndex + 1)/\(visible) (\(total))"
+    }
+
     private var isUnifiedNavigationDisabled: Bool {
         if viewMode == .terminal {
-            return terminalUnifiedMatchesCount == 0 || unifiedQuery.isEmpty
+            return terminalUnifiedMatchesCount == 0 || unifiedFreeText.isEmpty
         }
-        return unifiedMatches.isEmpty || unifiedQuery.isEmpty
+        return unifiedMatches.isEmpty || unifiedFreeText.isEmpty
     }
 
     private var isFindNavigationDisabled: Bool {

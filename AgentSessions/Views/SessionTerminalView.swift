@@ -3,6 +3,20 @@ import AppKit
 import Foundation
 import AVFoundation
 
+private struct MatchOccurrence: Equatable {
+    let range: NSRange
+    let lineID: Int
+}
+
+private struct TextSnapshot {
+    let text: String
+    let lineRanges: [Int: NSRange]
+    let orderedLineRanges: [NSRange]
+    let orderedLineIDs: [Int]
+
+    static let empty = TextSnapshot(text: "", lineRanges: [:], orderedLineRanges: [], orderedLineIDs: [])
+}
+
 /// Terminal-style session view with filters, optional gutter, and legend toggles.
 struct SessionTerminalView: View {
     let session: Session
@@ -13,6 +27,7 @@ struct SessionTerminalView: View {
     let unifiedFindReset: Bool
     let unifiedAllowMatchAutoScroll: Bool
     @Binding var unifiedExternalMatchCount: Int
+    @Binding var unifiedExternalTotalMatchCount: Int
     @Binding var unifiedExternalCurrentMatchIndex: Int
 
     // Find (⌘F): local query, standard macOS find-in-document behavior.
@@ -26,6 +41,7 @@ struct SessionTerminalView: View {
     let roleNavRole: RoleToggle
     let roleNavDirection: Int
     @Binding var externalMatchCount: Int
+    @Binding var externalTotalMatchCount: Int
     @Binding var externalCurrentMatchIndex: Int
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
@@ -33,6 +49,8 @@ struct SessionTerminalView: View {
 
     @State private var lines: [TerminalLine] = []
     @State private var visibleLines: [TerminalLine] = []
+    @State private var fullSnapshot: TextSnapshot = .empty
+    @State private var visibleSnapshot: TextSnapshot = .empty
     @State private var rebuildTask: Task<Void, Never>?
 
     enum RoleToggle: CaseIterable {
@@ -53,13 +71,11 @@ struct SessionTerminalView: View {
     @State private var roleNavPositions: [RoleToggle: Int] = [:]
 
     // Unified Search navigation/highlight state
-    @State private var unifiedMatchingLineIDs: [Int] = []
-    @State private var unifiedMatchIDSet: Set<Int> = []
+    @State private var unifiedMatchOccurrences: [MatchOccurrence] = []
     @State private var unifiedCurrentMatchLineID: Int? = nil
 
     // Local Find state
-    @State private var findMatchingLineIDs: [Int] = []
-    @State private var findMatchIDSet: Set<Int> = []
+    @State private var findMatchOccurrences: [MatchOccurrence] = []
     @State private var findCurrentMatchLineID: Int? = nil
     @State private var conversationStartLineID: Int? = nil
     @State private var scrollTargetLineID: Int? = nil
@@ -109,6 +125,7 @@ struct SessionTerminalView: View {
         }
         .onChange(of: activeRoles) { _, _ in
             visibleLines = roleFilteredLines(from: lines)
+            visibleSnapshot = buildTextSnapshot(lines: visibleLines)
             if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 recomputeUnifiedMatches(resetIndex: true)
             }
@@ -169,12 +186,11 @@ struct SessionTerminalView: View {
                     fontSize: CGFloat(transcriptFontSize),
                     sessionSource: session.source,
                     unifiedFindQuery: unifiedQuery,
-                    unifiedMatchIDs: unifiedMatchIDSet,
+                    unifiedMatchOccurrences: unifiedMatchOccurrences,
                     unifiedCurrentMatchLineID: unifiedCurrentMatchLineID,
                     unifiedHighlightActive: !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     unifiedAllowMatchAutoScroll: unifiedAllowMatchAutoScroll,
                     findQuery: findQuery,
-                    findMatchIDs: findMatchIDSet,
                     findCurrentMatchLineID: findCurrentMatchLineID,
                     findHighlightActive: !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     allowMatchAutoScroll: allowMatchAutoScroll,
@@ -220,6 +236,8 @@ struct SessionTerminalView: View {
 
             lines = result.lines
             visibleLines = roleFilteredLines(from: result.lines)
+            fullSnapshot = buildTextSnapshot(lines: result.lines)
+            visibleSnapshot = buildTextSnapshot(lines: visibleLines)
             conversationStartLineID = result.conversationStartLineID
             preambleUserBlockIndexes = result.preambleUserBlockIndexes
             userLineIndices = result.userLineIndices
@@ -228,17 +246,17 @@ struct SessionTerminalView: View {
             errorLineIndices = result.errorLineIndices
 
             // Reset Unified Search + Find state when rebuilding.
-            unifiedMatchingLineIDs = []
-            unifiedMatchIDSet = []
+            unifiedMatchOccurrences = []
             unifiedCurrentMatchLineID = nil
             unifiedExternalMatchCount = 0
+            unifiedExternalTotalMatchCount = 0
             unifiedExternalCurrentMatchIndex = 0
 
-            findMatchingLineIDs = []
-            findMatchIDSet = []
+            findMatchOccurrences = []
             findCurrentMatchLineID = nil
             roleNavPositions = [:]
             externalMatchCount = 0
+            externalTotalMatchCount = 0
             externalCurrentMatchIndex = 0
 
             if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -537,26 +555,23 @@ struct SessionTerminalView: View {
     private func recomputeUnifiedMatches(resetIndex: Bool, direction: Int = 1) {
         let query = unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
-            unifiedMatchingLineIDs = []
-            unifiedMatchIDSet = []
+            unifiedMatchOccurrences = []
             unifiedCurrentMatchLineID = nil
             unifiedExternalMatchCount = 0
+            unifiedExternalTotalMatchCount = 0
             unifiedExternalCurrentMatchIndex = 0
             return
         }
 
-        // Recompute matches over the currently filtered lines.
-        var ids: [Int] = []
-        for line in filteredLines {
-            if line.text.range(of: query, options: [.caseInsensitive]) != nil {
-                ids.append(line.id)
-            }
-        }
-        unifiedMatchingLineIDs = ids
-        unifiedMatchIDSet = Set(ids)
-        unifiedExternalMatchCount = ids.count
+        let visibleRanges = SearchTextMatcher.matchRanges(in: visibleSnapshot.text, query: query)
+        let visibleOccurrences = occurrences(from: visibleRanges, in: visibleSnapshot)
+        unifiedMatchOccurrences = visibleOccurrences
+        unifiedExternalMatchCount = visibleOccurrences.count
 
-        guard !ids.isEmpty else {
+        let totalRanges = SearchTextMatcher.matchRanges(in: fullSnapshot.text, query: query)
+        unifiedExternalTotalMatchCount = totalRanges.count
+
+        guard !visibleOccurrences.isEmpty else {
             unifiedCurrentMatchLineID = nil
             unifiedExternalCurrentMatchIndex = 0
             return
@@ -568,40 +583,37 @@ struct SessionTerminalView: View {
         } else {
             var nextIndex = unifiedExternalCurrentMatchIndex + (direction >= 0 ? 1 : -1)
             if nextIndex < 0 {
-                nextIndex = ids.count - 1
-            } else if nextIndex >= ids.count {
+                nextIndex = visibleOccurrences.count - 1
+            } else if nextIndex >= visibleOccurrences.count {
                 nextIndex = 0
             }
             unifiedExternalCurrentMatchIndex = nextIndex
         }
 
-        let clampedIndex = min(max(unifiedExternalCurrentMatchIndex, 0), ids.count - 1)
-        let lineID = ids[clampedIndex]
-        unifiedCurrentMatchLineID = lineID
+        let clampedIndex = min(max(unifiedExternalCurrentMatchIndex, 0), visibleOccurrences.count - 1)
+        unifiedCurrentMatchLineID = visibleOccurrences[clampedIndex].lineID
     }
 
     private func recomputeFindMatches(resetIndex: Bool, direction: Int = 1) {
         let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
-            findMatchingLineIDs = []
-            findMatchIDSet = []
+            findMatchOccurrences = []
             findCurrentMatchLineID = nil
             externalMatchCount = 0
+            externalTotalMatchCount = 0
             externalCurrentMatchIndex = 0
             return
         }
 
-        var ids: [Int] = []
-        for line in filteredLines {
-            if line.text.range(of: query, options: [.caseInsensitive]) != nil {
-                ids.append(line.id)
-            }
-        }
-        findMatchingLineIDs = ids
-        findMatchIDSet = Set(ids)
-        externalMatchCount = ids.count
+        let visibleRanges = SearchTextMatcher.matchRanges(in: visibleSnapshot.text, query: query)
+        let visibleOccurrences = occurrences(from: visibleRanges, in: visibleSnapshot)
+        findMatchOccurrences = visibleOccurrences
+        externalMatchCount = visibleOccurrences.count
 
-        guard !ids.isEmpty else {
+        let totalRanges = SearchTextMatcher.matchRanges(in: fullSnapshot.text, query: query)
+        externalTotalMatchCount = totalRanges.count
+
+        guard !visibleOccurrences.isEmpty else {
             findCurrentMatchLineID = nil
             externalCurrentMatchIndex = 0
             return
@@ -612,16 +624,78 @@ struct SessionTerminalView: View {
         } else {
             var nextIndex = externalCurrentMatchIndex + (direction >= 0 ? 1 : -1)
             if nextIndex < 0 {
-                nextIndex = ids.count - 1
-            } else if nextIndex >= ids.count {
+                nextIndex = visibleOccurrences.count - 1
+            } else if nextIndex >= visibleOccurrences.count {
                 nextIndex = 0
             }
             externalCurrentMatchIndex = nextIndex
         }
 
-        let clampedIndex = min(max(externalCurrentMatchIndex, 0), ids.count - 1)
-        let lineID = ids[clampedIndex]
-        findCurrentMatchLineID = lineID
+        let clampedIndex = min(max(externalCurrentMatchIndex, 0), visibleOccurrences.count - 1)
+        findCurrentMatchLineID = visibleOccurrences[clampedIndex].lineID
+    }
+
+    private func buildTextSnapshot(lines: [TerminalLine]) -> TextSnapshot {
+        guard !lines.isEmpty else { return .empty }
+        var text = ""
+        text.reserveCapacity(lines.count * 32)
+        var lineRanges: [Int: NSRange] = [:]
+        lineRanges.reserveCapacity(lines.count)
+        var orderedLineRanges: [NSRange] = []
+        orderedLineRanges.reserveCapacity(lines.count)
+        var orderedLineIDs: [Int] = []
+        orderedLineIDs.reserveCapacity(lines.count)
+
+        var location = 0
+        for (idx, line) in lines.enumerated() {
+            let lineString = idx == lines.count - 1 ? line.text : line.text + "\n"
+            let length = lineString.utf16.count
+            let range = NSRange(location: location, length: length)
+            text.append(lineString)
+            lineRanges[line.id] = range
+            orderedLineRanges.append(range)
+            orderedLineIDs.append(line.id)
+            location += length
+        }
+
+        return TextSnapshot(text: text,
+                            lineRanges: lineRanges,
+                            orderedLineRanges: orderedLineRanges,
+                            orderedLineIDs: orderedLineIDs)
+    }
+
+    private func occurrences(from ranges: [NSRange], in snapshot: TextSnapshot) -> [MatchOccurrence] {
+        guard !ranges.isEmpty else { return [] }
+        var out: [MatchOccurrence] = []
+        out.reserveCapacity(ranges.count)
+        for range in ranges {
+            guard let lineID = lineID(for: range.location, in: snapshot) else { continue }
+            out.append(MatchOccurrence(range: range, lineID: lineID))
+        }
+        return out
+    }
+
+    private func lineID(for location: Int, in snapshot: TextSnapshot) -> Int? {
+        let ranges = snapshot.orderedLineRanges
+        let ids = snapshot.orderedLineIDs
+        guard !ranges.isEmpty else { return nil }
+
+        var low = 0
+        var high = ranges.count - 1
+        while low <= high {
+            let mid = (low + high) / 2
+            let r = ranges[mid]
+            if location < r.location {
+                high = mid - 1
+                continue
+            }
+            if location >= (r.location + r.length) {
+                low = mid + 1
+                continue
+            }
+            return ids[mid]
+        }
+        return nil
     }
 
     private var shouldShowConversationStartControls: Bool {
@@ -1168,8 +1242,7 @@ private final class TerminalLayoutManager: NSLayoutManager {
 		        let lineGlyphs = glyphRange(forCharacterRange: entry.range, actualCharacterRange: nil)
 		        guard NSIntersectionRange(lineGlyphs, glyphsToShow).length > 0 else { return }
 
-		        let blue = NSColor.systemBlue
-		        let fill = blue.withAlphaComponent(isDark ? 0.78 : 0.70)
+		        let fill = NSColor.systemBlue.withAlphaComponent(isDark ? 0.95 : 0.88)
 		        let cardInsetX: CGFloat = 8
 		        var renderedGlyphStarts: Set<Int> = []
 
@@ -1194,14 +1267,13 @@ private final class TerminalLayoutManager: NSLayoutManager {
 		                return self.style(for: b.kind).accentWidth
 		            }()
 
-		            let width: CGFloat = max(5, blockAccentWidth + 1)
+		            let width: CGFloat = max(6, blockAccentWidth + 2)
 		            let height = max(2, matchRect.height - 2)
 		            let y = matchRect.minY + 1
 		            let x = rect.minX + origin.x + cardInsetX
 
 		            let barRect = CGRect(x: x, y: y, width: width, height: height)
-		            let radius: CGFloat = min(width / 2, 3)
-		            let bar = NSBezierPath(roundedRect: barRect, xRadius: radius, yRadius: radius)
+		            let bar = NSBezierPath(rect: barRect)
 
 		            fill.setFill()
 		            bar.fill()
@@ -1361,12 +1433,11 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let fontSize: CGFloat
     let sessionSource: SessionSource
     let unifiedFindQuery: String
-    let unifiedMatchIDs: Set<Int>
+    let unifiedMatchOccurrences: [MatchOccurrence]
     let unifiedCurrentMatchLineID: Int?
     let unifiedHighlightActive: Bool
     let unifiedAllowMatchAutoScroll: Bool
     let findQuery: String
-    let findMatchIDs: Set<Int>
     let findCurrentMatchLineID: Int?
     let findHighlightActive: Bool
     let allowMatchAutoScroll: Bool
@@ -1386,7 +1457,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastScrollToken: Int = 0
 
         var lastUnifiedFindQuery: String = ""
-        var lastUnifiedMatchIDs: Set<Int> = []
+        var lastUnifiedMatchOccurrences: [MatchOccurrence] = []
         var lastUnifiedCurrentMatchLineID: Int? = nil
 
         var lastFindQuery: String = ""
@@ -1561,8 +1632,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    private var effectiveUnifiedMatchIDs: Set<Int> {
-        unifiedHighlightActive ? unifiedMatchIDs : []
+    private var effectiveUnifiedMatchOccurrences: [MatchOccurrence] {
+        unifiedHighlightActive ? unifiedMatchOccurrences : []
     }
 
     private var effectiveUnifiedCurrentMatchLineID: Int? {
@@ -1611,7 +1682,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastMonochrome = monochrome
         context.coordinator.lastColorScheme = colorScheme
         context.coordinator.lastUnifiedFindQuery = unifiedFindQuery
-        context.coordinator.lastUnifiedMatchIDs = effectiveUnifiedMatchIDs
+        context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
         context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
         context.coordinator.lastFindQuery = findQuery
         context.coordinator.lastFindCurrentMatchLineID = effectiveFindCurrentMatchLineID
@@ -1635,14 +1706,14 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             context.coordinator.lastColorScheme = colorScheme
         } else {
             let unifiedChanged =
-                context.coordinator.lastUnifiedMatchIDs != effectiveUnifiedMatchIDs ||
+                context.coordinator.lastUnifiedMatchOccurrences != effectiveUnifiedMatchOccurrences ||
                 context.coordinator.lastUnifiedCurrentMatchLineID != effectiveUnifiedCurrentMatchLineID ||
                 context.coordinator.lastUnifiedFindQuery != unifiedFindQuery
             if unifiedChanged {
                 updateUnifiedHighlights(in: tv,
                                        context: context,
                                        query: unifiedFindQuery,
-                                       matches: effectiveUnifiedMatchIDs,
+                                       occurrences: effectiveUnifiedMatchOccurrences,
                                        currentLineID: effectiveUnifiedCurrentMatchLineID)
             }
 
@@ -1705,7 +1776,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lines = lines
         context.coordinator.orderedLineRanges = lines.compactMap { ranges[$0.id] }
         context.coordinator.orderedLineIDs = lines.map(\.id)
-        context.coordinator.lastUnifiedMatchIDs = effectiveUnifiedMatchIDs
+        context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
         context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
         context.coordinator.lastUnifiedFindQuery = unifiedFindQuery
         context.coordinator.lastFindQuery = findQuery
@@ -1719,9 +1790,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             lm.blocks = buildBlockDecorations(ranges: ranges)
             updateLayoutManagerUnifiedFind(lm,
                                            query: unifiedFindQuery,
-                                           matches: effectiveUnifiedMatchIDs,
-                                           currentLineID: effectiveUnifiedCurrentMatchLineID,
-                                           ranges: ranges)
+                                           occurrences: effectiveUnifiedMatchOccurrences,
+                                           currentLineID: effectiveUnifiedCurrentMatchLineID)
             updateLayoutManagerLocalFind(lm,
                                          query: findQuery,
                                          currentLineID: effectiveFindCurrentMatchLineID,
@@ -1734,17 +1804,16 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
     }
 
-    private func updateUnifiedHighlights(in textView: NSTextView, context: Context, query: String, matches: Set<Int>, currentLineID: Int?) {
+    private func updateUnifiedHighlights(in textView: NSTextView, context: Context, query: String, occurrences: [MatchOccurrence], currentLineID: Int?) {
         guard let lm = (textView.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager else { return }
         lm.isDark = (colorScheme == .dark)
         updateLayoutManagerUnifiedFind(lm,
                                        query: query,
-                                       matches: matches,
-                                       currentLineID: currentLineID,
-                                       ranges: context.coordinator.lineRanges)
+                                       occurrences: occurrences,
+                                       currentLineID: currentLineID)
         textView.setNeedsDisplay(textView.bounds)
         context.coordinator.lastUnifiedFindQuery = query
-        context.coordinator.lastUnifiedMatchIDs = matches
+        context.coordinator.lastUnifiedMatchOccurrences = occurrences
         context.coordinator.lastUnifiedCurrentMatchLineID = currentLineID
     }
 
@@ -1829,38 +1898,21 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         return out.sorted { $0.range.location < $1.range.location }
     }
 
-    private func updateLayoutManagerUnifiedFind(_ lm: TerminalLayoutManager, query: String, matches: Set<Int>, currentLineID: Int?, ranges: [Int: NSRange]) {
+    private func updateLayoutManagerUnifiedFind(_ lm: TerminalLayoutManager, query: String, occurrences: [MatchOccurrence], currentLineID: Int?) {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty, !matches.isEmpty else {
+        guard !q.isEmpty, !occurrences.isEmpty else {
             lm.matchLineIDs = []
             lm.currentMatchLineID = nil
             lm.matches = []
             return
         }
 
-        var out: [TerminalLayoutManager.FindMatch] = []
-        out.reserveCapacity(matches.count * 2)
-
-        for line in lines {
-            guard matches.contains(line.id) else { continue }
-            guard let base = ranges[line.id] else { continue }
-
-            let text = line.text as NSString
-            var search = NSRange(location: 0, length: text.length)
-            while search.length > 0 {
-                let found = text.range(of: q, options: [.caseInsensitive], range: search)
-                if found.location == NSNotFound { break }
-                out.append(.init(range: NSRange(location: base.location + found.location, length: found.length),
-                                 isCurrentLine: line.id == currentLineID))
-                let nextLoc = found.location + max(1, found.length)
-                if nextLoc >= text.length { break }
-                search = NSRange(location: nextLoc, length: text.length - nextLoc)
-            }
+        let matches = occurrences.map { occurrence in
+            TerminalLayoutManager.FindMatch(range: occurrence.range, isCurrentLine: occurrence.lineID == currentLineID)
         }
-
-        lm.matchLineIDs = matches
+        lm.matchLineIDs = Set(occurrences.map(\.lineID))
         lm.currentMatchLineID = currentLineID
-        lm.matches = out.sorted { $0.range.location < $1.range.location }
+        lm.matches = matches.sorted { $0.range.location < $1.range.location }
     }
 
     private func updateLayoutManagerLocalFind(_ lm: TerminalLayoutManager, query: String, currentLineID: Int?, ranges: [Int: NSRange]) {

@@ -8,6 +8,18 @@ private extension Notification.Name {
 private enum UnifiedSessionsStyle {
     static let selectionAccent = Color(hex: "007acc")
     static let timestampColor = Color(hex: "8E8E93")
+    static let agentPillFill = Color(nsColor: .controlBackgroundColor)
+    static let agentPillStroke = Color(nsColor: .separatorColor).opacity(0.35)
+    static let agentTabFont = Font.system(size: 12, weight: .medium)
+    static let agentDotSize: CGFloat = 8
+    static let toolbarGroupSpacing: CGFloat = 12
+    static let toolbarItemSpacing: CGFloat = 4
+    static let toolbarButtonSize: CGFloat = 32
+    static let toolbarIconSize: CGFloat = 16
+    static let toolbarButtonCornerRadius: CGFloat = 8
+    static let toolbarHoverOpacity: Double = 0.06
+    static let toolbarIconFont = Font.system(size: 16, weight: .semibold)
+    static let toolbarFocusRingColor = Color(nsColor: .keyboardFocusIndicatorColor)
 }
 
 struct UnifiedSessionsView: View {
@@ -135,6 +147,11 @@ struct UnifiedSessionsView: View {
         case .light: return .light
         case .dark: return .dark
         }
+    }
+
+    private var effectiveColorScheme: ColorScheme {
+        let current = AppAppearance(rawValue: appAppearanceRaw) ?? .system
+        return current.effectiveColorScheme(systemScheme: systemColorScheme)
     }
 
 	var body: some View {
@@ -665,147 +682,147 @@ struct UnifiedSessionsView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            HStack(spacing: 2) {
+            HStack(spacing: 12) {
                 if codexAgentEnabled {
-                    Toggle(isOn: $unified.includeCodex) {
-                        Text("Codex")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeCodex ? Color.agentCodex : .primary))
-                            .fixedSize()
-                    }
-                    .toggleStyle(.button)
-                    .help("Show or hide Codex sessions in the list (⌘1)")
-                    .keyboardShortcut("1", modifiers: .command)
+                    AgentTabToggle(title: "Codex", color: Color.agentCodex, isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
+                        .help("Show or hide Codex sessions in the list (⌘1)")
+                        .keyboardShortcut("1", modifiers: .command)
                 }
 
                 if claudeAgentEnabled {
-                    Toggle(isOn: $unified.includeClaude) {
-                        Text("Claude")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeClaude ? Color.agentClaude : .primary))
-                            .fixedSize()
-                    }
-                    .toggleStyle(.button)
-                    .help("Show or hide Claude sessions in the list (⌘2)")
-                    .keyboardShortcut("2", modifiers: .command)
+                    AgentTabToggle(title: "Claude", color: Color.agentClaude, isMonochrome: stripMonochrome, isOn: $unified.includeClaude)
+                        .help("Show or hide Claude sessions in the list (⌘2)")
+                        .keyboardShortcut("2", modifiers: .command)
                 }
 
                 if geminiAgentEnabled {
-                    Toggle(isOn: $unified.includeGemini) {
-                        Text("Gemini")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeGemini ? Color.teal : .primary))
-                            .fixedSize()
-                    }
-                    .toggleStyle(.button)
-                    .help("Show or hide Gemini sessions in the list (⌘3)")
-                    .keyboardShortcut("3", modifiers: .command)
+                    AgentTabToggle(title: "Gemini", color: Color.teal, isMonochrome: stripMonochrome, isOn: $unified.includeGemini)
+                        .help("Show or hide Gemini sessions in the list (⌘3)")
+                        .keyboardShortcut("3", modifiers: .command)
                 }
 
                 if openCodeAgentEnabled {
-                    Toggle(isOn: $unified.includeOpenCode) {
-                        Text("OpenCode")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeOpenCode ? Color.purple : .primary))
-                            .fixedSize()
-                    }
-                    .toggleStyle(.button)
-                    .help("Show or hide OpenCode sessions in the list (⌘4)")
-                    .keyboardShortcut("4", modifiers: .command)
+                    AgentTabToggle(title: "OpenCode", color: Color.purple, isMonochrome: stripMonochrome, isOn: $unified.includeOpenCode)
+                        .help("Show or hide OpenCode sessions in the list (⌘4)")
+                        .keyboardShortcut("4", modifiers: .command)
                 }
 
                 if copilotAgentEnabled {
-                    Toggle(isOn: $unified.includeCopilot) {
-                        Text("Copilot")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeCopilot ? Color.agentCopilot : .primary))
-                            .fixedSize()
-                    }
-                    .toggleStyle(.button)
-                    .help("Show or hide Copilot sessions in the list (⌘5)")
-                    .keyboardShortcut("5", modifiers: .command)
+                    AgentTabToggle(title: "Copilot", color: Color.agentCopilot, isMonochrome: stripMonochrome, isOn: $unified.includeCopilot)
+                        .help("Show or hide Copilot sessions in the list (⌘5)")
+                        .keyboardShortcut("5", modifiers: .command)
                 }
 
                 if droidAgentEnabled {
-                    Toggle(isOn: $unified.includeDroid) {
-                        Text("Droid")
-                            .foregroundStyle(stripMonochrome ? .primary : (unified.includeDroid ? Color.agentDroid : .primary))
-                            .fixedSize()
-                    }
-                    .toggleStyle(.button)
-                    .help("Show or hide Droid sessions in the list (⌘6)")
-                    .keyboardShortcut("6", modifiers: .command)
+                    AgentTabToggle(title: "Droid", color: Color.agentDroid, isMonochrome: stripMonochrome, isOn: $unified.includeDroid)
+                        .help("Show or hide Droid sessions in the list (⌘6)")
+                        .keyboardShortcut("6", modifiers: .command)
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(UnifiedSessionsStyle.agentPillFill)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
+            )
+            .controlSize(.small)
             .tint(UnifiedSessionsStyle.selectionAccent)
         }
         ToolbarItem(placement: .automatic) {
             UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator, searchState: searchState)
         }
-        ToolbarItem(placement: .automatic) {
-            Toggle(isOn: $unified.showFavoritesOnly) {
-                Label("Saved", systemImage: unified.showFavoritesOnly ? "star.fill" : "star")
-            }
-            .toggleStyle(.button)
-            .disabled(!showStarColumn)
-            .help(showStarColumn ? "Show only saved sessions" : "Enable the Save column in Preferences to use saved sessions")
-        }
-        ToolbarItem(placement: .automatic) {
-            AnalyticsButtonView(
-                isReady: analyticsReady,
-                disabledReason: analyticsDisabledReason,
-                onWarmupTap: handleAnalyticsWarmupTap
-            )
-        }
         ToolbarItemGroup(placement: .automatic) {
-            Button(action: { if let s = selectedSession { resume(s) } }) {
-                Label("Resume", systemImage: "play.circle")
-            }
-            .keyboardShortcut("r", modifiers: [.command, .control])
-            .disabled(selectedSession == nil || !(selectedSession?.source == .codex || selectedSession?.source == .claude))
-            .help("Resume the selected Codex or Claude session in its original CLI (⌃⌘R). Gemini, OpenCode, and Copilot sessions are read-only.")
+            HStack(spacing: UnifiedSessionsStyle.toolbarGroupSpacing) {
+                HStack(spacing: UnifiedSessionsStyle.toolbarItemSpacing) {
+                    ToolbarIconToggle(
+                        isOn: $unified.showFavoritesOnly,
+                        onSymbol: "star.fill",
+                        offSymbol: "star",
+                        help: showStarColumn ? "Show only saved sessions" : "Enable the Save column in Preferences to use saved sessions",
+                        activeColor: .primary
+                    )
+                    .disabled(!showStarColumn)
 
-            Button(action: { if let s = selectedSession { openDir(s) } }) { Label("Open Working Directory", systemImage: "folder") }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
-                .disabled(selectedSession == nil)
-                .help("Reveal the selected session's working directory in Finder (⌘⇧O)")
+                    AnalyticsButtonView(
+                        isReady: analyticsReady,
+                        disabledReason: analyticsDisabledReason,
+                        onWarmupTap: handleAnalyticsWarmupTap
+                    )
+                }
 
-            if isGitInspectorEnabled {
-                Button(action: { if let s = selectedSession { showGitInspector(s) } }) { Label("Git Context", systemImage: "clock.arrow.circlepath") }
-                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                ToolbarGroupDivider()
+
+                HStack(spacing: UnifiedSessionsStyle.toolbarItemSpacing) {
+                    ToolbarIconButton(help: "Resume the selected Codex or Claude session in its original CLI (⌃⌘R). Gemini, OpenCode, and Copilot sessions are read-only.") { _ in
+                        ToolbarIcon(systemName: "terminal")
+                    } action: {
+                        if let s = selectedSession { resume(s) }
+                    }
+                    .keyboardShortcut("r", modifiers: [.command, .control])
+                    .disabled(selectedSession == nil || !(selectedSession?.source == .codex || selectedSession?.source == .claude))
+                    .accessibilityLabel("Resume")
+
+                    ToolbarIconButton(help: "Reveal the selected session's working directory in Finder (⌘⇧O)") { _ in
+                        ToolbarIcon(systemName: "folder")
+                    } action: {
+                        if let s = selectedSession { openDir(s) }
+                    }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
                     .disabled(selectedSession == nil)
-                    .help("Show historical and current git context with safety analysis (⌘⇧G)")
-            }
-        }
-        ToolbarItem(placement: .automatic) {
-            Button(action: { unified.refresh() }) {
-                if unified.isIndexing || unified.isProcessingTranscripts {
-                    ProgressView()
-                } else {
-                    Image(systemName: "arrow.clockwise")
+                    .accessibilityLabel("Open Working Directory")
+
+                    ToolbarIconButton(help: "Re-run the session indexer to discover new logs (⌘R)") { _ in
+                        ZStack {
+                            ToolbarIcon(systemName: "arrow.clockwise")
+                                .opacity(unified.isIndexing || unified.isProcessingTranscripts ? 0.35 : 1)
+                            if unified.isIndexing || unified.isProcessingTranscripts {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+                    } action: {
+                        unified.refresh()
+                    }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .accessibilityLabel("Refresh")
+
+                    if isGitInspectorEnabled {
+                        ToolbarIconButton(help: "Show historical and current git context with safety analysis (⌘⇧G)") { _ in
+                            ToolbarIcon(systemName: "clock.arrow.circlepath")
+                        } action: {
+                            if let s = selectedSession { showGitInspector(s) }
+                        }
+                        .keyboardShortcut("g", modifiers: [.command, .shift])
+                        .disabled(selectedSession == nil)
+                        .accessibilityLabel("Git Context")
+                    }
+                }
+
+                ToolbarGroupDivider()
+
+                HStack(spacing: UnifiedSessionsStyle.toolbarItemSpacing) {
+                    LayoutTogglePill(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
+
+                    ToolbarIconButton(help: effectiveColorScheme == .dark ? "Switch to Light Mode" : "Switch to Dark Mode") { _ in
+                        ToolbarIcon(systemName: effectiveColorScheme == .dark ? "sun.max" : "moon")
+                    } action: {
+                        codexIndexer.toggleDarkLight(systemScheme: systemColorScheme)
+                    }
+                    .accessibilityLabel("Toggle Dark/Light")
+
+                    ToolbarIconButton(help: "Open preferences for appearance, indexing, and agents (⌘,)") { isHovering in
+                        ToolbarIcon(systemName: "gearshape", opacity: isHovering ? 1 : 0.4)
+                    } action: {
+                        PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController)
+                    }
+                    .keyboardShortcut(",", modifiers: .command)
+                    .accessibilityLabel("Settings")
                 }
             }
-                .keyboardShortcut("r", modifiers: .command)
-                .help("Re-run the session indexer to discover new logs (⌘R)")
-        }
-        ToolbarItem(placement: .automatic) {
-            Button(action: { onToggleLayout() }) {
-                Image(systemName: layoutMode == .vertical ? "rectangle.split.1x2" : "rectangle.split.2x1")
-            }
-            .keyboardShortcut("l", modifiers: .command)
-            .help("Toggle between vertical and horizontal layout modes (⌘L)")
-        }
-        ToolbarItem(placement: .automatic) {
-            let current = AppAppearance(rawValue: appAppearanceRaw) ?? .system
-            let effective = current.effectiveColorScheme(systemScheme: systemColorScheme)
-            let next = current.toggledDarkLight(systemScheme: systemColorScheme)
-            Button(action: { codexIndexer.setAppearance(next) }) {
-                Label("Toggle Dark/Light", systemImage: (effective == .dark) ? "sun.max" : "moon")
-                    .labelStyle(.iconOnly)
-            }
-            .help((effective == .dark) ? "Switch to Light Mode" : "Switch to Dark Mode")
-        }
-        ToolbarItem(placement: .automatic) {
-            Button(action: { PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController) }) {
-                Image(systemName: "gear")
-            }
-            .keyboardShortcut(",", modifiers: .command)
-            .help("Open preferences for appearance, indexing, and agents (⌘,)")
         }
     }
 
@@ -864,6 +881,8 @@ struct UnifiedSessionsView: View {
         } else if s.source == .droid, let exist = droidIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             droidIndexer.reloadSession(id: id)
         }
+
+        searchCoordinator.prewarmTranscriptIfNeeded(for: s)
     }
 
     private func updateCachedRows() {
@@ -1152,6 +1171,34 @@ struct UnifiedSessionsView: View {
     }
 }
 
+private struct AgentTabToggle: View {
+    let title: String
+    let color: Color
+    let isMonochrome: Bool
+    @Binding var isOn: Bool
+
+    private var activeColor: Color { isMonochrome ? .primary : color }
+    private var dotColor: Color { isOn ? activeColor : activeColor.opacity(0.35) }
+    private var textColor: Color { isOn ? activeColor : .primary }
+
+    var body: some View {
+        Button(action: { isOn.toggle() }) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: UnifiedSessionsStyle.agentDotSize, height: UnifiedSessionsStyle.agentDotSize)
+                Text(title)
+            }
+            .font(UnifiedSessionsStyle.agentTabFont)
+            .foregroundStyle(textColor)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(isOn ? "On" : "Off"))
+    }
+}
+
 // Stable transcript host that preserves layout identity across provider switches
 private struct TranscriptHostView: View {
     let kind: SessionSource
@@ -1288,7 +1335,7 @@ private struct UnifiedSearchFiltersView: View {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(searchFocus == .field ? Color.yellow : Color.gray.opacity(0.28), lineWidth: searchFocus == .field ? 2 : 1)
             )
-            .help("Search sessions (⌥⌘F)")
+            .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\.")
             .onAppear {
                 if searchState.query != unified.queryDraft {
                     searchState.query = unified.queryDraft

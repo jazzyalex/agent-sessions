@@ -41,12 +41,14 @@ final class SearchCoordinator: ObservableObject {
     @Published private(set) var progress: Progress = .init()
 
     private var currentTask: Task<Void, Never>? = nil
+    private var deepScanTask: Task<Void, Never>? = nil
     private let store: SearchSessionStoring
     private let db: IndexDB? = try? IndexDB()
     // Promotion support for large-queue preemption
     private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
     private var runID = UUID()
+    private var prewarmInFlight: Set<String> = []
     // Throttle guards for progress updates
     private var progressThrottleLastFlush = DispatchTime.now()
 
@@ -76,6 +78,8 @@ final class SearchCoordinator: ObservableObject {
     func cancel() {
         currentTask?.cancel()
         currentTask = nil
+        deepScanTask?.cancel()
+        deepScanTask = nil
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.runID = UUID()
@@ -93,6 +97,37 @@ final class SearchCoordinator: ObservableObject {
         }
     }
 
+    func prewarmTranscriptIfNeeded(for session: Session) {
+        guard let cache = transcriptCache(for: session.source) else { return }
+        if cache.getCached(session.id) != nil { return }
+        if prewarmInFlight.contains(session.id) { return }
+        prewarmInFlight.insert(session.id)
+
+        let sessionSnapshot = session
+        Task.detached(priority: .utility) { [weak self] in
+            defer {
+                DispatchQueue.main.async { [weak self] in
+                    self?.prewarmInFlight.remove(sessionSnapshot.id)
+                }
+            }
+
+            if FeatureFlags.gatePrewarmWhileTyping, TypingActivity.shared.isUserLikelyTyping {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+            guard !Task.isCancelled else { return }
+
+            var target = sessionSnapshot
+            if target.events.isEmpty, let parsed = await self?.store.parseFull(session: target) {
+                target = parsed
+                if !FeatureFlags.disableSessionUpdatesDuringSearch {
+                    self?.store.updateSession(parsed)
+                }
+            }
+
+            _ = cache.getOrGenerate(session: target)
+        }
+    }
+
     func start(query: String,
                filters: Filters,
                includeCodex: Bool,
@@ -104,6 +139,8 @@ final class SearchCoordinator: ObservableObject {
                all: [Session]) {
         // Cancel any in-flight search
         currentTask?.cancel()
+        deepScanTask?.cancel()
+        deepScanTask = nil
         wasCanceled = false
         let newRunID = UUID()
         runID = newRunID
@@ -194,8 +231,7 @@ final class SearchCoordinator: ObservableObject {
 	                    var mergedSet = Set(ids)
 	                    var out = mergedIDs.compactMap { byID[$0] }
 	                    var seen = Set(out.map(\.id))
-	                    let needsUnindexedScan = candidates.contains(where: { !indexedIDs.contains($0.id) })
-	                    let initialOut = out
+                    let initialOut = out
 	                    await MainActor.run {
 	                        guard self.runID == newRunID else { return }
 	                        self.results = initialOut
@@ -234,37 +270,14 @@ final class SearchCoordinator: ObservableObject {
                         }
                     }
 
-                    if !deepEnabled && !needsUnindexedScan {
-                        await MainActor.run {
-                            guard self.runID == newRunID else { return }
-                            self.isRunning = false
-                            self.progress.phase = .idle
-                        }
-                        return
-                    }
-                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-
                     let unindexedCandidates = candidates.filter { !indexedIDs.contains($0.id) && !seen.contains($0.id) }
-                    if !unindexedCandidates.isEmpty {
-                        await self.runDeepSearchAppend(
-                            runID: newRunID,
-                            query: query,
-                            filters: filters,
-                            candidates: unindexedCandidates,
-                            initialSeen: seen,
-                            finishWhenDone: !deepEnabled,
-                            progressPhases: (.unindexedSmall, .unindexedLarge),
-                            textScope: .all
-                        )
-                        if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-                        seen = await MainActor.run { Set(self.results.map(\.id)) }
-                    }
+                    let deepCandidates = deepEnabled
+                        ? candidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
+                        : []
 
-                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
-                    guard deepEnabled else { return }
-
-                    let deepCandidates = candidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
-                    if deepCandidates.isEmpty {
+                    let shouldRunUnindexed = !unindexedCandidates.isEmpty
+                    let shouldRunDeep = !deepCandidates.isEmpty
+                    if !shouldRunUnindexed && !shouldRunDeep {
                         await MainActor.run {
                             guard self.runID == newRunID else { return }
                             self.isRunning = false
@@ -273,15 +286,13 @@ final class SearchCoordinator: ObservableObject {
                         return
                     }
 
-                    await self.runDeepSearchAppend(
+                    self.startBackgroundDeepScan(
                         runID: newRunID,
                         query: query,
                         filters: filters,
-                        candidates: deepCandidates,
-                        initialSeen: seen,
-                        finishWhenDone: true,
-                        progressPhases: (.toolOutputsSmall, .toolOutputsLarge),
-                        textScope: .toolOutputsOnly
+                        unindexedCandidates: unindexedCandidates,
+                        deepCandidates: deepCandidates,
+                        initialSeen: seen
                     )
                     return
                 }
@@ -490,19 +501,15 @@ final class SearchCoordinator: ObservableObject {
         let q = freeText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return q }
 
+        let explicit = SearchTextMatcher.hasExplicitFTSSyntax(q)
+
         // Multi-word queries should behave like phrase searches by default (the same semantics
         // used for transcript navigation), so users can distinguish "exit" from "exit code".
         // Power users can still opt into explicit FTS query syntax by using quotes/operators/etc.
         if q.contains(where: \.isWhitespace) {
             // If the user already wrote an explicit FTS query (quotes, boolean ops, prefix, etc),
             // do not rewrite it.
-            let lower = q.lowercased()
-            if q.contains("\"") { return q }
-            if q.contains("*") { return q }
-            if q.contains("(") || q.contains(")") { return q }
-            if q.contains(":") { return q }
-            if lower.contains(" near ") || lower.hasPrefix("near ") || lower.hasSuffix(" near") { return q }
-            if lower.contains(" and ") || lower.contains(" or ") || lower.contains(" not ") { return q }
+            if explicit { return q }
 
             let normalized = q.split(whereSeparator: \.isWhitespace).joined(separator: " ")
             return "\"\(normalized)\""
@@ -510,13 +517,7 @@ final class SearchCoordinator: ObservableObject {
 
         // If the user already wrote an explicit FTS query (quotes, boolean ops, prefix, etc),
         // do not rewrite it.
-        let lower = q.lowercased()
-        if q.contains("\"") { return q }
-        if q.contains("*") { return q }
-        if q.contains("(") || q.contains(")") { return q }
-        if q.contains(":") { return q }
-        if lower.contains(" near ") || lower.hasPrefix("near ") || lower.hasSuffix(" near") { return q }
-        if lower.contains(" and ") || lower.contains(" or ") || lower.contains(" not ") { return q }
+        if explicit { return q }
 
         let rawTerms = q.split(whereSeparator: \.isWhitespace).map(String.init)
         guard !rawTerms.isEmpty else { return q }
@@ -541,6 +542,55 @@ final class SearchCoordinator: ObservableObject {
             return term + "*"
         }
         return rewritten.joined(separator: " ")
+    }
+
+    private func startBackgroundDeepScan(runID: UUID,
+                                         query: String,
+                                         filters: Filters,
+                                         unindexedCandidates: [Session],
+                                         deepCandidates: [Session],
+                                         initialSeen: Set<String>) {
+        deepScanTask?.cancel()
+        deepScanTask = Task.detached(priority: .utility) { [weak self, runID] in
+            guard let self else { return }
+            guard self.runID == runID else { return }
+            defer {
+                DispatchQueue.main.async { [weak self] in
+                    if self?.runID == runID {
+                        self?.deepScanTask = nil
+                    }
+                }
+            }
+            var seen = initialSeen
+
+            if !unindexedCandidates.isEmpty {
+                await self.runDeepSearchAppend(
+                    runID: runID,
+                    query: query,
+                    filters: filters,
+                    candidates: unindexedCandidates,
+                    initialSeen: seen,
+                    finishWhenDone: deepCandidates.isEmpty,
+                    progressPhases: (.unindexedSmall, .unindexedLarge),
+                    textScope: .all
+                )
+                if Task.isCancelled { await self.finishCanceled(runID: runID); return }
+                seen = await MainActor.run { Set(self.results.map(\.id)) }
+            }
+
+            if !deepCandidates.isEmpty {
+                await self.runDeepSearchAppend(
+                    runID: runID,
+                    query: query,
+                    filters: filters,
+                    candidates: deepCandidates,
+                    initialSeen: seen,
+                    finishWhenDone: true,
+                    progressPhases: (.toolOutputsSmall, .toolOutputsLarge),
+                    textScope: .toolOutputsOnly
+                )
+            }
+        }
     }
 
     private func runDeepSearchAppend(runID: UUID,
