@@ -45,6 +45,7 @@ All notable changes to this project will be documented in this file.
 - Transcript: Toolbar controls now use monospaced typography to match the session list.
 - Sessions list: Added a context menu action to copy the session ID to the clipboard.
 - Sessions: Resume context menu actions now include the selected terminal app (for example, Terminal or iTerm2).
+- Onboarding: Replaced the onboarding flow with a four-slide tour covering sessions, agent enablement, workflow tips, and usage tracking.
 
 ### Fixed
 
