@@ -24,7 +24,8 @@ All notable changes to this project will be documented in this file.
 - Search: Unified Search highlights now use token-phrase matching across punctuation/newlines, and Color view reports visible vs total match counts when role filters are active.
 - Search: Global search now accepts quoted `repo:` and `path:` filters, and background deep scans run at low priority with on-demand prewarming for opened sessions.
 - Search: The Search Sessions menu item and ⌥⌘F shortcut now reliably focus the global search field.
-- Transcript: Replace the read-only search box with a Unified Search navigation pill that appears only when Unified Search is active.
+- Transcript: Replace the read-only search box with a Unified Search navigation pill that appears only when Unified Search has a free-text query.
+- Search: Tooltips now include keyboard shortcuts for search fields and navigation arrows.
 - Transcript: Find in Transcript (⌘F) now opens a local find bar with its own query and navigation.
 - Transcript: Unified Search now auto-jumps to the first match after typing or switching sessions, and local Find uses a solid blue current-match marker aligned with the match.
 - Search: Unified Search highlights matches in the selected transcript and jumps to the first match when switching sessions.
@@ -54,6 +55,7 @@ All notable changes to this project will be documented in this file.
 - Search: Prevent missing results while the search index is still warming by falling back to legacy matching for unindexed sessions.
 - Search: Backfill missing per-session search data during incremental refresh so sessions don’t remain “not yet indexed” indefinitely.
 - Search: Claude sessions now keep transcript match highlights in sync with the active search query.
+- Transcript: Remove the ghost control inside the Unified Search navigation pill.
 - Transcript (Color view): Match counts now update when Unified Search is active.
 - Transcript (Color view): Search markers now appear only on matching wrapped lines and replace the block accent for that line.
 - Sessions: Auto-select the first session on launch so the transcript pane isn’t blank.
@@ -68,7 +70,9 @@ All notable changes to this project will be documented in this file.
 - Parsing: Surface Codex thread rollback events with readable text in timelines.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
 - Claude Usage: Detect the Claude Code first-run terms prompt and surface a “Setup required” state instead of timing out silently.
-- Toolbar: Restyled agent tabs into a pill group with 8px dots and reordered session action buttons.
+- Toolbar: Refined agent tabs and icon groups, updated the layout/theme controls, and tightened toolbar button sizing and hover states.
+- UI: Update Codex and Claude brand accents to blue and warm brown for clearer agent recognition.
+- Transcript: Rename view mode buttons to Session/Text/JSON, align them with HIG-style leading padding, and space the session ID control.
 - Menu Bar: When usage data is stale, reset indicators now show “n/a” instead of an incorrect countdown.
 - Claude Usage: Refresh usage automatically after wake when the usage strip or menu bar label is visible.
 - Menu Bar: Show an updating spinner next to reset indicators while probes run.

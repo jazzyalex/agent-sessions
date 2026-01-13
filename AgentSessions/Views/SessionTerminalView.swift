@@ -80,6 +80,8 @@ struct SessionTerminalView: View {
     @State private var conversationStartLineID: Int? = nil
     @State private var scrollTargetLineID: Int? = nil
     @State private var scrollTargetToken: Int = 0
+    @State private var roleNavScrollTargetLineID: Int? = nil
+    @State private var roleNavScrollToken: Int = 0
     @State private var preambleUserBlockIndexes: Set<Int> = []
 
     // Derived agent label for legend chips (Codex / Claude / Gemini)
@@ -196,6 +198,8 @@ struct SessionTerminalView: View {
                     allowMatchAutoScroll: allowMatchAutoScroll,
                     scrollTargetLineID: scrollTargetLineID,
                     scrollTargetToken: scrollTargetToken,
+                    roleNavScrollTargetLineID: roleNavScrollTargetLineID,
+                    roleNavScrollToken: roleNavScrollToken,
                     preambleUserBlockIndexes: preambleUserBlockIndexes,
                     colorScheme: colorScheme,
                     monochrome: stripMonochrome
@@ -540,6 +544,8 @@ struct SessionTerminalView: View {
         let nextIndex = wrapIndex(startIndex + step)
         roleNavPositions[role] = nextIndex
         unifiedCurrentMatchLineID = sorted[nextIndex]
+        roleNavScrollTargetLineID = sorted[nextIndex]
+        roleNavScrollToken &+= 1
     }
 
     /// Execute a Unified Search request driven by the sessions list.
@@ -1443,6 +1449,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let allowMatchAutoScroll: Bool
     let scrollTargetLineID: Int?
     let scrollTargetToken: Int
+    let roleNavScrollTargetLineID: Int?
+    let roleNavScrollToken: Int
     let preambleUserBlockIndexes: Set<Int>
     let colorScheme: ColorScheme
     let monochrome: Bool
@@ -1455,6 +1463,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastMonochrome: Bool = false
         var lastColorScheme: ColorScheme = .light
         var lastScrollToken: Int = 0
+        var lastRoleNavScrollToken: Int = 0
 
         var lastUnifiedFindQuery: String = ""
         var lastUnifiedMatchOccurrences: [MatchOccurrence] = []
@@ -1686,6 +1695,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
         context.coordinator.lastFindQuery = findQuery
         context.coordinator.lastFindCurrentMatchLineID = effectiveFindCurrentMatchLineID
+        context.coordinator.lastRoleNavScrollToken = roleNavScrollToken
         return scroll
     }
 
@@ -1745,6 +1755,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
            let range = context.coordinator.lineRanges[target] {
             scrollRangeToTop(tv, range: range)
             context.coordinator.lastScrollToken = scrollTargetToken
+        }
+
+        if roleNavScrollToken != context.coordinator.lastRoleNavScrollToken,
+           let target = roleNavScrollTargetLineID,
+           let range = context.coordinator.lineRanges[target] {
+            tv.scrollRangeToVisible(range)
+            context.coordinator.lastRoleNavScrollToken = roleNavScrollToken
         }
     }
 

@@ -1,0 +1,4008 @@
+{
+  "files_scanned": {
+    "claude": 50,
+    "codex": 50,
+    "copilot": 4,
+    "droid": 8,
+    "gemini": 18,
+    "opencode": 68
+  },
+  "generated_at": "2026-01-13T20:27:20Z",
+  "groups": [
+    {
+      "agent_family": "claude",
+      "count": 74,
+      "direction": "output",
+      "examples": [
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 31,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"parentUuid\":\"371e5438-4348-4ba1-9c45-bc4adcc80aa0\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_01PGf9uz1GQLomdtz38mij68\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"e0854d5d-bc13-423c-8180-b4e09e913be7\",\"timestamp\":\"2026-01-13T00:53:46.307Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"371e5438-4348-4ba1-9c45-bc4adcc80aa0\"}",
+          "raw_payload": "",
+          "shape_signature": "jsonl:message.content[].type=tool_result",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 38,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"parentUuid\":\"5006aa37-43ad-4728-9bf7-b8b422cd1908\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_015JgSSG2SF7uUMFgvaudzVy\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"06d3acd5-5879-439d-a87a-4e1454164039\",\"timestamp\":\"2026-01-13T00:54:00.630Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"5006aa37-43ad-4728-9bf7-b8b422cd1908\"}",
+          "raw_payload": "",
+          "shape_signature": "jsonl:message.content[].type=tool_result",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 239,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"parentUuid\":\"8c4b7da2-fb3a-459c-832f-bc13fa88b0b8\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_01JiQiQGEJJjdZdsQzH1GQ7E\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"9e61f658-e84b-41b1-b21c-bb731c230224\",\"timestamp\":\"2026-01-13T20:17:38.174Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"8c4b7da2-fb3a-459c-832f-bc13fa88b0b8\"}",
+          "raw_payload": "",
+          "shape_signature": "jsonl:message.content[].type=tool_result",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        }
+      ],
+      "field_variants": {
+        "content": [
+          "content"
+        ],
+        "is_error": [
+          "is_error"
+        ],
+        "tool_use_id": [
+          "tool_use_id"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "content",
+        "is_error",
+        "tool_use_id",
+        "type"
+      ],
+      "parse_success_rate": 0.0,
+      "shape_signature": "jsonl:message.content[].type=tool_result",
+      "tool_name_normalized": "unknown",
+      "tool_name_variants": []
+    },
+    {
+      "agent_family": "claude",
+      "count": 18,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "input": [
+          "input"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "input",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:message.content[].type=tool_use",
+      "tool_name_normalized": "bash",
+      "tool_name_variants": [
+        "Bash"
+      ]
+    },
+    {
+      "agent_family": "claude",
+      "count": 47,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "input": [
+          "input"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "input",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:message.content[].type=tool_use",
+      "tool_name_normalized": "edit",
+      "tool_name_variants": [
+        "Edit"
+      ]
+    },
+    {
+      "agent_family": "claude",
+      "count": 9,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "input": [
+          "input"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "input",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:message.content[].type=tool_use",
+      "tool_name_normalized": "read",
+      "tool_name_variants": [
+        "Read"
+      ]
+    },
+    {
+      "agent_family": "claude",
+      "count": 72,
+      "direction": "output",
+      "examples": [
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 31,
+          "field_path": "toolUseResult",
+          "parse_error": null,
+          "parsed_payload": {
+            "interrupted": false,
+            "isImage": false,
+            "stderr": "",
+            "stdout": ""
+          },
+          "raw_event": "{\"parentUuid\":\"371e5438-4348-4ba1-9c45-bc4adcc80aa0\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_01PGf9uz1GQLomdtz38mij68\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"e0854d5d-bc13-423c-8180-b4e09e913be7\",\"timestamp\":\"2026-01-13T00:53:46.307Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"371e5438-4348-4ba1-9c45-bc4adcc80aa0\"}",
+          "raw_payload": "{\"interrupted\": false, \"isImage\": false, \"stderr\": \"\", \"stdout\": \"\"}",
+          "shape_signature": "jsonl:toolUseResult",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 38,
+          "field_path": "toolUseResult",
+          "parse_error": null,
+          "parsed_payload": {
+            "interrupted": false,
+            "isImage": false,
+            "stderr": "",
+            "stdout": ""
+          },
+          "raw_event": "{\"parentUuid\":\"5006aa37-43ad-4728-9bf7-b8b422cd1908\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_015JgSSG2SF7uUMFgvaudzVy\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"06d3acd5-5879-439d-a87a-4e1454164039\",\"timestamp\":\"2026-01-13T00:54:00.630Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"5006aa37-43ad-4728-9bf7-b8b422cd1908\"}",
+          "raw_payload": "{\"interrupted\": false, \"isImage\": false, \"stderr\": \"\", \"stdout\": \"\"}",
+          "shape_signature": "jsonl:toolUseResult",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 239,
+          "field_path": "toolUseResult",
+          "parse_error": null,
+          "parsed_payload": {
+            "interrupted": false,
+            "isImage": false,
+            "stderr": "",
+            "stdout": ""
+          },
+          "raw_event": "{\"parentUuid\":\"8c4b7da2-fb3a-459c-832f-bc13fa88b0b8\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_01JiQiQGEJJjdZdsQzH1GQ7E\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"9e61f658-e84b-41b1-b21c-bb731c230224\",\"timestamp\":\"2026-01-13T20:17:38.174Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"8c4b7da2-fb3a-459c-832f-bc13fa88b0b8\"}",
+          "raw_payload": "{\"interrupted\": false, \"isImage\": false, \"stderr\": \"\", \"stdout\": \"\"}",
+          "shape_signature": "jsonl:toolUseResult",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        }
+      ],
+      "field_variants": {
+        "file": [
+          "file"
+        ],
+        "file_path": [
+          "filePath"
+        ],
+        "interrupted": [
+          "interrupted"
+        ],
+        "is_image": [
+          "isImage"
+        ],
+        "new_string": [
+          "newString"
+        ],
+        "old_string": [
+          "oldString"
+        ],
+        "original_file": [
+          "originalFile"
+        ],
+        "replace_all": [
+          "replaceAll"
+        ],
+        "return_code_interpretation": [
+          "returnCodeInterpretation"
+        ],
+        "stderr": [
+          "stderr"
+        ],
+        "stdout": [
+          "stdout"
+        ],
+        "structured_patch": [
+          "structuredPatch"
+        ],
+        "type": [
+          "type"
+        ],
+        "user_modified": [
+          "userModified"
+        ]
+      },
+      "fields_seen": [
+        "file",
+        "file_path",
+        "interrupted",
+        "is_image",
+        "new_string",
+        "old_string",
+        "original_file",
+        "replace_all",
+        "return_code_interpretation",
+        "stderr",
+        "stdout",
+        "structured_patch",
+        "type",
+        "user_modified"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:toolUseResult",
+      "tool_name_normalized": "unknown",
+      "tool_name_variants": []
+    },
+    {
+      "agent_family": "claude",
+      "count": 1,
+      "direction": "unknown",
+      "examples": [
+        {
+          "agent_family": "claude",
+          "direction": "unknown",
+          "event_index": 81,
+          "field_path": "message.content[0].content",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "--bg: #f5f5f5;\n--blue: #4472C4;\n--chip-flight: #5d6677;\n--chip-local: #1f7a4d;\n--chip-road: #8a6d1a;\n--dark: #2c3e50;\n--muted: #7f8c8d;\n--row-alt: #D9E2F3;\n:root {\n}\n<head>\n<html>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width\n<style>\n<title>USTA G12 Tournaments - NorCal and National</title>\nawk: trying to access out of range field -1\n input record number 18, file /Users/alexm/Repository/Scripts/tennis-scraper/2025-usta-norcal-national.html\n source line number 1",
+          "raw_payload": "{\n}",
+          "shape_signature": "text:line-prefix+json_block",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": "root"
+        }
+      ],
+      "field_variants": {},
+      "fields_seen": [],
+      "parse_success_rate": 1.0,
+      "shape_signature": "text:line-prefix+json_block",
+      "tool_name_normalized": "root",
+      "tool_name_variants": [
+        "root"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 2,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 4,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "ls",
+            "cwd": "/tmp/repo"
+          },
+          "raw_event": "{\"timestamp\":\"2025-12-17T23:27:51.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"tool_call\",\"function\":{\"name\":\"run_shell_command\"},\"arguments\":{\"command\":\"ls\",\"cwd\":\"/tmp/repo\"}}}",
+          "raw_payload": "{\"command\": \"ls\", \"cwd\": \"/tmp/repo\"}",
+          "shape_signature": "jsonl:response_item:payload.type=tool_call",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/codex/small.jsonl",
+          "tool_name": "run_shell_command"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 5,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "printf 'line1\\nline2\\nline3\\n'",
+            "cwd": "/tmp/large"
+          },
+          "raw_event": "{\"timestamp\":\"2025-12-18T10:00:03.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"tool_call\",\"function\":{\"name\":\"run_shell_command\"},\"arguments\":{\"command\":\"printf 'line1\\\\nline2\\\\nline3\\\\n'\",\"cwd\":\"/tmp/large\"}}}",
+          "raw_payload": "{\"command\": \"printf 'line1\\\\nline2\\\\nline3\\\\n'\", \"cwd\": \"/tmp/large\"}",
+          "shape_signature": "jsonl:response_item:payload.type=tool_call",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/codex/large.jsonl",
+          "tool_name": "run_shell_command"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "function": [
+          "function"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "function",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:response_item:payload.type=tool_call",
+      "tool_name_normalized": "run_shell_command",
+      "tool_name_variants": [
+        "run_shell_command"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 2,
+      "direction": "output",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "output",
+          "event_index": 5,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "exitCode": 0,
+            "stderr": "",
+            "stdout": "a.txt\nb.txt\n"
+          },
+          "raw_event": "{\"timestamp\":\"2025-12-17T23:27:52.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"tool_result\",\"name\":\"run_shell_command\",\"result\":{\"stdout\":\"a.txt\\nb.txt\\n\",\"stderr\":\"\",\"exitCode\":0}}}",
+          "raw_payload": "{\"exitCode\": 0, \"stderr\": \"\", \"stdout\": \"a.txt\\nb.txt\\n\"}",
+          "shape_signature": "jsonl:response_item:payload.type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/codex/small.jsonl",
+          "tool_name": "run_shell_command"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "output",
+          "event_index": 6,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "exitCode": 0,
+            "stderr": "",
+            "stdout": "line1\nline2\nline3\n"
+          },
+          "raw_event": "{\"timestamp\":\"2025-12-18T10:00:04.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"tool_result\",\"name\":\"run_shell_command\",\"result\":{\"stdout\":\"line1\\nline2\\nline3\\n\",\"stderr\":\"\",\"exitCode\":0}}}",
+          "raw_payload": "{\"exitCode\": 0, \"stderr\": \"\", \"stdout\": \"line1\\nline2\\nline3\\n\"}",
+          "shape_signature": "jsonl:response_item:payload.type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/codex/large.jsonl",
+          "tool_name": "run_shell_command"
+        }
+      ],
+      "field_variants": {
+        "name": [
+          "name"
+        ],
+        "result": [
+          "result"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "name",
+        "result",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:response_item:payload.type=tool_result",
+      "tool_name_normalized": "run_shell_command",
+      "tool_name_variants": [
+        "run_shell_command"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 2,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 9,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "{\"timestamp\":\"2026-01-12T23:42:15.204Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"list_mcp_resources\",\"arguments\":\"{}\",\"call_id\":\"call_UCnb4Cohr6TpN5eqpzwqQtap\"}}",
+          "raw_payload": "{}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/12/rollout-2026-01-12T15-42-01-019bb496-84e8-7691-bf4d-deea640339e2.jsonl",
+          "tool_name": "list_mcp_resources"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 9,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "{\"timestamp\":\"2026-01-12T21:32:10.734Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"list_mcp_resources\",\"arguments\":\"{}\",\"call_id\":\"call_tineV03THMS6IdkVLZCSh3c8\"}}",
+          "raw_payload": "{}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/12/rollout-2026-01-12T13-32-07-019bb41f-965e-7d53-925c-7d798916dc6a.jsonl",
+          "tool_name": "list_mcp_resources"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "list_mcp_resources",
+      "tool_name_variants": [
+        "list_mcp_resources"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 2,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 509,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "uid": "3_84"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:35:58.985Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__click\",\"arguments\":\"{\\\"uid\\\":\\\"3_84\\\"}\",\"call_id\":\"call_P8QUmkcyQCqW5AJVXCdLMPWN\"}}",
+          "raw_payload": "{\"uid\":\"3_84\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__click"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2846,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "uid": "27_58"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T05:36:53.705Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__click\",\"arguments\":\"{\\\"uid\\\":\\\"27_58\\\"}\",\"call_id\":\"call_HQKd8ryBqm5WnUaw8iG4FZdf\"}}",
+          "raw_payload": "{\"uid\":\"27_58\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__click"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_click",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__click"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 87,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 345,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "function": "() => ({ origin: location.origin, hasTournamentPlayers: localStorage.getItem('tournament_players') != null, keysSample: Object.keys(localStorage).slice(0, 50) })"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:25:29.112Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__evaluate_script\",\"arguments\":\"{\\\"function\\\":\\\"() => ({ origin: location.origin, hasTournamentPlayers: localStorage.getItem('tournament_players') != null, keysSample: Object.keys(localStorage).slice(0, 50) })\\\"}\",\"call_id\":\"call_Y5TS3wXLBIQ8YvIYF8SpPjhc\"}}",
+          "raw_payload": "{\"function\":\"() => ({ origin: location.origin, hasTournamentPlayers: localStorage.getItem('tournament_players') != null, keysSample: Object.keys(localStorage).slice(0, 50) })\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__evaluate_script"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 439,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "function": "() => {\n  const monthRe = /(January|February|March|April|May|June|July|August|September|October|November|December)/i;\n  const candidates = Array.from(document.querySelectorAll('body *'))\n    .map(el => (el.textContent || '').replace(/\\s+/g,' ').trim())\n    .filter(Boolean)\n    .filter(t => t.length <= 40)\n    .filter(t => monthRe.test(t) && /20\\d{2}/.test(t));\n  const best = candidates.find(t => /\\b\\d{1,2}\\b/.test(t) && /-/.test(t)) || candidates[0] || null;\n  return { candidates: candidates.slice(0, 10), best };\n}"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:31:39.359Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__evaluate_script\",\"arguments\":\"{\\\"function\\\":\\\"() => {\\\\n  const monthRe = /(January|February|March|April|May|June|July|August|September|October|November|December)/i;\\\\n  const candidates = Array.from(document.querySelectorAll('body *'))\\\\n    .map(el => (el.textContent || '').replace(/\\\\\\\\s+/g,' ').trim())\\\\n    .filter(Boolean)\\\\n    .filter(t => t.length <= 40)\\\\n    .filter(t => monthRe.test(t) && /20\\\\\\\\d{2}/.test(t));\\\\n  const best = candidates.find(t => /\\\\\\\\b\\\\\\\\d{1,2}\\\\\\\\b/.test(t) && /-/.test(t)) || candidates[0] || null;\\\\n  return { candidates: candidates.slice(0, 10), best };\\\\n}\\\"}\",\"call_id\":\"call_Ty25ykZsE3xRjcPLSm9i5Kmh\"}}",
+          "raw_payload": "{\"function\":\"() => {\\n  const monthRe = /(January|February|March|April|May|June|July|August|September|October|November|December)/i;\\n  const candidates = Array.from(document.querySelectorAll('body *'))\\n    .map(el => (el.textContent || '').replace(/\\\\s+/g,' ').trim())\\n    .filter(Boolean)\\n    .filter(t => t.length <= 40)\\n    .filter(t => monthRe.test(t) && /20\\\\d{2}/.test(t));\\n  const best = candidates.find(t => /\\\\b\\\\d{1,2}\\\\b/.test(t) && /-/.test(t)) || candidates[0] || null;\\n  return { candidates: candidates.slice(0, 10), best };\\n}\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__evaluate_script"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 547,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "function": "() => {\n  const candidates = Array.from(document.querySelectorAll('a,button,[role=\"tab\"]'));\n  const tab = candidates.find(el => (el.textContent || '').trim().toLowerCase() === 'rankings');\n  if (!tab) return { clicked: false, reason: 'Rankings tab not found', sample: candidates.slice(0,20).map(e => (e.textContent||'').trim()).filter(Boolean).slice(0,20) };\n  tab.click();\n  return { clicked: true, tag: tab.tagName, text: (tab.textContent||'').trim() };\n}"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:36:45.509Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__evaluate_script\",\"arguments\":\"{\\\"function\\\":\\\"() => {\\\\n  const candidates = Array.from(document.querySelectorAll('a,button,[role=\\\\\\\"tab\\\\\\\"]'));\\\\n  const tab = candidates.find(el => (el.textContent || '').trim().toLowerCase() === 'rankings');\\\\n  if (!tab) return { clicked: false, reason: 'Rankings tab not found', sample: candidates.slice(0,20).map(e => (e.textContent||'').trim()).filter(Boolean).slice(0,20) };\\\\n  tab.click();\\\\n  return { clicked: true, tag: tab.tagName, text: (tab.textContent||'').trim() };\\\\n}\\\"}\",\"call_id\":\"call_hPMOVnbpd3Q672T0lJEFRLeG\"}}",
+          "raw_payload": "{\"function\":\"() => {\\n  const candidates = Array.from(document.querySelectorAll('a,button,[role=\\\"tab\\\"]'));\\n  const tab = candidates.find(el => (el.textContent || '').trim().toLowerCase() === 'rankings');\\n  if (!tab) return { clicked: false, reason: 'Rankings tab not found', sample: candidates.slice(0,20).map(e => (e.textContent||'').trim()).filter(Boolean).slice(0,20) };\\n  tab.click();\\n  return { clicked: true, tag: tab.tagName, text: (tab.textContent||'').trim() };\\n}\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__evaluate_script"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_evaluate_script",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__evaluate_script"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 4,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2395,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "uid": "10_9",
+            "value": "Ziva Gadgil"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T05:13:34.136Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__fill\",\"arguments\":\"{\\\"uid\\\":\\\"10_9\\\",\\\"value\\\":\\\"Ziva Gadgil\\\"}\",\"call_id\":\"call_11xM5Nb94REQZAf9bGAzSqEs\"}}",
+          "raw_payload": "{\"uid\":\"10_9\",\"value\":\"Ziva Gadgil\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__fill"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2476,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "uid": "13_9",
+            "value": "Ziva Gadgil"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T05:16:01.279Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__fill\",\"arguments\":\"{\\\"uid\\\":\\\"13_9\\\",\\\"value\\\":\\\"Ziva Gadgil\\\"}\",\"call_id\":\"call_ywqSBSztxQBbbGMrM0FykVCn\"}}",
+          "raw_payload": "{\"uid\":\"13_9\",\"value\":\"Ziva Gadgil\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__fill"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2602,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "uid": "19_9",
+            "value": "Ziva Gadgil"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T05:21:32.033Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__fill\",\"arguments\":\"{\\\"uid\\\":\\\"19_9\\\",\\\"value\\\":\\\"Ziva Gadgil\\\"}\",\"call_id\":\"call_rwok9EyNogzAjEaljCbioHPn\"}}",
+          "raw_payload": "{\"uid\":\"19_9\",\"value\":\"Ziva Gadgil\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__fill"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_fill",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__fill"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 1,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2743,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "elements": [
+              {
+                "uid": "23_9",
+                "value": "Ziva Gadgil"
+              }
+            ]
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T05:30:17.302Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__fill_form\",\"arguments\":\"{\\\"elements\\\":[{\\\"uid\\\":\\\"23_9\\\",\\\"value\\\":\\\"Ziva Gadgil\\\"}]}\",\"call_id\":\"call_7twPYez079qXRbZAnlkuTrka\"}}",
+          "raw_payload": "{\"elements\":[{\"uid\":\"23_9\",\"value\":\"Ziva Gadgil\"}]}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__fill_form"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_fill_form",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__fill_form"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 4,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 798,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "reqid": "374"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:48:40.055Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__get_network_request\",\"arguments\":\"{\\\"reqid\\\":\\\"374\\\"}\",\"call_id\":\"call_eXrAjGAQDzKqS3kgPBPsHGfD\"}}",
+          "raw_payload": "{\"reqid\":\"374\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__get_network_request"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 803,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "reqid": 374
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:48:45.277Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__get_network_request\",\"arguments\":\"{\\\"reqid\\\":374}\",\"call_id\":\"call_1h9jB35fE4PfbflTMWD0fhGa\"}}",
+          "raw_payload": "{\"reqid\":374}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__get_network_request"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 823,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "reqid": 360
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:49:21.220Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__get_network_request\",\"arguments\":\"{\\\"reqid\\\":360}\",\"call_id\":\"call_n7mjYA6ijtgMIIofCPvl7Mit\"}}",
+          "raw_payload": "{\"reqid\":360}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__get_network_request"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_get_network_request",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__get_network_request"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 3,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 768,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "includePreservedRequests": false,
+            "pageIdx": 0,
+            "pageSize": 200,
+            "resourceTypes": [
+              "xhr",
+              "fetch"
+            ]
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:48:05.980Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__list_network_requests\",\"arguments\":\"{\\\"includePreservedRequests\\\":false,\\\"resourceTypes\\\":[\\\"xhr\\\",\\\"fetch\\\"],\\\"pageIdx\\\":0,\\\"pageSize\\\":200}\",\"call_id\":\"call_ByBWdgeb6fittFRzUSo4A0Ir\"}}",
+          "raw_payload": "{\"includePreservedRequests\":false,\"resourceTypes\":[\"xhr\",\"fetch\"],\"pageIdx\":0,\"pageSize\":200}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__list_network_requests"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 792,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "includePreservedRequests": false,
+            "pageIdx": 0,
+            "pageSize": 200,
+            "resourceTypes": [
+              "xhr",
+              "fetch"
+            ]
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:48:32.834Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__list_network_requests\",\"arguments\":\"{\\\"includePreservedRequests\\\":false,\\\"resourceTypes\\\":[\\\"xhr\\\",\\\"fetch\\\"],\\\"pageIdx\\\":0,\\\"pageSize\\\":200}\",\"call_id\":\"call_vZ4RrgzoTs2LEDljzxQWInzt\"}}",
+          "raw_payload": "{\"includePreservedRequests\":false,\"resourceTypes\":[\"xhr\",\"fetch\"],\"pageIdx\":0,\"pageSize\":200}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__list_network_requests"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2705,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "includePreservedRequests": false,
+            "resourceTypes": [
+              "xhr",
+              "fetch"
+            ]
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T05:27:30.344Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__list_network_requests\",\"arguments\":\"{\\\"resourceTypes\\\":[\\\"xhr\\\",\\\"fetch\\\"],\\\"includePreservedRequests\\\":false}\",\"call_id\":\"call_uQNDo8P1EfyblbKJxX6HckK1\"}}",
+          "raw_payload": "{\"resourceTypes\":[\"xhr\",\"fetch\"],\"includePreservedRequests\":false}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__list_network_requests"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_list_network_requests",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__list_network_requests"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 6,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 311,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:24:01.410Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__list_pages\",\"arguments\":\"{}\",\"call_id\":\"call_nAGqZHruRb6xrJTLD4Sx5jq1\"}}",
+          "raw_payload": "{}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__list_pages"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 409,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:30:47.114Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__list_pages\",\"arguments\":\"{}\",\"call_id\":\"call_vuWhl29Pbolsnf2ZtpOvYkcH\"}}",
+          "raw_payload": "{}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__list_pages"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 516,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:36:06.756Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__list_pages\",\"arguments\":\"{}\",\"call_id\":\"call_Y4gaTd6k15U0GH9GUfdZQGfL\"}}",
+          "raw_payload": "{}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__list_pages"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_list_pages",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__list_pages"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 52,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 339,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "timeout": 60000,
+            "type": "url",
+            "url": "https://www.usta.com/en/home/play/player-search/profile.html"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:25:21.729Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__navigate_page\",\"arguments\":\"{\\\"type\\\":\\\"url\\\",\\\"url\\\":\\\"https://www.usta.com/en/home/play/player-search/profile.html\\\",\\\"timeout\\\":60000}\",\"call_id\":\"call_p3IG4x9dGFxdiyLqrr6o9bPm\"}}",
+          "raw_payload": "{\"type\":\"url\",\"url\":\"https://www.usta.com/en/home/play/player-search/profile.html\",\"timeout\":60000}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__navigate_page"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 493,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "timeout": 60000,
+            "type": "url",
+            "url": "https://playtennis.usta.com/Competitions/fourdirectionstennis/Tournaments/players/EAD0497A-559C-4765-9253-2BF848B4FC4A"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:35:45.777Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__navigate_page\",\"arguments\":\"{\\\"type\\\":\\\"url\\\",\\\"url\\\":\\\"https://playtennis.usta.com/Competitions/fourdirectionstennis/Tournaments/players/EAD0497A-559C-4765-9253-2BF848B4FC4A\\\",\\\"timeout\\\":60000}\",\"call_id\":\"call_3r2QEPdIc6RhbbCkjODDLhCU\"}}",
+          "raw_payload": "{\"type\":\"url\",\"url\":\"https://playtennis.usta.com/Competitions/fourdirectionstennis/Tournaments/players/EAD0497A-559C-4765-9253-2BF848B4FC4A\",\"timeout\":60000}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__navigate_page"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 527,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "timeout": 60000,
+            "type": "url",
+            "url": "https://www.usta.com/en/home/play/player-search/profile.html#uaid=2018948492&tab=rankings"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:36:20.347Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__navigate_page\",\"arguments\":\"{\\\"type\\\":\\\"url\\\",\\\"url\\\":\\\"https://www.usta.com/en/home/play/player-search/profile.html#uaid=2018948492&tab=rankings\\\",\\\"timeout\\\":60000}\",\"call_id\":\"call_Y7mPdnA9CGLiYdKq14u0SoJZ\"}}",
+          "raw_payload": "{\"type\":\"url\",\"url\":\"https://www.usta.com/en/home/play/player-search/profile.html#uaid=2018948492&tab=rankings\",\"timeout\":60000}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__navigate_page"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_navigate_page",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__navigate_page"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 2,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 317,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "timeout": 60000,
+            "url": "https://playtennis.usta.com/"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:24:12.365Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__new_page\",\"arguments\":\"{\\\"url\\\":\\\"https://playtennis.usta.com/\\\",\\\"timeout\\\":60000}\",\"call_id\":\"call_fCp0ndSW5Y4zwdjENdT4Pd1d\"}}",
+          "raw_payload": "{\"url\":\"https://playtennis.usta.com/\",\"timeout\":60000}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__new_page"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2343,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "timeout": 600000,
+            "url": "https://app.utrsports.net/search?type=players"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T04:59:36.191Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__new_page\",\"arguments\":\"{\\\"url\\\":\\\"https://app.utrsports.net/search?type=players\\\",\\\"timeout\\\":600000}\",\"call_id\":\"call_V1YKBEzn2juLX6oxDNZTOgJv\"}}",
+          "raw_payload": "{\"url\":\"https://app.utrsports.net/search?type=players\",\"timeout\":600000}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__new_page"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_new_page",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__new_page"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 6,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2402,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "key": "Enter"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T05:13:42.928Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__press_key\",\"arguments\":\"{\\\"key\\\":\\\"Enter\\\"}\",\"call_id\":\"call_YbGLdJczHRTorEjU9VqJL2H9\"}}",
+          "raw_payload": "{\"key\":\"Enter\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__press_key"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2481,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "key": "Enter"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T05:16:04.658Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__press_key\",\"arguments\":\"{\\\"key\\\":\\\"Enter\\\"}\",\"call_id\":\"call_J90D5Z1K65SIpJnUCGwVaeVX\"}}",
+          "raw_payload": "{\"key\":\"Enter\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__press_key"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2607,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "key": "Enter"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T05:21:35.598Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__press_key\",\"arguments\":\"{\\\"key\\\":\\\"Enter\\\"}\",\"call_id\":\"call_KGjOmCvSyJWM0D1UGpiHlsjz\"}}",
+          "raw_payload": "{\"key\":\"Enter\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__press_key"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_press_key",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__press_key"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 7,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 522,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "bringToFront": true,
+            "pageIdx": 1
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:36:12.679Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__select_page\",\"arguments\":\"{\\\"pageIdx\\\":1,\\\"bringToFront\\\":true}\",\"call_id\":\"call_g6hFMBly8hbxjxRsXTdxqxEU\"}}",
+          "raw_payload": "{\"pageIdx\":1,\"bringToFront\":true}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__select_page"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 691,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "bringToFront": true,
+            "pageIdx": 0
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:44:54.593Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__select_page\",\"arguments\":\"{\\\"pageIdx\\\":0,\\\"bringToFront\\\":true}\",\"call_id\":\"call_RJKfqGdj9CjKqYHL2Co3ZRkY\"}}",
+          "raw_payload": "{\"pageIdx\":0,\"bringToFront\":true}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__select_page"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 726,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "bringToFront": true,
+            "pageIdx": 1
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:46:13.934Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__select_page\",\"arguments\":\"{\\\"pageIdx\\\":1,\\\"bringToFront\\\":true}\",\"call_id\":\"call_iz6rG20T2QXUQuXvSoggqXTo\"}}",
+          "raw_payload": "{\"pageIdx\":1,\"bringToFront\":true}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__select_page"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_select_page",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__select_page"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 5,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 414,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "verbose": false
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:30:51.194Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__take_snapshot\",\"arguments\":\"{\\\"verbose\\\":false}\",\"call_id\":\"call_pxy3L2ydFTeM97rSJT8qDH6m\"}}",
+          "raw_payload": "{\"verbose\":false}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__take_snapshot"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 498,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "verbose": false
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:35:49.422Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__take_snapshot\",\"arguments\":\"{\\\"verbose\\\":false}\",\"call_id\":\"call_MHpAQYfMJ7pdcp5x5S0wqdJA\"}}",
+          "raw_payload": "{\"verbose\":false}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__take_snapshot"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 534,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "verbose": false
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:36:28.874Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__take_snapshot\",\"arguments\":\"{\\\"verbose\\\":false}\",\"call_id\":\"call_NR3IdQioSMI8F9nmWbFFyEvU\"}}",
+          "raw_payload": "{\"verbose\":false}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__take_snapshot"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_take_snapshot",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__take_snapshot"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 12,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 322,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "text": "USTA",
+            "timeout": 60000
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:24:21.378Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__wait_for\",\"arguments\":\"{\\\"text\\\":\\\"USTA\\\",\\\"timeout\\\":60000}\",\"call_id\":\"call_SgS2YutOXxjF2WFI03VfPXfx\"}}",
+          "raw_payload": "{\"text\":\"USTA\",\"timeout\":60000}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__wait_for"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 540,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "text": "Rankings",
+            "timeout": 60000
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:36:36.553Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__wait_for\",\"arguments\":\"{\\\"text\\\":\\\"Rankings\\\",\\\"timeout\\\":60000}\",\"call_id\":\"call_WubIgitlwHkNZKfkxv3yzmuI\"}}",
+          "raw_payload": "{\"text\":\"Rankings\",\"timeout\":60000}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__wait_for"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 552,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "text": "National Standings",
+            "timeout": 60000
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T03:36:50.805Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__chrome-devtools__wait_for\",\"arguments\":\"{\\\"text\\\":\\\"National Standings\\\",\\\"timeout\\\":60000}\",\"call_id\":\"call_s0DR3TTnle3BGHOSBbXMddew\"}}",
+          "raw_payload": "{\"text\":\"National Standings\",\"timeout\":60000}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__chrome-devtools__wait_for"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_chrome_devtools_wait_for",
+      "tool_name_variants": [
+        "mcp__chrome-devtools__wait_for"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 6,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 3339,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "element": "Load More",
+            "ref": "e3585"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T06:35:41.555Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_click\",\"arguments\":\"{\\\"element\\\":\\\"Load More\\\",\\\"ref\\\":\\\"e3585\\\"}\",\"call_id\":\"call_vfGHC8BW5udEIQVpK5i9ZcUa\"}}",
+          "raw_payload": "{\"element\":\"Load More\",\"ref\":\"e3585\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_click"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 3346,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "element": "Load More",
+            "ref": "e3585"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T06:35:46.088Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_click\",\"arguments\":\"{\\\"element\\\":\\\"Load More\\\",\\\"ref\\\":\\\"e3585\\\"}\",\"call_id\":\"call_cybbVpwOTX650c9gxQCOMJm0\"}}",
+          "raw_payload": "{\"element\":\"Load More\",\"ref\":\"e3585\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_click"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 3353,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "element": "Load More",
+            "ref": "e3585"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T06:35:50.213Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_click\",\"arguments\":\"{\\\"element\\\":\\\"Load More\\\",\\\"ref\\\":\\\"e3585\\\"}\",\"call_id\":\"call_FeLI6k29HqM19tVxt8Lu0jwz\"}}",
+          "raw_payload": "{\"element\":\"Load More\",\"ref\":\"e3585\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_click"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_playwright_bridge_browser_click",
+      "tool_name_variants": [
+        "mcp__playwright_bridge__browser_click"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 1,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 3394,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "function": "() => {\n  const items = Array.from(document.querySelectorAll('a[href^=\"/profiles/\"]'));\n  const matches = items\n    .map(a => a.innerText.trim())\n    .filter(t => /Pleasanton/i.test(t));\n  return matches.slice(0, 20);\n}"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T06:36:35.918Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_evaluate\",\"arguments\":\"{\\\"function\\\":\\\"() => {\\\\n  const items = Array.from(document.querySelectorAll('a[href^=\\\\\\\"/profiles/\\\\\\\"]'));\\\\n  const matches = items\\\\n    .map(a => a.innerText.trim())\\\\n    .filter(t => /Pleasanton/i.test(t));\\\\n  return matches.slice(0, 20);\\\\n}\\\"}\",\"call_id\":\"call_uCXdBsplZKfHmYhisxFeN5f5\"}}",
+          "raw_payload": "{\"function\":\"() => {\\n  const items = Array.from(document.querySelectorAll('a[href^=\\\"/profiles/\\\"]'));\\n  const matches = items\\n    .map(a => a.innerText.trim())\\n    .filter(t => /Pleasanton/i.test(t));\\n  return matches.slice(0, 20);\\n}\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_evaluate"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_playwright_bridge_browser_evaluate",
+      "tool_name_variants": [
+        "mcp__playwright_bridge__browser_evaluate"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 6,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 2999,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "url": "https://app.utrsports.net/search?type=players&sportTypes=tennis,pickleball&utrTeamType=singles&utrMin=1&utrMax=16"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T06:08:38.142Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_navigate\",\"arguments\":\"{\\\"url\\\":\\\"https://app.utrsports.net/search?type=players&sportTypes=tennis,pickleball&utrTeamType=singles&utrMin=1&utrMax=16\\\"}\",\"call_id\":\"call_aoJpvEjubuwA900d8rsMMY94\"}}",
+          "raw_payload": "{\"url\":\"https://app.utrsports.net/search?type=players&sportTypes=tennis,pickleball&utrTeamType=singles&utrMin=1&utrMax=16\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_navigate"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 3311,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "url": "https://app.utrsports.net/search?type=players&sportTypes=tennis,pickleball&utrTeamType=singles&utrMin=1&utrMax=16"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T06:32:00.770Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_navigate\",\"arguments\":\"{\\\"url\\\":\\\"https://app.utrsports.net/search?type=players&sportTypes=tennis,pickleball&utrTeamType=singles&utrMin=1&utrMax=16\\\"}\",\"call_id\":\"call_w5VXndfMKDJ20NVQFXuy2YrJ\"}}",
+          "raw_payload": "{\"url\":\"https://app.utrsports.net/search?type=players&sportTypes=tennis,pickleball&utrTeamType=singles&utrMin=1&utrMax=16\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_navigate"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 4200,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "url": "https://playtennis.usta.com/Competitions/fourdirectionstennis/Tournaments/Overview/EAD0497A-559C-4765-9253-2BF848B4FC4A"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T07:17:41.070Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_navigate\",\"arguments\":\"{\\\"url\\\":\\\"https://playtennis.usta.com/Competitions/fourdirectionstennis/Tournaments/Overview/EAD0497A-559C-4765-9253-2BF848B4FC4A\\\"}\",\"call_id\":\"call_FangxO66ZZhpQHGzunndXTAO\"}}",
+          "raw_payload": "{\"url\":\"https://playtennis.usta.com/Competitions/fourdirectionstennis/Tournaments/Overview/EAD0497A-559C-4765-9253-2BF848B4FC4A\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_navigate"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_playwright_bridge_browser_navigate",
+      "tool_name_variants": [
+        "mcp__playwright_bridge__browser_navigate"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 20,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 3096,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "code": "async (page) => {\n  try {\n    // eslint-disable-next-line @typescript-eslint/no-var-requires\n    const fs = require('fs');\n    return { ok: true, cwd: process.cwd(), hasFs: !!fs?.readFileSync };\n  } catch (e) {\n    return { ok: false, error: String(e) };\n  }\n}"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T06:15:29.971Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_run_code\",\"arguments\":\"{\\\"code\\\":\\\"async (page) => {\\\\n  try {\\\\n    // eslint-disable-next-line @typescript-eslint/no-var-requires\\\\n    const fs = require('fs');\\\\n    return { ok: true, cwd: process.cwd(), hasFs: !!fs?.readFileSync };\\\\n  } catch (e) {\\\\n    return { ok: false, error: String(e) };\\\\n  }\\\\n}\\\"}\",\"call_id\":\"call_4IqvKS67WBOJ67NWThWFwiaU\"}}",
+          "raw_payload": "{\"code\":\"async (page) => {\\n  try {\\n    // eslint-disable-next-line @typescript-eslint/no-var-requires\\n    const fs = require('fs');\\n    return { ok: true, cwd: process.cwd(), hasFs: !!fs?.readFileSync };\\n  } catch (e) {\\n    return { ok: false, error: String(e) };\\n  }\\n}\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_run_code"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 3102,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "code": "async (page) => {\n  try {\n    const fs = await import('fs');\n    return { ok: true, hasFs: !!fs?.readFileSync, keys: Object.keys(fs).slice(0,5) };\n  } catch (e) {\n    return { ok: false, error: String(e) };\n  }\n}"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T06:15:42.397Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_run_code\",\"arguments\":\"{\\\"code\\\":\\\"async (page) => {\\\\n  try {\\\\n    const fs = await import('fs');\\\\n    return { ok: true, hasFs: !!fs?.readFileSync, keys: Object.keys(fs).slice(0,5) };\\\\n  } catch (e) {\\\\n    return { ok: false, error: String(e) };\\\\n  }\\\\n}\\\"}\",\"call_id\":\"call_hA7VIC7i1TKkk1UKHWkybYAv\"}}",
+          "raw_payload": "{\"code\":\"async (page) => {\\n  try {\\n    const fs = await import('fs');\\n    return { ok: true, hasFs: !!fs?.readFileSync, keys: Object.keys(fs).slice(0,5) };\\n  } catch (e) {\\n    return { ok: false, error: String(e) };\\n  }\\n}\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_run_code"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_playwright_bridge_browser_run_code",
+      "tool_name_variants": [
+        "mcp__playwright_bridge__browser_run_code"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 2,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 3332,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "{\"timestamp\":\"2026-01-06T06:35:39.551Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_snapshot\",\"arguments\":\"{}\",\"call_id\":\"call_0S7olhw1nqnfLk0xIYDY66Ho\"}}",
+          "raw_payload": "{}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_snapshot"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 3373,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "{\"timestamp\":\"2026-01-06T06:36:21.409Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_snapshot\",\"arguments\":\"{}\",\"call_id\":\"call_ghNolt0B6RDR0rVFNvsFpr5Q\"}}",
+          "raw_payload": "{}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_snapshot"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_playwright_bridge_browser_snapshot",
+      "tool_name_variants": [
+        "mcp__playwright_bridge__browser_snapshot"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 1,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 5810,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "filename": "utr-distribution-check.png",
+            "fullPage": true
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-06T19:02:22.835Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"mcp__playwright_bridge__browser_take_screenshot\",\"arguments\":\"{\\\"filename\\\":\\\"utr-distribution-check.png\\\",\\\"fullPage\\\":true}\",\"call_id\":\"call_VQHcwmDZASbFLeQOYPqvQfFG\"}}",
+          "raw_payload": "{\"filename\":\"utr-distribution-check.png\",\"fullPage\":true}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/05/rollout-2026-01-05T19-11-10-019b9149-7a72-7460-b8f0-a93853c31be9.jsonl",
+          "tool_name": "mcp__playwright_bridge__browser_take_screenshot"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "mcp_playwright_bridge_browser_take_screenshot",
+      "tool_name_variants": [
+        "mcp__playwright_bridge__browser_take_screenshot"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 2950,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 9,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "ls",
+            "workdir": "/Users/alexm/Repository/Codex-History"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-13T20:09:06.916Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"shell_command\",\"arguments\":\"{\\\"command\\\":\\\"ls\\\",\\\"workdir\\\":\\\"/Users/alexm/Repository/Codex-History\\\"}\",\"call_id\":\"call_fNOi78ulEiGq7EXpJIDarDDd\"}}",
+          "raw_payload": "{\"command\":\"ls\",\"workdir\":\"/Users/alexm/Repository/Codex-History\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/13/rollout-2026-01-13T12-08-58-019bb8f9-d2a1-7912-a0dd-860bfc00ee08.jsonl",
+          "tool_name": "shell_command"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 16,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "cat AGENTS.md",
+            "workdir": "/Users/alexm/Repository/Codex-History"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-13T20:09:09.241Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"shell_command\",\"arguments\":\"{\\\"command\\\":\\\"cat AGENTS.md\\\",\\\"workdir\\\":\\\"/Users/alexm/Repository/Codex-History\\\"}\",\"call_id\":\"call_jdBFwIKfi3Jz6LpDmYFhwxV1\"}}",
+          "raw_payload": "{\"command\":\"cat AGENTS.md\",\"workdir\":\"/Users/alexm/Repository/Codex-History\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/13/rollout-2026-01-13T12-08-58-019bb8f9-d2a1-7912-a0dd-860bfc00ee08.jsonl",
+          "tool_name": "shell_command"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 23,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "rg --files -g '*.jsonl'",
+            "workdir": "/Users/alexm/Repository/Codex-History"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-13T20:09:14.429Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"shell_command\",\"arguments\":\"{\\\"command\\\":\\\"rg --files -g '*.jsonl'\\\",\\\"workdir\\\":\\\"/Users/alexm/Repository/Codex-History\\\"}\",\"call_id\":\"call_4nXwCt1jD8zAVlhWvsp8yF8T\"}}",
+          "raw_payload": "{\"command\":\"rg --files -g '*.jsonl'\",\"workdir\":\"/Users/alexm/Repository/Codex-History\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/13/rollout-2026-01-13T12-08-58-019bb8f9-d2a1-7912-a0dd-860bfc00ee08.jsonl",
+          "tool_name": "shell_command"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "shell_command",
+      "tool_name_variants": [
+        "shell_command"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 202,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 374,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "plan": [
+              {
+                "status": "in_progress",
+                "step": "Refactor unified search state flow"
+              },
+              {
+                "status": "pending",
+                "step": "Add local find bar UI"
+              },
+              {
+                "status": "pending",
+                "step": "Dual highlights in terminal view"
+              },
+              {
+                "status": "pending",
+                "step": "Update changelog and summary"
+              },
+              {
+                "status": "pending",
+                "step": "Build and commit"
+              }
+            ]
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-12T20:03:34.908Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"update_plan\",\"arguments\":\"{\\\"plan\\\":[{\\\"step\\\":\\\"Refactor unified search state flow\\\",\\\"status\\\":\\\"in_progress\\\"},{\\\"step\\\":\\\"Add local find bar UI\\\",\\\"status\\\":\\\"pending\\\"},{\\\"step\\\":\\\"Dual highlights in terminal view\\\",\\\"status\\\":\\\"pending\\\"},{\\\"step\\\":\\\"Update changelog and summary\\\",\\\"status\\\":\\\"pending\\\"},{\\\"step\\\":\\\"Build and commit\\\",\\\"status\\\":\\\"pending\\\"}]}\",\"call_id\":\"call_dBAcSI4AdaKZoEQtTzkq83Tp\"}}",
+          "raw_payload": "{\"plan\":[{\"step\":\"Refactor unified search state flow\",\"status\":\"in_progress\"},{\"step\":\"Add local find bar UI\",\"status\":\"pending\"},{\"step\":\"Dual highlights in terminal view\",\"status\":\"pending\"},{\"step\":\"Update changelog and summary\",\"status\":\"pending\"},{\"step\":\"Build and commit\",\"status\":\"pending\"}]}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/10/rollout-2026-01-10T22-07-36-019babaa-ce2d-7e42-bb8f-f3f1f78f087e.jsonl",
+          "tool_name": "update_plan"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 586,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "plan": [
+              {
+                "status": "completed",
+                "step": "Refactor unified search state flow"
+              },
+              {
+                "status": "in_progress",
+                "step": "Add local find bar UI"
+              },
+              {
+                "status": "pending",
+                "step": "Dual highlights in terminal view"
+              },
+              {
+                "status": "pending",
+                "step": "Update changelog and summary"
+              },
+              {
+                "status": "pending",
+                "step": "Build and commit"
+              }
+            ]
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-12T20:17:14.660Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"update_plan\",\"arguments\":\"{\\\"plan\\\":[{\\\"step\\\":\\\"Refactor unified search state flow\\\",\\\"status\\\":\\\"completed\\\"},{\\\"step\\\":\\\"Add local find bar UI\\\",\\\"status\\\":\\\"in_progress\\\"},{\\\"step\\\":\\\"Dual highlights in terminal view\\\",\\\"status\\\":\\\"pending\\\"},{\\\"step\\\":\\\"Update changelog and summary\\\",\\\"status\\\":\\\"pending\\\"},{\\\"step\\\":\\\"Build and commit\\\",\\\"status\\\":\\\"pending\\\"}]}\",\"call_id\":\"call_chhnBk8rti5HkgwzIGKyQ37E\"}}",
+          "raw_payload": "{\"plan\":[{\"step\":\"Refactor unified search state flow\",\"status\":\"completed\"},{\"step\":\"Add local find bar UI\",\"status\":\"in_progress\"},{\"step\":\"Dual highlights in terminal view\",\"status\":\"pending\"},{\"step\":\"Update changelog and summary\",\"status\":\"pending\"},{\"step\":\"Build and commit\",\"status\":\"pending\"}]}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/10/rollout-2026-01-10T22-07-36-019babaa-ce2d-7e42-bb8f-f3f1f78f087e.jsonl",
+          "tool_name": "update_plan"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 621,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "plan": [
+              {
+                "status": "completed",
+                "step": "Refactor unified search state flow"
+              },
+              {
+                "status": "completed",
+                "step": "Add local find bar UI"
+              },
+              {
+                "status": "in_progress",
+                "step": "Dual highlights in terminal view"
+              },
+              {
+                "status": "pending",
+                "step": "Update changelog and summary"
+              },
+              {
+                "status": "pending",
+                "step": "Build and commit"
+              }
+            ]
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-12T20:19:41.989Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"update_plan\",\"arguments\":\"{\\\"plan\\\":[{\\\"step\\\":\\\"Refactor unified search state flow\\\",\\\"status\\\":\\\"completed\\\"},{\\\"step\\\":\\\"Add local find bar UI\\\",\\\"status\\\":\\\"completed\\\"},{\\\"step\\\":\\\"Dual highlights in terminal view\\\",\\\"status\\\":\\\"in_progress\\\"},{\\\"step\\\":\\\"Update changelog and summary\\\",\\\"status\\\":\\\"pending\\\"},{\\\"step\\\":\\\"Build and commit\\\",\\\"status\\\":\\\"pending\\\"}]}\",\"call_id\":\"call_FnqA6og7uYohjduMrcLsFuA3\"}}",
+          "raw_payload": "{\"plan\":[{\"step\":\"Refactor unified search state flow\",\"status\":\"completed\"},{\"step\":\"Add local find bar UI\",\"status\":\"completed\"},{\"step\":\"Dual highlights in terminal view\",\"status\":\"in_progress\"},{\"step\":\"Update changelog and summary\",\"status\":\"pending\"},{\"step\":\"Build and commit\",\"status\":\"pending\"}]}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/10/rollout-2026-01-10T22-07-36-019babaa-ce2d-7e42-bb8f-f3f1f78f087e.jsonl",
+          "tool_name": "update_plan"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "update_plan",
+      "tool_name_variants": [
+        "update_plan"
+      ]
+    },
+    {
+      "agent_family": "codex",
+      "count": 7,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 198,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "path": "/Users/alexm/Repository/Codex-History/Screenshot 2026-01-10 at 10.41.43 PM.png"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-11T06:49:59.341Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"view_image\",\"arguments\":\"{\\\"path\\\":\\\"/Users/alexm/Repository/Codex-History/Screenshot 2026-01-10 at 10.41.43 PM.png\\\"}\",\"call_id\":\"call_uWkklaNhYDb5r7BAHpVWFWAe\"}}",
+          "raw_payload": "{\"path\":\"/Users/alexm/Repository/Codex-History/Screenshot 2026-01-10 at 10.41.43 PM.png\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/10/rollout-2026-01-10T22-07-36-019babaa-ce2d-7e42-bb8f-f3f1f78f087e.jsonl",
+          "tool_name": "view_image"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 227,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "path": "/Users/alexm/Downloads/Screenshot 2026-01-12 at 2.22.21\u0018PM.png"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-12T22:26:56.157Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"view_image\",\"arguments\":\"{\\\"path\\\":\\\"/Users/alexm/Downloads/Screenshot 2026-01-12 at 2.22.21\\\\u0018PM.png\\\"}\",\"call_id\":\"call_fLZ6QrhGD9AZw5D2vrrNQDcy\"}}",
+          "raw_payload": "{\"path\":\"/Users/alexm/Downloads/Screenshot 2026-01-12 at 2.22.21\\u0018PM.png\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/12/rollout-2026-01-12T14-21-07-019bb44c-7045-7163-bd33-f68aad88c70b.jsonl",
+          "tool_name": "view_image"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 255,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "path": "/Users/alexm/Downloads/Screenshot 2026-01-12 at 2.22.21 PM.png"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-12T22:27:15.592Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"view_image\",\"arguments\":\"{\\\"path\\\":\\\"/Users/alexm/Downloads/Screenshot 2026-01-12 at 2.22.21 PM.png\\\"}\",\"call_id\":\"call_q3mHBW1LWjAuFGd30DJLb4Ne\"}}",
+          "raw_payload": "{\"path\":\"/Users/alexm/Downloads/Screenshot 2026-01-12 at 2.22.21 PM.png\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/12/rollout-2026-01-12T14-21-07-019bb44c-7045-7163-bd33-f68aad88c70b.jsonl",
+          "tool_name": "view_image"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "call_id": [
+          "call_id"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "call_id",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=function_call",
+      "tool_name_normalized": "view_image",
+      "tool_name_variants": [
+        "view_image"
+      ]
+    },
+    {
+      "agent_family": "copilot",
+      "count": 5,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "copilot",
+          "direction": "input",
+          "event_index": 14,
+          "field_path": "data.toolRequests[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "find . -mindepth 1 -not -path '*/.*' -not -path '*/tmp/*' -not -name 'tmp' -print | sed 's#^./##' | sort",
+            "description": "List files recursively excluding hidden and tmp directories",
+            "initial_wait": 30,
+            "mode": "sync"
+          },
+          "raw_event": "{\"type\":\"assistant.message\",\"data\":{\"messageId\":\"53707888-75e7-4f54-bb55-84e4de52da2b\",\"content\":\"\",\"toolRequests\":[{\"toolCallId\":\"call_ombKsNixv0YM9S8d2ilSwcrt\",\"name\":\"bash\",\"arguments\":{\"command\":\"find . -mindepth 1 -not -path '*/.*' -not -path '*/tmp/*' -not -name 'tmp' -print | sed 's#^./##' | sort\",\"description\":\"List files recursively excluding hidden and tmp directories\",\"mode\":\"sync\",\"initial_wait\":30}}]},\"id\":\"269a2662-f084-4d7c-9daf-c73086a00f5e\",\"timestamp\":\"2025-12-18T21:35:24.796Z\",\"parentId\":\"4e544a21-c2a1-4aa0-8001-9ce2166543b8\"}",
+          "raw_payload": "{\"command\": \"find . -mindepth 1 -not -path '*/.*' -not -path '*/tmp/*' -not -name 'tmp' -print | sed 's#^./##' | sort\", \"description\": \"List files recursively excluding hidden and tmp directories\", \"initial_wait\": 30, \"mode\": \"sync\"}",
+          "shape_signature": "jsonl:data.toolRequests[]",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": "bash"
+        },
+        {
+          "agent_family": "copilot",
+          "direction": "input",
+          "event_index": 29,
+          "field_path": "data.toolRequests[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "git --no-pager rev-parse --abbrev-ref HEAD && printf '\\n---\\n' && git --no-pager log -n 5 --pretty=format:\"%h  %ad  %an  %s\" --date=iso && printf '\\n---\\n' && git status --porcelain",
+            "description": "Show current branch, last 5 commits, and porcelain status",
+            "initial_wait": 30,
+            "mode": "sync"
+          },
+          "raw_event": "{\"type\":\"assistant.message\",\"data\":{\"messageId\":\"be42ad01-ba57-42b7-ad5d-50946f9ff146\",\"content\":\"\",\"toolRequests\":[{\"toolCallId\":\"call_eVNxf9j18jlUlYGbJFJSEZlR\",\"name\":\"bash\",\"arguments\":{\"command\":\"git --no-pager rev-parse --abbrev-ref HEAD && printf '\\\\n---\\\\n' && git --no-pager log -n 5 --pretty=format:\\\"%h  %ad  %an  %s\\\" --date=iso && printf '\\\\n---\\\\n' && git status --porcelain\",\"description\":\"Show current branch, last 5 commits, and porcelain status\",\"mode\":\"sync\",\"initial_wait\":30}}]},\"id\":\"fcae323a-4143-4314-95ce-8a2c23ed0f14\",\"timestamp\":\"2025-12-18T21:36:35.798Z\",\"parentId\":\"1edb8259-fe44-4088-a395-a8a590070351\"}",
+          "raw_payload": "{\"command\": \"git --no-pager rev-parse --abbrev-ref HEAD && printf '\\\\n---\\\\n' && git --no-pager log -n 5 --pretty=format:\\\"%h  %ad  %an  %s\\\" --date=iso && printf '\\\\n---\\\\n' && git status --porcelain\", \"description\": \"Show current branch, last 5 commits, and porcelain status\", \"initial_wait\": 30, \"mode\": \"sync\"}",
+          "shape_signature": "jsonl:data.toolRequests[]",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": "bash"
+        },
+        {
+          "agent_family": "copilot",
+          "direction": "input",
+          "event_index": 3,
+          "field_path": "data.toolRequests[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "echo hi"
+          },
+          "raw_event": "{\"type\":\"assistant.message\",\"data\":{\"content\":\"\",\"toolRequests\":[{\"toolCallId\":\"call_1\",\"name\":\"bash\",\"arguments\":{\"command\":\"echo hi\"}}]},\"id\":\"e4\",\"timestamp\":\"2025-12-18T22:00:03.000Z\",\"parentId\":\"e3\"}",
+          "raw_payload": "{\"command\": \"echo hi\"}",
+          "shape_signature": "jsonl:data.toolRequests[]",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl",
+          "tool_name": "bash"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "name": [
+          "name"
+        ],
+        "tool_call_id": [
+          "toolCallId"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "name",
+        "tool_call_id"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:data.toolRequests[]",
+      "tool_name_normalized": "bash",
+      "tool_name_variants": [
+        "bash"
+      ]
+    },
+    {
+      "agent_family": "copilot",
+      "count": 2,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "copilot",
+          "direction": "input",
+          "event_index": 12,
+          "field_path": "data.toolRequests[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "intent": "Listing files"
+          },
+          "raw_event": "{\"type\":\"assistant.message\",\"data\":{\"messageId\":\"14c2937a-e6c1-4c1a-9685-1488456f87b8\",\"content\":\"\",\"toolRequests\":[{\"toolCallId\":\"call_5OAMmXkGd8rHYdaCcbcGO9DG\",\"name\":\"report_intent\",\"arguments\":{\"intent\":\"Listing files\"}}]},\"id\":\"776522bd-238e-4782-8cc8-3dcc5a34f8ff\",\"timestamp\":\"2025-12-18T21:35:24.795Z\",\"parentId\":\"5dabb283-8295-4faa-bc10-ac022c999a65\"}",
+          "raw_payload": "{\"intent\": \"Listing files\"}",
+          "shape_signature": "jsonl:data.toolRequests[]",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": "report_intent"
+        },
+        {
+          "agent_family": "copilot",
+          "direction": "input",
+          "event_index": 27,
+          "field_path": "data.toolRequests[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "intent": "Listing commits"
+          },
+          "raw_event": "{\"type\":\"assistant.message\",\"data\":{\"messageId\":\"6ae2f112-bc31-4bb9-8dc8-bb2323df2072\",\"content\":\"\",\"toolRequests\":[{\"toolCallId\":\"call_tSoXp0GTb019WrGyRj1H9q4u\",\"name\":\"report_intent\",\"arguments\":{\"intent\":\"Listing commits\"}}]},\"id\":\"404e5146-7605-4185-ba05-ee52f6664a74\",\"timestamp\":\"2025-12-18T21:36:35.798Z\",\"parentId\":\"7b5e5eef-89e7-4517-8838-9dffeb857eb4\"}",
+          "raw_payload": "{\"intent\": \"Listing commits\"}",
+          "shape_signature": "jsonl:data.toolRequests[]",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": "report_intent"
+        }
+      ],
+      "field_variants": {
+        "arguments": [
+          "arguments"
+        ],
+        "name": [
+          "name"
+        ],
+        "tool_call_id": [
+          "toolCallId"
+        ]
+      },
+      "fields_seen": [
+        "arguments",
+        "name",
+        "tool_call_id"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:data.toolRequests[]",
+      "tool_name_normalized": "report_intent",
+      "tool_name_variants": [
+        "report_intent"
+      ]
+    },
+    {
+      "agent_family": "copilot",
+      "count": 8,
+      "direction": "output",
+      "examples": [
+        {
+          "agent_family": "copilot",
+          "direction": "output",
+          "event_index": 16,
+          "field_path": "data",
+          "parse_error": null,
+          "parsed_payload": {
+            "content": "Intent logged"
+          },
+          "raw_event": "{\"type\":\"tool.execution_complete\",\"data\":{\"toolCallId\":\"call_5OAMmXkGd8rHYdaCcbcGO9DG\",\"success\":true,\"result\":{\"content\":\"Intent logged\"},\"toolTelemetry\":{}},\"id\":\"637ab614-79de-437e-8165-0e4e1e86dd87\",\"timestamp\":\"2025-12-18T21:35:24.809Z\",\"parentId\":\"6de1fdec-68d9-4e2f-b606-083cce230562\"}",
+          "raw_payload": "{\"content\": \"Intent logged\"}",
+          "shape_signature": "jsonl:type=tool.execution_complete",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "copilot",
+          "direction": "output",
+          "event_index": 31,
+          "field_path": "data",
+          "parse_error": null,
+          "parsed_payload": {
+            "content": "Intent logged"
+          },
+          "raw_event": "{\"type\":\"tool.execution_complete\",\"data\":{\"toolCallId\":\"call_tSoXp0GTb019WrGyRj1H9q4u\",\"success\":true,\"result\":{\"content\":\"Intent logged\"},\"toolTelemetry\":{}},\"id\":\"c8fe4aa9-c325-4162-a3ef-71894850a471\",\"timestamp\":\"2025-12-18T21:36:35.801Z\",\"parentId\":\"bc6f8c1a-e7ba-46e3-96ff-249b1e183896\"}",
+          "raw_payload": "{\"content\": \"Intent logged\"}",
+          "shape_signature": "jsonl:type=tool.execution_complete",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "copilot",
+          "direction": "output",
+          "event_index": 4,
+          "field_path": "data",
+          "parse_error": null,
+          "parsed_payload": {
+            "content": "hi\n"
+          },
+          "raw_event": "{\"type\":\"tool.execution_complete\",\"data\":{\"toolCallId\":\"call_1\",\"success\":true,\"result\":{\"content\":\"hi\\n\"}},\"id\":\"e5\",\"timestamp\":\"2025-12-18T22:00:04.000Z\",\"parentId\":\"e4\"}",
+          "raw_payload": "{\"content\": \"hi\\n\"}",
+          "shape_signature": "jsonl:type=tool.execution_complete",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl",
+          "tool_name": null
+        }
+      ],
+      "field_variants": {
+        "result": [
+          "result"
+        ],
+        "success": [
+          "success"
+        ],
+        "tool_call_id": [
+          "toolCallId"
+        ],
+        "tool_telemetry": [
+          "toolTelemetry"
+        ]
+      },
+      "fields_seen": [
+        "result",
+        "success",
+        "tool_call_id",
+        "tool_telemetry"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=tool.execution_complete",
+      "tool_name_normalized": "unknown",
+      "tool_name_variants": []
+    },
+    {
+      "agent_family": "droid",
+      "count": 32,
+      "direction": "output",
+      "examples": [
+        {
+          "agent_family": "droid",
+          "direction": "output",
+          "event_index": 19,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"type\":\"message\",\"id\":\"821a189a-3c37-4a96-bf4f-7ee7d5182ad7\",\"timestamp\":\"2025-12-26T23:50:53.148Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"call_20G8vvLn2IPy8gzCy02c1ZLP\",\"content\":\"Error: Command failed (exit code: 1)\\nls: /nonexistent/path/that/does/not/exist: No such file or directory\\n\\n\\n[Process exited with code 1]\"}]},\"parentId\":\"7a32a047-f6e2-418e-8239-69c19e12eddc\"}",
+          "raw_payload": "Error: Command failed (exit code: 1)\nls: /nonexistent/path/that/does/not/exist: No such file or directory\n\n\n[Process exited with code 1]",
+          "shape_signature": "jsonl:message.content[].type=tool_result",
+          "source_file": "/Users/alexm/.factory/sessions/-Users-alexm-Repository-Triada/e41cac77-2b68-401d-87b3-9fcfee672891.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "droid",
+          "direction": "output",
+          "event_index": 4,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"type\":\"message\",\"id\":\"m4\",\"timestamp\":\"2025-12-26T00:10:03.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tu1\",\"content\":\"line1\\nline2\\nline3\\n\"}]}}",
+          "raw_payload": "line1\nline2\nline3\n",
+          "shape_signature": "jsonl:message.content[].type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/session_store_large.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "droid",
+          "direction": "output",
+          "event_index": 3,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"type\":\"message\",\"id\":\"m3\",\"timestamp\":\"2025-12-26T23:50:02.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tu1\",\"content\":\"Error: Command failed (exit code: 1)\\nls: /nope: No such file or directory\"}]}}",
+          "raw_payload": "Error: Command failed (exit code: 1)\nls: /nope: No such file or directory",
+          "shape_signature": "jsonl:message.content[].type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/session_store_small.jsonl",
+          "tool_name": null
+        }
+      ],
+      "field_variants": {
+        "content": [
+          "content"
+        ],
+        "tool_use_id": [
+          "tool_use_id"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "content",
+        "tool_use_id",
+        "type"
+      ],
+      "parse_success_rate": 0.0312,
+      "shape_signature": "jsonl:message.content[].type=tool_result",
+      "tool_name_normalized": "unknown",
+      "tool_name_variants": []
+    },
+    {
+      "agent_family": "droid",
+      "count": 3,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "droid",
+          "direction": "input",
+          "event_index": 3,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "printf 'line1\\nline2\\nline3\\n'"
+          },
+          "raw_event": "{\"type\":\"message\",\"id\":\"m3\",\"timestamp\":\"2025-12-26T00:10:02.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tu1\",\"name\":\"Execute\",\"input\":{\"command\":\"printf 'line1\\\\nline2\\\\nline3\\\\n'\"}}]}}",
+          "raw_payload": "{\"command\": \"printf 'line1\\\\nline2\\\\nline3\\\\n'\"}",
+          "shape_signature": "jsonl:message.content[].type=tool_use",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/session_store_large.jsonl",
+          "tool_name": "Execute"
+        },
+        {
+          "agent_family": "droid",
+          "direction": "input",
+          "event_index": 2,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "ls /nope"
+          },
+          "raw_event": "{\"type\":\"message\",\"id\":\"m2\",\"timestamp\":\"2025-12-26T23:50:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tu1\",\"name\":\"Execute\",\"input\":{\"command\":\"ls /nope\"}}]}}",
+          "raw_payload": "{\"command\": \"ls /nope\"}",
+          "shape_signature": "jsonl:message.content[].type=tool_use",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/session_store_small.jsonl",
+          "tool_name": "Execute"
+        }
+      ],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "input": [
+          "input"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "input",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:message.content[].type=tool_use",
+      "tool_name_normalized": "execute",
+      "tool_name_variants": [
+        "Execute"
+      ]
+    },
+    {
+      "agent_family": "droid",
+      "count": 1,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "input": [
+          "input"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "input",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:message.content[].type=tool_use",
+      "tool_name_normalized": "exit_spec_mode",
+      "tool_name_variants": [
+        "ExitSpecMode"
+      ]
+    },
+    {
+      "agent_family": "droid",
+      "count": 3,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "input": [
+          "input"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "input",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:message.content[].type=tool_use",
+      "tool_name_normalized": "glob",
+      "tool_name_variants": [
+        "Glob"
+      ]
+    },
+    {
+      "agent_family": "droid",
+      "count": 11,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "input": [
+          "input"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "input",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:message.content[].type=tool_use",
+      "tool_name_normalized": "ls",
+      "tool_name_variants": [
+        "LS"
+      ]
+    },
+    {
+      "agent_family": "droid",
+      "count": 14,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "input": [
+          "input"
+        ],
+        "name": [
+          "name"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "input",
+        "name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:message.content[].type=tool_use",
+      "tool_name_normalized": "read",
+      "tool_name_variants": [
+        "Read"
+      ]
+    },
+    {
+      "agent_family": "droid",
+      "count": 1,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "droid",
+          "direction": "input",
+          "event_index": 2,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "ls -la",
+            "riskLevel": "low",
+            "riskLevelReason": "Read-only directory listing."
+          },
+          "raw_event": "{\"type\":\"tool_call\",\"sessionId\":\"sid_stage0_drift\",\"timestamp\":1767812642000,\"id\":\"call_1\",\"messageId\":\"m1\",\"toolId\":\"Execute\",\"toolName\":\"Execute\",\"parameters\":{\"command\":\"ls -la\",\"riskLevel\":\"low\",\"riskLevelReason\":\"Read-only directory listing.\"}}",
+          "raw_payload": "{\"command\": \"ls -la\", \"riskLevel\": \"low\", \"riskLevelReason\": \"Read-only directory listing.\"}",
+          "shape_signature": "jsonl:type=tool_call",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl",
+          "tool_name": "Execute"
+        }
+      ],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "message_id": [
+          "messageId"
+        ],
+        "parameters": [
+          "parameters"
+        ],
+        "session_id": [
+          "sessionId"
+        ],
+        "timestamp": [
+          "timestamp"
+        ],
+        "tool_id": [
+          "toolId"
+        ],
+        "tool_name": [
+          "toolName"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "message_id",
+        "parameters",
+        "session_id",
+        "timestamp",
+        "tool_id",
+        "tool_name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=tool_call",
+      "tool_name_normalized": "execute",
+      "tool_name_variants": [
+        "Execute"
+      ]
+    },
+    {
+      "agent_family": "droid",
+      "count": 2,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "droid",
+          "direction": "input",
+          "event_index": 3,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "printf 'line1\\nline2\\nline3\\n'"
+          },
+          "raw_event": "{\"type\":\"tool_call\",\"session_id\":\"sid_stage0_large\",\"timestamp\":\"2025-12-26T02:00:03.000Z\",\"toolCallId\":\"c1\",\"toolName\":\"Shell\",\"parameters\":{\"command\":\"printf 'line1\\\\nline2\\\\nline3\\\\n'\"},\"id\":\"tc1\"}",
+          "raw_payload": "{\"command\": \"printf 'line1\\\\nline2\\\\nline3\\\\n'\"}",
+          "shape_signature": "jsonl:type=tool_call",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_large.jsonl",
+          "tool_name": "Shell"
+        },
+        {
+          "agent_family": "droid",
+          "direction": "input",
+          "event_index": 1,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "echo hi"
+          },
+          "raw_event": "{\"type\":\"tool_call\",\"session_id\":\"sid_stage0_small\",\"timestamp\":\"2025-12-26T00:00:01.000Z\",\"toolCallId\":\"c1\",\"toolName\":\"Shell\",\"parameters\":{\"command\":\"echo hi\"}}",
+          "raw_payload": "{\"command\": \"echo hi\"}",
+          "shape_signature": "jsonl:type=tool_call",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_small.jsonl",
+          "tool_name": "Shell"
+        }
+      ],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "parameters": [
+          "parameters"
+        ],
+        "session_id": [
+          "session_id"
+        ],
+        "timestamp": [
+          "timestamp"
+        ],
+        "tool_call_id": [
+          "toolCallId"
+        ],
+        "tool_name": [
+          "toolName"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "parameters",
+        "session_id",
+        "timestamp",
+        "tool_call_id",
+        "tool_name",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "jsonl:type=tool_call",
+      "tool_name_normalized": "shell",
+      "tool_name_variants": [
+        "Shell"
+      ]
+    },
+    {
+      "agent_family": "droid",
+      "count": 3,
+      "direction": "output",
+      "examples": [
+        {
+          "agent_family": "droid",
+          "direction": "output",
+          "event_index": 4,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": {
+            "exitCode": 0,
+            "stdout": "line1\nline2\nline3\n"
+          },
+          "raw_event": "{\"type\":\"tool_result\",\"session_id\":\"sid_stage0_large\",\"timestamp\":\"2025-12-26T02:00:04.000Z\",\"toolCallId\":\"c1\",\"value\":{\"stdout\":\"line1\\nline2\\nline3\\n\",\"exitCode\":0},\"id\":\"tr1\"}",
+          "raw_payload": "{\"exitCode\": 0, \"stdout\": \"line1\\nline2\\nline3\\n\"}",
+          "shape_signature": "jsonl:type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_large.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "droid",
+          "direction": "output",
+          "event_index": 3,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"type\":\"tool_result\",\"sessionId\":\"sid_stage0_drift\",\"timestamp\":1767812643000,\"id\":\"call_1\",\"messageId\":\"m1\",\"toolId\":\"Execute\",\"isError\":true,\"value\":\"ls: /non-existent-directory: No such file or directory\"}",
+          "raw_payload": "ls: /non-existent-directory: No such file or directory",
+          "shape_signature": "jsonl:type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "droid",
+          "direction": "output",
+          "event_index": 2,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": {
+            "exitCode": 0,
+            "stdout": "hi\n"
+          },
+          "raw_event": "{\"type\":\"tool_result\",\"session_id\":\"sid_stage0_small\",\"timestamp\":\"2025-12-26T00:00:02.000Z\",\"toolCallId\":\"c1\",\"value\":{\"stdout\":\"hi\\n\",\"exitCode\":0}}",
+          "raw_payload": "{\"exitCode\": 0, \"stdout\": \"hi\\n\"}",
+          "shape_signature": "jsonl:type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_small.jsonl",
+          "tool_name": null
+        }
+      ],
+      "field_variants": {
+        "id": [
+          "id"
+        ],
+        "is_error": [
+          "isError"
+        ],
+        "message_id": [
+          "messageId"
+        ],
+        "session_id": [
+          "sessionId",
+          "session_id"
+        ],
+        "timestamp": [
+          "timestamp"
+        ],
+        "tool_call_id": [
+          "toolCallId"
+        ],
+        "tool_id": [
+          "toolId"
+        ],
+        "type": [
+          "type"
+        ],
+        "value": [
+          "value"
+        ]
+      },
+      "fields_seen": [
+        "id",
+        "is_error",
+        "message_id",
+        "session_id",
+        "timestamp",
+        "tool_call_id",
+        "tool_id",
+        "type",
+        "value"
+      ],
+      "parse_success_rate": 0.6667,
+      "shape_signature": "jsonl:type=tool_result",
+      "tool_name_normalized": "unknown",
+      "tool_name_variants": []
+    },
+    {
+      "agent_family": "opencode",
+      "count": 4,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "call_id": [
+          "callID"
+        ],
+        "id": [
+          "id"
+        ],
+        "message_id": [
+          "messageID"
+        ],
+        "session_id": [
+          "sessionID"
+        ],
+        "state": [
+          "state"
+        ],
+        "tool": [
+          "tool"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "call_id",
+        "id",
+        "message_id",
+        "session_id",
+        "state",
+        "tool",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "json:part.type=tool",
+      "tool_name_normalized": "bash",
+      "tool_name_variants": [
+        "bash"
+      ]
+    },
+    {
+      "agent_family": "opencode",
+      "count": 3,
+      "direction": "output",
+      "examples": [],
+      "field_variants": {
+        "call_id": [
+          "callID"
+        ],
+        "id": [
+          "id"
+        ],
+        "message_id": [
+          "messageID"
+        ],
+        "session_id": [
+          "sessionID"
+        ],
+        "state": [
+          "state"
+        ],
+        "tool": [
+          "tool"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "call_id",
+        "id",
+        "message_id",
+        "session_id",
+        "state",
+        "tool",
+        "type"
+      ],
+      "parse_success_rate": 0.0,
+      "shape_signature": "json:part.type=tool",
+      "tool_name_normalized": "bash",
+      "tool_name_variants": [
+        "bash"
+      ]
+    },
+    {
+      "agent_family": "opencode",
+      "count": 3,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "call_id": [
+          "callID"
+        ],
+        "id": [
+          "id"
+        ],
+        "message_id": [
+          "messageID"
+        ],
+        "session_id": [
+          "sessionID"
+        ],
+        "state": [
+          "state"
+        ],
+        "tool": [
+          "tool"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "call_id",
+        "id",
+        "message_id",
+        "session_id",
+        "state",
+        "tool",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "json:part.type=tool",
+      "tool_name_normalized": "edit",
+      "tool_name_variants": [
+        "edit"
+      ]
+    },
+    {
+      "agent_family": "opencode",
+      "count": 1,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "call_id": [
+          "callID"
+        ],
+        "id": [
+          "id"
+        ],
+        "message_id": [
+          "messageID"
+        ],
+        "session_id": [
+          "sessionID"
+        ],
+        "state": [
+          "state"
+        ],
+        "tool": [
+          "tool"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "call_id",
+        "id",
+        "message_id",
+        "session_id",
+        "state",
+        "tool",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "json:part.type=tool",
+      "tool_name_normalized": "grep",
+      "tool_name_variants": [
+        "grep"
+      ]
+    },
+    {
+      "agent_family": "opencode",
+      "count": 1,
+      "direction": "output",
+      "examples": [],
+      "field_variants": {
+        "call_id": [
+          "callID"
+        ],
+        "id": [
+          "id"
+        ],
+        "message_id": [
+          "messageID"
+        ],
+        "session_id": [
+          "sessionID"
+        ],
+        "state": [
+          "state"
+        ],
+        "tool": [
+          "tool"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "call_id",
+        "id",
+        "message_id",
+        "session_id",
+        "state",
+        "tool",
+        "type"
+      ],
+      "parse_success_rate": 0.0,
+      "shape_signature": "json:part.type=tool",
+      "tool_name_normalized": "grep",
+      "tool_name_variants": [
+        "grep"
+      ]
+    },
+    {
+      "agent_family": "opencode",
+      "count": 3,
+      "direction": "input",
+      "examples": [],
+      "field_variants": {
+        "call_id": [
+          "callID"
+        ],
+        "id": [
+          "id"
+        ],
+        "message_id": [
+          "messageID"
+        ],
+        "session_id": [
+          "sessionID"
+        ],
+        "state": [
+          "state"
+        ],
+        "tool": [
+          "tool"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "call_id",
+        "id",
+        "message_id",
+        "session_id",
+        "state",
+        "tool",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "json:part.type=tool",
+      "tool_name_normalized": "read",
+      "tool_name_variants": [
+        "read"
+      ]
+    },
+    {
+      "agent_family": "opencode",
+      "count": 3,
+      "direction": "output",
+      "examples": [],
+      "field_variants": {
+        "call_id": [
+          "callID"
+        ],
+        "id": [
+          "id"
+        ],
+        "message_id": [
+          "messageID"
+        ],
+        "session_id": [
+          "sessionID"
+        ],
+        "state": [
+          "state"
+        ],
+        "tool": [
+          "tool"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "call_id",
+        "id",
+        "message_id",
+        "session_id",
+        "state",
+        "tool",
+        "type"
+      ],
+      "parse_success_rate": 0.0,
+      "shape_signature": "json:part.type=tool",
+      "tool_name_normalized": "read",
+      "tool_name_variants": [
+        "read"
+      ]
+    },
+    {
+      "agent_family": "opencode",
+      "count": 2,
+      "direction": "input",
+      "examples": [
+        {
+          "agent_family": "opencode",
+          "direction": "input",
+          "event_index": null,
+          "field_path": "state.input",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "{\n  \"id\": \"prt_b9fa5b51c001zmyM3D7vlByckQ\",\n  \"sessionID\": \"ses_46603d717ffe0DvOjJUqhEghez\",\n  \"messageID\": \"msg_b9fa5a509001w0p5ZTfYCh2W5x\",\n  \"type\": \"tool\",\n  \"callID\": \"toolu_01DTKpQCuguRGKdnscpiBtJT\",\n  \"tool\": \"write\",\n  \"state\": {\n    \"status\": \"error\",\n    \"input\": {},\n    \"error\": \"Tool execution aborted\",\n    \"time\": {\n      \"start\": 1767910047697,\n      \"end\": 1767910047697\n    }\n  }\n}",
+          "raw_payload": "{}",
+          "shape_signature": "json:part.type=tool",
+          "source_file": "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa5a509001w0p5ZTfYCh2W5x/prt_b9fa5b51c001zmyM3D7vlByckQ.json",
+          "tool_name": "write"
+        }
+      ],
+      "field_variants": {
+        "call_id": [
+          "callID"
+        ],
+        "id": [
+          "id"
+        ],
+        "message_id": [
+          "messageID"
+        ],
+        "session_id": [
+          "sessionID"
+        ],
+        "state": [
+          "state"
+        ],
+        "tool": [
+          "tool"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "call_id",
+        "id",
+        "message_id",
+        "session_id",
+        "state",
+        "tool",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "json:part.type=tool",
+      "tool_name_normalized": "write",
+      "tool_name_variants": [
+        "write"
+      ]
+    },
+    {
+      "agent_family": "opencode",
+      "count": 1,
+      "direction": "output",
+      "examples": [
+        {
+          "agent_family": "opencode",
+          "direction": "output",
+          "event_index": null,
+          "field_path": "state.output",
+          "parse_error": null,
+          "parsed_payload": {
+            "error": "Tool execution aborted",
+            "output": null
+          },
+          "raw_event": "{\n  \"id\": \"prt_b9fa5b51c001zmyM3D7vlByckQ\",\n  \"sessionID\": \"ses_46603d717ffe0DvOjJUqhEghez\",\n  \"messageID\": \"msg_b9fa5a509001w0p5ZTfYCh2W5x\",\n  \"type\": \"tool\",\n  \"callID\": \"toolu_01DTKpQCuguRGKdnscpiBtJT\",\n  \"tool\": \"write\",\n  \"state\": {\n    \"status\": \"error\",\n    \"input\": {},\n    \"error\": \"Tool execution aborted\",\n    \"time\": {\n      \"start\": 1767910047697,\n      \"end\": 1767910047697\n    }\n  }\n}",
+          "raw_payload": "{\"error\": \"Tool execution aborted\", \"output\": null}",
+          "shape_signature": "json:part.type=tool",
+          "source_file": "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa5a509001w0p5ZTfYCh2W5x/prt_b9fa5b51c001zmyM3D7vlByckQ.json",
+          "tool_name": "write"
+        }
+      ],
+      "field_variants": {
+        "call_id": [
+          "callID"
+        ],
+        "id": [
+          "id"
+        ],
+        "message_id": [
+          "messageID"
+        ],
+        "session_id": [
+          "sessionID"
+        ],
+        "state": [
+          "state"
+        ],
+        "tool": [
+          "tool"
+        ],
+        "type": [
+          "type"
+        ]
+      },
+      "fields_seen": [
+        "call_id",
+        "id",
+        "message_id",
+        "session_id",
+        "state",
+        "tool",
+        "type"
+      ],
+      "parse_success_rate": 1.0,
+      "shape_signature": "json:part.type=tool",
+      "tool_name_normalized": "write",
+      "tool_name_variants": [
+        "write"
+      ]
+    }
+  ],
+  "scan_roots": {
+    "claude": [
+      "/Users/alexm/.claude/projects/-Users-alexm-Library-Application-Support-AgentSessions-ClaudeProbeProject",
+      "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper",
+      "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a/subagents",
+      "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/c2cfe038-c3d5-4563-81c0-504ee60501b1/subagents"
+    ],
+    "codex": [
+      "/Users/alexm/.codex/sessions/2026/01/05",
+      "/Users/alexm/.codex/sessions/2026/01/06",
+      "/Users/alexm/.codex/sessions/2026/01/07",
+      "/Users/alexm/.codex/sessions/2026/01/09",
+      "/Users/alexm/.codex/sessions/2026/01/10",
+      "/Users/alexm/.codex/sessions/2026/01/12",
+      "/Users/alexm/.codex/sessions/2026/01/13",
+      "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/codex"
+    ],
+    "copilot": [
+      "/Users/alexm/.copilot/session-state",
+      "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/copilot"
+    ],
+    "droid": [
+      "/Users/alexm/.factory/sessions/-Users-alexm-Repository-Codex-History",
+      "/Users/alexm/.factory/sessions/-Users-alexm-Repository-Triada",
+      "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid"
+    ],
+    "gemini": [
+      "/Users/alexm/.gemini/tmp/205016864bd110904e9ad8314192344ab398d043e779da15bedbb9ee9be00da2/chats",
+      "/Users/alexm/.gemini/tmp/3d333da47869377b0d17226bcb6ebfca7cffeafe3d810959c7eab1b11ecaef82/chats",
+      "/Users/alexm/.gemini/tmp/6ac59b89f2b60533dc79adfac844a7e7327132a85843313b412e1dbd6a91497d/chats"
+    ],
+    "opencode": [
+      "/Users/alexm/.local/share/opencode/storage/session/122f9b9a5a2395ff21189f1e5fe874e61955d6ac",
+      "/Users/alexm/.local/share/opencode/storage/session/global",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa5776b0010bUakPBINe8R0G",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa59282001RjFmRCOSkuIFw3",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa5a509001w0p5ZTfYCh2W5x",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa67ff2001LdGwk16DSO9Xif",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa7e09b001pbvAs1yW0oxCKz",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa809c0001yoPoaVkBAUU70e",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa81cbc001M6H7BHMtVKyFxj",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa82c42001HSpxU2nvSUW6NW",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa83b94001lYd2IxzyZ668TX",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa863d20019YyWH09fZYuGmd",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa88394001IfjUejqVMpKdcG",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa89567001EpQLJjku9SFhxU",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa8ac750016vMoXhdgbEgWII",
+      "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa8c40f001K4eddxz7ofQ9xU"
+    ]
+  },
+  "shape_signatures": [
+    {
+      "agent_families": [
+        "opencode"
+      ],
+      "count": 21,
+      "direction_counts": {
+        "input": 13,
+        "output": 8
+      },
+      "examples": [
+        {
+          "agent_family": "opencode",
+          "direction": "input",
+          "event_index": null,
+          "field_path": "state.input",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "{\n  \"id\": \"prt_b9fa5b51c001zmyM3D7vlByckQ\",\n  \"sessionID\": \"ses_46603d717ffe0DvOjJUqhEghez\",\n  \"messageID\": \"msg_b9fa5a509001w0p5ZTfYCh2W5x\",\n  \"type\": \"tool\",\n  \"callID\": \"toolu_01DTKpQCuguRGKdnscpiBtJT\",\n  \"tool\": \"write\",\n  \"state\": {\n    \"status\": \"error\",\n    \"input\": {},\n    \"error\": \"Tool execution aborted\",\n    \"time\": {\n      \"start\": 1767910047697,\n      \"end\": 1767910047697\n    }\n  }\n}",
+          "raw_payload": "{}",
+          "shape_signature": "json:part.type=tool",
+          "source_file": "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa5a509001w0p5ZTfYCh2W5x/prt_b9fa5b51c001zmyM3D7vlByckQ.json",
+          "tool_name": "write"
+        },
+        {
+          "agent_family": "opencode",
+          "direction": "output",
+          "event_index": null,
+          "field_path": "state.output",
+          "parse_error": null,
+          "parsed_payload": {
+            "error": "Tool execution aborted",
+            "output": null
+          },
+          "raw_event": "{\n  \"id\": \"prt_b9fa5b51c001zmyM3D7vlByckQ\",\n  \"sessionID\": \"ses_46603d717ffe0DvOjJUqhEghez\",\n  \"messageID\": \"msg_b9fa5a509001w0p5ZTfYCh2W5x\",\n  \"type\": \"tool\",\n  \"callID\": \"toolu_01DTKpQCuguRGKdnscpiBtJT\",\n  \"tool\": \"write\",\n  \"state\": {\n    \"status\": \"error\",\n    \"input\": {},\n    \"error\": \"Tool execution aborted\",\n    \"time\": {\n      \"start\": 1767910047697,\n      \"end\": 1767910047697\n    }\n  }\n}",
+          "raw_payload": "{\"error\": \"Tool execution aborted\", \"output\": null}",
+          "shape_signature": "json:part.type=tool",
+          "source_file": "/Users/alexm/.local/share/opencode/storage/part/msg_b9fa5a509001w0p5ZTfYCh2W5x/prt_b9fa5b51c001zmyM3D7vlByckQ.json",
+          "tool_name": "write"
+        }
+      ],
+      "shape_signature": "json:part.type=tool"
+    },
+    {
+      "agent_families": [
+        "copilot"
+      ],
+      "count": 7,
+      "direction_counts": {
+        "input": 7
+      },
+      "examples": [
+        {
+          "agent_family": "copilot",
+          "direction": "input",
+          "event_index": 12,
+          "field_path": "data.toolRequests[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "intent": "Listing files"
+          },
+          "raw_event": "{\"type\":\"assistant.message\",\"data\":{\"messageId\":\"14c2937a-e6c1-4c1a-9685-1488456f87b8\",\"content\":\"\",\"toolRequests\":[{\"toolCallId\":\"call_5OAMmXkGd8rHYdaCcbcGO9DG\",\"name\":\"report_intent\",\"arguments\":{\"intent\":\"Listing files\"}}]},\"id\":\"776522bd-238e-4782-8cc8-3dcc5a34f8ff\",\"timestamp\":\"2025-12-18T21:35:24.795Z\",\"parentId\":\"5dabb283-8295-4faa-bc10-ac022c999a65\"}",
+          "raw_payload": "{\"intent\": \"Listing files\"}",
+          "shape_signature": "jsonl:data.toolRequests[]",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": "report_intent"
+        },
+        {
+          "agent_family": "copilot",
+          "direction": "input",
+          "event_index": 14,
+          "field_path": "data.toolRequests[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "find . -mindepth 1 -not -path '*/.*' -not -path '*/tmp/*' -not -name 'tmp' -print | sed 's#^./##' | sort",
+            "description": "List files recursively excluding hidden and tmp directories",
+            "initial_wait": 30,
+            "mode": "sync"
+          },
+          "raw_event": "{\"type\":\"assistant.message\",\"data\":{\"messageId\":\"53707888-75e7-4f54-bb55-84e4de52da2b\",\"content\":\"\",\"toolRequests\":[{\"toolCallId\":\"call_ombKsNixv0YM9S8d2ilSwcrt\",\"name\":\"bash\",\"arguments\":{\"command\":\"find . -mindepth 1 -not -path '*/.*' -not -path '*/tmp/*' -not -name 'tmp' -print | sed 's#^./##' | sort\",\"description\":\"List files recursively excluding hidden and tmp directories\",\"mode\":\"sync\",\"initial_wait\":30}}]},\"id\":\"269a2662-f084-4d7c-9daf-c73086a00f5e\",\"timestamp\":\"2025-12-18T21:35:24.796Z\",\"parentId\":\"4e544a21-c2a1-4aa0-8001-9ce2166543b8\"}",
+          "raw_payload": "{\"command\": \"find . -mindepth 1 -not -path '*/.*' -not -path '*/tmp/*' -not -name 'tmp' -print | sed 's#^./##' | sort\", \"description\": \"List files recursively excluding hidden and tmp directories\", \"initial_wait\": 30, \"mode\": \"sync\"}",
+          "shape_signature": "jsonl:data.toolRequests[]",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": "bash"
+        },
+        {
+          "agent_family": "copilot",
+          "direction": "input",
+          "event_index": 27,
+          "field_path": "data.toolRequests[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "intent": "Listing commits"
+          },
+          "raw_event": "{\"type\":\"assistant.message\",\"data\":{\"messageId\":\"6ae2f112-bc31-4bb9-8dc8-bb2323df2072\",\"content\":\"\",\"toolRequests\":[{\"toolCallId\":\"call_tSoXp0GTb019WrGyRj1H9q4u\",\"name\":\"report_intent\",\"arguments\":{\"intent\":\"Listing commits\"}}]},\"id\":\"404e5146-7605-4185-ba05-ee52f6664a74\",\"timestamp\":\"2025-12-18T21:36:35.798Z\",\"parentId\":\"7b5e5eef-89e7-4517-8838-9dffeb857eb4\"}",
+          "raw_payload": "{\"intent\": \"Listing commits\"}",
+          "shape_signature": "jsonl:data.toolRequests[]",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": "report_intent"
+        }
+      ],
+      "shape_signature": "jsonl:data.toolRequests[]"
+    },
+    {
+      "agent_families": [
+        "claude",
+        "droid"
+      ],
+      "count": 106,
+      "direction_counts": {
+        "output": 106
+      },
+      "examples": [
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 31,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"parentUuid\":\"371e5438-4348-4ba1-9c45-bc4adcc80aa0\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_01PGf9uz1GQLomdtz38mij68\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"e0854d5d-bc13-423c-8180-b4e09e913be7\",\"timestamp\":\"2026-01-13T00:53:46.307Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"371e5438-4348-4ba1-9c45-bc4adcc80aa0\"}",
+          "raw_payload": "",
+          "shape_signature": "jsonl:message.content[].type=tool_result",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 38,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"parentUuid\":\"5006aa37-43ad-4728-9bf7-b8b422cd1908\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_015JgSSG2SF7uUMFgvaudzVy\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"06d3acd5-5879-439d-a87a-4e1454164039\",\"timestamp\":\"2026-01-13T00:54:00.630Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"5006aa37-43ad-4728-9bf7-b8b422cd1908\"}",
+          "raw_payload": "",
+          "shape_signature": "jsonl:message.content[].type=tool_result",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 239,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"parentUuid\":\"8c4b7da2-fb3a-459c-832f-bc13fa88b0b8\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_01JiQiQGEJJjdZdsQzH1GQ7E\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"9e61f658-e84b-41b1-b21c-bb731c230224\",\"timestamp\":\"2026-01-13T20:17:38.174Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"8c4b7da2-fb3a-459c-832f-bc13fa88b0b8\"}",
+          "raw_payload": "",
+          "shape_signature": "jsonl:message.content[].type=tool_result",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        }
+      ],
+      "shape_signature": "jsonl:message.content[].type=tool_result"
+    },
+    {
+      "agent_families": [
+        "claude",
+        "droid"
+      ],
+      "count": 106,
+      "direction_counts": {
+        "input": 106
+      },
+      "examples": [
+        {
+          "agent_family": "droid",
+          "direction": "input",
+          "event_index": 3,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "printf 'line1\\nline2\\nline3\\n'"
+          },
+          "raw_event": "{\"type\":\"message\",\"id\":\"m3\",\"timestamp\":\"2025-12-26T00:10:02.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tu1\",\"name\":\"Execute\",\"input\":{\"command\":\"printf 'line1\\\\nline2\\\\nline3\\\\n'\"}}]}}",
+          "raw_payload": "{\"command\": \"printf 'line1\\\\nline2\\\\nline3\\\\n'\"}",
+          "shape_signature": "jsonl:message.content[].type=tool_use",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/session_store_large.jsonl",
+          "tool_name": "Execute"
+        },
+        {
+          "agent_family": "droid",
+          "direction": "input",
+          "event_index": 2,
+          "field_path": "message.content[]",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "ls /nope"
+          },
+          "raw_event": "{\"type\":\"message\",\"id\":\"m2\",\"timestamp\":\"2025-12-26T23:50:01.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tu1\",\"name\":\"Execute\",\"input\":{\"command\":\"ls /nope\"}}]}}",
+          "raw_payload": "{\"command\": \"ls /nope\"}",
+          "shape_signature": "jsonl:message.content[].type=tool_use",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/session_store_small.jsonl",
+          "tool_name": "Execute"
+        }
+      ],
+      "shape_signature": "jsonl:message.content[].type=tool_use"
+    },
+    {
+      "agent_families": [
+        "codex"
+      ],
+      "count": 2,
+      "direction_counts": {
+        "input": 2
+      },
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 4,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "ls",
+            "cwd": "/tmp/repo"
+          },
+          "raw_event": "{\"timestamp\":\"2025-12-17T23:27:51.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"tool_call\",\"function\":{\"name\":\"run_shell_command\"},\"arguments\":{\"command\":\"ls\",\"cwd\":\"/tmp/repo\"}}}",
+          "raw_payload": "{\"command\": \"ls\", \"cwd\": \"/tmp/repo\"}",
+          "shape_signature": "jsonl:response_item:payload.type=tool_call",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/codex/small.jsonl",
+          "tool_name": "run_shell_command"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 5,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "printf 'line1\\nline2\\nline3\\n'",
+            "cwd": "/tmp/large"
+          },
+          "raw_event": "{\"timestamp\":\"2025-12-18T10:00:03.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"tool_call\",\"function\":{\"name\":\"run_shell_command\"},\"arguments\":{\"command\":\"printf 'line1\\\\nline2\\\\nline3\\\\n'\",\"cwd\":\"/tmp/large\"}}}",
+          "raw_payload": "{\"command\": \"printf 'line1\\\\nline2\\\\nline3\\\\n'\", \"cwd\": \"/tmp/large\"}",
+          "shape_signature": "jsonl:response_item:payload.type=tool_call",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/codex/large.jsonl",
+          "tool_name": "run_shell_command"
+        }
+      ],
+      "shape_signature": "jsonl:response_item:payload.type=tool_call"
+    },
+    {
+      "agent_families": [
+        "codex"
+      ],
+      "count": 2,
+      "direction_counts": {
+        "output": 2
+      },
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "output",
+          "event_index": 5,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "exitCode": 0,
+            "stderr": "",
+            "stdout": "a.txt\nb.txt\n"
+          },
+          "raw_event": "{\"timestamp\":\"2025-12-17T23:27:52.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"tool_result\",\"name\":\"run_shell_command\",\"result\":{\"stdout\":\"a.txt\\nb.txt\\n\",\"stderr\":\"\",\"exitCode\":0}}}",
+          "raw_payload": "{\"exitCode\": 0, \"stderr\": \"\", \"stdout\": \"a.txt\\nb.txt\\n\"}",
+          "shape_signature": "jsonl:response_item:payload.type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/codex/small.jsonl",
+          "tool_name": "run_shell_command"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "output",
+          "event_index": 6,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "exitCode": 0,
+            "stderr": "",
+            "stdout": "line1\nline2\nline3\n"
+          },
+          "raw_event": "{\"timestamp\":\"2025-12-18T10:00:04.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"tool_result\",\"name\":\"run_shell_command\",\"result\":{\"stdout\":\"line1\\nline2\\nline3\\n\",\"stderr\":\"\",\"exitCode\":0}}}",
+          "raw_payload": "{\"exitCode\": 0, \"stderr\": \"\", \"stdout\": \"line1\\nline2\\nline3\\n\"}",
+          "shape_signature": "jsonl:response_item:payload.type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/codex/large.jsonl",
+          "tool_name": "run_shell_command"
+        }
+      ],
+      "shape_signature": "jsonl:response_item:payload.type=tool_result"
+    },
+    {
+      "agent_families": [
+        "claude"
+      ],
+      "count": 72,
+      "direction_counts": {
+        "output": 72
+      },
+      "examples": [
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 31,
+          "field_path": "toolUseResult",
+          "parse_error": null,
+          "parsed_payload": {
+            "interrupted": false,
+            "isImage": false,
+            "stderr": "",
+            "stdout": ""
+          },
+          "raw_event": "{\"parentUuid\":\"371e5438-4348-4ba1-9c45-bc4adcc80aa0\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_01PGf9uz1GQLomdtz38mij68\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"e0854d5d-bc13-423c-8180-b4e09e913be7\",\"timestamp\":\"2026-01-13T00:53:46.307Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"371e5438-4348-4ba1-9c45-bc4adcc80aa0\"}",
+          "raw_payload": "{\"interrupted\": false, \"isImage\": false, \"stderr\": \"\", \"stdout\": \"\"}",
+          "shape_signature": "jsonl:toolUseResult",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 38,
+          "field_path": "toolUseResult",
+          "parse_error": null,
+          "parsed_payload": {
+            "interrupted": false,
+            "isImage": false,
+            "stderr": "",
+            "stdout": ""
+          },
+          "raw_event": "{\"parentUuid\":\"5006aa37-43ad-4728-9bf7-b8b422cd1908\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_015JgSSG2SF7uUMFgvaudzVy\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"06d3acd5-5879-439d-a87a-4e1454164039\",\"timestamp\":\"2026-01-13T00:54:00.630Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"5006aa37-43ad-4728-9bf7-b8b422cd1908\"}",
+          "raw_payload": "{\"interrupted\": false, \"isImage\": false, \"stderr\": \"\", \"stdout\": \"\"}",
+          "shape_signature": "jsonl:toolUseResult",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "claude",
+          "direction": "output",
+          "event_index": 239,
+          "field_path": "toolUseResult",
+          "parse_error": null,
+          "parsed_payload": {
+            "interrupted": false,
+            "isImage": false,
+            "stderr": "",
+            "stdout": ""
+          },
+          "raw_event": "{\"parentUuid\":\"8c4b7da2-fb3a-459c-832f-bc13fa88b0b8\",\"isSidechain\":false,\"userType\":\"external\",\"cwd\":\"/Users/alexm/Repository/Scripts/tennis-scraper\",\"sessionId\":\"b4f868f3-0faf-4fe1-823b-3a78afcadb7a\",\"version\":\"2.1.5\",\"gitBranch\":\"master\",\"slug\":\"unified-stargazing-starfish\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"tool_use_id\":\"toolu_01JiQiQGEJJjdZdsQzH1GQ7E\",\"type\":\"tool_result\",\"content\":\"\",\"is_error\":false}]},\"uuid\":\"9e61f658-e84b-41b1-b21c-bb731c230224\",\"timestamp\":\"2026-01-13T20:17:38.174Z\",\"toolUseResult\":{\"stdout\":\"\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false},\"sourceToolAssistantUUID\":\"8c4b7da2-fb3a-459c-832f-bc13fa88b0b8\"}",
+          "raw_payload": "{\"interrupted\": false, \"isImage\": false, \"stderr\": \"\", \"stdout\": \"\"}",
+          "shape_signature": "jsonl:toolUseResult",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": null
+        }
+      ],
+      "shape_signature": "jsonl:toolUseResult"
+    },
+    {
+      "agent_families": [
+        "codex"
+      ],
+      "count": 3388,
+      "direction_counts": {
+        "input": 3388
+      },
+      "examples": [
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 9,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "ls",
+            "workdir": "/Users/alexm/Repository/Codex-History"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-13T20:09:06.916Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"shell_command\",\"arguments\":\"{\\\"command\\\":\\\"ls\\\",\\\"workdir\\\":\\\"/Users/alexm/Repository/Codex-History\\\"}\",\"call_id\":\"call_fNOi78ulEiGq7EXpJIDarDDd\"}}",
+          "raw_payload": "{\"command\":\"ls\",\"workdir\":\"/Users/alexm/Repository/Codex-History\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/13/rollout-2026-01-13T12-08-58-019bb8f9-d2a1-7912-a0dd-860bfc00ee08.jsonl",
+          "tool_name": "shell_command"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 16,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "cat AGENTS.md",
+            "workdir": "/Users/alexm/Repository/Codex-History"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-13T20:09:09.241Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"shell_command\",\"arguments\":\"{\\\"command\\\":\\\"cat AGENTS.md\\\",\\\"workdir\\\":\\\"/Users/alexm/Repository/Codex-History\\\"}\",\"call_id\":\"call_jdBFwIKfi3Jz6LpDmYFhwxV1\"}}",
+          "raw_payload": "{\"command\":\"cat AGENTS.md\",\"workdir\":\"/Users/alexm/Repository/Codex-History\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/13/rollout-2026-01-13T12-08-58-019bb8f9-d2a1-7912-a0dd-860bfc00ee08.jsonl",
+          "tool_name": "shell_command"
+        },
+        {
+          "agent_family": "codex",
+          "direction": "input",
+          "event_index": 23,
+          "field_path": "payload.type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "rg --files -g '*.jsonl'",
+            "workdir": "/Users/alexm/Repository/Codex-History"
+          },
+          "raw_event": "{\"timestamp\":\"2026-01-13T20:09:14.429Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"shell_command\",\"arguments\":\"{\\\"command\\\":\\\"rg --files -g '*.jsonl'\\\",\\\"workdir\\\":\\\"/Users/alexm/Repository/Codex-History\\\"}\",\"call_id\":\"call_4nXwCt1jD8zAVlhWvsp8yF8T\"}}",
+          "raw_payload": "{\"command\":\"rg --files -g '*.jsonl'\",\"workdir\":\"/Users/alexm/Repository/Codex-History\"}",
+          "shape_signature": "jsonl:type=function_call",
+          "source_file": "/Users/alexm/.codex/sessions/2026/01/13/rollout-2026-01-13T12-08-58-019bb8f9-d2a1-7912-a0dd-860bfc00ee08.jsonl",
+          "tool_name": "shell_command"
+        }
+      ],
+      "shape_signature": "jsonl:type=function_call"
+    },
+    {
+      "agent_families": [
+        "copilot"
+      ],
+      "count": 8,
+      "direction_counts": {
+        "output": 8
+      },
+      "examples": [
+        {
+          "agent_family": "copilot",
+          "direction": "output",
+          "event_index": 16,
+          "field_path": "data",
+          "parse_error": null,
+          "parsed_payload": {
+            "content": "Intent logged"
+          },
+          "raw_event": "{\"type\":\"tool.execution_complete\",\"data\":{\"toolCallId\":\"call_5OAMmXkGd8rHYdaCcbcGO9DG\",\"success\":true,\"result\":{\"content\":\"Intent logged\"},\"toolTelemetry\":{}},\"id\":\"637ab614-79de-437e-8165-0e4e1e86dd87\",\"timestamp\":\"2025-12-18T21:35:24.809Z\",\"parentId\":\"6de1fdec-68d9-4e2f-b606-083cce230562\"}",
+          "raw_payload": "{\"content\": \"Intent logged\"}",
+          "shape_signature": "jsonl:type=tool.execution_complete",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "copilot",
+          "direction": "output",
+          "event_index": 31,
+          "field_path": "data",
+          "parse_error": null,
+          "parsed_payload": {
+            "content": "Intent logged"
+          },
+          "raw_event": "{\"type\":\"tool.execution_complete\",\"data\":{\"toolCallId\":\"call_tSoXp0GTb019WrGyRj1H9q4u\",\"success\":true,\"result\":{\"content\":\"Intent logged\"},\"toolTelemetry\":{}},\"id\":\"c8fe4aa9-c325-4162-a3ef-71894850a471\",\"timestamp\":\"2025-12-18T21:36:35.801Z\",\"parentId\":\"bc6f8c1a-e7ba-46e3-96ff-249b1e183896\"}",
+          "raw_payload": "{\"content\": \"Intent logged\"}",
+          "shape_signature": "jsonl:type=tool.execution_complete",
+          "source_file": "/Users/alexm/.copilot/session-state/ec41a59e-c892-40c5-8d9c-f62387af8c30.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "copilot",
+          "direction": "output",
+          "event_index": 4,
+          "field_path": "data",
+          "parse_error": null,
+          "parsed_payload": {
+            "content": "hi\n"
+          },
+          "raw_event": "{\"type\":\"tool.execution_complete\",\"data\":{\"toolCallId\":\"call_1\",\"success\":true,\"result\":{\"content\":\"hi\\n\"}},\"id\":\"e5\",\"timestamp\":\"2025-12-18T22:00:04.000Z\",\"parentId\":\"e4\"}",
+          "raw_payload": "{\"content\": \"hi\\n\"}",
+          "shape_signature": "jsonl:type=tool.execution_complete",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl",
+          "tool_name": null
+        }
+      ],
+      "shape_signature": "jsonl:type=tool.execution_complete"
+    },
+    {
+      "agent_families": [
+        "droid"
+      ],
+      "count": 3,
+      "direction_counts": {
+        "input": 3
+      },
+      "examples": [
+        {
+          "agent_family": "droid",
+          "direction": "input",
+          "event_index": 3,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "printf 'line1\\nline2\\nline3\\n'"
+          },
+          "raw_event": "{\"type\":\"tool_call\",\"session_id\":\"sid_stage0_large\",\"timestamp\":\"2025-12-26T02:00:03.000Z\",\"toolCallId\":\"c1\",\"toolName\":\"Shell\",\"parameters\":{\"command\":\"printf 'line1\\\\nline2\\\\nline3\\\\n'\"},\"id\":\"tc1\"}",
+          "raw_payload": "{\"command\": \"printf 'line1\\\\nline2\\\\nline3\\\\n'\"}",
+          "shape_signature": "jsonl:type=tool_call",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_large.jsonl",
+          "tool_name": "Shell"
+        },
+        {
+          "agent_family": "droid",
+          "direction": "input",
+          "event_index": 2,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "ls -la",
+            "riskLevel": "low",
+            "riskLevelReason": "Read-only directory listing."
+          },
+          "raw_event": "{\"type\":\"tool_call\",\"sessionId\":\"sid_stage0_drift\",\"timestamp\":1767812642000,\"id\":\"call_1\",\"messageId\":\"m1\",\"toolId\":\"Execute\",\"toolName\":\"Execute\",\"parameters\":{\"command\":\"ls -la\",\"riskLevel\":\"low\",\"riskLevelReason\":\"Read-only directory listing.\"}}",
+          "raw_payload": "{\"command\": \"ls -la\", \"riskLevel\": \"low\", \"riskLevelReason\": \"Read-only directory listing.\"}",
+          "shape_signature": "jsonl:type=tool_call",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl",
+          "tool_name": "Execute"
+        },
+        {
+          "agent_family": "droid",
+          "direction": "input",
+          "event_index": 1,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": {
+            "command": "echo hi"
+          },
+          "raw_event": "{\"type\":\"tool_call\",\"session_id\":\"sid_stage0_small\",\"timestamp\":\"2025-12-26T00:00:01.000Z\",\"toolCallId\":\"c1\",\"toolName\":\"Shell\",\"parameters\":{\"command\":\"echo hi\"}}",
+          "raw_payload": "{\"command\": \"echo hi\"}",
+          "shape_signature": "jsonl:type=tool_call",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_small.jsonl",
+          "tool_name": "Shell"
+        }
+      ],
+      "shape_signature": "jsonl:type=tool_call"
+    },
+    {
+      "agent_families": [
+        "droid"
+      ],
+      "count": 3,
+      "direction_counts": {
+        "output": 3
+      },
+      "examples": [
+        {
+          "agent_family": "droid",
+          "direction": "output",
+          "event_index": 4,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": {
+            "exitCode": 0,
+            "stdout": "line1\nline2\nline3\n"
+          },
+          "raw_event": "{\"type\":\"tool_result\",\"session_id\":\"sid_stage0_large\",\"timestamp\":\"2025-12-26T02:00:04.000Z\",\"toolCallId\":\"c1\",\"value\":{\"stdout\":\"line1\\nline2\\nline3\\n\",\"exitCode\":0},\"id\":\"tr1\"}",
+          "raw_payload": "{\"exitCode\": 0, \"stdout\": \"line1\\nline2\\nline3\\n\"}",
+          "shape_signature": "jsonl:type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_large.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "droid",
+          "direction": "output",
+          "event_index": 3,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": null,
+          "raw_event": "{\"type\":\"tool_result\",\"sessionId\":\"sid_stage0_drift\",\"timestamp\":1767812643000,\"id\":\"call_1\",\"messageId\":\"m1\",\"toolId\":\"Execute\",\"isError\":true,\"value\":\"ls: /non-existent-directory: No such file or directory\"}",
+          "raw_payload": "ls: /non-existent-directory: No such file or directory",
+          "shape_signature": "jsonl:type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl",
+          "tool_name": null
+        },
+        {
+          "agent_family": "droid",
+          "direction": "output",
+          "event_index": 2,
+          "field_path": "type",
+          "parse_error": null,
+          "parsed_payload": {
+            "exitCode": 0,
+            "stdout": "hi\n"
+          },
+          "raw_event": "{\"type\":\"tool_result\",\"session_id\":\"sid_stage0_small\",\"timestamp\":\"2025-12-26T00:00:02.000Z\",\"toolCallId\":\"c1\",\"value\":{\"stdout\":\"hi\\n\",\"exitCode\":0}}",
+          "raw_payload": "{\"exitCode\": 0, \"stdout\": \"hi\\n\"}",
+          "shape_signature": "jsonl:type=tool_result",
+          "source_file": "/Users/alexm/Repository/Codex-History/Resources/Fixtures/stage0/agents/droid/stream_json_small.jsonl",
+          "tool_name": null
+        }
+      ],
+      "shape_signature": "jsonl:type=tool_result"
+    },
+    {
+      "agent_families": [
+        "claude"
+      ],
+      "count": 1,
+      "direction_counts": {
+        "unknown": 1
+      },
+      "examples": [
+        {
+          "agent_family": "claude",
+          "direction": "unknown",
+          "event_index": 81,
+          "field_path": "message.content[0].content",
+          "parse_error": null,
+          "parsed_payload": {},
+          "raw_event": "--bg: #f5f5f5;\n--blue: #4472C4;\n--chip-flight: #5d6677;\n--chip-local: #1f7a4d;\n--chip-road: #8a6d1a;\n--dark: #2c3e50;\n--muted: #7f8c8d;\n--row-alt: #D9E2F3;\n:root {\n}\n<head>\n<html>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width\n<style>\n<title>USTA G12 Tournaments - NorCal and National</title>\nawk: trying to access out of range field -1\n input record number 18, file /Users/alexm/Repository/Scripts/tennis-scraper/2025-usta-norcal-national.html\n source line number 1",
+          "raw_payload": "{\n}",
+          "shape_signature": "text:line-prefix+json_block",
+          "source_file": "/Users/alexm/.claude/projects/-Users-alexm-Repository-Scripts-tennis-scraper/b4f868f3-0faf-4fe1-823b-3a78afcadb7a.jsonl",
+          "tool_name": "root"
+        }
+      ],
+      "shape_signature": "text:line-prefix+json_block"
+    }
+  ],
+  "summary": {
+    "agent_counts": {
+      "claude": 221,
+      "codex": 3392,
+      "copilot": 15,
+      "droid": 70,
+      "opencode": 21
+    },
+    "direction_counts": {
+      "input": 3519,
+      "output": 199,
+      "unknown": 1
+    },
+    "shape_counts": {
+      "json:part.type=tool": 21,
+      "jsonl:data.toolRequests[]": 7,
+      "jsonl:message.content[].type=tool_result": 106,
+      "jsonl:message.content[].type=tool_use": 106,
+      "jsonl:response_item:payload.type=tool_call": 2,
+      "jsonl:response_item:payload.type=tool_result": 2,
+      "jsonl:toolUseResult": 72,
+      "jsonl:type=function_call": 3388,
+      "jsonl:type=tool.execution_complete": 8,
+      "jsonl:type=tool_call": 3,
+      "jsonl:type=tool_result": 3,
+      "text:line-prefix+json_block": 1
+    },
+    "total_tool_blocks": 3719
+  }
+}

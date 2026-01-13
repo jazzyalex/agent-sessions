@@ -20,7 +20,7 @@ struct SearchFiltersView: View {
                 .buttonStyle(.plain)
                 .keyboardShortcut("f", modifiers: [.command, .option])
                 .focusable(false)
-                .help("Search sessions")
+                .help("Search sessions (⌥⌘F)")
 
                 .popover(isPresented: $showSearchPopover, arrowEdge: .bottom) {
                     HStack(spacing: 8) {
@@ -28,6 +28,7 @@ struct SearchFiltersView: View {
                             .textFieldStyle(.roundedBorder)
                             .frame(minWidth: 220)
                             .focused($isSearchFocused)
+                            .help("Search sessions (⌥⌘F)")
                             .onSubmit { indexer.applySearch(); showSearchPopover = false }
                             .onChange(of: indexer.queryDraft) { _, _ in TypingActivity.shared.bump() }
                         Button("Find") { indexer.applySearch(); showSearchPopover = false }
