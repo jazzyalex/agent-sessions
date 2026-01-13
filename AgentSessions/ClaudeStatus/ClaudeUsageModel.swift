@@ -141,12 +141,16 @@ final class ClaudeUsageModel: ObservableObject {
         let nc = NSWorkspace.shared.notificationCenter
         wakeObservers.append(
             nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.handleWake()
+                Task { @MainActor [weak self] in
+                    self?.handleWake()
+                }
             }
         )
         wakeObservers.append(
             nc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.handleWake()
+                Task { @MainActor [weak self] in
+                    self?.handleWake()
+                }
             }
         )
     }
