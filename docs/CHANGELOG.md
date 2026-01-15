@@ -40,6 +40,7 @@ All notable changes to this project will be documented in this file.
 - Transcript: Reduce terminal-view stutter by debouncing rebuilds and avoiding full NSTextView reloads for match highlight updates.
 - Transcript (Color view): Use system font for narrative blocks; keep tool call blocks monospaced.
 - Transcript (Color view): Blocks now render as rounded cards with subtle tints and left accent borders.
+- Transcript (Color view): User prompts now use a thicker accent rail, slightly brighter tint, and semibold first-line text for readability.
 - Transcript (Color view): Assistant blocks now use per-agent brand tints and the role legend matches transcript accents.
 - Transcript (Color view): Find highlights now mark matched substrings and add a line indicator for easier scanning.
 - UI: Persist split-view divider positions per layout mode (horizontal vs vertical) so switching layouts doesn’t reset pane sizes.
