@@ -55,6 +55,7 @@ enum PreferencesKey {
         static let showStarColumn = "UnifiedShowStarColumn"
         static let hasCommandsOnly = "UnifiedHasCommandsOnly"
         static let skipAgentsPreamble = "SkipAgentsPreamble"
+        static let sessionViewAutoScrollTarget = "UnifiedSessionViewAutoScrollTarget"
         static let showCodexToolbarFilter = "UnifiedShowCodexToolbarFilter"
         static let showClaudeToolbarFilter = "UnifiedShowClaudeToolbarFilter"
         static let showGeminiToolbarFilter = "UnifiedShowGeminiToolbarFilter"
@@ -85,5 +86,21 @@ enum PreferencesKey {
         static let starPinsSessions = "StarPinsSessions"
         static let stopSyncAfterInactivityMinutes = "ArchiveStopSyncAfterInactivityMinutes"
         static let unstarRemovesArchive = "UnstarRemovesLocalArchive"
+    }
+}
+
+enum SessionViewAutoScrollTarget: String, CaseIterable, Identifiable {
+    case lastUserPrompt
+    case firstUserPrompt
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .lastUserPrompt:
+            return "Last User Prompt"
+        case .firstUserPrompt:
+            return "First User Prompt"
+        }
     }
 }

@@ -83,6 +83,7 @@ struct SessionTerminalView: View {
     @State private var roleNavScrollTargetLineID: Int? = nil
     @State private var roleNavScrollToken: Int = 0
     @State private var preambleUserBlockIndexes: Set<Int> = []
+    @State private var autoScrollSessionID: String? = nil
 
     // Derived agent label for legend chips (Codex / Claude / Gemini)
     private var agentLegendLabel: String {
@@ -123,6 +124,7 @@ struct SessionTerminalView: View {
             jumpToFirstPrompt()
         }
         .onChange(of: session.id) { _, _ in
+            autoScrollSessionID = nil
             rebuildLines(priority: .userInitiated)
         }
         .onChange(of: activeRoles) { _, _ in
@@ -161,20 +163,7 @@ struct SessionTerminalView: View {
             .foregroundStyle(.secondary)
 
             Spacer()
-
-                if shouldShowConversationStartControls, let _ = conversationStartLineID {
-                    Button(action: { jumpToFirstPrompt() }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.down.to.line")
-                                .imageScale(.small)
-                            Text("First prompt")
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .help("Jump to the first user prompt after the preamble")
-                }
-            }
+        }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(Color(NSColor.controlBackgroundColor))
@@ -270,10 +259,9 @@ struct SessionTerminalView: View {
                 recomputeFindMatches(resetIndex: true)
             }
 
-            if skipAgentsPreamble,
-               unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            if unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                jumpToFirstPrompt()
+                applyAutoScrollIfNeeded(sessionID: sessionSnapshot.id, skipAgentsPreamble: skipAgentsPreamble)
             }
         }
     }
@@ -704,10 +692,6 @@ struct SessionTerminalView: View {
         return nil
     }
 
-    private var shouldShowConversationStartControls: Bool {
-        skipAgentsPreambleEnabled() && (conversationStartLineID != nil)
-    }
-
     private func skipAgentsPreambleEnabled() -> Bool {
         let d = UserDefaults.standard
         let key = PreferencesKey.Unified.skipAgentsPreamble
@@ -715,10 +699,59 @@ struct SessionTerminalView: View {
         return d.bool(forKey: key)
     }
 
+    private func sessionViewAutoScrollTarget() -> SessionViewAutoScrollTarget {
+        let d = UserDefaults.standard
+        let key = PreferencesKey.Unified.sessionViewAutoScrollTarget
+        guard let raw = d.string(forKey: key),
+              let parsed = SessionViewAutoScrollTarget(rawValue: raw) else {
+            return .lastUserPrompt
+        }
+        return parsed
+    }
+
+    private func applyAutoScrollIfNeeded(sessionID: String, skipAgentsPreamble: Bool) {
+        guard autoScrollSessionID != sessionID else { return }
+
+        let target = sessionViewAutoScrollTarget()
+        guard let lineID = userPromptLineID(for: target, skipAgentsPreamble: skipAgentsPreamble) else { return }
+        autoScrollSessionID = sessionID
+        jumpToUserPrompt(lineID: lineID)
+    }
+
+    private func userPromptLineID(for target: SessionViewAutoScrollTarget, skipAgentsPreamble: Bool) -> Int? {
+        guard !userLineIndices.isEmpty else { return nil }
+        switch target {
+        case .lastUserPrompt:
+            return userLineIndices.last
+        case .firstUserPrompt:
+            if skipAgentsPreamble, let dividerID = conversationStartLineID {
+                if let after = userLineIndices.first(where: { $0 > dividerID }) {
+                    return after
+                }
+            }
+            return userLineIndices.first
+        }
+    }
+
     private func jumpToFirstPrompt() {
-        guard let target = conversationStartLineID else { return }
-        scrollTargetLineID = target
-        scrollTargetToken &+= 1
+        guard let lineID = userPromptLineID(for: .firstUserPrompt, skipAgentsPreamble: skipAgentsPreambleEnabled()) else { return }
+        jumpToUserPrompt(lineID: lineID)
+    }
+
+    private func jumpToUserPrompt(lineID: Int) {
+        if !activeRoles.contains(.user) {
+            activeRoles.insert(.user)
+            persistRoleToggles()
+        }
+        updateUserNavigationPosition(lineID: lineID)
+        roleNavScrollTargetLineID = lineID
+        roleNavScrollToken &+= 1
+    }
+
+    private func updateUserNavigationPosition(lineID: Int) {
+        if let position = userLineIndices.firstIndex(of: lineID) {
+            roleNavPositions[.user] = position
+        }
     }
 
     nonisolated private static func applyConversationStartDividerIfNeeded(session: Session, lines: [TerminalLine], enabled: Bool) -> ([TerminalLine], Int?) {
