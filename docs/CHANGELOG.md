@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file.
 - Search: Tooltips now include keyboard shortcuts for search fields and navigation arrows.
 - Transcript: Find in Transcript (⌘F) now opens a local find bar with its own query and navigation.
 - Transcript: Unified Search now auto-jumps to the first match after typing or switching sessions, and local Find uses a solid blue current-match marker aligned with the match.
+- Transcript: Session view now auto-scrolls to the last user prompt by default, with a Unified Window setting to choose first vs last user prompt.
 - Search: Unified Search highlights matches in the selected transcript and jumps to the first match when switching sessions.
 - Analytics: The By Agent card now auto-scales rows and falls back to an internal scroll when space is tight.
 - UI: Consolidate unified-window status indicators into a single cockpit-style footer.
@@ -70,6 +71,7 @@ All notable changes to this project will be documented in this file.
 - Parsing: Surface Codex thread rollback events with readable text in timelines.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
 - Claude Usage: Detect the Claude Code first-run terms prompt and surface a “Setup required” state instead of timing out silently.
+- Toolbar: Keep action icons visible and overflow actions accessible when a project filter is active.
 - Toolbar: Refined agent tabs and icon groups, updated the layout/theme controls, and tightened toolbar button sizing and hover states.
 - UI: Update Codex and Claude brand accents to blue and warm brown for clearer agent recognition.
 - Transcript: Rename view mode buttons to Session/Text/JSON, align them with HIG-style leading padding, and space the session ID control.

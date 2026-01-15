@@ -724,95 +724,93 @@ struct UnifiedSessionsView: View {
         }
         ToolbarItem(placement: .automatic) {
             UnifiedSearchFiltersView(unified: unified, search: searchCoordinator, focus: focusCoordinator, searchState: searchState)
+                .frame(maxWidth: 520)
+        }
+        if let projectFilter = unified.projectFilter, !projectFilter.isEmpty {
+            ToolbarItem(placement: .automatic) {
+                UnifiedProjectFilterBadgeView(unified: unified)
+            }
         }
         ToolbarItemGroup(placement: .automatic) {
-            HStack(spacing: UnifiedSessionsStyle.toolbarGroupSpacing) {
-                HStack(spacing: UnifiedSessionsStyle.toolbarItemSpacing) {
-                    ToolbarIconToggle(
-                        isOn: $unified.showFavoritesOnly,
-                        onSymbol: "star.fill",
-                        offSymbol: "star",
-                        help: showStarColumn ? "Show only saved sessions" : "Enable the Save column in Preferences to use saved sessions",
-                        activeColor: .primary
-                    )
-                    .disabled(!showStarColumn)
+            ToolbarIconToggle(
+                isOn: $unified.showFavoritesOnly,
+                onSymbol: "star.fill",
+                offSymbol: "star",
+                help: showStarColumn ? "Show only saved sessions" : "Enable the Save column in Preferences to use saved sessions",
+                activeColor: .primary
+            )
+            .disabled(!showStarColumn)
 
-                    AnalyticsButtonView(
-                        isReady: analyticsReady,
-                        disabledReason: analyticsDisabledReason,
-                        onWarmupTap: handleAnalyticsWarmupTap
-                    )
-                }
+            AnalyticsButtonView(
+                isReady: analyticsReady,
+                disabledReason: analyticsDisabledReason,
+                onWarmupTap: handleAnalyticsWarmupTap
+            )
 
-                ToolbarGroupDivider()
+            ToolbarGroupDivider()
 
-                HStack(spacing: UnifiedSessionsStyle.toolbarItemSpacing) {
-                    ToolbarIconButton(help: "Resume the selected Codex or Claude session in its original CLI (⌃⌘R). Gemini, OpenCode, and Copilot sessions are read-only.") { _ in
-                        ToolbarIcon(systemName: "terminal")
-                    } action: {
-                        if let s = selectedSession { resume(s) }
-                    }
-                    .keyboardShortcut("r", modifiers: [.command, .control])
-                    .disabled(selectedSession == nil || !(selectedSession?.source == .codex || selectedSession?.source == .claude))
-                    .accessibilityLabel(Text("Resume"))
-
-                    ToolbarIconButton(help: "Reveal the selected session's working directory in Finder (⌘⇧O)") { _ in
-                        ToolbarIcon(systemName: "folder")
-                    } action: {
-                        if let s = selectedSession { openDir(s) }
-                    }
-                    .keyboardShortcut("o", modifiers: [.command, .shift])
-                    .disabled(selectedSession == nil)
-                    .accessibilityLabel(Text("Open Working Directory"))
-
-                    ToolbarIconButton(help: "Re-run the session indexer to discover new logs (⌘R)") { _ in
-                        ZStack {
-                            ToolbarIcon(systemName: "arrow.clockwise")
-                                .opacity(unified.isIndexing || unified.isProcessingTranscripts ? 0.35 : 1)
-                            if unified.isIndexing || unified.isProcessingTranscripts {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-                    } action: {
-                        unified.refresh()
-                    }
-                    .keyboardShortcut("r", modifiers: .command)
-                    .accessibilityLabel(Text("Refresh"))
-
-                    if isGitInspectorEnabled {
-                        ToolbarIconButton(help: "Show historical and current git context with safety analysis (⌘⇧G)") { _ in
-                            ToolbarIcon(systemName: "clock.arrow.circlepath")
-                        } action: {
-                            if let s = selectedSession { showGitInspector(s) }
-                        }
-                        .keyboardShortcut("g", modifiers: [.command, .shift])
-                        .disabled(selectedSession == nil)
-                        .accessibilityLabel(Text("Git Context"))
-                    }
-                }
-
-                ToolbarGroupDivider()
-
-                HStack(spacing: UnifiedSessionsStyle.toolbarItemSpacing) {
-                    LayoutToggleButton(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
-
-                    ToolbarIconButton(help: effectiveColorScheme == .dark ? "Switch to Light Mode" : "Switch to Dark Mode") { _ in
-                        ToolbarIcon(systemName: effectiveColorScheme == .dark ? "sun.max" : "moon")
-                    } action: {
-                        codexIndexer.toggleDarkLight(systemScheme: systemColorScheme)
-                    }
-                    .accessibilityLabel(Text("Toggle Dark/Light"))
-
-                    ToolbarIconButton(help: "Open preferences for appearance, indexing, and agents (⌘,)") { isHovering in
-                        ToolbarIcon(systemName: "gearshape", opacity: isHovering ? 1 : 0.4)
-                    } action: {
-                        PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController)
-                    }
-                    .keyboardShortcut(",", modifiers: .command)
-                    .accessibilityLabel(Text("Settings"))
-                }
+            ToolbarIconButton(help: "Resume the selected Codex or Claude session in its original CLI (⌃⌘R). Gemini, OpenCode, and Copilot sessions are read-only.") { _ in
+                ToolbarIcon(systemName: "terminal")
+            } action: {
+                if let s = selectedSession { resume(s) }
             }
+            .keyboardShortcut("r", modifiers: [.command, .control])
+            .disabled(selectedSession == nil || !(selectedSession?.source == .codex || selectedSession?.source == .claude))
+            .accessibilityLabel(Text("Resume"))
+
+            ToolbarIconButton(help: "Reveal the selected session's working directory in Finder (⌘⇧O)") { _ in
+                ToolbarIcon(systemName: "folder")
+            } action: {
+                if let s = selectedSession { openDir(s) }
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(selectedSession == nil)
+            .accessibilityLabel(Text("Open Working Directory"))
+
+            ToolbarIconButton(help: "Re-run the session indexer to discover new logs (⌘R)") { _ in
+                ZStack {
+                    ToolbarIcon(systemName: "arrow.clockwise")
+                        .opacity(unified.isIndexing || unified.isProcessingTranscripts ? 0.35 : 1)
+                    if unified.isIndexing || unified.isProcessingTranscripts {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            } action: {
+                unified.refresh()
+            }
+            .keyboardShortcut("r", modifiers: .command)
+            .accessibilityLabel(Text("Refresh"))
+
+            if isGitInspectorEnabled {
+                ToolbarIconButton(help: "Show historical and current git context with safety analysis (⌘⇧G)") { _ in
+                    ToolbarIcon(systemName: "clock.arrow.circlepath")
+                } action: {
+                    if let s = selectedSession { showGitInspector(s) }
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(selectedSession == nil)
+                .accessibilityLabel(Text("Git Context"))
+            }
+
+            ToolbarGroupDivider()
+
+            LayoutToggleButton(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
+
+            ToolbarIconButton(help: effectiveColorScheme == .dark ? "Switch to Light Mode" : "Switch to Dark Mode") { _ in
+                ToolbarIcon(systemName: effectiveColorScheme == .dark ? "sun.max" : "moon")
+            } action: {
+                codexIndexer.toggleDarkLight(systemScheme: systemColorScheme)
+            }
+            .accessibilityLabel(Text("Toggle Dark/Light"))
+
+            ToolbarIconButton(help: "Open preferences for appearance, indexing, and agents (⌘,)") { isHovering in
+                ToolbarIcon(systemName: "gearshape", opacity: isHovering ? 1 : 0.4)
+            } action: {
+                PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController)
+            }
+            .keyboardShortcut(",", modifiers: .command)
+            .accessibilityLabel(Text("Settings"))
         }
     }
 
@@ -1372,7 +1370,6 @@ private struct UnifiedSearchFiltersView: View {
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
-    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     private enum SearchFocusTarget: Hashable { case field, clear }
     var body: some View {
         HStack(spacing: 8) {
@@ -1475,28 +1472,6 @@ private struct UnifiedSearchFiltersView: View {
                 .keyboardShortcut("f", modifiers: [.command, .option])
                 .opacity(0.001)
                 .frame(width: 1, height: 1)
-
-            // Active project filter badge (Codex parity)
-            if let projectFilter = unified.projectFilter, !projectFilter.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "folder").foregroundStyle(.secondary)
-                    Text(projectFilter)
-                        .font(.system(size: 12))
-                        .lineLimit(1)
-                    Button(action: { unified.projectFilter = nil; unified.recomputeNow() }) {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Remove the project filter and show all sessions")
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background((stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent).opacity(0.1))
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke((stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent).opacity(0.3))
-                )
-            }
         }
     }
 
@@ -1559,6 +1534,44 @@ private struct UnifiedSearchFiltersView: View {
         searchDebouncer = work
         let delay: TimeInterval = FeatureFlags.increaseDeepSearchDebounce ? 0.28 : 0.15
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+}
+
+private struct UnifiedProjectFilterBadgeView: View {
+    @ObservedObject var unified: UnifiedSessionIndexer
+    @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
+
+    var body: some View {
+        let accent = stripMonochrome ? Color.secondary : UnifiedSessionsStyle.selectionAccent
+        HStack(spacing: 4) {
+            Image(systemName: "folder")
+                .foregroundStyle(.secondary)
+            if let projectFilter = unified.projectFilter {
+                Text(projectFilter)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 220, alignment: .leading)
+            }
+            Button(action: {
+                unified.projectFilter = nil
+                unified.recomputeNow()
+            }) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Remove the project filter and show all sessions")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(accent.opacity(0.1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(accent.opacity(0.3))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
