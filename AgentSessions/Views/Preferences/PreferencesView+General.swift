@@ -174,6 +174,22 @@ extension PreferencesView {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                sectionHeader("Session View")
+                labeledRow("Auto-scroll in Session View") {
+                    let key = PreferencesKey.Unified.sessionViewAutoScrollTarget
+                    Picker("", selection: Binding(
+                        get: { UserDefaults.standard.string(forKey: key) ?? SessionViewAutoScrollTarget.lastUserPrompt.rawValue },
+                        set: { UserDefaults.standard.set($0, forKey: key) }
+                    )) {
+                        ForEach(SessionViewAutoScrollTarget.allCases) { option in
+                            Text(option.title).tag(option.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 320)
+                    .help("When opening a session without a search query, choose which prompt to jump to in Session view")
+                }
+
                 // Columns section
                 sectionHeader("Columns")
                 // First row: three columns to reduce height
