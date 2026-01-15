@@ -1137,12 +1137,12 @@ private final class TerminalLayoutManager: NSLayoutManager {
         let accentWidth: CGFloat
     }
 
-    private func style(for kind: BlockKind) -> BlockStyle {
-        // Tuned for consistent contrast in light/dark:
-        // - subtle tint fill
-        // - optional left accent bar
-        // - thin stroke for definition
-        let dark = isDark
+	    private func style(for kind: BlockKind) -> BlockStyle {
+	        // Tuned for consistent contrast in light/dark:
+	        // - subtle tint fill
+	        // - optional left accent bar
+	        // - thin stroke for definition
+	        let dark = isDark
 
         func rgba(_ color: NSColor, alpha: CGFloat) -> NSColor { color.withAlphaComponent(alpha) }
 
@@ -1150,9 +1150,9 @@ private final class TerminalLayoutManager: NSLayoutManager {
 	        case .user:
 	            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
 	            return BlockStyle(
-	                fill: rgba(base, alpha: dark ? 0.08 : 0.02),
-	                accent: rgba(base, alpha: dark ? 0.55 : 0.35),
-	                accentWidth: 4
+	                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
+	                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
+	                accentWidth: 6
 	            )
         case .agent:
             let base = agentBrandAccent
@@ -2006,6 +2006,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
 		        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
 			        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+			        let systemUserSemibold = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
 		        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
 	        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
@@ -2035,10 +2036,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	            let p = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
 	            p.paragraphSpacingBefore = spacingBefore
 	            // Card layout:
-	            // - keep a consistent left/right internal padding (accounts for 4px accent strip + 16px content padding)
+	            // - keep a consistent left/right internal padding (accounts for accent strip + 16px content padding)
 	            // - rely on paragraph spacing for whitespace between cards
 	            let cardInsetX: CGFloat = 8
-	            let leftPaddingFromCardEdge: CGFloat = 20 // 4px strip + 16px padding
+	            let leftPaddingFromCardEdge: CGFloat = 20 // Accent strip + 16px padding
 	            let rightPaddingFromCardEdge: CGFloat = 16
 	            p.firstLineHeadIndent = cardInsetX + leftPaddingFromCardEdge
 	            p.headIndent = cardInsetX + leftPaddingFromCardEdge
@@ -2060,6 +2061,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let range = NSRange(location: attr.length, length: ns.length)
             ranges[line.id] = range
 
+            let isFirstLineOfBlock = idx == 0 || previousBlockIndex != line.blockIndex
             let isNewBlock = idx > 0 && previousBlockIndex != line.blockIndex
             previousBlockIndex = line.blockIndex
 
@@ -2079,6 +2081,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
 	            let baseFont: NSFont = {
 	                if line.role == .toolInput { return monoRegularFont }
+	                if line.role == .user && !isPreambleUserLine && isFirstLineOfBlock { return systemUserSemibold }
 	                if line.role == .user && !isPreambleUserLine { return systemUserFont }
 	                return systemRegularFont
 	            }()
