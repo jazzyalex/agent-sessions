@@ -72,6 +72,15 @@ Local-first, open source, and built for terminal vibe warriors.
 
 ## What's New in 2.10
 
+### TL;DR
+- Apple Notes-style Unified Search across all sessions and inside a session, compatible with filters.
+- SQLite-backed search plus richer instant indexing for faster results and better recall.
+- Incremental analytics refresh and faster startup with immediate hydrated lists.
+- Session view (formerly Color view) is now a colored timeline with improved formatting.
+- Unified Search navigation and local Find are more consistent and responsive.
+- Cockpit-style status UI and refreshed session list typography with live counts.
+- Onboarding tour refreshed and always shows supported agents.
+
 ### Unified Search (Apple Notes-style)
 Unified Search is now fast across all sessions and within a specific session, and it can be combined with any filters.
 
@@ -119,7 +128,7 @@ Separate refresh intervals per agent (Codex: 1/5/15 min, Claude: 3/15/30 min). N
 
 ## What's New in 2.7
 
-### Color View
+### Color View (now Session view)
 Terminal-inspired view with CLI-style colorized output and role-based filtering (User, Agent, Tools, Errors). Quick toggle with Cmd+Shift+T.
 
 ### Claude Usage Format Fix
@@ -162,11 +171,11 @@ Usage limit tracking and reset times now properly support Codex 0.50+ session fo
 ## Core Features
 
 ### Unified Interface v2
-Browse **Codex CLI**, **Claude Code**, **Gemini CLI**, **GitHub Copilot CLI**, and **OpenCode** sessions side-by-side. Toggle between sources with strict filtering and unified search. Star favorites for quick access.
+Browse **Codex CLI**, **Claude Code**, **Gemini CLI**, **GitHub Copilot CLI**, **Droid (Factory CLI)**, and **OpenCode** sessions side-by-side. Toggle between sources with strict filtering and unified search. Star favorites for quick access.
 
 ### Unified Search v2
-One search for everything. Find any snippet or prompt instantly — no matter which agent or project it came from.
-Smart sorting, instant cancel, full-text search with project filters.
+Apple Notes-style search for everything. Find any snippet or prompt instantly — no matter which agent or project it came from.
+Smart sorting, instant cancel, full-text search with project filters, and fast in-session search.
 
 ### Instant Resume & Re-use
 Reopen any Codex or Claude session in Terminal/iTerm with one click — or just copy what you need.  
@@ -195,7 +204,7 @@ Right-click any Codex session → **Show Git Context** to open the inspector.
 
 ### Local, Private & Safe
 All processing runs on your Mac.
-Reads `~/.codex/sessions`, `~/.claude/sessions`, `~/.gemini/tmp`, `~/.copilot/session-state`, and `~/.local/share/opencode/storage/session` (all read‑only).
+Reads `~/.codex/sessions`, `~/.claude/sessions`, `~/.gemini/tmp`, `~/.copilot/session-state`, `~/.factory/sessions`, `~/.factory/projects`, and `~/.local/share/opencode/storage/session` (all read‑only).
 No cloud uploads or telemetry — **read‑only by design.**
 
 ---
