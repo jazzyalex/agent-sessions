@@ -241,7 +241,7 @@ struct TerminalBuilder {
         if let reviewText = reviewDisplayTextIfNeeded(block: block, source: source) {
             return [LineSegment(role: .meta, text: reviewText, blockIndex: blockIndex)]
         }
-        if baseRole == .user, isUserInterruptOnlyMessage(rawText) {
+        if baseRole == .user, isUserInterruptMarker(rawText) {
             let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
             let text = trimmed.isEmpty ? rawText : trimmed
             let segment = LineSegment(role: .meta, text: text, blockIndex: syntheticIndex)
@@ -319,20 +319,33 @@ struct TerminalBuilder {
         return found ? segments : nil
     }
 
-    private static func isUserInterruptOnlyMessage(_ text: String) -> Bool {
+    static func isUserInterruptMarker(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         let lower = trimmed.lowercased()
         let stripped = lower.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        switch stripped {
-        case "request interrupted by user",
-             "interrupted by user",
-             "request cancelled by user",
-             "request canceled by user":
-            return true
-        default:
-            return false
-        }
+        let collapsed = stripped
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let normalized = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: ".!"))
+        guard !normalized.isEmpty else { return false }
+
+        let markers: Set<String> = [
+            "request interrupted by user",
+            "request interrupted by user for tool use",
+            "request interrupted by user for tool-use",
+            "interrupted by user",
+            "interrupted by user for tool use",
+            "interrupted by user for tool-use",
+            "request cancelled by user",
+            "request cancelled by user for tool use",
+            "request cancelled by user for tool-use",
+            "request canceled by user",
+            "request canceled by user for tool use",
+            "request canceled by user for tool-use"
+        ]
+        return markers.contains(normalized)
     }
 
     private static func isClaudeLocalCommandTagLine(_ trimmed: String) -> Bool {

@@ -30,6 +30,8 @@ struct OnboardingSheetView: View {
     @State private var isForward: Bool = true
     @State private var showSkipConfirm: Bool = false
     @State private var animatedPrimarySessions: Double = 0
+    @State private var indexedSessionsSnapshot: [SessionSource: [Session]] = [:]
+    @State private var didLoadIndexedSessionsSnapshot: Bool = false
 
     private var palette: OnboardingPalette { OnboardingPalette(colorScheme: colorScheme) }
     private var slides: [OnboardingSlide] { OnboardingSlide.allCases }
@@ -70,6 +72,7 @@ struct OnboardingSheetView: View {
         .frame(minWidth: 780, minHeight: 620)
         .interactiveDismissDisabled(true)
         .onAppear {
+            loadIndexedSessionsSnapshotIfNeeded()
             updateAnimatedCount(animated: !reduceMotion)
         }
         .onChange(of: totalSessions) { _, _ in
@@ -148,15 +151,9 @@ struct OnboardingSheetView: View {
                     .multilineTextAlignment(.center)
             }
 
-            if displayAgents.isEmpty {
-                Text(totalSessions > 0 ? "No real sessions detected yet." : "No sessions detected yet.")
-                    .font(.system(size: 14, weight: .regular, design: .default))
-                    .foregroundStyle(.secondary)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
-                    ForEach(displayAgents) { agent in
-                        AgentPill(agent: agent, palette: palette)
-                    }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
+                ForEach(displayAgents) { agent in
+                    AgentPill(agent: agent, palette: palette)
                 }
             }
         }
@@ -173,17 +170,17 @@ struct OnboardingSheetView: View {
             )
 
             VStack(spacing: 12) {
-                if discoveredAgents.isEmpty {
-                    OnboardingEmptyState(text: "No sessions found yet. Check Settings to connect an agent.", palette: palette)
-                } else {
-                    ForEach(discoveredAgents) { agent in
-                        AgentToggleRow(
-                            agent: agent,
-                            palette: palette,
-                            isOn: agentBinding(for: agent.source),
-                            isDisabled: !AgentEnablement.canDisable(agent.source)
-                        )
-                    }
+                if totalSessions == 0 {
+                    OnboardingEmptyState(text: "No sessions found yet. Check Settings → Paths to connect an agent.", palette: palette)
+                }
+
+                ForEach(agentsForToggles) { agent in
+                    AgentToggleRow(
+                        agent: agent,
+                        palette: palette,
+                        isOn: agentBinding(for: agent.source),
+                        isDisabled: isToggleDisabled(for: agent.source)
+                    )
                 }
             }
 
@@ -370,26 +367,15 @@ struct OnboardingSheetView: View {
     }
 
     private var agentCounts: [AgentCount] {
-        [
-            AgentCount(source: .claude,
-                       totalCount: claudeIndexer.allSessions.count,
-                       realCount: realCount(in: claudeIndexer.allSessions)),
-            AgentCount(source: .codex,
-                       totalCount: codexIndexer.allSessions.count,
-                       realCount: realCount(in: codexIndexer.allSessions)),
-            AgentCount(source: .gemini,
-                       totalCount: geminiIndexer.allSessions.count,
-                       realCount: realCount(in: geminiIndexer.allSessions)),
-            AgentCount(source: .opencode,
-                       totalCount: opencodeIndexer.allSessions.count,
-                       realCount: realCount(in: opencodeIndexer.allSessions)),
-            AgentCount(source: .copilot,
-                       totalCount: copilotIndexer.allSessions.count,
-                       realCount: realCount(in: copilotIndexer.allSessions)),
-            AgentCount(source: .droid,
-                       totalCount: droidIndexer.allSessions.count,
-                       realCount: realCount(in: droidIndexer.allSessions))
-        ]
+        SessionSource.allCases.map { source in
+            let sessions = sessionsForCounts(source: source)
+            return AgentCount(
+                source: source,
+                totalCount: sessions.count,
+                realCount: realCount(in: sessions),
+                isEnabled: isAgentEnabled(source)
+            )
+        }
     }
 
     private var totalSessions: Int {
@@ -408,16 +394,83 @@ struct OnboardingSheetView: View {
         max(0, totalSessions - realSessionsTotal)
     }
 
-    private var discoveredAgents: [AgentCount] {
-        agentCounts.filter { $0.realCount > 0 }
-    }
-
     private var displayAgents: [AgentCount] {
-        discoveredAgents.sorted { lhs, rhs in
+        agentCounts.sorted { lhs, rhs in
             if lhs.displayCount == rhs.displayCount {
                 return lhs.source.displayName < rhs.source.displayName
             }
             return lhs.displayCount > rhs.displayCount
+        }
+    }
+
+    private var agentsForToggles: [AgentCount] {
+        // Preserve the enum order (matches Preferences)
+        SessionSource.allCases.compactMap { source in
+            agentCounts.first(where: { $0.source == source })
+        }
+    }
+
+    private func sessionsForCounts(source: SessionSource) -> [Session] {
+        let live = sessionsFromIndexer(source)
+        if !live.isEmpty { return live }
+        if let snapshot = indexedSessionsSnapshot[source], !snapshot.isEmpty { return snapshot }
+        return live
+    }
+
+    private func sessionsFromIndexer(_ source: SessionSource) -> [Session] {
+        switch source {
+        case .codex: return codexIndexer.allSessions
+        case .claude: return claudeIndexer.allSessions
+        case .gemini: return geminiIndexer.allSessions
+        case .opencode: return opencodeIndexer.allSessions
+        case .copilot: return copilotIndexer.allSessions
+        case .droid: return droidIndexer.allSessions
+        }
+    }
+
+    private func isAgentEnabled(_ source: SessionSource) -> Bool {
+        switch source {
+        case .codex: return codexAgentEnabled
+        case .claude: return claudeAgentEnabled
+        case .gemini: return geminiAgentEnabled
+        case .opencode: return openCodeAgentEnabled
+        case .copilot: return copilotAgentEnabled
+        case .droid: return droidAgentEnabled
+        }
+    }
+
+    private func isToggleDisabled(for source: SessionSource) -> Bool {
+        let enabledCount = SessionSource.allCases.filter { isAgentEnabled($0) }.count
+        let isCurrentlyOn = isAgentEnabled(source)
+        let canDisable = !(enabledCount == 1 && isCurrentlyOn)
+
+        let installed = AgentEnablement.binaryInstalled(for: source)
+        let available = installed || AgentEnablement.isAvailable(source)
+        let canEnable = available || isCurrentlyOn
+
+        return !(canDisable && canEnable)
+    }
+
+    private func loadIndexedSessionsSnapshotIfNeeded() {
+        guard !didLoadIndexedSessionsSnapshot else { return }
+        didLoadIndexedSessionsSnapshot = true
+
+        Task.detached(priority: .utility) {
+            do {
+                let db = try IndexDB()
+                let repo = SessionMetaRepository(db: db)
+                var out: [SessionSource: [Session]] = [:]
+                for source in SessionSource.allCases {
+                    if let sessions = try? await repo.fetchSessions(for: source) {
+                        out[source] = sessions
+                    }
+                }
+                await MainActor.run {
+                    self.indexedSessionsSnapshot = out
+                }
+            } catch {
+                // Best-effort: onboarding can still render live counts from active indexers.
+            }
         }
     }
 
@@ -467,6 +520,7 @@ private struct AgentCount: Identifiable {
     let source: SessionSource
     let totalCount: Int
     let realCount: Int
+    let isEnabled: Bool
 
     var id: String { source.rawValue }
     var displayCount: Int { realCount }
@@ -543,6 +597,22 @@ private struct AgentPill: View {
             Text("\(agent.displayCount)")
                 .font(.custom("JetBrains Mono", size: 13))
                 .foregroundStyle(.secondary)
+
+            if !agent.isEnabled {
+                Text("Inactive")
+                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(palette.tipFill)
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(palette.tipStroke, lineWidth: 1)
+                    )
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -554,6 +624,7 @@ private struct AgentPill: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(palette.pillStroke, lineWidth: 1)
         )
+        .opacity(agent.isEnabled ? 1.0 : 0.7)
     }
 }
 
@@ -571,6 +642,7 @@ private struct AgentToggleRow: View {
                 Text(agent.source.displayName)
                     .font(.system(size: 14, weight: .semibold, design: .default))
                     .foregroundStyle(.primary)
+                    .opacity(agent.isEnabled ? 1.0 : 0.7)
                 HStack(spacing: 4) {
                     Text("\(agent.displayCount)")
                         .font(.custom("JetBrains Mono", size: 12))
@@ -1028,9 +1100,23 @@ private struct OnboardingPrimaryButtonStyle: ButtonStyle {
             .padding(.horizontal, 18)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isFinal ? palette.primaryFinalGradient : palette.primaryGradient)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(palette.primaryGradient)
+
+                    if isFinal {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(palette.primaryLiquidOverlay)
+                            .blendMode(.softLight)
+                            .opacity(palette.primaryLiquidOverlayOpacity)
+                    }
+                }
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(palette.primaryButtonStroke, lineWidth: 1)
+            )
+            .shadow(color: palette.primaryButtonShadow, radius: 6, x: 0, y: 2)
             .opacity(configuration.isPressed ? 0.85 : 1.0)
     }
 }
@@ -1157,6 +1243,11 @@ private struct CountingNumberText: View, Animatable {
 
 private struct OnboardingPalette {
     let colorScheme: ColorScheme
+    private var controlAccent: NSColor { NSColor.controlAccentColor }
+
+    private func blendAccent(towards target: NSColor, fraction: CGFloat) -> Color {
+        Color(nsColor: controlAccent.blended(withFraction: fraction, of: target) ?? controlAccent)
+    }
 
     var backgroundTop: Color {
         colorScheme == .dark
@@ -1242,7 +1333,10 @@ private struct OnboardingPalette {
 
     var iconGradientPrimary: LinearGradient {
         LinearGradient(
-            colors: [Color(red: 0.32, green: 0.55, blue: 0.98), Color(red: 0.58, green: 0.45, blue: 0.96)],
+            colors: [
+                blendAccent(towards: .white, fraction: colorScheme == .dark ? 0.12 : 0.18),
+                blendAccent(towards: .black, fraction: colorScheme == .dark ? 0.18 : 0.10)
+            ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
@@ -1274,9 +1368,12 @@ private struct OnboardingPalette {
 
     var primaryGradient: LinearGradient {
         LinearGradient(
-            colors: [Color(red: 0.36, green: 0.56, blue: 0.96), Color(red: 0.50, green: 0.44, blue: 0.95)],
-            startPoint: .leading,
-            endPoint: .trailing
+            colors: [
+                blendAccent(towards: .white, fraction: colorScheme == .dark ? 0.10 : 0.14),
+                blendAccent(towards: .black, fraction: colorScheme == .dark ? 0.16 : 0.10)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
         )
     }
 
@@ -1286,6 +1383,34 @@ private struct OnboardingPalette {
             startPoint: .leading,
             endPoint: .trailing
         )
+    }
+
+    var primaryLiquidOverlay: RadialGradient {
+        RadialGradient(
+            colors: [
+                Color.white.opacity(colorScheme == .dark ? 0.22 : 0.28),
+                Color.white.opacity(0.0)
+            ],
+            center: .topLeading,
+            startRadius: 6,
+            endRadius: 140
+        )
+    }
+
+    var primaryLiquidOverlayOpacity: Double {
+        colorScheme == .dark ? 0.34 : 0.26
+    }
+
+    var primaryButtonStroke: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.14)
+            : Color.black.opacity(0.12)
+    }
+
+    var primaryButtonShadow: Color {
+        colorScheme == .dark
+            ? Color.black.opacity(0.42)
+            : Color.black.opacity(0.18)
     }
 
     var secondaryButtonFill: Color {
