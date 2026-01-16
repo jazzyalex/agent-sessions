@@ -45,6 +45,7 @@ struct AgentSessionsApp: App {
     @State private var selectedSessionID: String?
     @State private var selectedEventID: String?
     @State private var focusSearchToggle: Bool = false
+    @State private var didRunProbeCleanup: Bool = false
     // Legacy first-run prompt removed
 
     // Analytics
@@ -92,6 +93,13 @@ struct AgentSessionsApp: App {
                 .background(WindowAutosave(name: "MainWindow"))
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
+                    if !didRunProbeCleanup {
+                        didRunProbeCleanup = true
+                        Task.detached(priority: .background) {
+                            await ClaudeStatusService.cleanupOrphansOnLaunch()
+                            await CodexStatusService.cleanupOrphansOnLaunch()
+                        }
+                    }
                     LaunchProfiler.reset("Unified main window")
                     LaunchProfiler.log("Window appeared")
                     LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
