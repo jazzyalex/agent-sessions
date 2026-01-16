@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import SwiftUI
 #if os(macOS)
 import IOKit.ps
@@ -339,6 +340,9 @@ struct RateLimitSummary {
 
 actor CodexStatusService {
     private enum State { case idle, starting, running, stopping }
+    private static let probeSessionName = "status"
+    private static let probeLabelPrefix = "as-cx-"
+    private static let probeLabelLength = 12
 
     // Regex helpers
     private let percentRegex = try! NSRegularExpression(pattern: "(\\d{1,3})\\s*%\\b", options: [.caseInsensitive])
@@ -353,6 +357,8 @@ actor CodexStatusService {
     private var stdoutPipe: Pipe?
     private var stderrPipe: Pipe?
     private var state: State = .idle
+    private var tmuxProbeInFlight: Bool = false
+    private var activeProbeLabel: String? = nil
     private var bufferOut = Data()
     private var bufferErr = Data()
     private var snapshot = CodexUsageSnapshot()
@@ -369,8 +375,14 @@ actor CodexStatusService {
         self.availabilityHandler = availabilityHandler
     }
 
+    static func cleanupOrphansOnLaunch() async {
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        await service.cleanupOrphanedProbeProcesses()
+    }
+
     func start() async {
         shouldRun = true
+        await cleanupOrphanedProbeProcesses()
         refresherTask?.cancel()
         refresherTask = Task { [weak self] in
             guard let self else { return }
@@ -386,6 +398,11 @@ actor CodexStatusService {
         shouldRun = false
         refresherTask?.cancel()
         refresherTask = nil
+        if let label = activeProbeLabel {
+            await cleanupTmuxProbe(label: label, session: Self.probeSessionName)
+            activeProbeLabel = nil
+        }
+        tmuxProbeInFlight = false
     }
 
     func setVisible(_ isVisible: Bool) {
@@ -401,6 +418,16 @@ actor CodexStatusService {
     func refreshNow() {
         // Manual refresh from strip/menu uses the same stale-only probe rule.
         Task { await self.refreshTick(userInitiated: true) }
+    }
+
+    private func beginTmuxProbe() -> Bool {
+        if tmuxProbeInFlight { return false }
+        tmuxProbeInFlight = true
+        return true
+    }
+
+    private func endTmuxProbe() {
+        tmuxProbeInFlight = false
     }
 
     // MARK: - Core
@@ -703,12 +730,18 @@ actor CodexStatusService {
             let d = CodexProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(missing)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Script not found in bundle")
             return (nil, d)
         }
+        let workDir = CodexProbeConfig.probeWorkingDirectory()
+        guard beginTmuxProbe() else {
+            let d = CodexProbeDiagnostics(success: false, exitCode: 125, scriptPath: "(not run)", workdir: workDir, codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Probe already running")
+            return (nil, d)
+        }
+        defer { endTmuxProbe() }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [scriptURL.path]
 
         var env = ProcessInfo.processInfo.environment
-        let workDir = CodexProbeConfig.probeWorkingDirectory()
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
         env["WORKDIR"] = workDir
         env["TIMEOUT_SECS"] = env["TIMEOUT_SECS"] ?? "14"
@@ -717,6 +750,12 @@ actor CodexStatusService {
         if let codexBin { env["CODEX_BIN"] = codexBin }
         let tmuxBin = resolveTmuxPath()
         if let tmuxBin { env["TMUX_BIN"] = tmuxBin }
+        let probeLabel = makeProbeLabel()
+        env["TMUX_LABEL"] = probeLabel
+        activeProbeLabel = probeLabel
+        defer { activeProbeLabel = nil }
+        let timeoutValue = Int(env["TIMEOUT_SECS"] ?? "") ?? 14
+        let scriptTimeoutSeconds = max(20, timeoutValue + 8)
 
         // Provide a Terminal-like PATH so Node and vendor binaries resolve inside tmux
         if let terminalPATH = Self.terminalPATH() { env["PATH"] = terminalPATH }
@@ -728,9 +767,13 @@ actor CodexStatusService {
             print("[CodexProbe] Failed to launch capture script: \(error.localizedDescription)")
             return (nil, d)
         }
-        process.waitUntilExit()
+        let didExit = await waitForProcessExit(process, timeoutSeconds: scriptTimeoutSeconds, label: probeLabel, session: Self.probeSessionName)
         let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        if !didExit {
+            let d = CodexProbeDiagnostics(success: false, exitCode: 124, scriptPath: scriptURL.path, workdir: workDir, codexBin: codexBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr.isEmpty ? "Script timed out" : stderr)
+            return (nil, d)
+        }
         if process.terminationStatus != 0 {
             if !stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 print("[CodexProbe] Script non-zero (\(process.terminationStatus)). stdout: \n\(stdout)")
@@ -761,6 +804,251 @@ actor CodexStatusService {
         }
         s.eventTimestamp = Date()
         return s
+    }
+
+    private func waitForProcessExit(_ process: Process,
+                                    timeoutSeconds: Int,
+                                    label: String,
+                                    session: String) async -> Bool {
+        let maxIterations = max(1, timeoutSeconds * 2)
+        var iterations = 0
+        while process.isRunning && iterations < maxIterations {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            iterations += 1
+        }
+        if process.isRunning {
+            process.terminate()
+            await cleanupTmuxProbe(label: label, session: session)
+            var grace = 0
+            while process.isRunning && grace < 6 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                grace += 1
+            }
+            if process.isRunning {
+                _ = kill(process.processIdentifier, SIGKILL)
+            }
+            return false
+        }
+        return true
+    }
+
+    private func makeProbeLabel() -> String {
+        let token = randomToken(length: Self.probeLabelLength)
+        return Self.probeLabelPrefix + token
+    }
+
+    private func randomToken(length: Int) -> String {
+        let letters = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        let digits = Array("0123456789")
+        let all = letters + digits
+        var rng = SystemRandomNumberGenerator()
+        guard length > 0 else { return "" }
+        var chars: [Character] = []
+        chars.reserveCapacity(length)
+        chars.append(letters.randomElement(using: &rng) ?? "a")
+        if length > 1 {
+            for _ in 0..<(length - 2) {
+                chars.append(all.randomElement(using: &rng) ?? "a")
+            }
+            chars.append(digits.randomElement(using: &rng) ?? "0")
+        }
+        return String(chars)
+    }
+
+    private func cleanupOrphanedProbeProcesses() async {
+        let workDir = CodexProbeConfig.probeWorkingDirectory()
+        let markers = workDirMarkers(workDir)
+        let snapshot = await runProcess(executable: "/bin/ps",
+                                        arguments: ["-A", "-o", "pid=", "-o", "command="],
+                                        timeoutSeconds: 2)
+        guard !snapshot.stdout.isEmpty else {
+            await cleanupOrphanedTmuxLabels()
+            return
+        }
+        var labels = Set<String>()
+        var pids: [pid_t] = []
+        for line in snapshot.stdout.split(separator: "\n") {
+            let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let splitIndex = trimmed.firstIndex(where: { $0.isWhitespace }) else { continue }
+            let pidString = String(trimmed[..<splitIndex])
+            let command = String(trimmed[splitIndex...]).trimmingCharacters(in: .whitespaces)
+            guard let pidValue = Int32(pidString) else { continue }
+            let lowerCommand = command.lowercased()
+            guard lowerCommand.contains("codex") else { continue }
+            if lowerCommand.contains("codex_status_capture") { continue }
+            let envSnapshot = await runProcess(executable: "/bin/ps",
+                                               arguments: ["eww", "-p", pidString],
+                                               timeoutSeconds: 2)
+            let envLine = envSnapshot.stdout
+            guard !envLine.isEmpty else { continue }
+            guard envLine.contains("__CFBundleIdentifier=com.triada.AgentSessions") else { continue }
+            guard markers.contains(where: { envLine.contains($0) }) else { continue }
+            pids.append(pid_t(pidValue))
+            if let label = extractTmuxLabel(from: envLine, expectedPrefix: Self.probeLabelPrefix) {
+                labels.insert(label)
+            }
+        }
+        labels.formUnion(scanTmuxLabels(prefix: Self.probeLabelPrefix))
+        for label in labels {
+            if await tmuxServerLooksLikeProbe(label: label,
+                                              session: Self.probeSessionName,
+                                              expectedCommandToken: "codex") {
+                await cleanupTmuxProbe(label: label, session: Self.probeSessionName)
+            }
+        }
+        for pid in pids {
+            await terminateProcessGroup(pid: pid)
+        }
+    }
+
+    private func cleanupOrphanedTmuxLabels() async {
+        let labels = scanTmuxLabels(prefix: Self.probeLabelPrefix)
+        for label in labels {
+            if await tmuxServerLooksLikeProbe(label: label,
+                                              session: Self.probeSessionName,
+                                              expectedCommandToken: "codex") {
+                await cleanupTmuxProbe(label: label, session: Self.probeSessionName)
+            }
+        }
+    }
+
+    private func extractTmuxLabel(from command: String, expectedPrefix: String) -> String? {
+        guard let range = command.range(of: "TMUX=") else { return nil }
+        let after = command[range.upperBound...]
+        let end = after.firstIndex(where: { $0.isWhitespace }) ?? after.endIndex
+        let value = String(after[..<end])
+        let socketPath = value.split(separator: ",", maxSplits: 1, omittingEmptySubsequences: false).first
+        guard let socketPath else { return nil }
+        let label = URL(fileURLWithPath: String(socketPath)).lastPathComponent
+        return label.hasPrefix(expectedPrefix) ? label : nil
+    }
+
+    private func workDirMarkers(_ workDir: String) -> [String] {
+        let escaped = workDir.replacingOccurrences(of: " ", with: "\\ ")
+        if escaped == workDir {
+            return ["WORKDIR=\(workDir)"]
+        }
+        return ["WORKDIR=\(workDir)", "WORKDIR=\(escaped)"]
+    }
+
+    private func scanTmuxLabels(prefix: String) -> Set<String> {
+        let uid = getuid()
+        let roots = ["/private/tmp/tmux-\(uid)", "/tmp/tmux-\(uid)"]
+        var labels = Set<String>()
+        let fm = FileManager.default
+        for root in roots {
+            let rootURL = URL(fileURLWithPath: root)
+            guard let contents = try? fm.contentsOfDirectory(at: rootURL,
+                                                             includingPropertiesForKeys: nil,
+                                                             options: [.skipsHiddenFiles]) else { continue }
+            for entry in contents {
+                let name = entry.lastPathComponent
+                if name.hasPrefix(prefix) {
+                    labels.insert(name)
+                }
+            }
+        }
+        return labels
+    }
+
+    private func tmuxServerLooksLikeProbe(label: String,
+                                          session: String,
+                                          expectedCommandToken: String) async -> Bool {
+        guard let tmuxPath = resolveTmuxPath() else { return false }
+        let sessions = await runProcess(executable: tmuxPath,
+                                        arguments: ["-L", label, "list-sessions", "-F", "#{session_name}"],
+                                        timeoutSeconds: 2)
+        guard sessions.status == 0 else { return false }
+        let sessionNames = sessions.stdout.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard sessionNames.contains(session) else { return false }
+        let clients = await runProcess(executable: tmuxPath,
+                                       arguments: ["-L", label, "list-clients", "-t", session, "-F", "#{client_name}"],
+                                       timeoutSeconds: 2)
+        if clients.status == 0 {
+            let trimmedClients = clients.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedClients.isEmpty { return false }
+        }
+        let env = await runProcess(executable: tmuxPath,
+                                   arguments: ["-L", label, "show-environment", "-g"],
+                                   timeoutSeconds: 2)
+        if env.status == 0, env.stdout.contains("AS_PROBE=1") {
+            guard env.stdout.contains("AS_PROBE_APP=com.triada.AgentSessions") else { return false }
+            guard env.stdout.contains("AS_PROBE_KIND=codex") else { return false }
+            return true
+        }
+        let panes = await runProcess(executable: tmuxPath,
+                                     arguments: ["-L", label, "list-panes", "-t", session, "-F", "#{pane_current_command} #{pane_start_command}"],
+                                     timeoutSeconds: 2)
+        guard panes.status == 0 else { return false }
+        let paneInfo = panes.stdout.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !paneInfo.isEmpty else { return false }
+        return paneInfo.contains(expectedCommandToken.lowercased())
+    }
+
+    private func cleanupTmuxProbe(label: String, session: String) async {
+        guard let tmuxPath = resolveTmuxPath() else { return }
+        if let panePid = await tmuxPanePID(tmuxPath: tmuxPath, label: label, session: session) {
+            await terminateProcessGroup(pid: panePid)
+        }
+        _ = await runProcess(executable: tmuxPath,
+                             arguments: ["-L", label, "kill-session", "-t", session],
+                             timeoutSeconds: 2)
+        _ = await runProcess(executable: tmuxPath,
+                             arguments: ["-L", label, "kill-server"],
+                             timeoutSeconds: 2)
+    }
+
+    private func tmuxPanePID(tmuxPath: String, label: String, session: String) async -> pid_t? {
+        let result = await runProcess(executable: tmuxPath,
+                                      arguments: ["-L", label, "display-message", "-p", "-t", "\(session):0.0", "#{pane_pid}"],
+                                      timeoutSeconds: 2)
+        guard result.status == 0 else { return nil }
+        let trimmed = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let pidValue = Int32(trimmed) else { return nil }
+        return pid_t(pidValue)
+    }
+
+    private func terminateProcessGroup(pid: pid_t) async {
+        guard pid > 0 else { return }
+        if pid == getpid() { return }
+        let pgid = getpgid(pid)
+        let appPgid = getpgrp()
+        if pgid > 0 && pgid != appPgid {
+            _ = kill(-pgid, SIGTERM)
+        } else {
+            _ = kill(pid, SIGTERM)
+        }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        if pgid > 0 && pgid != appPgid {
+            _ = kill(-pgid, SIGKILL)
+        } else {
+            _ = kill(pid, SIGKILL)
+        }
+    }
+
+    private func runProcess(executable: String,
+                            arguments: [String],
+                            timeoutSeconds: Int) async -> (status: Int32, stdout: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = Pipe()
+        do { try process.run() } catch { return (127, "") }
+        let maxIterations = max(1, timeoutSeconds * 10)
+        var iterations = 0
+        while process.isRunning && iterations < maxIterations {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            iterations += 1
+        }
+        if process.isRunning {
+            process.terminate()
+            return (124, "")
+        }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        let stdout = String(data: data, encoding: .utf8) ?? ""
+        return (process.terminationStatus, stdout)
     }
 
     private func nextInterval() -> UInt64 {

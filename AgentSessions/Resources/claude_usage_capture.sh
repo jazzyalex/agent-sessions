@@ -27,9 +27,19 @@ SLEEP_AFTER_USAGE="${SLEEP_AFTER_USAGE:-2.0}"
 WORKDIR="${WORKDIR:-$(pwd)}"
 # CLAUDE_TUI_DEBUG - set to 1 to dump raw tmux capture on parsing failure
 
-# Unique label to avoid interference
-LABEL="as-cc-$$"
+# Unique label to avoid interference (override via TMUX_LABEL)
+LABEL="${TMUX_LABEL:-}"
+if [[ -z "$LABEL" ]]; then
+    uuid=$(uuidgen 2>/dev/null || true)
+    uuid=${uuid//-/}
+    if [[ -n "$uuid" ]]; then
+        LABEL="as-cc-${uuid:0:12}"
+    else
+        LABEL="as-cc-${RANDOM}${RANDOM}$(date +%s)"
+    fi
+fi
 SESSION="usage"
+PANE_PID=""
 
 # ============================================================================
 # Error handling
@@ -46,9 +56,32 @@ EOF
 # Cleanup trap
 # ============================================================================
 cleanup() {
-    "${TMUX_CMD:-tmux}" -L "$LABEL" kill-server 2>/dev/null || true
+    set +e
+    set +o pipefail
+    local tmux_cmd="${TMUX_CMD:-${TMUX_BIN:-tmux}}"
+    local pane_pid="$PANE_PID"
+    if command -v "$tmux_cmd" >/dev/null 2>&1; then
+        if [[ -z "$pane_pid" ]]; then
+            pane_pid=$("$tmux_cmd" -L "$LABEL" display-message -p -t "$SESSION:0.0" "#{pane_pid}" 2>/dev/null || true)
+        fi
+        if [[ -n "$pane_pid" ]]; then
+            local pgid=""
+            pgid=$(ps -o pgid= -p "$pane_pid" 2>/dev/null | tr -d ' ')
+            if [[ -n "$pgid" ]]; then
+                kill -TERM -"$pgid" 2>/dev/null || true
+                sleep 0.4
+                kill -KILL -"$pgid" 2>/dev/null || true
+            else
+                kill -TERM "$pane_pid" 2>/dev/null || true
+                sleep 0.4
+                kill -KILL "$pane_pid" 2>/dev/null || true
+            fi
+        fi
+        "$tmux_cmd" -L "$LABEL" kill-session -t "$SESSION" 2>/dev/null || true
+        "$tmux_cmd" -L "$LABEL" kill-server 2>/dev/null || true
+    fi
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM HUP
 
 # ============================================================================
 # Dependency checks
@@ -98,8 +131,14 @@ fi
 "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" \
     "cd '$WORKDIR' && env TERM=xterm-256color '$CLAUDE_CMD' --model $MODEL"
 
+# Mark this tmux server as an Agent Sessions probe.
+"$TMUX_CMD" -L "$LABEL" set-environment -g AS_PROBE "1" 2>/dev/null || true
+"$TMUX_CMD" -L "$LABEL" set-environment -g AS_PROBE_KIND "claude" 2>/dev/null || true
+"$TMUX_CMD" -L "$LABEL" set-environment -g AS_PROBE_APP "com.triada.AgentSessions" 2>/dev/null || true
+
 # Resize pane for predictable rendering
 "$TMUX_CMD" -L "$LABEL" resize-pane -t "$SESSION:0.0" -x 120 -y 32
+PANE_PID=$("$TMUX_CMD" -L "$LABEL" display-message -p -t "$SESSION:0.0" "#{pane_pid}" 2>/dev/null || true)
 
 # ============================================================================
 # Wait for TUI to boot

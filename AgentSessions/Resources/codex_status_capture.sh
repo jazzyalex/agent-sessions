@@ -23,13 +23,48 @@ WORKDIR="${WORKDIR:-$(pwd)}"
 WAIT_AFTER_MSG="${WAIT_AFTER_MSG:-10}"
 THINK_WAIT="${THINK_WAIT:-0.5}"
 
-LABEL="as-cx-$$"
+LABEL="${TMUX_LABEL:-}"
+if [[ -z "$LABEL" ]]; then
+  uuid=$(uuidgen 2>/dev/null || true)
+  uuid=${uuid//-/}
+  if [[ -n "$uuid" ]]; then
+    LABEL="as-cx-${uuid:0:12}"
+  else
+    LABEL="as-cx-${RANDOM}${RANDOM}$(date +%s)"
+  fi
+fi
 SESSION="status"
+PANE_PID=""
 
 error_json() { local code="$1"; local hint="$2"; echo "{\"ok\":false,\"error\":\"$code\",\"hint\":\"$hint\"}"; }
 
-cleanup() { "${TMUX_BIN:-tmux}" -L "$LABEL" kill-server 2>/dev/null || true; }
-trap cleanup EXIT
+cleanup() {
+  set +e
+  set +o pipefail
+  local tmux_cmd="${TMUX_BIN:-tmux}"
+  local pane_pid="$PANE_PID"
+  if command -v "$tmux_cmd" >/dev/null 2>&1; then
+    if [[ -z "$pane_pid" ]]; then
+      pane_pid=$("$tmux_cmd" -L "$LABEL" display-message -p -t "$SESSION:0.0" "#{pane_pid}" 2>/dev/null || true)
+    fi
+    if [[ -n "$pane_pid" ]]; then
+      local pgid=""
+      pgid=$(ps -o pgid= -p "$pane_pid" 2>/dev/null | tr -d ' ')
+      if [[ -n "$pgid" ]]; then
+        kill -TERM -"$pgid" 2>/dev/null || true
+        sleep 0.4
+        kill -KILL -"$pgid" 2>/dev/null || true
+      else
+        kill -TERM "$pane_pid" 2>/dev/null || true
+        sleep 0.4
+        kill -KILL "$pane_pid" 2>/dev/null || true
+      fi
+    fi
+    "$tmux_cmd" -L "$LABEL" kill-session -t "$SESSION" 2>/dev/null || true
+    "$tmux_cmd" -L "$LABEL" kill-server 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM HUP
 
 # tmux check
 if [[ -n "${TMUX_BIN:-}" ]]; then
@@ -70,9 +105,14 @@ set -e
 if [[ $rc -ne 0 ]]; then
   echo "$(error_json tmux_start_failed "Failed to start tmux session (rc=$rc). TMUX_TMPDIR=$TMUX_TMPDIR")"; exit 1
 fi
+# Mark this tmux server as an Agent Sessions probe.
+"$TMUX_CMD" -L "$LABEL" set-environment -g AS_PROBE "1" 2>/dev/null || true
+"$TMUX_CMD" -L "$LABEL" set-environment -g AS_PROBE_KIND "codex" 2>/dev/null || true
+"$TMUX_CMD" -L "$LABEL" set-environment -g AS_PROBE_APP "com.triada.AgentSessions" 2>/dev/null || true
 "$TMUX_CMD" -L "$LABEL" set-option -t "$SESSION" history-limit 5000 2>/dev/null || true
 
 "$TMUX_CMD" -L "$LABEL" resize-pane -t "$SESSION:0.0" -x 132 -y 48 2>/dev/null || true
+PANE_PID=$("$TMUX_CMD" -L "$LABEL" display-message -p -t "$SESSION:0.0" "#{pane_pid}" 2>/dev/null || true)
 
 sleep 0.8
 
