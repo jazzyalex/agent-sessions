@@ -4,64 +4,70 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Improvements
+## [2.10] - 2026-01-16
 
-- Onboarding: Show all supported agents and discovered sessions in the tour regardless of Sessions toolbar filters; disabled agents appear as inactive.
-- Onboarding: Refine tour icon and primary button colors to better match native macOS accents.
-- Sessions: Hide housekeeping-only sessions (no assistant output and no real prompt content) by default; use “Show housekeeping-only sessions” in Settings → General to reveal them.
+### Major Changes
+
+- Search: Unified Search is now Apple Notes-style: fast across all sessions, within a specific session, and compatible with all filters.
 - Search: Use SQLite full-text indexing to speed up global search after analytics indexing completes.
 - Search: Instant search now indexes full tool inputs and outputs for recent sessions (last 90 days), reducing the need to wait for background scanning.
 - Search: Tool output indexing now redacts embedded base64/data URL blobs to keep search responsive and the index compact.
 - Search: Instant search now uses token-prefix matching by default (for example, `magic` behaves like `magic*`) to improve identifier and structured-text recall without trigram/substr indexing.
 - Search: Background scanning of large tool outputs is now opt-in by default, keeping Instant search more responsive (Settings → Advanced).
 - Search: Instant indexing now samples long assistant messages and tool inputs (head + middle + tail) to reduce false negatives without indexing the full transcript.
-- Indexing: Analytics refresh is now incremental (skips unchanged files and removes deleted ones) to reduce startup work and keep search data current.
-- Startup: When Codex sessions are already indexed, the app now shows the hydrated list immediately while scanning for newly created sessions in the background.
 - Search: Instant indexing now captures more of long tool outputs (head + middle + tail slices) and keeps active Codex sessions searchable while they are updating.
-- Sessions: Show a live session count in the unified list that updates while indexing and when filters/search change.
-- Preferences: The Menu Bar pane now groups label options into sections and aligns toggles consistently.
-- Transcript: Removed the duplicate Jump to First Prompt control from the transcript toolbar.
-- Sessions list: The Size column can now be sorted.
 - Search: Multi-word Unified Search queries now behave like phrase searches (for example, `exit code`) to match transcript navigation and avoid accidental boolean parsing.
-- Search: Unified Search highlights now use token-phrase matching across punctuation/newlines, and Color view reports visible vs total match counts when role filters are active.
+- Search: Unified Search highlights now use token-phrase matching across punctuation/newlines, and Session view reports visible vs total match counts when role filters are active.
 - Search: Global search now accepts quoted `repo:` and `path:` filters, and background deep scans run at low priority with on-demand prewarming for opened sessions.
 - Search: The Search Sessions menu item and ⌥⌘F shortcut now reliably focus the global search field.
+- Search: Unified Search highlights matches in the selected transcript and jumps to the first match when switching sessions.
+- Indexing: Analytics refresh is now incremental (skips unchanged files and removes deleted ones) to reduce startup work and keep search data current.
+- Startup: When Codex sessions are already indexed, the app now shows the hydrated list immediately while scanning for newly created sessions in the background.
 - Transcript: Replace the read-only search box with a Unified Search navigation pill that appears only when Unified Search has a free-text query.
-- Search: Tooltips now include keyboard shortcuts for search fields and navigation arrows.
 - Transcript: Find in Transcript (⌘F) now opens a local find bar with its own query and navigation.
 - Transcript: Unified Search now auto-jumps to the first match after typing or switching sessions, and local Find uses a solid blue current-match marker aligned with the match.
 - Transcript: Session view now auto-scrolls to the last user prompt by default, with a Unified Window setting to choose first vs last user prompt.
-- Search: Unified Search highlights matches in the selected transcript and jumps to the first match when switching sessions.
-- Analytics: The By Agent card now auto-scales rows and falls back to an internal scroll when space is tight.
+- Transcript: Color view is now called Session view and presents a colored timeline with improved formatting.
+- Transcript (Session view): Use system font for narrative blocks; keep tool call blocks monospaced.
+- Transcript (Session view): Blocks now render as rounded cards with subtle tints and left accent borders.
+- Transcript (Session view): User prompts now use a thicker accent rail, slightly brighter tint, and semibold first-line text for readability.
+- Transcript (Session view): Assistant blocks now use per-agent brand tints and the role legend matches transcript accents.
+- Transcript (Session view): Find highlights now mark matched substrings and add a line indicator for easier scanning.
 - UI: Consolidate unified-window status indicators into a single cockpit-style footer.
 - UI: In dark mode, the cockpit footer now uses a transparent HUD style with crisp borders instead of a solid fill.
 - UI: Menu bar usage now uses the same monospace, logo-forward cockpit styling as the footer.
-- Menu Bar: Reset menu items now include weekday; menu bar label can hide reset indicators per provider.
-- Menu Bar: Removed pill backgrounds from the menu bar label for a cleaner, more native look.
-- Usage: Time-only reset strings now roll forward to the next day to avoid showing stale "<1m" countdowns.
-- Transcript: Reduce terminal-view stutter by debouncing rebuilds and avoiding full NSTextView reloads for match highlight updates.
-- Transcript (Color view): Use system font for narrative blocks; keep tool call blocks monospaced.
-- Transcript (Color view): Blocks now render as rounded cards with subtle tints and left accent borders.
-- Transcript (Color view): User prompts now use a thicker accent rail, slightly brighter tint, and semibold first-line text for readability.
-- Transcript (Color view): Assistant blocks now use per-agent brand tints and the role legend matches transcript accents.
-- Transcript (Color view): Find highlights now mark matched substrings and add a line indicator for easier scanning.
 - UI: Persist split-view divider positions per layout mode (horizontal vs vertical) so switching layouts doesn’t reset pane sizes.
 - UI: Session list typography now uses monospaced text with softer timestamp gray, taller rows, lighter message counts, and footer-blue selection accents.
 - UI: Increase session list row height to 48px for easier scanning.
 - UI: Codex now uses a blue brand accent distinct from the cockpit footer tint; the transcript toolbar spacing is tighter, and the terminal view adds a subtle top border.
+- Onboarding: Replaced the onboarding flow with a four-slide tour covering sessions, agent enablement, workflow tips, and usage tracking.
+- Onboarding: Show all supported agents and discovered sessions in the tour regardless of Sessions toolbar filters; disabled agents appear as inactive.
+
+### Minor Changes
+
+- Onboarding: Refine tour icon and primary button colors to better match native macOS accents.
+- Sessions: Hide housekeeping-only sessions (no assistant output and no real prompt content) by default; use “Show housekeeping-only sessions” in Settings → General to reveal them.
+- Sessions: Show a live session count in the unified list that updates while indexing and when filters/search change.
+- Preferences: The Menu Bar pane now groups label options into sections and aligns toggles consistently.
+- Transcript: Removed the duplicate Jump to First Prompt control from the transcript toolbar.
+- Sessions list: The Size column can now be sorted.
+- Search: Tooltips now include keyboard shortcuts for search fields and navigation arrows.
+- Analytics: The By Agent card now auto-scales rows and falls back to an internal scroll when space is tight.
+- Menu Bar: Reset menu items now include weekday; menu bar label can hide reset indicators per provider.
+- Menu Bar: Removed pill backgrounds from the menu bar label for a cleaner, more native look.
+- Usage: Time-only reset strings now roll forward to the next day to avoid showing stale "<1m" countdowns.
 - Transcript: Toolbar controls now use monospaced typography to match the session list.
 - Sessions list: Added a context menu action to copy the session ID to the clipboard.
 - Sessions: Resume context menu actions now include the selected terminal app (for example, Terminal or iTerm2).
-- Onboarding: Replaced the onboarding flow with a four-slide tour covering sessions, agent enablement, workflow tips, and usage tracking.
 
-### Fixed
+### Critical Fixes
 
 - Search: Prevent missing results while the search index is still warming by falling back to legacy matching for unindexed sessions.
 - Search: Backfill missing per-session search data during incremental refresh so sessions don’t remain “not yet indexed” indefinitely.
 - Search: Claude sessions now keep transcript match highlights in sync with the active search query.
 - Transcript: Remove the ghost control inside the Unified Search navigation pill.
-- Transcript (Color view): Match counts now update when Unified Search is active.
-- Transcript (Color view): Search markers now appear only on matching wrapped lines and replace the block accent for that line.
+- Transcript (Session view): Match counts now update when Unified Search is active.
+- Transcript (Session view): Search markers now appear only on matching wrapped lines and replace the block accent for that line.
 - Sessions: Auto-select the first session on launch so the transcript pane isn’t blank.
 - Sessions: Stabilize message counts for large sessions while full parsing completes to reduce list row jumps.
 - Copilot: Normalize tool output newlines when logs include escaped `\\n` sequences.
@@ -73,11 +79,11 @@ All notable changes to this project will be documented in this file.
 - Transcript: Clearing Find now immediately clears match highlights.
 - Transcript: Terminal view no longer leaves a stale find highlight when the Find query is empty.
 - Transcript: Toolbar filters now use dot + count labels with compact navigation chevrons.
-- Transcript (Color view): Render Codex review blocks as labeled Review meta entries instead of user prompts.
-- Transcript (Color view): Split system reminder and local-command caveat blocks into meta lines so user prompts stay visible.
-- Transcript (Color view): Treat Claude local-command tag-only blocks as Local Command meta lines.
-- Transcript (Color view): Local Command meta blocks now render with a thin blue accent strip.
-- Transcript (Color view): Request interrupted-by-user markers now use a thin blue strip and regular text.
+- Transcript (Session view): Render Codex review blocks as labeled Review meta entries instead of user prompts.
+- Transcript (Session view): Split system reminder and local-command caveat blocks into meta lines so user prompts stay visible.
+- Transcript (Session view): Treat Claude local-command tag-only blocks as Local Command meta lines.
+- Transcript (Session view): Local Command meta blocks now render with a thin blue accent strip.
+- Transcript (Session view): Request interrupted-by-user markers now use a thin blue strip and regular text.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
 - Parsing: Surface Codex thread rollback events with readable text in timelines.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
