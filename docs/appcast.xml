@@ -3,44 +3,108 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.9.2</title>
-            <pubDate>Thu, 01 Jan 2026 19:33:44 -0800</pubDate>
+            <title>2.10</title>
+            <pubDate>Fri, 16 Jan 2026 12:33:38 -0800</pubDate>
             <description><![CDATA[
-                <h2>What's New in 2.9.2</h2>
+                <h2>What's New in 2.10</h2>
 
-<h3>Improvements</h3>
+<h3>Major Changes</h3>
 
-<p>Dates: Normalize timestamps (usage reset times, session dates, analytics labels, and transcript timestamps) to follow system locale and 12/24-hour settings.</p>
-<p>Appearance: Add a toolbar toggle for Dark/Light mode and View menu actions for Toggle Dark/Light and Use System Appearance.</p>
-<p>Preferences: Add quick links to Security & Privacy and License in Settings → About.</p>
-<p>Preferences: Make the Settings → About updates section more compact.</p>
-<p>Preferences: Droid pane now includes binary detection and a version check, consistent with other agents.
-</p>
-🎄 **Agent Sessions 2.9 Christmas Edition**
+<p>Search: Unified Search is now Apple Notes-style: fast across all sessions, within a specific session, and compatible with all filters.</p>
+<p>Search: Use SQLite full-text indexing to speed up global search after analytics indexing completes.</p>
+<p>Search: Instant search now indexes full tool inputs and outputs for recent sessions (last 90 days), reducing the need to wait for background scanning.</p>
+<p>Search: Tool output indexing now redacts embedded base64/data URL blobs to keep search responsive and the index compact.</p>
+<p>Search: Instant search now uses token-prefix matching by default (for example, `magic` behaves like `magic*`) to improve identifier and structured-text recall without trigram/substr indexing.</p>
+<p>Search: Background scanning of large tool outputs is now opt-in by default, keeping Instant search more responsive (Settings → Advanced).</p>
+<p>Search: Instant indexing now samples long assistant messages and tool inputs (head + middle + tail) to reduce false negatives without indexing the full transcript.</p>
+<p>Search: Instant indexing now captures more of long tool outputs (head + middle + tail slices) and keeps active Codex sessions searchable while they are updating.</p>
+<p>Search: Multi-word Unified Search queries now behave like phrase searches (for example, `exit code`) to match transcript navigation and avoid accidental boolean parsing.</p>
+<p>Search: Unified Search highlights now use token-phrase matching across punctuation/newlines, and Session view reports visible vs total match counts when role filters are active.</p>
+<p>Search: Global search now accepts quoted `repo:` and `path:` filters, and background deep scans run at low priority with on-demand prewarming for opened sessions.</p>
+<p>Search: The Search Sessions menu item and ⌥⌘F shortcut now reliably focus the global search field.</p>
+<p>Search: Unified Search highlights matches in the selected transcript and jumps to the first match when switching sessions.</p>
+<p>Indexing: Analytics refresh is now incremental (skips unchanged files and removes deleted ones) to reduce startup work and keep search data current.</p>
+<p>Startup: When Codex sessions are already indexed, the app now shows the hydrated list immediately while scanning for newly created sessions in the background.</p>
+<p>Transcript: Replace the read-only search box with a Unified Search navigation pill that appears only when Unified Search has a free-text query.</p>
+<p>Transcript: Find in Transcript (⌘F) now opens a local find bar with its own query and navigation.</p>
+<p>Transcript: Unified Search now auto-jumps to the first match after typing or switching sessions, and local Find uses a solid blue current-match marker aligned with the match.</p>
+<p>Transcript: Session view now auto-scrolls to the last user prompt by default, with a Unified Window setting to choose first vs last user prompt.</p>
+<p>Transcript: Color view is now called Session view and presents a colored timeline with improved formatting.</p>
+<p>Transcript (Session view): Use system font for narrative blocks; keep tool call blocks monospaced.</p>
+<p>Transcript (Session view): Blocks now render as rounded cards with subtle tints and left accent borders.</p>
+<p>Transcript (Session view): User prompts now use a thicker accent rail, slightly brighter tint, and semibold first-line text for readability.</p>
+<p>Transcript (Session view): Assistant blocks now use per-agent brand tints and the role legend matches transcript accents.</p>
+<p>Transcript (Session view): Find highlights now mark matched substrings and add a line indicator for easier scanning.</p>
+<p>UI: Consolidate unified-window status indicators into a single cockpit-style footer.</p>
+<p>UI: In dark mode, the cockpit footer now uses a transparent HUD style with crisp borders instead of a solid fill.</p>
+<p>UI: Menu bar usage now uses the same monospace, logo-forward cockpit styling as the footer.</p>
+<p>UI: Persist split-view divider positions per layout mode (horizontal vs vertical) so switching layouts doesn’t reset pane sizes.</p>
+<p>UI: Session list typography now uses monospaced text with softer timestamp gray, taller rows, lighter message counts, and footer-blue selection accents.</p>
+<p>UI: Increase session list row height to 48px for easier scanning.</p>
+<p>UI: Codex now uses a blue brand accent distinct from the cockpit footer tint; the transcript toolbar spacing is tighter, and the terminal view adds a subtle top border.</p>
+<p>Onboarding: Replaced the onboarding flow with a four-slide tour covering sessions, agent enablement, workflow tips, and usage tracking.</p>
+<p>Onboarding: Show all supported agents and discovered sessions in the tour regardless of Sessions toolbar filters; disabled agents appear as inactive.</p>
 
-<h3>New Features</h3>
+<h3>Minor Changes</h3>
 
-<p>**Onboarding Tours**: Interactive onboarding for new installs and a skippable update tour for major/minor releases. Reopen anytime from Help → Show Onboarding.</p>
-<p>**Copilot CLI Support**: Full session browser integration for GitHub Copilot CLI sessions. Includes Preferences pane and toolbar filter (⌘5).</p>
-<p>**Saved Sessions Window**: New dedicated window (View menu) for managing archived sessions with delete, reveal, and diagnostics.</p>
-<p>**Keyboard Navigation**: Option-Command-Arrow shortcuts to jump between user prompts, tool calls, and errors in transcripts.</p>
+<p>Onboarding: Refine tour icon and primary button colors to better match native macOS accents.</p>
+<p>Sessions: Hide housekeeping-only sessions (no assistant output and no real prompt content) by default; use “Show housekeeping-only sessions” in Settings → General to reveal them.</p>
+<p>Sessions: Show a live session count in the unified list that updates while indexing and when filters/search change.</p>
+<p>Preferences: The Menu Bar pane now groups label options into sections and aligns toggles consistently.</p>
+<p>Transcript: Removed the duplicate Jump to First Prompt control from the transcript toolbar.</p>
+<p>Sessions list: The Size column can now be sorted.</p>
+<p>Search: Tooltips now include keyboard shortcuts for search fields and navigation arrows.</p>
+<p>Analytics: The By Agent card now auto-scales rows and falls back to an internal scroll when space is tight.</p>
+<p>Menu Bar: Reset menu items now include weekday; menu bar label can hide reset indicators per provider.</p>
+<p>Menu Bar: Removed pill backgrounds from the menu bar label for a cleaner, more native look.</p>
+<p>Usage: Time-only reset strings now roll forward to the next day to avoid showing stale "<1m" countdowns.</p>
+<p>Transcript: Toolbar controls now use monospaced typography to match the session list.</p>
+<p>Sessions list: Added a context menu action to copy the session ID to the clipboard.</p>
+<p>Sessions: Resume context menu actions now include the selected terminal app (for example, Terminal or iTerm2).</p>
 
-<h3>Improvements</h3>
+<h3>Critical Fixes</h3>
 
-<p>**Preferences**: Reorganized CLI agent controls. Disabling an agent now hides it everywhere (toolbar, Analytics, menu bar) and stops background work.</p>
-<p>**Improved Focus**: Transcript Find controls stay out of Tab navigation unless explicitly opened, preventing stuck focus states.</p>
-
-<h3>Fixed</h3>
-
-<p>**Saved Sessions**: Archive backfill and reveal actions now work reliably. Pinning no longer blocks the UI.</p>
-<p>**Claude Sessions**: Better parsing for modern Claude Code format, session titles, and error detection.</p>
-<p>**OpenCode Sessions**: Fixed missing content in Plain/Color views for migration=2 storage schema.</p>
-<p>**Clipboard**: Fixed intermittent issue where full transcripts could overwrite clipboard.</p>
+<p>Search: Prevent missing results while the search index is still warming by falling back to legacy matching for unindexed sessions.</p>
+<p>Search: Backfill missing per-session search data during incremental refresh so sessions don’t remain “not yet indexed” indefinitely.</p>
+<p>Search: Claude sessions now keep transcript match highlights in sync with the active search query.</p>
+<p>Transcript: Remove the ghost control inside the Unified Search navigation pill.</p>
+<p>Transcript (Session view): Match counts now update when Unified Search is active.</p>
+<p>Transcript (Session view): Search markers now appear only on matching wrapped lines and replace the block accent for that line.</p>
+<p>Sessions: Auto-select the first session on launch so the transcript pane isn’t blank.</p>
+<p>Sessions: Stabilize message counts for large sessions while full parsing completes to reduce list row jumps.</p>
+<p>Copilot: Normalize tool output newlines when logs include escaped `
+` sequences.</p>
+<p>Parsing: Preserve non-zero exit codes in Gemini/OpenCode tool outputs and classify them as errors for error navigation.</p>
+<p>Parsing: Droid stream-json now handles numeric timestamps, tool call IDs, and error flags in tool results.</p>
+<p>Parsing: Treat Claude Code `queue-operation` and `file-history-snapshot` events as metadata so new versions don’t pollute transcripts or inflate message counts.</p>
+<p>Parsing: Gemini sessions now account for `model`/`tokens`/`thoughts` fields in newer chat logs.</p>
+<p>Parsing: Treat Copilot `assistant.turn_start/end`, `tool.execution_start`, and `session.truncation` events as metadata so they don’t clutter transcripts.</p>
+<p>Transcript: Clearing Find now immediately clears match highlights.</p>
+<p>Transcript: Terminal view no longer leaves a stale find highlight when the Find query is empty.</p>
+<p>Transcript: Toolbar filters now use dot + count labels with compact navigation chevrons.</p>
+<p>Transcript (Session view): Render Codex review blocks as labeled Review meta entries instead of user prompts.</p>
+<p>Transcript (Session view): Split system reminder and local-command caveat blocks into meta lines so user prompts stay visible.</p>
+<p>Transcript (Session view): Treat Claude local-command tag-only blocks as Local Command meta lines.</p>
+<p>Transcript (Session view): Local Command meta blocks now render with a thin blue accent strip.</p>
+<p>Transcript (Session view): Request interrupted-by-user markers now use a thin blue strip and regular text.</p>
+<p>Parsing: Ignore empty JSONL lines during scanning for improved robustness.</p>
+<p>Parsing: Surface Codex thread rollback events with readable text in timelines.</p>
+<p>Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).</p>
+<p>Claude Usage: Detect the Claude Code first-run terms prompt and surface a “Setup required” state instead of timing out silently.</p>
+<p>Toolbar: Keep action icons visible and overflow actions accessible when a project filter is active.</p>
+<p>Toolbar: Refined agent tabs and icon groups, updated the layout/theme controls, and tightened toolbar button sizing and hover states.</p>
+<p>UI: Update Codex and Claude brand accents to blue and warm brown for clearer agent recognition.</p>
+<p>Transcript: Rename view mode buttons to Session/Text/JSON, align them with HIG-style leading padding, and space the session ID control.</p>
+<p>Menu Bar: When usage data is stale, reset indicators now show “n/a” instead of an incorrect countdown.</p>
+<p>Claude Usage: Refresh usage automatically after wake when the usage strip or menu bar label is visible.</p>
+<p>Menu Bar: Show an updating spinner next to reset indicators while probes run.</p>
+<p>Search: Unified Search now accepts quoted repo/path filters with spaces.</p>
+<p>Claude/Codex Usage: Add a conservative startup sweep for probe tmux servers and harden cleanup/timeouts to avoid orphaned CLI processes after stalled probes or restarts.</p>
             ]]></description>
-            <sparkle:version>15</sparkle:version>
-            <sparkle:shortVersionString>2.9.2</sparkle:shortVersionString>
+            <sparkle:version>16</sparkle:version>
+            <sparkle:shortVersionString>2.10</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.9.2/AgentSessions-2.9.2.dmg" length="8945629" type="application/octet-stream" sparkle:edSignature="xNBhDyjlxgWjK+V66spOXc+aV7gs8PuTERsFhug6CBHrCcWwvIfCac9v8GeUwNNJMX6JAGnkAtPN3Zq11iybBg=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10/AgentSessions-2.10.dmg" length="9734154" type="application/octet-stream" sparkle:edSignature="saicttt20zN9piqjj3Kor9fGlJM+/M74eRDNgmdELgwWihuAvbQmR8qFpY0iazDmAvMn6J3o0km3e7KtsAmdCw=="/>
         </item>
     </channel>
 </rss>
