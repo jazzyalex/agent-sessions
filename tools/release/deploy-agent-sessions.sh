@@ -33,6 +33,8 @@ DEV_ID_APP=${DEV_ID_APP:-}
 NOTES_FILE=${NOTES_FILE:-}
 UPDATE_CASK=${UPDATE_CASK:-1}
 SKIP_CONFIRM=${SKIP_CONFIRM:-0}
+COMMIT_TOOL=${COMMIT_TOOL:-Codex}
+COMMIT_MODEL=${COMMIT_MODEL:-gpt-5}
 
 green(){ printf "\033[32m%s\033[0m\n" "$*"; }
 yellow(){ printf "\033[33m%s\033[0m\n" "$*"; }
@@ -617,7 +619,11 @@ PYEOF
     # Commit and push appcast to GitHub Pages (fail hard if push fails)
     git add "$REPO_ROOT/docs/appcast.xml"
     if ! git diff --staged --quiet; then
-      git commit -m "chore(release): update appcast for ${VERSION}"
+      git commit \
+        -m "chore(release): update appcast for ${VERSION}" \
+        -m "Tool: ${COMMIT_TOOL}" \
+        -m "Model: ${COMMIT_MODEL}" \
+        -m "Why: Publish appcast for ${VERSION} release"
       retry git push origin HEAD:main
     else
       yellow "No appcast changes to commit."
@@ -667,7 +673,11 @@ done
 
 git add README.md docs/index.html
 if ! git diff --staged --quiet; then
-  git commit -m "docs: update download links for ${VERSION}"
+  git commit \
+    -m "docs: update download links for ${VERSION}" \
+    -m "Tool: ${COMMIT_TOOL}" \
+    -m "Model: ${COMMIT_MODEL}" \
+    -m "Why: Update site download links for ${VERSION} release"
   retry git push origin HEAD:main
 else
   yellow "No README/docs link changes to commit."
