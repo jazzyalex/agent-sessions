@@ -80,3 +80,40 @@ entries:
         sessions:
           max_verified_version: "0.0.400"
           evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"]
+
+  - agent_sessions_version: "2.9.2"
+    as_of_date_utc: "2026-01-16"
+    as_of_commit: "065deee"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.79.0"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "Resources/Fixtures/stage0/agents/codex/large.jsonl", "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"]
+        usage_limits:
+          max_verified_version: "0.79.0"
+          evidence: ["Resources/Fixtures/codex_053_rate_limit.jsonl", "AgentSessions/Resources/codex_status_capture.sh"]
+      claude:
+        sessions:
+          max_verified_version: "2.1.9"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "Resources/Fixtures/stage0/agents/claude/large.jsonl", "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl"]
+        usage_limits:
+          max_verified_version: "2.1.9"
+          evidence: ["AgentSessions/Resources/claude_usage_capture.sh", "scripts/claude-status"]
+          notes:
+            - "Usage/limits may be temporarily unavailable upstream; weekly monitoring records status.claude.com context."
+      opencode:
+        sessions:
+          max_verified_version: "1.1.6"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json", "Resources/Fixtures/stage0/agents/opencode/storage_legacy/session/proj_test/ses_s_stage0_drift.json"]
+      droid:
+        sessions:
+          max_verified_version: "0.43.0"
+          evidence: ["Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl", "Resources/Fixtures/stage0/agents/droid/session_store_schema_drift.jsonl", "scripts/droid_stream_schema_probe.py"]
+      gemini:
+        sessions:
+          max_verified_version: "0.23.0"
+          evidence: ["Resources/Fixtures/stage0/agents/gemini/small.json", "Resources/Fixtures/stage0/agents/gemini/large.json", "Resources/Fixtures/stage0/agents/gemini/schema_drift.json"]
+      copilot:
+        sessions:
+          max_verified_version: "0.0.400"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"]

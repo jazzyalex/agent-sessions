@@ -534,12 +534,14 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Each indexer is internally serial and already hydrates from IndexDB.session_meta
         // before scanning for new files, so starting them together is safe.
         LaunchProfiler.log("Unified.refresh: Stage 1 (per-source) start")
-        let shouldRefreshCodex = codexAgentEnabled && includeCodex && !codex.isIndexing
-        let shouldRefreshClaude = claudeAgentEnabled && includeClaude && !claude.isIndexing
-        let shouldRefreshGemini = geminiAgentEnabled && includeGemini && !gemini.isIndexing
-        let shouldRefreshOpenCode = openCodeAgentEnabled && includeOpenCode && !opencode.isIndexing
-        let shouldRefreshCopilot = copilotAgentEnabled && includeCopilot && !copilot.isIndexing
-        let shouldRefreshDroid = droidAgentEnabled && includeDroid && !droid.isIndexing
+        // NOTE: Toolbar include toggles are view-level filters; they must not gate indexing.
+        // Only global agent enablement (Preferences) controls whether background work runs.
+        let shouldRefreshCodex = codexAgentEnabled && !codex.isIndexing
+        let shouldRefreshClaude = claudeAgentEnabled && !claude.isIndexing
+        let shouldRefreshGemini = geminiAgentEnabled && !gemini.isIndexing
+        let shouldRefreshOpenCode = openCodeAgentEnabled && !opencode.isIndexing
+        let shouldRefreshCopilot = copilotAgentEnabled && !copilot.isIndexing
+        let shouldRefreshDroid = droidAgentEnabled && !droid.isIndexing
 
         if shouldRefreshCodex { codex.refresh() }
         if shouldRefreshClaude { claude.refresh() }

@@ -1914,18 +1914,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         func isUserInterruptMetaBlock(start: Int, end: Int) -> Bool {
             guard start <= end else { return false }
             for line in lines[start...end] where line.role == .meta {
-                let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { continue }
-                let lower = trimmed.lowercased()
-                let stripped = lower.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-                switch stripped {
-                case "request interrupted by user",
-                     "interrupted by user",
-                     "request cancelled by user",
-                     "request canceled by user":
+                if TerminalBuilder.isUserInterruptMarker(line.text) {
                     return true
-                default:
-                    continue
                 }
             }
             return false

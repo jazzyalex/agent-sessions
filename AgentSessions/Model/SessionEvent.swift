@@ -32,7 +32,16 @@ extension SessionEventKind {
             case "tool_call", "tool-call", "toolcall", "tool_use", "tool-use", "function_call", "web_search_call", "custom_tool_call": return .tool_call
             case "tool_result", "tool-result", "toolresult", "function_result", "function_call_output", "web_search_call_output", "custom_tool_call_output": return .tool_result
             case "error", "err": return .error
-            case "meta", "system", "environment_context", "environment-context", "env_context", "thread_rolled_back": return .meta
+            case "meta",
+                 "system",
+                 "summary",
+                 "file-history-snapshot",
+                 "queue-operation",
+                 "environment_context",
+                 "environment-context",
+                 "env_context",
+                 "thread_rolled_back":
+                return .meta
             default: break
             }
         }

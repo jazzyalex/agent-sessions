@@ -1,6 +1,6 @@
 agent_sessions_version: 2.9.2
-as_of_commit: cb3e102
-as_of_date: 2026-01-07
+as_of_commit: 065deee
+as_of_date: 2026-01-16
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
   - "Max verified versions come from repo fixtures and documented format changes."
@@ -14,7 +14,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.0.76"
+    max_verified_version: "2.1.9"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"

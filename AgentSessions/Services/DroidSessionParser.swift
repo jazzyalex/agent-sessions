@@ -20,6 +20,16 @@ final class DroidSessionParser {
 
     private static let systemReminderOpenTag = "<system-reminder>"
     private static let systemReminderCloseTag = "</system-reminder>"
+    private static let dateFormatterWithFractionalSeconds: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let dateFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
 
     // MARK: - Public
 
@@ -740,12 +750,8 @@ final class DroidSessionParser {
         if let d = any as? Double { return Date(timeIntervalSince1970: normalizeEpochSeconds(d)) }
         if let i = any as? Int { return Date(timeIntervalSince1970: normalizeEpochSeconds(Double(i))) }
         if let s = any as? String {
-            let f = ISO8601DateFormatter()
-            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let d = f.date(from: s) { return d }
-            let f2 = ISO8601DateFormatter()
-            f2.formatOptions = [.withInternetDateTime]
-            return f2.date(from: s)
+            if let d = dateFormatterWithFractionalSeconds.date(from: s) { return d }
+            return dateFormatter.date(from: s)
         }
         return nil
     }

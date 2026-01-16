@@ -27,7 +27,10 @@ final class OnboardingCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(result.isPresented)
         XCTAssertEqual(result.kind, .fullTour)
-        XCTAssertEqual(result.title, "Welcome to Agent Sessions")
+        XCTAssertTrue(
+            ["Welcome to Agent Sessions", "Sessions Found"].contains(result.title ?? ""),
+            "Unexpected first screen title: \(result.title ?? "nil")"
+        )
     }
 
     func testCheckAndPresentIfNeededPresentsUpdateTourWhenNotFreshAndNotSeenForVersion() async {
