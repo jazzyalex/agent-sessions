@@ -68,6 +68,11 @@ All notable changes to this project will be documented in this file.
 - Transcript: Clearing Find now immediately clears match highlights.
 - Transcript: Terminal view no longer leaves a stale find highlight when the Find query is empty.
 - Transcript: Toolbar filters now use dot + count labels with compact navigation chevrons.
+- Transcript (Color view): Render Codex review blocks as labeled Review meta entries instead of user prompts.
+- Transcript (Color view): Split system reminder and local-command caveat blocks into meta lines so user prompts stay visible.
+- Transcript (Color view): Treat Claude local-command tag-only blocks as Local Command meta lines.
+- Transcript (Color view): Local Command meta blocks now render with a thin blue accent strip.
+- Transcript (Color view): Request interrupted-by-user markers now use a thin blue strip and regular text.
 - Parsing: Ignore empty JSONL lines during scanning for improved robustness.
 - Parsing: Surface Codex thread rollback events with readable text in timelines.
 - Claude: Avoid UI stalls when opening sessions with embedded base64 blobs (for example, Chrome MCP screenshots).
@@ -80,6 +85,7 @@ All notable changes to this project will be documented in this file.
 - Claude Usage: Refresh usage automatically after wake when the usage strip or menu bar label is visible.
 - Menu Bar: Show an updating spinner next to reset indicators while probes run.
 - Search: Unified Search now accepts quoted repo/path filters with spaces.
+- Claude/Codex Usage: Add a conservative startup sweep for probe tmux servers and harden cleanup/timeouts to avoid orphaned CLI processes after stalled probes or restarts.
 
 ## [2.9.2] - 2026-01-01
 

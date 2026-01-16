@@ -1100,10 +1100,12 @@ private extension TerminalLineRole {
 private final class TerminalLayoutManager: NSLayoutManager {
     enum BlockKind {
         case user
+        case userInterrupt
         case agent
         case toolCall
         case toolOutput
         case error
+        case localCommand
     }
 
     struct BlockDecoration {
@@ -1154,11 +1156,25 @@ private final class TerminalLayoutManager: NSLayoutManager {
 	                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
 	                accentWidth: 6
 	            )
+        case .userInterrupt:
+            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
+                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
+                accentWidth: 4
+            )
         case .agent:
             let base = agentBrandAccent
             return BlockStyle(
                 fill: rgba(base, alpha: dark ? 0.06 : 0.012),
                 accent: rgba(base, alpha: dark ? 0.60 : 0.42),
+                accentWidth: 4
+            )
+        case .localCommand:
+            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
+                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
                 accentWidth: 4
             )
 	        case .toolCall:
@@ -1884,6 +1900,37 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var currentBlock: Int? = nil
         var rolesInBlock: Set<TerminalLineRole> = []
 
+        func isLocalCommandMetaBlock(start: Int, end: Int) -> Bool {
+            guard start <= end else { return false }
+            for line in lines[start...end] where line.role == .meta {
+                let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.hasPrefix("Local Command") {
+                    return true
+                }
+            }
+            return false
+        }
+
+        func isUserInterruptMetaBlock(start: Int, end: Int) -> Bool {
+            guard start <= end else { return false }
+            for line in lines[start...end] where line.role == .meta {
+                let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                let lower = trimmed.lowercased()
+                let stripped = lower.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+                switch stripped {
+                case "request interrupted by user",
+                     "interrupted by user",
+                     "request cancelled by user",
+                     "request canceled by user":
+                    return true
+                default:
+                    continue
+                }
+            }
+            return false
+        }
+
         func finishBlock(endIdx: Int) {
             guard let s = startIdx else { return }
             guard currentBlock != nil else { return }
@@ -1895,7 +1942,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             guard end > start else { return }
 
             let kind: TerminalLayoutManager.BlockKind? = {
-                if rolesInBlock.count == 1, rolesInBlock.contains(.meta) { return nil }
+                if rolesInBlock.count == 1, rolesInBlock.contains(.meta) {
+                    if isUserInterruptMetaBlock(start: s, end: endIdx) { return .userInterrupt }
+                    return isLocalCommandMetaBlock(start: s, end: endIdx) ? .localCommand : nil
+                }
                 if rolesInBlock.contains(.error) { return .error }
                 if rolesInBlock.contains(.toolInput) { return .toolCall }
                 if rolesInBlock.contains(.toolOutput) { return .toolOutput }
