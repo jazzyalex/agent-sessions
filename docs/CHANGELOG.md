@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ## [2.10] - 2026-01-16
 
+### TL;DR
+
+- Apple Notes-style Unified Search across all sessions and inside a session, compatible with filters.
+- SQLite-backed search plus richer instant indexing for faster results and better recall.
+- Incremental analytics refresh and faster startup with immediate hydrated lists.
+- Session view (formerly Color view) is now a colored timeline with improved formatting.
+- Unified Search navigation and local Find are more consistent and responsive.
+- Cockpit-style status UI and refreshed session list typography with live counts.
+- Onboarding tour refreshed and always shows supported agents.
+
 ### Major Changes
 
 - Search: Unified Search is now Apple Notes-style: fast across all sessions, within a specific session, and compatible with all filters.
