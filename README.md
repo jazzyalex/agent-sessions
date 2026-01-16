@@ -203,7 +203,7 @@ No cloud uploads or telemetry — **read‑only by design.**
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.9.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.9.2/AgentSessions-2.9.2.dmg)
+1. [Download AgentSessions-2.10.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.10/AgentSessions-2.10.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew Tap
