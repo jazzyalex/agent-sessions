@@ -16,7 +16,7 @@ private actor PromotionState {
     }
 }
 
-final class SearchCoordinator: ObservableObject {
+final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     struct Progress: Equatable {
         enum Phase {
             case idle

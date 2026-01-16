@@ -62,9 +62,10 @@ struct TerminalBuilder {
         lines.reserveCapacity(blocks.count * 2)
 
         var nextID = 0
+        var syntheticBlockIndex = -1
 
         for (blockIndex, block) in blocks.enumerated() {
-            let role: TerminalLineRole = {
+            let baseRole: TerminalLineRole = {
                 switch block.kind {
                 case .user:
                     return .user
@@ -83,34 +84,43 @@ struct TerminalBuilder {
                 }
             }()
 
-            // Use the block text directly; do not inject CLI prefixes here.
             var rawText = block.text
             if block.kind == .toolCall {
                 rawText = toolCallDisplayText(block: block)
             }
-            if rawText.isEmpty {
-                // Ensure tools and errors still render a placeholder line
-                if let tool = block.toolName, !tool.isEmpty {
-                    rawText = tool
+            let segments = lineSegments(for: block,
+                                        baseRole: baseRole,
+                                        rawText: rawText,
+                                        blockIndex: blockIndex,
+                                        source: session.source,
+                                        syntheticIndex: &syntheticBlockIndex)
+
+            for segment in segments {
+                var segmentText = segment.text
+                if segmentText.isEmpty {
+                    // Ensure tools and errors still render a placeholder line
+                    if let tool = block.toolName, !tool.isEmpty {
+                        segmentText = tool
+                    }
                 }
-            }
 
-            let splitLines = rawText.split(separator: "\n", omittingEmptySubsequences: false)
-            if splitLines.isEmpty {
-                continue
-            }
+                let splitLines = segmentText.split(separator: "\n", omittingEmptySubsequences: false)
+                if splitLines.isEmpty {
+                    continue
+                }
 
-            for fragment in splitLines {
-                let lineText = String(fragment)
-                let line = TerminalLine(
-                    id: nextID,
-                    text: lineText,
-                    role: role,
-                    eventIndex: nil,
-                    blockIndex: blockIndex
-                )
-                lines.append(line)
-                nextID += 1
+                for fragment in splitLines {
+                    let lineText = String(fragment)
+                    let line = TerminalLine(
+                        id: nextID,
+                        text: lineText,
+                        role: segment.role,
+                        eventIndex: nil,
+                        blockIndex: segment.blockIndex
+                    )
+                    lines.append(line)
+                    nextID += 1
+                }
             }
         }
 
@@ -129,9 +139,10 @@ struct TerminalBuilder {
         terminalBlocks.reserveCapacity(blocks.count)
 
         var nextID = 0
+        var syntheticBlockIndex = -1
 
         for (blockIndex, block) in blocks.enumerated() {
-            let role: TerminalLineRole = {
+            let baseRole: TerminalLineRole = {
                 switch block.kind {
                 case .user:
                     return .user
@@ -152,36 +163,52 @@ struct TerminalBuilder {
             if block.kind == .toolCall {
                 rawText = toolCallDisplayText(block: block)
             }
-            let splitLines = rawText.split(separator: "\n", omittingEmptySubsequences: false)
-            if splitLines.isEmpty {
-                let line = TerminalLine(
-                    id: nextID,
-                    text: "",
-                    role: role,
-                    eventIndex: nil,
-                    blockIndex: blockIndex
-                )
-                lines.append(line)
-                nextID += 1
-                continue
-            }
+            let segments = lineSegments(for: block,
+                                        baseRole: baseRole,
+                                        rawText: rawText,
+                                        blockIndex: blockIndex,
+                                        source: session.source,
+                                        syntheticIndex: &syntheticBlockIndex)
 
-            let startLine = nextID
-            for fragment in splitLines {
-                let lineText = String(fragment)
-                let line = TerminalLine(
-                    id: nextID,
-                    text: lineText,
-                    role: role,
-                    eventIndex: nil,
-                    blockIndex: blockIndex
-                )
-                lines.append(line)
-                nextID += 1
+            for segment in segments {
+                var segmentText = segment.text
+                if segmentText.isEmpty {
+                    if let tool = block.toolName, !tool.isEmpty {
+                        segmentText = tool
+                    }
+                }
+
+                let splitLines = segmentText.split(separator: "\n", omittingEmptySubsequences: false)
+                if splitLines.isEmpty {
+                    let line = TerminalLine(
+                        id: nextID,
+                        text: "",
+                        role: segment.role,
+                        eventIndex: nil,
+                        blockIndex: segment.blockIndex
+                    )
+                    lines.append(line)
+                    nextID += 1
+                    continue
+                }
+
+                let startLine = nextID
+                for fragment in splitLines {
+                    let lineText = String(fragment)
+                    let line = TerminalLine(
+                        id: nextID,
+                        text: lineText,
+                        role: segment.role,
+                        eventIndex: nil,
+                        blockIndex: segment.blockIndex
+                    )
+                    lines.append(line)
+                    nextID += 1
+                }
+                let endLine = nextID - 1
+                let blockModel = TerminalBlock(role: segment.role, startLine: startLine, endLine: endLine, eventIndex: nil)
+                terminalBlocks.append(blockModel)
             }
-            let endLine = nextID - 1
-            let blockModel = TerminalBlock(role: role, startLine: startLine, endLine: endLine, eventIndex: nil)
-            terminalBlocks.append(blockModel)
         }
 
         return (lines, terminalBlocks)
@@ -197,6 +224,192 @@ struct TerminalBuilder {
         }
         pieces.append(input)
         return pieces.joined(separator: " ")
+    }
+
+    private struct LineSegment {
+        let role: TerminalLineRole
+        let text: String
+        let blockIndex: Int?
+    }
+
+    private static func lineSegments(for block: SessionTranscriptBuilder.LogicalBlock,
+                                     baseRole: TerminalLineRole,
+                                     rawText: String,
+                                     blockIndex: Int,
+                                     source: SessionSource,
+                                     syntheticIndex: inout Int) -> [LineSegment] {
+        if let reviewText = reviewDisplayTextIfNeeded(block: block, source: source) {
+            return [LineSegment(role: .meta, text: reviewText, blockIndex: blockIndex)]
+        }
+        if baseRole == .user, isUserInterruptOnlyMessage(rawText) {
+            let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = trimmed.isEmpty ? rawText : trimmed
+            let segment = LineSegment(role: .meta, text: text, blockIndex: syntheticIndex)
+            syntheticIndex -= 1
+            return [segment]
+        }
+        if baseRole == .user,
+           source == .claude,
+           let split = splitClaudeLocalCommandSegments(from: rawText,
+                                                       userBlockIndex: blockIndex,
+                                                       syntheticIndex: &syntheticIndex) {
+            return split
+        }
+        if baseRole == .user,
+           let split = splitSystemReminderSegments(from: rawText,
+                                                   userBlockIndex: blockIndex,
+                                                   syntheticIndex: &syntheticIndex) {
+            return split
+        }
+        return [LineSegment(role: baseRole, text: rawText, blockIndex: blockIndex)]
+    }
+
+    private static func reviewDisplayTextIfNeeded(block: SessionTranscriptBuilder.LogicalBlock,
+                                                  source: SessionSource) -> String? {
+        guard source == .codex, block.kind == .user else { return nil }
+        let text = block.text
+        guard text.contains("<user_action>"),
+              text.contains("<action>review</action>") else { return nil }
+        let results = extractTag("results", from: text) ?? ""
+        let trimmed = results.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return "Review"
+        }
+        return "Review\n" + trimmed
+    }
+
+    private static func splitSystemReminderSegments(from text: String,
+                                                    userBlockIndex: Int,
+                                                    syntheticIndex: inout Int) -> [LineSegment]? {
+        guard text.contains("<system-reminder>") else { return nil }
+        var segments: [LineSegment] = []
+        var remainder: Substring = text[...]
+        var found = false
+
+        while let start = remainder.range(of: "<system-reminder>") {
+            found = true
+            let before = String(remainder[..<start.lowerBound])
+            if !before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                segments.append(LineSegment(role: .user, text: before, blockIndex: userBlockIndex))
+            }
+            let afterStart = start.upperBound
+            guard let end = remainder.range(of: "</system-reminder>", range: afterStart..<remainder.endIndex) else {
+                let rest = String(remainder)
+                if !rest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    segments.append(LineSegment(role: .user, text: rest, blockIndex: userBlockIndex))
+                }
+                remainder = remainder[remainder.endIndex...]
+                break
+            }
+            let inner = String(remainder[afterStart..<end.lowerBound])
+            let trimmed = inner.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                let metaText = "System Reminder\n" + trimmed
+                segments.append(LineSegment(role: .meta, text: metaText, blockIndex: syntheticIndex))
+                syntheticIndex -= 1
+            }
+            remainder = remainder[end.upperBound...]
+        }
+
+        let tail = String(remainder)
+        if !tail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            segments.append(LineSegment(role: .user, text: tail, blockIndex: userBlockIndex))
+        }
+
+        return found ? segments : nil
+    }
+
+    private static func isUserInterruptOnlyMessage(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let lower = trimmed.lowercased()
+        let stripped = lower.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        switch stripped {
+        case "request interrupted by user",
+             "interrupted by user",
+             "request cancelled by user",
+             "request canceled by user":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isClaudeLocalCommandTagLine(_ trimmed: String) -> Bool {
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("<command-name>") { return true }
+        if lower.hasPrefix("<command-message>") { return true }
+        if lower.hasPrefix("<command-args>") { return true }
+        if lower.hasPrefix("<local-command-") { return true }
+        if lower.hasPrefix("</local-command-") { return true }
+        return false
+    }
+
+    private static func splitClaudeLocalCommandSegments(from text: String,
+                                                        userBlockIndex: Int,
+                                                        syntheticIndex: inout Int) -> [LineSegment]? {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let firstNonEmpty = lines.firstIndex(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            return nil
+        }
+        let firstLine = lines[firstNonEmpty].trimmingCharacters(in: .whitespacesAndNewlines)
+        let isCaveat = firstLine.hasPrefix("Caveat:")
+        let isTagStart = isClaudeLocalCommandTagLine(firstLine)
+        guard isCaveat || isTagStart else { return nil }
+
+        var endIndex = firstNonEmpty
+        var idx = firstNonEmpty + 1
+        while idx < lines.count {
+            let trimmed = lines[idx].trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                endIndex = idx
+                idx += 1
+                continue
+            }
+            if isCaveat {
+                if trimmed.hasPrefix("<") {
+                    endIndex = idx
+                    idx += 1
+                    continue
+                }
+            } else if isClaudeLocalCommandTagLine(trimmed) {
+                endIndex = idx
+                idx += 1
+                continue
+            }
+            break
+        }
+
+        var segments: [LineSegment] = []
+        let leading = lines[..<firstNonEmpty].joined(separator: "\n")
+        if !leading.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            segments.append(LineSegment(role: .user, text: leading, blockIndex: userBlockIndex))
+        }
+
+        let preamble = lines[firstNonEmpty...endIndex].joined(separator: "\n")
+        let trimmedPreamble = preamble.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedPreamble.isEmpty {
+            let metaText = "Local Command\n" + trimmedPreamble
+            segments.append(LineSegment(role: .meta, text: metaText, blockIndex: syntheticIndex))
+            syntheticIndex -= 1
+        }
+
+        if endIndex + 1 < lines.count {
+            let tail = lines[(endIndex + 1)...].joined(separator: "\n")
+            if !tail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                segments.append(LineSegment(role: .user, text: tail, blockIndex: userBlockIndex))
+            }
+        }
+
+        return segments.isEmpty ? nil : segments
+    }
+
+    private static func extractTag(_ name: String, from text: String) -> String? {
+        guard let start = text.range(of: "<\(name)>"),
+              let end = text.range(of: "</\(name)>", range: start.upperBound..<text.endIndex) else {
+            return nil
+        }
+        return String(text[start.upperBound..<end.lowerBound])
     }
 }
 
