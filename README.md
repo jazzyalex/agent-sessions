@@ -20,7 +20,7 @@
 - Security & Privacy: Local-only. No telemetry. Details: `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.9.2/AgentSessions-2.9.2.dmg"><b>Download Agent Sessions 2.9.2 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10/AgentSessions-2.10.dmg"><b>Download Agent Sessions 2.10 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -67,6 +67,22 @@ Local-first, open source, and built for terminal vibe warriors.
   <p style="margin:0 0 15px 0;"><em>Git Context Inspector showing repository state and historical diffs (Light Mode)</em></p>
   <img src="docs/assets/git-context-light.png" alt="Git Context Inspector showing repository state and historical diffs (Light Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px auto;display:block;"/>
 </div>
+
+---
+
+## What's New in 2.10
+
+### Unified Search (Apple Notes-style)
+Unified Search is now fast across all sessions and within a specific session, and it can be combined with any filters.
+
+### Session View Timeline
+Color view is now called Session view, with a colored timeline layout and improved formatting for prompts, tools, and meta events.
+
+### Search + Indexing Performance
+SQLite full-text indexing, richer instant indexing (tool inputs/outputs and long-message sampling), and incremental analytics refresh keep the list responsive and current.
+
+### UI and Workflow Polish
+Live session counts, cockpit-style status indicators, and a refreshed onboarding tour that always shows supported agents make day-to-day use smoother.
 
 ---
 
