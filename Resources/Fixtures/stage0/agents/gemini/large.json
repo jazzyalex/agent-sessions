@@ -15,6 +15,9 @@
       "id": "m2",
       "timestamp": "2025-12-16T23:47:02.000Z",
       "type": "gemini",
+      "model": "gemini-3-flash-preview",
+      "tokens": { "input": 100, "output": 10, "total": 110, "thoughts": 0, "tool": 0, "cached": 0 },
+      "thoughts": [{"description":"Placeholder thoughts for schema coverage."}],
       "content": "",
       "toolCalls": [
         {

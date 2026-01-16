@@ -9,4 +9,7 @@
 {"type":"assistant.message","data":{"content":"Captured multiline output.","toolRequests":[]},"id":"e9","timestamp":"2025-12-18T23:00:08.000Z","parentId":"e8"}
 {"type":"user.message","data":{"content":"Step 3","transformedContent":"Step 3","attachments":[]},"id":"e10","timestamp":"2025-12-18T23:00:09.000Z","parentId":"e9"}
 {"type":"assistant.message","data":{"content":"Ok","toolRequests":[]},"id":"e11","timestamp":"2025-12-18T23:00:10.000Z","parentId":"e10"}
-
+{"type":"assistant.turn_start","data":{"turnId":"turn_1"},"id":"e12","timestamp":"2025-12-18T23:00:10.100Z","parentId":"e11"}
+{"type":"tool.execution_start","data":{"toolCallId":"call_2","toolName":"bash","arguments":{"command":"echo hi"}},"id":"e13","timestamp":"2025-12-18T23:00:10.200Z","parentId":"e12"}
+{"type":"assistant.turn_end","data":{"turnId":"turn_1"},"id":"e14","timestamp":"2025-12-18T23:00:10.300Z","parentId":"e13"}
+{"type":"session.truncation","data":{"reason":"context_limit","droppedTokens":1234},"id":"e15","timestamp":"2025-12-18T23:00:10.400Z","parentId":"e14"}

@@ -1,5 +1,5 @@
 agent_sessions_version: 2.9.2
-as_of_commit: 065deee
+as_of_commit: e23c74f
 as_of_date: 2026-01-16
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
@@ -21,7 +21,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/claude/large.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl"
   gemini_cli:
-    max_verified_version: "0.23.0"
+    max_verified_version: "0.24.0"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/gemini/small.json"
@@ -35,7 +35,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/large.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
   opencode:
-    max_verified_version: "1.1.6"
+    max_verified_version: "1.1.23"
     version_field: "session.version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
