@@ -1,5 +1,23 @@
-[
-  {"type":"user","text":"Prompt 1","ts":"2025-09-18T02:45:00Z"},
-  {"type":"model","parts":[{"text":"Reply 1"}],"ts":"2025-09-18T02:45:08Z"}
-]
-
+{
+  "startTime": "2026-01-16T18:34:00.000Z",
+  "lastUpdated": "2026-01-16T18:34:10.000Z",
+  "projectHash": "0b7dfb1274ee51b336813b17f2ddab1f56b6591f723e7314126bbd502c69e9c9",
+  "sessionId": "session-2026-01-16T18-34-3739ef95",
+  "messages": [
+    {
+      "id": "m1",
+      "timestamp": "2026-01-16T18:34:01.000Z",
+      "type": "user",
+      "content": "Hello"
+    },
+    {
+      "id": "m2",
+      "timestamp": "2026-01-16T18:34:02.000Z",
+      "type": "gemini",
+      "model": "gemini-3-flash-preview",
+      "tokens": { "input": 10, "output": 5, "total": 15, "thoughts": 0, "tool": 0, "cached": 0 },
+      "thoughts": [{"description":"Short reasoning placeholder."}],
+      "content": "Hi!"
+    }
+  ]
+}
