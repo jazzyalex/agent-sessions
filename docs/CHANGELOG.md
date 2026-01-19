@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-01-19
+
+### Fixed
+
+- Onboarding: Prevent a crash that could occur for some users.
+
 ## [2.10] - 2026-01-16
 
 ### TL;DR
