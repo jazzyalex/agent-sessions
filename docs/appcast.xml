@@ -3,10 +3,24 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.10</title>
-            <pubDate>Fri, 16 Jan 2026 12:33:38 -0800</pubDate>
+            <title>2.10.1</title>
+            <pubDate>Mon, 19 Jan 2026 10:07:38 -0800</pubDate>
             <description><![CDATA[
-                <h2>What's New in 2.10</h2>
+                <h2>What's New in 2.10.1</h2>
+
+<h3>Fixed</h3>
+
+<p>Onboarding: Prevent a crash that could occur for some users.
+</p>
+<h3>TL;DR</h3>
+
+<p>Apple Notes-style Unified Search across all sessions and inside a session, compatible with filters.</p>
+<p>SQLite-backed search plus richer instant indexing for faster results and better recall.</p>
+<p>Incremental analytics refresh and faster startup with immediate hydrated lists.</p>
+<p>Session view (formerly Color view) is now a colored timeline with improved formatting.</p>
+<p>Unified Search navigation and local Find are more consistent and responsive.</p>
+<p>Cockpit-style status UI and refreshed session list typography with live counts.</p>
+<p>Onboarding tour refreshed and always shows supported agents.</p>
 
 <h3>Major Changes</h3>
 
@@ -101,10 +115,10 @@
 <p>Search: Unified Search now accepts quoted repo/path filters with spaces.</p>
 <p>Claude/Codex Usage: Add a conservative startup sweep for probe tmux servers and harden cleanup/timeouts to avoid orphaned CLI processes after stalled probes or restarts.</p>
             ]]></description>
-            <sparkle:version>16</sparkle:version>
-            <sparkle:shortVersionString>2.10</sparkle:shortVersionString>
+            <sparkle:version>17</sparkle:version>
+            <sparkle:shortVersionString>2.10.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10/AgentSessions-2.10.dmg" length="9734154" type="application/octet-stream" sparkle:edSignature="saicttt20zN9piqjj3Kor9fGlJM+/M74eRDNgmdELgwWihuAvbQmR8qFpY0iazDmAvMn6J3o0km3e7KtsAmdCw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.1/AgentSessions-2.10.1.dmg" length="9756249" type="application/octet-stream" sparkle:edSignature="tnlgOBpA7N/5KFVBUzlD9ONY2k6UIfddsG/fAMk2gyK0nphAko70CrPl75ZTmi4Nc532HabaGiLeQgDX+4ESCA=="/>
         </item>
     </channel>
 </rss>
