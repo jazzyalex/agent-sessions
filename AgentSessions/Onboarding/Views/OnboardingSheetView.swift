@@ -32,6 +32,7 @@ struct OnboardingSheetView: View {
     @State private var animatedPrimarySessions: Double = 0
     @State private var indexedSessionsSnapshot: [SessionSource: [Session]] = [:]
     @State private var didLoadIndexedSessionsSnapshot: Bool = false
+    @StateObject private var agentAvailabilityModel = OnboardingAgentAvailabilityModel()
 
     private var palette: OnboardingPalette { OnboardingPalette(colorScheme: colorScheme) }
     private var slides: [OnboardingSlide] { OnboardingSlide.allCases }
@@ -71,6 +72,9 @@ struct OnboardingSheetView: View {
         }
         .frame(minWidth: 780, minHeight: 620)
         .interactiveDismissDisabled(true)
+        .task {
+            await agentAvailabilityModel.refreshIfNeeded()
+        }
         .onAppear {
             loadIndexedSessionsSnapshotIfNeeded()
             updateAnimatedCount(animated: !reduceMotion)
@@ -444,9 +448,8 @@ struct OnboardingSheetView: View {
         let isCurrentlyOn = isAgentEnabled(source)
         let canDisable = !(enabledCount == 1 && isCurrentlyOn)
 
-        let installed = AgentEnablement.binaryInstalled(for: source)
-        let available = installed || AgentEnablement.isAvailable(source)
-        let canEnable = available || isCurrentlyOn
+        let availability = agentAvailabilityModel.availability(for: source)
+        let canEnable = availability != .missing || isCurrentlyOn
 
         return !(canDisable && canEnable)
     }
@@ -506,6 +509,41 @@ struct OnboardingSheetView: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+}
+
+private enum OnboardingAgentAvailability: Equatable {
+    case unknown
+    case present
+    case missing
+}
+
+@MainActor
+private final class OnboardingAgentAvailabilityModel: ObservableObject {
+    @Published private var availabilityBySource: [SessionSource: OnboardingAgentAvailability] = [:]
+    private var didCompute: Bool = false
+
+    func availability(for source: SessionSource) -> OnboardingAgentAvailability {
+        availabilityBySource[source] ?? .unknown
+    }
+
+    func refreshIfNeeded() async {
+        if didCompute { return }
+        didCompute = true
+        await refresh()
+    }
+
+    func refresh() async {
+        let computed = await Task.detached(priority: .utility) {
+            var out: [SessionSource: OnboardingAgentAvailability] = [:]
+            for source in SessionSource.allCases {
+                let available = AgentEnablement.isAvailable(source)
+                out[source] = available ? .present : .missing
+            }
+            return out
+        }.value
+
+        availabilityBySource = computed
     }
 }
 

@@ -2,12 +2,23 @@ import Foundation
 
 enum AgentEnablement {
     static let didChangeNotification = Notification.Name("AgentEnablementDidChange")
-    private static let cachedBinaryPresence = Locked<[String: Bool]>([:])
-    private static let fastBinarySearchPaths: [String] = [
+    private static let binaryPresenceCacheCapacity: Int = 64
+    private static let cachedBinaryPresence = Locked<BinaryPresenceCache>(.init(capacity: binaryPresenceCacheCapacity))
+
+    private static let fallbackBinarySearchPaths: [String] = [
         "/opt/homebrew/bin",
         "/usr/local/bin",
         "/usr/bin",
-        "/bin"
+        "/bin",
+        "/usr/sbin",
+        "/sbin"
+    ]
+
+    private static let userLevelBinarySearchPaths: [String] = [
+        "~/.local/bin",
+        "~/bin",
+        "~/Library/pnpm",
+        "~/.npm-global/bin"
     ]
 
     static func isEnabled(_ source: SessionSource, defaults: UserDefaults = .standard) -> Bool {
@@ -173,35 +184,131 @@ enum AgentEnablement {
         }
     }
 
+    static func binaryDetectedInPATH(_ binaryName: String, pathOverride: String? = nil) -> Bool {
+        let fileManager = FileManager.default
+        let expandedBinaryName = expandTilde(binaryName)
+
+        if expandedBinaryName.contains("/") {
+            return fileManager.isExecutableFile(atPath: expandedBinaryName)
+        }
+
+        let dirs = normalizedPATHDirectories(pathOverride: pathOverride)
+        for dir in dirs {
+            let candidatePath = URL(fileURLWithPath: dir, isDirectory: true)
+                .appendingPathComponent(expandedBinaryName, isDirectory: false)
+                .path
+            if fileManager.isExecutableFile(atPath: candidatePath) { return true }
+        }
+        return false
+    }
+
     private static func binaryDetectedCached(_ command: String) -> Bool {
-        if let v = cachedBinaryPresence.withLock({ $0[command] }) { return v }
-        let v = binaryDetected(command)
-        cachedBinaryPresence.withLock { $0[command] = v }
+        let signature = effectivePATHSignature(pathOverride: nil)
+        let key = "\(command)|\(signature)"
+
+        if let v = cachedBinaryPresence.withLock({ $0.get(key) }) { return v }
+
+        let v = binaryDetectedInPATH(command, pathOverride: nil)
+        cachedBinaryPresence.withLock { $0.set(key, value: v) }
         return v
     }
 
-    private static func binaryDetected(_ command: String) -> Bool {
-        // Fast path: common install locations (Homebrew + system)
-        for dir in fastBinarySearchPaths {
-            let path = URL(fileURLWithPath: dir, isDirectory: true).appendingPathComponent(command, isDirectory: false).path
-            if FileManager.default.isExecutableFile(atPath: path) { return true }
+    private static func effectivePATHSignature(pathOverride: String?) -> String {
+        if let pathOverride {
+            return normalizedPATHDirectories(pathOverride: pathOverride).joined(separator: ":")
+        }
+        return normalizedPATHDirectories(pathOverride: nil).joined(separator: ":")
+    }
+
+    private static func normalizedPATHDirectories(pathOverride: String?) -> [String] {
+        var out: [String] = []
+
+        func appendUnique(_ value: String, seen: inout Set<String>) {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return }
+            let expanded = expandTilde(trimmed)
+            if expanded.isEmpty { return }
+            var normalized = expanded
+            while normalized.count > 1, normalized.hasSuffix("/") {
+                normalized.removeLast()
+            }
+            if normalized.isEmpty { return }
+            if seen.contains(normalized) { return }
+            seen.insert(normalized)
+            out.append(normalized)
         }
 
-        // Next: scan current process PATH (no shell spawn).
+        var seen: Set<String> = []
+
+        if let pathOverride, !pathOverride.isEmpty {
+            for component in pathOverride.split(separator: ":") {
+                appendUnique(String(component), seen: &seen)
+            }
+            return out
+        }
+
         if let path = ProcessInfo.processInfo.environment["PATH"], !path.isEmpty {
             for component in path.split(separator: ":") {
-                let candidate = URL(fileURLWithPath: String(component), isDirectory: true)
-                    .appendingPathComponent(command, isDirectory: false).path
-                if FileManager.default.isExecutableFile(atPath: candidate) { return true }
+                appendUnique(String(component), seen: &seen)
             }
         }
 
-        // Last resort: /usr/bin/which (still avoids login shell).
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        process.arguments = [command]
-        do { try process.run() } catch { return false }
-        process.waitUntilExit()
-        return process.terminationStatus == 0
+        for dir in fallbackBinarySearchPaths {
+            appendUnique(dir, seen: &seen)
+        }
+
+        for dir in userLevelBinarySearchPaths {
+            appendUnique(dir, seen: &seen)
+        }
+
+        return out
+    }
+
+    private static func expandTilde(_ path: String) -> String {
+        if path == "~" {
+            return FileManager.default.homeDirectoryForCurrentUser.path
+        }
+        if path.hasPrefix("~/") {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            return home + "/" + String(path.dropFirst(2))
+        }
+        return path
+    }
+}
+
+private struct BinaryPresenceCache {
+    private let capacity: Int
+    private var values: [String: Bool] = [:]
+    private var lruKeys: [String] = []
+
+    init(capacity: Int) {
+        self.capacity = capacity
+    }
+
+    mutating func get(_ key: String) -> Bool? {
+        guard let v = values[key] else { return nil }
+        touch(key)
+        return v
+    }
+
+    mutating func set(_ key: String, value: Bool) {
+        values[key] = value
+        touch(key)
+        trimIfNeeded()
+    }
+
+    private mutating func touch(_ key: String) {
+        if let idx = lruKeys.firstIndex(of: key) {
+            lruKeys.remove(at: idx)
+        }
+        lruKeys.append(key)
+    }
+
+    private mutating func trimIfNeeded() {
+        guard values.count > capacity else { return }
+        while values.count > capacity, let oldest = lruKeys.first {
+            lruKeys.removeFirst()
+            values.removeValue(forKey: oldest)
+        }
     }
 }
