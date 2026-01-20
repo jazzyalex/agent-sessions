@@ -302,13 +302,22 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         guard source == .codex else { return nil }
         let filename = (filePath as NSString).lastPathComponent
 
+        if let cached = Self.rolloutDateCache.object(forKey: filename as NSString) {
+            return cached as Date
+        }
+
         guard let match = Self.rolloutRegex.firstMatch(in: filename) else {
             return nil
         }
 
         let ts = match.ts
-        let formatter = Self.rolloutDateFormatter
-        return formatter.date(from: ts)
+        Self.rolloutDateFormatterLock.lock()
+        let parsed = Self.rolloutDateFormatter.date(from: ts)
+        Self.rolloutDateFormatterLock.unlock()
+        if let parsed {
+            Self.rolloutDateCache.setObject(parsed as NSDate, forKey: filename as NSString)
+        }
+        return parsed
     }
 
     public var codexFilenameUUID: String? {
@@ -675,6 +684,8 @@ private extension Session {
         f.timeZone = TimeZone.current  // Use local timezone, not UTC
         return f
     }()
+    static let rolloutDateFormatterLock = NSLock()
+    static let rolloutDateCache = NSCache<NSString, NSDate>()
     static func firstCommandLine(from raw: String?) -> String? {
         guard var s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
         // Try to parse JSON object
