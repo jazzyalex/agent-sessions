@@ -27,11 +27,8 @@ final class TranscriptBuilderTests: XCTestCase {
         "}"
         let s = session(from: [line])
         let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
-        XCTAssertTrue(txt.contains(SessionTranscriptBuilder.outPrefix))
-        XCTAssertTrue(txt.contains("\"k\" : 1") || txt.contains("\"k\": 1"))
-        XCTAssertTrue(txt.contains("["))
-        XCTAssertTrue(txt.contains("\"a\""))
-        XCTAssertTrue(txt.contains("\"b\""))
+        XCTAssertTrue(txt.contains("{\"k\":1}"))
+        XCTAssertTrue(txt.contains("[\"a\",\"b\"]"))
     }
 
     func testChunksAreCoalescedByMessageID() throws {

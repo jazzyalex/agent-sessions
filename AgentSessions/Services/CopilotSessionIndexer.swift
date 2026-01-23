@@ -71,7 +71,7 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol, @un
                                       pathContains: nil)
                 var results = FilterEngine.filterSessions(all, filters: filters, transcriptCache: self?.transcriptCache, allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
                 if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
-                if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
+                if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
                 return results
             }
             .receive(on: DispatchQueue.main)
@@ -161,7 +161,7 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol, @un
                               pathContains: nil)
 	        var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache, allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
 	        if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
-	        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
+	        if hideLowMessageSessionsPref { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
 	        Task { @MainActor [weak self] in
 	            self?.sessions = results
 	        }

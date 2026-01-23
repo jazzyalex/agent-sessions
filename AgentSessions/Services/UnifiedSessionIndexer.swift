@@ -327,7 +327,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
                 if self.showFavoritesOnly { results = results.filter { $0.isFavorite } }
                 if self.hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
-                if self.hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
+                if self.hideLowMessageSessionsPref { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
                 if !self.showHousekeepingSessionsPref { results = results.filter { !$0.isHousekeeping } }
 
                 // Apply sort descriptor (now included in pipeline so changes trigger background re-sort)
@@ -731,7 +731,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if hideLowMessageSessionsPref {
             results = results.filter { s in
                 if s.source == .opencode { return true }
-                return s.messageCount > 2
+                return s.messageCount == 0 || s.messageCount > 2
             }
         }
 

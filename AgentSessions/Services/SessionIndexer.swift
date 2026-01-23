@@ -224,7 +224,7 @@ final class SessionIndexer: ObservableObject {
                                                          allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
 
                 if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
-                if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
+                if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
                 if !(self?.showHousekeepingSessionsPref ?? false) { results = results.filter { !$0.isHousekeeping } }
 
                 return results
@@ -483,7 +483,7 @@ final class SessionIndexer: ObservableObject {
                                                          transcriptCache: self.transcriptCache,
                                                          allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
                 if self.hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
-                if self.hideLowMessageSessionsPref { results = results.filter { $0.messageCount > 2 } }
+                if self.hideLowMessageSessionsPref { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
                 if !self.showHousekeepingSessionsPref { results = results.filter { !$0.isHousekeeping } }
                 // FilterEngine now preserves order, so filtered results maintain allSessions sort order
                 DispatchQueue.main.async {

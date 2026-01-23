@@ -9,7 +9,7 @@ enum ClaudeProbeConfig {
     /// macOS: ~/Library/Application Support/AgentSessions/ClaudeProbeProject
     static func probeWorkingDirectory() -> String {
         // Test override support: AS_TEST_PROBE_WD
-        if let override = ProcessInfo.processInfo.environment["AS_TEST_PROBE_WD"], !override.isEmpty {
+        if let override = envValue("AS_TEST_PROBE_WD"), !override.isEmpty {
             return (override as NSString).expandingTildeInPath
         }
         let home = NSHomeDirectory() as NSString
@@ -48,5 +48,10 @@ enum ClaudeProbeConfig {
     private static func normalizePath(_ path: String) -> String {
         let expanded = (path as NSString).expandingTildeInPath
         return (expanded as NSString).standardizingPath
+    }
+
+    private static func envValue(_ key: String) -> String? {
+        guard let value = getenv(key) else { return nil }
+        return String(cString: value)
     }
 }

@@ -108,7 +108,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                                                      allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
 
             if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
-            if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 2 } }
+            if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
             if !(self?.showHousekeepingSessionsPref ?? false) { results = results.filter { !$0.isHousekeeping } }
 
             return results
