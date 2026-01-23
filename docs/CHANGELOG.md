@@ -19,7 +19,7 @@ All notable changes to this project will be documented in this file.
 - Transcript (Session view): Accent strips now align to their block padding.
 - Transcript (Session view): Block accents no longer bleed into inter-block spacing.
 - Transcript (Session view): Accent strips now sit outside text bounds.
-- Transcript (Session view): User prompts now use medium-weight text for faster scanning.
+- Transcript (Session view): User prompts now use medium italic text for faster scanning.
 
 ## [2.10.1] - 2026-01-19
 
