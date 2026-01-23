@@ -24,13 +24,12 @@ actor AnalyticsRepository {
         let d = UserDefaults.standard
         let hideZero = d.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
         let hideLow  = d.object(forKey: "HideLowMessageSessions") as? Bool ?? true
-        let minMessages = hideLow ? 3 : (hideZero ? 1 : 0)
 
-        if minMessages > 0 {
-            let sessions = (try? await db.countDistinctSessionsFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0
-            let messages = (try? await db.sumMessagesFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0
-            let commands = (try? await db.sumCommandsFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0
-            let duration = (try? await db.sumDurationFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0.0
+        if hideZero || hideLow {
+            let sessions = (try? await db.countDistinctSessionsFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, hideZero: hideZero, hideLow: hideLow)) ?? 0
+            let messages = (try? await db.sumMessagesFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, hideZero: hideZero, hideLow: hideLow)) ?? 0
+            let commands = (try? await db.sumCommandsFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, hideZero: hideZero, hideLow: hideLow)) ?? 0
+            let duration = (try? await db.sumDurationFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, hideZero: hideZero, hideLow: hideLow)) ?? 0.0
             return Summary(sessionsDistinct: sessions, messages: messages, commands: commands, durationSeconds: duration)
         } else {
             let sessions = (try? await db.countDistinctSessions(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? 0
@@ -69,13 +68,8 @@ actor AnalyticsRepository {
         let d = UserDefaults.standard
         let hideZero = d.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
         let hideLow  = d.object(forKey: "HideLowMessageSessions") as? Bool ?? true
-        // Determine minimum messages required per session across the selected period
-        // - hideLow: exclude sessions with <= 2 messages → min = 3
-        // - else if hideZero: exclude sessions with 0 messages → min = 1
-        // - else: include all → min = 0
-        let minMessages = hideLow ? 3 : (hideZero ? 1 : 0)
-        if minMessages > 0 {
-            return (try? await db.avgSessionDurationFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, minMessages: minMessages)) ?? 0
+        if hideZero || hideLow {
+            return (try? await db.avgSessionDurationFiltered(sources: sources, dayStart: dayStart, dayEnd: dayEnd, hideZero: hideZero, hideLow: hideLow)) ?? 0
         } else {
             return (try? await db.avgSessionDuration(sources: sources, dayStart: dayStart, dayEnd: dayEnd)) ?? 0
         }

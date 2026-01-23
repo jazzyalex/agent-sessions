@@ -85,8 +85,10 @@ struct TerminalBuilder {
             }()
 
             var rawText = block.text
-            if block.kind == .toolCall {
-                rawText = toolCallDisplayText(block: block)
+            if block.kind == .toolCall || block.kind == .toolOut {
+                if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: session.source) {
+                    rawText = ToolTextBlockNormalizer.displayText(for: toolBlock)
+                }
             }
             let segments = lineSegments(for: block,
                                         baseRole: baseRole,
@@ -160,8 +162,10 @@ struct TerminalBuilder {
             }()
 
             var rawText = block.text
-            if block.kind == .toolCall {
-                rawText = toolCallDisplayText(block: block)
+            if block.kind == .toolCall || block.kind == .toolOut {
+                if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: session.source) {
+                    rawText = ToolTextBlockNormalizer.displayText(for: toolBlock)
+                }
             }
             let segments = lineSegments(for: block,
                                         baseRole: baseRole,
@@ -212,18 +216,6 @@ struct TerminalBuilder {
         }
 
         return (lines, terminalBlocks)
-    }
-
-    private static func toolCallDisplayText(block: SessionTranscriptBuilder.LogicalBlock) -> String {
-        guard let input = block.toolInput, !input.isEmpty else {
-            return block.text
-        }
-        var pieces: [String] = []
-        if let name = block.toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-            pieces.append(name)
-        }
-        pieces.append(input)
-        return pieces.joined(separator: " ")
     }
 
     private struct LineSegment {

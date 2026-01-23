@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Filters: “Hide 1–2 message sessions” no longer hides 0-message sessions when “Hide 0-message sessions” is off.
+- Onboarding: “Sessions Found” counts now reflect current filter settings; filter labels are now consistently “Hide …”.
+- Claude probes: Auto-delete now removes failed/empty probe sessions, not just successful ones.
+- Claude probes: Cleanup now requires validated probe evidence (marker or content) before deleting a project, and cleanup messaging is clearer about protecting normal sessions.
+
+### Changed
+
+- Transcript: Tool calls and outputs now render as readable text blocks (commands, paths, stdout, stderr) instead of JSON wrappers.
+- Transcript: Tool call/output navigation now groups paired blocks, tool outputs no longer repeat the tool label, and tool/error blocks have consistent padding.
+- Transcript (Session view): User prompts no longer use semibold text; emphasis comes from the accent strip.
+- Transcript (Session view): Accent strips now align to their block padding.
+
 ## [2.10.1] - 2026-01-19
 
 ### Fixed

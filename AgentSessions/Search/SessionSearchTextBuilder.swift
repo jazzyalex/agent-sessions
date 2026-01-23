@@ -233,6 +233,20 @@ enum SessionSearchTextBuilder {
         }
 
         func appendEventFields(_ ev: SessionEvent, into out: inout [String], remaining: inout Int) {
+            let isToolEvent = ev.kind == .tool_call
+                || ev.kind == .tool_result
+                || (ev.kind == .error && (ev.toolName != nil || ev.toolOutput != nil))
+
+            if isToolEvent, let block = ToolTextBlockNormalizer.normalize(event: ev, source: session.source) {
+                let text = ToolTextBlockNormalizer.displayText(for: block)
+                if block.kind == .toolOutput {
+                    appendToolOutput(text, into: &out, remaining: &remaining)
+                } else {
+                    appendSampledLargeText(text, maxOut: perFieldLimit, into: &out, remaining: &remaining)
+                }
+                return
+            }
+
             if let t = ev.text, !t.isEmpty {
                 appendSampledLargeText(t, maxOut: perFieldLimit, into: &out, remaining: &remaining)
             }
@@ -319,6 +333,11 @@ enum SessionSearchTextBuilder {
         var remaining = maxCharacters
         for ev in session.events {
             guard remaining > 0 else { break }
+            if let block = ToolTextBlockNormalizer.normalize(event: ev, source: session.source) {
+                let text = ToolTextBlockNormalizer.displayText(for: block)
+                append(text, into: &parts, remaining: &remaining)
+                continue
+            }
             switch ev.kind {
             case .tool_call:
                 append(ev.toolName, into: &parts, remaining: &remaining)

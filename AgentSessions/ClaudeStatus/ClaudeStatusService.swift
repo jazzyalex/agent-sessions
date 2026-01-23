@@ -157,13 +157,13 @@ actor ClaudeStatusService {
         guard tmuxAvailable && claudeAvailable else { return }
         guard beginProbe() else { return }
         defer { endProbe() }
+        defer { _ = ClaudeProbeProject.cleanupNowIfAuto() }
+        defer { ClaudeProbeProject.noteProbeRun() }
         do {
             let json = try await executeScript()
             if let parsed = parseUsageJSON(json) {
                 snapshot = parsed
                 updateHandler(snapshot)
-                // Auto-cleanup the probe project immediately after a successful probe
-                _ = ClaudeProbeProject.cleanupNowIfAuto()
             } else {
                 print("ClaudeStatusService: Failed to parse JSON: \(json)")
             }
@@ -211,6 +211,8 @@ actor ClaudeStatusService {
             return ClaudeProbeDiagnostics(success: false, exitCode: 125, scriptPath: "(not run)", workdir: workDir, claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Probe already running")
         }
         defer { endProbe() }
+        defer { _ = ClaudeProbeProject.cleanupNowIfAuto() }
+        defer { ClaudeProbeProject.noteProbeRun() }
         guard let scriptURL = prepareScript() else {
             return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(missing)", workdir: workDir, claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Script not found in bundle")
         }
@@ -255,7 +257,6 @@ actor ClaudeStatusService {
             if let parsed = parseUsageJSON(stdout) {
                 snapshot = parsed
                 updateHandler(snapshot)
-                _ = ClaudeProbeProject.cleanupNowIfAuto()
             }
             publishAvailability(loginRequired: false, setupRequired: false, setupHint: nil)
             return ClaudeProbeDiagnostics(success: true, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)

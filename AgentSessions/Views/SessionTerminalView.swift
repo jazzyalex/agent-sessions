@@ -285,6 +285,7 @@ struct SessionTerminalView: View {
     }
 
     nonisolated private static func buildRebuildResult(session: Session, skipAgentsPreamble: Bool) -> RebuildResult {
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
         let built = TerminalBuilder.buildLines(for: session, showMeta: false)
         let (decorated, dividerID) = applyConversationStartDividerIfNeeded(session: session, lines: built, enabled: skipAgentsPreamble)
         let preambleUserBlockIndexes = computePreambleUserBlockIndexes(session: session)
@@ -292,12 +293,52 @@ struct SessionTerminalView: View {
         // Collapse multi-line blocks into single navigable/message entries per role.
         var firstLineForBlock: [Int: Int] = [:]       // blockIndex -> first line id
         var roleForBlock: [Int: TerminalLineRole] = [:]
+        var toolGroupKeyForBlock: [Int: String] = [:]
+        var lastToolGroupKey: String? = nil
+        var lastToolName: String? = nil
 
         for line in decorated {
             guard let blockIndex = line.blockIndex else { continue }
             if firstLineForBlock[blockIndex] == nil {
                 firstLineForBlock[blockIndex] = line.id
                 roleForBlock[blockIndex] = line.role
+            }
+        }
+
+        if !blocks.isEmpty {
+            for (idx, block) in blocks.enumerated() {
+                guard block.kind == .toolCall || block.kind == .toolOut else {
+                    lastToolGroupKey = nil
+                    lastToolName = nil
+                    continue
+                }
+
+                let normalizedName = block.toolName?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                var derivedKey: String? = nil
+
+                if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: session.source),
+                   let groupKey = toolBlock.groupKey,
+                   !groupKey.isEmpty {
+                    derivedKey = groupKey
+                }
+
+                if derivedKey == nil,
+                   block.kind == .toolOut,
+                   let last = lastToolGroupKey {
+                    if let lastName = lastToolName, let normalizedName {
+                        if lastName == normalizedName { derivedKey = last }
+                    } else {
+                        derivedKey = last
+                    }
+                }
+
+                if derivedKey == nil {
+                    derivedKey = "tool-block-\(idx)"
+                }
+
+                toolGroupKeyForBlock[idx] = derivedKey
+                lastToolGroupKey = derivedKey
+                if let normalizedName { lastToolName = normalizedName }
             }
         }
 
@@ -309,13 +350,27 @@ struct SessionTerminalView: View {
             .sorted()
         }
 
+        func toolMessageIDs() -> [Int] {
+            var grouped: [String: Int] = [:]
+            for (blockIndex, lineID) in firstLineForBlock {
+                guard let role = roleForBlock[blockIndex], role == .toolInput || role == .toolOutput else { continue }
+                let key = toolGroupKeyForBlock[blockIndex] ?? "tool-block-\(blockIndex)"
+                if let existing = grouped[key] {
+                    grouped[key] = min(existing, lineID)
+                } else {
+                    grouped[key] = lineID
+                }
+            }
+            return grouped.values.sorted()
+        }
+
         return RebuildResult(
             lines: decorated,
             conversationStartLineID: dividerID,
             preambleUserBlockIndexes: preambleUserBlockIndexes,
             userLineIndices: messageIDs { $0 == .user },
             assistantLineIndices: messageIDs { $0 == .assistant },
-            toolLineIndices: messageIDs { role in role == .toolInput || role == .toolOutput },
+            toolLineIndices: toolMessageIDs(),
             errorLineIndices: messageIDs { $0 == .error }
         )
     }
@@ -423,28 +478,33 @@ struct SessionTerminalView: View {
                 }
             }
             .buttonStyle(.plain)
+            .help(toggleHelpText(for: role))
 
             HStack(spacing: 4) {
-                Button(action: { navigateRole(role, direction: -1) }) {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 16, height: 16)
-                        .contentShape(Rectangle())
+                ZStack {
+                    Button(action: { navigateRole(role, direction: -1) }) {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(navDisabled ? Color.secondary.opacity(0.35) : Color.secondary)
+                    .disabled(navDisabled)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(navDisabled ? Color.secondary.opacity(0.35) : Color.secondary)
-                .disabled(navDisabled)
                 .help(previousHelpText(for: role))
 
-                Button(action: { navigateRole(role, direction: 1) }) {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 16, height: 16)
-                        .contentShape(Rectangle())
+                ZStack {
+                    Button(action: { navigateRole(role, direction: 1) }) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(navDisabled ? Color.secondary.opacity(0.35) : Color.secondary)
+                    .disabled(navDisabled)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(navDisabled ? Color.secondary.opacity(0.35) : Color.secondary)
-                .disabled(navDisabled)
                 .help(nextHelpText(for: role))
             }
         }
@@ -495,6 +555,15 @@ struct SessionTerminalView: View {
         case .assistant: return "Previous agent response"
         case .tools: return "Previous tool call/output (⌥⌘←)"
         case .errors: return "Previous error (⌥⌘⇧↑)"
+        }
+    }
+
+    private func toggleHelpText(for role: RoleToggle) -> String {
+        switch role {
+        case .user: return "Show/hide user prompts"
+        case .assistant: return "Show/hide agent responses"
+        case .tools: return "Show/hide tool calls and outputs"
+        case .errors: return "Show/hide errors"
         }
     }
 
@@ -880,11 +949,13 @@ private struct TerminalLineView: View {
 	    var body: some View {
 	        HStack(alignment: .firstTextBaseline, spacing: 4) {
 	            prefixView
-		            Text(line.text)
-		                .font(.system(size: fontSize,
-		                              weight: .regular,
-		                              design: (line.role == .toolInput) ? .monospaced : .default))
-		                .foregroundColor(swatch.foreground)
+                    Group {
+                        Text(line.text)
+                    }
+                    .font(.system(size: fontSize,
+                                  weight: (line.role == .toolInput && isToolLabelLine(line.text)) ? .semibold : .regular,
+                                  design: (line.role == .toolInput) ? .monospaced : .default))
+                    .foregroundColor(swatch.foreground)
 		        }
 	        .textSelection(.enabled)
 	        .padding(.horizontal, 4)
@@ -927,6 +998,16 @@ private struct TerminalLineView: View {
 
     private var swatch: TerminalRolePalette.SwiftUISwatch {
         TerminalRolePalette.swiftUI(role: line.role.paletteRole, scheme: colorScheme, monochrome: monochrome)
+    }
+
+    private func isToolLabelLine(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let lower = trimmed.lowercased()
+        let labels: Set<String> = ["bash", "read", "list", "glob", "grep", "plan", "task", "tool"]
+        if labels.contains(lower) { return true }
+        if lower.hasPrefix("task ("), lower.hasSuffix(")") { return true }
+        return false
     }
 }
 
@@ -1137,6 +1218,7 @@ private final class TerminalLayoutManager: NSLayoutManager {
         let fill: NSColor
         let accent: NSColor?
         let accentWidth: CGFloat
+        let paddingY: CGFloat
     }
 
 	    private func style(for kind: BlockKind) -> BlockStyle {
@@ -1154,49 +1236,56 @@ private final class TerminalLayoutManager: NSLayoutManager {
 	            return BlockStyle(
 	                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
 	                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
-	                accentWidth: 6
+	                accentWidth: 6,
+                    paddingY: 6
 	            )
         case .userInterrupt:
             let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
             return BlockStyle(
                 fill: rgba(base, alpha: dark ? 0.10 : 0.03),
                 accent: rgba(base, alpha: dark ? 0.70 : 0.50),
-                accentWidth: 4
+                accentWidth: 4,
+                paddingY: 6
             )
         case .agent:
             let base = agentBrandAccent
             return BlockStyle(
                 fill: rgba(base, alpha: dark ? 0.06 : 0.012),
                 accent: rgba(base, alpha: dark ? 0.60 : 0.42),
-                accentWidth: 4
+                accentWidth: 4,
+                paddingY: 6
             )
         case .localCommand:
             let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
             return BlockStyle(
                 fill: rgba(base, alpha: dark ? 0.10 : 0.03),
                 accent: rgba(base, alpha: dark ? 0.70 : 0.50),
-                accentWidth: 4
+                accentWidth: 4,
+                paddingY: 6
             )
 	        case .toolCall:
 	            let base: NSColor = TranscriptColorSystem.semanticAccent(.toolCall)
 	            return BlockStyle(
 	                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
 	                accent: rgba(base, alpha: dark ? 0.78 : 0.60),
-	                accentWidth: 4
+	                accentWidth: 4,
+                    paddingY: 8
 	            )
 	        case .toolOutput:
 	            let base: NSColor = TranscriptColorSystem.semanticAccent(.toolOutputSuccess)
 	            return BlockStyle(
 	                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
 	                accent: rgba(base, alpha: dark ? 0.78 : 0.60),
-	                accentWidth: 4
+	                accentWidth: 4,
+                    paddingY: 8
 	            )
 	        case .error:
 	            let base: NSColor = TranscriptColorSystem.semanticAccent(.error)
 	            return BlockStyle(
 	                fill: rgba(base, alpha: dark ? 0.11 : 0.035),
 	                accent: rgba(base, alpha: dark ? 0.82 : 0.65),
-	                accentWidth: 4
+	                accentWidth: 4,
+                    paddingY: 8
 	            )
 	        }
 	    }
@@ -1340,8 +1429,6 @@ private final class TerminalLayoutManager: NSLayoutManager {
 
         let cardCornerRadius: CGFloat = 8
         let cardInsetX: CGFloat = 8
-        let cardPadY: CGFloat = 6
-        let stripInsetY: CGFloat = 8
 
         for block in blocks {
             let blockGlyphs = glyphRange(forCharacterRange: block.range, actualCharacterRange: nil)
@@ -1354,17 +1441,18 @@ private final class TerminalLayoutManager: NSLayoutManager {
             }
             guard var cardRect = unionRect else { continue }
 
+            let style = style(for: block.kind)
+
             // Card geometry: keep whitespace between blocks, but add internal padding.
             cardRect = cardRect.insetBy(dx: cardInsetX, dy: 0)
-            cardRect = cardRect.insetBy(dx: 0, dy: -cardPadY)
-
-            let style = style(for: block.kind)
+            cardRect = cardRect.insetBy(dx: 0, dy: -style.paddingY)
             let path = NSBezierPath(roundedRect: cardRect, xRadius: cardCornerRadius, yRadius: cardCornerRadius)
 
             style.fill.setFill()
             path.fill()
 
             if let accent = style.accent, style.accentWidth > 0 {
+                let stripInsetY = style.paddingY
                 accent.setFill()
                 let y0 = cardRect.minY + stripInsetY
                 let h = max(0, cardRect.height - (stripInsetY * 2))
@@ -2044,10 +2132,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 		        var ranges: [Int: NSRange] = [:]
 		        ranges.reserveCapacity(lines.count)
 
-		        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-			        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-			        let systemUserSemibold = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
+			        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+				        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
 		        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+                let monoSemiboldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .semibold)
 
 	        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
 	        let assistantSwatch = TerminalRolePalette.appKit(role: .assistant, scheme: colorScheme, monochrome: monochrome)
@@ -2120,9 +2208,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	            let lineSwatch = swatch(for: line.role)
 
 	            let baseFont: NSFont = {
-	                if line.role == .toolInput { return monoRegularFont }
-	                if line.role == .user && !isPreambleUserLine && isFirstLineOfBlock { return systemUserSemibold }
-	                if line.role == .user && !isPreambleUserLine { return systemUserFont }
+	                if line.role == .toolInput {
+                        return isFirstLineOfBlock ? monoSemiboldFont : monoRegularFont
+                    }
+		                if line.role == .user && !isPreambleUserLine { return systemUserFont }
 	                return systemRegularFont
 	            }()
 

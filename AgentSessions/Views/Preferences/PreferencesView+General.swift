@@ -226,20 +226,23 @@ extension PreferencesView {
                 sectionHeader("Filters")
                     .padding(.top, 8)
                 HStack(spacing: 16) {
-                    Toggle("Zero msgs", isOn: $hideZeroMessageSessionsPref)
+                    Toggle("Hide 0-message sessions", isOn: $hideZeroMessageSessionsPref)
                         .onChange(of: hideZeroMessageSessionsPref) { _, _ in indexer.recomputeNow() }
-                        .help("Hide sessions that contain no user or assistant messages")
-                    Toggle("1–2 messages", isOn: $hideLowMessageSessionsPref)
+                        .help("Exclude sessions that contain no user or assistant messages")
+                    Toggle("Hide 1–2 message sessions", isOn: $hideLowMessageSessionsPref)
                         .onChange(of: hideLowMessageSessionsPref) { _, _ in indexer.recomputeNow() }
-                        .help("Hide sessions with only one or two messages")
-                    Toggle("Show housekeeping-only sessions", isOn: $showHousekeepingSessions)
-                        .onChange(of: showHousekeepingSessions) { _, _ in indexer.recomputeNow() }
-                        .help("Show sessions that contain no assistant output and no meaningful prompt content (for example Codex rollouts and Claude local-command transcripts like /usage)")
-                    Toggle("Only sessions with tool calls (strict)", isOn: Binding(
+                        .help("Exclude sessions with only one or two messages (but keep 0-message sessions unless also excluded above)")
+                    Toggle("Hide housekeeping-only sessions", isOn: Binding(
+                        get: { !showHousekeepingSessions },
+                        set: { showHousekeepingSessions = !$0 }
+                    ))
+                    .onChange(of: showHousekeepingSessions) { _, _ in indexer.recomputeNow() }
+                    .help("Exclude sessions that contain no assistant output and no meaningful prompt content (for example Codex rollouts that only captured preamble, or Claude local-command-only transcripts)")
+                    Toggle("Hide sessions without tool calls (strict)", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.hasCommandsOnly) },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.hasCommandsOnly) }
                     ))
-                    .help("Show only sessions that contain recorded tool/command calls. Strict: Claude/Gemini are excluded unless tool calls are present in the parsed transcript.")
+                    .help("Exclude sessions that contain no recorded tool/command calls. Strict: Claude/Gemini are excluded unless tool calls are present in the parsed transcript.")
                 }
 
                 Divider()

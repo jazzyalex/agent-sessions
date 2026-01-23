@@ -18,13 +18,13 @@ struct SessionTranscriptBuilder {
         static let bold = "\u{001B}[1m"
     }
 
-    struct Options { var showTimestamps: Bool; var showMeta: Bool; var renderMode: TranscriptRenderMode }
+    struct Options { var showTimestamps: Bool; var showMeta: Bool; var renderMode: TranscriptRenderMode; var sessionSource: SessionSource? }
 
     // MARK: Public API
 
     /// New plain terminal transcript builder (no truncation, no styling)
     static func buildPlainTerminalTranscript(session: Session, filters: TranscriptFilters, mode: TranscriptRenderMode = .normal) -> String {
-        let opts = options(from: filters, mode: mode)
+        let opts = options(from: filters, mode: mode, source: session.source)
         let blocks = coalesce(session: session, includeMeta: opts.showMeta)
         var out = ""
         // Intentionally omit session header and divider for a cleaner transcript view
@@ -37,7 +37,7 @@ struct SessionTranscriptBuilder {
 
     /// Terminal mode helper that also returns NSRanges for command lines and user text to enable styling in the UI.
     static func buildTerminalPlainWithRanges(session: Session, filters: TranscriptFilters) -> (String, [NSRange], [NSRange]) {
-        let opts = options(from: filters, mode: .terminal)
+        let opts = options(from: filters, mode: .terminal, source: session.source)
         let blocks = coalesce(session: session, includeMeta: opts.showMeta)
         var out = ""
         var commandRanges: [NSRange] = []
@@ -51,11 +51,9 @@ struct SessionTranscriptBuilder {
         for b in blocks {
             switch b.kind {
             case .toolCall:
-                let rendered = renderTerminalToolCall(name: b.toolName, toolInput: b.toolInput, fallback: b.text)
-                // Mark each command line as a command range
-                let lines = rendered.split(separator: "\n", omittingEmptySubsequences: false)
+                let lines = toolDisplayLines(for: b, source: opts.sessionSource)
                 for (i, line) in lines.enumerated() {
-                    markRange(String(line), into: &commandRanges)
+                    markRange(line, into: &commandRanges)
                     if i < lines.count - 1 { out += "\n" }
                 }
             case .user:
@@ -73,7 +71,7 @@ struct SessionTranscriptBuilder {
     }
 
     static func buildANSI(session: Session, filters: TranscriptFilters) -> String {
-        let opts = options(from: filters, mode: .normal)
+        let opts = options(from: filters, mode: .normal, source: session.source)
         var out = ""
         out += ANSI.bold + headerLine(session: session) + ANSI.reset + "\n"
         out += String(repeating: "─", count: 80) + "\n"
@@ -85,7 +83,7 @@ struct SessionTranscriptBuilder {
     }
 
     static func buildAttributed(session: Session, theme: TranscriptTheme, filters: TranscriptFilters) -> AttributedString {
-        let opts = options(from: filters, mode: .normal)
+        let opts = options(from: filters, mode: .normal, source: session.source)
         let colors = theme.colors
         var attr = AttributedString("")
 
@@ -121,7 +119,7 @@ struct SessionTranscriptBuilder {
 
     // Legacy builders kept for compatibility in case other views still call them
     static func buildPlain(session: Session, filters: TranscriptFilters) -> String {
-        let opts = options(from: filters, mode: .normal)
+        let opts = options(from: filters, mode: .normal, source: session.source)
         var lines: [String] = []
         lines.append(headerLine(session: session))
         lines.append(String(repeating: "-", count: 80))
@@ -209,10 +207,10 @@ struct SessionTranscriptBuilder {
 
     // MARK: Formatting helpers
 
-    private static func options(from filters: TranscriptFilters, mode: TranscriptRenderMode) -> Options {
+    private static func options(from filters: TranscriptFilters, mode: TranscriptRenderMode, source: SessionSource?) -> Options {
         switch filters {
         case let .current(showTimestamps, showMeta):
-            return Options(showTimestamps: showTimestamps, showMeta: showMeta, renderMode: mode)
+            return Options(showTimestamps: showTimestamps, showMeta: showMeta, renderMode: mode, sessionSource: source)
         }
     }
 
@@ -273,28 +271,98 @@ struct SessionTranscriptBuilder {
         // Marks tool output that represents an error (stderr/non-zero exit, etc.).
         // This is primarily used by the new Terminal view to classify error lines.
         var isErrorOutput: Bool
+        var eventID: String
+        var rawJSON: String
     }
 
     private static func block(from e: SessionEvent) -> LogicalBlock {
         switch e.kind {
         case .user:
-            return LogicalBlock(kind: .user, text: e.text ?? "", timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta, isErrorOutput: false)
+            return LogicalBlock(kind: .user,
+                                text: e.text ?? "",
+                                timestamp: e.timestamp,
+                                messageID: e.messageID,
+                                toolName: nil,
+                                isDelta: e.isDelta,
+                                toolInput: nil,
+                                isErrorOutput: false,
+                                eventID: e.id,
+                                rawJSON: e.rawJSON)
         case .assistant:
-            return LogicalBlock(kind: .assistant, text: e.text ?? "", timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta, isErrorOutput: false)
+            return LogicalBlock(kind: .assistant,
+                                text: e.text ?? "",
+                                timestamp: e.timestamp,
+                                messageID: e.messageID,
+                                toolName: nil,
+                                isDelta: e.isDelta,
+                                toolInput: nil,
+                                isErrorOutput: false,
+                                eventID: e.id,
+                                rawJSON: e.rawJSON)
         case .tool_call:
             let rendered = renderToolCallLabel(name: e.toolName, args: e.toolInput)
-            return LogicalBlock(kind: .toolCall, text: rendered, timestamp: e.timestamp, messageID: e.messageID ?? e.parentID, toolName: e.toolName, isDelta: e.isDelta, toolInput: e.toolInput, isErrorOutput: false)
+            return LogicalBlock(kind: .toolCall,
+                                text: rendered,
+                                timestamp: e.timestamp,
+                                messageID: e.messageID ?? e.parentID,
+                                toolName: e.toolName,
+                                isDelta: e.isDelta,
+                                toolInput: e.toolInput,
+                                isErrorOutput: false,
+                                eventID: e.id,
+                                rawJSON: e.rawJSON)
         case .tool_result:
-            let outputText = e.toolOutput ?? ""
-            let looksLikeError = SessionTranscriptBuilder.textLooksLikeError(outputText)
-            return LogicalBlock(kind: .toolOut, text: outputText, timestamp: e.timestamp, messageID: e.messageID ?? e.parentID, toolName: e.toolName, isDelta: e.isDelta, toolInput: nil, isErrorOutput: looksLikeError)
+            let outputText = e.toolOutput ?? e.text ?? ""
+            let exitCode = ToolTextBlockNormalizer.exitCode(from: e.rawJSON)
+            let looksLikeError = (exitCode != nil && exitCode != 0) || SessionTranscriptBuilder.textLooksLikeError(outputText)
+            return LogicalBlock(kind: .toolOut,
+                                text: outputText,
+                                timestamp: e.timestamp,
+                                messageID: e.messageID ?? e.parentID,
+                                toolName: e.toolName,
+                                isDelta: e.isDelta,
+                                toolInput: nil,
+                                isErrorOutput: looksLikeError,
+                                eventID: e.id,
+                                rawJSON: e.rawJSON)
         case .error:
+            if e.toolName != nil || e.toolOutput != nil {
+                let outputText = e.toolOutput ?? e.text ?? ""
+                return LogicalBlock(kind: .toolOut,
+                                    text: outputText,
+                                    timestamp: e.timestamp,
+                                    messageID: e.messageID ?? e.parentID,
+                                    toolName: e.toolName,
+                                    isDelta: e.isDelta,
+                                    toolInput: nil,
+                                    isErrorOutput: true,
+                                    eventID: e.id,
+                                    rawJSON: e.rawJSON)
+            }
             // If text is empty, fall back to pretty textified raw JSON
             let txt = (e.text?.isEmpty == false) ? e.text! : PrettyJSON.prettyPrinted(e.rawJSON)
-            return LogicalBlock(kind: .error, text: txt, timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta, isErrorOutput: true)
+            return LogicalBlock(kind: .error,
+                                text: txt,
+                                timestamp: e.timestamp,
+                                messageID: e.messageID,
+                                toolName: nil,
+                                isDelta: e.isDelta,
+                                toolInput: nil,
+                                isErrorOutput: true,
+                                eventID: e.id,
+                                rawJSON: e.rawJSON)
         case .meta:
             let txt = e.text ?? PrettyJSON.prettyPrinted(e.rawJSON)
-            return LogicalBlock(kind: .meta, text: txt, timestamp: e.timestamp, messageID: e.messageID, toolName: nil, isDelta: e.isDelta, isErrorOutput: false)
+            return LogicalBlock(kind: .meta,
+                                text: txt,
+                                timestamp: e.timestamp,
+                                messageID: e.messageID,
+                                toolName: nil,
+                                isDelta: e.isDelta,
+                                toolInput: nil,
+                                isErrorOutput: false,
+                                eventID: e.id,
+                                rawJSON: e.rawJSON)
         }
     }
 
@@ -376,6 +444,10 @@ struct SessionTranscriptBuilder {
                 var merged = last
                 merged.text += b.text
                 merged.timestamp = merged.timestamp ?? b.timestamp
+                merged.rawJSON = b.rawJSON
+                if merged.toolName == nil { merged.toolName = b.toolName }
+                if merged.toolInput == nil { merged.toolInput = b.toolInput }
+                merged.isErrorOutput = merged.isErrorOutput || b.isErrorOutput
                 blocks.removeLast()
                 blocks.append(merged)
             } else {
@@ -408,24 +480,12 @@ struct SessionTranscriptBuilder {
             }
         case .toolCall:
             let head = timestampPrefix(b.timestamp, options: options)
-            if options.renderMode == .terminal {
-                return head + renderTerminalToolCall(name: b.toolName, toolInput: b.toolInput, fallback: b.text)
-            } else {
-                return head + "\(toolPrefix) \(b.text)"
-            }
+            let lines = toolDisplayLines(for: b, source: options.sessionSource)
+            return renderPrefixedLines(lines, prefix: head)
         case .toolOut:
-            guard !b.text.isEmpty else {
-                let pfx = options.renderMode == .terminal ? "[out]" : outPrefix
-                return timestampPrefix(b.timestamp, options: options) + pfx
-            }
-            let prefixLabel = options.renderMode == .terminal ? "[out]" : outPrefix
-            if let nl = b.text.firstIndex(of: "\n") {
-                let first = String(b.text[..<nl])
-                let rest = String(b.text[nl...])
-                return timestampPrefix(b.timestamp, options: options) + "\(prefixLabel) \(first)" + rest
-            } else {
-                return timestampPrefix(b.timestamp, options: options) + "\(prefixLabel) \(b.text)"
-            }
+            let head = timestampPrefix(b.timestamp, options: options)
+            let lines = toolDisplayLines(for: b, source: options.sessionSource)
+            return renderPrefixedLines(lines, prefix: head)
         case .error:
             let head = timestampPrefix(b.timestamp, options: options)
             let marker = options.renderMode == .terminal ? "[error] " : (errorPrefix + " ")
@@ -446,6 +506,22 @@ struct SessionTranscriptBuilder {
                 return head + "· meta " + b.text
             }
         }
+    }
+
+    private static func renderPrefixedLines(_ lines: [String], prefix: String) -> String {
+        guard let first = lines.first else { return prefix }
+        if lines.count == 1 {
+            return prefix + first
+        }
+        let rest = lines.dropFirst().joined(separator: "\n")
+        return prefix + first + "\n" + rest
+    }
+
+    private static func toolDisplayLines(for block: LogicalBlock, source: SessionSource?) -> [String] {
+        if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: source) {
+            return ToolTextBlockNormalizer.displayLines(for: toolBlock)
+        }
+        return block.text.isEmpty ? [] : block.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     }
 
     private static func renderToolCallLabel(name: String?, args: String?) -> String {

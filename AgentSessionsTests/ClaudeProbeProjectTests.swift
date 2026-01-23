@@ -13,6 +13,12 @@ final class ClaudeProbeProjectTests: XCTestCase {
         return dir
     }
 
+    private func nameHint(for path: String) -> String {
+        let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        let parts = trimmed.split(separator: "/").map { $0.replacingOccurrences(of: " ", with: "-") }
+        return "-" + parts.joined(separator: "-")
+    }
+
     func testDiscoveryFindsProjectMatchingProbeWD() throws {
         let testRoot = mkdtemp(prefix: "as-probe-projects")
         let probeWD = mkdtemp(prefix: "as-probe-wd")
@@ -67,6 +73,72 @@ final class ClaudeProbeProjectTests: XCTestCase {
         // Directory should be deleted
         var isDir: ObjCBool = false
         XCTAssertFalse(FileManager.default.fileExists(atPath: projectDir.path, isDirectory: &isDir))
+    }
+
+    func testDiscoveryFindsProjectByMarkerWhenProjectJSONMissing() throws {
+        let testRoot = mkdtemp(prefix: "as-probe-projects")
+        let probeWD = mkdtemp(prefix: "as-probe-wd")
+        setEnv("AS_TEST_CLAUDE_PROJECTS_ROOT", testRoot.path)
+        setEnv("AS_TEST_PROBE_WD", probeWD.path)
+
+        let hintedName = nameHint(for: probeWD.path)
+        let projectDir = testRoot.appendingPathComponent(hintedName)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        let marker = projectDir.appendingPathComponent(".agentsessions_probe_marker.json")
+        try JSONSerialization.data(withJSONObject: ["version": 1], options: []).write(to: marker)
+
+        let id = ClaudeProbeProject.discoverProbeProjectId()
+        XCTAssertEqual(id, hintedName)
+    }
+
+    func testCleanupDeletesEmptyProbeProjectByMarker() throws {
+        let testRoot = mkdtemp(prefix: "as-probe-projects")
+        let probeWD = mkdtemp(prefix: "as-probe-wd")
+        setEnv("AS_TEST_CLAUDE_PROJECTS_ROOT", testRoot.path)
+        setEnv("AS_TEST_PROBE_WD", probeWD.path)
+
+        let hintedName = nameHint(for: probeWD.path)
+        let projectDir = testRoot.appendingPathComponent(hintedName)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        let marker = projectDir.appendingPathComponent(".agentsessions_probe_marker.json")
+        try JSONSerialization.data(withJSONObject: ["version": 1], options: []).write(to: marker)
+
+        let empty = projectDir.appendingPathComponent("empty.jsonl")
+        try Data().write(to: empty)
+
+        let status = ClaudeProbeProject.cleanupNowUserInitiated()
+        switch status {
+        case .success:
+            break
+        default:
+            XCTFail("Expected success, got: \(status)")
+        }
+        var isDir: ObjCBool = false
+        XCTAssertFalse(FileManager.default.fileExists(atPath: projectDir.path, isDirectory: &isDir))
+    }
+
+    func testCleanupSkipsNameHintWithoutProbeEvidence() throws {
+        let testRoot = mkdtemp(prefix: "as-probe-projects")
+        let probeWD = mkdtemp(prefix: "as-probe-wd")
+        setEnv("AS_TEST_CLAUDE_PROJECTS_ROOT", testRoot.path)
+        setEnv("AS_TEST_PROBE_WD", probeWD.path)
+
+        let hintedName = nameHint(for: probeWD.path)
+        let projectDir = testRoot.appendingPathComponent(hintedName)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+
+        let empty = projectDir.appendingPathComponent("empty.jsonl")
+        try Data().write(to: empty)
+
+        let status = ClaudeProbeProject.cleanupNowUserInitiated()
+        switch status {
+        case .success:
+            XCTFail("Expected cleanup to skip unverified project, but it succeeded")
+        default:
+            break
+        }
+        var isDir: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: projectDir.path, isDirectory: &isDir))
     }
 
     func testCleanupDeletesValidProbeProject() throws {

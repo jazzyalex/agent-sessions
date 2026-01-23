@@ -490,8 +490,12 @@ actor IndexDB {
         return 0
     }
 
-    /// Count distinct sessions with a minimum total messages threshold across the selected period.
-    func countDistinctSessionsFiltered(sources: [String], dayStart: String?, dayEnd: String?, minMessages: Int) throws -> Int {
+    /// Count distinct sessions while respecting message-count preferences.
+    ///
+    /// Semantics:
+    /// - hideZero: exclude sessions whose total messages across the period is 0
+    /// - hideLow: exclude sessions whose total messages across the period is 1–2 (but keep 0-message sessions unless hideZero is also enabled)
+    func countDistinctSessionsFiltered(sources: [String], dayStart: String?, dayEnd: String?, hideZero: Bool, hideLow: Bool) throws -> Int {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []
         var binds: [Any] = []
@@ -508,7 +512,8 @@ actor IndexDB {
             SELECT session_id
             FROM session_days\(whereSQL)
             GROUP BY session_id
-            HAVING SUM(messages) >= ?
+            HAVING (? = 0 OR SUM(messages) >= 1)
+               AND (? = 0 OR SUM(messages) = 0 OR SUM(messages) >= 3)
         )
         """
         var stmt: OpaquePointer?
@@ -519,13 +524,15 @@ actor IndexDB {
             if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
             idx += 1
         }
-        sqlite3_bind_int(stmt, idx, Int32(minMessages))
+        sqlite3_bind_int(stmt, idx, hideZero ? 1 : 0)
+        idx += 1
+        sqlite3_bind_int(stmt, idx, hideLow ? 1 : 0)
         if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int64(stmt, 0)) }
         return 0
     }
 
-    /// Sum of messages across sessions that meet a minimum messages threshold across the period.
-    func sumMessagesFiltered(sources: [String], dayStart: String?, dayEnd: String?, minMessages: Int) throws -> Int {
+    /// Sum of messages across sessions that pass the message-count preferences across the period.
+    func sumMessagesFiltered(sources: [String], dayStart: String?, dayEnd: String?, hideZero: Bool, hideLow: Bool) throws -> Int {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []
         var binds: [Any] = []
@@ -542,7 +549,8 @@ actor IndexDB {
             SELECT session_id, SUM(messages) AS msgs
             FROM session_days\(whereSQL)
             GROUP BY session_id
-            HAVING SUM(messages) >= ?
+            HAVING (? = 0 OR msgs >= 1)
+               AND (? = 0 OR msgs = 0 OR msgs >= 3)
         )
         """
         var stmt: OpaquePointer?
@@ -553,13 +561,15 @@ actor IndexDB {
             if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
             idx += 1
         }
-        sqlite3_bind_int(stmt, idx, Int32(minMessages))
+        sqlite3_bind_int(stmt, idx, hideZero ? 1 : 0)
+        idx += 1
+        sqlite3_bind_int(stmt, idx, hideLow ? 1 : 0)
         if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int64(stmt, 0)) }
         return 0
     }
 
-    /// Sum of duration across sessions that meet a minimum messages threshold.
-    func sumDurationFiltered(sources: [String], dayStart: String?, dayEnd: String?, minMessages: Int) throws -> TimeInterval {
+    /// Sum of duration across sessions that pass the message-count preferences across the period.
+    func sumDurationFiltered(sources: [String], dayStart: String?, dayEnd: String?, hideZero: Bool, hideLow: Bool) throws -> TimeInterval {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []
         var binds: [Any] = []
@@ -576,7 +586,8 @@ actor IndexDB {
             SELECT session_id, SUM(duration_sec) AS dur, SUM(messages) AS msgs
             FROM session_days\(whereSQL)
             GROUP BY session_id
-            HAVING msgs >= ?
+            HAVING (? = 0 OR msgs >= 1)
+               AND (? = 0 OR msgs = 0 OR msgs >= 3)
         )
         """
         var stmt: OpaquePointer?
@@ -587,13 +598,15 @@ actor IndexDB {
             if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
             idx += 1
         }
-        sqlite3_bind_int(stmt, idx, Int32(minMessages))
+        sqlite3_bind_int(stmt, idx, hideZero ? 1 : 0)
+        idx += 1
+        sqlite3_bind_int(stmt, idx, hideLow ? 1 : 0)
         if sqlite3_step(stmt) == SQLITE_ROW { return sqlite3_column_double(stmt, 0) }
         return 0.0
     }
 
-    /// Sum of commands across sessions that meet a minimum messages threshold.
-    func sumCommandsFiltered(sources: [String], dayStart: String?, dayEnd: String?, minMessages: Int) throws -> Int {
+    /// Sum of commands across sessions that pass the message-count preferences across the period.
+    func sumCommandsFiltered(sources: [String], dayStart: String?, dayEnd: String?, hideZero: Bool, hideLow: Bool) throws -> Int {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []
         var binds: [Any] = []
@@ -610,7 +623,8 @@ actor IndexDB {
             SELECT session_id, SUM(commands) AS cmds, SUM(messages) AS msgs
             FROM session_days\(whereSQL)
             GROUP BY session_id
-            HAVING msgs >= ?
+            HAVING (? = 0 OR msgs >= 1)
+               AND (? = 0 OR msgs = 0 OR msgs >= 3)
         )
         """
         var stmt: OpaquePointer?
@@ -621,7 +635,9 @@ actor IndexDB {
             if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
             idx += 1
         }
-        sqlite3_bind_int(stmt, idx, Int32(minMessages))
+        sqlite3_bind_int(stmt, idx, hideZero ? 1 : 0)
+        idx += 1
+        sqlite3_bind_int(stmt, idx, hideLow ? 1 : 0)
         if sqlite3_step(stmt) == SQLITE_ROW { return Int(sqlite3_column_int64(stmt, 0)) }
         return 0
     }
@@ -781,9 +797,8 @@ actor IndexDB {
         return 0.0
     }
 
-    /// Average session duration with a minimum message threshold per session across the period.
-    /// Sessions whose total messages across the selected bounds are below `minMessages` are excluded.
-    func avgSessionDurationFiltered(sources: [String], dayStart: String?, dayEnd: String?, minMessages: Int) throws -> TimeInterval {
+    /// Average session duration while respecting message-count preferences.
+    func avgSessionDurationFiltered(sources: [String], dayStart: String?, dayEnd: String?, hideZero: Bool, hideLow: Bool) throws -> TimeInterval {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []
         var binds: [Any] = []
@@ -803,7 +818,8 @@ actor IndexDB {
                    SUM(messages)     AS msgs
             FROM session_days\(whereSQL)
             GROUP BY session_id
-            HAVING msgs >= ?
+            HAVING (? = 0 OR msgs >= 1)
+               AND (? = 0 OR msgs = 0 OR msgs >= 3)
         )
         """
         var stmt: OpaquePointer?
@@ -814,7 +830,9 @@ actor IndexDB {
             if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
             idx += 1
         }
-        sqlite3_bind_int(stmt, idx, Int32(minMessages))
+        sqlite3_bind_int(stmt, idx, hideZero ? 1 : 0)
+        idx += 1
+        sqlite3_bind_int(stmt, idx, hideLow ? 1 : 0)
         if sqlite3_step(stmt) == SQLITE_ROW {
             return sqlite3_column_double(stmt, 0)
         }

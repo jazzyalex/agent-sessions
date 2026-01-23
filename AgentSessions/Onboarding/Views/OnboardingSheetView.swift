@@ -25,6 +25,11 @@ struct OnboardingSheetView: View {
 
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
+    @AppStorage(PreferencesKey.hideZeroMessageSessions) private var hideZeroMessageSessionsPref: Bool = true
+    @AppStorage(PreferencesKey.hideLowMessageSessions) private var hideLowMessageSessionsPref: Bool = true
+    @AppStorage(PreferencesKey.showHousekeepingSessions) private var showHousekeepingSessionsPref: Bool = false
+    @AppStorage(PreferencesKey.Unified.hasCommandsOnly) private var hasCommandsOnlyPref: Bool = false
+    @AppStorage(PreferencesKey.showSystemProbeSessions) private var showSystemProbeSessions: Bool = false
 
     @State private var slideIndex: Int = 0
     @State private var isForward: Bool = true
@@ -82,7 +87,7 @@ struct OnboardingSheetView: View {
         .onChange(of: totalSessions) { _, _ in
             updateAnimatedCount(animated: !reduceMotion)
         }
-        .onChange(of: realSessionsTotal) { _, _ in
+        .onChange(of: visibleSessionsTotal) { _, _ in
             updateAnimatedCount(animated: !reduceMotion)
         }
         .onChange(of: content.versionMajorMinor) { _, _ in
@@ -143,13 +148,13 @@ struct OnboardingSheetView: View {
                         .foregroundStyle(palette.accentBlue)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("sessions discovered")
+                        Text("sessions visible")
                             .font(.system(size: 16, weight: .semibold, design: .default))
                             .foregroundStyle(.primary)
                     }
                 }
 
-                Text("\(formattedCount(hiddenSessionsCount)) sessions hidden by filters (empty, housekeeping). Adjust in Settings.")
+                Text("\(formattedCount(hiddenSessionsCount)) hidden by current filters. Adjust in Settings.")
                     .font(.system(size: 11, weight: .regular, design: .default))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -376,7 +381,7 @@ struct OnboardingSheetView: View {
             return AgentCount(
                 source: source,
                 totalCount: sessions.count,
-                realCount: realCount(in: sessions),
+                visibleCount: visibleCount(in: sessions),
                 isEnabled: isAgentEnabled(source)
             )
         }
@@ -386,16 +391,16 @@ struct OnboardingSheetView: View {
         agentCounts.reduce(0) { $0 + $1.totalCount }
     }
 
-    private var realSessionsTotal: Int {
-        agentCounts.reduce(0) { $0 + $1.realCount }
+    private var visibleSessionsTotal: Int {
+        agentCounts.reduce(0) { $0 + $1.visibleCount }
     }
 
     private var primarySessionCount: Int {
-        realSessionsTotal
+        visibleSessionsTotal
     }
 
     private var hiddenSessionsCount: Int {
-        max(0, totalSessions - realSessionsTotal)
+        max(0, totalSessions - visibleSessionsTotal)
     }
 
     private var displayAgents: [AgentCount] {
@@ -487,21 +492,46 @@ struct OnboardingSheetView: View {
         return WeeklyActivityDay.build(from: sessions, palette: palette)
     }
 
-    private func realCount(in sessions: [Session]) -> Int {
-        sessions.filter { isRealSession($0) }.count
+    private func visibleCount(in sessions: [Session]) -> Int {
+        sessions.filter { isVisibleSession($0) }.count
     }
 
-    private func isRealSession(_ session: Session) -> Bool {
-        if session.isHousekeeping { return false }
-        if session.messageCount <= 2 { return false }
-        switch session.source {
-        case .codex:
-            if CodexProbeConfig.isProbeSession(session) { return false }
-        case .claude:
-            if ClaudeProbeConfig.isProbeSession(session) { return false }
-        default:
-            break
+    private func isVisibleSession(_ session: Session) -> Bool {
+        // Probes are filtered out of live indexers, but DB snapshots may include them.
+        if !showSystemProbeSessions {
+            switch session.source {
+            case .codex:
+                if CodexProbeConfig.isProbeSession(session) { return false }
+            case .claude:
+                if ClaudeProbeConfig.isProbeSession(session) { return false }
+            default:
+                break
+            }
         }
+
+        if !showHousekeepingSessionsPref, session.isHousekeeping { return false }
+
+        // Message count filters (OpenCode excluded from msg-count heuristics)
+        if session.source != .opencode {
+            if hideZeroMessageSessionsPref, session.messageCount == 0 { return false }
+            if hideLowMessageSessionsPref, session.messageCount > 0, session.messageCount <= 2 { return false }
+        }
+
+        // Tool-call-only filter (strict)
+        if hasCommandsOnlyPref {
+            switch session.source {
+            case .codex, .opencode, .copilot, .droid:
+                if !session.events.isEmpty {
+                    if !session.events.contains(where: { $0.kind == .tool_call }) { return false }
+                } else {
+                    if (session.lightweightCommands ?? 0) <= 0 { return false }
+                }
+            case .claude, .gemini:
+                if session.events.isEmpty { return false }
+                if !session.events.contains(where: { $0.kind == .tool_call }) { return false }
+            }
+        }
+
         return true
     }
 
@@ -557,11 +587,11 @@ private enum OnboardingSlide: Int, CaseIterable {
 private struct AgentCount: Identifiable {
     let source: SessionSource
     let totalCount: Int
-    let realCount: Int
+    let visibleCount: Int
     let isEnabled: Bool
 
     var id: String { source.rawValue }
-    var displayCount: Int { realCount }
+    var displayCount: Int { visibleCount }
 }
 
 private struct SlideHeader: View {

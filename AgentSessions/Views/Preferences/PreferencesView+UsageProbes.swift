@@ -8,7 +8,7 @@ extension PreferencesView {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("Runs lightweight terminal-based probes in dedicated working folders to refresh usage limits. Cleanup only removes validated probe sessions; normal projects are never touched.")
+            Text("Runs lightweight terminal-based probes in dedicated working folders to refresh usage limits. Probe sessions are auto-generated /usage checks stored in a separate Claude project. Cleanup only removes validated probe sessions; your normal sessions are never touched.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -87,7 +87,7 @@ extension PreferencesView {
                 .frame(maxWidth: 440)
 
                 HStack(spacing: 12) {
-                    Button("Delete Claude probe sessions now") { showConfirmDeleteNow = true }
+                    Button("Clean Claude probe sessions now") { showConfirmDeleteNow = true }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
                 }
@@ -118,7 +118,7 @@ extension PreferencesView {
                     handleCleanupResult(res, manual: true)
                 }
             } message: {
-                Text("Removes only the Agent Sessions Claude probe project after validation. If any session doesn’t look like a probe, nothing is deleted.")
+                Text("Probe sessions are short /usage checks created by Agent Sessions in a dedicated Claude project. This cleanup only removes that probe project after validation, and never touches your normal Claude sessions.")
             }
 
             // Result summary dialog
