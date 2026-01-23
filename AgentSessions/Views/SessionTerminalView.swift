@@ -1435,8 +1435,8 @@ private final class TerminalLayoutManager: NSLayoutManager {
             guard NSIntersectionRange(blockGlyphs, glyphsToShow).length > 0 else { continue }
 
             var unionRect: CGRect? = nil
-            enumerateLineFragments(forGlyphRange: blockGlyphs) { rect, _, _, _, _ in
-                let r = rect.offsetBy(dx: origin.x, dy: origin.y)
+            enumerateLineFragments(forGlyphRange: blockGlyphs) { rect, usedRect, _, _, _ in
+                let r = usedRect.offsetBy(dx: origin.x, dy: origin.y)
                 unionRect = unionRect.map { $0.union(r) } ?? r
             }
             guard var cardRect = unionRect else { continue }

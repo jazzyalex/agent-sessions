@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Transcript: Tool call/output navigation now groups paired blocks, tool outputs no longer repeat the tool label, and tool/error blocks have consistent padding.
 - Transcript (Session view): User prompts no longer use semibold text; emphasis comes from the accent strip.
 - Transcript (Session view): Accent strips now align to their block padding.
+- Transcript (Session view): Block accents no longer bleed into inter-block spacing.
 
 ## [2.10.1] - 2026-01-19
 
