@@ -2140,7 +2140,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 		        ranges.reserveCapacity(lines.count)
 
 			        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-				        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
+				        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .medium)
 	                let systemUserItalicFont = NSFontManager.shared.convert(systemUserFont, toHaveTrait: .italicFontMask)
 		        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
                 let monoSemiboldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .semibold)
