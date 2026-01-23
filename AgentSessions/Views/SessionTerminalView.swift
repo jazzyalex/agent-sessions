@@ -1436,8 +1436,15 @@ private final class TerminalLayoutManager: NSLayoutManager {
 
             var unionRect: CGRect? = nil
             enumerateLineFragments(forGlyphRange: blockGlyphs) { rect, usedRect, _, _, _ in
-                let r = usedRect.offsetBy(dx: origin.x, dy: origin.y)
-                unionRect = unionRect.map { $0.union(r) } ?? r
+                let r = rect.offsetBy(dx: origin.x, dy: origin.y)
+                let u = usedRect.offsetBy(dx: origin.x, dy: origin.y)
+                let mixed = CGRect(
+                    x: r.minX,
+                    y: u.minY,
+                    width: max(0, r.maxX - r.minX),
+                    height: max(0, u.maxY - u.minY)
+                )
+                unionRect = unionRect.map { $0.union(mixed) } ?? mixed
             }
             guard var cardRect = unionRect else { continue }
 

@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - Transcript (Session view): User prompts no longer use semibold text; emphasis comes from the accent strip.
 - Transcript (Session view): Accent strips now align to their block padding.
 - Transcript (Session view): Block accents no longer bleed into inter-block spacing.
+- Transcript (Session view): Accent strips now sit outside text bounds.
 
 ## [2.10.1] - 2026-01-19
 
