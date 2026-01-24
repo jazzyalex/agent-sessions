@@ -645,6 +645,10 @@ enum ToolTextBlockNormalizer {
         }
 
         if let dict = obj as? [String: Any] {
+            let outputValue = dict["output"]
+            let resultValue = dict["result"]
+            let contentValue = dict["content"]
+
             if let format = dict["format"] as? String, format.lowercased() == "markdown" {
                 if let url = dict["url"] as? String {
                     info.stdout = info.stdout ?? url
@@ -663,9 +667,6 @@ enum ToolTextBlockNormalizer {
             if let stderrValue = dict["stderr"] { info.stderr = info.stderr ?? stringifyValue(stderrValue) }
             if let errorValue = dict["error"] { info.stderr = info.stderr ?? stringifyValue(errorValue) }
             if let errValue = dict["err"] { info.stderr = info.stderr ?? stringifyValue(errValue) }
-            if let outputValue = dict["output"], info.stdout == nil { info.stdout = stringifyValue(outputValue) }
-            if let resultValue = dict["result"], info.stdout == nil { info.stdout = stringifyValue(resultValue) }
-            if let contentValue = dict["content"], info.stdout == nil, info.stderr == nil { info.stdout = stringifyValue(contentValue) }
             if let statusValue = dict["status"] as? String { info.status = info.status ?? statusValue }
             if let exitValue = dict["exitCode"] ?? dict["exit_code"] ?? dict["exit"] ?? dict["code"] {
                 info.exitCode = info.exitCode ?? extractExitCode(from: exitValue)
@@ -677,17 +678,32 @@ enum ToolTextBlockNormalizer {
             if let data = dict["data"] {
                 extractOutputInfo(from: data, into: &info, depth: depth + 1)
             }
-            if let result = dict["result"] {
+            if let result = resultValue {
                 extractOutputInfo(from: result, into: &info, depth: depth + 1)
             }
-            if let output = dict["output"] {
+            if let output = outputValue {
                 extractOutputInfo(from: output, into: &info, depth: depth + 1)
+            }
+            if let content = contentValue {
+                extractOutputInfo(from: content, into: &info, depth: depth + 1)
             }
             if let value = dict["value"] {
                 extractOutputInfo(from: value, into: &info, depth: depth + 1)
             }
             if let state = dict["state"] {
                 extractOutputInfo(from: state, into: &info, depth: depth + 1)
+            }
+
+            // Fallback: if we still have no output after exploring nested structures, stringify the
+            // most common containers (result/output/content) for a best-effort display.
+            if info.stdout == nil, info.stderr == nil {
+                if let contentValue, let rendered = stringifyValue(contentValue), !rendered.isEmpty, !isEmptyJSONPayload(rendered) {
+                    info.stdout = rendered
+                } else if let outputValue, let rendered = stringifyValue(outputValue), !rendered.isEmpty, !isEmptyJSONPayload(rendered) {
+                    info.stdout = rendered
+                } else if let resultValue, let rendered = stringifyValue(resultValue), !rendered.isEmpty, !isEmptyJSONPayload(rendered) {
+                    info.stdout = rendered
+                }
             }
             return
         }

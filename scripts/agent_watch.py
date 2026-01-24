@@ -318,6 +318,270 @@ def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
     }
 
 
+def _gemini_session_json_schema_fingerprint(path: Path, max_messages: int) -> dict[str, Any]:
+    """
+    Best-effort schema fingerprint for Gemini CLI session JSON.
+
+    Gemini sessions are JSON (not JSONL) and usually include a `messages` array where each
+    message has a `type` field (e.g. `user`, `gemini`). We bucket keys by message `type`,
+    plus a `root` bucket for top-level session keys.
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors: int = 0
+    parsed_messages: int = 0
+
+    try:
+        root = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {
+            "file": str(path),
+            "type_counts": {},
+            "type_keys": {},
+            "parsed_messages": 0,
+            "parse_errors": 1,
+        }
+
+    def _add(event_type: str, obj: dict[str, Any]) -> None:
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        ks = type_keys.setdefault(event_type, set())
+        for k in obj.keys():
+            ks.add(k)
+
+    if isinstance(root, dict):
+        _add("root", root)
+        messages = root.get("messages")
+        if isinstance(messages, list):
+            for item in messages[: max(0, int(max_messages))]:
+                if not isinstance(item, dict):
+                    continue
+                t = item.get("type")
+                event_type = t if isinstance(t, str) and t else "<missing-type>"
+                _add(event_type, item)
+                parsed_messages += 1
+    elif isinstance(root, list):
+        for item in root[: max(0, int(max_messages))]:
+            if not isinstance(item, dict):
+                continue
+            t = item.get("type")
+            event_type = t if isinstance(t, str) and t else "<missing-type>"
+            _add(event_type, item)
+            parsed_messages += 1
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "parsed_messages": parsed_messages,
+        "parse_errors": parse_errors,
+    }
+
+
+def _opencode_storage_root_for_session_file(session_path: Path) -> Path | None:
+    # Typical layout: ~/.local/share/opencode/storage/session/<project>/ses_*.json
+    for parent in session_path.parents:
+        try:
+            if (parent / "session").exists() and (parent / "message").exists() and (parent / "part").exists():
+                return parent
+        except OSError:
+            continue
+    return None
+
+
+def _opencode_fixture_file_schema_fingerprint(path: Path) -> dict[str, Any]:
+    """
+    Fingerprint a single OpenCode JSON file from fixtures.
+
+    We bucket keys by "record kind" so message/part schema changes are visible separately
+    from session record schema changes.
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors: int = 0
+
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parse_errors": 1}
+
+    if not isinstance(obj, dict):
+        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parse_errors": 0}
+
+    p = str(path).replace("\\", "/")
+    if "/storage_v2/session/" in p or "/storage_legacy/session/" in p:
+        event_type = "session"
+    elif "/storage_v2/message/" in p:
+        role = obj.get("role")
+        event_type = f"message.{role}" if isinstance(role, str) and role else "message"
+    elif "/storage_v2/part/" in p:
+        part_type = obj.get("type")
+        event_type = f"part.{part_type}" if isinstance(part_type, str) and part_type else "part"
+    else:
+        event_type = "opencode_json"
+
+    type_counts[event_type] = 1
+    type_keys[event_type] = set(obj.keys())
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "parse_errors": parse_errors,
+    }
+
+
+def _opencode_storage_session_tree_schema_fingerprint(
+    session_path: Path, *, max_messages: int, max_parts: int
+) -> dict[str, Any]:
+    """
+    Fingerprint a local OpenCode v2 session by scanning:
+    - session record (storage/session/**/ses_*.json)
+    - message records (storage/message/<sessionId>/msg_*.json)
+    - part records (storage/part/<messageId>/*.json)
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors: int = 0
+    message_files_parsed: int = 0
+    part_files_parsed: int = 0
+
+    def _add(event_type: str, obj: dict[str, Any]) -> None:
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        ks = type_keys.setdefault(event_type, set())
+        for k in obj.keys():
+            ks.add(k)
+
+    try:
+        session_obj = json.loads(session_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {
+            "file": str(session_path),
+            "type_counts": {},
+            "type_keys": {},
+            "message_files_parsed": 0,
+            "part_files_parsed": 0,
+            "parse_errors": 1,
+        }
+
+    if isinstance(session_obj, dict):
+        _add("session", session_obj)
+
+    session_id = session_obj.get("id") if isinstance(session_obj, dict) else None
+    if not isinstance(session_id, str) or not session_id:
+        return {
+            "file": str(session_path),
+            "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+            "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+            "message_files_parsed": 0,
+            "part_files_parsed": 0,
+            "parse_errors": parse_errors,
+        }
+
+    storage_root = _opencode_storage_root_for_session_file(session_path)
+    if storage_root is None:
+        return {
+            "file": str(session_path),
+            "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+            "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+            "message_files_parsed": 0,
+            "part_files_parsed": 0,
+            "parse_errors": parse_errors,
+            "warning": "storage_root_not_found",
+        }
+
+    msg_dir = storage_root / "message" / session_id
+    if not msg_dir.exists():
+        return {
+            "file": str(session_path),
+            "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+            "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+            "message_files_parsed": 0,
+            "part_files_parsed": 0,
+            "parse_errors": parse_errors,
+            "warning": "message_dir_not_found",
+        }
+
+    total_parts_budget = max(0, int(max_parts))
+    msg_budget = max(0, int(max_messages))
+    for msg_file in sorted(msg_dir.glob("msg_*.json"))[:msg_budget]:
+        try:
+            msg_obj = json.loads(msg_file.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            parse_errors += 1
+            continue
+        if not isinstance(msg_obj, dict):
+            continue
+        role = msg_obj.get("role")
+        event_type = f"message.{role}" if isinstance(role, str) and role else "message"
+        _add(event_type, msg_obj)
+        message_files_parsed += 1
+
+        mid = msg_obj.get("id")
+        if not isinstance(mid, str) or not mid:
+            continue
+        part_dir = storage_root / "part" / mid
+        if not part_dir.exists():
+            continue
+        if total_parts_budget <= 0:
+            continue
+        part_files = sorted(part_dir.glob("*.json"))
+        for part_file in part_files:
+            if total_parts_budget <= 0:
+                break
+            try:
+                part_obj = json.loads(part_file.read_text(encoding="utf-8", errors="replace"))
+            except Exception:
+                parse_errors += 1
+                total_parts_budget -= 1
+                continue
+            total_parts_budget -= 1
+            if not isinstance(part_obj, dict):
+                continue
+            part_type = part_obj.get("type")
+            et = f"part.{part_type}" if isinstance(part_type, str) and part_type else "part"
+            _add(et, part_obj)
+            part_files_parsed += 1
+
+    return {
+        "file": str(session_path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "message_files_parsed": message_files_parsed,
+        "part_files_parsed": part_files_parsed,
+        "parse_errors": parse_errors,
+    }
+
+
+def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) -> dict[str, list[str]]:
+    # Baseline should represent the current "normal" format; ignore schema_drift fixtures.
+    filtered = [p for p in baseline_paths if isinstance(p, str) and p and "schema_drift" not in p]
+    fps: list[dict[str, Any]] = []
+
+    if agent_name in ("codex", "claude", "copilot", "droid"):
+        for p in filtered:
+            if not p.endswith(".jsonl"):
+                continue
+            bp = Path(p)
+            if bp.exists():
+                fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
+    elif agent_name == "gemini":
+        for p in filtered:
+            if not p.endswith(".json"):
+                continue
+            bp = Path(p)
+            if bp.exists():
+                fps.append(_gemini_session_json_schema_fingerprint(bp, max_messages=5000))
+    elif agent_name == "opencode":
+        for p in filtered:
+            if not p.endswith(".json"):
+                continue
+            bp = Path(p)
+            if bp.exists():
+                fps.append(_opencode_fixture_file_schema_fingerprint(bp))
+
+    return _merge_type_keys(fps)
+
+
 def _merge_type_keys(fingerprints: list[dict[str, Any]]) -> dict[str, list[str]]:
     merged: dict[str, set[str]] = {}
     for fp in fingerprints:
@@ -631,48 +895,63 @@ def main(argv: list[str]) -> int:
         if args.mode == "weekly":
             weekly_details = {}
             local_schema_cfg = (agent_cfg.get("weekly") or {}).get("local_schema")
-            if isinstance(local_schema_cfg, dict) and local_schema_cfg.get("kind") == "jsonl_newest":
+            if isinstance(local_schema_cfg, dict):
+                kind = local_schema_cfg.get("kind")
                 roots = list(local_schema_cfg.get("roots") or [])
-                glob = str(local_schema_cfg.get("glob") or "**/*.jsonl")
-                max_lines = int(local_schema_cfg.get("max_lines") or 2500)
-                required_types = list(local_schema_cfg.get("required_types") or [])
-                if required_types:
-                    newest = _newest_file_with_types(roots, glob, required_types, max_lines=400)
-                else:
-                    newest = _newest_file(roots, glob)
-                if newest:
-                    local_fp = _jsonl_schema_fingerprint(newest, max_lines=max_lines)
-                    weekly_details["local_schema"] = local_fp
+                glob = str(local_schema_cfg.get("glob") or "**/*")
 
-                    # Baseline schema from fixtures (when JSONL fixtures exist).
-                    matrix_key = {
-                        "codex": "codex_cli",
-                        "claude": "claude_code",
-                        "copilot": "copilot_cli",
-                        "droid": "droid",
-                    }.get(agent_name)
-                    baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
-                    # Baseline should represent the current "normal" format; ignore schema_drift fixtures.
-                    baseline_jsonl = [
-                        Path(p)
-                        for p in baseline_paths
-                        if p.endswith(".jsonl") and "schema_drift" not in p
-                    ]
-                    fps: list[dict[str, Any]] = []
-                    for bp in baseline_jsonl:
-                        if bp.exists():
-                            fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
-                    baseline_type_keys = _merge_type_keys(fps)
+                matrix_key = {
+                    "codex": "codex_cli",
+                    "claude": "claude_code",
+                    "copilot": "copilot_cli",
+                    "droid": "droid",
+                    "gemini": "gemini_cli",
+                    "opencode": "opencode",
+                }.get(agent_name)
+                baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
+                baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
+
+                local_fp: dict[str, Any] | None = None
+                newest: Path | None = None
+
+                if kind == "jsonl_newest":
+                    max_lines = int(local_schema_cfg.get("max_lines") or 2500)
+                    required_types = list(local_schema_cfg.get("required_types") or [])
+                    if required_types:
+                        newest = _newest_file_with_types(roots, glob, required_types, max_lines=400)
+                    else:
+                        newest = _newest_file(roots, glob)
+                    if newest:
+                        local_fp = _jsonl_schema_fingerprint(newest, max_lines=max_lines)
+                elif kind == "gemini_session_json_newest":
+                    max_messages = int(local_schema_cfg.get("max_messages") or 2500)
+                    newest = _newest_file(roots, glob)
+                    if newest:
+                        local_fp = _gemini_session_json_schema_fingerprint(newest, max_messages=max_messages)
+                elif kind == "opencode_storage_latest_session":
+                    max_messages = int(local_schema_cfg.get("max_messages") or 250)
+                    max_parts = int(local_schema_cfg.get("max_parts") or 2500)
+                    newest = _newest_file(roots, glob)
+                    if newest:
+                        local_fp = _opencode_storage_session_tree_schema_fingerprint(
+                            newest, max_messages=max_messages, max_parts=max_parts
+                        )
+
+                if local_fp is not None:
+                    weekly_details["local_schema"] = local_fp
                     if baseline_type_keys:
                         schema_diff = _schema_diff(
                             observed_type_keys=local_fp.get("type_keys") or {},
                             baseline_type_keys=baseline_type_keys,
                         )
                         schema_matches_baseline = bool(schema_diff.get("unknown_only_is_empty"))
-                        weekly_details["baseline_schema"] = {"fixtures": [str(p) for p in baseline_jsonl], "type_keys": baseline_type_keys}
+                        weekly_details["baseline_schema"] = {
+                            "fixtures": [p for p in baseline_paths if isinstance(p, str) and "schema_drift" not in p],
+                            "type_keys": baseline_type_keys,
+                        }
                         weekly_details["schema_diff"] = schema_diff
                 else:
-                    weekly_details["local_schema"] = {"error": "no_files_found", "roots": roots, "glob": glob}
+                    weekly_details["local_schema"] = {"error": "no_files_found", "roots": roots, "glob": glob, "kind": kind}
 
             probes_cfg = (agent_cfg.get("weekly") or {}).get("probes") or []
             probe_results: list[dict[str, Any]] = []

@@ -1,20 +1,20 @@
-agent_sessions_version: 2.9.2
-as_of_commit: e23c74f
-as_of_date: 2026-01-16
+agent_sessions_version: 2.10.1
+as_of_commit: 6b82ef2
+as_of_date: 2026-01-24
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
   - "Max verified versions come from repo fixtures and documented format changes."
   - "Some agents do not log their own CLI version; those are marked unknown."
 agents:
   codex_cli:
-    max_verified_version: "0.79.0"
+    max_verified_version: "0.89.0"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.9"
+    max_verified_version: "2.1.19"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
@@ -40,6 +40,13 @@ agents:
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json"
+      - "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_small/msg_0001.json"
+      - "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_small/msg_0002.json"
+      - "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0001.json"
+      - "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0002.json"
+      - "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_user_small/001.json"
+      - "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_small/001.json"
+      - "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/001.json"
       - "Resources/Fixtures/stage0/agents/opencode/storage_legacy/session/proj_test/ses_s_stage0_drift.json"
   droid:
     max_verified_version: "0.43.0"
