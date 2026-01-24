@@ -14,13 +14,8 @@ extension PreferencesView {
 
             // No ephemeral in-pane messages; results are shown in modal dialogs only.
 
-            // Debug visibility
-            Toggle("Show system probe sessions for debugging", isOn: $showSystemProbeSessions)
-                .toggleStyle(.switch)
-                .help("Reveal probe sessions in the Sessions list. Leave OFF for normal use to avoid noise.")
-
-            // Claude subsection
-            sectionHeader("Claude")
+	            // Claude subsection
+	            sectionHeader("Claude")
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
                     Button("Refresh Claude usage now") {
@@ -237,18 +232,24 @@ extension PreferencesView {
             }
 
             // Hard-probe result dialog
-            .alert("Codex /status Probe", isPresented: $showCodexProbeResult) {
-                Button("Close", role: .cancel) {}
-            } message: {
-                Text(codexProbeMessage)
-                    .font(.system(.body, design: .monospaced))
-                    .multilineTextAlignment(.leading)
-            }
+	            .alert("Codex /status Probe", isPresented: $showCodexProbeResult) {
+	                Button("Close", role: .cancel) {}
+	            } message: {
+	                Text(codexProbeMessage)
+	                    .font(.system(.body, design: .monospaced))
+	                    .multilineTextAlignment(.leading)
+	            }
 
-        }
-        .onReceive(NotificationCenter.default.publisher(for: CodexProbeCleanup.didRunCleanupNotification)) { note in
-            guard let info = note.userInfo as? [String: Any], let status = info["status"] as? String else { return }
-            let mode = (info["mode"] as? String) ?? "manual"
+	            // Debug visibility
+	            sectionHeader("Debug")
+	            Toggle("Show system probe sessions for debugging", isOn: $showSystemProbeSessions)
+	                .toggleStyle(.switch)
+	                .help("Reveal probe sessions in the Sessions list. Leave OFF for normal use to avoid noise.")
+
+	        }
+	        .onReceive(NotificationCenter.default.publisher(for: CodexProbeCleanup.didRunCleanupNotification)) { note in
+	            guard let info = note.userInfo as? [String: Any], let status = info["status"] as? String else { return }
+	            let mode = (info["mode"] as? String) ?? "manual"
             if mode == "manual" {
                 var lines: [String] = []
                 switch status {
