@@ -1,4 +1,4 @@
-{"timestamp":"2025-12-18T10:00:00.000Z","type":"session_meta","payload":{"id":"019b2ea4-aaaa-bbbb-cccc-58208e1f0000","timestamp":"2025-12-18T10:00:00.000Z","cwd":"/tmp/large","originator":"codex_cli_rs","cli_version":"0.79.0","source":"cli","model_provider":"openai","instructions":"large"}}
+{"timestamp":"2025-12-18T10:00:00.000Z","type":"session_meta","payload":{"id":"019b2ea4-aaaa-bbbb-cccc-58208e1f0000","timestamp":"2025-12-18T10:00:00.000Z","cwd":"/tmp/large","originator":"codex_cli_rs","cli_version":"0.89.0","source":"cli","model_provider":"openai","instructions":"large"}}
 {"timestamp":"2025-12-18T10:00:00.200Z","type":"event_msg","payload":{"type":"user_message","message":"Start","images":[]}}
 {"timestamp":"2025-12-18T10:00:00.300Z","type":"turn_context","payload":{"cwd":"/tmp/large","approval_policy":"never","sandbox_policy":{"type":"danger-full-access"},"model":"gpt-5.2","effort":"high","summary":"auto","user_instructions":"(truncated)"}}
 {"timestamp":"2025-12-18T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Start"}]}}

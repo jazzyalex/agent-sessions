@@ -80,6 +80,13 @@
         "usage": ["usage", "token", "tokens", "limit", "quota"]
       },
       "weekly": {
+        "local_schema": {
+          "kind": "opencode_storage_latest_session",
+          "roots": ["~/.local/share/opencode/storage/session"],
+          "glob": "**/ses_*.json",
+          "max_messages": 250,
+          "max_parts": 2500
+        },
         "probes": [
           {
             "kind": "script",
@@ -130,6 +137,12 @@
         "usage": ["usage", "token", "tokens", "limit", "quota"]
       },
       "weekly": {
+        "local_schema": {
+          "kind": "gemini_session_json_newest",
+          "roots": ["~/.gemini/tmp"],
+          "glob": "**/session-*.json",
+          "max_messages": 2500
+        },
         "probes": [
           {
             "kind": "script",

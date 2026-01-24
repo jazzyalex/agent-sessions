@@ -369,9 +369,9 @@ enum ClaudeProbeProject {
 
     private static func scanProbeFile(url: URL, expectedWD: String) -> FileScanOutcome {
         guard let fh = try? FileHandle(forReadingFrom: url) else { return .unsafe }
-        let data = try? fh.read(upToCount: 256 * 1024)
+        // `read(upToCount:)` can return nil at EOF; treat that as an empty file, not an error.
+        let data = (try? fh.read(upToCount: 256 * 1024)) ?? Data()
         try? fh.close()
-        guard let data else { return .unsafe }
         if data.isEmpty { return .empty }
         guard let text = String(data: data, encoding: .utf8) else { return .unsafe }
 
