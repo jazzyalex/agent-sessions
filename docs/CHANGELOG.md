@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Onboarding: “Sessions Found” counts now reflect current filter settings; filter labels are now consistently “Hide …”.
 - Claude probes: Auto-delete now removes failed/empty probe sessions, not just successful ones.
 - Claude probes: Cleanup now requires validated probe evidence (marker or content) before deleting a project, and cleanup messaging is clearer about protecting normal sessions.
+- Usage Tracking: Disabling Codex/Claude tracking now also disables their probes/refresh actions and hides them from the menu bar.
 
 ### Changed
 

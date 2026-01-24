@@ -87,6 +87,7 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     func refreshNow() {
+        guard isEnabled else { return }
         if isUpdating { return }
         isUpdating = true
         let svc = self.service
@@ -126,6 +127,7 @@ final class ClaudeUsageModel: ObservableObject {
         Task.detached {
             await service.start()
         }
+        propagateVisibility()
     }
 
     private func stop() {
@@ -166,12 +168,27 @@ final class ClaudeUsageModel: ObservableObject {
     private func handleWake() {
         guard isEnabled else { return }
         guard stripVisible || menuVisible else { return }
-        if UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled") == false { return }
+        if UserDefaults.standard.bool(forKey: PreferencesKey.claudeUsageEnabled) == false { return }
         refreshNow()
     }
 
     // Hard-probe entry: run a one-off /usage probe and return diagnostics
     func hardProbeNowDiagnostics(completion: @escaping (ClaudeProbeDiagnostics) -> Void) {
+        guard isEnabled else {
+            let diag = ClaudeProbeDiagnostics(
+                success: false,
+                exitCode: 125,
+                scriptPath: "(not run)",
+                workdir: ClaudeProbeConfig.probeWorkingDirectory(),
+                claudeBin: nil,
+                tmuxBin: nil,
+                timeoutSecs: nil,
+                stdout: "",
+                stderr: "Claude usage tracking is disabled"
+            )
+            completion(diag)
+            return
+        }
         if isUpdating { return }
         isUpdating = true
         Task { [weak self] in

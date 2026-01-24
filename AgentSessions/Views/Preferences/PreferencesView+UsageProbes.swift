@@ -50,9 +50,10 @@ extension PreferencesView {
                             }
                             showClaudeProbeResult = true
                         }
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Instantly refresh Claude usage data. Note: probing launches Claude Code and may count toward Claude Code usage limits.")
+	                    }
+	                    .buttonStyle(.bordered)
+	                    .disabled(!claudeUsageEnabled || !claudeAgentEnabled)
+	                    .help("Instantly refresh Claude usage data. Note: probing launches Claude Code and may count toward Claude Code usage limits.")
 
                     if isClaudeHardProbeRunning {
                         Text("Wait for probe result…")
@@ -126,9 +127,10 @@ extension PreferencesView {
             // Codex subsection
             sectionHeader("Codex")
             VStack(alignment: .leading, spacing: 12) {
-                Toggle("Allow auto /status probe when no recent sessions", isOn: $codexAllowStatusProbe)
-                    .toggleStyle(.checkbox)
-                    .help("When there are no recent Codex sessions (6+ hours) and the strip or menu bar is visible, ask Codex CLI (/status) via tmux for current usage.")
+	                Toggle("Allow auto /status probe when no recent sessions", isOn: $codexAllowStatusProbe)
+	                    .toggleStyle(.checkbox)
+	                    .disabled(!codexUsageEnabled || !codexAgentEnabled)
+	                    .help("When there are no recent Codex sessions (6+ hours) and the strip or menu bar is visible, ask Codex CLI (/status) via tmux for current usage.")
                 HStack(spacing: 12) {
                     Button("Run hard Codex /status probe now") {
                         isCodexHardProbeRunning = true
@@ -163,9 +165,10 @@ extension PreferencesView {
                             }
                             showCodexProbeResult = true
                         }
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Runs a one-off /status probe regardless of staleness or auto-probe setting, and shows the result.")
+	                    }
+	                    .buttonStyle(.bordered)
+	                    .disabled(!codexUsageEnabled || !codexAgentEnabled)
+	                    .help("Runs a one-off /status probe regardless of staleness or auto-probe setting, and shows the result.")
 
                     if isCodexHardProbeRunning {
                         Text("Wait for probe result…")

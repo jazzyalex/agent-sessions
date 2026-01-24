@@ -57,6 +57,10 @@ struct ClaudeUsageStripView: View {
         .padding(.bottom, collapseBottom ? 0 : verticalPadding)
         .background(drawBackground ? AnyShapeStyle(.thickMaterial) : AnyShapeStyle(.clear))
         .onTapGesture(count: 2) {
+            let d = UserDefaults.standard
+            let claudeTrackingEnabled = (d.object(forKey: PreferencesKey.Agents.claudeEnabled) as? Bool ?? true)
+                && d.bool(forKey: PreferencesKey.claudeUsageEnabled)
+            guard claudeTrackingEnabled else { return }
             if status.tmuxUnavailable {
                 showTmuxHelp = true
             } else if !status.isUpdating {

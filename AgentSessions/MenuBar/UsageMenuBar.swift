@@ -13,26 +13,43 @@ struct UsageMenuBarLabel: View {
     @AppStorage(PreferencesKey.MenuBar.showPills) private var showPills: Bool = false
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
+    @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
+
+    private struct MenuVisibility: Equatable {
+        var codex: Bool
+        var claude: Bool
+    }
+
+    private func applyMenuVisibility(_ visibility: MenuVisibility) {
+        codexStatus.setMenuVisible(visibility.codex)
+        claudeStatus.setMenuVisible(visibility.claude)
+    }
 
     var body: some View {
         let menuScope = MenuBarScope(rawValue: scopeRaw) ?? .both
         let menuStyle = MenuBarStyleKind(rawValue: styleRaw) ?? .bars
         let desiredSource = MenuBarSource(rawValue: sourceRaw) ?? .codex
-        let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
+        let codexAvailable = codexAgentEnabled && codexUsageEnabled
+        let claudeAvailable = claudeAgentEnabled && claudeUsageEnabled
         let source: MenuBarSource = {
-            if codexAgentEnabled && claudeAgentEnabled { return desiredSource }
-            if codexAgentEnabled { return .codex }
-            if claudeAgentEnabled { return .claude }
+            if codexAvailable && claudeAvailable { return desiredSource }
+            if codexAvailable { return .codex }
+            if claudeAvailable { return .claude }
             return desiredSource
         }()
+
+        let showCodex = codexAvailable && (source == .codex || source == .both)
+        let showClaude = claudeAvailable && (source == .claude || source == .both)
+        let visibility = MenuVisibility(codex: showCodex, claude: showClaude)
 
         let quotas: [QuotaData] = {
             var out: [QuotaData] = []
             out.reserveCapacity(2)
-            if codexAgentEnabled, source == .codex || source == .both {
+            if showCodex {
                 out.append(QuotaData.codex(from: codexStatus))
             }
-            if claudeAgentEnabled, claudeEnabled, source == .claude || source == .both {
+            if showClaude {
                 out.append(QuotaData.claude(from: claudeStatus))
             }
             return out
@@ -64,13 +81,12 @@ struct UsageMenuBarLabel: View {
         }
         .frame(height: NSStatusBar.system.thickness)
         .fixedSize(horizontal: true, vertical: false)
-        .onAppear {
-            codexStatus.setMenuVisible(codexAgentEnabled)
-            claudeStatus.setMenuVisible(claudeAgentEnabled)
+        .onAppear { applyMenuVisibility(visibility) }
+        .onChange(of: visibility) { _, newValue in
+            applyMenuVisibility(newValue)
         }
         .onDisappear {
-            codexStatus.setMenuVisible(false)
-            claudeStatus.setMenuVisible(false)
+            applyMenuVisibility(MenuVisibility(codex: false, claude: false))
         }
     }
 }

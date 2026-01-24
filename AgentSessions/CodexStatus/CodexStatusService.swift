@@ -171,6 +171,7 @@ final class CodexUsageModel: ObservableObject {
     }
 
     func refreshNow() {
+        guard isEnabled else { return }
         if isUpdating { return }
         isUpdating = true
         Task { [weak self] in
@@ -184,7 +185,7 @@ final class CodexUsageModel: ObservableObject {
                 }
                 return
             }
-            // On-demand one-shot refresh even when tracking is disabled
+            // Fallback: one-shot refresh if the long-lived service isn't running.
             let handler: @Sendable (CodexUsageSnapshot) -> Void = { snapshot in
                 Task { @MainActor in self.apply(snapshot) }
             }
@@ -202,6 +203,10 @@ final class CodexUsageModel: ObservableObject {
 
     // Hard-probe from Preferences pane: forces a /status tmux probe, shows result via callback
     func hardProbeNow(completion: @escaping (Bool) -> Void) {
+        guard isEnabled else {
+            completion(false)
+            return
+        }
         if isUpdating { return }
         isUpdating = true
         Task { [weak self] in
@@ -242,6 +247,21 @@ final class CodexUsageModel: ObservableObject {
     func hardProbeNowDiagnostics(completion: @escaping (CodexProbeDiagnostics) -> Void) {
         Task { [weak self] in
             guard let self = self else { return }
+            guard self.isEnabled else {
+                let diag = CodexProbeDiagnostics(
+                    success: false,
+                    exitCode: 125,
+                    scriptPath: "(not run)",
+                    workdir: CodexProbeConfig.probeWorkingDirectory(),
+                    codexBin: nil,
+                    tmuxBin: nil,
+                    timeoutSecs: nil,
+                    stdout: "",
+                    stderr: "Codex usage tracking is disabled"
+                )
+                await MainActor.run { completion(diag) }
+                return
+            }
             if let svc = self.service {
                 let diag = await svc.forceProbeNow()
                 await MainActor.run {
@@ -289,6 +309,7 @@ final class CodexUsageModel: ObservableObject {
         Task.detached {
             await service.start()
         }
+        propagateVisibility()
     }
 
     private func stop() {
