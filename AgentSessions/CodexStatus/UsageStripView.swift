@@ -40,6 +40,10 @@ struct UsageStripView: View {
         .padding(.bottom, collapseBottom ? 0 : verticalPadding)
         .background(drawBackground ? AnyShapeStyle(.thickMaterial) : AnyShapeStyle(.clear))
         .onTapGesture(count: 2) {
+            let d = UserDefaults.standard
+            let codexTrackingEnabled = (d.object(forKey: PreferencesKey.Agents.codexEnabled) as? Bool ?? true)
+                && d.bool(forKey: PreferencesKey.codexUsageEnabled)
+            guard codexTrackingEnabled else { return }
             if !codexStatus.isUpdating {
                 // Double-click performs a hard /status probe (same as the
                 // Usage Probes button) but without showing a diagnostics dialog.

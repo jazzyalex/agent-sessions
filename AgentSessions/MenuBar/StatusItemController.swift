@@ -66,6 +66,10 @@ final class StatusItemController: NSObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.updateLength() }
             .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateLength() }
+            .store(in: &cancellables)
 
         // No popover; we construct an NSMenu on demand in togglePopover
     }
@@ -100,25 +104,28 @@ final class StatusItemController: NSObject {
         let d = UserDefaults.standard
         let codexAgentEnabled = d.object(forKey: PreferencesKey.Agents.codexEnabled) as? Bool ?? true
         let claudeAgentEnabled = d.object(forKey: PreferencesKey.Agents.claudeEnabled) as? Bool ?? true
+        let codexUsageEnabled = d.object(forKey: PreferencesKey.codexUsageEnabled) as? Bool ?? false
+        let claudeUsageEnabled = d.object(forKey: PreferencesKey.claudeUsageEnabled) as? Bool ?? false
+        let codexTrackingEnabled = codexAgentEnabled && codexUsageEnabled
+        let claudeTrackingEnabled = claudeAgentEnabled && claudeUsageEnabled
         let desiredSource = MenuBarSource(rawValue: d.string(forKey: "MenuBarSource") ?? MenuBarSource.codex.rawValue) ?? .codex
         let style = MenuBarStyleKind(rawValue: d.string(forKey: "MenuBarStyle") ?? MenuBarStyleKind.bars.rawValue) ?? .bars
         let scope = MenuBarScope(rawValue: d.string(forKey: "MenuBarScope") ?? MenuBarScope.both.rawValue) ?? .both
         let source: MenuBarSource = {
-            if codexAgentEnabled && claudeAgentEnabled { return desiredSource }
-            if codexAgentEnabled { return .codex }
-            if claudeAgentEnabled { return .claude }
+            if codexTrackingEnabled && claudeTrackingEnabled { return desiredSource }
+            if codexTrackingEnabled { return .codex }
+            if claudeTrackingEnabled { return .claude }
             return desiredSource
         }()
 
         // Reset lines (clicking opens Preferences → Menu Bar)
-        if codexAgentEnabled && (source == .codex || source == .both) {
+        if codexTrackingEnabled && (source == .codex || source == .both) {
             menu.addItem(makeTitleItem("Codex"))
             menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: codexStatus.fiveHourRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
             menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: codexStatus.weekRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openPreferences)))
         }
-        let claudeEnabled = UserDefaults.standard.bool(forKey: "ClaudeUsageEnabled")
-        if source == .both && codexAgentEnabled && claudeAgentEnabled && claudeEnabled { menu.addItem(NSMenuItem.separator()) }
-        if claudeAgentEnabled && (source == .claude || source == .both) && claudeEnabled {
+        if source == .both && codexTrackingEnabled && claudeTrackingEnabled { menu.addItem(NSMenuItem.separator()) }
+        if claudeTrackingEnabled && (source == .claude || source == .both) {
             menu.addItem(makeTitleItem("Claude"))
             if claudeStatus.setupRequired {
                 menu.addItem(makeActionItem(title: "Copy setup command: claude", action: #selector(copyClaudeCommand)))
@@ -134,10 +141,10 @@ final class StatusItemController: NSObject {
         let showCodexResetIndicators = d.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true
         let showClaudeResetIndicators = d.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true
         let codexToggle = makeCheckboxItem(title: "Show Codex reset indicators", checked: showCodexResetIndicators, action: #selector(toggleShowCodexResetTimes))
-        codexToggle.isEnabled = codexAgentEnabled
+        codexToggle.isEnabled = codexTrackingEnabled
         menu.addItem(codexToggle)
         let claudeToggle = makeCheckboxItem(title: "Show Claude reset indicators", checked: showClaudeResetIndicators, action: #selector(toggleShowClaudeResetTimes))
-        claudeToggle.isEnabled = claudeAgentEnabled && claudeEnabled
+        claudeToggle.isEnabled = claudeTrackingEnabled
         menu.addItem(claudeToggle)
 
         menu.addItem(NSMenuItem.separator())
@@ -145,13 +152,13 @@ final class StatusItemController: NSObject {
         // Source
         menu.addItem(makeTitleItem("Source"))
         let srcCodex = makeRadioItem(title: MenuBarSource.codex.title, selected: source == .codex, action: #selector(setSourceCodex))
-        srcCodex.isEnabled = codexAgentEnabled
+        srcCodex.isEnabled = codexTrackingEnabled
         menu.addItem(srcCodex)
         let srcClaude = makeRadioItem(title: MenuBarSource.claude.title, selected: source == .claude, action: #selector(setSourceClaude))
-        srcClaude.isEnabled = claudeAgentEnabled
+        srcClaude.isEnabled = claudeTrackingEnabled
         menu.addItem(srcClaude)
         let srcBoth = makeRadioItem(title: MenuBarSource.both.title, selected: source == .both, action: #selector(setSourceBoth))
-        srcBoth.isEnabled = codexAgentEnabled && claudeAgentEnabled
+        srcBoth.isEnabled = codexTrackingEnabled && claudeTrackingEnabled
         menu.addItem(srcBoth)
 
         // Style
@@ -167,10 +174,10 @@ final class StatusItemController: NSObject {
 
         menu.addItem(NSMenuItem.separator())
 
-        if codexAgentEnabled {
+        if codexTrackingEnabled {
             menu.addItem(makeActionItem(title: "Hard Refresh Codex", action: #selector(refreshCodexHard)))
         }
-        if claudeAgentEnabled && claudeEnabled {
+        if claudeTrackingEnabled {
             menu.addItem(makeActionItem(title: "Hard Refresh Claude", action: #selector(refreshClaudeHard)))
         }
         menu.addItem(NSMenuItem.separator())
@@ -231,12 +238,20 @@ final class StatusItemController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
     }
     @objc private func refreshCodexHard() {
+        let d = UserDefaults.standard
+        let codexTrackingEnabled = (d.object(forKey: PreferencesKey.Agents.codexEnabled) as? Bool ?? true)
+            && (d.object(forKey: PreferencesKey.codexUsageEnabled) as? Bool ?? false)
+        guard codexTrackingEnabled else { return }
         guard !codexStatus.isUpdating else { return }
         codexStatus.hardProbeNowDiagnostics { diag in
             if !diag.success { self.presentFailureAlert(title: "Codex Probe Failed", diagnostics: diag) }
         }
     }
     @objc private func refreshClaudeHard() {
+        let d = UserDefaults.standard
+        let claudeTrackingEnabled = (d.object(forKey: PreferencesKey.Agents.claudeEnabled) as? Bool ?? true)
+            && (d.object(forKey: PreferencesKey.claudeUsageEnabled) as? Bool ?? false)
+        guard claudeTrackingEnabled else { return }
         guard !claudeStatus.isUpdating else { return }
         claudeStatus.hardProbeNowDiagnostics { diag in
             if !diag.success { self.presentFailureAlert(title: "Claude Probe Failed", diagnostics: diag) }
