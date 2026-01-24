@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Transcript (Session view): Accent strips now sit outside text bounds.
 - Transcript (Session view): User prompts use the base system font size with matching left/right accent strips; the system preamble keeps a single left strip.
 - Transcript (Session view): Reduced the user prompt Optima font size bump from +2pt to +1pt.
+- Preferences (Usage Probes): Moved “Show system probe sessions for debugging” to the bottom of the pane.
 - Onboarding: Onboarding counts now use the system font.
 
 ## [2.10.1] - 2026-01-19
