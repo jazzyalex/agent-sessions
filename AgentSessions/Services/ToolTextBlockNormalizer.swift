@@ -638,7 +638,9 @@ enum ToolTextBlockNormalizer {
 
         if let s = obj as? String {
             let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty, info.stdout == nil, info.stderr == nil {
+            // Preserve best-effort stdout even when stderr is already present (common in error payloads
+            // like { output: "...", error: "..." }).
+            if !trimmed.isEmpty, info.stdout == nil {
                 info.stdout = trimmed
             }
             return
@@ -670,6 +672,17 @@ enum ToolTextBlockNormalizer {
             if let statusValue = dict["status"] as? String { info.status = info.status ?? statusValue }
             if let exitValue = dict["exitCode"] ?? dict["exit_code"] ?? dict["exit"] ?? dict["code"] {
                 info.exitCode = info.exitCode ?? extractExitCode(from: exitValue)
+            }
+
+            // Fast-path primitives even when stderr is already present.
+            if info.stdout == nil {
+                if let outputString = outputValue as? String, !outputString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    info.stdout = outputString.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if let resultString = resultValue as? String, !resultString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    info.stdout = resultString.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if let contentString = contentValue as? String, !contentString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    info.stdout = contentString.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
             }
 
             if let toolUseResult = dict["toolUseResult"] {
