@@ -1181,6 +1181,7 @@ private extension TerminalLineRole {
 private final class TerminalLayoutManager: NSLayoutManager {
     enum BlockKind {
         case user
+        case userPreamble
         case userInterrupt
         case agent
         case toolCall
@@ -1231,7 +1232,7 @@ private final class TerminalLayoutManager: NSLayoutManager {
         func rgba(_ color: NSColor, alpha: CGFloat) -> NSColor { color.withAlphaComponent(alpha) }
 
 	        switch kind {
-        case .user:
+        case .user, .userPreamble:
             let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
             return BlockStyle(
                 fill: rgba(base, alpha: dark ? 0.12 : 0.04),
@@ -2022,7 +2023,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             return false
         }
 
-        func finishBlock(endIdx: Int) {
+        func finishBlock(endIdx: Int, blockIndex: Int?) {
             guard let s = startIdx else { return }
             guard currentBlock != nil else { return }
             guard let startRange = ranges[lines[s].id] else { return }
@@ -2032,6 +2033,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let end = endRange.location + endRange.length
             guard end > start else { return }
 
+            let isPreambleUserBlock = blockIndex.map { preambleUserBlockIndexes.contains($0) } ?? false
             let kind: TerminalLayoutManager.BlockKind? = {
                 if rolesInBlock.count == 1, rolesInBlock.contains(.meta) {
                     if isUserInterruptMetaBlock(start: s, end: endIdx) { return .userInterrupt }
@@ -2040,7 +2042,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 if rolesInBlock.contains(.error) { return .error }
                 if rolesInBlock.contains(.toolInput) { return .toolCall }
                 if rolesInBlock.contains(.toolOutput) { return .toolOutput }
-                if rolesInBlock.contains(.user) { return .user }
+                if rolesInBlock.contains(.user) { return isPreambleUserBlock ? .userPreamble : .user }
                 return .agent
             }()
 
@@ -2053,7 +2055,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             guard let blockIndex = line.blockIndex else {
                 // Treat nil block index lines as a standalone “agent” block for consistent spacing, but only if non-empty.
                 if startIdx != nil {
-                    finishBlock(endIdx: idx - 1)
+                    finishBlock(endIdx: idx - 1, blockIndex: currentBlock)
                     startIdx = nil
                     currentBlock = nil
                     rolesInBlock = []
@@ -2072,7 +2074,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
 
             if currentBlock != blockIndex {
-                finishBlock(endIdx: idx - 1)
+                finishBlock(endIdx: idx - 1, blockIndex: currentBlock)
                 currentBlock = blockIndex
                 startIdx = idx
                 rolesInBlock = [line.role]
@@ -2083,7 +2085,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
 
         if startIdx != nil {
-            finishBlock(endIdx: lines.count - 1)
+            finishBlock(endIdx: lines.count - 1, blockIndex: currentBlock)
         }
 
         return out.sorted { $0.range.location < $1.range.location }

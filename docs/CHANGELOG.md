@@ -15,11 +15,13 @@ All notable changes to this project will be documented in this file.
 
 - Transcript: Tool calls and outputs now render as readable text blocks (commands, paths, stdout, stderr) instead of JSON wrappers.
 - Transcript: Tool call/output navigation now groups paired blocks, tool outputs no longer repeat the tool label, and tool/error blocks have consistent padding.
+- Layout: New installs default to the vertical split layout.
+- Onboarding: The tour now opens in a standard window with a close button.
 - Transcript (Session view): User prompts no longer use semibold text; emphasis comes from the accent strip.
 - Transcript (Session view): Accent strips now align to their block padding.
 - Transcript (Session view): Block accents no longer bleed into inter-block spacing.
 - Transcript (Session view): Accent strips now sit outside text bounds.
-- Transcript (Session view): User prompts now use the base system font size with matching left/right accent strips for quick scanning.
+- Transcript (Session view): User prompts use the base system font size with matching left/right accent strips; the system preamble keeps a single left strip.
 
 ## [2.10.1] - 2026-01-19
 

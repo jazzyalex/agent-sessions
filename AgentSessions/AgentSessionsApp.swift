@@ -27,11 +27,12 @@ struct AgentSessionsApp: App {
     @StateObject private var onboardingCoordinator = OnboardingCoordinator()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @State private var statusItemController: StatusItemController? = nil
+    private let onboardingWindowPresenter = OnboardingWindowPresenter()
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
-    @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.horizontal.rawValue
+    @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.vertical.rawValue
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("CodexUsageEnabled") private var codexUsageEnabledPref: Bool = false
@@ -136,20 +137,22 @@ struct AgentSessionsApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: .showOnboardingFromMenu)) { _ in
                     onboardingCoordinator.presentManually()
                 }
-                .sheet(isPresented: $onboardingCoordinator.isPresented) {
-                    Group {
-                        if let content = onboardingCoordinator.content {
-                            OnboardingSheetView(content: content,
-                                                coordinator: onboardingCoordinator,
-                                                codexIndexer: indexer,
-                                                claudeIndexer: claudeIndexer,
-                                                geminiIndexer: geminiIndexer,
-                                                opencodeIndexer: opencodeIndexer,
-                                                copilotIndexer: copilotIndexer,
-                                                droidIndexer: droidIndexer,
-                                                codexUsageModel: codexUsageModel,
-                                                claudeUsageModel: claudeUsageModel)
-                        }
+                .onChange(of: onboardingCoordinator.isPresented) { _, isPresented in
+                    if isPresented, let content = onboardingCoordinator.content {
+                        onboardingWindowPresenter.show(
+                            content: content,
+                            coordinator: onboardingCoordinator,
+                            codexIndexer: indexer,
+                            claudeIndexer: claudeIndexer,
+                            geminiIndexer: geminiIndexer,
+                            opencodeIndexer: opencodeIndexer,
+                            copilotIndexer: copilotIndexer,
+                            droidIndexer: droidIndexer,
+                            codexUsageModel: codexUsageModel,
+                            claudeUsageModel: claudeUsageModel
+                        )
+                    } else {
+                        onboardingWindowPresenter.hide()
                     }
                 }
                 // Immediate cleanup happens after each probe; no app-exit cleanup required.
@@ -363,5 +366,73 @@ extension AgentSessionsApp {
         }
     }
 
+}
+// MARK: - Onboarding window presentation
+
+@MainActor
+final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
+    private weak var coordinator: OnboardingCoordinator?
+    private var windowController: NSWindowController?
+
+    func show(
+        content: OnboardingContent,
+        coordinator: OnboardingCoordinator,
+        codexIndexer: SessionIndexer,
+        claudeIndexer: ClaudeSessionIndexer,
+        geminiIndexer: GeminiSessionIndexer,
+        opencodeIndexer: OpenCodeSessionIndexer,
+        copilotIndexer: CopilotSessionIndexer,
+        droidIndexer: DroidSessionIndexer,
+        codexUsageModel: CodexUsageModel,
+        claudeUsageModel: ClaudeUsageModel
+    ) {
+        self.coordinator = coordinator
+        let rootView = OnboardingSheetView(
+            content: content,
+            coordinator: coordinator,
+            codexIndexer: codexIndexer,
+            claudeIndexer: claudeIndexer,
+            geminiIndexer: geminiIndexer,
+            opencodeIndexer: opencodeIndexer,
+            copilotIndexer: copilotIndexer,
+            droidIndexer: droidIndexer,
+            codexUsageModel: codexUsageModel,
+            claudeUsageModel: claudeUsageModel
+        )
+
+        if let hosting = windowController?.contentViewController as? NSHostingController<OnboardingSheetView> {
+            hosting.rootView = rootView
+            windowController?.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let hostingController = NSHostingController(rootView: rootView)
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Onboarding"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 780, height: 620))
+        window.minSize = NSSize(width: 780, height: 620)
+        window.center()
+        window.delegate = self
+
+        let controller = NSWindowController(window: window)
+        windowController = controller
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func hide() {
+        windowController?.close()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if coordinator?.isPresented == true {
+            coordinator?.skip()
+        }
+        coordinator = nil
+        windowController = nil
+    }
 }
 // (Legacy ContentView and FirstRunPrompt removed)
