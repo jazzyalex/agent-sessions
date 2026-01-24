@@ -20,7 +20,7 @@
 - Security & Privacy: Local-only. No telemetry. Details: `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.1/AgentSessions-2.10.1.dmg"><b>Download Agent Sessions 2.10.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.2/AgentSessions-2.10.2.dmg"><b>Download Agent Sessions 2.10.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -210,7 +210,7 @@ No cloud uploads or telemetry — **read‑only by design.**
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.10.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.1/AgentSessions-2.10.1.dmg)
+1. [Download AgentSessions-2.10.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.2/AgentSessions-2.10.2.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew Tap
