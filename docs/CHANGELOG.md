@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - Transcript (Session view): Block accents no longer bleed into inter-block spacing.
 - Transcript (Session view): Accent strips now sit outside text bounds.
 - Transcript (Session view): User prompts use the base system font size with matching left/right accent strips; the system preamble keeps a single left strip.
+- Onboarding: Onboarding counts now use the system font.
 
 ## [2.10.1] - 2026-01-19
 
