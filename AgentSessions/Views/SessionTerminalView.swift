@@ -2149,7 +2149,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
 				        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
 					        let systemUserFont: NSFont = {
-		                        let userFontSize = fontSize + 2
+			                        let userFontSize = fontSize + 1
 		                        if let optima = NSFont(name: "Optima", size: userFontSize) {
 		                            let descriptor = optima.fontDescriptor.addingAttributes([
 		                                .traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.medium]
