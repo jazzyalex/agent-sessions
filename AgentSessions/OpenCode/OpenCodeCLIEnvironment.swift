@@ -53,12 +53,17 @@ struct OpenCodeCLIEnvironment {
             "/opt/homebrew/bin/opencode",
             "/usr/local/bin/opencode"
         ])
-        if let npmPrefix = runAndCapture(["/usr/bin/env", "npm", "prefix", "-g"], useSafeHome: false).out?.trimmingCharacters(in: .whitespacesAndNewlines), !npmPrefix.isEmpty {
+        let home = resolvedUserHomeDirectory()
+        if let npmPrefix = runAndCapture(["/usr/bin/env", "npm", "prefix", "-g"], useSafeHome: false, homeOverride: home).out?.trimmingCharacters(in: .whitespacesAndNewlines), !npmPrefix.isEmpty {
             candidates.append("\(npmPrefix)/bin/opencode")
         }
-        candidates.append((NSHomeDirectory() as NSString).appendingPathComponent(".npm-global/bin/opencode"))
-        candidates.append((NSHomeDirectory() as NSString).appendingPathComponent(".local/bin/opencode"))
-        candidates.append((NSHomeDirectory() as NSString).appendingPathComponent(".local/pipx/venvs/opencode/bin/opencode"))
+        candidates.append((home as NSString).appendingPathComponent(".npm-global/bin/opencode"))
+        candidates.append((home as NSString).appendingPathComponent(".local/bin/opencode"))
+        candidates.append((home as NSString).appendingPathComponent(".local/pipx/venvs/opencode/bin/opencode"))
+        candidates.append((home as NSString).appendingPathComponent(".local/pipx/venvs/opencode-ai/bin/opencode"))
+        candidates.append((home as NSString).appendingPathComponent(".local/share/pipx/venvs/opencode/bin/opencode"))
+        candidates.append((home as NSString).appendingPathComponent(".local/share/pipx/venvs/opencode-ai/bin/opencode"))
+        candidates.append(contentsOf: pythonUserBinCandidates(home: home))
 
         for path in Set(candidates) {
             if FileManager.default.isExecutableFile(atPath: path) { return URL(fileURLWithPath: path) }
@@ -78,9 +83,12 @@ struct OpenCodeCLIEnvironment {
         }
 
         let shell = defaultShell()
-        let versionCmd = "\(escapeForShell(binary.path)) --version"
+        // Run the CLI in a login shell so user PATH customizations are applied, but avoid
+        // clobbering the shell's HOME (which would prevent dotfiles from loading).
+        let safeHome = makeSafeHomeDirectory()
+        let versionCmd = "HOME=\(escapeForShell(safeHome)) \(escapeForShell(binary.path)) --version"
 
-        let vres = runAndCapture([shell, "-lic", versionCmd], useSafeHome: true)
+        let vres = runAndCapture([shell, "-lic", versionCmd], useSafeHome: false, homeOverride: resolvedUserHomeDirectory())
         guard vres.status == 0 else {
             return .failure(.commandFailed(vres.err ?? "Failed to execute opencode --version."))
         }
@@ -102,7 +110,7 @@ struct OpenCodeCLIEnvironment {
 
     private func whichViaLoginShell(_ command: String) -> String? {
         let shell = defaultShell()
-        let res = runAndCapture([shell, "-lic", "command -v \(command) || true"], useSafeHome: false).out?
+        let res = runAndCapture([shell, "-lic", "command -v \(command) || true"], useSafeHome: false, homeOverride: resolvedUserHomeDirectory()).out?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !res.isEmpty else { return nil }
         if res == command { return nil }
@@ -111,7 +119,31 @@ struct OpenCodeCLIEnvironment {
 
     private func defaultShell() -> String { ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh" }
 
-    private func runAndCapture(_ argv: [String], useSafeHome: Bool = false) -> (status: Int32, out: String?, err: String?) {
+    private func pythonUserBinCandidates(home: String) -> [String] {
+        let base = (home as NSString).appendingPathComponent("Library/Python")
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: base) else { return [] }
+        var out: [String] = []
+        for entry in entries {
+            let candidate = (base as NSString).appendingPathComponent(entry)
+            out.append((candidate as NSString).appendingPathComponent("bin/opencode"))
+        }
+        return out
+    }
+
+    private func resolvedUserHomeDirectory() -> String {
+        if let byUser = NSHomeDirectoryForUser(NSUserName()), !byUser.isEmpty { return byUser }
+        if let envHome = ProcessInfo.processInfo.environment["HOME"], !envHome.isEmpty { return envHome }
+        return NSHomeDirectory()
+    }
+
+    private func makeSafeHomeDirectory() -> String {
+        let base = NSTemporaryDirectory()
+        let safeHome = (base as NSString).appendingPathComponent("AgentSessions-opencode-safe-home")
+        try? FileManager.default.createDirectory(atPath: safeHome, withIntermediateDirectories: true)
+        return safeHome
+    }
+
+    private func runAndCapture(_ argv: [String], useSafeHome: Bool = false, homeOverride: String? = nil) -> (status: Int32, out: String?, err: String?) {
         guard let first = argv.first else { return (127, nil, "no command") }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: first)
@@ -123,6 +155,8 @@ struct OpenCodeCLIEnvironment {
             let safeHome = (base as NSString).appendingPathComponent("AgentSessions-opencode-safe-home")
             try? FileManager.default.createDirectory(atPath: safeHome, withIntermediateDirectories: true)
             env["HOME"] = safeHome
+        } else if let homeOverride, !homeOverride.isEmpty {
+            env["HOME"] = homeOverride
         }
         process.environment = env
         let outPipe = Pipe()
