@@ -638,9 +638,9 @@ enum ToolTextBlockNormalizer {
 
         if let s = obj as? String {
             let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Preserve best-effort stdout even when stderr is already present (common in error payloads
-            // like { output: "...", error: "..." }).
-            if !trimmed.isEmpty, info.stdout == nil {
+            // Only treat a bare string as stdout when we have no stderr yet. Otherwise we risk
+            // capturing non-output status strings (e.g. "error") and blocking later stdout.
+            if !trimmed.isEmpty, info.stdout == nil, info.stderr == nil {
                 info.stdout = trimmed
             }
             return
