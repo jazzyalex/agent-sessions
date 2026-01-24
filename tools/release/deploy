@@ -135,8 +135,8 @@ safe_version_bump() {
   local curr_marketing="$4"
   local new_marketing="$5"
 
-  local lock_file="${pbxproj}.lock"
-  local backup_file="${pbxproj}.backup.$(date +%s)"
+  local lock_file="/tmp/$(echo "$pbxproj" | tr '/.' '__').lock"
+  local backup_file="/tmp/$(basename "$pbxproj").backup.$(date +%s)"
 
   PBXPROJ="$pbxproj" \
   LOCK_FILE="$lock_file" \
@@ -304,20 +304,13 @@ PYEOF
     fi
   fi
 
-  # Insert new version section
+  # Insert new version section directly under [Unreleased] so Unreleased becomes empty
   awk -v ver="$NEW_VERSION" -v date="$TODAY" '
 /^## \[Unreleased\]/ {
     print
     print ""
     print "## [" ver "] - " date
-    in_unreleased = 1
     next
-}
-/^## \[/ && in_unreleased {
-    print ""
-    print "## [Unreleased]"
-    print ""
-    in_unreleased = 0
 }
 { print }
 ' docs/CHANGELOG.md > docs/CHANGELOG.md.tmp && mv docs/CHANGELOG.md.tmp docs/CHANGELOG.md
