@@ -144,7 +144,7 @@ struct OnboardingSheetView: View {
 
             VStack(spacing: 10) {
                 HStack(spacing: 18) {
-                    CountingNumberText(value: animatedPrimarySessions, font: Font.custom("JetBrains Mono", size: 56))
+                    CountingNumberText(value: animatedPrimarySessions, font: .system(size: 56, weight: .regular, design: .default))
                         .foregroundStyle(palette.accentBlue)
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -663,7 +663,8 @@ private struct AgentPill: View {
                 .foregroundStyle(.primary)
 
             Text("\(agent.displayCount)")
-                .font(.custom("JetBrains Mono", size: 13))
+                .font(.system(size: 13, weight: .regular, design: .default))
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
 
             if !agent.isEnabled {
@@ -713,7 +714,8 @@ private struct AgentToggleRow: View {
                     .opacity(agent.isEnabled ? 1.0 : 0.7)
                 HStack(spacing: 4) {
                     Text("\(agent.displayCount)")
-                        .font(.custom("JetBrains Mono", size: 12))
+                        .font(.system(size: 12, weight: .regular, design: .default))
+                        .monospacedDigit()
                     Text("sessions found")
                         .font(.system(size: 12, weight: .regular, design: .default))
                 }
@@ -1105,7 +1107,8 @@ private struct UsageMeterRow: View {
                 Spacer()
 
                 Text(usageText)
-                    .font(.custom("JetBrains Mono", size: 11))
+                    .font(.system(size: 11, weight: .regular, design: .default))
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
 
@@ -1306,6 +1309,7 @@ private struct CountingNumberText: View, Animatable {
     var body: some View {
         Text("\(Int(value.rounded()))")
             .font(font)
+            .monospacedDigit()
     }
 }
 
