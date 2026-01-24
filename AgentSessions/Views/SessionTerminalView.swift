@@ -2147,9 +2147,18 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 		        var ranges: [Int: NSRange] = [:]
 		        ranges.reserveCapacity(lines.count)
 
-			        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-				        let systemUserFont = systemRegularFont
-		        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+				        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+					        let systemUserFont: NSFont = {
+		                        let userFontSize = fontSize + 2
+		                        if let optima = NSFont(name: "Optima", size: userFontSize) {
+		                            let descriptor = optima.fontDescriptor.addingAttributes([
+		                                .traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.medium]
+		                            ])
+		                            return NSFont(descriptor: descriptor, size: userFontSize) ?? optima
+		                        }
+		                        return NSFont.systemFont(ofSize: userFontSize, weight: .medium)
+		                    }()
+			        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
                 let monoSemiboldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .semibold)
 
 	        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
