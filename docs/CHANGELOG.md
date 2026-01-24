@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.10.2] - 2026-01-24
+
 ### Fixed
 
 - OpenCode: Auto-detection now works for npm-installed CLIs and checks common pip/pipx install locations on macOS (including `~/Library/Python/*/bin`).
@@ -27,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - Transcript (Session view): Reduced the user prompt Optima font size bump from +2pt to +1pt.
 - Preferences (Usage Probes): Moved “Show system probe sessions for debugging” to the bottom of the pane.
 - Onboarding: Onboarding counts now use the system font.
+
 
 ## [2.10.1] - 2026-01-19
 
