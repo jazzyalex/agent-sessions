@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- OpenCode: Auto-detection now works for npm-installed CLIs and checks common pip/pipx install locations on macOS (including `~/Library/Python/*/bin`).
 - Filters: “Hide 1–2 message sessions” no longer hides 0-message sessions when “Hide 0-message sessions” is off.
 - Onboarding: “Sessions Found” counts now reflect current filter settings; filter labels are now consistently “Hide …”.
 - Claude probes: Auto-delete now removes failed/empty probe sessions, not just successful ones.
