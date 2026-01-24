@@ -1231,14 +1231,14 @@ private final class TerminalLayoutManager: NSLayoutManager {
         func rgba(_ color: NSColor, alpha: CGFloat) -> NSColor { color.withAlphaComponent(alpha) }
 
 	        switch kind {
-	        case .user:
-	            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
-	            return BlockStyle(
-	                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
-	                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
-	                accentWidth: 6,
-                    paddingY: 6
-	            )
+        case .user:
+            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
+                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
+                accentWidth: 4,
+                paddingY: 6
+            )
         case .userInterrupt:
             let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
             return BlockStyle(
@@ -1481,6 +1481,12 @@ private final class TerminalLayoutManager: NSLayoutManager {
                         }
                     } else {
                         NSBezierPath(roundedRect: stripRect, xRadius: radius, yRadius: radius).fill()
+                    }
+                    if block.kind == .user {
+                        let rightStripRect = CGRect(x: cardRect.maxX - style.accentWidth, y: y0, width: style.accentWidth, height: h)
+                        let rightRadius = style.accentWidth / 2
+                        accent.setFill()
+                        NSBezierPath(roundedRect: rightStripRect, xRadius: rightRadius, yRadius: rightRadius).fill()
                     }
                 }
             }
@@ -2140,8 +2146,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 		        ranges.reserveCapacity(lines.count)
 
 			        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-				        let systemUserFont = NSFont.systemFont(ofSize: fontSize, weight: .medium)
-	                let systemUserItalicFont = NSFontManager.shared.convert(systemUserFont, toHaveTrait: .italicFontMask)
+				        let systemUserFont = systemRegularFont
 		        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
                 let monoSemiboldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .semibold)
 
@@ -2219,7 +2224,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	                if line.role == .toolInput {
                         return isFirstLineOfBlock ? monoSemiboldFont : monoRegularFont
                     }
-		                if line.role == .user && !isPreambleUserLine { return systemUserItalicFont }
+		                if line.role == .user && !isPreambleUserLine { return systemUserFont }
 	                return systemRegularFont
 	            }()
 
