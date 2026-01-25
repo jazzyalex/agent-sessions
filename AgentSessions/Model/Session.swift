@@ -216,6 +216,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         if lower.contains("<environment_context>") || lower.contains("</environment_context>") { return true }
         // Droid / Factory: some logs embed <system-reminder>...</system-reminder> blocks before the first real prompt.
         if lower.contains("<system-reminder") || lower.contains("</system-reminder>") { return true }
+        // Codex CLI harness: turn-aborted notices can appear as XML-ish blocks captured under the user role.
+        if lower.contains("<turn_aborted") || lower.contains("</turn_aborted>") { return true }
         // Strong anchors commonly seen in agents.md-driven openings
         let anchors = [
             "<user_instructions>",

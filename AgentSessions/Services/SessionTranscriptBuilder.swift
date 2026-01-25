@@ -439,23 +439,129 @@ struct SessionTranscriptBuilder {
         blocks.reserveCapacity(session.events.count)
         for e in session.events {
             if e.kind == .meta && !includeMeta { continue }
-            let b = block(from: e)
-            if let last = blocks.last, canMerge(last, b) {
-                var merged = last
-                merged.text += b.text
-                merged.timestamp = merged.timestamp ?? b.timestamp
-                merged.rawJSON = b.rawJSON
-                if merged.toolName == nil { merged.toolName = b.toolName }
-                if merged.toolInput == nil { merged.toolInput = b.toolInput }
-                merged.isErrorOutput = merged.isErrorOutput || b.isErrorOutput
-                blocks.removeLast()
-                blocks.append(merged)
-            } else {
-                blocks.append(b)
+            let base = block(from: e)
+            let expanded = expandUserEmbeddedNoticesIfNeeded(block: base)
+            for b in expanded {
+                if let last = blocks.last, canMerge(last, b) {
+                    var merged = last
+                    merged.text += b.text
+                    merged.timestamp = merged.timestamp ?? b.timestamp
+                    merged.rawJSON = b.rawJSON
+                    if merged.toolName == nil { merged.toolName = b.toolName }
+                    if merged.toolInput == nil { merged.toolInput = b.toolInput }
+                    merged.isErrorOutput = merged.isErrorOutput || b.isErrorOutput
+                    blocks.removeLast()
+                    blocks.append(merged)
+                } else {
+                    blocks.append(b)
+                }
             }
         }
         return blocks
     }
+    
+    private static func expandUserEmbeddedNoticesIfNeeded(block: LogicalBlock) -> [LogicalBlock] {
+        guard block.kind == .user else { return [block] }
+        if !block.text.localizedCaseInsensitiveContains("<turn_aborted") { return [block] }
+        return splitTurnAbortedBlocks(from: block)
+    }
+    
+    private static func splitTurnAbortedBlocks(from block: LogicalBlock) -> [LogicalBlock] {
+        let text = block.text
+        let closeTag = "</turn_aborted>"
+        var out: [LogicalBlock] = []
+        out.reserveCapacity(3)
+        
+        var remainder: Substring = text[...]
+        var found = false
+        
+        func makeBlock(kind: LogicalBlock.Kind, text: String) -> LogicalBlock {
+            LogicalBlock(kind: kind,
+                         text: text,
+                         timestamp: block.timestamp,
+                         messageID: block.messageID,
+                         toolName: block.toolName,
+                         isDelta: block.isDelta,
+                         toolInput: block.toolInput,
+                         isErrorOutput: block.isErrorOutput,
+                         eventID: block.eventID,
+                         rawJSON: block.rawJSON)
+        }
+        
+        while let openStart = remainder.range(of: "<turn_aborted", options: [.caseInsensitive]) {
+            found = true
+            let before = String(remainder[..<openStart.lowerBound])
+            if !before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out.append(makeBlock(kind: .user, text: before))
+            }
+            
+            // Find end of the opening tag (supports `<turn_aborted>` and `<turn_aborted ...>`).
+            guard let openEnd = remainder[openStart.lowerBound...].firstIndex(of: ">") else {
+                // Malformed tag: keep remainder as user text to avoid dropping content.
+                let rest = String(remainder)
+                if !rest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    out.append(makeBlock(kind: .user, text: rest))
+                }
+                remainder = remainder[remainder.endIndex...]
+                break
+            }
+            
+            let innerStart = remainder.index(after: openEnd)
+            guard let closeRange = remainder.range(of: closeTag, options: [.caseInsensitive], range: innerStart..<remainder.endIndex) else {
+                let rest = String(remainder)
+                if !rest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    out.append(makeBlock(kind: .user, text: rest))
+                }
+                remainder = remainder[remainder.endIndex...]
+                break
+            }
+            
+            let inner = String(remainder[innerStart..<closeRange.lowerBound])
+            if let display = turnAbortedDisplayText(from: inner) {
+                out.append(makeBlock(kind: .meta, text: display))
+            }
+            
+            remainder = remainder[closeRange.upperBound...]
+        }
+        
+        let tail = String(remainder)
+        if !tail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            out.append(makeBlock(kind: .user, text: tail))
+        }
+        
+        return found ? out : [block]
+    }
+    
+	    private static func turnAbortedDisplayText(from inner: String) -> String? {
+	        let trimmed = inner.trimmingCharacters(in: .whitespacesAndNewlines)
+	        let headerLines = ["Turn Aborted", "Tag: turn_aborted"]
+	        if trimmed.isEmpty { return headerLines.joined(separator: "\n") }
+	        
+	        func extractTag(_ name: String, from text: String) -> String? {
+	            guard let start = text.range(of: "<\(name)>"),
+	                  let end = text.range(of: "</\(name)>", range: start.upperBound..<text.endIndex) else {
+	                return nil
+            }
+            return String(text[start.upperBound..<end.lowerBound])
+        }
+        
+        let turnID = extractTag("turn_id", from: trimmed)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let reason = extractTag("reason", from: trimmed)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+	        let guidance = extractTag("guidance", from: trimmed)?
+	            .trimmingCharacters(in: .whitespacesAndNewlines)
+	        
+	        var parts: [String] = headerLines
+	        if let turnID, !turnID.isEmpty { parts.append("Turn ID: \(turnID)") }
+	        if let reason, !reason.isEmpty { parts.append("Reason: \(reason)") }
+	        if let guidance, !guidance.isEmpty { parts.append("Guidance: \(guidance)") }
+	        
+	        if parts.count == headerLines.count {
+	            return headerLines.joined(separator: "\n") + "\n" + trimmed
+	        }
+	        return parts.joined(separator: "\n")
+	    }
 
     private static func render(block b: LogicalBlock, options: Options) -> String {
         switch b.kind {

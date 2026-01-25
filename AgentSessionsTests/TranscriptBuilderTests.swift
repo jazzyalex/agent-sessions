@@ -118,4 +118,52 @@ final class TranscriptBuilderTests: XCTestCase {
         let expected2 = cal.date(from: DateComponents(timeZone: tz, year: 2026, month: 1, day: 5, hour: 23, minute: 0, second: 0))!
         XCTAssertEqual(reset2, expected2)
     }
+
+    func testTurnAbortedBlocksRenderAsMetaInsteadOfUser() throws {
+        let text = """
+        <turn_aborted>
+          <turn_id>21</turn_id>
+          <reason>interrupted</reason>
+          <guidance>The user interrupted the previous turn.</guidance>
+        </turn_aborted>
+        """
+
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .user,
+                         role: "user",
+                         text: text,
+                         toolName: nil,
+                         toolInput: nil,
+                         toolOutput: nil,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-turn-aborted",
+                        source: .codex,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/turn-aborted.jsonl",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let lines = TerminalBuilder.buildLines(for: s, showMeta: false)
+        XCTAssertTrue(lines.contains(where: { $0.role == .meta && $0.text == "Turn Aborted" }))
+        XCTAssertTrue(lines.contains(where: { $0.role == .meta && $0.text.contains("Turn ID: 21") }))
+        XCTAssertTrue(lines.contains(where: { $0.role == .meta && $0.text.contains("Reason: interrupted") }))
+        XCTAssertFalse(lines.contains(where: { $0.role == .user && $0.text.contains("<turn_aborted") }))
+
+        let plain = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
+        XCTAssertFalse(plain.contains("<turn_aborted"), "Plain transcript should not include raw <turn_aborted> blocks")
+        XCTAssertTrue(plain.contains("Turn Aborted"), "Plain transcript should include a readable turn-aborted notice")
+        XCTAssertTrue(SearchTextMatcher.hasMatch(in: plain, query: "turn_aborted"))
+
+        let joined = lines.map(\.text).joined(separator: "\n")
+        XCTAssertTrue(SearchTextMatcher.hasMatch(in: joined, query: "turn_aborted"))
+    }
 }

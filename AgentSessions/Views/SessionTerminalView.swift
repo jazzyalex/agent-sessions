@@ -946,19 +946,19 @@ private struct TerminalLineView: View {
     let monochrome: Bool
     @Environment(\.colorScheme) private var colorScheme
 
-	    var body: some View {
-	        HStack(alignment: .firstTextBaseline, spacing: 4) {
-	            prefixView
-                    Group {
-                        Text(line.text)
-                    }
-                    .font(.system(size: fontSize,
-                                  weight: (line.role == .toolInput && isToolLabelLine(line.text)) ? .semibold : .regular,
-                                  design: (line.role == .toolInput) ? .monospaced : .default))
-                    .foregroundColor(swatch.foreground)
-		        }
-	        .textSelection(.enabled)
-	        .padding(.horizontal, 4)
+		    var body: some View {
+		        HStack(alignment: .firstTextBaseline, spacing: 4) {
+		            prefixView
+	                    Group {
+	                        Text(line.text)
+	                    }
+	                    .font(.system(size: fontSize,
+	                                  weight: lineFontWeight,
+	                                  design: (line.role == .toolInput) ? .monospaced : .default))
+	                    .foregroundColor(swatch.foreground)
+			        }
+		        .textSelection(.enabled)
+		        .padding(.horizontal, 4)
         .padding(.vertical, 1)
         .background(background)
         .cornerRadius(4)
@@ -996,14 +996,20 @@ private struct TerminalLineView: View {
         }
     }
 
-    private var swatch: TerminalRolePalette.SwiftUISwatch {
-        TerminalRolePalette.swiftUI(role: line.role.paletteRole, scheme: colorScheme, monochrome: monochrome)
-    }
+	    private var swatch: TerminalRolePalette.SwiftUISwatch {
+	        TerminalRolePalette.swiftUI(role: line.role.paletteRole, scheme: colorScheme, monochrome: monochrome)
+	    }
+	
+	    private var lineFontWeight: Font.Weight {
+	        if line.role == .user { return .medium }
+	        if line.role == .toolInput && isToolLabelLine(line.text) { return .semibold }
+	        return .regular
+	    }
 
-    private func isToolLabelLine(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        let lower = trimmed.lowercased()
+	    private func isToolLabelLine(_ text: String) -> Bool {
+	        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+	        guard !trimmed.isEmpty else { return false }
+	        let lower = trimmed.lowercased()
         let labels: Set<String> = ["bash", "read", "list", "glob", "grep", "plan", "task", "tool"]
         if labels.contains(lower) { return true }
         if lower.hasPrefix("task ("), lower.hasSuffix(")") { return true }
@@ -1178,16 +1184,17 @@ private extension TerminalLineRole {
 
 // MARK: - Terminal layout + decorations (Color view)
 
-private final class TerminalLayoutManager: NSLayoutManager {
-    enum BlockKind {
-        case user
-        case userPreamble
-        case userInterrupt
-        case agent
-        case toolCall
-        case toolOutput
-        case error
-        case localCommand
+	private final class TerminalLayoutManager: NSLayoutManager {
+	    enum BlockKind {
+	        case user
+	        case userPreamble
+	        case userInterrupt
+	        case systemNotice
+	        case agent
+	        case toolCall
+	        case toolOutput
+	        case error
+	        case localCommand
     }
 
     struct BlockDecoration {
@@ -1222,36 +1229,44 @@ private final class TerminalLayoutManager: NSLayoutManager {
         let paddingY: CGFloat
     }
 
-	    private func style(for kind: BlockKind) -> BlockStyle {
-	        // Tuned for consistent contrast in light/dark:
-	        // - subtle tint fill
-	        // - optional left accent bar
-	        // - thin stroke for definition
+		    private func style(for kind: BlockKind) -> BlockStyle {
+		        // Tuned for consistent contrast in light/dark:
+		        // - subtle tint fill
+		        // - optional left accent bar
+		        // - thin stroke for definition
 	        let dark = isDark
 
         func rgba(_ color: NSColor, alpha: CGFloat) -> NSColor { color.withAlphaComponent(alpha) }
 
 	        switch kind {
-        case .user, .userPreamble:
-            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
-            return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
-                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
-                accentWidth: 4,
-                paddingY: 6
-            )
-        case .userInterrupt:
-            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
-            return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
-                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
-                accentWidth: 4,
-                paddingY: 6
-            )
-        case .agent:
-            let base = agentBrandAccent
-            return BlockStyle(
-                fill: rgba(base, alpha: dark ? 0.06 : 0.012),
+	        case .user, .userPreamble:
+	            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
+	            return BlockStyle(
+	                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
+	                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
+	                accentWidth: 4,
+	                paddingY: 6
+	            )
+	        case .userInterrupt:
+	            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
+	            return BlockStyle(
+	                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
+	                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
+	                accentWidth: 4,
+	                paddingY: 6
+	            )
+	        case .systemNotice:
+	            let base = NSColor.systemOrange
+	            return BlockStyle(
+	                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
+	                accent: rgba(base, alpha: dark ? 0.82 : 0.65),
+	                accentWidth: 4,
+	                paddingY: 8
+	            )
+	        case .agent:
+	            let base = agentBrandAccent
+	            return BlockStyle(
+	                fill: rgba(base, alpha: dark ? 0.06 : 0.012),
                 accent: rgba(base, alpha: dark ? 0.60 : 0.42),
                 accentWidth: 4,
                 paddingY: 6
@@ -2013,34 +2028,44 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             return false
         }
 
-        func isUserInterruptMetaBlock(start: Int, end: Int) -> Bool {
-            guard start <= end else { return false }
-            for line in lines[start...end] where line.role == .meta {
-                if TerminalBuilder.isUserInterruptMarker(line.text) {
-                    return true
-                }
-            }
-            return false
-        }
+	        func isUserInterruptMetaBlock(start: Int, end: Int) -> Bool {
+	            guard start <= end else { return false }
+	            for line in lines[start...end] where line.role == .meta {
+	                if TerminalBuilder.isUserInterruptMarker(line.text) {
+	                    return true
+	                }
+	            }
+	            return false
+	        }
+	
+	        func isTurnAbortedMetaBlock(start: Int, end: Int) -> Bool {
+	            guard start <= end else { return false }
+	            for line in lines[start...end] where line.role == .meta {
+	                let lower = line.text.lowercased()
+	                if lower.contains("tag: turn_aborted") { return true }
+	            }
+	            return false
+	        }
 
-        func finishBlock(endIdx: Int, blockIndex: Int?) {
-            guard let s = startIdx else { return }
-            guard currentBlock != nil else { return }
-            guard let startRange = ranges[lines[s].id] else { return }
+	        func finishBlock(endIdx: Int, blockIndex: Int?) {
+	            guard let s = startIdx else { return }
+	            guard currentBlock != nil else { return }
+	            guard let startRange = ranges[lines[s].id] else { return }
             guard let endRange = ranges[lines[endIdx].id] else { return }
 
             let start = startRange.location
             let end = endRange.location + endRange.length
             guard end > start else { return }
 
-            let isPreambleUserBlock = blockIndex.map { preambleUserBlockIndexes.contains($0) } ?? false
-            let kind: TerminalLayoutManager.BlockKind? = {
-                if rolesInBlock.count == 1, rolesInBlock.contains(.meta) {
-                    if isUserInterruptMetaBlock(start: s, end: endIdx) { return .userInterrupt }
-                    return isLocalCommandMetaBlock(start: s, end: endIdx) ? .localCommand : nil
-                }
-                if rolesInBlock.contains(.error) { return .error }
-                if rolesInBlock.contains(.toolInput) { return .toolCall }
+	            let isPreambleUserBlock = blockIndex.map { preambleUserBlockIndexes.contains($0) } ?? false
+	            let kind: TerminalLayoutManager.BlockKind? = {
+	                if rolesInBlock.count == 1, rolesInBlock.contains(.meta) {
+	                    if isUserInterruptMetaBlock(start: s, end: endIdx) { return .userInterrupt }
+	                    if isTurnAbortedMetaBlock(start: s, end: endIdx) { return .systemNotice }
+	                    return isLocalCommandMetaBlock(start: s, end: endIdx) ? .localCommand : nil
+	                }
+	                if rolesInBlock.contains(.error) { return .error }
+	                if rolesInBlock.contains(.toolInput) { return .toolCall }
                 if rolesInBlock.contains(.toolOutput) { return .toolOutput }
                 if rolesInBlock.contains(.user) { return isPreambleUserBlock ? .userPreamble : .user }
                 return .agent

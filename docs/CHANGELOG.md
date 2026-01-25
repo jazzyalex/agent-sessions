@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Transcript (Session view): Treat `<turn_aborted>` blocks embedded in user prompts as system notices so they don’t render as user prompts.
+
+### Changed
+
+- Transcript (Session view): User prompt text now uses medium weight.
+
 ## [2.10.2] - 2026-01-24
 
 ### Fixed
