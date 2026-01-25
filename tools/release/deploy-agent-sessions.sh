@@ -474,86 +474,47 @@ else
   # Sparkle will read the private key from Keychain item "Sparkle"
   "$SPARKLE_BIN" "$UPDATES_DIR"
 
-  if [[ -f "$UPDATES_DIR/appcast.xml" ]]; then
-    green "Appcast generated successfully"
+	if [[ -f "$UPDATES_DIR/appcast.xml" ]]; then
+	  green "Appcast generated successfully"
 
     # Fix DMG URLs: Sparkle generates wrong URLs pointing to GitHub Pages
     # Replace: https://jazzyalex.github.io/agent-sessions/AgentSessions-{VERSION}.dmg
     # With:    https://github.com/jazzyalex/agent-sessions/releases/download/v{VERSION}/AgentSessions-{VERSION}.dmg
     sed -i '' -E 's|https://jazzyalex\.github\.io/agent-sessions/AgentSessions-([0-9.]+)\.dmg|https://github.com/jazzyalex/agent-sessions/releases/download/v\1/AgentSessions-\1.dmg|g' \
       "$UPDATES_DIR/appcast.xml"
-    green "Fixed DMG URLs in appcast to point to GitHub Releases"
+	  green "Fixed DMG URLs in appcast to point to GitHub Releases"
 
-    # Add release notes from CHANGELOG.md to prevent Sparkle UI hang
-    # CRITICAL: Sparkle UI will hang without release notes!
-    if [[ -f "docs/CHANGELOG.md" ]]; then
-      # Patch version rule: Aggregate [A.B.C] and [A.B] notes
-      # Example: 2.5.1 will include [2.5.1] first, then [2.5]
-      NOTES=""
-      if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+)\.([0-9]+)$ ]]; then
-        # Patch version (A.B.C) - include parent version notes
-        PARENT_VERSION="${BASH_REMATCH[1]}"
-        yellow "Patch version detected: ${VERSION} - including notes from ${PARENT_VERSION}"
+	  # Add release notes from CHANGELOG.md to prevent Sparkle UI hang
+	  # CRITICAL: Sparkle UI will hang without release notes!
+	  CHANGELOG_PATH="$REPO_ROOT/docs/CHANGELOG.md"
+	  NOTES_PREVIEW_TXT="$UPDATES_DIR/release-notes-${VERSION}.txt"
+	  NOTES_PREVIEW_HTML="$UPDATES_DIR/release-notes-${VERSION}.html"
+	  GITHUB_URL="https://github.com/jazzyalex/agent-sessions/releases/tag/v${VERSION}"
 
-        # Extract parent version notes
-        PARENT_NOTES=$(sed -n "/^## \[${PARENT_VERSION}\]/,/^## \[/{ /^## \[${PARENT_VERSION}\]/d; /^## \[/d; p; }" docs/CHANGELOG.md 2>/dev/null || true)
-        # Extract patch version notes
-        PATCH_NOTES=$(sed -n "/^## \[${VERSION}\]/,/^## \[/{ /^## \[${VERSION}\]/d; /^## \[/d; p; }" docs/CHANGELOG.md 2>/dev/null || true)
+	  if [[ ! -f "$CHANGELOG_PATH" ]]; then
+	    red "ERROR: $CHANGELOG_PATH not found"
+	    red "Sparkle UI will HANG without release notes!"
+	    exit 1
+	  fi
 
-        # Combine notes: patch notes first, then parent notes if present
-        if [[ -n "$PATCH_NOTES" || -n "$PARENT_NOTES" ]]; then
-          NOTES="${PATCH_NOTES}${PATCH_NOTES:+\n}${PARENT_NOTES}"
-        fi
-      else
-        # Major/minor version (A.B) - extract only this version
-        NOTES=$(sed -n "/^## \[${VERSION}\]/,/^## \[/{ /^## \[${VERSION}\]/d; /^## \[/d; p; }" docs/CHANGELOG.md 2>/dev/null || true)
-      fi
+	  python3 "$REPO_ROOT/tools/release/sparkle_release_notes.py" \
+	    --version "$VERSION" \
+	    --changelog "$CHANGELOG_PATH" \
+	    --appcast "$UPDATES_DIR/appcast.xml" \
+	    --github-url "$GITHUB_URL" \
+	    --out-text "$NOTES_PREVIEW_TXT" \
+	    --out-html "$NOTES_PREVIEW_HTML" >/dev/null
 
-      if [[ -n "$NOTES" ]]; then
-        # Convert markdown to HTML
-        NOTES_HTML=$(echo "$NOTES" | sed 's/^### \(.*\)/<h3>\1<\/h3>/g; s/^- \(.*\)/<p>\1<\/p>/g')
+	  if grep -q '<description>' "$UPDATES_DIR/appcast.xml"; then
+	    green "Added structured release notes from CHANGELOG.md to appcast"
+	  else
+	    red "ERROR: Failed to add release notes to appcast"
+	    red "Sparkle UI will HANG without release notes!"
+	    exit 1
+	  fi
 
-        # Use Python to insert description (most reliable for XML manipulation)
-        python3 << PYEOF
-import re
-
-# Read appcast
-with open("$UPDATES_DIR/appcast.xml", "r") as f:
-    content = f.read()
-
-# Create description element
-description = """            <description><![CDATA[
-                <h2>What's New in ${VERSION}</h2>
-${NOTES_HTML}
-            ]]></description>"""
-
-# Insert after pubDate
-content = re.sub(
-    r'(<pubDate>.*?</pubDate>)',
-    r'\1\n' + description,
-    content,
-    flags=re.DOTALL
-)
-
-# Write back
-with open("$UPDATES_DIR/appcast.xml", "w") as f:
-    f.write(content)
-PYEOF
-
-        green "Added release notes from CHANGELOG.md to appcast"
-      else
-        red "ERROR: No release notes found for ${VERSION} in CHANGELOG.md"
-        red "Sparkle UI will HANG without release notes! Add notes and re-run."
-        exit 1
-      fi
-    else
-      red "ERROR: docs/CHANGELOG.md not found"
-      red "Sparkle UI will HANG without release notes!"
-      exit 1
-    fi
-
-    # Copy appcast to docs/ for GitHub Pages
-    cp "$UPDATES_DIR/appcast.xml" "$REPO_ROOT/docs/appcast.xml"
+	  # Copy appcast to docs/ for GitHub Pages
+	  cp "$UPDATES_DIR/appcast.xml" "$REPO_ROOT/docs/appcast.xml"
 
     # ========================================================================
     # APPCAST VALIDATION
@@ -635,15 +596,37 @@ PYEOF
       red "  Fix the issues above before continuing."
       red "═══════════════════════════════════════════════════════════"
       exit 2
-    fi
+	    fi
 
-    green "✓ All appcast validation checks passed"
-    echo ""
+	    green "✓ All appcast validation checks passed"
+	    echo ""
 
-    save_state "appcast_generated"
+	    # ================================================================
+	    # RELEASE NOTES REVIEW GATE (before publishing anything)
+	    # ================================================================
+	    echo "==> Sparkle release notes preview"
+	    if [[ -f "$NOTES_PREVIEW_TXT" ]]; then
+	      cat "$NOTES_PREVIEW_TXT"
+	    else
+	      yellow "WARNING: Missing notes preview file: $NOTES_PREVIEW_TXT"
+	    fi
+	    echo ""
 
-    # Commit and push appcast to GitHub Pages (fail hard if push fails)
-    git add "$REPO_ROOT/docs/appcast.xml"
+	    if [[ "${SKIP_CONFIRM}" != "1" ]]; then
+	      read -r -p "Publish these release notes and continue deployment? [y/N] " approve_notes
+	      if [[ ! "$approve_notes" =~ ^[Yy]$ ]]; then
+	        yellow "Stopped before publishing (no appcast push, no Homebrew update, no GitHub release changes)."
+	        yellow "Edit notes in docs/CHANGELOG.md and rerun when ready."
+	        exit 0
+	      fi
+	    else
+	      green "Proceeding automatically (SKIP_CONFIRM=1): publishing without release-notes prompt"
+	    fi
+
+	    save_state "appcast_generated"
+
+	    # Commit and push appcast to GitHub Pages (fail hard if push fails)
+	    git add "$REPO_ROOT/docs/appcast.xml"
     if ! git diff --staged --quiet; then
       git commit \
         -m "chore(release): update appcast for ${VERSION}" \

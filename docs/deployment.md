@@ -352,10 +352,12 @@ VERSION=2.5.1 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
    - Generates `appcast.xml` with EdDSA signature (reads private key from Keychain)
    - **Verifies EdDSA private key exists in Keychain (service: "https://sparkle-project.org")**
    - Fixes DMG URL to point to GitHub Releases (not GitHub Pages)
-   - Inserts release notes into a `<description><![CDATA[...]]></description>` element using Python (robust with CDATA)
-     - Patch version rule: When releasing `A.B.C`, the script aggregates `[A.B.C]` and `[A.B]` sections (patch first, then minor). Fails if neither exist
-     - Fails hard with a clear error if no notes found (prevents Sparkle UI hang)
+   - Inserts **structured Sparkle release notes** into `<description><![CDATA[...]]></description>`
+     - Starts with highlights for the current release, then a short “Other Changes” summary
+     - For patch releases `A.B.C`, includes a short reminder from the baseline release `A.B` (TL;DR if available)
+     - Fails hard with a clear error if no notes are found (prevents Sparkle UI hang)
    - Copies appcast.xml to docs/ for GitHub Pages
+   - Prints a Sparkle release notes preview and asks for approval before publishing (unless `SKIP_CONFIRM=1`)
    - Commits and pushes appcast to main branch
 
 6. **Update Documentation**

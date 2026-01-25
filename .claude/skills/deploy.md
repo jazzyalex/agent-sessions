@@ -22,7 +22,18 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 - Ensure README feature copy matches current naming (for example, **Session view** instead of Color view) and agent list.
 - Update `docs/index.html` feature/hero copy to reflect major changes and avoid outdated references.
 - Keep detailed release notes in `docs/CHANGELOG.md` (README/GH Pages should stay concise).
+- For major feature/UI releases, update README/index narrative copy (not just the download link/version).
 - After pushing, verify GitHub Pages reflects the updated `docs/index.html`.
+
+## Sparkle Release Notes (Approval Gate)
+
+- The release pipeline generates **structured Sparkle notes** from `docs/CHANGELOG.md`:
+  - Highlights (current release)
+  - Other changes (summary)
+  - Reminder from the baseline release (for patch releases: `A.B`)
+- During `tools/release/deploy release <VERSION>`, the deploy script prints a **Sparkle release notes preview** after build/sign/notarization and appcast validation.
+- If `SKIP_CONFIRM` is not `1`, it will pause and ask for approval before publishing (pushing appcast, updating Homebrew, updating the GitHub release).
+- If you want fully unattended deploys, set `SKIP_CONFIRM=1` (skips the notes prompt).
 
 ## Standard Workflow (Use the Unified Tool)
 
