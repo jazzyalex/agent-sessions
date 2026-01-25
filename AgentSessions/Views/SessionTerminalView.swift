@@ -1001,7 +1001,7 @@ private struct TerminalLineView: View {
 	    }
 	
 	    private var lineFontWeight: Font.Weight {
-	        if line.role == .user { return .medium }
+	        if line.role == .user { return .semibold }
 	        if line.role == .toolInput && isToolLabelLine(line.text) { return .semibold }
 	        return .regular
 	    }
@@ -2173,16 +2173,18 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 		        ranges.reserveCapacity(lines.count)
 
 				        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-					        let systemUserFont: NSFont = {
-			                        let userFontSize = fontSize + 1
-		                        if let optima = NSFont(name: "Optima", size: userFontSize) {
-		                            let descriptor = optima.fontDescriptor.addingAttributes([
-		                                .traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.medium]
-		                            ])
-		                            return NSFont(descriptor: descriptor, size: userFontSize) ?? optima
-		                        }
-		                        return NSFont.systemFont(ofSize: userFontSize, weight: .medium)
-		                    }()
+						        let systemUserFont: NSFont = {
+				                        let userFontSize = fontSize + 1
+			                        if let optima = NSFont(name: "Optima", size: userFontSize) {
+			                            let descriptor = optima.fontDescriptor.addingAttributes([
+			                                .traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.semibold]
+			                            ])
+			                            if let weighted = NSFont(descriptor: descriptor, size: userFontSize) {
+			                                return weighted
+			                            }
+			                        }
+			                        return NSFont.systemFont(ofSize: userFontSize, weight: .semibold)
+			                    }()
 			        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
                 let monoSemiboldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .semibold)
 
