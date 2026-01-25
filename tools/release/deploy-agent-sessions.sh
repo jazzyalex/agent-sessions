@@ -40,6 +40,28 @@ green(){ printf "\033[32m%s\033[0m\n" "$*"; }
 yellow(){ printf "\033[33m%s\033[0m\n" "$*"; }
 red(){ printf "\033[31m%s\033[0m\n" "$*"; }
 
+# Retry notarytool history checks to survive transient keychain/tooling hiccups.
+# Some macOS/Xcode environments occasionally fail a first attempt even when the
+# profile is configured (for example, brief keychain access races).
+check_notary_profile() {
+  local attempts="${1:-5}"
+  local sleep_s=2
+
+  for ((i=1; i<=attempts; i++)); do
+    if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if [[ $i -lt $attempts ]]; then
+      yellow "Notary profile check failed (attempt $i/$attempts). Retrying in ${sleep_s}s..."
+      sleep "$sleep_s"
+      sleep_s=$((sleep_s * 2))
+    fi
+  done
+
+  return 1
+}
+
 # State management (for resume/diagnostics)
 STATE_FILE="/tmp/deploy-state.json"
 
@@ -213,8 +235,12 @@ check_dependencies
 command -v gh >/dev/null || { red "gh CLI not found"; exit 2; }
 gh auth status >/dev/null 2>&1 || { red "gh not authenticated. Run: gh auth login"; exit 2; }
 
-if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
-  red "Notary profile '$NOTARY_PROFILE' not configured. Run: xcrun notarytool store-credentials $NOTARY_PROFILE --apple-id <id> --team-id <TEAM> --password <app-specific-password>"
+if ! check_notary_profile 5; then
+  red "Notary profile '$NOTARY_PROFILE' not configured or not accessible."
+  red "Try:"
+  red "  xcrun notarytool history --keychain-profile \"$NOTARY_PROFILE\""
+  red "If you need to recreate credentials:"
+  red "  xcrun notarytool store-credentials \"$NOTARY_PROFILE\" --apple-id <id> --team-id <TEAM> --password <app-specific-password>"
   exit 2
 fi
 

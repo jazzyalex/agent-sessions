@@ -172,18 +172,30 @@ echo ""
 
 # 8. Git tag check
 echo "Git Tags:"
-if git tag | grep -q "^$TAG$"; then
-    green "Local tag $TAG exists"
-else
-    yellow "Local tag $TAG not found"
-    ((WARNINGS++))
-fi
-
+REMOTE_TAG_OK=0
 if git ls-remote --tags origin | grep -q "refs/tags/$TAG$"; then
     green "Remote tag $TAG exists"
+    REMOTE_TAG_OK=1
 else
     red "Remote tag $TAG not found"
     ((ERRORS++))
+fi
+
+if git tag | grep -q "^$TAG$"; then
+    green "Local tag $TAG exists"
+else
+    if [[ "$REMOTE_TAG_OK" == "1" ]]; then
+        # GitHub Releases can create tags remotely without a local tag.
+        # Fetch the specific tag to avoid spurious warnings.
+        git fetch --tags origin "refs/tags/$TAG:refs/tags/$TAG" >/dev/null 2>&1 || true
+    fi
+
+    if git tag | grep -q "^$TAG$"; then
+        green "Local tag $TAG exists (fetched)"
+    else
+        yellow "Local tag $TAG not found"
+        ((WARNINGS++))
+    fi
 fi
 
 echo ""
