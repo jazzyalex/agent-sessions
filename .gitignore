@@ -61,3 +61,7 @@ AgentSessions.xcodeproj/project.pbxproj.backup*
 AgentSessions.xcodeproj/project.pbxproj.bak*
 AgentSessions.xcodeproj/project.pbxproj.fix*
 AgentSessions.xcodeproj/project.pbxproj.final
+
+# Python bytecode caches
+__pycache__/
+*.pyc
