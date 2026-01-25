@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Transcript (Session view): User prompt text now uses medium weight.
+- Transcript (Session view): User prompt text now uses semibold weight.
 
 ## [2.10.2] - 2026-01-24
 
