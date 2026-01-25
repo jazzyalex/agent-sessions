@@ -3,14 +3,34 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.10.1</title>
-            <pubDate>Mon, 19 Jan 2026 10:07:38 -0800</pubDate>
+            <title>2.10.2</title>
+            <pubDate>Sat, 24 Jan 2026 19:21:02 -0800</pubDate>
             <description><![CDATA[
-                <h2>What's New in 2.10.1</h2>
+                <h2>What's New in 2.10.2</h2>
 
 <h3>Fixed</h3>
 
-<p>Onboarding: Prevent a crash that could occur for some users.
+<p>OpenCode: Auto-detection now works for npm-installed CLIs and checks common pip/pipx install locations on macOS (including `~/Library/Python/*/bin`).</p>
+<p>Filters: “Hide 1–2 message sessions” no longer hides 0-message sessions when “Hide 0-message sessions” is off.</p>
+<p>Onboarding: “Sessions Found” counts now reflect current filter settings; filter labels are now consistently “Hide …”.</p>
+<p>Claude probes: Auto-delete now removes failed/empty probe sessions, not just successful ones.</p>
+<p>Claude probes: Cleanup now requires validated probe evidence (marker or content) before deleting a project, and cleanup messaging is clearer about protecting normal sessions.</p>
+<p>Usage Tracking: Disabling Codex/Claude tracking now also disables their probes/refresh actions and hides them from the menu bar.</p>
+
+<h3>Changed</h3>
+
+<p>Transcript: Tool calls and outputs now render as readable text blocks (commands, paths, stdout, stderr) instead of JSON wrappers.</p>
+<p>Transcript: Tool call/output navigation now groups paired blocks, tool outputs no longer repeat the tool label, and tool/error blocks have consistent padding.</p>
+<p>Layout: New installs default to the vertical split layout.</p>
+<p>Onboarding: The tour now opens in a standard window with a close button.</p>
+<p>Transcript (Session view): User prompts no longer use semibold text; emphasis comes from the accent strip.</p>
+<p>Transcript (Session view): Accent strips now align to their block padding.</p>
+<p>Transcript (Session view): Block accents no longer bleed into inter-block spacing.</p>
+<p>Transcript (Session view): Accent strips now sit outside text bounds.</p>
+<p>Transcript (Session view): User prompts use the base system font size with matching left/right accent strips; the system preamble keeps a single left strip.</p>
+<p>Transcript (Session view): Reduced the user prompt Optima font size bump from +2pt to +1pt.</p>
+<p>Preferences (Usage Probes): Moved “Show system probe sessions for debugging” to the bottom of the pane.</p>
+<p>Onboarding: Onboarding counts now use the system font.
 </p>
 <h3>TL;DR</h3>
 
@@ -115,10 +135,10 @@
 <p>Search: Unified Search now accepts quoted repo/path filters with spaces.</p>
 <p>Claude/Codex Usage: Add a conservative startup sweep for probe tmux servers and harden cleanup/timeouts to avoid orphaned CLI processes after stalled probes or restarts.</p>
             ]]></description>
-            <sparkle:version>17</sparkle:version>
-            <sparkle:shortVersionString>2.10.1</sparkle:shortVersionString>
+            <sparkle:version>18</sparkle:version>
+            <sparkle:shortVersionString>2.10.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.1/AgentSessions-2.10.1.dmg" length="9756249" type="application/octet-stream" sparkle:edSignature="tnlgOBpA7N/5KFVBUzlD9ONY2k6UIfddsG/fAMk2gyK0nphAko70CrPl75ZTmi4Nc532HabaGiLeQgDX+4ESCA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.2/AgentSessions-2.10.2.dmg" length="9881035" type="application/octet-stream" sparkle:edSignature="4es4Vw0Dk0YCTnF4C8AQlXRH3YAvskQa3GDCBJHjoQeMcALVQsEO/mwLMmFWpkUufJvqg9Pub0+Ro7YyEh9XCw=="/>
         </item>
     </channel>
 </rss>
