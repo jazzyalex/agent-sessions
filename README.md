@@ -9,15 +9,16 @@
 </td>
 <td>
 
- **Unified session browser for Codex CLI, Claude Code, Gemini CLI, GitHub Copilot CLI, Droid (Factory CLI), and OpenCode.**
- Search, browse, and resume any past AI-coding session in a single local-first macOS app.
+**Unified session browser for Codex CLI, Claude Code, Gemini CLI, GitHub Copilot CLI, Droid (Factory CLI), and OpenCode.**
+Search, browse, and resume your past AI-coding sessions in a local-first macOS app.
 
 </td>
 </tr>
 </table>
 
+- Requires: macOS 14+
 - License: MIT
-- Security & Privacy: Local-only. No telemetry. Details: `docs/security.md`
+- Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
   <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.2/AgentSessions-2.10.2.dmg"><b>Download Agent Sessions 2.10.2 (DMG)</b></a>
@@ -27,50 +28,82 @@
   <a href="#install">Install</a>
   •
   <a href="#resume-workflows">Resume Workflows</a>
-
+  •
+  <a href="#development">Development</a>
 </p>
-<p></p>
 
+## Overview
 
-
-##  Overview
-
-Agent Sessions 2 brings **Codex CLI**, **Claude Code**, **Gemini CLI**, **GitHub Copilot CLI**, and **Droid (Factory CLI)** together in one interface.
-Look up any past session — even the ancient ones `/resume` can't show — or browse visually to find that perfect prompt or code snippet, then instantly copy or resume it.
-
-## Trust
-- `docs/PRIVACY.md`
-- `docs/security.md`
-- `LICENSE`
-
-<div align="center">
-
-```
-Local-first, open source, and built for terminal vibe warriors.
-```
-
-</div>
+Agent Sessions helps you search across large session histories, quickly find the right prompt/tool output, then reuse it by copying snippets or resuming supported sessions in your terminal.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Transcript view with search (Dark Mode)</em></p>
   <img src="docs/assets/screenshot-H.png" alt="Transcript view with search (Dark Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
 
-  <p style="margin:0 0 0px 0;"><em>Resume any Codex CLI and Claude Code session</em></p>
-  <img src="docs/assets/screenshot-V.png" alt="Resume any Codex CLI and Claude Code session" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
-
-  <p style="margin:0 0 15px 0;"><em>Menu bar usage tracking with 5-hour and weekly percentages</em></p>
-  <img src="docs/assets/screenshot-menubar.png" alt="Menu bar usage tracking with 5-hour and weekly percentages" width="50%" style="max-width:480px;border-radius:8px;margin:5px auto;display:block;"/>
-
-  <p style="margin:0 0 0px 0;"><em>Analytics dashboard with session trends and agent breakdown (Dark Mode)</em></p>
-  <img src="docs/assets/analytics-dark.png" alt="Analytics dashboard with session trends and agent breakdown (Dark Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
-
+  <p style="margin:0 0 0px 0;"><em>Resume Codex CLI and Claude Code sessions</em></p>
+  <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI and Claude Code sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
+
+## Core Features
+
+- Unified browsing across supported agents, with strict filtering and a single session list.
+- Unified Search across all sessions plus in-session Find for fast transcript navigation.
+- Readable tool calls/outputs and navigation between prompts, tools, and errors.
+- Local-only indexing designed for large histories.
+
+## Documentation
+
+- Release notes: `docs/CHANGELOG.md`
+- Monthly summaries: `docs/summaries/`
+- Privacy: `docs/PRIVACY.md`
+- Security: `docs/security.md`
+- Maintainers: `docs/deployment.md`
+
+## Install
+
+### Option A — Download DMG
+1. [Download AgentSessions-2.10.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.2/AgentSessions-2.10.2.dmg)
+2. Drag **Agent Sessions.app** into Applications.
+
+### Option B — Homebrew
+```bash
+brew tap jazzyalex/agent-sessions
+brew install --cask agent-sessions
+```
+
+### Automatic Updates (Sparkle)
+
+Agent Sessions uses Sparkle for automatic updates (signed + notarized).
+
+To force an update check (for testing):
+```bash
+defaults delete com.triada.AgentSessions SULastCheckTime
+open "/Applications/Agent Sessions.app"
+```
+
+## Resume Workflows
+
+- Open a session in your preferred terminal (Terminal.app or iTerm).
+- Copy a session ID, command, or snippet to reuse in a new run.
+- Use Unified Search (across sessions) and Find (within a session) to jump to relevant tool calls and outputs quickly.
+
+## Privacy & Security
+
+- Local-only. No telemetry.
+- Reads agent session directories in read-only mode:
+  - `~/.codex/sessions`
+  - `~/.claude/sessions`
+  - `~/.gemini/tmp`
+  - `~/.copilot/session-state`
+  - `~/.factory/sessions` and `~/.factory/projects`
+  - `~/.local/share/opencode/storage/session`
+- Details: `docs/PRIVACY.md` and `docs/security.md`
 
 ---
 
 ## What's New in 2.10
 
-### TL;DR
+Short version:
 - Apple Notes-style Unified Search across all sessions and inside a session, compatible with filters.
 - SQLite-backed search plus richer instant indexing for faster results and better recall.
 - Incremental analytics refresh and faster startup with immediate hydrated lists.
@@ -79,160 +112,26 @@ Local-first, open source, and built for terminal vibe warriors.
 - Cockpit-style status UI and refreshed session list typography with live counts.
 - Onboarding tour refreshed and always shows supported agents.
 
-### Unified Search (Apple Notes-style)
-Unified Search is now fast across all sessions and within a specific session, and it can be combined with any filters.
+Details: `docs/CHANGELOG.md` and `docs/summaries/`.
 
-### Session View Timeline
-Color view is now called Session view, with a colored timeline layout and improved formatting for prompts, tools, and meta events.
+## Development
 
-### Search + Indexing Performance
-SQLite full-text indexing, richer instant indexing (tool inputs/outputs and long-message sampling), and incremental analytics refresh keep the list responsive and current.
+Prerequisites:
+- Xcode (macOS 14+)
 
-### UI and Workflow Polish
-Live session counts, cockpit-style status indicators, and a refreshed onboarding tour that always shows supported agents make day-to-day use smoother.
-
----
-
-## What's New in 2.9 🎄
-
-### Onboarding Tours
-Interactive onboarding experience for new users and a skippable update tour for major releases. Learn key features through guided walkthroughs. Reopen anytime from **Help → Show Onboarding**.
-
-### GitHub Copilot CLI Support
-Full session browser integration for GitHub Copilot CLI sessions from `~/.copilot/session-state`. Includes dedicated Preferences pane and toolbar filter (⌘5).
-
-### Saved Sessions Window
-New dedicated **Saved Sessions** window (View menu) for managing archived sessions. Delete, reveal, and diagnose saved sessions with archive status tooltips.
-
-### Keyboard Navigation
-New **Option-Command-Arrow** shortcuts jump between user prompts, tool calls, and errors in transcripts for faster navigation.
-
-### Improvements
-- Reorganized Preferences with better CLI agent controls
-- Disabling an agent now hides it everywhere (toolbar, Analytics, menu bar) and stops background work
-- Improved Tab focus behavior for Find controls
-
----
-
-## What's New in 2.8
-
-### OpenCode Support
-Full session browser integration with OpenCode sessions from `~/.local/share/opencode/storage/session`. Includes transcript viewing, analytics, and favorites. Sessions appear in the unified list with source filtering.
-
-### Improved Usage Tracking
-Separate refresh intervals per agent (Codex: 1/5/15 min, Claude: 3/15/30 min). New Usage Probes pane consolidates probe settings with clear safety messaging. Usage probes no longer stall after 24 attempts.
-
----
-
-## What's New in 2.7
-
-### Color View (now Session view)
-Terminal-inspired view with CLI-style colorized output and role-based filtering (User, Agent, Tools, Errors). Quick toggle with Cmd+Shift+T.
-
-### Claude Usage Format Fix
-Fixed compatibility with Claude Code's usage format change ("% left" vs "% used") with automatic percentage inversion.
-
----
-
-## What's New in 2.6
-
-### Usage Probe Support for Codex
-Automatic background probes refresh Codex usage limits when data goes stale. New Usage Probes preferences pane provides full control: enable/disable auto-probes, configure refresh intervals, and manage probe session cleanup. Mirrors the Claude usage tracking workflow with 24-hour probe budgets and auto-delete options.
-
-### Analytics Flip Cards
-Interactive flip cards reveal insights behind every metric. Click any analytics card to see sparklines, agent breakdowns, and detailed context. Switch between Sessions and Messages views with unified toggle across all charts.
-
-### Quality Improvements
-- Improved launch loading UX with better progress indicators and analytics gating
-- Hardened Claude and Codex probe reliability with robust capture logic
-- Refined analytics card layouts with balanced spacing and visual hierarchy
-- Better stale data indicators with "Last updated" timestamps
-
----
-
-## What's New in 2.5
-
-### Massive Performance Improvements
-SQLite-backed indexing brings **dramatically faster** session loading and filtering. Background indexing runs at utility priority, updating only changed session files. No more waiting—browse thousands of sessions instantly.
-
-### Analytics Dashboard (v1)
-Visualize your AI coding patterns with comprehensive analytics. Track session trends, compare agent usage, discover your most productive hours with time-of-day heatmaps, and view key metrics—all in a dedicated analytics window.
-
-### Git Context Inspector
-Deep-dive into the git context of any Codex session. See repository state, branch info, and historical diffs—understand exactly what code changes were visible to Codex during each session. Right-click any Codex session → **Show Git Context**.
-
-### Updated Usage Tracking
-Usage limit tracking and reset times now properly support Codex 0.50+ session format changes. The strip and menu show a "Stale data" warning when rate‑limit information is older than the freshness threshold, even if token‑only events or UI refreshes occurred meanwhile. Flexible timestamp parsing handles both old and new session formats.
-
----
-
-## Core Features
-
-### Unified Interface v2
-Browse **Codex CLI**, **Claude Code**, **Gemini CLI**, **GitHub Copilot CLI**, **Droid (Factory CLI)**, and **OpenCode** sessions side-by-side. Toggle between sources with strict filtering and unified search. Star favorites for quick access.
-
-### Unified Search v2
-Apple Notes-style search for everything. Find any snippet or prompt instantly — no matter which agent or project it came from.
-Smart sorting, instant cancel, full-text search with project filters, and fast in-session search.
-
-### Instant Resume & Re-use
-Reopen any Codex or Claude session in Terminal/iTerm with one click — or just copy what you need.  
-When `/resume` falls short, browse visually, copy the fragment, and drop it into a new terminal or ChatGPT.
-
-### Dual Usage Tracking
-Independent 5-hour and weekly limits for Codex and Claude.
-A color-coded **menu-bar indicator** (or in-app strip) shows live percentages and reset times so you never get surprised mid-session.
-
-### Advanced Analytics
-Visualize your AI coding patterns with comprehensive analytics:
-- **Session trends**: Track daily/weekly session counts and message volume over time
-- **Agent breakdown**: Compare Codex CLI vs Claude Code usage patterns
-- **Time-of-day heatmap**: Discover when you're most productive with AI tools
-- **Key metrics**: Average session length, total messages, and usage distribution
-
-Access via **Window → Analytics** or the toolbar analytics icon.
-
-### Git Context Inspector (Codex CLI)
-Deep-dive into the git context of any Codex session:
-- **Repository state**: See branch, commit, and working tree status at session time
-- **Historical diffs**: Review exact code changes that were visible to Codex
-- **Context timeline**: Understand what git context influenced each session
-
-Right-click any Codex session → **Show Git Context** to open the inspector.
-
-### Local, Private & Safe
-All processing runs on your Mac.
-Reads `~/.codex/sessions`, `~/.claude/sessions`, `~/.gemini/tmp`, `~/.copilot/session-state`, `~/.factory/sessions`, `~/.factory/projects`, and `~/.local/share/opencode/storage/session` (all read‑only).
-No cloud uploads or telemetry — **read‑only by design.**
-
----
-
-## Install
-
-### Option A — Download DMG
-1. [Download AgentSessions-2.10.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.2/AgentSessions-2.10.2.dmg)
-2. Drag **Agent Sessions.app** into Applications.
-
-### Option B — Homebrew Tap
+Build:
 ```bash
-# install with Homebrew
-brew tap jazzyalex/agent-sessions
-brew install --cask agent-sessions
+xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS' build
 ```
 
-### Automatic Updates
-
-Agent Sessions includes **Sparkle 2** for automatic updates:
-- **Background checks**: The app checks for updates every 24 hours (customizable in Settings)
-- **Non-intrusive**: Update notifications only appear when the app is in focus (menu bar friendly)
-- **Secure**: All updates are cryptographically signed (EdDSA) and Apple-notarized
-- **Manual checks**: Use **Help → Check for Updates…** anytime
-
-To manually check for updates:
+Tests:
 ```bash
-# Force immediate update check (for testing)
-defaults delete com.triada.AgentSessions SULastCheckTime
-open "/Applications/Agent Sessions.app"
+xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessionsTests -destination 'platform=macOS' test
 ```
 
-**Note**: The first Sparkle-enabled release (2.4.0+) requires a manual download. All subsequent updates work automatically via in-app prompts.
+Contributing:
+- `CONTRIBUTING.md`
+
+## License
+
+MIT. See `LICENSE`.
