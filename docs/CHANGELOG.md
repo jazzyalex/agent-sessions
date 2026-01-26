@@ -11,6 +11,8 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Transcript (Session view): User prompt text now uses semibold weight.
+- Transcript: Codex sessions with embedded base64 images now show an Images toolbar button that opens a thumbnail gallery with preview, save actions, and optional project-wide scope.
+- Images: Navigating to a session from the image browser now focuses the main window and jumps to the related user prompt.
 
 ## [2.10.2] - 2026-01-24
 

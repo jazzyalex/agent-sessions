@@ -6,6 +6,8 @@ extension Notification.Name {
     static let openSessionsSearchFromMenu = Notification.Name("AgentSessionsOpenSessionsSearchFromMenu")
     static let openTranscriptFindFromMenu = Notification.Name("AgentSessionsOpenTranscriptFindFromMenu")
     static let showOnboardingFromMenu = Notification.Name("AgentSessionsShowOnboardingFromMenu")
+    static let navigateToSessionFromImages = Notification.Name("AgentSessionsNavigateToSessionFromImages")
+    static let navigateToSessionEventFromImages = Notification.Name("AgentSessionsNavigateToSessionEventFromImages")
 }
 
 @main

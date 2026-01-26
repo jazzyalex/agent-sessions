@@ -68,6 +68,9 @@ struct SessionTerminalView: View {
     @State private var assistantLineIndices: [Int] = []
     @State private var toolLineIndices: [Int] = []
     @State private var errorLineIndices: [Int] = []
+    @State private var eventIDToUserLineID: [String: Int] = [:]
+    @State private var pendingEventJumpID: String? = nil
+    @State private var transcriptFocusToken: Int = 0
     @State private var roleNavPositions: [RoleToggle: Int] = [:]
 
     // Unified Search navigation/highlight state
@@ -145,6 +148,14 @@ struct SessionTerminalView: View {
             }
             navigateRole(roleNavRole, direction: roleNavDirection)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToSessionEventFromImages)) { n in
+            guard let sid = n.object as? String, sid == session.id else { return }
+            guard let eventID = n.userInfo?["eventID"] as? String else { return }
+            if !jumpToEventID(eventID) {
+                pendingEventJumpID = eventID
+            }
+            transcriptFocusToken &+= 1
+        }
         .onChange(of: session.events.count) { _, _ in
             rebuildLines(priority: .utility, debounceNanoseconds: 150_000_000)
         }
@@ -190,6 +201,7 @@ struct SessionTerminalView: View {
                     roleNavScrollTargetLineID: roleNavScrollTargetLineID,
                     roleNavScrollToken: roleNavScrollToken,
                     preambleUserBlockIndexes: preambleUserBlockIndexes,
+                    focusRequestToken: transcriptFocusToken,
                     colorScheme: colorScheme,
                     monochrome: stripMonochrome
                 )
@@ -208,6 +220,7 @@ struct SessionTerminalView: View {
         let assistantLineIndices: [Int]
         let toolLineIndices: [Int]
         let errorLineIndices: [Int]
+        let eventIDToUserLineID: [String: Int]
     }
 
     private func rebuildLines(priority: TaskPriority, debounceNanoseconds: UInt64 = 0) {
@@ -237,6 +250,11 @@ struct SessionTerminalView: View {
             assistantLineIndices = result.assistantLineIndices
             toolLineIndices = result.toolLineIndices
             errorLineIndices = result.errorLineIndices
+            eventIDToUserLineID = result.eventIDToUserLineID
+
+            if let pending = pendingEventJumpID, jumpToEventID(pending) {
+                pendingEventJumpID = nil
+            }
 
             // Reset Unified Search + Find state when rebuilding.
             unifiedMatchOccurrences = []
@@ -302,6 +320,35 @@ struct SessionTerminalView: View {
             if firstLineForBlock[blockIndex] == nil {
                 firstLineForBlock[blockIndex] = line.id
                 roleForBlock[blockIndex] = line.role
+            }
+        }
+
+        var eventIDToUserLineID: [String: Int] = [:]
+        if !blocks.isEmpty {
+            let userBlockIndices = blocks.enumerated().compactMap { $0.element.kind == .user ? $0.offset : nil }
+
+            func nearestUserBlockIndex(for idx: Int) -> Int? {
+                let prior = userBlockIndices.filter { $0 <= idx }
+                if let preferred = prior.last(where: { !preambleUserBlockIndexes.contains($0) }) ?? prior.last {
+                    return preferred
+                }
+                let after = userBlockIndices.filter { $0 > idx }
+                if let preferred = after.first(where: { !preambleUserBlockIndexes.contains($0) }) ?? after.first {
+                    return preferred
+                }
+                return nil
+            }
+
+            for (idx, block) in blocks.enumerated() {
+                let targetUserBlock: Int?
+                if block.kind == .user {
+                    targetUserBlock = idx
+                } else {
+                    targetUserBlock = nearestUserBlockIndex(for: idx)
+                }
+                guard let targetUserBlock,
+                      let lineID = firstLineForBlock[targetUserBlock] else { continue }
+                eventIDToUserLineID[block.eventID] = lineID
             }
         }
 
@@ -371,7 +418,8 @@ struct SessionTerminalView: View {
             userLineIndices: messageIDs { $0 == .user },
             assistantLineIndices: messageIDs { $0 == .assistant },
             toolLineIndices: toolMessageIDs(),
-            errorLineIndices: messageIDs { $0 == .error }
+            errorLineIndices: messageIDs { $0 == .error },
+            eventIDToUserLineID: eventIDToUserLineID
         )
     }
 
@@ -815,6 +863,12 @@ struct SessionTerminalView: View {
         updateUserNavigationPosition(lineID: lineID)
         roleNavScrollTargetLineID = lineID
         roleNavScrollToken &+= 1
+    }
+
+    private func jumpToEventID(_ eventID: String) -> Bool {
+        guard let lineID = eventIDToUserLineID[eventID] else { return false }
+        jumpToUserPrompt(lineID: lineID)
+        return true
     }
 
     private func updateUserNavigationPosition(lineID: Int) {
@@ -1618,6 +1672,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let roleNavScrollTargetLineID: Int?
     let roleNavScrollToken: Int
     let preambleUserBlockIndexes: Set<Int>
+    let focusRequestToken: Int
     let colorScheme: ColorScheme
     let monochrome: Bool
 
@@ -1630,6 +1685,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastColorScheme: ColorScheme = .light
         var lastScrollToken: Int = 0
         var lastRoleNavScrollToken: Int = 0
+        var lastFocusRequestToken: Int = 0
 
         var lastUnifiedFindQuery: String = ""
         var lastUnifiedMatchOccurrences: [MatchOccurrence] = []
@@ -1862,6 +1918,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastFindQuery = findQuery
         context.coordinator.lastFindCurrentMatchLineID = effectiveFindCurrentMatchLineID
         context.coordinator.lastRoleNavScrollToken = roleNavScrollToken
+        context.coordinator.lastFocusRequestToken = focusRequestToken
         return scroll
     }
 
@@ -1928,6 +1985,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
            let range = context.coordinator.lineRanges[target] {
             tv.scrollRangeToVisible(range)
             context.coordinator.lastRoleNavScrollToken = roleNavScrollToken
+        }
+
+        if context.coordinator.lastFocusRequestToken != focusRequestToken {
+            context.coordinator.lastFocusRequestToken = focusRequestToken
+            if let window = tv.window {
+                window.makeFirstResponder(tv)
+            }
         }
     }
 

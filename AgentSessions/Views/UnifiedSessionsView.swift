@@ -238,13 +238,37 @@ struct UnifiedSessionsView: View {
 				focusCoordinator.perform(.openSessionSearch)
 			}
 
-		let afterTranscriptFind = afterSessionSearch
-			.onReceive(NotificationCenter.default.publisher(for: .openTranscriptFindFromMenu)) { _ in
-				focusCoordinator.perform(.openTranscriptFind)
-			}
+			let afterTranscriptFind = afterSessionSearch
+				.onReceive(NotificationCenter.default.publisher(for: .openTranscriptFindFromMenu)) { _ in
+					focusCoordinator.perform(.openTranscriptFind)
+				}
 
-		return AnyView(afterTranscriptFind)
-	}
+			let afterNavigateFromImages = afterTranscriptFind
+				.onReceive(NotificationCenter.default.publisher(for: .navigateToSessionFromImages)) { n in
+					guard let id = n.object as? String else { return }
+					let eventID = n.userInfo?["eventID"] as? String
+					selection = id
+					let desired: Set<String> = [id]
+					if tableSelection != desired {
+						programmaticSelectionUpdate = true
+						tableSelection = desired
+						DispatchQueue.main.async { programmaticSelectionUpdate = false }
+					}
+					NSApp.activate(ignoringOtherApps: true)
+					NSApp.mainWindow?.makeKeyAndOrderFront(nil)
+					if let eventID {
+						DispatchQueue.main.async {
+							NotificationCenter.default.post(
+								name: .navigateToSessionEventFromImages,
+								object: id,
+								userInfo: ["eventID": eventID]
+							)
+						}
+					}
+				}
+
+			return AnyView(afterNavigateFromImages)
+		}
 
 	private var topTrailingNotices: some View {
 		VStack(alignment: .trailing, spacing: 8) {

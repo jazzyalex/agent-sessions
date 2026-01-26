@@ -1353,6 +1353,11 @@ final class SessionIndexer: ObservableObject {
         return base + String(format: "-%04d", index)
     }
 
+    static func eventID(forPath path: String, index: Int) -> String {
+        let base = hash(path: path)
+        return base + String(format: "-%04d", index)
+    }
+
     private static func hash(path: String) -> String {
         let d = SHA256.hash(data: Data(path.utf8))
         return d.compactMap { String(format: "%02x", $0) }.joined()

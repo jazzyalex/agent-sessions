@@ -463,24 +463,25 @@ struct OnboardingSheetView: View {
         guard !didLoadIndexedSessionsSnapshot else { return }
         didLoadIndexedSessionsSnapshot = true
 
-        Task.detached(priority: .utility) {
-            do {
-                let db = try IndexDB()
-                let repo = SessionMetaRepository(db: db)
-                var out: [SessionSource: [Session]] = [:]
-                for source in SessionSource.allCases {
-                    if let sessions = try? await repo.fetchSessions(for: source) {
-                        out[source] = sessions
-                    }
-                }
-                await MainActor.run {
-                    self.indexedSessionsSnapshot = out
-                }
-            } catch {
-                // Best-effort: onboarding can still render live counts from active indexers.
-            }
-        }
-    }
+	        Task(priority: .utility) {
+	            do {
+	                let db = try IndexDB()
+	                let repo = SessionMetaRepository(db: db)
+	                var out: [SessionSource: [Session]] = [:]
+	                for source in SessionSource.allCases {
+	                    if let sessions = try? await repo.fetchSessions(for: source) {
+	                        out[source] = sessions
+	                    }
+	                }
+	                let outSnapshot = out
+	                await MainActor.run {
+	                    self.indexedSessionsSnapshot = outSnapshot
+	                }
+	            } catch {
+	                // Best-effort: onboarding can still render live counts from active indexers.
+	            }
+	        }
+	    }
 
     private var weeklyActivity: [WeeklyActivityDay] {
         let sessions = codexIndexer.allSessions
