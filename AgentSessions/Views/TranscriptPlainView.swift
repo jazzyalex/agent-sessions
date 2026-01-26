@@ -174,6 +174,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var terminalUserRangesCache: [String: [NSRange]] = [:]
     @State private var lastBuildKey: String? = nil
 
+    // Codex-only images (pilot: toolbar button + gallery)
+    @State private var codexHasImages: Bool = false
+
     private var shouldShowLoadingAnimation: Bool {
         guard let id = sessionID else { return false }
         return indexer.isLoadingSession && indexer.loadingSessionID == id
@@ -240,6 +243,22 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         )
                     }
                 }
+            }
+            .task(id: session.filePath) {
+                codexHasImages = false
+                guard session.source == .codex else { return }
+                let url = URL(fileURLWithPath: session.filePath)
+                let hasImages = await withTaskGroup(of: Bool.self) { group in
+                    group.addTask(priority: .utility) {
+                        Base64ImageDataURLScanner.fileContainsBase64ImageDataURL(at: url,
+                                                                                 shouldCancel: { Task.isCancelled })
+                    }
+                    let value = await group.next() ?? false
+                    group.cancelAll()
+                    return value
+                }
+                guard !Task.isCancelled else { return }
+                codexHasImages = hasImages
             }
             .onAppear { rebuild(session: session) }
             .onChange(of: id) { _, _ in rebuild(session: session) }
@@ -441,6 +460,26 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .accessibilityLabel("Copy Transcript")
 
                 Divider().frame(height: 20)
+
+                if session.source == .codex, codexHasImages {
+                    Button(action: {
+                        guard let codexIndexer = indexer as? SessionIndexer else { return }
+                        CodexImagesWindowController.shared.show(session: session, indexer: codexIndexer)
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "photo.on.rectangle")
+                                .foregroundStyle(.secondary)
+                                .imageScale(.small)
+                            Text("Images")
+                                .font(TranscriptToolbarStyle.baseFont)
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Show images in this session")
+                    .accessibilityLabel("Show Session Images")
+
+                    Divider().frame(height: 20)
+                }
 
                 Button(action: {
                     if isFindBarVisible {
