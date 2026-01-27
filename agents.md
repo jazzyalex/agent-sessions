@@ -7,13 +7,7 @@
 
 ## Instructions for Codex CLI
 
-### Explain Before Coding (Non-Breaking Flow)
-ALWAYS explain your plan before making ANY code changes, but continue automatically unless interrupted:
 
-1. **Print your plan FIRST** - State what you'll change and why
-2. **Then proceed immediately** - Start coding right away (user can press ESC during explanation to cancel)
-3. **No waiting/prompting** - Don't ask "Should I proceed?" or wait for explicit approval unless you see words "plan mode ++" or "plan mode++" in a prompt
-4. **Do not stop after the plan** - If you say you are proceeding, you must actually begin the implementation in the same turn (tool calls / edits). If you cannot proceed (blocked, need clarification), say so explicitly instead of implying you will continue.
 
 ### Format
 ```
