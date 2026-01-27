@@ -1130,10 +1130,11 @@ private struct CodexImageThumbnailCell: View {
         .buttonStyle(.plain)
         .help(helpText)
         .contextMenu {
+            Button("Copy Image Path") { onSelect(); onCopyPath() }
+            Button("Copy Image") { onSelect(); onCopy() }
+            Divider()
             Button("Save to Downloads") { onSelect(); onSaveToDownloads() }
             Button("Save…") { onSelect(); onSave() }
-            Button("Copy Image") { onSelect(); onCopy() }
-            Button("Copy Image Path") { onSelect(); onCopyPath() }
             Divider()
             Button("Navigate to Session") { onSelect(); onNavigate() }
         }
