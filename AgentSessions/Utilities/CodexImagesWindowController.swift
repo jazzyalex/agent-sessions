@@ -46,4 +46,8 @@ final class CodexImagesWindowController: NSObject, NSWindowDelegate {
             hostingController = nil
         }
     }
+
+    func sendToBack() {
+        window?.orderBack(nil)
+    }
 }
