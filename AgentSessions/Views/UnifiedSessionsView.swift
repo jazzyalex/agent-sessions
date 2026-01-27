@@ -243,10 +243,11 @@ struct UnifiedSessionsView: View {
 					focusCoordinator.perform(.openTranscriptFind)
 				}
 
-			let afterNavigateFromImages = afterTranscriptFind
+		let afterNavigateFromImages = afterTranscriptFind
 				.onReceive(NotificationCenter.default.publisher(for: .navigateToSessionFromImages)) { n in
 					guard let id = n.object as? String else { return }
 					let eventID = n.userInfo?["eventID"] as? String
+					let userPromptIndex = n.userInfo?["userPromptIndex"] as? Int
 					selection = id
 					let desired: Set<String> = [id]
 					if tableSelection != desired {
@@ -254,20 +255,28 @@ struct UnifiedSessionsView: View {
 						tableSelection = desired
 						DispatchQueue.main.async { programmaticSelectionUpdate = false }
 					}
+					CodexImagesWindowController.shared.sendToBack()
 					NSApp.activate(ignoringOtherApps: true)
-					NSApp.mainWindow?.makeKeyAndOrderFront(nil)
+					if let main = NSApp.windows.first(where: { $0.isVisible && $0.title == "Agent Sessions" }) ?? NSApp.mainWindow {
+						main.makeKeyAndOrderFront(nil)
+					}
 					if let eventID {
 						DispatchQueue.main.async {
 							NotificationCenter.default.post(
 								name: .navigateToSessionEventFromImages,
 								object: id,
-								userInfo: ["eventID": eventID]
+								userInfo: ["eventID": eventID, "userPromptIndex": userPromptIndex as Any]
 							)
 						}
 					}
 				}
 
-			return AnyView(afterNavigateFromImages)
+			let afterShowImages = afterNavigateFromImages
+				.onReceive(NotificationCenter.default.publisher(for: .showImagesFromMenu)) { _ in
+					showImagesForSelectedSession(showNoSelectionAlert: true)
+				}
+
+			return AnyView(afterShowImages)
 		}
 
 	private var topTrailingNotices: some View {
@@ -806,6 +815,14 @@ struct UnifiedSessionsView: View {
             .keyboardShortcut("r", modifiers: .command)
             .accessibilityLabel(Text("Refresh"))
 
+            ToolbarIconButton(help: imagesToolbarHelpText) { _ in
+                ToolbarIcon(systemName: "photo.on.rectangle")
+            } action: {
+                showImagesForSelectedSession(showNoSelectionAlert: true)
+            }
+            .disabled(selectedSession == nil || selectedSession?.source != .codex)
+            .accessibilityLabel(Text("Image Browser"))
+
             if isGitInspectorEnabled {
                 ToolbarIconButton(help: "Show historical and current git context with safety analysis (⌘⇧G)") { _ in
                     ToolbarIcon(systemName: "clock.arrow.circlepath")
@@ -840,6 +857,16 @@ struct UnifiedSessionsView: View {
 
     private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
 
+    private var imagesToolbarHelpText: String {
+        guard let session = selectedSession else {
+            return "Show images for the selected session"
+        }
+        if session.source != .codex {
+            return "Images are available for Codex sessions only"
+        }
+        return "Show images for the selected session"
+    }
+
     // Local helper mirrors SessionsListView absolute time formatting
     private func absoluteTimeUnified(_ date: Date?) -> String {
         guard let date else { return "" }
@@ -857,6 +884,30 @@ struct UnifiedSessionsView: View {
             programmaticSelectionUpdate = true
             tableSelection = desired
             DispatchQueue.main.async { programmaticSelectionUpdate = false }
+        }
+    }
+
+    private func showImagesForSelectedSession(showNoSelectionAlert: Bool) {
+        guard let session = selectedSession else {
+            if showNoSelectionAlert {
+                showImagesAlert(message: "Select a session to view images.")
+            }
+            return
+        }
+        guard session.source == .codex else {
+            showImagesAlert(message: "Images are available for Codex sessions only.")
+            return
+        }
+        CodexImagesWindowController.shared.show(session: session, indexer: codexIndexer)
+    }
+
+    private func showImagesAlert(message: String) {
+        let alert = NSAlert()
+        alert.messageText = message
+        if let window = NSApp.keyWindow {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
         }
     }
 

@@ -11,8 +11,11 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Transcript (Session view): User prompt text now uses semibold weight.
-- Transcript: Codex sessions with embedded base64 images now show an Images toolbar button that opens a thumbnail gallery with preview, save actions, and optional project-wide scope.
+- Images: Codex sessions with embedded base64 images now show an Image Browser in the main toolbar that opens a thumbnail gallery with preview, save actions, and optional project-wide scope.
 - Images: Navigating to a session from the image browser now focuses the main window and jumps to the related user prompt.
+- Images: Navigating to a session now brings the main window forward, highlights the image prompt, and restores Tab focus cycling.
+- Images: The Image Browser moved to the main toolbar and View menu, and image thumbnails now support Copy Image from the context menu.
+- Images: Opening the Image Browser for a session with no images now shows an empty-state message in the browser instead of blocking the window.
 
 ## [2.10.2] - 2026-01-24
 

@@ -8,6 +8,7 @@ extension Notification.Name {
     static let showOnboardingFromMenu = Notification.Name("AgentSessionsShowOnboardingFromMenu")
     static let navigateToSessionFromImages = Notification.Name("AgentSessionsNavigateToSessionFromImages")
     static let navigateToSessionEventFromImages = Notification.Name("AgentSessionsNavigateToSessionEventFromImages")
+    static let showImagesFromMenu = Notification.Name("AgentSessionsShowImagesFromMenu")
 }
 
 @main
@@ -193,6 +194,10 @@ struct AgentSessionsApp: App {
                 Divider()
                 // Bind through UserDefaults so it persists; also forward to unified when it changes
                 FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
+                Divider()
+                Button("Image Browser") {
+                    NotificationCenter.default.post(name: .showImagesFromMenu, object: nil)
+                }
                 Divider()
                 OpenPinnedSessionsWindowButton()
             }

@@ -534,6 +534,7 @@ struct CodexSessionImagesGalleryView: View {
                                 onSelect: { selectedItemID = item.id },
                                 onSaveToDownloads: { saveToDownloads(item: item) },
                                 onSave: { saveWithPanel(item: item) },
+                                onCopy: { copyImage(item: item) },
                                 onNavigate: { navigateToSession(item: item) }
                             )
                         }
@@ -808,17 +809,68 @@ struct CodexSessionImagesGalleryView: View {
         let offset = item.span.startOffset
         Task(priority: .userInitiated) {
             let eventID: String?
+            let userPromptIndex: Int?
             if let lineIndex = lineIndexForOffset(url: url, offset: offset) {
                 eventID = SessionIndexer.eventID(forPath: url.path, index: lineIndex)
+                userPromptIndex = userPromptIndexForLineIndex(sessionID: sessionID, lineIndex: lineIndex)
             } else {
                 eventID = nil
+                userPromptIndex = nil
             }
             await MainActor.run {
                 var userInfo: [AnyHashable: Any]? = nil
-                if let eventID {
-                    userInfo = ["eventID": eventID]
+                var payload: [AnyHashable: Any] = [:]
+                if let eventID { payload["eventID"] = eventID }
+                if let userPromptIndex { payload["userPromptIndex"] = userPromptIndex }
+                if !payload.isEmpty {
+                    userInfo = payload
                 }
                 NotificationCenter.default.post(name: .navigateToSessionFromImages, object: sessionID, userInfo: userInfo)
+            }
+        }
+    }
+
+    private func userPromptIndexForLineIndex(sessionID: String, lineIndex: Int) -> Int? {
+        guard lineIndex >= 0 else { return nil }
+        guard let session = indexer.allSessions.first(where: { $0.id == sessionID }) else { return nil }
+        var userIndex: Int? = nil
+        var seenUsers = 0
+        for (idx, event) in session.events.enumerated() {
+            if event.kind == .user {
+                if idx <= lineIndex {
+                    userIndex = seenUsers
+                } else if userIndex == nil {
+                    userIndex = seenUsers
+                }
+                seenUsers += 1
+            }
+            if idx > lineIndex, userIndex != nil { break }
+        }
+        return userIndex
+    }
+
+    private func copyImage(item: CodexSessionImageItem) {
+        let url = item.sessionFileURL
+        let span = item.span
+        let maxDecodedBytes = model.maxDecodedBytes
+        Task(priority: .userInitiated) {
+            do {
+                let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
+                                                                          span: span,
+                                                                          maxDecodedBytes: maxDecodedBytes)
+                guard let image = NSImage(data: decoded) else { return }
+                await MainActor.run {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.writeObjects([image])
+                    if let tiff = image.tiffRepresentation,
+                       let rep = NSBitmapImageRep(data: tiff),
+                       let png = rep.representation(using: .png, properties: [:]) {
+                        pasteboard.setData(png, forType: .png)
+                    }
+                }
+            } catch {
+                // Best-effort copy; no UI error.
             }
         }
     }
@@ -999,6 +1051,7 @@ private struct CodexImageThumbnailCell: View {
     let onSelect: () -> Void
     let onSaveToDownloads: () -> Void
     let onSave: () -> Void
+    let onCopy: () -> Void
     let onNavigate: () -> Void
 
     var body: some View {
@@ -1044,6 +1097,7 @@ private struct CodexImageThumbnailCell: View {
         .contextMenu {
             Button("Save to Downloads") { onSelect(); onSaveToDownloads() }
             Button("Save…") { onSelect(); onSave() }
+            Button("Copy Image") { onSelect(); onCopy() }
             Divider()
             Button("Navigate to Session") { onSelect(); onNavigate() }
         }

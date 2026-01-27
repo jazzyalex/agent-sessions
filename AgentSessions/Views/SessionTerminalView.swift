@@ -70,7 +70,10 @@ struct SessionTerminalView: View {
     @State private var errorLineIndices: [Int] = []
     @State private var eventIDToUserLineID: [String: Int] = [:]
     @State private var pendingEventJumpID: String? = nil
+    @State private var pendingUserPromptIndex: Int? = nil
     @State private var transcriptFocusToken: Int = 0
+    @State private var imageHighlightLineID: Int? = nil
+    @State private var imageHighlightToken: Int = 0
     @State private var roleNavPositions: [RoleToggle: Int] = [:]
 
     // Unified Search navigation/highlight state
@@ -128,6 +131,7 @@ struct SessionTerminalView: View {
         }
         .onChange(of: session.id) { _, _ in
             autoScrollSessionID = nil
+            imageHighlightLineID = nil
             rebuildLines(priority: .userInitiated)
         }
         .onChange(of: activeRoles) { _, _ in
@@ -150,9 +154,16 @@ struct SessionTerminalView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToSessionEventFromImages)) { n in
             guard let sid = n.object as? String, sid == session.id else { return }
-            guard let eventID = n.userInfo?["eventID"] as? String else { return }
-            if !jumpToEventID(eventID) {
-                pendingEventJumpID = eventID
+            if let userPromptIndex = n.userInfo?["userPromptIndex"] as? Int {
+                if !jumpToUserPromptIndex(userPromptIndex) {
+                    pendingUserPromptIndex = userPromptIndex
+                }
+            } else if let eventID = n.userInfo?["eventID"] as? String {
+                if !jumpToEventID(eventID) {
+                    pendingEventJumpID = eventID
+                }
+            } else {
+                return
             }
             transcriptFocusToken &+= 1
         }
@@ -201,6 +212,8 @@ struct SessionTerminalView: View {
                     roleNavScrollTargetLineID: roleNavScrollTargetLineID,
                     roleNavScrollToken: roleNavScrollToken,
                     preambleUserBlockIndexes: preambleUserBlockIndexes,
+                    imageHighlightLineID: imageHighlightLineID,
+                    imageHighlightToken: imageHighlightToken,
                     focusRequestToken: transcriptFocusToken,
                     colorScheme: colorScheme,
                     monochrome: stripMonochrome
@@ -252,6 +265,9 @@ struct SessionTerminalView: View {
             errorLineIndices = result.errorLineIndices
             eventIDToUserLineID = result.eventIDToUserLineID
 
+            if let pendingIndex = pendingUserPromptIndex, jumpToUserPromptIndex(pendingIndex) {
+                pendingUserPromptIndex = nil
+            }
             if let pending = pendingEventJumpID, jumpToEventID(pending) {
                 pendingEventJumpID = nil
             }
@@ -865,9 +881,20 @@ struct SessionTerminalView: View {
         roleNavScrollToken &+= 1
     }
 
+    private func jumpToUserPromptIndex(_ index: Int) -> Bool {
+        guard index >= 0, index < userLineIndices.count else { return false }
+        let lineID = userLineIndices[index]
+        jumpToUserPrompt(lineID: lineID)
+        imageHighlightLineID = lineID
+        imageHighlightToken &+= 1
+        return true
+    }
+
     private func jumpToEventID(_ eventID: String) -> Bool {
         guard let lineID = eventIDToUserLineID[eventID] else { return false }
         jumpToUserPrompt(lineID: lineID)
+        imageHighlightLineID = lineID
+        imageHighlightToken &+= 1
         return true
     }
 
@@ -1238,17 +1265,18 @@ private extension TerminalLineRole {
 
 // MARK: - Terminal layout + decorations (Color view)
 
-	private final class TerminalLayoutManager: NSLayoutManager {
-	    enum BlockKind {
-	        case user
-	        case userPreamble
-	        case userInterrupt
-	        case systemNotice
-	        case agent
-	        case toolCall
-	        case toolOutput
-	        case error
-	        case localCommand
+    private final class TerminalLayoutManager: NSLayoutManager {
+        enum BlockKind {
+            case user
+            case userPreamble
+            case userInterrupt
+            case systemNotice
+            case agent
+            case toolCall
+            case toolOutput
+            case error
+            case localCommand
+            case imageAnchor
     }
 
     struct BlockDecoration {
@@ -1292,15 +1320,15 @@ private extension TerminalLineRole {
 
         func rgba(_ color: NSColor, alpha: CGFloat) -> NSColor { color.withAlphaComponent(alpha) }
 
-	        switch kind {
-	        case .user, .userPreamble:
-	            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
-	            return BlockStyle(
-	                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
-	                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
-	                accentWidth: 4,
-	                paddingY: 6
-	            )
+        switch kind {
+        case .user, .userPreamble:
+            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.12 : 0.04),
+                accent: rgba(base, alpha: dark ? 0.70 : 0.50),
+                accentWidth: 4,
+                paddingY: 6
+            )
 	        case .userInterrupt:
 	            let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
 	            return BlockStyle(
@@ -1349,16 +1377,24 @@ private extension TerminalLineRole {
 	                accentWidth: 4,
                     paddingY: 8
 	            )
-	        case .error:
-	            let base: NSColor = TranscriptColorSystem.semanticAccent(.error)
-	            return BlockStyle(
-	                fill: rgba(base, alpha: dark ? 0.11 : 0.035),
-	                accent: rgba(base, alpha: dark ? 0.82 : 0.65),
-	                accentWidth: 4,
-                    paddingY: 8
-	            )
-	        }
-	    }
+        case .error:
+            let base: NSColor = TranscriptColorSystem.semanticAccent(.error)
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.11 : 0.035),
+                accent: rgba(base, alpha: dark ? 0.82 : 0.65),
+                accentWidth: 4,
+                paddingY: 8
+            )
+        case .imageAnchor:
+            let base: NSColor = NSColor.systemPurple
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.12 : 0.05),
+                accent: rgba(base, alpha: dark ? 0.78 : 0.60),
+                accentWidth: 5,
+                paddingY: 6
+            )
+        }
+    }
 
     private func blockDecoration(containing charIndex: Int) -> BlockDecoration? {
         // Binary search by character location (blocks are non-overlapping and sorted by construction).
@@ -1672,6 +1708,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let roleNavScrollTargetLineID: Int?
     let roleNavScrollToken: Int
     let preambleUserBlockIndexes: Set<Int>
+    let imageHighlightLineID: Int?
+    let imageHighlightToken: Int
     let focusRequestToken: Int
     let colorScheme: ColorScheme
     let monochrome: Bool
@@ -1686,6 +1724,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastScrollToken: Int = 0
         var lastRoleNavScrollToken: Int = 0
         var lastFocusRequestToken: Int = 0
+        var lastImageHighlightToken: Int = 0
 
         var lastUnifiedFindQuery: String = ""
         var lastUnifiedMatchOccurrences: [MatchOccurrence] = []
@@ -1861,6 +1900,20 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
     }
 
+    final class TerminalTextView: NSTextView {
+        override func keyDown(with event: NSEvent) {
+            if event.keyCode == 48, !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control), !event.modifierFlags.contains(.option) {
+                if event.modifierFlags.contains(.shift) {
+                    window?.selectPreviousKeyView(nil)
+                } else {
+                    window?.selectNextKeyView(nil)
+                }
+                return
+            }
+            super.keyDown(with: event)
+        }
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     private var effectiveUnifiedMatchOccurrences: [MatchOccurrence] {
@@ -1890,7 +1943,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         container.lineFragmentPadding = 0
         layoutManager.addTextContainer(container)
 
-        let textView = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize), textContainer: container)
+        let textView = TerminalTextView(frame: NSRect(origin: .zero, size: scroll.contentSize), textContainer: container)
         textView.isEditable = false
         textView.isSelectable = true
         textView.usesFindPanel = true
@@ -1919,6 +1972,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastFindCurrentMatchLineID = effectiveFindCurrentMatchLineID
         context.coordinator.lastRoleNavScrollToken = roleNavScrollToken
         context.coordinator.lastFocusRequestToken = focusRequestToken
+        context.coordinator.lastImageHighlightToken = imageHighlightToken
         return scroll
     }
 
@@ -1985,6 +2039,14 @@ private struct TerminalTextScrollView: NSViewRepresentable {
            let range = context.coordinator.lineRanges[target] {
             tv.scrollRangeToVisible(range)
             context.coordinator.lastRoleNavScrollToken = roleNavScrollToken
+        }
+
+        if context.coordinator.lastImageHighlightToken != imageHighlightToken {
+            context.coordinator.lastImageHighlightToken = imageHighlightToken
+            if let lm = (tv.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager {
+                lm.blocks = buildBlockDecorations(ranges: context.coordinator.lineRanges)
+                tv.setNeedsDisplay(tv.bounds)
+            }
         }
 
         if context.coordinator.lastFocusRequestToken != focusRequestToken {
@@ -2177,7 +2239,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             finishBlock(endIdx: lines.count - 1, blockIndex: currentBlock)
         }
 
-        return out.sorted { $0.range.location < $1.range.location }
+        if let highlightLineID = imageHighlightLineID, let range = ranges[highlightLineID] {
+            out.append(.init(range: range, kind: .imageAnchor))
+        }
+
+        return out.sorted {
+            if $0.range.location == $1.range.location && $0.range.length == $1.range.length {
+                if $0.kind == .imageAnchor { return false }
+                if $1.kind == .imageAnchor { return true }
+            }
+            return $0.range.location < $1.range.location
+        }
     }
 
     private func updateLayoutManagerUnifiedFind(_ lm: TerminalLayoutManager, query: String, occurrences: [MatchOccurrence], currentLineID: Int?) {
