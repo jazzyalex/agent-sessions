@@ -535,6 +535,7 @@ struct CodexSessionImagesGalleryView: View {
                                 onSaveToDownloads: { saveToDownloads(item: item) },
                                 onSave: { saveWithPanel(item: item) },
                                 onCopy: { copyImage(item: item) },
+                                onCopyPath: { copyImagePath(item: item) },
                                 onNavigate: { navigateToSession(item: item) }
                             )
                         }
@@ -859,16 +860,37 @@ struct CodexSessionImagesGalleryView: View {
                                                                           span: span,
                                                                           maxDecodedBytes: maxDecodedBytes)
                 guard let image = NSImage(data: decoded) else { return }
-                let fileURL = try writeClipboardImageFile(item: item, data: decoded)
                 await MainActor.run {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
-                    pasteboard.writeObjects([image, fileURL as NSURL])
+                    pasteboard.writeObjects([image])
                     if let tiff = image.tiffRepresentation,
                        let rep = NSBitmapImageRep(data: tiff),
                        let png = rep.representation(using: .png, properties: [:]) {
                         pasteboard.setData(png, forType: .png)
                     }
+                }
+            } catch {
+                // Best-effort copy; no UI error.
+            }
+        }
+    }
+
+    private func copyImagePath(item: CodexSessionImageItem) {
+        let url = item.sessionFileURL
+        let span = item.span
+        let maxDecodedBytes = model.maxDecodedBytes
+        Task(priority: .userInitiated) {
+            do {
+                let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
+                                                                          span: span,
+                                                                          maxDecodedBytes: maxDecodedBytes)
+                let fileURL = try writeClipboardImageFile(item: item, data: decoded)
+                await MainActor.run {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.writeObjects([fileURL as NSURL])
+                    pasteboard.setString(fileURL.path, forType: .string)
                 }
             } catch {
                 // Best-effort copy; no UI error.
@@ -1064,6 +1086,7 @@ private struct CodexImageThumbnailCell: View {
     let onSaveToDownloads: () -> Void
     let onSave: () -> Void
     let onCopy: () -> Void
+    let onCopyPath: () -> Void
     let onNavigate: () -> Void
 
     var body: some View {
@@ -1110,6 +1133,7 @@ private struct CodexImageThumbnailCell: View {
             Button("Save to Downloads") { onSelect(); onSaveToDownloads() }
             Button("Save…") { onSelect(); onSave() }
             Button("Copy Image") { onSelect(); onCopy() }
+            Button("Copy Image Path") { onSelect(); onCopyPath() }
             Divider()
             Button("Navigate to Session") { onSelect(); onNavigate() }
         }
