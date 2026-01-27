@@ -859,10 +859,11 @@ struct CodexSessionImagesGalleryView: View {
                                                                           span: span,
                                                                           maxDecodedBytes: maxDecodedBytes)
                 guard let image = NSImage(data: decoded) else { return }
+                let fileURL = try writeClipboardImageFile(item: item, data: decoded)
                 await MainActor.run {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
-                    pasteboard.writeObjects([image])
+                    pasteboard.writeObjects([image, fileURL as NSURL])
                     if let tiff = image.tiffRepresentation,
                        let rep = NSBitmapImageRep(data: tiff),
                        let png = rep.representation(using: .png, properties: [:]) {
@@ -873,6 +874,17 @@ struct CodexSessionImagesGalleryView: View {
                 // Best-effort copy; no UI error.
             }
         }
+    }
+
+    private func writeClipboardImageFile(item: CodexSessionImageItem, data: Data) throws -> URL {
+        let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.span.mediaType)
+        let tempRoot = FileManager.default.temporaryDirectory
+        let dir = tempRoot.appendingPathComponent("AgentSessions/ImageClipboard", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let filename = suggestedFileName(for: item, ext: ext)
+        let destination = uniqueDestinationURL(in: dir, filename: filename)
+        try data.write(to: destination, options: [.atomic])
+        return destination
     }
 
     private func saveWithPanel(item: CodexSessionImageItem) {
