@@ -16,7 +16,7 @@ All notable changes to this project will be documented in this file.
 - Images: Navigating to a session now brings the main window forward, highlights the image prompt, and restores Tab focus cycling.
 - Images: The Image Browser moved to the main toolbar and View menu, and image thumbnails now support Copy Image from the context menu.
 - Images: Opening the Image Browser for a session with no images now shows an empty-state message in the browser instead of blocking the window.
-- Images: Copy Image now also places a temporary file URL on the clipboard to enable pasting into terminals that require file paths.
+- Images: Image thumbnails now include a separate “Copy Image Path” action for terminal/CLI pasting.
 
 ## [2.10.2] - 2026-01-24
 
