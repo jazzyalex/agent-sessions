@@ -7,6 +7,14 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Transcript (Session view): Treat `<turn_aborted>` blocks embedded in user prompts as system notices so they don’t render as user prompts.
+- Windows: Image Browser and auxiliary windows now follow system light/dark changes immediately when using System appearance, and update instantly when switching Light/Dark in Settings or the View menu.
+- Image Browser: Bottom status bar no longer shows “Scanning …” after scanning completes.
+- Image Browser: Project scan progress no longer reports “224/224” while the final session is still scanning.
+- Image Browser: Project scope now always includes the selected session to avoid missing images when project grouping is incomplete.
+
+### Changed
+
+- Menu: Removed the separator between Image Browser and Saved Sessions, and renamed “Saved Sessions…” to “Saved Sessions”.
 
 ### Changed
 

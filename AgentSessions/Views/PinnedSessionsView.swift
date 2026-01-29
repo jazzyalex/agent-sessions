@@ -4,6 +4,7 @@ import AppKit
 struct PinnedSessionsView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @EnvironmentObject var archiveManager: SessionArchiveManager
+    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @State private var query: String = ""
     @State private var selection: Set<RowKey> = []
     @State private var pendingDeleteSelection: Set<RowKey> = []
@@ -56,6 +57,17 @@ struct PinnedSessionsView: View {
     }
 
     var body: some View {
+        let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
+        Group {
+            switch appAppearance {
+            case .light: content.preferredColorScheme(.light)
+            case .dark: content.preferredColorScheme(.dark)
+            case .system: content
+            }
+        }
+    }
+
+    private var content: some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 Text("Saved Sessions")
