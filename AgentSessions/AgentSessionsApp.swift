@@ -198,7 +198,6 @@ struct AgentSessionsApp: App {
                 Button("Image Browser") {
                     NotificationCenter.default.post(name: .showImagesFromMenu, object: nil)
                 }
-                Divider()
                 OpenPinnedSessionsWindowButton()
             }
             CommandGroup(after: .help) {
@@ -272,7 +271,7 @@ private struct FavoritesOnlyToggle: View {
 private struct OpenPinnedSessionsWindowButton: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Button("Saved Sessions…") {
+        Button("Saved Sessions") {
             openWindow(id: "PinnedSessions")
         }
         .keyboardShortcut("p", modifiers: [.command, .option, .shift])
@@ -380,6 +379,12 @@ extension AgentSessionsApp {
 final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
     private weak var coordinator: OnboardingCoordinator?
     private var windowController: NSWindowController?
+    private var hostingView: AppearanceHostingView?
+    private var window: NSWindow?
+    private var distributedObserver: NSObjectProtocol?
+    private var defaultsObserver: NSObjectProtocol?
+    private var lastAppAppearanceRaw: String = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
+    private var state: OnboardingWindowState?
 
     func show(
         content: OnboardingContent,
@@ -394,7 +399,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         claudeUsageModel: ClaudeUsageModel
     ) {
         self.coordinator = coordinator
-        let rootView = OnboardingSheetView(
+        state = OnboardingWindowState(
             content: content,
             coordinator: coordinator,
             codexIndexer: codexIndexer,
@@ -407,17 +412,26 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
             claudeUsageModel: claudeUsageModel
         )
 
-        if let hosting = windowController?.contentViewController as? NSHostingController<OnboardingSheetView> {
-            hosting.rootView = rootView
-            windowController?.showWindow(nil)
+        let wrapped = makeRootView()
+        if let wc = windowController, let hv = hostingView, let win = window {
+            hv.rootView = wrapped
+            applyAppearance(forceRedraw: true)
+            wc.showWindow(nil)
+            win.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let hostingController = NSHostingController(rootView: rootView)
-        let window = NSWindow(contentViewController: hostingController)
+        let hv = AppearanceHostingView(rootView: wrapped)
+        hv.onAppearanceChanged = { [weak self] in
+            Task { @MainActor in
+                self?.handleEffectiveAppearanceChange()
+            }
+        }
+
+        let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.contentView = hv
         window.title = "Onboarding"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 780, height: 620))
         window.minSize = NSSize(width: 780, height: 620)
@@ -425,9 +439,32 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         window.delegate = self
 
         let controller = NSWindowController(window: window)
+        self.hostingView = hv
+        self.window = window
         windowController = controller
+        applyAppearance(forceRedraw: false)
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        distributedObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleEffectiveAppearanceChange()
+            }
+        }
+
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleAppearancePreferenceChange()
+            }
+        }
     }
 
     func hide() {
@@ -440,6 +477,93 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         }
         coordinator = nil
         windowController = nil
+        hostingView = nil
+        window = nil
+        state = nil
+        if let o = distributedObserver { DistributedNotificationCenter.default().removeObserver(o) }
+        distributedObserver = nil
+        if let o = defaultsObserver { NotificationCenter.default.removeObserver(o) }
+        defaultsObserver = nil
     }
 }
 // (Legacy ContentView and FirstRunPrompt removed)
+
+private struct OnboardingWindowState {
+    let content: OnboardingContent
+    let coordinator: OnboardingCoordinator
+    let codexIndexer: SessionIndexer
+    let claudeIndexer: ClaudeSessionIndexer
+    let geminiIndexer: GeminiSessionIndexer
+    let opencodeIndexer: OpenCodeSessionIndexer
+    let copilotIndexer: CopilotSessionIndexer
+    let droidIndexer: DroidSessionIndexer
+    let codexUsageModel: CodexUsageModel
+    let claudeUsageModel: ClaudeUsageModel
+}
+
+private struct OnboardingWindowRoot: View {
+    let state: OnboardingWindowState
+    @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+
+    var body: some View {
+        let content = OnboardingSheetView(
+            content: state.content,
+            coordinator: state.coordinator,
+            codexIndexer: state.codexIndexer,
+            claudeIndexer: state.claudeIndexer,
+            geminiIndexer: state.geminiIndexer,
+            opencodeIndexer: state.opencodeIndexer,
+            copilotIndexer: state.copilotIndexer,
+            droidIndexer: state.droidIndexer,
+            codexUsageModel: state.codexUsageModel,
+            claudeUsageModel: state.claudeUsageModel
+        )
+
+        let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
+        Group {
+            switch appAppearance {
+            case .light: content.preferredColorScheme(.light)
+            case .dark: content.preferredColorScheme(.dark)
+            case .system: content
+            }
+        }
+    }
+}
+
+private extension OnboardingWindowPresenter {
+    func makeRootView() -> AnyView {
+        guard let state else { return AnyView(EmptyView()) }
+        return AnyView(OnboardingWindowRoot(state: state))
+    }
+
+    func handleEffectiveAppearanceChange() {
+        let raw = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
+        let appAppearance = AppAppearance(rawValue: raw) ?? .system
+        guard appAppearance == .system else { return }
+        applyAppearance(forceRedraw: true)
+    }
+
+    func handleAppearancePreferenceChange() {
+        let raw = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
+        guard raw != lastAppAppearanceRaw else { return }
+        lastAppAppearanceRaw = raw
+        applyAppearance(forceRedraw: true)
+    }
+
+    func applyAppearance(forceRedraw: Bool) {
+        let raw = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
+        let appAppearance = AppAppearance(rawValue: raw) ?? .system
+        switch appAppearance {
+        case .system:
+            window?.appearance = nil
+        case .light:
+            window?.appearance = NSAppearance(named: .aqua)
+        case .dark:
+            window?.appearance = NSAppearance(named: .darkAqua)
+        }
+        guard forceRedraw, let hv = hostingView else { return }
+        hv.needsLayout = true
+        hv.setNeedsDisplay(hv.bounds)
+        hv.displayIfNeeded()
+    }
+}

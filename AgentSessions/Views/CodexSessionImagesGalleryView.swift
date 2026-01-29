@@ -496,7 +496,7 @@ struct CodexSessionImagesGalleryView: View {
                 ProgressView()
                     .controlSize(.small)
             }
-            Text(loadingStatusText)
+            Text(footerStatusText)
                 .font(.system(size: 11, weight: .regular, design: .monospaced))
                 .foregroundStyle(.secondary)
             Spacer()
@@ -506,10 +506,41 @@ struct CodexSessionImagesGalleryView: View {
         .background(Color(NSColor.controlBackgroundColor))
     }
 
+    private var footerStatusText: String {
+        if scope == .project {
+            if model.state == .loading {
+                if model.totalSessionsToScan > 0 {
+                    let total = model.totalSessionsToScan
+                    let completed = min(model.scannedSessions, total)
+                    if completed >= total { return "Finalizing scan…" }
+                    return "Scanning \(completed)/\(total) sessions for images…"
+                }
+                return "Scanning project sessions for images…"
+            }
+
+            if model.totalSessionsToScan > 0 {
+                let scanned = min(model.scannedSessions, model.totalSessionsToScan)
+                if model.didReachItemLimit {
+                    return "Scan stopped at limit (\(scanned)/\(model.totalSessionsToScan) sessions)"
+                }
+                return "Scan complete (\(scanned)/\(model.totalSessionsToScan) sessions)"
+            }
+            return model.didReachItemLimit ? "Scan stopped at limit" : "Scan complete"
+        }
+
+        if model.state == .loading {
+            return "Scanning session for images…"
+        }
+        return model.didReachItemLimit ? "Scan stopped at limit" : "Scan complete"
+    }
+
     private var loadingStatusText: String {
         if scope == .project {
             if model.totalSessionsToScan > 0 {
-                return "Scanning \(min(model.scannedSessions + 1, model.totalSessionsToScan))/\(model.totalSessionsToScan) sessions for images…"
+                let total = model.totalSessionsToScan
+                let completed = min(model.scannedSessions, total)
+                if completed >= total { return "Finalizing scan…" }
+                return "Scanning \(completed)/\(total) sessions for images…"
             }
             return "Scanning project sessions for images…"
         }
@@ -657,7 +688,15 @@ struct CodexSessionImagesGalleryView: View {
         case .singleSession:
             return [seedSession]
         case .project:
-            return projectSessions.isEmpty ? [seedSession] : projectSessions
+            if projectSessions.isEmpty {
+                return [seedSession]
+            }
+
+            var combined = projectSessions
+            if !combined.contains(where: { $0.id == seedSession.id || $0.filePath == seedSession.filePath }) {
+                combined.append(seedSession)
+            }
+            return combined.sorted(by: { $0.modifiedAt > $1.modifiedAt })
         }
     }
 

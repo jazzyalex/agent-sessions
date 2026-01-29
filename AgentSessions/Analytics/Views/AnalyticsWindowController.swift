@@ -179,12 +179,3 @@ private extension AnalyticsWindowController {
         }
     }
 }
-
-// Custom hosting view that notifies when its effectiveAppearance changes
-private final class AppearanceHostingView: NSHostingView<AnyView> {
-    var onAppearanceChanged: (() -> Void)?
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        onAppearanceChanged?()
-    }
-}
