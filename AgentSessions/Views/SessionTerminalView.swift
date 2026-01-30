@@ -2973,30 +2973,43 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 		        private var mouseDownLocationInWindow: NSPoint? = nil
 		        private var selectionAtMouseDown: NSRange = NSRange(location: 0, length: 0)
 		        private var hoverTrackingArea: NSTrackingArea? = nil
-	
-	        private func inlineImageID(at point: NSPoint) -> String? {
-	            guard let ts = textStorage, ts.length > 0 else { return nil }
-	            let idx = characterIndexForInsertion(at: point)
-	            guard idx != NSNotFound else { return nil }
-	
-	            let candidates = [idx, idx - 1, idx + 1]
-	            for c in candidates where c >= 0 && c < ts.length {
-	                if let id = ts.attribute(Coordinator.inlineImageIDKey, at: c, effectiveRange: nil) as? String {
+		
+		        private func inlineImageHitCharacterIndex(at point: NSPoint) -> Int? {
+		            guard let ts = textStorage, ts.length > 0 else { return nil }
+		            guard let lm = layoutManager, let tc = textContainer else { return nil }
+
+		            // Layout manager coordinates are in text-container space (not view space).
+		            let containerPoint = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+		            let glyphIndex = lm.glyphIndex(for: containerPoint, in: tc, fractionOfDistanceThroughGlyph: nil)
+		            if glyphIndex == NSNotFound { return nil }
+		            let charIndex = lm.characterIndexForGlyph(at: glyphIndex)
+		            guard charIndex != NSNotFound else { return nil }
+
+		            // Clamp to valid character range.
+		            return max(0, min(ts.length - 1, charIndex))
+		        }
+
+		        private func inlineImageID(at point: NSPoint) -> String? {
+		            guard let ts = textStorage, ts.length > 0 else { return nil }
+		            guard let idx = inlineImageHitCharacterIndex(at: point) else { return nil }
+		
+		            let candidates = [idx, idx - 1, idx + 1]
+		            for c in candidates where c >= 0 && c < ts.length {
+		                if let id = ts.attribute(Coordinator.inlineImageIDKey, at: c, effectiveRange: nil) as? String {
 	                    return id
 	                }
 	            }
 	            return nil
 	        }
 	
-	        private func inlineImageIDWithEffectiveRange(at point: NSPoint) -> (id: String, range: NSRange)? {
-	            guard let ts = textStorage, ts.length > 0 else { return nil }
-	            let idx = characterIndexForInsertion(at: point)
-	            guard idx != NSNotFound else { return nil }
-	
-	            let candidates = [idx, idx - 1, idx + 1]
-	            for c in candidates where c >= 0 && c < ts.length {
-	                var effectiveRange = NSRange(location: NSNotFound, length: 0)
-	                if let id = ts.attribute(Coordinator.inlineImageIDKey, at: c, effectiveRange: &effectiveRange) as? String,
+		        private func inlineImageIDWithEffectiveRange(at point: NSPoint) -> (id: String, range: NSRange)? {
+		            guard let ts = textStorage, ts.length > 0 else { return nil }
+		            guard let idx = inlineImageHitCharacterIndex(at: point) else { return nil }
+		
+		            let candidates = [idx, idx - 1, idx + 1]
+		            for c in candidates where c >= 0 && c < ts.length {
+		                var effectiveRange = NSRange(location: NSNotFound, length: 0)
+		                if let id = ts.attribute(Coordinator.inlineImageIDKey, at: c, effectiveRange: &effectiveRange) as? String,
 	                   effectiveRange.location != NSNotFound {
 	                    return (id, effectiveRange)
 	                }
