@@ -271,13 +271,42 @@ struct UnifiedSessionsView: View {
 					}
 				}
 
-			let afterShowImages = afterNavigateFromImages
-				.onReceive(NotificationCenter.default.publisher(for: .showImagesFromMenu)) { _ in
-					showImagesForSelectedSession(showNoSelectionAlert: true)
-				}
+				let afterShowImages = afterNavigateFromImages
+					.onReceive(NotificationCenter.default.publisher(for: .showImagesFromMenu)) { _ in
+						showImagesForSelectedSession(showNoSelectionAlert: true)
+					}
 
-			return AnyView(afterShowImages)
-		}
+				let afterShowImagesForInlineImage = afterShowImages
+					.onReceive(NotificationCenter.default.publisher(for: .showImagesForInlineImage)) { n in
+							guard let id = n.object as? String else { return }
+							let requestedItemID = n.userInfo?["selectedItemID"] as? String
+
+							selection = id
+							let desired: Set<String> = [id]
+							if tableSelection != desired {
+								programmaticSelectionUpdate = true
+								tableSelection = desired
+								DispatchQueue.main.async { programmaticSelectionUpdate = false }
+							}
+
+							guard let session = selectedSession, session.source == .codex else {
+								NSSound.beep()
+								return
+							}
+							CodexImagesWindowController.shared.show(session: session, indexer: codexIndexer)
+
+							guard let requestedItemID else { return }
+							DispatchQueue.main.async {
+								NotificationCenter.default.post(
+									name: .selectImagesBrowserItem,
+									object: id,
+									userInfo: ["selectedItemID": requestedItemID, "forceScope": CodexImagesScope.singleSession.rawValue]
+								)
+							}
+						}
+
+				return AnyView(afterShowImagesForInlineImage)
+			}
 
 	private var topTrailingNotices: some View {
 		VStack(alignment: .trailing, spacing: 8) {

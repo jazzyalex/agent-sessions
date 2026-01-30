@@ -441,7 +441,10 @@ struct SessionTranscriptBuilder {
             if e.kind == .meta && !includeMeta { continue }
             let base = block(from: e)
             let expanded = expandUserEmbeddedNoticesIfNeeded(block: base)
-            for b in expanded {
+            for var b in expanded {
+                if session.source == .codex {
+                    b.text = normalizeCodexInlineImageMarkers(b.text)
+                }
                 if let last = blocks.last, canMerge(last, b) {
                     var merged = last
                     merged.text += b.text
@@ -458,6 +461,30 @@ struct SessionTranscriptBuilder {
             }
         }
         return blocks
+    }
+
+    private static func normalizeCodexInlineImageMarkers(_ text: String) -> String {
+        guard text.localizedCaseInsensitiveContains("<image name=[image #") else { return text }
+
+        func replaceAll(pattern: String, template: String, in input: String) -> String {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return input }
+            let range = NSRange(input.startIndex..<input.endIndex, in: input)
+            return regex.stringByReplacingMatches(in: input, options: [], range: range, withTemplate: template)
+        }
+
+        var out = text
+
+        // Prefer the bracketed marker in rendered text.
+        out = replaceAll(pattern: "<image\\s+name=\\[image\\s+#(\\d+)\\]\\s*>\\s*(?:</image\\s*>)?",
+                         template: "[Image #$1]",
+                         in: out)
+
+        // De-duplicate when both the XML-ish tag and the marker appear.
+        out = replaceAll(pattern: "\\[image\\s+#(\\d+)\\]\\s*\\[image\\s+#\\1\\]",
+                         template: "[Image #$1]",
+                         in: out)
+
+        return out
     }
     
     private static func expandUserEmbeddedNoticesIfNeeded(block: LogicalBlock) -> [LogicalBlock] {

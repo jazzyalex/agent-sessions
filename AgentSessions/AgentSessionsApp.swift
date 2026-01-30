@@ -9,6 +9,8 @@ extension Notification.Name {
     static let navigateToSessionFromImages = Notification.Name("AgentSessionsNavigateToSessionFromImages")
     static let navigateToSessionEventFromImages = Notification.Name("AgentSessionsNavigateToSessionEventFromImages")
     static let showImagesFromMenu = Notification.Name("AgentSessionsShowImagesFromMenu")
+    static let showImagesForInlineImage = Notification.Name("AgentSessionsShowImagesForInlineImage")
+    static let selectImagesBrowserItem = Notification.Name("AgentSessionsSelectImagesBrowserItem")
 }
 
 @main
