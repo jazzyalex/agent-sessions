@@ -17,6 +17,17 @@ private struct TextSnapshot {
     static let empty = TextSnapshot(text: "", lineRanges: [:], orderedLineRanges: [], orderedLineIDs: [])
 }
 
+private struct InlineSessionImage: Identifiable, Hashable, Sendable {
+    let sessionID: String
+    let sessionFileURL: URL
+    let imageEventID: String
+    let userPromptIndex: Int?
+    let sessionImageIndex: Int
+    let span: Base64ImageDataURLScanner.Span
+
+    var id: String { "\(sessionID)-\(span.id)" }
+}
+
 /// Terminal-style session view with filters, optional gutter, and legend toggles.
 struct SessionTerminalView: View {
     let session: Session
@@ -45,6 +56,7 @@ struct SessionTerminalView: View {
     @Binding var externalCurrentMatchIndex: Int
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
+    @AppStorage("InlineSessionImageThumbnailsEnabled") private var inlineSessionImageThumbnailsEnabled: Bool = true
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var lines: [TerminalLine] = []
@@ -75,6 +87,13 @@ struct SessionTerminalView: View {
     @State private var imageHighlightLineID: Int? = nil
     @State private var imageHighlightToken: Int = 0
     @State private var roleNavPositions: [RoleToggle: Int] = [:]
+
+    @State private var inlineImagesByUserBlockIndex: [Int: [InlineSessionImage]] = [:]
+    @State private var inlineImagesSignature: Int = 0
+    @State private var hasInlineImagesInSession: Bool = false
+    @State private var inlineImagesVisibleInSession: Bool = true
+    @State private var inlineImagesTask: Task<Void, Never>?
+    @State private var selectedInlineImageUserBlockIndex: Int? = nil
 
     // Unified Search navigation/highlight state
     @State private var unifiedMatchOccurrences: [MatchOccurrence] = []
@@ -107,6 +126,13 @@ struct SessionTerminalView: View {
         visibleLines
     }
 
+    private var effectiveInlineImagesSignature: Int {
+        var hasher = Hasher()
+        hasher.combine(inlineImagesSignature)
+        hasher.combine(inlineSessionImageThumbnailsEnabled)
+        return hasher.finalize()
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -121,10 +147,13 @@ struct SessionTerminalView: View {
         .onAppear {
             loadRoleToggles()
             rebuildLines(priority: .userInitiated)
+            refreshInlineImages()
         }
         .onDisappear {
             rebuildTask?.cancel()
             rebuildTask = nil
+            inlineImagesTask?.cancel()
+            inlineImagesTask = nil
         }
         .onChange(of: jumpToken) { _, _ in
             jumpToFirstPrompt()
@@ -132,6 +161,16 @@ struct SessionTerminalView: View {
         .onChange(of: session.id) { _, _ in
             autoScrollSessionID = nil
             imageHighlightLineID = nil
+            selectedInlineImageUserBlockIndex = nil
+            rebuildLines(priority: .userInitiated)
+            refreshInlineImages()
+        }
+        .onChange(of: session.events.count) { _, _ in
+            refreshInlineImages()
+        }
+        .onChange(of: inlineSessionImageThumbnailsEnabled) { _, _ in
+            // Avoid background scanning work when the feature is disabled.
+            refreshInlineImages()
             rebuildLines(priority: .userInitiated)
         }
         .onChange(of: activeRoles) { _, _ in
@@ -155,10 +194,12 @@ struct SessionTerminalView: View {
         .onReceive(NotificationCenter.default.publisher(for: .navigateToSessionEventFromImages)) { n in
             guard let sid = n.object as? String, sid == session.id else { return }
             if let userPromptIndex = n.userInfo?["userPromptIndex"] as? Int {
+                updateSelectedInlineImageBlockIndex(forUserPromptIndex: userPromptIndex)
                 if !jumpToUserPromptIndex(userPromptIndex) {
                     pendingUserPromptIndex = userPromptIndex
                 }
             } else if let eventID = n.userInfo?["eventID"] as? String {
+                updateSelectedInlineImageBlockIndex(forEventID: eventID)
                 if !jumpToEventID(eventID) {
                     pendingEventJumpID = eventID
                 }
@@ -181,6 +222,9 @@ struct SessionTerminalView: View {
                 legendToggle(label: agentLegendLabel, role: .assistant)
                 legendToggle(label: "Tools", role: .tools)
                 legendToggle(label: "Errors", role: .errors)
+                if session.source == .codex, hasInlineImagesInSession {
+                    imagesPill()
+                }
             }
             .foregroundStyle(.secondary)
 
@@ -198,6 +242,9 @@ struct SessionTerminalView: View {
                     lines: filteredLines,
                     fontSize: CGFloat(transcriptFontSize),
                     sessionSource: session.source,
+                    inlineImagesEnabled: inlineSessionImageThumbnailsEnabled && hasInlineImagesInSession && session.source == .codex && inlineImagesVisibleInSession,
+                    inlineImagesByUserBlockIndex: inlineImagesByUserBlockIndex,
+                    inlineImagesSignature: effectiveInlineImagesSignature,
                     unifiedFindQuery: unifiedQuery,
                     unifiedMatchOccurrences: unifiedMatchOccurrences,
                     unifiedCurrentMatchLineID: unifiedCurrentMatchLineID,
@@ -222,6 +269,275 @@ struct SessionTerminalView: View {
                 .onChange(of: findToken) { _, _ in handleFindRequest() }
             }
             .padding(.horizontal, 8)
+        }
+    }
+
+    private func refreshInlineImages() {
+        inlineImagesTask?.cancel()
+        inlineImagesTask = nil
+
+        guard inlineSessionImageThumbnailsEnabled else {
+            hasInlineImagesInSession = false
+            inlineImagesByUserBlockIndex = [:]
+            inlineImagesSignature = 0
+            return
+        }
+
+        guard session.source == .codex else {
+            hasInlineImagesInSession = false
+            inlineImagesByUserBlockIndex = [:]
+            inlineImagesSignature = 0
+            return
+        }
+
+        let sessionSnapshot = session
+        let url = URL(fileURLWithPath: sessionSnapshot.filePath)
+
+        inlineImagesTask = Task(priority: .utility) { @MainActor in
+            let outcome = await Task.detached(priority: .utility) { () -> (Bool, [Int: [InlineSessionImage]], Int) in
+                guard FileManager.default.fileExists(atPath: url.path) else { return (false, [:], 0) }
+
+                let hasAny = Base64ImageDataURLScanner.fileContainsBase64ImageDataURL(at: url, shouldCancel: { Task.isCancelled })
+                guard hasAny, !Task.isCancelled else { return (hasAny, [:], 0) }
+
+                let located: [Base64ImageDataURLScanner.LocatedSpan]
+                do {
+                    located = try Base64ImageDataURLScanner.scanFileWithLineIndexes(at: url, maxMatches: 400, shouldCancel: { Task.isCancelled })
+                } catch {
+                    return (true, [:], 0)
+                }
+                let filtered = located.filter {
+                    Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: $0.span.startOffset)
+                }
+                guard !filtered.isEmpty, !Task.isCancelled else { return (false, [:], 0) }
+
+                let blocks = SessionTranscriptBuilder.coalescedBlocks(for: sessionSnapshot, includeMeta: false)
+                var userEventIDToBlockIndex: [String: Int] = [:]
+                userEventIDToBlockIndex.reserveCapacity(64)
+                for (idx, block) in blocks.enumerated() where block.kind == .user {
+                    userEventIDToBlockIndex[block.eventID] = idx
+                }
+
+                let userEventIndices: [Int] = sessionSnapshot.events.enumerated().compactMap { (idx, ev) in
+                    ev.kind == .user ? idx : nil
+                }
+
+                func isPreambleUserEventIndex(_ idx: Int) -> Bool {
+                    guard sessionSnapshot.source == .codex || sessionSnapshot.source == .droid else { return false }
+                    guard sessionSnapshot.events.indices.contains(idx) else { return false }
+                    guard sessionSnapshot.events[idx].kind == .user else { return false }
+                    return Session.isAgentsPreambleText(sessionSnapshot.events[idx].text ?? "")
+                }
+
+                func nearestUserEventIndex(for lineIndex: Int) -> Int? {
+                    guard !userEventIndices.isEmpty else { return nil }
+
+                    let prior = userEventIndices.filter { $0 <= lineIndex }
+                    if let preferred = prior.last(where: { !isPreambleUserEventIndex($0) }) ?? prior.last {
+                        return preferred
+                    }
+
+                    let after = userEventIndices.filter { $0 > lineIndex }
+                    if let preferred = after.first(where: { !isPreambleUserEventIndex($0) }) ?? after.first {
+                        return preferred
+                    }
+                    return nil
+                }
+
+                func userPromptIndexForLineIndex(_ lineIndex: Int) -> Int? {
+                    guard lineIndex >= 0 else { return nil }
+                    var userIndex: Int? = nil
+                    var seenUsers = 0
+                    for (idx, event) in sessionSnapshot.events.enumerated() {
+                        if event.kind == .user {
+                            if idx <= lineIndex {
+                                userIndex = seenUsers
+                            } else if userIndex == nil {
+                                userIndex = seenUsers
+                            }
+                            seenUsers += 1
+                        }
+                        if idx > lineIndex, userIndex != nil { break }
+                    }
+                    return userIndex
+                }
+
+                var out: [Int: [InlineSessionImage]] = [:]
+                out.reserveCapacity(min(16, userEventIDToBlockIndex.count))
+                var sessionImageIndex = 1
+
+                for item in filtered {
+                    if Task.isCancelled { break }
+
+                    guard let targetUserEventIndex = nearestUserEventIndex(for: item.lineIndex) else { continue }
+                    let targetUserEventID = sessionSnapshot.events[targetUserEventIndex].id
+                    guard let targetUserBlockIndex = userEventIDToBlockIndex[targetUserEventID] else { continue }
+
+                    let imageEventID = SessionIndexer.eventID(forPath: url.path, index: item.lineIndex)
+                    let userPromptIndex = userPromptIndexForLineIndex(item.lineIndex)
+
+                    let img = InlineSessionImage(
+                        sessionID: sessionSnapshot.id,
+                        sessionFileURL: url,
+                        imageEventID: imageEventID,
+                        userPromptIndex: userPromptIndex,
+                        sessionImageIndex: sessionImageIndex,
+                        span: item.span
+                    )
+                    out[targetUserBlockIndex, default: []].append(img)
+                    sessionImageIndex += 1
+                }
+
+                var hasher = Hasher()
+                hasher.combine(out.values.reduce(0) { $0 + $1.count })
+                if let first = located.first {
+                    hasher.combine(first.span.startOffset)
+                    hasher.combine(first.span.endOffset)
+                }
+                if let last = located.last {
+                    hasher.combine(last.span.startOffset)
+                    hasher.combine(last.span.endOffset)
+                }
+
+                return (true, out, hasher.finalize())
+            }.value
+
+            guard !Task.isCancelled else { return }
+            hasInlineImagesInSession = !outcome.1.isEmpty
+            inlineImagesByUserBlockIndex = outcome.1
+            inlineImagesSignature = outcome.2
+        }
+    }
+
+    private func imagesPill() -> some View {
+        let isOn = inlineImagesVisibleInSession
+        let imageBlockIndices = sortedInlineImageUserBlockIndices()
+        let navDisabled = imageBlockIndices.isEmpty
+        let status = inlineImageNavigationStatus()
+        let countText = "\(formattedCount(status.current))/\(formattedCount(status.total))"
+
+        return HStack(spacing: 6) {
+            Button(action: {
+                inlineImagesVisibleInSession.toggle()
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(isOn ? Color.secondary : Color.secondary.opacity(0.55))
+                    Text("Images")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(isOn ? .primary : .secondary)
+                    Text(countText)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(Color.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .buttonStyle(.plain)
+            .help(isOn ? "Hide inline images in this view" : "Show inline images in this view")
+
+            HStack(spacing: 4) {
+                ZStack {
+                    Button(action: { navigateInlineImages(direction: -1) }) {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(navDisabled ? Color.secondary.opacity(0.35) : Color.secondary)
+                    .disabled(navDisabled)
+                }
+                .help("Previous image prompt")
+
+                ZStack {
+                    Button(action: { navigateInlineImages(direction: 1) }) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(navDisabled ? Color.secondary.opacity(0.35) : Color.secondary)
+                    .disabled(navDisabled)
+                }
+                .help("Next image prompt")
+            }
+        }
+        .foregroundStyle(.secondary)
+    }
+
+    private func sortedInlineImageUserBlockIndices() -> [Int] {
+        inlineImagesByUserBlockIndex
+            .filter { !($0.value.isEmpty) }
+            .map(\.key)
+            .sorted()
+    }
+
+    private func inlineImageNavigationStatus() -> (current: Int, total: Int) {
+        let blocks = sortedInlineImageUserBlockIndices()
+        let total = blocks.count
+        guard total > 0 else { return (0, 0) }
+
+        if let selected = selectedInlineImageUserBlockIndex, let pos = blocks.firstIndex(of: selected) {
+            return (pos + 1, total)
+        }
+        return (1, total)
+    }
+
+    private func navigateInlineImages(direction: Int) {
+        let blocks = sortedInlineImageUserBlockIndices()
+        guard !blocks.isEmpty else { return }
+
+        let count = blocks.count
+
+        func wrapIndex(_ value: Int) -> Int {
+            (value % count + count) % count
+        }
+
+        let nextIndex: Int = {
+            if let selected = selectedInlineImageUserBlockIndex, let pos = blocks.firstIndex(of: selected) {
+                let step = direction >= 0 ? 1 : -1
+                return wrapIndex(pos + step)
+            }
+            return direction >= 0 ? 0 : (count - 1)
+        }()
+
+        let targetUserBlockIndex = blocks[nextIndex]
+        selectedInlineImageUserBlockIndex = targetUserBlockIndex
+
+        guard let eventID = eventIDForUserBlockIndex(targetUserBlockIndex) else { return }
+        _ = jumpToEventID(eventID)
+    }
+
+    private func eventIDForUserBlockIndex(_ userBlockIndex: Int) -> String? {
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        guard blocks.indices.contains(userBlockIndex) else { return nil }
+        return blocks[userBlockIndex].eventID
+    }
+
+    private func updateSelectedInlineImageBlockIndex(forUserPromptIndex userPromptIndex: Int) {
+        for (blockIndex, images) in inlineImagesByUserBlockIndex {
+            if images.contains(where: { $0.userPromptIndex == userPromptIndex }) {
+                selectedInlineImageUserBlockIndex = blockIndex
+                return
+            }
+        }
+    }
+
+    private func updateSelectedInlineImageBlockIndex(forEventID eventID: String) {
+        for (blockIndex, images) in inlineImagesByUserBlockIndex {
+            if images.contains(where: { $0.imageEventID == eventID }) {
+                selectedInlineImageUserBlockIndex = blockIndex
+                return
+            }
+        }
+
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        if let matchIndex = blocks.firstIndex(where: { $0.eventID == eventID }) {
+            if !(inlineImagesByUserBlockIndex[matchIndex]?.isEmpty ?? true) {
+                selectedInlineImageUserBlockIndex = matchIndex
+            }
         }
     }
 
@@ -1694,6 +2010,9 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let lines: [TerminalLine]
     let fontSize: CGFloat
     let sessionSource: SessionSource
+    let inlineImagesEnabled: Bool
+    let inlineImagesByUserBlockIndex: [Int: [InlineSessionImage]]
+    let inlineImagesSignature: Int
     let unifiedFindQuery: String
     let unifiedMatchOccurrences: [MatchOccurrence]
     let unifiedCurrentMatchLineID: Int?
@@ -1714,13 +2033,190 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let colorScheme: ColorScheme
     let monochrome: Bool
 
+    private final class InlineImageAttachment: NSTextAttachment {
+        let imageID: String
+        let fixedSize: NSSize
+
+        init(imageID: String, fixedSize: NSSize) {
+            self.imageID = imageID
+            self.fixedSize = fixedSize
+            super.init(data: nil, ofType: nil)
+            self.attachmentCell = InlineImageAttachmentCell(thumbnail: nil, fixedSize: fixedSize)
+        }
+
+        required init?(coder: NSCoder) {
+            self.imageID = ""
+            self.fixedSize = .zero
+            super.init(coder: coder)
+            self.attachmentCell = InlineImageAttachmentCell(thumbnail: nil, fixedSize: .zero)
+        }
+
+        func setThumbnail(_ image: NSImage?) {
+            if let cell = attachmentCell as? InlineImageAttachmentCell {
+                cell.thumbnail = image
+                if image != nil {
+                    cell.isFailed = false
+                }
+            }
+        }
+
+        func setFailed(_ failed: Bool) {
+            (attachmentCell as? InlineImageAttachmentCell)?.isFailed = failed
+        }
+    }
+
+    private final class InlineImageAttachmentCell: NSTextAttachmentCell {
+        var thumbnail: NSImage?
+        var isFailed: Bool = false
+        let fixedSize: NSSize
+
+        init(thumbnail: NSImage?, fixedSize: NSSize) {
+            self.thumbnail = thumbnail
+            self.fixedSize = fixedSize
+            super.init(imageCell: thumbnail)
+        }
+
+        required init(coder: NSCoder) {
+            self.thumbnail = nil
+            self.fixedSize = .zero
+            super.init(coder: coder)
+        }
+
+        override func cellSize() -> NSSize {
+            fixedSize
+        }
+
+        override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
+            let radius: CGFloat = 10
+            let bg = NSColor.gray.withAlphaComponent(0.08)
+            let stroke = NSColor.gray.withAlphaComponent(0.18)
+
+            let path = NSBezierPath(roundedRect: cellFrame.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)
+            bg.setFill()
+            path.fill()
+            stroke.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+
+            if let image = thumbnail {
+                let inset: CGFloat = 10
+                let target = cellFrame.insetBy(dx: inset, dy: inset)
+                let imgSize = image.size
+                if imgSize.width > 0, imgSize.height > 0 {
+                    let scale = min(target.width / imgSize.width, target.height / imgSize.height)
+                    let w = imgSize.width * scale
+                    let h = imgSize.height * scale
+                    let rect = NSRect(x: target.midX - w / 2, y: target.midY - h / 2, width: w, height: h)
+                    image.draw(in: rect)
+                }
+                return
+            }
+
+            let symbolName = isFailed ? "photo.badge.exclamationmark" : "photo"
+            let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+            symbol?.isTemplate = true
+            if let symbol {
+                let tint = NSColor.secondaryLabelColor
+                let symbolSize: CGFloat = min(28, min(cellFrame.width, cellFrame.height) * 0.35)
+                let rect = NSRect(x: cellFrame.midX - symbolSize / 2, y: cellFrame.midY - symbolSize / 2, width: symbolSize, height: symbolSize)
+                tint.set()
+                symbol.draw(in: rect)
+            }
+        }
+    }
+
     final class Coordinator: NSObject, NSTextViewDelegate, AVSpeechSynthesizerDelegate {
+        static let inlineImageIDKey = NSAttributedString.Key("AgentSessionsInlineImageID")
+
+        private final class InlineImageHoverPreviewViewController: NSViewController {
+            private let imageView = NSImageView()
+            private let spinner = NSProgressIndicator()
+            private let hintLabel = NSTextField(labelWithString: "Double-click to open Image Browser")
+            private let errorLabel = NSTextField(labelWithString: "")
+            private let labelsStack = NSStackView()
+
+            override func loadView() {
+                let content = NSView()
+
+                imageView.translatesAutoresizingMaskIntoConstraints = false
+                imageView.imageScaling = .scaleProportionallyUpOrDown
+                imageView.wantsLayer = true
+                imageView.layer?.cornerRadius = 8
+                imageView.layer?.masksToBounds = true
+
+                spinner.translatesAutoresizingMaskIntoConstraints = false
+                spinner.style = .spinning
+                spinner.controlSize = .small
+
+                hintLabel.translatesAutoresizingMaskIntoConstraints = false
+                hintLabel.font = NSFont.systemFont(ofSize: 11)
+                hintLabel.textColor = .secondaryLabelColor
+
+                errorLabel.translatesAutoresizingMaskIntoConstraints = false
+                errorLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+                errorLabel.textColor = .systemRed
+                errorLabel.lineBreakMode = .byWordWrapping
+                errorLabel.maximumNumberOfLines = 2
+                errorLabel.isHidden = true
+
+                labelsStack.translatesAutoresizingMaskIntoConstraints = false
+                labelsStack.orientation = .vertical
+                labelsStack.alignment = .leading
+                labelsStack.distribution = .fill
+                labelsStack.spacing = 2
+                labelsStack.addArrangedSubview(errorLabel)
+                labelsStack.addArrangedSubview(hintLabel)
+
+                content.addSubview(imageView)
+                content.addSubview(spinner)
+                content.addSubview(labelsStack)
+
+                NSLayoutConstraint.activate([
+                    imageView.topAnchor.constraint(equalTo: content.topAnchor, constant: 10),
+                    imageView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+                    imageView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
+
+                    labelsStack.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 8),
+                    labelsStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+                    labelsStack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
+                    labelsStack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10),
+
+                    spinner.centerXAnchor.constraint(equalTo: imageView.centerXAnchor),
+                    spinner.centerYAnchor.constraint(equalTo: imageView.centerYAnchor),
+
+                    imageView.widthAnchor.constraint(equalToConstant: 360),
+                    imageView.heightAnchor.constraint(equalToConstant: 260),
+                ])
+
+                view = content
+            }
+
+            func setState(image: NSImage?, error: String? = nil) {
+                imageView.image = image
+                if let error {
+                    errorLabel.stringValue = error
+                    errorLabel.isHidden = false
+                    spinner.stopAnimation(nil)
+                    return
+                }
+
+                errorLabel.stringValue = ""
+                errorLabel.isHidden = true
+                if image == nil {
+                    spinner.startAnimation(nil)
+                } else {
+                    spinner.stopAnimation(nil)
+                }
+            }
+        }
+
         var lineRanges: [Int: NSRange] = [:]
         var lineRoles: [Int: TerminalLineRole] = [:]
         var lastLinesSignature: Int = 0
         var lastFontSize: CGFloat = 0
         var lastMonochrome: Bool = false
         var lastColorScheme: ColorScheme = .light
+        var lastInlineImagesSignature: Int = 0
         var lastScrollToken: Int = 0
         var lastRoleNavScrollToken: Int = 0
         var lastFocusRequestToken: Int = 0
@@ -1738,15 +2234,41 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var orderedLineIDs: [Int] = []
 
         private weak var activeTextView: NSTextView?
+        private weak var activeScrollView: NSScrollView?
         weak var activeLayoutManager: TerminalLayoutManager?
         private var activeBlockText: String = ""
         private let speechSynthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer()
         private let speechQueue = DispatchQueue(label: "com.agentsessions.speechSynthesizer", qos: .default)
         private var isSpeaking: Bool = false
 
+        var inlineImagesEnabled: Bool = false
+        private var inlineImagesByID: [String: InlineSessionImage] = [:]
+        private var inlineAttachmentsByID: [String: InlineImageAttachment] = [:]
+        private var inlineAttachmentRangesByID: [String: NSRange] = [:]
+        private var inlineThumbnailCache: [String: NSImage] = [:]
+        private var inlineThumbnailTasks: [String: Task<Void, Never>] = [:]
+        private var inlinePreviewFileCache: [String: URL] = [:]
+        private var inlineHoverPreviewCache: [String: NSImage] = [:]
+        private var inlineDecodeFailedIDs: Set<String> = []
+        private var inlineHoverTask: Task<Void, Never>? = nil
+        private var inlineHoverPopover: NSPopover? = nil
+        private var inlineHoverController: InlineImageHoverPreviewViewController? = nil
+        private var inlineHoverImageID: String? = nil
+        private var inlineContextImageID: String? = nil
+        private var scrollIdleWorkItem: DispatchWorkItem? = nil
+        private var scrollObserver: NSObjectProtocol? = nil
+
         override init() {
             super.init()
             speechSynthesizer.delegate = self
+        }
+
+        deinit {
+            if let scrollObserver {
+                NotificationCenter.default.removeObserver(scrollObserver)
+            }
+            inlineThumbnailTasks.values.forEach { $0.cancel() }
+            inlineHoverTask?.cancel()
         }
 
         func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange oldSelectedCharRange: NSRange, toCharacterRange newSelectedCharRange: NSRange) -> NSRange {
@@ -1767,6 +2289,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
             self.activeTextView = textView
             self.activeBlockText = blockText(at: charIndex) ?? ""
+            closeInlineHoverPopover()
+
+            if inlineImagesEnabled,
+               let ts = textView.textStorage,
+               charIndex >= 0,
+               charIndex < ts.length,
+               let id = ts.attribute(Self.inlineImageIDKey, at: charIndex, effectiveRange: nil) as? String {
+                inlineContextImageID = id
+                return inlineImageContextMenu()
+            }
+            inlineContextImageID = nil
 
             let out = NSMenu(title: "Transcript")
             out.autoenablesItems = false
@@ -1799,8 +2332,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         @objc private func copySelectionOnly(_ sender: Any?) {
             guard let tv = activeTextView else { return }
-            guard tv.selectedRange().length > 0 else { return }
-            tv.copy(sender)
+            let sel = tv.selectedRange()
+            guard sel.length > 0 else { return }
+            let s = (tv.string as NSString).substring(with: sel)
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(s, forType: .string)
         }
 
         @objc private func copyBlock(_ sender: Any?) {
@@ -1858,6 +2395,536 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
+        // MARK: - Inline images
+
+        func installScrollObserver(scrollView: NSScrollView, textView: TerminalTextView) {
+            if activeScrollView !== scrollView {
+                if let scrollObserver {
+                    NotificationCenter.default.removeObserver(scrollObserver)
+                }
+                scrollObserver = nil
+            }
+
+            activeScrollView = scrollView
+            activeTextView = textView
+
+            if scrollObserver == nil {
+                scrollView.contentView.postsBoundsChangedNotifications = true
+                scrollObserver = NotificationCenter.default.addObserver(
+                    forName: NSView.boundsDidChangeNotification,
+                    object: scrollView.contentView,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.closeInlineHoverPopover()
+                    self?.scheduleIdleThumbnailLoad(delay: 0.2)
+                }
+            }
+
+            // Initial load after first render.
+            scheduleIdleThumbnailLoad(delay: 0.05)
+        }
+
+        func updateInlineImages(enabled: Bool, imagesByUserBlockIndex: [Int: [InlineSessionImage]], signature: Int, textView: TerminalTextView) {
+            inlineImagesEnabled = enabled
+            lastInlineImagesSignature = signature
+
+            if !enabled {
+                inlineImagesByID = [:]
+                inlineAttachmentsByID = [:]
+                inlineAttachmentRangesByID = [:]
+                inlineDecodeFailedIDs = []
+                inlineThumbnailTasks.values.forEach { $0.cancel() }
+                inlineThumbnailTasks = [:]
+                scrollIdleWorkItem?.cancel()
+                scrollIdleWorkItem = nil
+                closeInlineHoverPopover()
+                return
+            }
+
+            var byID: [String: InlineSessionImage] = [:]
+            for images in imagesByUserBlockIndex.values {
+                for img in images {
+                    byID[img.id] = img
+                }
+            }
+            inlineImagesByID = byID
+
+            indexInlineImageAttachments(in: textView)
+        }
+
+        private func indexInlineImageAttachments(in textView: TerminalTextView) {
+            inlineAttachmentsByID = [:]
+            inlineAttachmentRangesByID = [:]
+
+            guard let ts = textView.textStorage, ts.length > 0 else { return }
+            let full = NSRange(location: 0, length: ts.length)
+            ts.enumerateAttribute(Self.inlineImageIDKey, in: full, options: []) { value, range, _ in
+                guard let id = value as? String else { return }
+                inlineAttachmentRangesByID[id] = range
+                if let att = ts.attribute(.attachment, at: range.location, effectiveRange: nil) as? InlineImageAttachment {
+                    inlineAttachmentsByID[id] = att
+                    if let cached = inlineThumbnailCache[id] {
+                        att.setThumbnail(cached)
+                    }
+                    if inlineDecodeFailedIDs.contains(id) {
+                        att.setFailed(true)
+                    }
+                }
+            }
+        }
+
+        private func scheduleIdleThumbnailLoad(delay: TimeInterval) {
+            scrollIdleWorkItem?.cancel()
+            let item = DispatchWorkItem { [weak self] in
+                self?.loadVisibleThumbnails(prefetchViewports: 1)
+            }
+            scrollIdleWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+        }
+
+        private func loadVisibleThumbnails(prefetchViewports: Int) {
+            guard inlineImagesEnabled else { return }
+            guard let tv = activeTextView, let scroll = activeScrollView else { return }
+            guard let lm = tv.layoutManager, let tc = tv.textContainer else { return }
+            guard let ts = tv.textStorage, ts.length > 0 else { return }
+
+            var rect = scroll.contentView.bounds
+            if prefetchViewports > 0 {
+                let pad = rect.height * CGFloat(prefetchViewports)
+                rect = rect.insetBy(dx: 0, dy: -pad)
+            }
+
+            let glyphRange = lm.glyphRange(forBoundingRect: rect, in: tc)
+            let charRange = lm.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+
+            var ids: Set<String> = []
+            ts.enumerateAttribute(Self.inlineImageIDKey, in: charRange, options: []) { value, _, _ in
+                if let id = value as? String {
+                    ids.insert(id)
+                }
+            }
+
+            for id in ids {
+                startThumbnailLoad(id: id)
+            }
+        }
+
+        private func startThumbnailLoad(id: String) {
+            guard inlineImagesEnabled else { return }
+            guard !inlineDecodeFailedIDs.contains(id) else { return }
+            guard inlineThumbnailCache[id] == nil else { return }
+            guard inlineThumbnailTasks[id] == nil else { return }
+            guard let meta = inlineImagesByID[id] else { return }
+
+            let maxDecodedBytes = 25 * 1024 * 1024
+            let maxPixels = 480
+            let url = meta.sessionFileURL
+            let span = meta.span
+
+            inlineThumbnailTasks[id] = Task(priority: .utility) { [weak self] in
+                guard let self else { return }
+                let img: NSImage? = await Task.detached(priority: .utility) {
+                    do {
+                        let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
+                                                                                  span: span,
+                                                                                  maxDecodedBytes: maxDecodedBytes,
+                                                                                  shouldCancel: { Task.isCancelled })
+                        return CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: maxPixels)
+                    } catch {
+                        return nil
+                    }
+                }.value
+
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.inlineThumbnailTasks[id] = nil
+                    guard let img else {
+                        self.markInlineImageDecodeFailed(id: id)
+                        return
+                    }
+                    self.inlineThumbnailCache[id] = img
+                    self.inlineAttachmentsByID[id]?.setThumbnail(img)
+                    if let tv = self.activeTextView, let range = self.inlineAttachmentRangesByID[id] {
+                        tv.layoutManager?.invalidateDisplay(forCharacterRange: range)
+                    }
+                }
+            }
+        }
+
+        @MainActor
+        private func markInlineImageDecodeFailed(id: String) {
+            inlineDecodeFailedIDs.insert(id)
+            inlineThumbnailCache[id] = nil
+            inlineHoverPreviewCache[id] = nil
+            inlinePreviewFileCache[id] = nil
+            inlineAttachmentsByID[id]?.setFailed(true)
+
+            if inlineHoverImageID == id {
+                inlineHoverController?.setState(image: nil, error: "Unable to decode image.")
+            }
+
+            if let tv = activeTextView, let range = inlineAttachmentRangesByID[id] {
+                tv.layoutManager?.invalidateDisplay(forCharacterRange: range)
+                tv.needsDisplay = true
+            }
+        }
+
+        @MainActor
+        func handleInlineImageDoubleClick(id: String) {
+            guard inlineImagesEnabled else { return }
+            closeInlineHoverPopover()
+            guard let meta = inlineImagesByID[id] else { return }
+            NotificationCenter.default.post(
+                name: .showImagesForInlineImage,
+                object: meta.sessionID,
+                userInfo: ["selectedItemID": id]
+            )
+        }
+
+        @MainActor
+        func handleInlineImageHover(id: String?, anchorRect: NSRect, in view: NSView) {
+            guard inlineImagesEnabled else {
+                closeInlineHoverPopover()
+                return
+            }
+            guard let id else {
+                closeInlineHoverPopover()
+                return
+            }
+            if inlineDecodeFailedIDs.contains(id) {
+                if inlineHoverPopover == nil {
+                    let popover = NSPopover()
+                    popover.behavior = .transient
+                    popover.animates = false
+                    inlineHoverPopover = popover
+                }
+                if inlineHoverController == nil {
+                    let controller = InlineImageHoverPreviewViewController()
+                    inlineHoverController = controller
+                    inlineHoverPopover?.contentViewController = controller
+                }
+                inlineHoverImageID = id
+                inlineHoverController?.setState(image: nil, error: "Unable to decode image.")
+                if inlineHoverPopover?.isShown != true {
+                    inlineHoverPopover?.show(relativeTo: anchorRect, of: view, preferredEdge: .maxY)
+                }
+                return
+            }
+
+            let didChangeID = inlineHoverImageID != id
+            if didChangeID {
+                inlineHoverImageID = id
+                inlineHoverTask?.cancel()
+            }
+
+            if inlineHoverPopover == nil {
+                let popover = NSPopover()
+                popover.behavior = .transient
+                popover.animates = false
+                inlineHoverPopover = popover
+            }
+
+            if inlineHoverController == nil {
+                let controller = InlineImageHoverPreviewViewController()
+                inlineHoverController = controller
+                inlineHoverPopover?.contentViewController = controller
+            }
+
+            startThumbnailLoad(id: id)
+            let img = inlineHoverPreviewCache[id] ?? inlineThumbnailCache[id]
+            inlineHoverController?.setState(image: img)
+
+            if didChangeID, inlineHoverPopover?.isShown == true {
+                inlineHoverPopover?.performClose(nil)
+            }
+            if inlineHoverPopover?.isShown != true {
+                inlineHoverPopover?.show(relativeTo: anchorRect, of: view, preferredEdge: .maxY)
+            }
+
+            guard inlineHoverPreviewCache[id] == nil else { return }
+            guard let meta = inlineImagesByID[id] else { return }
+
+            let maxDecodedBytes = 25 * 1024 * 1024
+            let maxPixels = 1200
+            let url = meta.sessionFileURL
+            let span = meta.span
+
+            inlineHoverTask = Task(priority: .utility) { [weak self] in
+                guard let self else { return }
+                let preview: NSImage? = await Task.detached(priority: .utility) {
+                    do {
+                        let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
+                                                                                  span: span,
+                                                                                  maxDecodedBytes: maxDecodedBytes,
+                                                                                  shouldCancel: { Task.isCancelled })
+                        return CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: maxPixels)
+                    } catch {
+                        return nil
+                    }
+                }.value
+
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    guard let preview else {
+                        self.markInlineImageDecodeFailed(id: id)
+                        return
+                    }
+                    self.inlineHoverPreviewCache[id] = preview
+                    if self.inlineHoverImageID == id {
+                        self.inlineHoverController?.setState(image: preview)
+                    }
+                }
+            }
+        }
+
+        private func closeInlineHoverPopover() {
+            inlineHoverTask?.cancel()
+            inlineHoverTask = nil
+            inlineHoverImageID = nil
+            inlineHoverPopover?.performClose(nil)
+        }
+
+        private func ensureInlinePreviewFileURL(id: String) async -> URL? {
+            if let url = inlinePreviewFileCache[id] { return url }
+            guard let meta = inlineImagesByID[id] else { return nil }
+
+            let maxDecodedBytes = 25 * 1024 * 1024
+            let sourceURL = meta.sessionFileURL
+            let span = meta.span
+            let ext = CodexSessionImagePayload.suggestedFileExtension(for: span.mediaType)
+            let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
+
+            do {
+                // This is triggered by explicit user actions (context menu / Preview / copy / save).
+                // Avoid priority inversions by doing the decode work on the current task's priority.
+                let decoded = try CodexSessionImagePayload.decodeImageData(url: sourceURL,
+                                                                          span: span,
+                                                                          maxDecodedBytes: maxDecodedBytes,
+                                                                          shouldCancel: { Task.isCancelled })
+                if Task.isCancelled { return nil }
+
+                let tempRoot = FileManager.default.temporaryDirectory
+                let dir = tempRoot.appendingPathComponent("AgentSessions/InlineImagePreview", isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let destination = uniqueDestinationURL(in: dir, filename: filename)
+                try decoded.write(to: destination, options: [.atomic])
+
+                await MainActor.run { [weak self] in
+                    self?.inlinePreviewFileCache[id] = destination
+                }
+                return destination
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.markInlineImageDecodeFailed(id: id)
+                }
+                return nil
+            }
+        }
+
+        @MainActor
+        private func openInPreviewApp(_ url: URL) {
+            guard let previewURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") else {
+                NSWorkspace.shared.open(url)
+                return
+            }
+
+            let config = NSWorkspace.OpenConfiguration()
+            NSWorkspace.shared.open([url], withApplicationAt: previewURL, configuration: config, completionHandler: nil)
+        }
+
+	        private func inlineImageContextMenu() -> NSMenu {
+	            let out = NSMenu(title: "Image")
+	            out.autoenablesItems = false
+
+	            let openPreview = NSMenuItem(title: "Open in Preview", action: #selector(openInlineImageInPreview(_:)), keyEquivalent: "")
+	            openPreview.target = self
+	            out.addItem(openPreview)
+
+	            out.addItem(.separator())
+
+	            let copyPath = NSMenuItem(title: "Copy Image Path (for CLI agent)", action: #selector(copyInlineImagePath(_:)), keyEquivalent: "")
+	            copyPath.target = self
+	            out.addItem(copyPath)
+
+	            let copyImage = NSMenuItem(title: "Copy Image", action: #selector(copyInlineImage(_:)), keyEquivalent: "")
+	            copyImage.target = self
+	            out.addItem(copyImage)
+
+	            out.addItem(.separator())
+
+	            let saveDownloads = NSMenuItem(title: "Save to Downloads", action: #selector(saveInlineImageToDownloads(_:)), keyEquivalent: "")
+	            saveDownloads.target = self
+	            out.addItem(saveDownloads)
+
+            let save = NSMenuItem(title: "Save…", action: #selector(saveInlineImageWithPanel(_:)), keyEquivalent: "")
+            save.target = self
+            out.addItem(save)
+
+            return out
+        }
+
+        @objc private func openInlineImageInPreview(_ sender: Any?) {
+            guard let id = inlineContextImageID else { return }
+            Task(priority: .userInitiated) { [weak self] in
+                guard let self else { return }
+                guard let url = await self.ensureInlinePreviewFileURL(id: id) else { return }
+                await MainActor.run {
+                    self.openInPreviewApp(url)
+                }
+            }
+        }
+
+        @objc private func copyInlineImagePath(_ sender: Any?) {
+            guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
+            let maxDecodedBytes = 25 * 1024 * 1024
+            let sourceURL = meta.sessionFileURL
+            let span = meta.span
+            let ext = CodexSessionImagePayload.suggestedFileExtension(for: span.mediaType)
+            let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
+
+            Task(priority: .userInitiated) {
+                do {
+                    let decoded = try await Task.detached(priority: .utility) {
+                        try CodexSessionImagePayload.decodeImageData(url: sourceURL,
+                                                                     span: span,
+                                                                     maxDecodedBytes: maxDecodedBytes,
+                                                                     shouldCancel: { Task.isCancelled })
+                    }.value
+                    if Task.isCancelled { return }
+
+                    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("AgentSessions/ImageClipboard", isDirectory: true)
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let destination = uniqueDestinationURL(in: dir, filename: filename)
+                    try decoded.write(to: destination, options: [.atomic])
+
+                    await MainActor.run {
+                        let pasteboard = NSPasteboard.general
+                        pasteboard.clearContents()
+                        pasteboard.writeObjects([destination as NSURL])
+                        pasteboard.setString(destination.path, forType: .string)
+                    }
+                } catch {
+                    // Best-effort copy; no UI error.
+                }
+            }
+        }
+
+        @objc private func copyInlineImage(_ sender: Any?) {
+            guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
+            let maxDecodedBytes = 25 * 1024 * 1024
+            let sourceURL = meta.sessionFileURL
+            let span = meta.span
+
+            Task(priority: .userInitiated) {
+                do {
+                    let decoded = try await Task.detached(priority: .utility) {
+                        try CodexSessionImagePayload.decodeImageData(url: sourceURL,
+                                                                     span: span,
+                                                                     maxDecodedBytes: maxDecodedBytes,
+                                                                     shouldCancel: { Task.isCancelled })
+                    }.value
+                    if Task.isCancelled { return }
+                    guard let image = NSImage(data: decoded) else { return }
+
+                    await MainActor.run {
+                        let pasteboard = NSPasteboard.general
+                        pasteboard.clearContents()
+                        pasteboard.writeObjects([image])
+                        if let tiff = image.tiffRepresentation,
+                           let rep = NSBitmapImageRep(data: tiff),
+                           let png = rep.representation(using: .png, properties: [:]) {
+                            pasteboard.setData(png, forType: .png)
+                        }
+                    }
+                } catch {
+                    // Best-effort copy; no UI error.
+                }
+            }
+        }
+
+        @objc private func saveInlineImageToDownloads(_ sender: Any?) {
+            guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
+            guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
+            let maxDecodedBytes = 25 * 1024 * 1024
+            let sourceURL = meta.sessionFileURL
+            let span = meta.span
+            let ext = CodexSessionImagePayload.suggestedFileExtension(for: span.mediaType)
+            let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
+            let destination = uniqueDestinationURL(in: downloads, filename: filename)
+
+            Task(priority: .userInitiated) {
+                do {
+                    let decoded = try await Task.detached(priority: .utility) {
+                        try CodexSessionImagePayload.decodeImageData(url: sourceURL,
+                                                                     span: span,
+                                                                     maxDecodedBytes: maxDecodedBytes,
+                                                                     shouldCancel: { Task.isCancelled })
+                    }.value
+                    if Task.isCancelled { return }
+                    try decoded.write(to: destination, options: [.atomic])
+                } catch {
+                    // Best-effort save; no UI error.
+                }
+            }
+        }
+
+        @objc private func saveInlineImageWithPanel(_ sender: Any?) {
+            guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
+
+            let span = meta.span
+            let ext = CodexSessionImagePayload.suggestedFileExtension(for: span.mediaType)
+            let utType = CodexSessionImagePayload.suggestedUTType(for: span.mediaType)
+            let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
+
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [utType]
+            panel.canCreateDirectories = true
+            panel.isExtensionHidden = false
+            panel.nameFieldStringValue = filename
+
+            let maxDecodedBytes = 25 * 1024 * 1024
+            let sourceURL = meta.sessionFileURL
+            let sourceSpan = span
+
+            let destinationKeyWindow = NSApp.keyWindow
+            let onComplete: (NSApplication.ModalResponse) -> Void = { response in
+                guard response == .OK, let destination = panel.url else { return }
+                Task(priority: .userInitiated) {
+                    do {
+                        let decoded = try await Task.detached(priority: .utility) {
+                            try CodexSessionImagePayload.decodeImageData(url: sourceURL,
+                                                                         span: sourceSpan,
+                                                                         maxDecodedBytes: maxDecodedBytes,
+                                                                         shouldCancel: { Task.isCancelled })
+                        }.value
+                        if Task.isCancelled { return }
+                        try decoded.write(to: destination, options: [.atomic])
+                    } catch {
+                        // Best-effort save; no UI error.
+                    }
+                }
+            }
+
+            if let win = destinationKeyWindow {
+                panel.beginSheetModal(for: win, completionHandler: onComplete)
+            } else {
+                onComplete(panel.runModal())
+            }
+        }
+
+        private func uniqueDestinationURL(in dir: URL, filename: String) -> URL {
+            let base = (filename as NSString).deletingPathExtension
+            let ext = (filename as NSString).pathExtension
+            var candidate = dir.appendingPathComponent(filename)
+            var counter = 2
+            while FileManager.default.fileExists(atPath: candidate.path) {
+                let next = "\(base)-\(counter).\(ext)"
+                candidate = dir.appendingPathComponent(next)
+                counter += 1
+            }
+            return candidate
+        }
+
         private func blockText(at charIndex: Int) -> String? {
             guard !lines.isEmpty else { return nil }
             guard let lineIndex = lineIndex(at: charIndex) else { return nil }
@@ -1900,7 +2967,150 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
     }
 
-    final class TerminalTextView: NSTextView {
+	    final class TerminalTextView: NSTextView {
+		        weak var inlineImageCoordinator: Coordinator?
+
+		        private var mouseDownLocationInWindow: NSPoint? = nil
+		        private var selectionAtMouseDown: NSRange = NSRange(location: 0, length: 0)
+		        private var hoverTrackingArea: NSTrackingArea? = nil
+	
+	        private func inlineImageID(at point: NSPoint) -> String? {
+	            guard let ts = textStorage, ts.length > 0 else { return nil }
+	            let idx = characterIndexForInsertion(at: point)
+	            guard idx != NSNotFound else { return nil }
+	
+	            let candidates = [idx, idx - 1, idx + 1]
+	            for c in candidates where c >= 0 && c < ts.length {
+	                if let id = ts.attribute(Coordinator.inlineImageIDKey, at: c, effectiveRange: nil) as? String {
+	                    return id
+	                }
+	            }
+	            return nil
+	        }
+	
+	        private func inlineImageIDWithEffectiveRange(at point: NSPoint) -> (id: String, range: NSRange)? {
+	            guard let ts = textStorage, ts.length > 0 else { return nil }
+	            let idx = characterIndexForInsertion(at: point)
+	            guard idx != NSNotFound else { return nil }
+	
+	            let candidates = [idx, idx - 1, idx + 1]
+	            for c in candidates where c >= 0 && c < ts.length {
+	                var effectiveRange = NSRange(location: NSNotFound, length: 0)
+	                if let id = ts.attribute(Coordinator.inlineImageIDKey, at: c, effectiveRange: &effectiveRange) as? String,
+	                   effectiveRange.location != NSNotFound {
+	                    return (id, effectiveRange)
+	                }
+	            }
+	            return nil
+	        }
+
+	        override func mouseDown(with event: NSEvent) {
+	            if event.type == .leftMouseDown,
+	               event.clickCount >= 2,
+	               !event.modifierFlags.contains(.command),
+	               !event.modifierFlags.contains(.control),
+	               !event.modifierFlags.contains(.option) {
+	                let point = convert(event.locationInWindow, from: nil)
+	                if let id = inlineImageID(at: point) {
+	                    Task { @MainActor in
+	                        inlineImageCoordinator?.handleInlineImageDoubleClick(id: id)
+	                    }
+	                    return
+	                }
+	            }
+
+	            if event.type == .leftMouseDown {
+	                mouseDownLocationInWindow = event.locationInWindow
+	                selectionAtMouseDown = selectedRange()
+	            } else {
+	                mouseDownLocationInWindow = nil
+	            }
+	            super.mouseDown(with: event)
+	        }
+
+		        override func mouseUp(with event: NSEvent) {
+	            super.mouseUp(with: event)
+
+	            guard event.type == .leftMouseUp else { return }
+	            guard !event.modifierFlags.contains(.command),
+                  !event.modifierFlags.contains(.control),
+                  !event.modifierFlags.contains(.option) else { return }
+
+            if selectedRange().length > 0, selectedRange() != selectionAtMouseDown {
+                return
+            }
+
+	            if let down = mouseDownLocationInWindow {
+	                let dx = abs(down.x - event.locationInWindow.x)
+	                let dy = abs(down.y - event.locationInWindow.y)
+	                if dx > 3 || dy > 3 { return }
+	            }
+
+		            let point = convert(event.locationInWindow, from: nil)
+		            if let hit = inlineImageIDWithEffectiveRange(at: point),
+                       let lm = layoutManager,
+                       let tc = textContainer {
+                        let charRange = NSRange(location: hit.range.location, length: max(1, hit.range.length))
+                        let glyphRange = lm.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+                        var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+                        rect.origin.x += textContainerOrigin.x
+                        rect.origin.y += textContainerOrigin.y
+                        rect = rect.insetBy(dx: -4, dy: -4)
+		                Task { @MainActor in
+		                    inlineImageCoordinator?.handleInlineImageHover(id: hit.id, anchorRect: rect, in: self)
+		                }
+		            }
+	        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.acceptsMouseMovedEvents = true
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+
+            if let hoverTrackingArea {
+                removeTrackingArea(hoverTrackingArea)
+            }
+
+            let options: NSTrackingArea.Options = [.activeInKeyWindow, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect]
+            let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+            addTrackingArea(area)
+            hoverTrackingArea = area
+        }
+
+	        override func mouseMoved(with event: NSEvent) {
+	            super.mouseMoved(with: event)
+
+	            guard let inlineImageCoordinator else { return }
+	            let point = convert(event.locationInWindow, from: nil)
+	            guard let hit = inlineImageIDWithEffectiveRange(at: point) else {
+	                Task { @MainActor in
+	                    inlineImageCoordinator.handleInlineImageHover(id: nil, anchorRect: .zero, in: self)
+	                }
+	                return
+	            }
+	            guard let lm = layoutManager, let tc = textContainer else { return }
+	            let charRange = NSRange(location: hit.range.location, length: max(1, hit.range.length))
+	            let glyphRange = lm.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+	            var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+	            rect.origin.x += textContainerOrigin.x
+	            rect.origin.y += textContainerOrigin.y
+	            rect = rect.insetBy(dx: -4, dy: -4)
+
+	            Task { @MainActor in
+	                inlineImageCoordinator.handleInlineImageHover(id: hit.id, anchorRect: rect, in: self)
+	            }
+	        }
+
+        override func mouseExited(with event: NSEvent) {
+            super.mouseExited(with: event)
+            Task { @MainActor in
+                inlineImageCoordinator?.handleInlineImageHover(id: nil, anchorRect: .zero, in: self)
+            }
+        }
+
         override func keyDown(with event: NSEvent) {
             if event.keyCode == 48, !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control), !event.modifierFlags.contains(.option) {
                 if event.modifierFlags.contains(.shift) {
@@ -1948,6 +3158,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         textView.isSelectable = true
         textView.usesFindPanel = true
         textView.delegate = context.coordinator
+        textView.inlineImageCoordinator = context.coordinator
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = true
@@ -1960,11 +3171,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         scroll.documentView = textView
 
         context.coordinator.activeLayoutManager = layoutManager
+        context.coordinator.installScrollObserver(scrollView: scroll, textView: textView)
         applyContent(to: textView, context: context)
         context.coordinator.lastLinesSignature = signature(for: lines)
         context.coordinator.lastFontSize = fontSize
         context.coordinator.lastMonochrome = monochrome
         context.coordinator.lastColorScheme = colorScheme
+        context.coordinator.lastInlineImagesSignature = inlineImagesSignature
         context.coordinator.lastUnifiedFindQuery = unifiedFindQuery
         context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
         context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
@@ -1977,13 +3190,16 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let tv = nsView.documentView as? NSTextView else { return }
+        guard let tv = nsView.documentView as? TerminalTextView else { return }
+        context.coordinator.installScrollObserver(scrollView: nsView, textView: tv)
 
         let lineSig = signature(for: lines)
         let fontChanged = abs((context.coordinator.lastFontSize) - fontSize) > 0.1
         let monochromeChanged = context.coordinator.lastMonochrome != monochrome
         let schemeChanged = context.coordinator.lastColorScheme != colorScheme
-        let needsReload = lineSig != context.coordinator.lastLinesSignature || fontChanged || monochromeChanged || schemeChanged
+        let inlineChanged = context.coordinator.lastInlineImagesSignature != inlineImagesSignature
+        let inlineEnabledChanged = context.coordinator.inlineImagesEnabled != inlineImagesEnabled
+        let needsReload = lineSig != context.coordinator.lastLinesSignature || fontChanged || monochromeChanged || schemeChanged || inlineChanged || inlineEnabledChanged
 
         if needsReload {
             applyContent(to: tv, context: context)
@@ -1991,6 +3207,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             context.coordinator.lastFontSize = fontSize
             context.coordinator.lastMonochrome = monochrome
             context.coordinator.lastColorScheme = colorScheme
+            context.coordinator.lastInlineImagesSignature = inlineImagesSignature
         } else {
             let unifiedChanged =
                 context.coordinator.lastUnifiedMatchOccurrences != effectiveUnifiedMatchOccurrences ||
@@ -2079,7 +3296,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     }
 
     private func applyContent(to textView: NSTextView, context: Context) {
-        let (attr, ranges) = buildAttributedString()
+        // Ensure container tracks width (also used for inline thumbnail sizing).
+        let width = max(1, textView.enclosingScrollView?.contentSize.width ?? textView.bounds.width)
+
+        let (attr, ranges) = buildAttributedString(containerWidth: width)
         context.coordinator.lineRanges = ranges
         context.coordinator.lineRoles = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0.role) })
         context.coordinator.lines = lines
@@ -2091,6 +3311,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastFindQuery = findQuery
         context.coordinator.lastFindCurrentMatchLineID = effectiveFindCurrentMatchLineID
         textView.textStorage?.setAttributedString(attr)
+
+        if let tv = textView as? TerminalTextView {
+            context.coordinator.updateInlineImages(enabled: inlineImagesEnabled,
+                                                  imagesByUserBlockIndex: inlineImagesByUserBlockIndex,
+                                                  signature: inlineImagesSignature,
+                                                  textView: tv)
+        }
 
         if let lm = (textView.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager {
             lm.isDark = (colorScheme == .dark)
@@ -2107,8 +3334,6 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                                          ranges: ranges)
         }
 
-        // Ensure container tracks width
-        let width = max(1, textView.enclosingScrollView?.contentSize.width ?? textView.bounds.width)
         textView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
     }
@@ -2303,33 +3528,33 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         lm.localFindCurrentLineID = out.isEmpty ? nil : currentLineID
     }
 
-	private func buildAttributedString() -> (NSAttributedString, [Int: NSRange]) {
-		        let attr = NSMutableAttributedString()
-		        var ranges: [Int: NSRange] = [:]
-		        ranges.reserveCapacity(lines.count)
+    private func buildAttributedString(containerWidth: CGFloat) -> (NSAttributedString, [Int: NSRange]) {
+        let attr = NSMutableAttributedString()
+        var ranges: [Int: NSRange] = [:]
+        ranges.reserveCapacity(lines.count)
 
-				        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-						        let systemUserFont: NSFont = {
-				                        let userFontSize = fontSize + 1
-			                        if let optima = NSFont(name: "Optima", size: userFontSize) {
-			                            let descriptor = optima.fontDescriptor.addingAttributes([
-			                                .traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.semibold]
-			                            ])
-			                            if let weighted = NSFont(descriptor: descriptor, size: userFontSize) {
-			                                return weighted
-			                            }
-			                        }
-			                        return NSFont.systemFont(ofSize: userFontSize, weight: .semibold)
-			                    }()
-			        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-                let monoSemiboldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .semibold)
+        let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+        let systemUserFont: NSFont = {
+            let userFontSize = fontSize + 1
+            if let optima = NSFont(name: "Optima", size: userFontSize) {
+                let descriptor = optima.fontDescriptor.addingAttributes([
+                    .traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.semibold]
+                ])
+                if let weighted = NSFont(descriptor: descriptor, size: userFontSize) {
+                    return weighted
+                }
+            }
+            return NSFont.systemFont(ofSize: userFontSize, weight: .semibold)
+        }()
+        let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let monoSemiboldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .semibold)
 
-	        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
-	        let assistantSwatch = TerminalRolePalette.appKit(role: .assistant, scheme: colorScheme, monochrome: monochrome)
-	        let toolInputSwatch = TerminalRolePalette.appKit(role: .toolInput, scheme: colorScheme, monochrome: monochrome)
-	        let toolOutputSwatch = TerminalRolePalette.appKit(role: .toolOutput, scheme: colorScheme, monochrome: monochrome)
-	        let errorSwatch = TerminalRolePalette.appKit(role: .error, scheme: colorScheme, monochrome: monochrome)
-	        let metaSwatch = TerminalRolePalette.appKit(role: .meta, scheme: colorScheme, monochrome: monochrome)
+        let userSwatch = TerminalRolePalette.appKit(role: .user, scheme: colorScheme, monochrome: monochrome)
+        let assistantSwatch = TerminalRolePalette.appKit(role: .assistant, scheme: colorScheme, monochrome: monochrome)
+        let toolInputSwatch = TerminalRolePalette.appKit(role: .toolInput, scheme: colorScheme, monochrome: monochrome)
+        let toolOutputSwatch = TerminalRolePalette.appKit(role: .toolOutput, scheme: colorScheme, monochrome: monochrome)
+        let errorSwatch = TerminalRolePalette.appKit(role: .error, scheme: colorScheme, monochrome: monochrome)
+        let metaSwatch = TerminalRolePalette.appKit(role: .meta, scheme: colorScheme, monochrome: monochrome)
 
         func swatch(for role: TerminalLineRole) -> TerminalRolePalette.AppKitSwatch {
             switch role {
@@ -2342,77 +3567,152 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-	        let baseParagraph = NSMutableParagraphStyle()
-	        baseParagraph.lineSpacing = 1.5
-	        baseParagraph.paragraphSpacing = 0
-	        baseParagraph.lineBreakMode = .byWordWrapping
+        let baseParagraph = NSMutableParagraphStyle()
+        baseParagraph.lineSpacing = 1.5
+        baseParagraph.paragraphSpacing = 0
+        baseParagraph.lineBreakMode = .byWordWrapping
 
-	        func paragraph(spacingBefore: CGFloat) -> NSParagraphStyle {
-	            let p = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
-	            p.paragraphSpacingBefore = spacingBefore
-	            // Card layout:
-	            // - keep a consistent left/right internal padding (accounts for accent strip + 16px content padding)
-	            // - rely on paragraph spacing for whitespace between cards
-	            let cardInsetX: CGFloat = 8
-	            let leftPaddingFromCardEdge: CGFloat = 20 // Accent strip + 16px padding
-	            let rightPaddingFromCardEdge: CGFloat = 16
-	            p.firstLineHeadIndent = cardInsetX + leftPaddingFromCardEdge
-	            p.headIndent = cardInsetX + leftPaddingFromCardEdge
-	            p.tailIndent = -(cardInsetX + rightPaddingFromCardEdge)
-	            return p
-	        }
+        let cardInsetX: CGFloat = 8
+        let leftPaddingFromCardEdge: CGFloat = 20 // Accent strip + 16px padding
+        let rightPaddingFromCardEdge: CGFloat = 16
+        let cardLeftIndent = cardInsetX + leftPaddingFromCardEdge
+        let cardRightInset = cardInsetX + rightPaddingFromCardEdge
 
-	        let paragraph0 = paragraph(spacingBefore: 0)
-	        let blockGap: CGFloat = 18
-	        let paragraphGap = paragraph(spacingBefore: blockGap)
-	        let paragraphMetaGap = paragraph(spacingBefore: 10)
+        func paragraph(spacingBefore: CGFloat) -> NSParagraphStyle {
+            let p = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
+            p.paragraphSpacingBefore = spacingBefore
+            p.firstLineHeadIndent = cardLeftIndent
+            p.headIndent = cardLeftIndent
+            p.tailIndent = -(cardRightInset)
+            return p
+        }
+
+        let paragraph0 = paragraph(spacingBefore: 0)
+        let paragraphGap = paragraph(spacingBefore: 18)
+        let paragraphMetaGap = paragraph(spacingBefore: 10)
+
+        let contentWidth = max(1, containerWidth - (cardLeftIndent + cardRightInset))
+        let thumbSpacing: CGFloat = 12
+        let thumbMaxColumns: Int = 5
+        let thumbMinWidthForColumnChoice: CGFloat = 140
+        let thumbColumns: Int = {
+            let raw = Int(floor((contentWidth + thumbSpacing) / (thumbMinWidthForColumnChoice + thumbSpacing)))
+            return min(thumbMaxColumns, max(1, raw))
+        }()
+        let rawThumbWidth: CGFloat = floor((contentWidth - (thumbSpacing * CGFloat(max(0, thumbColumns - 1)))) / CGFloat(thumbColumns))
+        let thumbSize: CGFloat = min(220, max(110, rawThumbWidth))
+
+        let thumbParagraph: NSParagraphStyle = {
+            let p = (baseParagraph.mutableCopy() as? NSMutableParagraphStyle) ?? baseParagraph
+            p.paragraphSpacingBefore = 8
+            p.firstLineHeadIndent = cardLeftIndent
+            p.headIndent = cardLeftIndent
+            p.tailIndent = -(cardRightInset)
+            p.tabStops = []
+            if thumbColumns > 1 {
+                p.defaultTabInterval = thumbSize + thumbSpacing
+                p.tabStops = (1..<thumbColumns).map { col in
+                    let tabLoc = cardLeftIndent + (CGFloat(col) * (thumbSize + thumbSpacing))
+                    return NSTextTab(textAlignment: .left, location: tabLoc)
+                }
+            }
+            return p
+        }()
+
+        func appendInlineThumbnails(_ images: [InlineSessionImage]) {
+            guard inlineImagesEnabled else { return }
+            guard !images.isEmpty else { return }
+
+            var idx = 0
+            while idx < images.count {
+                let rowStart = idx
+                let rowEnd = min(images.count, idx + thumbColumns)
+                let rowImages = Array(images[rowStart..<rowEnd])
+                idx = rowEnd
+
+                let row = NSMutableAttributedString()
+                let rowAttributes: [NSAttributedString.Key: Any] = [
+                    .font: systemRegularFont,
+                    .paragraphStyle: thumbParagraph
+                ]
+
+                for (col, image) in rowImages.enumerated() {
+                    if col > 0 {
+                        row.append(NSAttributedString(string: "\t", attributes: rowAttributes))
+                    }
+                    let attachment = InlineImageAttachment(imageID: image.id, fixedSize: NSSize(width: thumbSize, height: thumbSize))
+                    let frag = NSMutableAttributedString(attachment: attachment)
+                    frag.addAttribute(Coordinator.inlineImageIDKey, value: image.id, range: NSRange(location: 0, length: frag.length))
+                    row.append(frag)
+                }
+
+                row.append(NSAttributedString(string: "\n", attributes: rowAttributes))
+                row.addAttributes(rowAttributes, range: NSRange(location: 0, length: row.length))
+                attr.append(row)
+            }
+        }
 
         var previousBlockIndex: Int? = nil
 
         for (idx, line) in lines.enumerated() {
-            let text = line.text
-            let lineString = idx == lines.count - 1 ? text : text + "\n"
-            let ns = lineString as NSString
-            let range = NSRange(location: attr.length, length: ns.length)
-            ranges[line.id] = range
+            let blockIndex = line.blockIndex
+            let isFirstLineOfBlock = idx == 0 || previousBlockIndex != blockIndex
+            let isNewBlock = idx > 0 && previousBlockIndex != blockIndex
+            previousBlockIndex = blockIndex
 
-            let isFirstLineOfBlock = idx == 0 || previousBlockIndex != line.blockIndex
-            let isNewBlock = idx > 0 && previousBlockIndex != line.blockIndex
-            previousBlockIndex = line.blockIndex
+            let isLastLineOfBlock: Bool = {
+                if idx == lines.count - 1 { return true }
+                return lines[idx + 1].blockIndex != blockIndex
+            }()
 
-	            let paragraphStyle: NSParagraphStyle = {
-	                guard isNewBlock else { return paragraph0 }
-	                if line.role == .meta { return paragraphMetaGap }
-	                return paragraphGap
-	            }()
+            let shouldAppendInlineImages: Bool = {
+                guard inlineImagesEnabled else { return false }
+                guard line.role == .user else { return false }
+                guard isLastLineOfBlock, let blockIndex else { return false }
+                return !(inlineImagesByUserBlockIndex[blockIndex]?.isEmpty ?? true)
+            }()
+
+            let paragraphStyle: NSParagraphStyle = {
+                guard isNewBlock else { return paragraph0 }
+                if line.role == .meta { return paragraphMetaGap }
+                return paragraphGap
+            }()
 
             let isPreambleUserLine: Bool = {
                 guard line.role == .user else { return false }
-                guard let blockIndex = line.blockIndex else { return false }
+                guard let blockIndex else { return false }
                 return preambleUserBlockIndexes.contains(blockIndex)
             }()
 
-	            let lineSwatch = swatch(for: line.role)
+            let lineSwatch = swatch(for: line.role)
+            let baseFont: NSFont = {
+                if line.role == .toolInput {
+                    return isFirstLineOfBlock ? monoSemiboldFont : monoRegularFont
+                }
+                if line.role == .user && !isPreambleUserLine { return systemUserFont }
+                return systemRegularFont
+            }()
 
-	            let baseFont: NSFont = {
-	                if line.role == .toolInput {
-                        return isFirstLineOfBlock ? monoSemiboldFont : monoRegularFont
-                    }
-		                if line.role == .user && !isPreambleUserLine { return systemUserFont }
-	                return systemRegularFont
-	            }()
+            let needsTrailingNewline = (idx != lines.count - 1) || shouldAppendInlineImages
+            let lineString = line.text + (needsTrailingNewline ? "\n" : "")
 
-		            let attributes: [NSAttributedString.Key: Any] = [
-		                .font: baseFont,
-		                .foregroundColor: lineSwatch.foreground,
-		                .paragraphStyle: paragraphStyle
-		            ]
+            let start = attr.length
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: baseFont,
+                .foregroundColor: lineSwatch.foreground,
+                .paragraphStyle: paragraphStyle
+            ]
+            attr.append(NSAttributedString(string: lineString, attributes: attributes))
 
-	            attr.append(NSAttributedString(string: lineString, attributes: attributes))
-	        }
+            if shouldAppendInlineImages, let blockIndex, let images = inlineImagesByUserBlockIndex[blockIndex] {
+                appendInlineThumbnails(images)
+            }
 
-	        return (attr, ranges)
-	    }
+            ranges[line.id] = NSRange(location: start, length: attr.length - start)
+        }
+
+        return (attr, ranges)
+    }
 
     private func signature(for lines: [TerminalLine]) -> Int {
         var hasher = Hasher()

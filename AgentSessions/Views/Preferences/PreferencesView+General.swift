@@ -190,6 +190,9 @@ extension PreferencesView {
                     .help("When opening a session without a search query, choose which prompt to jump to in Session view")
                 }
 
+                Toggle("Show inline image thumbnails in Session view", isOn: $inlineSessionImageThumbnailsEnabled)
+                    .help("Show small image thumbnails inline in Session view. Thumbnails load after scrolling stops to reduce CPU and I/O during fast scroll.")
+
                 // Columns section
                 sectionHeader("Columns")
                 // First row: three columns to reduce height

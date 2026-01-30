@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import ImageIO
 import UniformTypeIdentifiers
 
 enum CodexImagesScope: String, CaseIterable, Identifiable {
@@ -133,13 +132,14 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
                             continue
                         }
 
-                        totalFound += spans.count
-
                         let filtered = spans.filter { span in
                             span.base64PayloadLength >= minPayloadLen &&
                                 span.approxBytes >= minBytes &&
-                                span.approxBytes <= maxDecodedBytes
+                                span.approxBytes <= maxDecodedBytes &&
+                                Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: span.startOffset)
                         }
+
+                        totalFound += filtered.count
 
                         if !filtered.isEmpty {
                             let title = session.codexDisplayTitle
@@ -255,103 +255,6 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
     }
 }
 
-private enum CodexSessionImagePayload {
-    enum DecodeError: Error {
-        case invalidBase64
-        case tooLarge
-    }
-
-    static func decodeImageData(url: URL,
-                                span: Base64ImageDataURLScanner.Span,
-                                maxDecodedBytes: Int,
-                                shouldCancel: () -> Bool = { false }) throws -> Data {
-        if shouldCancel() { throw CancellationError() }
-        if span.approxBytes > maxDecodedBytes {
-            throw DecodeError.tooLarge
-        }
-
-        let payload = try readFileSlice(url: url,
-                                        offset: span.base64PayloadOffset,
-                                        length: span.base64PayloadLength,
-                                        shouldCancel: shouldCancel)
-        if shouldCancel() { throw CancellationError() }
-        guard let decoded = Data(base64Encoded: payload, options: [.ignoreUnknownCharacters]) else {
-            throw DecodeError.invalidBase64
-        }
-        if shouldCancel() { throw CancellationError() }
-
-        if decoded.count > maxDecodedBytes {
-            throw DecodeError.tooLarge
-        }
-
-        return decoded
-    }
-
-    static func readFileSlice(url: URL,
-                              offset: UInt64,
-                              length: Int,
-                              shouldCancel: () -> Bool = { false }) throws -> Data {
-        let fh = try FileHandle(forReadingFrom: url)
-        defer { try? fh.close() }
-        try fh.seek(toOffset: offset)
-
-        var remaining = max(0, length)
-        var out = Data()
-        out.reserveCapacity(min(remaining, 256 * 1024))
-
-        let chunkSize = 64 * 1024
-        while remaining > 0 {
-            if shouldCancel() { throw CancellationError() }
-            let n = min(chunkSize, remaining)
-            let chunk = try fh.read(upToCount: n) ?? Data()
-            if chunk.isEmpty { break }
-            out.append(chunk)
-            remaining -= chunk.count
-        }
-
-        return out
-    }
-
-    static func makeThumbnail(from imageData: Data, maxPixelSize: Int) -> NSImage? {
-        guard let src = CGImageSourceCreateWithData(imageData as CFData, nil) else { return nil }
-        let opts: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: max(32, maxPixelSize),
-            kCGImageSourceShouldCacheImmediately: true
-        ]
-        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
-        return NSImage(cgImage: cg, size: .zero)
-    }
-
-    static func suggestedUTType(for mediaType: String) -> UTType {
-        UTType(mimeType: mediaType) ?? .image
-    }
-
-    static func suggestedFileExtension(for mediaType: String) -> String {
-        let normalized = mediaType.lowercased()
-        switch normalized {
-        case "image/png":
-            return "png"
-        case "image/jpeg", "image/jpg":
-            return "jpg"
-        case "image/gif":
-            return "gif"
-        case "image/tiff", "image/tif":
-            return "tiff"
-        case "image/heic":
-            return "heic"
-        case "image/heif":
-            return "heif"
-        default:
-            if normalized.hasPrefix("image/") {
-                return String(normalized.dropFirst("image/".count))
-            }
-            return "img"
-        }
-    }
-}
-
 struct CodexSessionImagesGalleryView: View {
     let seedSession: Session
 
@@ -360,6 +263,7 @@ struct CodexSessionImagesGalleryView: View {
 
     @State private var scope: CodexImagesScope = .singleSession
     @State private var selectedItemID: String? = nil
+    @State private var pendingSelectedItemID: String? = nil
 
     @State private var isPreviewLoading: Bool = false
     @State private var previewImage: NSImage? = nil
@@ -385,16 +289,42 @@ struct CodexSessionImagesGalleryView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 560)
+        // Finder-like: Space opens Quick Look for the selected image.
+        .overlay {
+            Button("") { quickLookSelected() }
+                .keyboardShortcut(.space, modifiers: [])
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
         .onAppear { reload() }
         .onChange(of: scope) { _, _ in reload() }
         .onChange(of: model.items) { _, newValue in
+            if let pendingSelectedItemID, newValue.contains(where: { $0.id == pendingSelectedItemID }) {
+                selectedItemID = pendingSelectedItemID
+                self.pendingSelectedItemID = nil
+            }
+
             guard let selectedItemID else { return }
             if !newValue.contains(where: { $0.id == selectedItemID }) {
                 self.selectedItemID = nil
             }
         }
-        .task(id: selectedItemID) {
-            await loadPreview()
+        .task(id: selectedItemID) { await loadPreview() }
+        .onReceive(NotificationCenter.default.publisher(for: .selectImagesBrowserItem)) { n in
+            guard let sid = n.object as? String, sid == seedSession.id else { return }
+            guard let requested = n.userInfo?["selectedItemID"] as? String else { return }
+            let forceScope = n.userInfo?["forceScope"] as? String
+
+            pendingSelectedItemID = requested
+            if forceScope == CodexImagesScope.singleSession.rawValue, scope != .singleSession {
+                scope = .singleSession
+                return
+            }
+            if model.items.contains(where: { $0.id == requested }) {
+                selectedItemID = requested
+                pendingSelectedItemID = nil
+            }
         }
         .onDisappear {
             model.cancelLoad()
@@ -548,32 +478,41 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private var thumbnailsPane: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                summaryRow
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    summaryRow
 
-                ForEach(timeGroups, id: \.id) { group in
-                    TimeframeDivider(title: group.title)
+                    ForEach(timeGroups, id: \.id) { group in
+                        TimeframeDivider(title: group.title)
 
-                    LazyVGrid(columns: gridColumns, spacing: 12) {
-                        ForEach(group.items, id: \.id) { item in
-                            CodexImageThumbnailCell(
-                                model: model,
-                                item: item,
-                                isSelected: item.id == selectedItemID,
-                                helpText: itemTooltip(item),
-                                onSelect: { selectedItemID = item.id },
-                                onSaveToDownloads: { saveToDownloads(item: item) },
-                                onSave: { saveWithPanel(item: item) },
-                                onCopy: { copyImage(item: item) },
-                                onCopyPath: { copyImagePath(item: item) },
-                                onNavigate: { navigateToSession(item: item) }
-                            )
+                        LazyVGrid(columns: gridColumns, spacing: 12) {
+                            ForEach(group.items, id: \.id) { item in
+                                CodexImageThumbnailCell(
+                                    model: model,
+                                    item: item,
+                                    isSelected: item.id == selectedItemID,
+                                    helpText: itemTooltip(item),
+                                    onSelect: { selectedItemID = item.id },
+                                    onOpenInPreview: { openInPreview(item: item) },
+                                    onSaveToDownloads: { saveToDownloads(item: item) },
+                                    onSave: { saveWithPanel(item: item) },
+                                    onCopy: { copyImage(item: item) },
+                                    onCopyPath: { copyImagePath(item: item) },
+                                    onNavigate: { navigateToSession(item: item) }
+                                )
+                            }
                         }
                     }
                 }
+                .padding(12)
             }
-            .padding(12)
+            .onChange(of: selectedItemID) { _, newValue in
+                guard let newValue else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(newValue, anchor: .center)
+                }
+            }
         }
         .frame(minWidth: 340, idealWidth: 460, maxWidth: 560)
         .background(Color(NSColor.textBackgroundColor))
@@ -937,6 +876,49 @@ struct CodexSessionImagesGalleryView: View {
         }
     }
 
+    private func openInPreview(item: CodexSessionImageItem) {
+        let url = item.sessionFileURL
+        let span = item.span
+        let maxDecodedBytes = model.maxDecodedBytes
+        Task(priority: .userInitiated) {
+            do {
+                let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
+                                                                          span: span,
+                                                                          maxDecodedBytes: maxDecodedBytes)
+                let fileURL = try writePreviewImageFile(item: item, data: decoded)
+                await MainActor.run {
+                    openInPreviewApp(fileURL)
+                }
+            } catch {
+                // Best-effort open; no UI error.
+            }
+        }
+    }
+
+    private func quickLookSelected() {
+        guard let item = selectedItem else { return }
+        quickLook(item: item)
+    }
+
+    private func quickLook(item: CodexSessionImageItem) {
+        let url = item.sessionFileURL
+        let span = item.span
+        let maxDecodedBytes = model.maxDecodedBytes
+        Task(priority: .userInitiated) {
+            do {
+                let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
+                                                                          span: span,
+                                                                          maxDecodedBytes: maxDecodedBytes)
+                let fileURL = try writePreviewImageFile(item: item, data: decoded)
+                await MainActor.run {
+                    QuickLookPreviewController.shared.preview(urls: [fileURL])
+                }
+            } catch {
+                // Best-effort preview; no UI error.
+            }
+        }
+    }
+
     private func writeClipboardImageFile(item: CodexSessionImageItem, data: Data) throws -> URL {
         let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.span.mediaType)
         let tempRoot = FileManager.default.temporaryDirectory
@@ -946,6 +928,28 @@ struct CodexSessionImagesGalleryView: View {
         let destination = uniqueDestinationURL(in: dir, filename: filename)
         try data.write(to: destination, options: [.atomic])
         return destination
+    }
+
+    private func writePreviewImageFile(item: CodexSessionImageItem, data: Data) throws -> URL {
+        let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.span.mediaType)
+        let tempRoot = FileManager.default.temporaryDirectory
+        let dir = tempRoot.appendingPathComponent("AgentSessions/ImagesGalleryPreview", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let filename = suggestedFileName(for: item, ext: ext)
+        let destination = uniqueDestinationURL(in: dir, filename: filename)
+        try data.write(to: destination, options: [.atomic])
+        return destination
+    }
+
+    @MainActor
+    private func openInPreviewApp(_ url: URL) {
+        guard let previewURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+
+        let config = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.open([url], withApplicationAt: previewURL, configuration: config, completionHandler: nil)
     }
 
     private func saveWithPanel(item: CodexSessionImageItem) {
@@ -1122,6 +1126,7 @@ private struct CodexImageThumbnailCell: View {
     let isSelected: Bool
     let helpText: String
     let onSelect: () -> Void
+    let onOpenInPreview: () -> Void
     let onSaveToDownloads: () -> Void
     let onSave: () -> Void
     let onCopy: () -> Void
@@ -1129,46 +1134,53 @@ private struct CodexImageThumbnailCell: View {
     let onNavigate: () -> Void
 
     var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 8) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.gray.opacity(0.08))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(isSelected ? Color.accentColor.opacity(0.70) : Color.gray.opacity(0.18),
-                                        lineWidth: isSelected ? 2 : 1)
-                        )
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.gray.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(isSelected ? Color.accentColor.opacity(0.70) : Color.gray.opacity(0.18),
+                                    lineWidth: isSelected ? 2 : 1)
+                    )
 
-                    if let img = model.thumbnails[item.id] {
-                        Image(nsImage: img)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .padding(10)
-                    } else {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                    }
+                if let img = model.thumbnails[item.id] {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .padding(10)
+                } else {
+                    ProgressView()
+                        .progressViewStyle(.circular)
                 }
-                .frame(height: 140)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.span.mediaType)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(item.span.approxBytes), countStyle: .file))
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 2)
             }
+            .frame(height: 140)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.span.mediaType)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Text(ByteCountFormatter.string(fromByteCount: Int64(item.span.approxBytes), countStyle: .file))
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 2)
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
         .help(helpText)
+        .onTapGesture(count: 2) {
+            onSelect()
+            onOpenInPreview()
+        }
+        .onTapGesture {
+            onSelect()
+        }
         .contextMenu {
+            Button("Open in Preview") { onSelect(); onOpenInPreview() }
+            Divider()
             Button("Copy Image Path (for CLI agent)") { onSelect(); onCopyPath() }
             Button("Copy Image") { onSelect(); onCopy() }
             Divider()
