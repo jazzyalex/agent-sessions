@@ -2131,7 +2131,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         private final class InlineImageHoverPreviewViewController: NSViewController {
             private let imageView = NSImageView()
             private let spinner = NSProgressIndicator()
-            private let hintLabel = NSTextField(labelWithString: "Double-click to open Image Browser")
+            private let hintLabel = NSTextField(labelWithString: "Click to open Image Browser")
             private let errorLabel = NSTextField(labelWithString: "")
             private let labelsStack = NSStackView()
 
@@ -2968,64 +2968,75 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     }
 
 	    final class TerminalTextView: NSTextView {
-		        weak var inlineImageCoordinator: Coordinator?
+	        weak var inlineImageCoordinator: Coordinator?
 
-		        private var mouseDownLocationInWindow: NSPoint? = nil
-		        private var selectionAtMouseDown: NSRange = NSRange(location: 0, length: 0)
-		        private var hoverTrackingArea: NSTrackingArea? = nil
-		
-		        private func inlineImageHitCharacterIndex(at point: NSPoint) -> Int? {
-		            guard let ts = textStorage, ts.length > 0 else { return nil }
-		            guard let lm = layoutManager, let tc = textContainer else { return nil }
+	        private var mouseDownLocationInWindow: NSPoint? = nil
+	        private var selectionAtMouseDown: NSRange = NSRange(location: 0, length: 0)
+	        private var hoverTrackingArea: NSTrackingArea? = nil
+	
+	        private func inlineImageHit(at point: NSPoint) -> (id: String, range: NSRange)? {
+	            guard let ts = textStorage, ts.length > 0 else { return nil }
+	            guard let lm = layoutManager, let tc = textContainer else { return nil }
 
-		            // Layout manager coordinates are in text-container space (not view space).
-		            let containerPoint = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
-		            let glyphIndex = lm.glyphIndex(for: containerPoint, in: tc, fractionOfDistanceThroughGlyph: nil)
-		            if glyphIndex == NSNotFound { return nil }
-		            let charIndex = lm.characterIndexForGlyph(at: glyphIndex)
-		            guard charIndex != NSNotFound else { return nil }
+	            // Layout manager coordinates are in text-container space (not view space).
+	            let containerPoint = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
 
-		            // Clamp to valid character range.
-		            return max(0, min(ts.length - 1, charIndex))
-		        }
+	            let idx = lm.characterIndex(for: containerPoint, in: tc, fractionOfDistanceBetweenInsertionPoints: nil)
+	            guard idx != NSNotFound else { return nil }
 
-		        private func inlineImageID(at point: NSPoint) -> String? {
-		            guard let ts = textStorage, ts.length > 0 else { return nil }
-		            guard let idx = inlineImageHitCharacterIndex(at: point) else { return nil }
-		
-		            let candidates = [idx, idx - 1, idx + 1]
-		            for c in candidates where c >= 0 && c < ts.length {
-		                if let id = ts.attribute(Coordinator.inlineImageIDKey, at: c, effectiveRange: nil) as? String {
-	                    return id
+	            func matchAt(_ c: Int) -> (id: String, range: NSRange)? {
+	                guard c >= 0 && c < ts.length else { return nil }
+	                var effectiveRange = NSRange(location: NSNotFound, length: 0)
+	                guard let id = ts.attribute(Coordinator.inlineImageIDKey, at: c, effectiveRange: &effectiveRange) as? String,
+	                      effectiveRange.location != NSNotFound else { return nil }
+	                let glyphs = lm.glyphRange(forCharacterRange: effectiveRange, actualCharacterRange: nil)
+	                var rect = lm.boundingRect(forGlyphRange: glyphs, in: tc)
+	                rect = rect.insetBy(dx: -4, dy: -4)
+	                guard rect.contains(containerPoint) else { return nil }
+	                return (id, effectiveRange)
+	            }
+
+	            // Prefer direct point->character mapping, but allow small index drift around attachments.
+	            if let hit = matchAt(idx) ?? matchAt(idx - 1) ?? matchAt(idx + 1) {
+	                return hit
+	            }
+
+	            // Fallback: scan a small neighborhood and use bounding boxes for confirmation.
+	            let start = max(0, idx - 8)
+	            let end = min(ts.length, idx + 8)
+	            let scan = NSRange(location: start, length: max(0, end - start))
+	            if scan.length == 0 { return nil }
+
+	            var found: (id: String, range: NSRange)? = nil
+	            ts.enumerateAttribute(Coordinator.inlineImageIDKey, in: scan, options: []) { value, range, stop in
+	                guard let id = value as? String else { return }
+	                let glyphs = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+	                var rect = lm.boundingRect(forGlyphRange: glyphs, in: tc)
+	                rect = rect.insetBy(dx: -4, dy: -4)
+	                if rect.contains(containerPoint) {
+	                    found = (id, range)
+	                    stop.pointee = true
 	                }
 	            }
-	            return nil
+	            return found
+	        }
+
+	        private func inlineImageID(at point: NSPoint) -> String? {
+	            inlineImageHit(at: point)?.id
 	        }
 	
-		        private func inlineImageIDWithEffectiveRange(at point: NSPoint) -> (id: String, range: NSRange)? {
-		            guard let ts = textStorage, ts.length > 0 else { return nil }
-		            guard let idx = inlineImageHitCharacterIndex(at: point) else { return nil }
-		
-		            let candidates = [idx, idx - 1, idx + 1]
-		            for c in candidates where c >= 0 && c < ts.length {
-		                var effectiveRange = NSRange(location: NSNotFound, length: 0)
-		                if let id = ts.attribute(Coordinator.inlineImageIDKey, at: c, effectiveRange: &effectiveRange) as? String,
-	                   effectiveRange.location != NSNotFound {
-	                    return (id, effectiveRange)
-	                }
-	            }
-	            return nil
+	        private func inlineImageIDWithEffectiveRange(at point: NSPoint) -> (id: String, range: NSRange)? {
+	            inlineImageHit(at: point)
 	        }
 
 	        override func mouseDown(with event: NSEvent) {
+	            let handledModifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
 	            if event.type == .leftMouseDown,
-	               event.clickCount >= 2,
-	               !event.modifierFlags.contains(.command),
-	               !event.modifierFlags.contains(.control),
-	               !event.modifierFlags.contains(.option) {
+	               handledModifiers.isEmpty {
 	                let point = convert(event.locationInWindow, from: nil)
 	                if let id = inlineImageID(at: point) {
 	                    Task { @MainActor in
+	                        // Single click opens the Image Browser for the current session and selects this image.
 	                        inlineImageCoordinator?.handleInlineImageDoubleClick(id: id)
 	                    }
 	                    return
