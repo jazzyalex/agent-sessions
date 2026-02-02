@@ -471,7 +471,10 @@ struct CodexSessionImagesGalleryView: View {
                 Button {
                     viewModel.selectedSources = Set(viewModel.availableSources)
                 } label: {
-                    Label("All Agents", systemImage: viewModel.selectedSources.count == viewModel.availableSources.count ? "checkmark.square" : "square")
+                    agentMenuCheckboxRow(
+                        title: "All Agents",
+                        isOn: viewModel.selectedSources.count == viewModel.availableSources.count
+                    )
                 }
 
                 if !viewModel.availableSources.isEmpty {
@@ -482,7 +485,7 @@ struct CodexSessionImagesGalleryView: View {
                     Button {
                         toggleAgent(source)
                     } label: {
-                        Label(source.displayName, systemImage: viewModel.selectedSources.contains(source) ? "checkmark.square" : "square")
+                        agentMenuCheckboxRow(title: source.displayName, isOn: viewModel.selectedSources.contains(source))
                     }
                 }
             } label: {
@@ -498,6 +501,15 @@ struct CodexSessionImagesGalleryView: View {
             }
             .controlSize(.small)
             .buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    private func agentMenuCheckboxRow(title: String, isOn: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                .foregroundStyle(isOn ? Color.accentColor : .secondary)
+            Text(title)
         }
     }
 
