@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - Image Browser: Double-click opens the selected image in Preview; Space opens Quick Look.
 - Image Browser: Now supports Claude Code sessions.
 - Image Browser: Added Project and Agent filters, a larger preview pane, and user prompt context for each image.
+- Image Browser: Caches image indexes and thumbnails for faster open and to avoid reprocessing previously seen sessions.
 
 ### Changed
 

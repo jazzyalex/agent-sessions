@@ -8,21 +8,22 @@ final class CodexImagesWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var hostingView: AppearanceHostingView?
     private var currentSession: Session?
+    private let viewModel = ImageBrowserViewModel()
     private var distributedObserver: NSObjectProtocol?
     private var defaultsObserver: NSObjectProtocol?
     private var lastAppAppearanceRaw: String = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
 
     func show(session: Session, allSessions: [Session]) {
         currentSession = session
-        let wrapped = AnyView(
-            CodexImagesWindowRoot(seedSession: session, allSessions: allSessions)
-        )
+        viewModel.updateSessions(allSessions: allSessions, seedSession: session)
+        let wrapped = AnyView(CodexImagesWindowRoot(viewModel: viewModel))
 
         if let win = window, let hv = hostingView {
             hv.rootView = wrapped
             applyAppearance(forceRedraw: true)
             win.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+            viewModel.markWindowShown()
             return
         }
 
@@ -56,6 +57,7 @@ final class CodexImagesWindowController: NSObject, NSWindowDelegate {
         applyAppearance(forceRedraw: false)
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        viewModel.markWindowShown()
 
         distributedObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
@@ -96,13 +98,11 @@ final class CodexImagesWindowController: NSObject, NSWindowDelegate {
 }
 
 private struct CodexImagesWindowRoot: View {
-    let seedSession: Session
-    let allSessions: [Session]
+    @ObservedObject var viewModel: ImageBrowserViewModel
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     var body: some View {
-        let content = CodexSessionImagesGalleryView(seedSession: seedSession, allSessions: allSessions)
-            .id("CodexImagesSeed-\(seedSession.id)")
+        let content = CodexSessionImagesGalleryView(viewModel: viewModel)
 
         let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
         Group {

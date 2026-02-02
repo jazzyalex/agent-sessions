@@ -326,15 +326,9 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
 }
 
 struct CodexSessionImagesGalleryView: View {
-    let seedSession: Session
-    let allSessions: [Session]
+    @ObservedObject var viewModel: ImageBrowserViewModel
 
-    @StateObject private var model = CodexSessionImagesGalleryModel()
-
-    @State private var selectedItemID: String? = nil
     @State private var pendingSelectedItemID: String? = nil
-    @State private var selectedProject: String? = nil // nil means "All Projects"
-    @State private var selectedSources: Set<SessionSource> = []
 
     @State private var isPreviewLoading: Bool = false
     @State private var previewImage: NSImage? = nil
@@ -347,9 +341,8 @@ struct CodexSessionImagesGalleryView: View {
     @State private var saveTask: Task<Void, Never>? = nil
     @State private var activeSaveToken: UUID? = nil
 
-    init(seedSession: Session, allSessions: [Session]) {
-        self.seedSession = seedSession
-        self.allSessions = allSessions
+    init(viewModel: ImageBrowserViewModel) {
+        self.viewModel = viewModel
     }
 
     var body: some View {
@@ -367,47 +360,37 @@ struct CodexSessionImagesGalleryView: View {
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
         }
-        .onAppear { ensureFiltersInitialized(); reload() }
-        .onChange(of: selectedProject) { _, _ in reload() }
-        .onChange(of: selectedSources) { _, _ in reload() }
-        .onChange(of: model.items) { _, newValue in
+        .onAppear { viewModel.markWindowShown() }
+        .onChange(of: viewModel.selectedProject) { _, _ in viewModel.onFiltersChanged() }
+        .onChange(of: viewModel.selectedSources) { _, _ in viewModel.onFiltersChanged() }
+        .onChange(of: viewModel.items) { _, newValue in
             if let pendingSelectedItemID, newValue.contains(where: { $0.id == pendingSelectedItemID }) {
-                selectedItemID = pendingSelectedItemID
+                viewModel.selectedItemID = pendingSelectedItemID
                 self.pendingSelectedItemID = nil
             }
 
-            guard let selectedItemID else { return }
-            if !newValue.contains(where: { $0.id == selectedItemID }) {
-                self.selectedItemID = nil
+            if let selectedItemID = viewModel.selectedItemID, !newValue.contains(where: { $0.id == selectedItemID }) {
+                viewModel.selectedItemID = nil
             }
 
-            if self.selectedItemID == nil, let first = newValue.first {
-                self.selectedItemID = first.id
+            if viewModel.selectedItemID == nil, let first = newValue.first {
+                viewModel.selectedItemID = first.id
             }
         }
-        .task(id: selectedItemID) { await loadDetail() }
+        .task(id: viewModel.selectedItemID) { await loadDetail() }
         .onReceive(NotificationCenter.default.publisher(for: .selectImagesBrowserItem)) { n in
-            guard let sid = n.object as? String, sid == seedSession.id else { return }
+            guard let sid = n.object as? String, sid == viewModel.seedSessionID else { return }
             guard let requested = n.userInfo?["selectedItemID"] as? String else { return }
-            let forceScope = n.userInfo?["forceScope"] as? String
 
             pendingSelectedItemID = requested
-            if model.items.contains(where: { $0.id == requested }) {
-                selectedItemID = requested
+            if viewModel.items.contains(where: { $0.id == requested }) {
+                viewModel.selectedItemID = requested
                 pendingSelectedItemID = nil
                 return
             }
-
-            if forceScope == CodexImagesScope.singleSession.rawValue {
-                // When jumping from an inline image click, bias filters toward the originating session.
-                if let project = seedSession.repoName, !project.isEmpty {
-                    selectedProject = project
-                }
-                selectedSources = [seedSession.source]
-            }
         }
         .onDisappear {
-            model.cancelLoad()
+            viewModel.cancelBackgroundWork()
             saveTask?.cancel()
             saveTask = nil
             activeSaveToken = nil
@@ -421,7 +404,7 @@ struct CodexSessionImagesGalleryView: View {
 
             Spacer()
 
-            Text("\(model.items.count) image\(model.items.count == 1 ? "" : "s")")
+            Text("\(viewModel.items.count) image\(viewModel.items.count == 1 ? "" : "s")")
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
@@ -438,24 +421,24 @@ struct CodexSessionImagesGalleryView: View {
 
             Menu {
                 Button {
-                    selectedProject = nil
+                    viewModel.selectedProject = nil
                 } label: {
-                    if selectedProject == nil {
+                    if viewModel.selectedProject == nil {
                         Label("All Projects", systemImage: "checkmark")
                     } else {
                         Text("All Projects")
                     }
                 }
 
-                if !availableProjects.isEmpty {
+                if !viewModel.availableProjects.isEmpty {
                     Divider()
                 }
 
-                ForEach(availableProjects, id: \.self) { project in
+                ForEach(viewModel.availableProjects, id: \.self) { project in
                     Button {
-                        selectedProject = project
+                        viewModel.selectedProject = project
                     } label: {
-                        if selectedProject == project {
+                        if viewModel.selectedProject == project {
                             Label(project, systemImage: "checkmark")
                         } else {
                             Text(project)
@@ -464,7 +447,7 @@ struct CodexSessionImagesGalleryView: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    Text(selectedProject ?? "All Projects")
+                    Text(viewModel.selectedProject ?? "All Projects")
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Image(systemName: "chevron.down")
@@ -486,20 +469,20 @@ struct CodexSessionImagesGalleryView: View {
 
             Menu {
                 Button {
-                    selectedSources = Set(availableSources)
+                    viewModel.selectedSources = Set(viewModel.availableSources)
                 } label: {
-                    Label("All Agents", systemImage: selectedSources.count == availableSources.count ? "checkmark.square" : "square")
+                    Label("All Agents", systemImage: viewModel.selectedSources.count == viewModel.availableSources.count ? "checkmark.square" : "square")
                 }
 
-                if !availableSources.isEmpty {
+                if !viewModel.availableSources.isEmpty {
                     Divider()
                 }
 
-                ForEach(availableSources, id: \.self) { source in
+                ForEach(viewModel.availableSources, id: \.self) { source in
                     Button {
                         toggleAgent(source)
                     } label: {
-                        Label(source.displayName, systemImage: selectedSources.contains(source) ? "checkmark.square" : "square")
+                        Label(source.displayName, systemImage: viewModel.selectedSources.contains(source) ? "checkmark.square" : "square")
                     }
                 }
             } label: {
@@ -519,19 +502,20 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private var agentMenuTitle: String {
-        let all = Set(availableSources)
-        if selectedSources == all { return "All Agents" }
-        if selectedSources.count == 1, let one = selectedSources.first { return one.displayName }
-        if selectedSources.isEmpty { return "No Agents" }
-        return "\(selectedSources.count) selected"
+        let all = Set(viewModel.availableSources)
+        let selected = viewModel.selectedSources
+        if selected == all { return "All Agents" }
+        if selected.count == 1, let one = selected.first { return one.displayName }
+        if selected.isEmpty { return "No Agents" }
+        return "\(selected.count) selected"
     }
 
     private func toggleAgent(_ source: SessionSource) {
-        if selectedSources.contains(source) {
-            if selectedSources.count <= 1 { return }
-            selectedSources.remove(source)
+        if viewModel.selectedSources.contains(source) {
+            if viewModel.selectedSources.count <= 1 { return }
+            viewModel.selectedSources.remove(source)
         } else {
-            selectedSources.insert(source)
+            viewModel.selectedSources.insert(source)
         }
     }
 
@@ -551,9 +535,9 @@ struct CodexSessionImagesGalleryView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch model.state {
-        case .idle, .loading:
-            if model.items.isEmpty {
+        switch viewModel.state {
+        case .idle, .loadingSelected:
+            if viewModel.items.isEmpty {
                 VStack(spacing: 12) {
                     ProgressView()
                     Text(loadingStatusText)
@@ -574,22 +558,11 @@ struct CodexSessionImagesGalleryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(NSColor.textBackgroundColor))
 
-        case .loaded:
-            if model.items.isEmpty {
-                if model.totalDataURLsFound == 0 {
-                    ContentUnavailableView("No images found", systemImage: "photo")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(NSColor.textBackgroundColor))
-                } else {
-                    VStack(spacing: 12) {
-                        ContentUnavailableView("No previewable images", systemImage: "photo")
-                        Text("These filters contain images, but none could be previewed here.")
-                            .font(.system(size: 12, weight: .regular, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
+        case .indexingBackground, .loaded:
+            if viewModel.items.isEmpty {
+                ContentUnavailableView("No images found", systemImage: "photo")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(NSColor.textBackgroundColor))
-                }
             } else {
                 HSplitView {
                     thumbnailsPane
@@ -604,13 +577,13 @@ struct CodexSessionImagesGalleryView: View {
         let todayStart = calendar.startOfDay(for: Date())
         let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart) ?? todayStart
 
-        let sorted = model.items.sorted { a, b in
+        let sorted = viewModel.items.sorted { a, b in
             if a.sessionModifiedAt != b.sessionModifiedAt { return a.sessionModifiedAt > b.sessionModifiedAt }
             if a.sessionID != b.sessionID { return a.sessionID > b.sessionID }
             return a.span.startOffset > b.span.startOffset
         }
 
-        var buckets: [Date: [CodexSessionImageItem]] = [:]
+        var buckets: [Date: [ImageBrowserViewModel.Item]] = [:]
         for item in sorted {
             let day = calendar.startOfDay(for: item.sessionModifiedAt)
             buckets[day, default: []].append(item)
@@ -633,13 +606,16 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private var loadingStatusText: String {
-        if model.totalSessionsToScan > 0 {
-            let total = model.totalSessionsToScan
-            let completed = min(model.scannedSessions, total)
-            if completed >= total { return "Finalizing scan…" }
-            return "Scanning \(completed)/\(total) sessions for images…"
+        switch viewModel.state {
+        case .loadingSelected:
+            return "Indexing selected session…"
+        case .indexingBackground:
+            return "Indexing images…"
+        case .failed:
+            return "Index failed."
+        case .idle, .loaded:
+            return "Ready"
         }
-        return "Scanning sessions for images…"
     }
 
     private var thumbnailsPane: some View {
@@ -655,10 +631,10 @@ struct CodexSessionImagesGalleryView: View {
                         LazyVGrid(columns: gridColumns, spacing: 12) {
                             ForEach(group.items, id: \.id) { item in
                                 CodexImageThumbnailCard(
-                                    model: model,
+                                    viewModel: viewModel,
                                     item: item,
-                                    isSelected: item.id == selectedItemID,
-                                    onSelect: { selectedItemID = item.id },
+                                    isSelected: item.id == viewModel.selectedItemID,
+                                    onSelect: { viewModel.selectedItemID = item.id },
                                     onDoubleClick: { openInPreview(item: item) }
                                 )
                             }
@@ -667,7 +643,7 @@ struct CodexSessionImagesGalleryView: View {
                 }
                 .padding(12)
             }
-            .onChange(of: selectedItemID) { _, newValue in
+            .onChange(of: viewModel.selectedItemID) { _, newValue in
                 guard let newValue else { return }
                 DispatchQueue.main.async {
                     proxy.scrollTo(newValue, anchor: .center)
@@ -785,15 +761,15 @@ struct CodexSessionImagesGalleryView: View {
         .background(Color(NSColor.textBackgroundColor))
     }
 
-    private var selectedItem: CodexSessionImageItem? {
-        guard let selectedItemID else { return nil }
-        return model.items.first(where: { $0.id == selectedItemID })
+    private var selectedItem: ImageBrowserViewModel.Item? {
+        guard let selectedItemID = viewModel.selectedItemID else { return nil }
+        return viewModel.items.first(where: { $0.id == selectedItemID })
     }
 
     private struct DateGroup: Identifiable, Hashable {
         let id: String
         let title: String
-        let items: [CodexSessionImageItem]
+        let items: [ImageBrowserViewModel.Item]
     }
 
     private var gridColumns: [GridItem] {
@@ -802,61 +778,6 @@ struct CodexSessionImagesGalleryView: View {
             GridItem(.flexible(minimum: 140, maximum: 240), spacing: 12),
             GridItem(.flexible(minimum: 140, maximum: 240), spacing: 12)
         ]
-    }
-
-    private var availableProjects: [String] {
-        let projects = allSessions.compactMap { $0.repoName?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return Array(Set(projects)).sorted()
-    }
-
-    private var availableSources: [SessionSource] {
-        let sources = Set(allSessions.map(\.source))
-        return SessionSource.allCases.filter { sources.contains($0) }
-    }
-
-    private func ensureFiltersInitialized() {
-        if selectedSources.isEmpty {
-            selectedSources = Set(availableSources)
-        } else {
-            selectedSources = selectedSources.intersection(Set(availableSources))
-        }
-        if selectedProject != nil, !availableProjects.contains(selectedProject ?? "") {
-            selectedProject = nil
-        }
-    }
-
-    private var sessionsToScan: [Session] {
-        let trimmedProject = selectedProject?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let projectFilter = (trimmedProject?.isEmpty == false) ? trimmedProject : nil
-
-        return allSessions
-            .filter { session in
-                if let projectFilter {
-                    return session.repoName == projectFilter
-                }
-                return true
-            }
-            .filter { selectedSources.contains($0.source) }
-            .sorted(by: { $0.modifiedAt > $1.modifiedAt })
-    }
-
-    private var effectiveItemLimit: Int {
-        if selectedProject == nil { return 2000 }
-        return 1200
-    }
-
-    private func reload() {
-        ensureFiltersInitialized()
-        model.load(sessions: sessionsToScan, itemLimit: effectiveItemLimit)
-    }
-
-    private func closeWindow() {
-        model.cancelLoad()
-        saveTask?.cancel()
-        saveTask = nil
-        activeSaveToken = nil
-        NSApp.keyWindow?.performClose(nil)
     }
 
     private func loadDetail() async {
@@ -870,7 +791,7 @@ struct CodexSessionImagesGalleryView: View {
 
         let url = item.sessionFileURL
         let span = item.span
-        let maxDecodedBytes = model.maxDecodedBytes
+        let maxDecodedBytes = 25 * 1024 * 1024
         let previewMaxPixelSize = 3600
         let itemID = item.id
 
@@ -903,7 +824,7 @@ struct CodexSessionImagesGalleryView: View {
         let previewValue = await preview
 
         guard !Task.isCancelled else { return }
-        guard selectedItemID == itemID else { return }
+        guard viewModel.selectedItemID == itemID else { return }
 
         isPreviewLoading = false
         previewImage = previewValue.0
@@ -912,25 +833,13 @@ struct CodexSessionImagesGalleryView: View {
         promptText = promptValue
     }
 
-    private func loadPromptText(item: CodexSessionImageItem) async -> String? {
+    private func loadPromptText(item: ImageBrowserViewModel.Item) async -> String? {
         if Task.isCancelled { return nil }
-        if let session = allSessions.first(where: { $0.id == item.sessionID }),
-           !session.events.isEmpty,
-           session.events.indices.contains(item.lineIndex),
-           session.events[item.lineIndex].kind == .user,
-           let text = session.events[item.lineIndex].text?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !text.isEmpty {
-            return text
-        }
-
+        if let fromLoaded = viewModel.loadedUserPromptText(for: item) { return fromLoaded }
         return ImageAttachmentPromptContextExtractor.extractPromptText(url: item.sessionFileURL, span: item.span)
     }
 
-    private func itemTooltip(_ item: CodexSessionImageItem) -> String {
-        "\(item.sessionTitle)\n\(AppDateFormatting.dateTimeMedium(item.sessionModifiedAt))"
-    }
-
-    private func navigateToSession(item: CodexSessionImageItem) {
+    private func navigateToSession(item: ImageBrowserViewModel.Item) {
         NotificationCenter.default.post(
             name: .navigateToSessionFromImages,
             object: item.sessionID,
@@ -938,10 +847,10 @@ struct CodexSessionImagesGalleryView: View {
         )
     }
 
-    private func copyImage(item: CodexSessionImageItem) {
+    private func copyImage(item: ImageBrowserViewModel.Item) {
         let url = item.sessionFileURL
         let span = item.span
-        let maxDecodedBytes = model.maxDecodedBytes
+        let maxDecodedBytes = 25 * 1024 * 1024
         Task(priority: .userInitiated) {
             do {
                 let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
@@ -964,10 +873,10 @@ struct CodexSessionImagesGalleryView: View {
         }
     }
 
-    private func copyImagePath(item: CodexSessionImageItem) {
+    private func copyImagePath(item: ImageBrowserViewModel.Item) {
         let url = item.sessionFileURL
         let span = item.span
-        let maxDecodedBytes = model.maxDecodedBytes
+        let maxDecodedBytes = 25 * 1024 * 1024
         Task(priority: .userInitiated) {
             do {
                 let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
@@ -986,10 +895,10 @@ struct CodexSessionImagesGalleryView: View {
         }
     }
 
-    private func openInPreview(item: CodexSessionImageItem) {
+    private func openInPreview(item: ImageBrowserViewModel.Item) {
         let url = item.sessionFileURL
         let span = item.span
-        let maxDecodedBytes = model.maxDecodedBytes
+        let maxDecodedBytes = 25 * 1024 * 1024
         Task(priority: .userInitiated) {
             do {
                 let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
@@ -1010,10 +919,10 @@ struct CodexSessionImagesGalleryView: View {
         quickLook(item: item)
     }
 
-    private func quickLook(item: CodexSessionImageItem) {
+    private func quickLook(item: ImageBrowserViewModel.Item) {
         let url = item.sessionFileURL
         let span = item.span
-        let maxDecodedBytes = model.maxDecodedBytes
+        let maxDecodedBytes = 25 * 1024 * 1024
         Task(priority: .userInitiated) {
             do {
                 let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
@@ -1029,7 +938,7 @@ struct CodexSessionImagesGalleryView: View {
         }
     }
 
-    private func writeClipboardImageFile(item: CodexSessionImageItem, data: Data) throws -> URL {
+    private func writeClipboardImageFile(item: ImageBrowserViewModel.Item, data: Data) throws -> URL {
         let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.span.mediaType)
         let tempRoot = FileManager.default.temporaryDirectory
         let dir = tempRoot.appendingPathComponent("AgentSessions/ImageClipboard", isDirectory: true)
@@ -1040,7 +949,7 @@ struct CodexSessionImagesGalleryView: View {
         return destination
     }
 
-    private func writePreviewImageFile(item: CodexSessionImageItem, data: Data) throws -> URL {
+    private func writePreviewImageFile(item: ImageBrowserViewModel.Item, data: Data) throws -> URL {
         let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.span.mediaType)
         let tempRoot = FileManager.default.temporaryDirectory
         let dir = tempRoot.appendingPathComponent("AgentSessions/ImagesGalleryPreview", isDirectory: true)
@@ -1062,7 +971,7 @@ struct CodexSessionImagesGalleryView: View {
         NSWorkspace.shared.open([url], withApplicationAt: previewURL, configuration: config, completionHandler: nil)
     }
 
-    private func saveWithPanel(item: CodexSessionImageItem) {
+    private func saveWithPanel(item: ImageBrowserViewModel.Item) {
         let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.span.mediaType)
         let utType = CodexSessionImagePayload.suggestedUTType(for: item.span.mediaType)
 
@@ -1075,7 +984,7 @@ struct CodexSessionImagesGalleryView: View {
         let destinationKeyWindow = NSApp.keyWindow
         let destinationURL = item.sessionFileURL
         let span = item.span
-        let maxDecodedBytes = model.maxDecodedBytes
+        let maxDecodedBytes = 25 * 1024 * 1024
         let token = UUID()
 
         let onComplete: (NSApplication.ModalResponse) -> Void = { response in
@@ -1095,7 +1004,7 @@ struct CodexSessionImagesGalleryView: View {
         }
     }
 
-    private func saveToDownloads(item: CodexSessionImageItem) {
+    private func saveToDownloads(item: ImageBrowserViewModel.Item) {
         guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else {
             saveStatus = "Downloads folder not found."
             return
@@ -1110,7 +1019,7 @@ struct CodexSessionImagesGalleryView: View {
                   destination: destination,
                   sourceURL: item.sessionFileURL,
                   span: item.span,
-                  maxDecodedBytes: model.maxDecodedBytes,
+                  maxDecodedBytes: 25 * 1024 * 1024,
                   successStatus: "Saved to Downloads.")
     }
 
@@ -1169,7 +1078,7 @@ struct CodexSessionImagesGalleryView: View {
         }
     }
 
-    private func suggestedFileName(for item: CodexSessionImageItem, ext: String) -> String {
+    private func suggestedFileName(for item: ImageBrowserViewModel.Item, ext: String) -> String {
         let shortID = String(item.sessionID.prefix(6))
         return "image-\(shortID)-\(item.sessionImageIndex).\(ext)"
     }
@@ -1209,8 +1118,8 @@ private struct TimeframeDivider: View {
 }
 
 private struct CodexImageThumbnailCard: View {
-    @ObservedObject var model: CodexSessionImagesGalleryModel
-    let item: CodexSessionImageItem
+    @ObservedObject var viewModel: ImageBrowserViewModel
+    let item: ImageBrowserViewModel.Item
     let isSelected: Bool
     let onSelect: () -> Void
     let onDoubleClick: () -> Void
@@ -1226,7 +1135,7 @@ private struct CodexImageThumbnailCard: View {
                                     lineWidth: isSelected ? 2 : 1)
                     )
 
-                if let img = model.thumbnails[item.id] {
+                if let img = viewModel.thumbnails[item.id] {
                     Image(nsImage: img)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -1239,7 +1148,7 @@ private struct CodexImageThumbnailCard: View {
             }
             .frame(height: 160)
 
-            Text(ByteCountFormatter.string(fromByteCount: Int64(item.span.approxBytes), countStyle: .file))
+            Text(item.approxSizeText)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
@@ -1253,6 +1162,6 @@ private struct CodexImageThumbnailCard: View {
         .onTapGesture {
             onSelect()
         }
-        .onAppear { model.requestThumbnail(for: item) }
+        .onAppear { viewModel.requestThumbnail(for: item) }
     }
 }
