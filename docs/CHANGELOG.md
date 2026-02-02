@@ -21,8 +21,10 @@ All notable changes to this project will be documented in this file.
 - Session view: Inline image thumbnails now support hover popover previews and click open in the Image Browser (auto-selecting the clicked image); the inline thumbnail context menu includes Open in Preview and omits Navigate to Session.
 - Session view: Added an Images toolbar pill to toggle inline images and jump between prompts that contain images.
 - Session view: Inline image thumbnails now support Claude Code sessions.
+- Session view: Inline image thumbnails now support OpenCode sessions.
 - Image Browser: Double-click opens the selected image in Preview; Space opens Quick Look.
 - Image Browser: Now supports Claude Code sessions.
+- Image Browser: Now supports OpenCode sessions.
 - Image Browser: Added Project and Agent filters, a larger preview pane, and user prompt context for each image.
 - Image Browser: Caches image indexes and thumbnails for faster open and to avoid reprocessing previously seen sessions.
 

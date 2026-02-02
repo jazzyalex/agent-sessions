@@ -836,6 +836,7 @@ struct CodexSessionImagesGalleryView: View {
     private func loadPromptText(item: ImageBrowserViewModel.Item) async -> String? {
         if Task.isCancelled { return nil }
         if let fromLoaded = viewModel.loadedUserPromptText(for: item) { return fromLoaded }
+        guard item.sessionSource == .codex || item.sessionSource == .claude else { return nil }
         return ImageAttachmentPromptContextExtractor.extractPromptText(url: item.sessionFileURL, span: item.span)
     }
 

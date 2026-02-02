@@ -10,9 +10,22 @@ struct ImageBrowserStoredSpan: Codable, Hashable, Sendable {
     let lineIndex: Int
 }
 
+struct ImageBrowserStoredOpenCodeImage: Codable, Hashable, Sendable {
+    let messageID: String
+    let partFilePath: String
+    let startOffset: UInt64
+    let endOffset: UInt64
+    let mediaType: String
+    let base64PayloadOffset: UInt64
+    let base64PayloadLength: Int
+    let approxBytes: Int
+    let fileLineIndex: Int
+}
+
 struct ImageBrowserStoredIndex: Codable, Sendable {
     let signature: ImageBrowserFileSignature
     let spans: [ImageBrowserStoredSpan]
+    let openCodeImages: [ImageBrowserStoredOpenCodeImage]?
     let createdAtUnixSeconds: Int64
 }
 
@@ -53,51 +66,93 @@ actor ImageBrowserIndexCache {
         let signature = fileSignature(forPath: session.filePath) ?? ImageBrowserFileSignature(filePath: session.filePath, fileSizeBytes: 0, modifiedAtUnixSeconds: 0)
         let url = URL(fileURLWithPath: session.filePath)
 
-        let located: [Base64ImageDataURLScanner.LocatedSpan] = {
-            do {
-                switch session.source {
-                case .codex:
-                    return try Base64ImageDataURLScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
-                case .claude:
-                    return try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
-                default:
+        let createdAt = Int64(Date().timeIntervalSince1970)
+
+        switch session.source {
+        case .codex, .claude:
+            let located: [Base64ImageDataURLScanner.LocatedSpan] = {
+                do {
+                    switch session.source {
+                    case .codex:
+                        return try Base64ImageDataURLScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
+                    case .claude:
+                        return try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
+                    default:
+                        return []
+                    }
+                } catch {
                     return []
                 }
-            } catch {
-                return []
-            }
-        }()
+            }()
 
-        let filtered: [Base64ImageDataURLScanner.LocatedSpan] = located.filter { item in
-            if shouldCancel() { return false }
-            let span = item.span
-            guard span.base64PayloadLength >= 64, span.approxBytes >= 32 else { return false }
-            switch session.source {
-            case .codex:
-                return Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: span.startOffset)
-            case .claude:
-                return true
-            default:
-                return false
+            let filtered: [Base64ImageDataURLScanner.LocatedSpan] = located.filter { item in
+                if shouldCancel() { return false }
+                let span = item.span
+                guard span.base64PayloadLength >= 64, span.approxBytes >= 32 else { return false }
+                switch session.source {
+                case .codex:
+                    return Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: span.startOffset)
+                case .claude:
+                    return true
+                default:
+                    return false
+                }
             }
+
+            let spans: [ImageBrowserStoredSpan] = filtered.map { item in
+                let span = item.span
+                return ImageBrowserStoredSpan(
+                    startOffset: span.startOffset,
+                    endOffset: span.endOffset,
+                    mediaType: span.mediaType,
+                    base64PayloadOffset: span.base64PayloadOffset,
+                    base64PayloadLength: span.base64PayloadLength,
+                    approxBytes: span.approxBytes,
+                    lineIndex: item.lineIndex
+                )
+            }
+
+            let built = ImageBrowserStoredIndex(signature: signature, spans: spans, openCodeImages: nil, createdAtUnixSeconds: createdAt)
+            saveIndex(built, forPath: session.filePath)
+            return built
+
+        case .opencode:
+            let messageIDs = Array(Set(session.events.compactMap(\.messageID)).filter { $0.hasPrefix("msg_") }).sorted()
+            let located: [OpenCodeBase64ImageScanner.LocatedSpan] = {
+                do {
+                    return try OpenCodeBase64ImageScanner.scanSessionPartFiles(sessionFileURL: url,
+                                                                              messageIDs: messageIDs,
+                                                                              maxMatches: maxMatches,
+                                                                              shouldCancel: shouldCancel)
+                } catch {
+                    return []
+                }
+            }()
+
+            let images: [ImageBrowserStoredOpenCodeImage] = located.map { item in
+                ImageBrowserStoredOpenCodeImage(
+                    messageID: item.messageID,
+                    partFilePath: item.partFileURL.path,
+                    startOffset: item.span.startOffset,
+                    endOffset: item.span.endOffset,
+                    mediaType: item.span.mediaType,
+                    base64PayloadOffset: item.span.base64PayloadOffset,
+                    base64PayloadLength: item.span.base64PayloadLength,
+                    approxBytes: item.span.approxBytes,
+                    fileLineIndex: item.fileLineIndex
+                )
+            }
+
+            let built = ImageBrowserStoredIndex(signature: signature, spans: [], openCodeImages: images, createdAtUnixSeconds: createdAt)
+            saveIndex(built, forPath: session.filePath)
+            return built
+
+        default:
+            let built = ImageBrowserStoredIndex(signature: signature, spans: [], openCodeImages: nil, createdAtUnixSeconds: createdAt)
+            saveIndex(built, forPath: session.filePath)
+            return built
         }
 
-        let spans: [ImageBrowserStoredSpan] = filtered.map { item in
-            let span = item.span
-            return ImageBrowserStoredSpan(
-                startOffset: span.startOffset,
-                endOffset: span.endOffset,
-                mediaType: span.mediaType,
-                base64PayloadOffset: span.base64PayloadOffset,
-                base64PayloadLength: span.base64PayloadLength,
-                approxBytes: span.approxBytes,
-                lineIndex: item.lineIndex
-            )
-        }
-
-        let built = ImageBrowserStoredIndex(signature: signature, spans: spans, createdAtUnixSeconds: Int64(Date().timeIntervalSince1970))
-        saveIndex(built, forPath: session.filePath)
-        return built
     }
 
     func saveIndex(_ index: ImageBrowserStoredIndex, forPath filePath: String) {
@@ -120,7 +175,7 @@ actor ImageBrowserIndexCache {
 private extension ImageBrowserIndexCache {
     func emptyIndex(for session: Session) -> ImageBrowserStoredIndex {
         let sig = fileSignature(forPath: session.filePath) ?? ImageBrowserFileSignature(filePath: session.filePath, fileSizeBytes: 0, modifiedAtUnixSeconds: 0)
-        return ImageBrowserStoredIndex(signature: sig, spans: [], createdAtUnixSeconds: Int64(Date().timeIntervalSince1970))
+        return ImageBrowserStoredIndex(signature: sig, spans: [], openCodeImages: nil, createdAtUnixSeconds: Int64(Date().timeIntervalSince1970))
     }
 
     func fileSignature(forPath path: String) -> ImageBrowserFileSignature? {
@@ -143,4 +198,3 @@ private extension ImageBrowserIndexCache {
         return indexDir.appendingPathComponent("\(key).json", isDirectory: false)
     }
 }
-
