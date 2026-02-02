@@ -222,7 +222,7 @@ struct SessionTerminalView: View {
                 legendToggle(label: agentLegendLabel, role: .assistant)
                 legendToggle(label: "Tools", role: .tools)
                 legendToggle(label: "Errors", role: .errors)
-                if session.source == .codex, hasInlineImagesInSession {
+                if (session.source == .codex || session.source == .claude), hasInlineImagesInSession {
                     imagesPill()
                 }
             }
@@ -242,7 +242,10 @@ struct SessionTerminalView: View {
                     lines: filteredLines,
                     fontSize: CGFloat(transcriptFontSize),
                     sessionSource: session.source,
-                    inlineImagesEnabled: inlineSessionImageThumbnailsEnabled && hasInlineImagesInSession && session.source == .codex && inlineImagesVisibleInSession,
+                    inlineImagesEnabled: inlineSessionImageThumbnailsEnabled
+                        && hasInlineImagesInSession
+                        && (session.source == .codex || session.source == .claude)
+                        && inlineImagesVisibleInSession,
                     inlineImagesByUserBlockIndex: inlineImagesByUserBlockIndex,
                     inlineImagesSignature: effectiveInlineImagesSignature,
                     unifiedFindQuery: unifiedQuery,
@@ -283,7 +286,7 @@ struct SessionTerminalView: View {
             return
         }
 
-        guard session.source == .codex else {
+        guard session.source == .codex || session.source == .claude else {
             hasInlineImagesInSession = false
             inlineImagesByUserBlockIndex = [:]
             inlineImagesSignature = 0
@@ -297,18 +300,45 @@ struct SessionTerminalView: View {
             let outcome = await Task.detached(priority: .utility) { () -> (Bool, [Int: [InlineSessionImage]], Int) in
                 guard FileManager.default.fileExists(atPath: url.path) else { return (false, [:], 0) }
 
-                let hasAny = Base64ImageDataURLScanner.fileContainsBase64ImageDataURL(at: url, shouldCancel: { Task.isCancelled })
+                let hasAny: Bool = {
+                    switch sessionSnapshot.source {
+                    case .codex:
+                        return Base64ImageDataURLScanner.fileContainsBase64ImageDataURL(at: url, shouldCancel: { Task.isCancelled })
+                    case .claude:
+                        return ClaudeBase64ImageScanner.fileContainsUserBase64Image(at: url, shouldCancel: { Task.isCancelled })
+                    default:
+                        return false
+                    }
+                }()
                 guard hasAny, !Task.isCancelled else { return (hasAny, [:], 0) }
 
-                let located: [Base64ImageDataURLScanner.LocatedSpan]
-                do {
-                    located = try Base64ImageDataURLScanner.scanFileWithLineIndexes(at: url, maxMatches: 400, shouldCancel: { Task.isCancelled })
-                } catch {
-                    return (true, [:], 0)
-                }
-                let filtered = located.filter {
-                    Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: $0.span.startOffset)
-                }
+                let located: [Base64ImageDataURLScanner.LocatedSpan] = {
+                    do {
+                        switch sessionSnapshot.source {
+                        case .codex:
+                            return try Base64ImageDataURLScanner.scanFileWithLineIndexes(at: url, maxMatches: 400, shouldCancel: { Task.isCancelled })
+                        case .claude:
+                            return try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: 400, shouldCancel: { Task.isCancelled })
+                        default:
+                            return []
+                        }
+                    } catch {
+                        return []
+                    }
+                }()
+
+                let filtered: [Base64ImageDataURLScanner.LocatedSpan] = {
+                    switch sessionSnapshot.source {
+                    case .codex:
+                        return located.filter {
+                            Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: $0.span.startOffset)
+                        }
+                    case .claude:
+                        return located
+                    default:
+                        return []
+                    }
+                }()
                 guard !filtered.isEmpty, !Task.isCancelled else { return (false, [:], 0) }
 
                 let blocks = SessionTranscriptBuilder.coalescedBlocks(for: sessionSnapshot, includeMeta: false)
@@ -323,7 +353,7 @@ struct SessionTerminalView: View {
                 }
 
                 func isPreambleUserEventIndex(_ idx: Int) -> Bool {
-                    guard sessionSnapshot.source == .codex || sessionSnapshot.source == .droid else { return false }
+                    guard sessionSnapshot.source == .codex || sessionSnapshot.source == .droid || sessionSnapshot.source == .claude else { return false }
                     guard sessionSnapshot.events.indices.contains(idx) else { return false }
                     guard sessionSnapshot.events[idx].kind == .user else { return false }
                     return Session.isAgentsPreambleText(sessionSnapshot.events[idx].text ?? "")

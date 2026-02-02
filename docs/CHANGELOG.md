@@ -20,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - Preferences: Added a Session View toggle for “Show inline image thumbnails in Session view”.
 - Session view: Inline image thumbnails now support hover popover previews and click open in the Image Browser (auto-selecting the clicked image); the inline thumbnail context menu includes Open in Preview and omits Navigate to Session.
 - Session view: Added an Images toolbar pill to toggle inline images and jump between prompts that contain images.
+- Session view: Inline image thumbnails now support Claude Code sessions.
 - Image Browser: Double-click opens the selected image in Preview; Space opens Quick Look.
 
 ### Changed
