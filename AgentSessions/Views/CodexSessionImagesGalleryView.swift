@@ -119,9 +119,18 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
 
                         let spans: [Base64ImageDataURLScanner.Span]
                         do {
-                            spans = try Base64ImageDataURLScanner.scanFile(at: url,
-                                                                           maxMatches: maxPerSession,
-                                                                           shouldCancel: { Task.isCancelled })
+                            switch session.source {
+                            case .codex:
+                                spans = try Base64ImageDataURLScanner.scanFile(at: url,
+                                                                               maxMatches: maxPerSession,
+                                                                               shouldCancel: { Task.isCancelled })
+                            case .claude:
+                                spans = try ClaudeBase64ImageScanner
+                                    .scanFileWithLineIndexes(at: url, maxMatches: maxPerSession, shouldCancel: { Task.isCancelled })
+                                    .map(\.span)
+                            default:
+                                spans = []
+                            }
                         } catch {
                             scanned += 1
                             let scannedSnapshot = scanned
@@ -132,11 +141,21 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
                             continue
                         }
 
-                        let filtered = spans.filter { span in
-                            span.base64PayloadLength >= minPayloadLen &&
-                                span.approxBytes >= minBytes &&
-                                span.approxBytes <= maxDecodedBytes &&
-                                Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: span.startOffset)
+                        let filtered: [Base64ImageDataURLScanner.Span] = spans.filter { span in
+                            guard span.base64PayloadLength >= minPayloadLen,
+                                  span.approxBytes >= minBytes,
+                                  span.approxBytes <= maxDecodedBytes else {
+                                return false
+                            }
+
+                            switch session.source {
+                            case .codex:
+                                return Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: span.startOffset)
+                            case .claude:
+                                return true
+                            default:
+                                return false
+                            }
                         }
 
                         totalFound += filtered.count
@@ -257,8 +276,8 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
 
 struct CodexSessionImagesGalleryView: View {
     let seedSession: Session
+    let allSessions: [Session]
 
-    @EnvironmentObject private var indexer: SessionIndexer
     @StateObject private var model = CodexSessionImagesGalleryModel()
 
     @State private var scope: CodexImagesScope = .singleSession
@@ -274,8 +293,9 @@ struct CodexSessionImagesGalleryView: View {
     @State private var saveTask: Task<Void, Never>? = nil
     @State private var activeSaveToken: UUID? = nil
 
-    init(seedSession: Session) {
+    init(seedSession: Session, allSessions: [Session]) {
         self.seedSession = seedSession
+        self.allSessions = allSessions
     }
 
     var body: some View {
@@ -617,7 +637,7 @@ struct CodexSessionImagesGalleryView: View {
 
     private var projectSessions: [Session] {
         guard let project = seedSession.repoName, !project.isEmpty else { return [] }
-        let all = indexer.allSessions
+        let all = allSessions
         let filtered = all.filter { $0.repoName == project }
         return filtered.sorted(by: { $0.modifiedAt > $1.modifiedAt })
     }
@@ -811,7 +831,7 @@ struct CodexSessionImagesGalleryView: View {
 
     private func userPromptIndexForLineIndex(sessionID: String, lineIndex: Int) -> Int? {
         guard lineIndex >= 0 else { return nil }
-        guard let session = indexer.allSessions.first(where: { $0.id == sessionID }) else { return nil }
+        guard let session = allSessions.first(where: { $0.id == sessionID }) else { return nil }
         var userIndex: Int? = nil
         var seenUsers = 0
         for (idx, event) in session.events.enumerated() {

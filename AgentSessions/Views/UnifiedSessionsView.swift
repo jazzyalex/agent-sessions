@@ -289,11 +289,21 @@ struct UnifiedSessionsView: View {
 								DispatchQueue.main.async { programmaticSelectionUpdate = false }
 							}
 
-							guard let session = selectedSession, session.source == .codex else {
+							guard let session = selectedSession else {
 								NSSound.beep()
 								return
 							}
-							CodexImagesWindowController.shared.show(session: session, indexer: codexIndexer)
+							let allSessions: [Session]
+							switch session.source {
+							case .codex:
+								allSessions = codexIndexer.allSessions
+							case .claude:
+								allSessions = claudeIndexer.allSessions
+							default:
+								NSSound.beep()
+								return
+							}
+							CodexImagesWindowController.shared.show(session: session, allSessions: allSessions)
 
 							guard let requestedItemID else { return }
 							DispatchQueue.main.async {
@@ -849,7 +859,7 @@ struct UnifiedSessionsView: View {
             } action: {
                 showImagesForSelectedSession(showNoSelectionAlert: true)
             }
-            .disabled(selectedSession == nil || selectedSession?.source != .codex)
+            .disabled(selectedSession == nil || !((selectedSession?.source == .codex) || (selectedSession?.source == .claude)))
             .accessibilityLabel(Text("Image Browser"))
 
             if isGitInspectorEnabled {
@@ -890,8 +900,8 @@ struct UnifiedSessionsView: View {
         guard let session = selectedSession else {
             return "Show images for the selected session"
         }
-        if session.source != .codex {
-            return "Images are available for Codex sessions only"
+        if !(session.source == .codex || session.source == .claude) {
+            return "Images are available for Codex and Claude sessions only"
         }
         return "Show images for the selected session"
     }
@@ -923,11 +933,17 @@ struct UnifiedSessionsView: View {
             }
             return
         }
-        guard session.source == .codex else {
-            showImagesAlert(message: "Images are available for Codex sessions only.")
+        let allSessions: [Session]
+        switch session.source {
+        case .codex:
+            allSessions = codexIndexer.allSessions
+        case .claude:
+            allSessions = claudeIndexer.allSessions
+        default:
+            showImagesAlert(message: "Images are available for Codex and Claude sessions only.")
             return
         }
-        CodexImagesWindowController.shared.show(session: session, indexer: codexIndexer)
+        CodexImagesWindowController.shared.show(session: session, allSessions: allSessions)
     }
 
     private func showImagesAlert(message: String) {
