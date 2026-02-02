@@ -416,9 +416,6 @@ struct CodexSessionImagesGalleryView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("Images")
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-
             projectFilterMenu
             agentFilterMenu
 
@@ -427,9 +424,6 @@ struct CodexSessionImagesGalleryView: View {
             Text("\(model.items.count) image\(model.items.count == 1 ? "" : "s")")
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
-
-            Button("Done") { closeWindow() }
-                .keyboardShortcut(.escape, modifiers: [])
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -494,11 +488,7 @@ struct CodexSessionImagesGalleryView: View {
                 Button {
                     selectedSources = Set(availableSources)
                 } label: {
-                    if selectedSources.count == availableSources.count {
-                        Label("All Agents", systemImage: "checkmark")
-                    } else {
-                        Text("All Agents")
-                    }
+                    Label("All Agents", systemImage: selectedSources.count == availableSources.count ? "checkmark.square" : "square")
                 }
 
                 if !availableSources.isEmpty {
@@ -509,11 +499,7 @@ struct CodexSessionImagesGalleryView: View {
                     Button {
                         toggleAgent(source)
                     } label: {
-                        if selectedSources.contains(source) {
-                            Label(source.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(source.displayName)
-                        }
+                        Label(source.displayName, systemImage: selectedSources.contains(source) ? "checkmark.square" : "square")
                     }
                 }
             } label: {
@@ -945,9 +931,11 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private func navigateToSession(item: CodexSessionImageItem) {
-        var payload: [AnyHashable: Any] = ["eventID": item.eventID]
-        payload["userPromptIndex"] = item.userPromptIndex as Any
-        NotificationCenter.default.post(name: .navigateToSessionFromImages, object: item.sessionID, userInfo: payload)
+        NotificationCenter.default.post(
+            name: .navigateToSessionFromImages,
+            object: item.sessionID,
+            userInfo: ["eventID": item.eventID]
+        )
     }
 
     private func copyImage(item: CodexSessionImageItem) {
