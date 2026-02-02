@@ -8,17 +8,14 @@ final class CodexImagesWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var hostingView: AppearanceHostingView?
     private var currentSession: Session?
-    private weak var indexer: SessionIndexer?
     private var distributedObserver: NSObjectProtocol?
     private var defaultsObserver: NSObjectProtocol?
     private var lastAppAppearanceRaw: String = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
 
-    func show(session: Session, indexer: SessionIndexer) {
+    func show(session: Session, allSessions: [Session]) {
         currentSession = session
-        self.indexer = indexer
         let wrapped = AnyView(
-            CodexImagesWindowRoot(seedSession: session)
-                .environmentObject(indexer)
+            CodexImagesWindowRoot(seedSession: session, allSessions: allSessions)
         )
 
         if let win = window, let hv = hostingView {
@@ -100,10 +97,11 @@ final class CodexImagesWindowController: NSObject, NSWindowDelegate {
 
 private struct CodexImagesWindowRoot: View {
     let seedSession: Session
+    let allSessions: [Session]
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     var body: some View {
-        let content = CodexSessionImagesGalleryView(seedSession: seedSession)
+        let content = CodexSessionImagesGalleryView(seedSession: seedSession, allSessions: allSessions)
             .id("CodexImagesSeed-\(seedSession.id)")
 
         let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system

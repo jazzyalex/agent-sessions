@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - Session view: Added an Images toolbar pill to toggle inline images and jump between prompts that contain images.
 - Session view: Inline image thumbnails now support Claude Code sessions.
 - Image Browser: Double-click opens the selected image in Preview; Space opens Quick Look.
+- Image Browser: Now supports Claude Code sessions.
 
 ### Changed
 
