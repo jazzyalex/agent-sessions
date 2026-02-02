@@ -260,14 +260,20 @@ struct UnifiedSessionsView: View {
 					if let main = NSApp.windows.first(where: { $0.isVisible && $0.title == "Agent Sessions" }) ?? NSApp.mainWindow {
 						main.makeKeyAndOrderFront(nil)
 					}
-					if let eventID {
-						DispatchQueue.main.async {
-							NotificationCenter.default.post(
-								name: .navigateToSessionEventFromImages,
-								object: id,
-								userInfo: ["eventID": eventID, "userPromptIndex": userPromptIndex as Any]
-							)
+					DispatchQueue.main.async {
+						var payload: [AnyHashable: Any] = [:]
+						if let eventID, !eventID.isEmpty {
+							payload["eventID"] = eventID
+						} else if let userPromptIndex {
+							payload["userPromptIndex"] = userPromptIndex
+						} else {
+							return
 						}
+						NotificationCenter.default.post(
+							name: .navigateToSessionEventFromImages,
+							object: id,
+							userInfo: payload
+						)
 					}
 				}
 

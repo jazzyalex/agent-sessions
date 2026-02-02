@@ -40,7 +40,7 @@ final class CodexImagesWindowController: NSObject, NSWindowDelegate {
             defer: false
         )
         win.contentView = hv
-        win.title = "Images"
+        win.title = "Image Browser"
         win.isReleasedWhenClosed = false
         let autosaveName = "CodexImagesWindow"
         win.setFrameAutosaveName(autosaveName)
