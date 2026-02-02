@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Session view: Inline image thumbnails now support Claude Code sessions.
 - Image Browser: Double-click opens the selected image in Preview; Space opens Quick Look.
 - Image Browser: Now supports Claude Code sessions.
+- Image Browser: Added Project and Agent filters, a larger preview pane, and user prompt context for each image.
 
 ### Changed
 

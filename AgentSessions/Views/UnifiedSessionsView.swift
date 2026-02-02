@@ -294,15 +294,7 @@ struct UnifiedSessionsView: View {
 								return
 							}
 							let allSessions: [Session]
-							switch session.source {
-							case .codex:
-								allSessions = codexIndexer.allSessions
-							case .claude:
-								allSessions = claudeIndexer.allSessions
-							default:
-								NSSound.beep()
-								return
-							}
+							allSessions = unified.allSessions
 							CodexImagesWindowController.shared.show(session: session, allSessions: allSessions)
 
 							guard let requestedItemID else { return }
@@ -859,7 +851,7 @@ struct UnifiedSessionsView: View {
             } action: {
                 showImagesForSelectedSession(showNoSelectionAlert: true)
             }
-            .disabled(selectedSession == nil || !((selectedSession?.source == .codex) || (selectedSession?.source == .claude)))
+            .disabled(selectedSession == nil)
             .accessibilityLabel(Text("Image Browser"))
 
             if isGitInspectorEnabled {
@@ -900,9 +892,6 @@ struct UnifiedSessionsView: View {
         guard let session = selectedSession else {
             return "Show images for the selected session"
         }
-        if !(session.source == .codex || session.source == .claude) {
-            return "Images are available for Codex and Claude sessions only"
-        }
         return "Show images for the selected session"
     }
 
@@ -933,17 +922,7 @@ struct UnifiedSessionsView: View {
             }
             return
         }
-        let allSessions: [Session]
-        switch session.source {
-        case .codex:
-            allSessions = codexIndexer.allSessions
-        case .claude:
-            allSessions = claudeIndexer.allSessions
-        default:
-            showImagesAlert(message: "Images are available for Codex and Claude sessions only.")
-            return
-        }
-        CodexImagesWindowController.shared.show(session: session, allSessions: allSessions)
+        CodexImagesWindowController.shared.show(session: session, allSessions: unified.allSessions)
     }
 
     private func showImagesAlert(message: String) {
