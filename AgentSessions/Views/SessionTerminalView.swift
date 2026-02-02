@@ -25,7 +25,7 @@ private struct InlineSessionImage: Identifiable, Hashable, Sendable {
     let sessionImageIndex: Int
     let span: Base64ImageDataURLScanner.Span
 
-    var id: String { "\(sessionID)-\(span.id)" }
+    var id: String { "\(sessionID)-\(sha256Hex(sessionFileURL.path))-\(span.id)" }
 }
 
 /// Terminal-style session view with filters, optional gutter, and legend toggles.
@@ -222,7 +222,7 @@ struct SessionTerminalView: View {
                 legendToggle(label: agentLegendLabel, role: .assistant)
                 legendToggle(label: "Tools", role: .tools)
                 legendToggle(label: "Errors", role: .errors)
-                if (session.source == .codex || session.source == .claude), hasInlineImagesInSession {
+                if (session.source == .codex || session.source == .claude || session.source == .opencode), hasInlineImagesInSession {
                     imagesPill()
                 }
             }
@@ -244,7 +244,7 @@ struct SessionTerminalView: View {
                     sessionSource: session.source,
                     inlineImagesEnabled: inlineSessionImageThumbnailsEnabled
                         && hasInlineImagesInSession
-                        && (session.source == .codex || session.source == .claude)
+                        && (session.source == .codex || session.source == .claude || session.source == .opencode)
                         && inlineImagesVisibleInSession,
                     inlineImagesByUserBlockIndex: inlineImagesByUserBlockIndex,
                     inlineImagesSignature: effectiveInlineImagesSignature,
@@ -286,7 +286,7 @@ struct SessionTerminalView: View {
             return
         }
 
-        guard session.source == .codex || session.source == .claude else {
+        guard session.source == .codex || session.source == .claude || session.source == .opencode else {
             hasInlineImagesInSession = false
             inlineImagesByUserBlockIndex = [:]
             inlineImagesSignature = 0
@@ -294,31 +294,66 @@ struct SessionTerminalView: View {
         }
 
         let sessionSnapshot = session
-        let url = URL(fileURLWithPath: sessionSnapshot.filePath)
+        let sessionFileURL = URL(fileURLWithPath: sessionSnapshot.filePath)
 
         inlineImagesTask = Task(priority: .utility) { @MainActor in
             let outcome = await Task.detached(priority: .utility) { () -> (Bool, [Int: [InlineSessionImage]], Int) in
-                guard FileManager.default.fileExists(atPath: url.path) else { return (false, [:], 0) }
+                guard FileManager.default.fileExists(atPath: sessionFileURL.path) else { return (false, [:], 0) }
+
+                struct InlineScanResult: Hashable, Sendable {
+                    let span: Base64ImageDataURLScanner.Span
+                    let lineIndex: Int
+                    let sourceFileURL: URL
+                }
 
                 let hasAny: Bool = {
                     switch sessionSnapshot.source {
                     case .codex:
-                        return Base64ImageDataURLScanner.fileContainsBase64ImageDataURL(at: url, shouldCancel: { Task.isCancelled })
+                        return Base64ImageDataURLScanner.fileContainsBase64ImageDataURL(at: sessionFileURL, shouldCancel: { Task.isCancelled })
                     case .claude:
-                        return ClaudeBase64ImageScanner.fileContainsUserBase64Image(at: url, shouldCancel: { Task.isCancelled })
+                        return ClaudeBase64ImageScanner.fileContainsUserBase64Image(at: sessionFileURL, shouldCancel: { Task.isCancelled })
+                    case .opencode:
+                        let messageIDs = Array(Set(sessionSnapshot.events.compactMap(\.messageID)).filter { $0.hasPrefix("msg_") })
+                        return OpenCodeBase64ImageScanner.fileContainsBase64ImageDataURL(sessionFileURL: sessionFileURL,
+                                                                                        messageIDs: messageIDs,
+                                                                                        shouldCancel: { Task.isCancelled })
                     default:
                         return false
                     }
                 }()
                 guard hasAny, !Task.isCancelled else { return (hasAny, [:], 0) }
 
-                let located: [Base64ImageDataURLScanner.LocatedSpan] = {
+                let located: [InlineScanResult] = {
                     do {
                         switch sessionSnapshot.source {
                         case .codex:
-                            return try Base64ImageDataURLScanner.scanFileWithLineIndexes(at: url, maxMatches: 400, shouldCancel: { Task.isCancelled })
+                            return try Base64ImageDataURLScanner
+                                .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
+                                .map { InlineScanResult(span: $0.span, lineIndex: $0.lineIndex, sourceFileURL: sessionFileURL) }
                         case .claude:
-                            return try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: 400, shouldCancel: { Task.isCancelled })
+                            return try ClaudeBase64ImageScanner
+                                .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
+                                .map { InlineScanResult(span: $0.span, lineIndex: $0.lineIndex, sourceFileURL: sessionFileURL) }
+                        case .opencode:
+                            let messageIDs = Array(Set(sessionSnapshot.events.compactMap(\.messageID)).filter { $0.hasPrefix("msg_") })
+
+                            var messageToUserEventIndex: [String: Int] = [:]
+                            var messageToFirstEventIndex: [String: Int] = [:]
+                            for (idx, ev) in sessionSnapshot.events.enumerated() {
+                                guard let mid = ev.messageID, mid.hasPrefix("msg_") else { continue }
+                                if messageToFirstEventIndex[mid] == nil { messageToFirstEventIndex[mid] = idx }
+                                if ev.kind == .user, messageToUserEventIndex[mid] == nil { messageToUserEventIndex[mid] = idx }
+                            }
+
+                            let parts = try OpenCodeBase64ImageScanner.scanSessionPartFiles(sessionFileURL: sessionFileURL,
+                                                                                           messageIDs: messageIDs,
+                                                                                           maxMatches: 400,
+                                                                                           shouldCancel: { Task.isCancelled })
+                            return parts.map { part in
+                                let mid = part.messageID
+                                let eventIndex = messageToUserEventIndex[mid] ?? messageToFirstEventIndex[mid] ?? 0
+                                return InlineScanResult(span: part.span, lineIndex: eventIndex, sourceFileURL: part.partFileURL)
+                            }
                         default:
                             return []
                         }
@@ -327,13 +362,13 @@ struct SessionTerminalView: View {
                     }
                 }()
 
-                let filtered: [Base64ImageDataURLScanner.LocatedSpan] = {
+                let filtered: [InlineScanResult] = {
                     switch sessionSnapshot.source {
                     case .codex:
-                        return located.filter {
-                            Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: $0.span.startOffset)
-                        }
+                        return located.filter { Base64ImageDataURLScanner.isLikelyImageURLContext(at: sessionFileURL, startOffset: $0.span.startOffset) }
                     case .claude:
+                        return located
+                    case .opencode:
                         return located
                     default:
                         return []
@@ -353,7 +388,7 @@ struct SessionTerminalView: View {
                 }
 
                 func isPreambleUserEventIndex(_ idx: Int) -> Bool {
-                    guard sessionSnapshot.source == .codex || sessionSnapshot.source == .droid || sessionSnapshot.source == .claude else { return false }
+                    guard sessionSnapshot.source == .codex || sessionSnapshot.source == .droid || sessionSnapshot.source == .claude || sessionSnapshot.source == .opencode else { return false }
                     guard sessionSnapshot.events.indices.contains(idx) else { return false }
                     guard sessionSnapshot.events[idx].kind == .user else { return false }
                     return Session.isAgentsPreambleText(sessionSnapshot.events[idx].text ?? "")
@@ -403,12 +438,12 @@ struct SessionTerminalView: View {
                     let targetUserEventID = sessionSnapshot.events[targetUserEventIndex].id
                     guard let targetUserBlockIndex = userEventIDToBlockIndex[targetUserEventID] else { continue }
 
-                    let imageEventID = SessionIndexer.eventID(forPath: url.path, index: item.lineIndex)
-                    let userPromptIndex = userPromptIndexForLineIndex(item.lineIndex)
+                    let imageEventID = targetUserEventID
+                    let userPromptIndex = userPromptIndexForLineIndex(targetUserEventIndex)
 
                     let img = InlineSessionImage(
                         sessionID: sessionSnapshot.id,
-                        sessionFileURL: url,
+                        sessionFileURL: item.sourceFileURL,
                         imageEventID: imageEventID,
                         userPromptIndex: userPromptIndex,
                         sessionImageIndex: sessionImageIndex,

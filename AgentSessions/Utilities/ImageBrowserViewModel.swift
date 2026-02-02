@@ -24,7 +24,7 @@ final class ImageBrowserViewModel: ObservableObject {
         let span: Base64ImageDataURLScanner.Span
         let fileSignature: ImageBrowserFileSignature
 
-        var id: String { "\(sessionID)-\(span.startOffset)-\(span.base64PayloadOffset)" }
+        var id: String { "\(sessionID)-\(sha256Hex(sessionFileURL.path))-\(span.id)" }
 
         var approxSizeText: String {
             ByteCountFormatter.string(fromByteCount: Int64(span.approxBytes), countStyle: .file)
@@ -57,6 +57,7 @@ final class ImageBrowserViewModel: ObservableObject {
 
     // Indexed items per sessionID (for incremental updates without resetting from zero)
     private var itemsBySessionID: [String: [Item]] = [:]
+    private var sessionSignatureBySessionID: [String: ImageBrowserFileSignature] = [:]
     private var backgroundTask: Task<Void, Never>?
     private var selectedTask: Task<Void, Never>?
     private var firstThumbnailLogged = false
@@ -172,9 +173,8 @@ private extension ImageBrowserViewModel {
         selectedTask = Task { [weak self] in
             guard let self else { return }
             if let existing = itemsBySessionID[seedSession.id],
-               let existingSig = existing.first?.fileSignature,
                let currentSig = fileSignature(forPath: seedSession.filePath),
-               existingSig == currentSig {
+               sessionSignatureBySessionID[seedSession.id] == currentSig {
                 recomputeVisibleItems()
                 state = .loaded
                 if selectedItemID == nil, let first = items.first {
@@ -191,6 +191,7 @@ private extension ImageBrowserViewModel {
 
             let newItems = buildItems(for: seedSession, index: index)
             itemsBySessionID[seedSession.id] = newItems
+            sessionSignatureBySessionID[seedSession.id] = index.signature
             recomputeVisibleItems()
 
             ImageBrowserPerfMetrics.markSelectedIndexReady(imageCount: newItems.count)
@@ -225,6 +226,7 @@ private extension ImageBrowserViewModel {
                 let built = await MainActor.run { self.buildItems(for: session, index: index) }
                 await MainActor.run {
                     self.itemsBySessionID[session.id] = built
+                    self.sessionSignatureBySessionID[session.id] = index.signature
                     self.recomputeVisibleItems()
                 }
                 scanned += 1
@@ -282,39 +284,111 @@ private extension ImageBrowserViewModel {
     }
 
     func buildItems(for session: Session, index: ImageBrowserStoredIndex) -> [Item] {
-        let url = URL(fileURLWithPath: session.filePath)
-        let signature = index.signature
+        switch session.source {
+        case .opencode:
+            let images = index.openCodeImages ?? []
 
-        var out: [Item] = []
-        out.reserveCapacity(min(index.spans.count, 64))
+            var messageToUserEventIndex: [String: Int] = [:]
+            var messageToFirstEventIndex: [String: Int] = [:]
+            messageToUserEventIndex.reserveCapacity(64)
+            messageToFirstEventIndex.reserveCapacity(64)
 
-        for (i, stored) in index.spans.enumerated() {
-            let span = Base64ImageDataURLScanner.Span(
-                startOffset: stored.startOffset,
-                endOffset: stored.endOffset,
-                mediaType: stored.mediaType,
-                base64PayloadOffset: stored.base64PayloadOffset,
-                base64PayloadLength: stored.base64PayloadLength,
-                approxBytes: stored.approxBytes
-            )
-            out.append(
-                Item(
-                    sessionID: session.id,
-                    sessionTitle: session.title,
-                    sessionModifiedAt: session.modifiedAt,
-                    sessionFileURL: url,
-                    sessionSource: session.source,
-                    sessionProject: session.repoName,
-                    sessionImageIndex: i + 1,
-                    lineIndex: stored.lineIndex,
-                    eventID: SessionIndexer.eventID(forPath: url.path, index: stored.lineIndex),
-                    span: span,
-                    fileSignature: signature
+            for (idx, ev) in session.events.enumerated() {
+                guard let mid = ev.messageID, mid.hasPrefix("msg_") else { continue }
+                if messageToFirstEventIndex[mid] == nil { messageToFirstEventIndex[mid] = idx }
+                if ev.kind == .user, messageToUserEventIndex[mid] == nil { messageToUserEventIndex[mid] = idx }
+            }
+
+            var out: [Item] = []
+            out.reserveCapacity(min(images.count, 64))
+
+            for (i, stored) in images.enumerated() {
+                let span = Base64ImageDataURLScanner.Span(
+                    startOffset: stored.startOffset,
+                    endOffset: stored.endOffset,
+                    mediaType: stored.mediaType,
+                    base64PayloadOffset: stored.base64PayloadOffset,
+                    base64PayloadLength: stored.base64PayloadLength,
+                    approxBytes: stored.approxBytes
                 )
-            )
-        }
 
-        return out
+                let fileURL = URL(fileURLWithPath: stored.partFilePath)
+                let fileSignature = fileSignature(forPath: stored.partFilePath)
+                    ?? ImageBrowserFileSignature(filePath: stored.partFilePath, fileSizeBytes: 0, modifiedAtUnixSeconds: 0)
+
+                let eventIndex = messageToUserEventIndex[stored.messageID] ?? messageToFirstEventIndex[stored.messageID] ?? 0
+                let eventID: String = session.events.indices.contains(eventIndex) ? session.events[eventIndex].id : ""
+
+                out.append(
+                    Item(
+                        sessionID: session.id,
+                        sessionTitle: session.title,
+                        sessionModifiedAt: session.modifiedAt,
+                        sessionFileURL: fileURL,
+                        sessionSource: session.source,
+                        sessionProject: session.repoName,
+                        sessionImageIndex: i + 1,
+                        lineIndex: eventIndex,
+                        eventID: eventID,
+                        span: span,
+                        fileSignature: fileSignature
+                    )
+                )
+            }
+
+            return out
+
+        default:
+            let url = URL(fileURLWithPath: session.filePath)
+            let signature = index.signature
+            let userEventIndices: [Int] = session.events.enumerated().compactMap { (idx, ev) in
+                ev.kind == .user ? idx : nil
+            }
+
+            func nearestUserEventIndex(for lineIndex: Int) -> Int? {
+                guard lineIndex >= 0 else { return userEventIndices.first }
+                guard !userEventIndices.isEmpty else { return nil }
+                let prior = userEventIndices.filter { $0 <= lineIndex }
+                if let preferred = prior.last { return preferred }
+                let after = userEventIndices.filter { $0 > lineIndex }
+                return after.first
+            }
+
+            var out: [Item] = []
+            out.reserveCapacity(min(index.spans.count, 64))
+
+            for (i, stored) in index.spans.enumerated() {
+                let span = Base64ImageDataURLScanner.Span(
+                    startOffset: stored.startOffset,
+                    endOffset: stored.endOffset,
+                    mediaType: stored.mediaType,
+                    base64PayloadOffset: stored.base64PayloadOffset,
+                    base64PayloadLength: stored.base64PayloadLength,
+                    approxBytes: stored.approxBytes
+                )
+                out.append(
+                    Item(
+                        sessionID: session.id,
+                        sessionTitle: session.title,
+                        sessionModifiedAt: session.modifiedAt,
+                        sessionFileURL: url,
+                        sessionSource: session.source,
+                        sessionProject: session.repoName,
+                        sessionImageIndex: i + 1,
+                        lineIndex: nearestUserEventIndex(for: stored.lineIndex) ?? stored.lineIndex,
+                        eventID: {
+                            let idx = nearestUserEventIndex(for: stored.lineIndex) ?? stored.lineIndex
+                            if session.events.indices.contains(idx) { return session.events[idx].id }
+                            return SessionIndexer.eventID(forPath: url.path, index: stored.lineIndex)
+                        }(),
+                        span: span,
+                        fileSignature: signature
+                    )
+                )
+            }
+
+            return out
+        }
     }
 
     func fileSignature(forPath path: String) -> ImageBrowserFileSignature? {
