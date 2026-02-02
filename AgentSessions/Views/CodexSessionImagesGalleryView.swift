@@ -23,7 +23,12 @@ struct CodexSessionImageItem: Identifiable, Hashable {
     let sessionTitle: String
     let sessionModifiedAt: Date
     let sessionFileURL: URL
+    let sessionSource: SessionSource
+    let sessionProject: String?
     let sessionImageIndex: Int
+    let lineIndex: Int
+    let eventID: String
+    let userPromptIndex: Int?
     let span: Base64ImageDataURLScanner.Span
 
     var id: String { "\(sessionID)-\(span.id)" }
@@ -64,6 +69,26 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
         self.perSessionMatchLimit = perSessionMatchLimit
         self.maxDecodedBytes = maxDecodedBytes
         self.thumbnailMaxPixelSize = thumbnailMaxPixelSize
+    }
+
+    nonisolated private static func userPromptIndex(for session: Session, lineIndex: Int) -> Int? {
+        guard lineIndex >= 0 else { return nil }
+        guard !session.events.isEmpty else { return nil }
+
+        var userIndex: Int? = nil
+        var seenUsers = 0
+        for (idx, event) in session.events.enumerated() {
+            if event.kind == .user {
+                if idx <= lineIndex {
+                    userIndex = seenUsers
+                } else if userIndex == nil {
+                    userIndex = seenUsers
+                }
+                seenUsers += 1
+            }
+            if idx > lineIndex, userIndex != nil { break }
+        }
+        return userIndex
     }
 
     func load(sessions: [Session], itemLimit: Int) {
@@ -117,19 +142,38 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
                             continue
                         }
 
-                        let spans: [Base64ImageDataURLScanner.Span]
+                        let hasAny: Bool = {
+                            switch session.source {
+                            case .codex:
+                                return Base64ImageDataURLScanner.fileContainsBase64ImageDataURL(at: url, shouldCancel: { Task.isCancelled })
+                            case .claude:
+                                return ClaudeBase64ImageScanner.fileContainsUserBase64Image(at: url, shouldCancel: { Task.isCancelled })
+                            default:
+                                return false
+                            }
+                        }()
+
+                        guard hasAny, !Task.isCancelled else {
+                            scanned += 1
+                            let scannedSnapshot = scanned
+                            await MainActor.run {
+                                if Task.isCancelled { return }
+                                self.scannedSessions = scannedSnapshot
+                            }
+                            continue
+                        }
+
+                        let located: [Base64ImageDataURLScanner.LocatedSpan]
                         do {
                             switch session.source {
                             case .codex:
-                                spans = try Base64ImageDataURLScanner.scanFile(at: url,
-                                                                               maxMatches: maxPerSession,
-                                                                               shouldCancel: { Task.isCancelled })
-                            case .claude:
-                                spans = try ClaudeBase64ImageScanner
+                                located = try Base64ImageDataURLScanner
                                     .scanFileWithLineIndexes(at: url, maxMatches: maxPerSession, shouldCancel: { Task.isCancelled })
-                                    .map(\.span)
+                            case .claude:
+                                located = try ClaudeBase64ImageScanner
+                                    .scanFileWithLineIndexes(at: url, maxMatches: maxPerSession, shouldCancel: { Task.isCancelled })
                             default:
-                                spans = []
+                                located = []
                             }
                         } catch {
                             scanned += 1
@@ -141,7 +185,8 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
                             continue
                         }
 
-                        let filtered: [Base64ImageDataURLScanner.Span] = spans.filter { span in
+                        let filtered: [Base64ImageDataURLScanner.LocatedSpan] = located.filter { item in
+                            let span = item.span
                             guard span.base64PayloadLength >= minPayloadLen,
                                   span.approxBytes >= minBytes,
                                   span.approxBytes <= maxDecodedBytes else {
@@ -161,21 +206,27 @@ final class CodexSessionImagesGalleryModel: ObservableObject {
                         totalFound += filtered.count
 
                         if !filtered.isEmpty {
-                            let title = session.codexDisplayTitle
+                            let title = session.title
                             let modifiedAt = session.modifiedAt
                             let sessionID = session.id
 
                             var newItems: [CodexSessionImageItem] = []
                             newItems.reserveCapacity(filtered.count)
-                            for (idx, span) in filtered.enumerated() {
+                            for (idx, item) in filtered.enumerated() {
+                                let lineIndex = item.lineIndex
                                 newItems.append(
                                     CodexSessionImageItem(
                                         sessionID: sessionID,
                                         sessionTitle: title,
                                         sessionModifiedAt: modifiedAt,
                                         sessionFileURL: url,
+                                        sessionSource: session.source,
+                                        sessionProject: session.repoName,
                                         sessionImageIndex: idx + 1,
-                                        span: span
+                                        lineIndex: lineIndex,
+                                        eventID: SessionIndexer.eventID(forPath: url.path, index: lineIndex),
+                                        userPromptIndex: Self.userPromptIndex(for: session, lineIndex: lineIndex),
+                                        span: item.span
                                     )
                                 )
                             }
@@ -280,13 +331,16 @@ struct CodexSessionImagesGalleryView: View {
 
     @StateObject private var model = CodexSessionImagesGalleryModel()
 
-    @State private var scope: CodexImagesScope = .singleSession
     @State private var selectedItemID: String? = nil
     @State private var pendingSelectedItemID: String? = nil
+    @State private var selectedProject: String? = nil // nil means "All Projects"
+    @State private var selectedSources: Set<SessionSource> = []
 
     @State private var isPreviewLoading: Bool = false
     @State private var previewImage: NSImage? = nil
     @State private var previewError: String? = nil
+    @State private var promptText: String? = nil
+    @State private var dimensionsText: String? = nil
 
     @State private var isSaving: Bool = false
     @State private var saveStatus: String? = nil
@@ -303,10 +357,6 @@ struct CodexSessionImagesGalleryView: View {
             header
             Divider()
             content
-            if shouldShowFooter {
-                Divider()
-                footer
-            }
         }
         .frame(minWidth: 900, minHeight: 560)
         // Finder-like: Space opens Quick Look for the selected image.
@@ -317,8 +367,9 @@ struct CodexSessionImagesGalleryView: View {
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
         }
-        .onAppear { reload() }
-        .onChange(of: scope) { _, _ in reload() }
+        .onAppear { ensureFiltersInitialized(); reload() }
+        .onChange(of: selectedProject) { _, _ in reload() }
+        .onChange(of: selectedSources) { _, _ in reload() }
         .onChange(of: model.items) { _, newValue in
             if let pendingSelectedItemID, newValue.contains(where: { $0.id == pendingSelectedItemID }) {
                 selectedItemID = pendingSelectedItemID
@@ -329,21 +380,30 @@ struct CodexSessionImagesGalleryView: View {
             if !newValue.contains(where: { $0.id == selectedItemID }) {
                 self.selectedItemID = nil
             }
+
+            if self.selectedItemID == nil, let first = newValue.first {
+                self.selectedItemID = first.id
+            }
         }
-        .task(id: selectedItemID) { await loadPreview() }
+        .task(id: selectedItemID) { await loadDetail() }
         .onReceive(NotificationCenter.default.publisher(for: .selectImagesBrowserItem)) { n in
             guard let sid = n.object as? String, sid == seedSession.id else { return }
             guard let requested = n.userInfo?["selectedItemID"] as? String else { return }
             let forceScope = n.userInfo?["forceScope"] as? String
 
             pendingSelectedItemID = requested
-            if forceScope == CodexImagesScope.singleSession.rawValue, scope != .singleSession {
-                scope = .singleSession
-                return
-            }
             if model.items.contains(where: { $0.id == requested }) {
                 selectedItemID = requested
                 pendingSelectedItemID = nil
+                return
+            }
+
+            if forceScope == CodexImagesScope.singleSession.rawValue {
+                // When jumping from an inline image click, bias filters toward the originating session.
+                if let project = seedSession.repoName, !project.isEmpty {
+                    selectedProject = project
+                }
+                selectedSources = [seedSession.source]
             }
         }
         .onDisappear {
@@ -359,23 +419,14 @@ struct CodexSessionImagesGalleryView: View {
             Text("Images")
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
 
-            HStack(spacing: 8) {
-                Text("Show Images:")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-
-                Picker("Show Images", selection: $scope) {
-                    Text(CodexImagesScope.singleSession.title).tag(CodexImagesScope.singleSession)
-                    Text(CodexImagesScope.project.title).tag(CodexImagesScope.project)
-                        .disabled(projectSessions.isEmpty)
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .controlSize(.small)
-                .help(projectSessions.isEmpty ? "Project sessions are unavailable for this session." : "Choose whether to show images for this session or all sessions in the same project.")
-            }
+            projectFilterMenu
+            agentFilterMenu
 
             Spacer()
+
+            Text("\(model.items.count) image\(model.items.count == 1 ? "" : "s")")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
 
             Button("Done") { closeWindow() }
                 .keyboardShortcut(.escape, modifiers: [])
@@ -383,6 +434,133 @@ struct CodexSessionImagesGalleryView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    private var projectFilterMenu: some View {
+        HStack(spacing: 8) {
+            Text("Project:")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            Menu {
+                Button {
+                    selectedProject = nil
+                } label: {
+                    if selectedProject == nil {
+                        Label("All Projects", systemImage: "checkmark")
+                    } else {
+                        Text("All Projects")
+                    }
+                }
+
+                if !availableProjects.isEmpty {
+                    Divider()
+                }
+
+                ForEach(availableProjects, id: \.self) { project in
+                    Button {
+                        selectedProject = project
+                    } label: {
+                        if selectedProject == project {
+                            Label(project, systemImage: "checkmark")
+                        } else {
+                            Text(project)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(selectedProject ?? "All Projects")
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .opacity(0.7)
+                }
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+            }
+            .controlSize(.small)
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var agentFilterMenu: some View {
+        HStack(spacing: 8) {
+            Text("Agent:")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            Menu {
+                Button {
+                    selectedSources = Set(availableSources)
+                } label: {
+                    if selectedSources.count == availableSources.count {
+                        Label("All Agents", systemImage: "checkmark")
+                    } else {
+                        Text("All Agents")
+                    }
+                }
+
+                if !availableSources.isEmpty {
+                    Divider()
+                }
+
+                ForEach(availableSources, id: \.self) { source in
+                    Button {
+                        toggleAgent(source)
+                    } label: {
+                        if selectedSources.contains(source) {
+                            Label(source.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(source.displayName)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(agentMenuTitle)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .opacity(0.7)
+                }
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+            }
+            .controlSize(.small)
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var agentMenuTitle: String {
+        let all = Set(availableSources)
+        if selectedSources == all { return "All Agents" }
+        if selectedSources.count == 1, let one = selectedSources.first { return one.displayName }
+        if selectedSources.isEmpty { return "No Agents" }
+        return "\(selectedSources.count) selected"
+    }
+
+    private func toggleAgent(_ source: SessionSource) {
+        if selectedSources.contains(source) {
+            if selectedSources.count <= 1 { return }
+            selectedSources.remove(source)
+        } else {
+            selectedSources.insert(source)
+        }
+    }
+
+    private func metaLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.secondary)
+    }
+
+    private func metaValue(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .regular, design: .monospaced))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 
     @ViewBuilder
@@ -419,7 +597,7 @@ struct CodexSessionImagesGalleryView: View {
                 } else {
                     VStack(spacing: 12) {
                         ContentUnavailableView("No previewable images", systemImage: "photo")
-                        Text("This scope contains images, but none could be previewed here.")
+                        Text("These filters contain images, but none could be previewed here.")
                             .font(.system(size: 12, weight: .regular, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
@@ -435,91 +613,67 @@ struct CodexSessionImagesGalleryView: View {
         }
     }
 
-    private var shouldShowFooter: Bool {
-        if model.state == .loading { return true }
-        return model.state == .loaded && model.totalSessionsToScan > 1
-    }
+    private var dateGroups: [DateGroup] {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+        let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart) ?? todayStart
 
-    private var footer: some View {
-        HStack(spacing: 10) {
-            if model.state == .loading {
-                ProgressView()
-                    .controlSize(.small)
-            }
-            Text(footerStatusText)
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color(NSColor.controlBackgroundColor))
-    }
-
-    private var footerStatusText: String {
-        if scope == .project {
-            if model.state == .loading {
-                if model.totalSessionsToScan > 0 {
-                    let total = model.totalSessionsToScan
-                    let completed = min(model.scannedSessions, total)
-                    if completed >= total { return "Finalizing scan…" }
-                    return "Scanning \(completed)/\(total) sessions for images…"
-                }
-                return "Scanning project sessions for images…"
-            }
-
-            if model.totalSessionsToScan > 0 {
-                let scanned = min(model.scannedSessions, model.totalSessionsToScan)
-                if model.didReachItemLimit {
-                    return "Scan stopped at limit (\(scanned)/\(model.totalSessionsToScan) sessions)"
-                }
-                return "Scan complete (\(scanned)/\(model.totalSessionsToScan) sessions)"
-            }
-            return model.didReachItemLimit ? "Scan stopped at limit" : "Scan complete"
+        let sorted = model.items.sorted { a, b in
+            if a.sessionModifiedAt != b.sessionModifiedAt { return a.sessionModifiedAt > b.sessionModifiedAt }
+            if a.sessionID != b.sessionID { return a.sessionID > b.sessionID }
+            return a.span.startOffset > b.span.startOffset
         }
 
-        if model.state == .loading {
-            return "Scanning session for images…"
+        var buckets: [Date: [CodexSessionImageItem]] = [:]
+        for item in sorted {
+            let day = calendar.startOfDay(for: item.sessionModifiedAt)
+            buckets[day, default: []].append(item)
         }
-        return model.didReachItemLimit ? "Scan stopped at limit" : "Scan complete"
+
+        let orderedDays = buckets.keys.sorted(by: >)
+        return orderedDays.map { dayStart in
+            let title: String
+            if dayStart == todayStart {
+                title = "Today"
+            } else if dayStart == yesterdayStart {
+                title = "Yesterday"
+            } else {
+                title = AppDateFormatting.monthDayAbbrev(dayStart)
+            }
+
+            let id = ISO8601DateFormatter().string(from: dayStart)
+            return DateGroup(id: id, title: title, items: buckets[dayStart] ?? [])
+        }
     }
 
     private var loadingStatusText: String {
-        if scope == .project {
-            if model.totalSessionsToScan > 0 {
-                let total = model.totalSessionsToScan
-                let completed = min(model.scannedSessions, total)
-                if completed >= total { return "Finalizing scan…" }
-                return "Scanning \(completed)/\(total) sessions for images…"
-            }
-            return "Scanning project sessions for images…"
+        if model.totalSessionsToScan > 0 {
+            let total = model.totalSessionsToScan
+            let completed = min(model.scannedSessions, total)
+            if completed >= total { return "Finalizing scan…" }
+            return "Scanning \(completed)/\(total) sessions for images…"
         }
-        return "Scanning session for images…"
+        return "Scanning sessions for images…"
     }
 
     private var thumbnailsPane: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    summaryRow
-
-                    ForEach(timeGroups, id: \.id) { group in
-                        TimeframeDivider(title: group.title)
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(dateGroups) { group in
+                        Text(group.title.uppercased())
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 2)
 
                         LazyVGrid(columns: gridColumns, spacing: 12) {
                             ForEach(group.items, id: \.id) { item in
-                                CodexImageThumbnailCell(
+                                CodexImageThumbnailCard(
                                     model: model,
                                     item: item,
                                     isSelected: item.id == selectedItemID,
-                                    helpText: itemTooltip(item),
                                     onSelect: { selectedItemID = item.id },
-                                    onOpenInPreview: { openInPreview(item: item) },
-                                    onSaveToDownloads: { saveToDownloads(item: item) },
-                                    onSave: { saveWithPanel(item: item) },
-                                    onCopy: { copyImage(item: item) },
-                                    onCopyPath: { copyImagePath(item: item) },
-                                    onNavigate: { navigateToSession(item: item) }
+                                    onDoubleClick: { openInPreview(item: item) }
                                 )
                             }
                         }
@@ -538,58 +692,9 @@ struct CodexSessionImagesGalleryView: View {
         .background(Color(NSColor.textBackgroundColor))
     }
 
-    private var summaryRow: some View {
-        HStack(spacing: 10) {
-            Text("\(model.items.count) image\(model.items.count == 1 ? "" : "s")")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            if model.didReachItemLimit, model.itemLimit > 0 {
-                Text("(showing first \(model.itemLimit))")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-        }
-    }
-
     private var detailPane: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             if let item = selectedItem {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.span.mediaType)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-
-                        Text(ByteCountFormatter.string(fromByteCount: Int64(item.span.approxBytes), countStyle: .file))
-                            .font(.system(size: 12, weight: .regular, design: .monospaced))
-                            .foregroundStyle(.secondary)
-
-                        if scope == .project {
-                            Text(item.sessionTitle)
-                                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                    }
-
-                    Spacer()
-
-                    Button(isSaving ? "Saving…" : "Save…") { saveWithPanel(item: item) }
-                        .disabled(isSaving)
-                }
-
-                if let saveStatus {
-                    Text(saveStatus)
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color.gray.opacity(0.06))
@@ -619,7 +724,71 @@ struct CodexSessionImagesGalleryView: View {
                             .padding(12)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Button("Navigate to Session") { navigateToSession(item: item) }
+                            .buttonStyle(.borderedProminent)
+
+                        Button(isSaving ? "Saving…" : "Save…") { saveWithPanel(item: item) }
+                            .disabled(isSaving)
+
+                        Spacer()
+                    }
+
+                    if let saveStatus {
+                        Text(saveStatus)
+                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("USER PROMPT")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+
+                        Text(promptText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? (promptText ?? "") : "Prompt unavailable")
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                            .padding(10)
+                            .background(Color.gray.opacity(0.06))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+                            GridRow {
+                                metaLabel("SESSION")
+                                metaValue(item.sessionTitle)
+                            }
+                            GridRow {
+                                metaLabel("PROJECT")
+                                metaValue(item.sessionProject ?? "—")
+                            }
+                            GridRow {
+                                metaLabel("AGENT")
+                                metaValue(item.sessionSource.displayName)
+                            }
+                            GridRow {
+                                metaLabel("TIME")
+                                metaValue(AppDateFormatting.dateTimeMedium(item.sessionModifiedAt))
+                            }
+                            GridRow {
+                                metaLabel("SIZE")
+                                metaValue(ByteCountFormatter.string(fromByteCount: Int64(item.span.approxBytes), countStyle: .file))
+                            }
+                            GridRow {
+                                metaLabel("DIMENSIONS")
+                                metaValue(dimensionsText ?? "—")
+                            }
+                        }
+                        .padding(10)
+                        .background(Color.gray.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
             } else {
                 ContentUnavailableView("Select an image", systemImage: "photo.on.rectangle")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -635,109 +804,64 @@ struct CodexSessionImagesGalleryView: View {
         return model.items.first(where: { $0.id == selectedItemID })
     }
 
-    private var projectSessions: [Session] {
-        guard let project = seedSession.repoName, !project.isEmpty else { return [] }
-        let all = allSessions
-        let filtered = all.filter { $0.repoName == project }
-        return filtered.sorted(by: { $0.modifiedAt > $1.modifiedAt })
-    }
-
-    private var sessionsToScan: [Session] {
-        switch scope {
-        case .singleSession:
-            return [seedSession]
-        case .project:
-            if projectSessions.isEmpty {
-                return [seedSession]
-            }
-
-            var combined = projectSessions
-            if !combined.contains(where: { $0.id == seedSession.id || $0.filePath == seedSession.filePath }) {
-                combined.append(seedSession)
-            }
-            return combined.sorted(by: { $0.modifiedAt > $1.modifiedAt })
-        }
-    }
-
-    private var effectiveItemLimit: Int {
-        switch scope {
-        case .singleSession:
-            return 200
-        case .project:
-            return 800
-        }
-    }
-
-    private var gridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 140, maximum: 220), spacing: 12)]
-    }
-
-    private struct TimeGroup: Identifiable, Hashable {
+    private struct DateGroup: Identifiable, Hashable {
         let id: String
         let title: String
         let items: [CodexSessionImageItem]
     }
 
-    private var timeGroups: [TimeGroup] {
-        let now = Date()
-        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: now) ?? now
+    private var gridColumns: [GridItem] {
+        [
+            GridItem(.flexible(minimum: 140, maximum: 240), spacing: 12),
+            GridItem(.flexible(minimum: 140, maximum: 240), spacing: 12),
+            GridItem(.flexible(minimum: 140, maximum: 240), spacing: 12)
+        ]
+    }
 
-        let sorted = model.items.sorted { a, b in
-            if a.sessionModifiedAt != b.sessionModifiedAt { return a.sessionModifiedAt > b.sessionModifiedAt }
-            if a.sessionID != b.sessionID { return a.sessionID > b.sessionID }
-            return a.span.startOffset > b.span.startOffset
+    private var availableProjects: [String] {
+        let projects = allSessions.compactMap { $0.repoName?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(projects)).sorted()
+    }
+
+    private var availableSources: [SessionSource] {
+        let sources = Set(allSessions.map(\.source))
+        return SessionSource.allCases.filter { sources.contains($0) }
+    }
+
+    private func ensureFiltersInitialized() {
+        if selectedSources.isEmpty {
+            selectedSources = Set(availableSources)
+        } else {
+            selectedSources = selectedSources.intersection(Set(availableSources))
         }
-
-        var groups: [TimeGroup] = []
-        groups.reserveCapacity(12)
-
-        var currentKey: String? = nil
-        var currentTitle: String = ""
-        var currentItems: [CodexSessionImageItem] = []
-
-        func flush() {
-            guard let key = currentKey, !currentItems.isEmpty else { return }
-            groups.append(TimeGroup(id: key, title: currentTitle, items: currentItems))
-            currentItems = []
+        if selectedProject != nil, !availableProjects.contains(selectedProject ?? "") {
+            selectedProject = nil
         }
+    }
 
-        for item in sorted {
-            let date = item.sessionModifiedAt
-            let isRecent = date >= cutoff
+    private var sessionsToScan: [Session] {
+        let trimmedProject = selectedProject?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let projectFilter = (trimmedProject?.isEmpty == false) ? trimmedProject : nil
 
-            let key: String
-            let title: String
-            if isRecent {
-                let comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
-                let y = comps.year ?? 0
-                let m = comps.month ?? 0
-                let d = comps.day ?? 0
-                key = "day-\(y)-\(m)-\(d)"
-                title = AppDateFormatting.monthDayAbbrev(date)
-            } else {
-                let comps = Calendar.current.dateComponents([.year, .month], from: date)
-                let y = comps.year ?? 0
-                let m = comps.month ?? 0
-                key = "month-\(y)-\(m)"
-                title = date.formatted(.dateTime.month(.wide).year())
+        return allSessions
+            .filter { session in
+                if let projectFilter {
+                    return session.repoName == projectFilter
+                }
+                return true
             }
+            .filter { selectedSources.contains($0.source) }
+            .sorted(by: { $0.modifiedAt > $1.modifiedAt })
+    }
 
-            if key != currentKey {
-                flush()
-                currentKey = key
-                currentTitle = title
-            }
-            currentItems.append(item)
-        }
-
-        flush()
-        return groups
+    private var effectiveItemLimit: Int {
+        if selectedProject == nil { return 2000 }
+        return 1200
     }
 
     private func reload() {
-        if scope == .project, projectSessions.isEmpty {
-            scope = .singleSession
-        }
+        ensureFiltersInitialized()
         model.load(sessions: sessionsToScan, itemLimit: effectiveItemLimit)
     }
 
@@ -749,9 +873,11 @@ struct CodexSessionImagesGalleryView: View {
         NSApp.keyWindow?.performClose(nil)
     }
 
-    private func loadPreview() async {
+    private func loadDetail() async {
         previewImage = nil
         previewError = nil
+        promptText = nil
+        dimensionsText = nil
         isPreviewLoading = false
 
         guard let item = selectedItem else { return }
@@ -763,39 +889,55 @@ struct CodexSessionImagesGalleryView: View {
         let itemID = item.id
 
         isPreviewLoading = true
-        let outcome: (NSImage?, String?) = await withTaskGroup(of: (NSImage?, String?).self) { group in
-            group.addTask(priority: .userInitiated) {
-                do {
-                    let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
-                                                                              span: span,
-                                                                              maxDecodedBytes: maxDecodedBytes,
-                                                                              shouldCancel: { Task.isCancelled })
-                    guard let img = CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: previewMaxPixelSize) else {
-                        return (nil, "Unsupported image format.")
-                    }
-                    return (img, nil)
-                } catch is CancellationError {
-                    return (nil, nil)
-                } catch CodexSessionImagePayload.DecodeError.tooLarge {
-                    return (nil, "Image too large to preview.")
-                } catch CodexSessionImagePayload.DecodeError.invalidBase64 {
-                    return (nil, "Invalid image data.")
-                } catch {
-                    return (nil, "Failed to load image preview.")
-                }
-            }
 
-            let value = await group.next() ?? (nil, "Failed to load image preview.")
-            group.cancelAll()
-            return value
-        }
+        async let prompt: String? = loadPromptText(item: item)
+        async let preview: (NSImage?, String?, String?) = Task.detached(priority: .userInitiated) {
+            do {
+                let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
+                                                                          span: span,
+                                                                          maxDecodedBytes: maxDecodedBytes,
+                                                                          shouldCancel: { Task.isCancelled })
+                guard let img = CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: previewMaxPixelSize) else {
+                    return (nil, "Unsupported image format.", nil)
+                }
+                let dims = ImageAttachmentPromptContextExtractor.dimensionsText(for: decoded)
+                return (img, nil, dims)
+            } catch is CancellationError {
+                return (nil, nil, nil)
+            } catch CodexSessionImagePayload.DecodeError.tooLarge {
+                return (nil, "Image too large to preview.", nil)
+            } catch CodexSessionImagePayload.DecodeError.invalidBase64 {
+                return (nil, "Invalid image data.", nil)
+            } catch {
+                return (nil, "Failed to load image preview.", nil)
+            }
+        }.value
+
+        let promptValue = await prompt
+        let previewValue = await preview
 
         guard !Task.isCancelled else { return }
         guard selectedItemID == itemID else { return }
 
         isPreviewLoading = false
-        previewImage = outcome.0
-        previewError = outcome.1
+        previewImage = previewValue.0
+        previewError = previewValue.1
+        dimensionsText = previewValue.2
+        promptText = promptValue
+    }
+
+    private func loadPromptText(item: CodexSessionImageItem) async -> String? {
+        if Task.isCancelled { return nil }
+        if let session = allSessions.first(where: { $0.id == item.sessionID }),
+           !session.events.isEmpty,
+           session.events.indices.contains(item.lineIndex),
+           session.events[item.lineIndex].kind == .user,
+           let text = session.events[item.lineIndex].text?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !text.isEmpty {
+            return text
+        }
+
+        return ImageAttachmentPromptContextExtractor.extractPromptText(url: item.sessionFileURL, span: item.span)
     }
 
     private func itemTooltip(_ item: CodexSessionImageItem) -> String {
@@ -803,49 +945,9 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private func navigateToSession(item: CodexSessionImageItem) {
-        let sessionID = item.sessionID
-        let url = item.sessionFileURL
-        let offset = item.span.startOffset
-        Task(priority: .userInitiated) {
-            let eventID: String?
-            let userPromptIndex: Int?
-            if let lineIndex = lineIndexForOffset(url: url, offset: offset) {
-                eventID = SessionIndexer.eventID(forPath: url.path, index: lineIndex)
-                userPromptIndex = userPromptIndexForLineIndex(sessionID: sessionID, lineIndex: lineIndex)
-            } else {
-                eventID = nil
-                userPromptIndex = nil
-            }
-            await MainActor.run {
-                var userInfo: [AnyHashable: Any]? = nil
-                var payload: [AnyHashable: Any] = [:]
-                if let eventID { payload["eventID"] = eventID }
-                if let userPromptIndex { payload["userPromptIndex"] = userPromptIndex }
-                if !payload.isEmpty {
-                    userInfo = payload
-                }
-                NotificationCenter.default.post(name: .navigateToSessionFromImages, object: sessionID, userInfo: userInfo)
-            }
-        }
-    }
-
-    private func userPromptIndexForLineIndex(sessionID: String, lineIndex: Int) -> Int? {
-        guard lineIndex >= 0 else { return nil }
-        guard let session = allSessions.first(where: { $0.id == sessionID }) else { return nil }
-        var userIndex: Int? = nil
-        var seenUsers = 0
-        for (idx, event) in session.events.enumerated() {
-            if event.kind == .user {
-                if idx <= lineIndex {
-                    userIndex = seenUsers
-                } else if userIndex == nil {
-                    userIndex = seenUsers
-                }
-                seenUsers += 1
-            }
-            if idx > lineIndex, userIndex != nil { break }
-        }
-        return userIndex
+        var payload: [AnyHashable: Any] = ["eventID": item.eventID]
+        payload["userPromptIndex"] = item.userPromptIndex as Any
+        NotificationCenter.default.post(name: .navigateToSessionFromImages, object: item.sessionID, userInfo: payload)
     }
 
     private func copyImage(item: CodexSessionImageItem) {
@@ -1097,28 +1199,6 @@ struct CodexSessionImagesGalleryView: View {
         return candidate
     }
 
-    private func lineIndexForOffset(url: URL, offset: UInt64) -> Int? {
-        do {
-            let fh = try FileHandle(forReadingFrom: url)
-            defer { try? fh.close() }
-
-            var remaining = offset
-            let chunkSize = 64 * 1024
-            var lineCount = 0
-
-            while remaining > 0 {
-                let readCount = min(UInt64(chunkSize), remaining)
-                let data = try fh.read(upToCount: Int(readCount)) ?? Data()
-                if data.isEmpty { break }
-                lineCount += data.reduce(0) { $1 == 0x0A ? $0 + 1 : $0 }
-                remaining -= UInt64(data.count)
-            }
-
-            return lineCount
-        } catch {
-            return nil
-        }
-    }
 }
 
 private struct TimeframeDivider: View {
@@ -1140,27 +1220,21 @@ private struct TimeframeDivider: View {
     }
 }
 
-private struct CodexImageThumbnailCell: View {
+private struct CodexImageThumbnailCard: View {
     @ObservedObject var model: CodexSessionImagesGalleryModel
     let item: CodexSessionImageItem
     let isSelected: Bool
-    let helpText: String
     let onSelect: () -> Void
-    let onOpenInPreview: () -> Void
-    let onSaveToDownloads: () -> Void
-    let onSave: () -> Void
-    let onCopy: () -> Void
-    let onCopyPath: () -> Void
-    let onNavigate: () -> Void
+    let onDoubleClick: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        ZStack(alignment: .bottomLeading) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.gray.opacity(0.08))
+                    .fill(Color.gray.opacity(0.06))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(isSelected ? Color.accentColor.opacity(0.70) : Color.gray.opacity(0.18),
+                            .stroke(isSelected ? Color(nsColor: .systemBlue).opacity(0.85) : Color.gray.opacity(0.18),
                                     lineWidth: isSelected ? 2 : 1)
                     )
 
@@ -1170,44 +1244,26 @@ private struct CodexImageThumbnailCell: View {
                         .aspectRatio(contentMode: .fit)
                         .padding(10)
                 } else {
-                    ProgressView()
-                        .progressViewStyle(.circular)
+                    Image(systemName: "photo")
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(.secondary)
                 }
             }
-            .frame(height: 140)
+            .frame(height: 160)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.span.mediaType)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                Text(ByteCountFormatter.string(fromByteCount: Int64(item.span.approxBytes), countStyle: .file))
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 2)
+            Text(ByteCountFormatter.string(fromByteCount: Int64(item.span.approxBytes), countStyle: .file))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
         }
         .contentShape(Rectangle())
-        .help(helpText)
         .onTapGesture(count: 2) {
             onSelect()
-            onOpenInPreview()
+            onDoubleClick()
         }
         .onTapGesture {
             onSelect()
-        }
-        .contextMenu {
-            Button("Open in Preview") { onSelect(); onOpenInPreview() }
-            Divider()
-            Button("Copy Image Path (for CLI agent)") { onSelect(); onCopyPath() }
-            Button("Copy Image") { onSelect(); onCopy() }
-            Divider()
-            Button("Save to Downloads") { onSelect(); onSaveToDownloads() }
-            Button("Save…") { onSelect(); onSave() }
-            Divider()
-            Button("Navigate to Session") { onSelect(); onNavigate() }
         }
         .onAppear { model.requestThumbnail(for: item) }
     }
