@@ -2341,7 +2341,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         weak var activeLayoutManager: TerminalLayoutManager?
         private var activeBlockText: String = ""
         private let speechSynthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer()
-        private let speechQueue = DispatchQueue(label: "com.agentsessions.speechSynthesizer", qos: .default)
+	        private let speechQueue = DispatchQueue(label: "com.agentsessions.speechSynthesizer", qos: .userInitiated)
         private var isSpeaking: Bool = false
 
         var inlineImagesEnabled: Bool = false
@@ -2878,7 +2878,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-        @objc private func copyInlineImagePath(_ sender: Any?) {
+	        @objc private func copyInlineImagePath(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
             let maxDecodedBytes = 25 * 1024 * 1024
 
@@ -2895,14 +2895,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let ext = CodexSessionImagePayload.suggestedFileExtension(for: meta.payload.mediaType)
             let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
 
-            Task(priority: .userInitiated) {
-                do {
-                    let decoded = try await Task.detached(priority: .utility) {
-                        try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
-                                                                     maxDecodedBytes: maxDecodedBytes,
-                                                                     shouldCancel: { Task.isCancelled })
-                    }.value
-                    if Task.isCancelled { return }
+	            Task(priority: .userInitiated) {
+	                do {
+	                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
+	                                                                             maxDecodedBytes: maxDecodedBytes,
+	                                                                             shouldCancel: { Task.isCancelled })
+	                    if Task.isCancelled { return }
 
                     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("AgentSessions/ImageClipboard", isDirectory: true)
                     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -2921,19 +2919,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-        @objc private func copyInlineImage(_ sender: Any?) {
+	        @objc private func copyInlineImage(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
             let maxDecodedBytes = 25 * 1024 * 1024
 
-            Task(priority: .userInitiated) {
-                do {
-                    let decoded = try await Task.detached(priority: .utility) {
-                        try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
-                                                                     maxDecodedBytes: maxDecodedBytes,
-                                                                     shouldCancel: { Task.isCancelled })
-                    }.value
-                    if Task.isCancelled { return }
-                    guard let image = NSImage(data: decoded) else { return }
+	            Task(priority: .userInitiated) {
+	                do {
+	                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
+	                                                                             maxDecodedBytes: maxDecodedBytes,
+	                                                                             shouldCancel: { Task.isCancelled })
+	                    if Task.isCancelled { return }
+	                    guard let image = NSImage(data: decoded) else { return }
 
                     await MainActor.run {
                         let pasteboard = NSPasteboard.general
@@ -2951,7 +2947,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-        @objc private func saveInlineImageToDownloads(_ sender: Any?) {
+	        @objc private func saveInlineImageToDownloads(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
             guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
             let maxDecodedBytes = 25 * 1024 * 1024
@@ -2959,22 +2955,20 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
             let destination = uniqueDestinationURL(in: downloads, filename: filename)
 
-            Task(priority: .userInitiated) {
-                do {
-                    let decoded = try await Task.detached(priority: .utility) {
-                        try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
-                                                                     maxDecodedBytes: maxDecodedBytes,
-                                                                     shouldCancel: { Task.isCancelled })
-                    }.value
-                    if Task.isCancelled { return }
-                    try decoded.write(to: destination, options: [.atomic])
-                } catch {
+	            Task(priority: .userInitiated) {
+	                do {
+	                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
+	                                                                             maxDecodedBytes: maxDecodedBytes,
+	                                                                             shouldCancel: { Task.isCancelled })
+	                    if Task.isCancelled { return }
+	                    try decoded.write(to: destination, options: [.atomic])
+	                } catch {
                     // Best-effort save; no UI error.
                 }
             }
         }
 
-        @objc private func saveInlineImageWithPanel(_ sender: Any?) {
+	        @objc private func saveInlineImageWithPanel(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
 
             let ext = CodexSessionImagePayload.suggestedFileExtension(for: meta.payload.mediaType)
@@ -2990,19 +2984,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let maxDecodedBytes = 25 * 1024 * 1024
 
             let destinationKeyWindow = NSApp.keyWindow
-            let onComplete: (NSApplication.ModalResponse) -> Void = { response in
-                guard response == .OK, let destination = panel.url else { return }
-                Task(priority: .userInitiated) {
-                    do {
-                        let decoded = try await Task.detached(priority: .utility) {
-                            try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
-                                                                         maxDecodedBytes: maxDecodedBytes,
-                                                                         shouldCancel: { Task.isCancelled })
-                        }.value
-                        if Task.isCancelled { return }
-                        try decoded.write(to: destination, options: [.atomic])
-                    } catch {
-                        // Best-effort save; no UI error.
+	            let onComplete: (NSApplication.ModalResponse) -> Void = { response in
+	                guard response == .OK, let destination = panel.url else { return }
+	                Task(priority: .userInitiated) {
+	                    do {
+	                        let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
+	                                                                                 maxDecodedBytes: maxDecodedBytes,
+	                                                                                 shouldCancel: { Task.isCancelled })
+	                        if Task.isCancelled { return }
+	                        try decoded.write(to: destination, options: [.atomic])
+	                    } catch {
+	                        // Best-effort save; no UI error.
                     }
                 }
             }
