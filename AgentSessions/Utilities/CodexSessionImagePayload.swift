@@ -3,10 +3,65 @@ import AppKit
 import ImageIO
 import UniformTypeIdentifiers
 
+enum SessionImagePayload: Hashable, Sendable {
+    case base64(sourceURL: URL, span: Base64ImageDataURLScanner.Span)
+    case file(fileURL: URL, mediaType: String, fileSizeBytes: Int64)
+
+    var mediaType: String {
+        switch self {
+        case .base64(_, let span):
+            return span.mediaType
+        case .file(_, let mediaType, _):
+            return mediaType
+        }
+    }
+
+    var approxBytes: Int {
+        switch self {
+        case .base64(_, let span):
+            return span.approxBytes
+        case .file(_, _, let sizeBytes):
+            if sizeBytes > Int64(Int.max) { return Int.max }
+            return max(0, Int(sizeBytes))
+        }
+    }
+
+    var stableID: String {
+        switch self {
+        case .base64(let sourceURL, let span):
+            return sha256Hex(sourceURL.path) + "-" + span.id
+        case .file(let fileURL, let mediaType, let sizeBytes):
+            var s = "file|"
+            s.append(fileURL.path)
+            s.append("|")
+            s.append(mediaType)
+            s.append("|")
+            s.append(String(sizeBytes))
+            return sha256Hex(s)
+        }
+    }
+}
+
 enum CodexSessionImagePayload {
     enum DecodeError: Error {
         case invalidBase64
         case tooLarge
+    }
+
+    static func decodeImageData(payload: SessionImagePayload,
+                                maxDecodedBytes: Int,
+                                shouldCancel: () -> Bool = { false }) throws -> Data {
+        switch payload {
+        case .base64(let sourceURL, let span):
+            return try decodeImageData(url: sourceURL, span: span, maxDecodedBytes: maxDecodedBytes, shouldCancel: shouldCancel)
+        case .file(let fileURL, _, let sizeBytes):
+            if shouldCancel() { throw CancellationError() }
+            if sizeBytes > Int64(maxDecodedBytes) { throw DecodeError.tooLarge }
+            let attrs = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)) ?? [:]
+            let actualSize = (attrs[.size] as? NSNumber)?.int64Value ?? sizeBytes
+            if actualSize > Int64(maxDecodedBytes) { throw DecodeError.tooLarge }
+            return try Data(contentsOf: fileURL)
+        }
     }
 
     static func decodeImageData(url: URL,
@@ -99,4 +154,3 @@ enum CodexSessionImagePayload {
         return out
     }
 }
-

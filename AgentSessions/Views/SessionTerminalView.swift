@@ -19,13 +19,12 @@ private struct TextSnapshot {
 
 private struct InlineSessionImage: Identifiable, Hashable, Sendable {
     let sessionID: String
-    let sessionFileURL: URL
     let imageEventID: String
     let userPromptIndex: Int?
     let sessionImageIndex: Int
-    let span: Base64ImageDataURLScanner.Span
+    let payload: SessionImagePayload
 
-    var id: String { "\(sessionID)-\(sha256Hex(sessionFileURL.path))-\(span.id)" }
+    var id: String { "\(sessionID)-\(payload.stableID)" }
 }
 
 /// Terminal-style session view with filters, optional gutter, and legend toggles.
@@ -222,7 +221,12 @@ struct SessionTerminalView: View {
                 legendToggle(label: agentLegendLabel, role: .assistant)
                 legendToggle(label: "Tools", role: .tools)
                 legendToggle(label: "Errors", role: .errors)
-                if (session.source == .codex || session.source == .claude || session.source == .opencode), hasInlineImagesInSession {
+                if (session.source == .codex
+                        || session.source == .claude
+                        || session.source == .opencode
+                        || session.source == .gemini
+                        || session.source == .copilot),
+                   hasInlineImagesInSession {
                     imagesPill()
                 }
             }
@@ -286,7 +290,11 @@ struct SessionTerminalView: View {
             return
         }
 
-        guard session.source == .codex || session.source == .claude || session.source == .opencode else {
+        guard session.source == .codex
+                || session.source == .claude
+                || session.source == .opencode
+                || session.source == .gemini
+                || session.source == .copilot else {
             hasInlineImagesInSession = false
             inlineImagesByUserBlockIndex = [:]
             inlineImagesSignature = 0
@@ -301,9 +309,8 @@ struct SessionTerminalView: View {
                 guard FileManager.default.fileExists(atPath: sessionFileURL.path) else { return (false, [:], 0) }
 
                 struct InlineScanResult: Hashable, Sendable {
-                    let span: Base64ImageDataURLScanner.Span
+                    let payload: SessionImagePayload
                     let lineIndex: Int
-                    let sourceFileURL: URL
                 }
 
                 let hasAny: Bool = {
@@ -317,6 +324,14 @@ struct SessionTerminalView: View {
                         return OpenCodeBase64ImageScanner.fileContainsBase64ImageDataURL(sessionFileURL: sessionFileURL,
                                                                                         messageIDs: messageIDs,
                                                                                         shouldCancel: { Task.isCancelled })
+                    case .gemini:
+                        return GeminiInlineDataImageScanner.fileContainsInlineDataImage(at: sessionFileURL, shouldCancel: { Task.isCancelled })
+                    case .copilot:
+                        do {
+                            return try CopilotAttachmentScanner.scanFile(at: sessionFileURL, maxMatches: 1, shouldCancel: { Task.isCancelled }).isEmpty == false
+                        } catch {
+                            return false
+                        }
                     default:
                         return false
                     }
@@ -329,11 +344,11 @@ struct SessionTerminalView: View {
                         case .codex:
                             return try Base64ImageDataURLScanner
                                 .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
-                                .map { InlineScanResult(span: $0.span, lineIndex: $0.lineIndex, sourceFileURL: sessionFileURL) }
+                                .map { InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: $0.span), lineIndex: $0.lineIndex) }
                         case .claude:
                             return try ClaudeBase64ImageScanner
                                 .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
-                                .map { InlineScanResult(span: $0.span, lineIndex: $0.lineIndex, sourceFileURL: sessionFileURL) }
+                                .map { InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: $0.span), lineIndex: $0.lineIndex) }
                         case .opencode:
                             let messageIDs = Array(Set(sessionSnapshot.events.compactMap(\.messageID)).filter { $0.hasPrefix("msg_") })
 
@@ -352,7 +367,32 @@ struct SessionTerminalView: View {
                             return parts.map { part in
                                 let mid = part.messageID
                                 let eventIndex = messageToUserEventIndex[mid] ?? messageToFirstEventIndex[mid] ?? 0
-                                return InlineScanResult(span: part.span, lineIndex: eventIndex, sourceFileURL: part.partFileURL)
+                                return InlineScanResult(payload: .base64(sourceURL: part.partFileURL, span: part.span), lineIndex: eventIndex)
+                            }
+                        case .gemini:
+                            let located = try GeminiInlineDataImageScanner.scanFile(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
+                            var eventIndexByID: [String: Int] = [:]
+                            eventIndexByID.reserveCapacity(min(sessionSnapshot.events.count, 512))
+                            for (idx, ev) in sessionSnapshot.events.enumerated() {
+                                eventIndexByID[ev.id] = idx
+                            }
+                            return located.map { item in
+                                let baseID = sessionSnapshot.id + String(format: "-%04d", item.itemIndex)
+                                let eventIndex = eventIndexByID[baseID] ?? 0
+                                return InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: item.span), lineIndex: eventIndex)
+                            }
+                        case .copilot:
+                            let located = try CopilotAttachmentScanner.scanFile(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
+                            var eventIndexByID: [String: Int] = [:]
+                            eventIndexByID.reserveCapacity(min(sessionSnapshot.events.count, 512))
+                            for (idx, ev) in sessionSnapshot.events.enumerated() {
+                                eventIndexByID[ev.id] = idx
+                            }
+                            return located.compactMap { att in
+                                let baseID = sessionSnapshot.id + String(format: "-%04d", att.eventSequenceIndex)
+                                let eventIndex = eventIndexByID[baseID] ?? 0
+                                return InlineScanResult(payload: .file(fileURL: att.fileURL, mediaType: att.mediaType, fileSizeBytes: att.fileSizeBytes),
+                                                       lineIndex: eventIndex)
                             }
                         default:
                             return []
@@ -365,10 +405,11 @@ struct SessionTerminalView: View {
                 let filtered: [InlineScanResult] = {
                     switch sessionSnapshot.source {
                     case .codex:
-                        return located.filter { Base64ImageDataURLScanner.isLikelyImageURLContext(at: sessionFileURL, startOffset: $0.span.startOffset) }
-                    case .claude:
-                        return located
-                    case .opencode:
+                        return located.filter { item in
+                            guard case .base64(_, let span) = item.payload else { return false }
+                            return Base64ImageDataURLScanner.isLikelyImageURLContext(at: sessionFileURL, startOffset: span.startOffset)
+                        }
+                    case .claude, .opencode, .gemini, .copilot:
                         return located
                     default:
                         return []
@@ -443,11 +484,10 @@ struct SessionTerminalView: View {
 
                     let img = InlineSessionImage(
                         sessionID: sessionSnapshot.id,
-                        sessionFileURL: item.sourceFileURL,
                         imageEventID: imageEventID,
                         userPromptIndex: userPromptIndex,
                         sessionImageIndex: sessionImageIndex,
-                        span: item.span
+                        payload: item.payload
                     )
                     out[targetUserBlockIndex, default: []].append(img)
                     sessionImageIndex += 1
@@ -456,12 +496,10 @@ struct SessionTerminalView: View {
                 var hasher = Hasher()
                 hasher.combine(out.values.reduce(0) { $0 + $1.count })
                 if let first = located.first {
-                    hasher.combine(first.span.startOffset)
-                    hasher.combine(first.span.endOffset)
+                    hasher.combine(first.payload.stableID)
                 }
                 if let last = located.last {
-                    hasher.combine(last.span.startOffset)
-                    hasher.combine(last.span.endOffset)
+                    hasher.combine(last.payload.stableID)
                 }
 
                 return (true, out, hasher.finalize())
@@ -2583,15 +2621,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
             let maxDecodedBytes = 25 * 1024 * 1024
             let maxPixels = 480
-            let url = meta.sessionFileURL
-            let span = meta.span
 
             inlineThumbnailTasks[id] = Task(priority: .utility) { [weak self] in
                 guard let self else { return }
                 let img: NSImage? = await Task.detached(priority: .utility) {
                     do {
-                        let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
-                                                                                  span: span,
+                        let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
                                                                                   maxDecodedBytes: maxDecodedBytes,
                                                                                   shouldCancel: { Task.isCancelled })
                         return CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: maxPixels)
@@ -2711,15 +2746,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
             let maxDecodedBytes = 25 * 1024 * 1024
             let maxPixels = 1200
-            let url = meta.sessionFileURL
-            let span = meta.span
 
             inlineHoverTask = Task(priority: .utility) { [weak self] in
                 guard let self else { return }
                 let preview: NSImage? = await Task.detached(priority: .utility) {
                     do {
-                        let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
-                                                                                  span: span,
+                        let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
                                                                                   maxDecodedBytes: maxDecodedBytes,
                                                                                   shouldCancel: { Task.isCancelled })
                         return CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: maxPixels)
@@ -2754,16 +2786,23 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             guard let meta = inlineImagesByID[id] else { return nil }
 
             let maxDecodedBytes = 25 * 1024 * 1024
-            let sourceURL = meta.sessionFileURL
-            let span = meta.span
-            let ext = CodexSessionImagePayload.suggestedFileExtension(for: span.mediaType)
+            switch meta.payload {
+            case .file(let originalURL, _, _):
+                await MainActor.run { [weak self] in
+                    self?.inlinePreviewFileCache[id] = originalURL
+                }
+                return originalURL
+            case .base64:
+                break
+            }
+
+            let ext = CodexSessionImagePayload.suggestedFileExtension(for: meta.payload.mediaType)
             let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
 
             do {
                 // This is triggered by explicit user actions (context menu / Preview / copy / save).
                 // Avoid priority inversions by doing the decode work on the current task's priority.
-                let decoded = try CodexSessionImagePayload.decodeImageData(url: sourceURL,
-                                                                          span: span,
+                let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
                                                                           maxDecodedBytes: maxDecodedBytes,
                                                                           shouldCancel: { Task.isCancelled })
                 if Task.isCancelled { return nil }
@@ -2842,16 +2881,24 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         @objc private func copyInlineImagePath(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
             let maxDecodedBytes = 25 * 1024 * 1024
-            let sourceURL = meta.sessionFileURL
-            let span = meta.span
-            let ext = CodexSessionImagePayload.suggestedFileExtension(for: span.mediaType)
+
+            if case .file(let originalURL, _, _) = meta.payload {
+                Task { @MainActor in
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.writeObjects([originalURL as NSURL])
+                    pasteboard.setString(originalURL.path, forType: .string)
+                }
+                return
+            }
+
+            let ext = CodexSessionImagePayload.suggestedFileExtension(for: meta.payload.mediaType)
             let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
 
             Task(priority: .userInitiated) {
                 do {
                     let decoded = try await Task.detached(priority: .utility) {
-                        try CodexSessionImagePayload.decodeImageData(url: sourceURL,
-                                                                     span: span,
+                        try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
                                                                      maxDecodedBytes: maxDecodedBytes,
                                                                      shouldCancel: { Task.isCancelled })
                     }.value
@@ -2877,14 +2924,11 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         @objc private func copyInlineImage(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
             let maxDecodedBytes = 25 * 1024 * 1024
-            let sourceURL = meta.sessionFileURL
-            let span = meta.span
 
             Task(priority: .userInitiated) {
                 do {
                     let decoded = try await Task.detached(priority: .utility) {
-                        try CodexSessionImagePayload.decodeImageData(url: sourceURL,
-                                                                     span: span,
+                        try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
                                                                      maxDecodedBytes: maxDecodedBytes,
                                                                      shouldCancel: { Task.isCancelled })
                     }.value
@@ -2911,17 +2955,14 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
             guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
             let maxDecodedBytes = 25 * 1024 * 1024
-            let sourceURL = meta.sessionFileURL
-            let span = meta.span
-            let ext = CodexSessionImagePayload.suggestedFileExtension(for: span.mediaType)
+            let ext = CodexSessionImagePayload.suggestedFileExtension(for: meta.payload.mediaType)
             let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
             let destination = uniqueDestinationURL(in: downloads, filename: filename)
 
             Task(priority: .userInitiated) {
                 do {
                     let decoded = try await Task.detached(priority: .utility) {
-                        try CodexSessionImagePayload.decodeImageData(url: sourceURL,
-                                                                     span: span,
+                        try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
                                                                      maxDecodedBytes: maxDecodedBytes,
                                                                      shouldCancel: { Task.isCancelled })
                     }.value
@@ -2936,9 +2977,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         @objc private func saveInlineImageWithPanel(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
 
-            let span = meta.span
-            let ext = CodexSessionImagePayload.suggestedFileExtension(for: span.mediaType)
-            let utType = CodexSessionImagePayload.suggestedUTType(for: span.mediaType)
+            let ext = CodexSessionImagePayload.suggestedFileExtension(for: meta.payload.mediaType)
+            let utType = CodexSessionImagePayload.suggestedUTType(for: meta.payload.mediaType)
             let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
 
             let panel = NSSavePanel()
@@ -2948,8 +2988,6 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             panel.nameFieldStringValue = filename
 
             let maxDecodedBytes = 25 * 1024 * 1024
-            let sourceURL = meta.sessionFileURL
-            let sourceSpan = span
 
             let destinationKeyWindow = NSApp.keyWindow
             let onComplete: (NSApplication.ModalResponse) -> Void = { response in
@@ -2957,8 +2995,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 Task(priority: .userInitiated) {
                     do {
                         let decoded = try await Task.detached(priority: .utility) {
-                            try CodexSessionImagePayload.decodeImageData(url: sourceURL,
-                                                                         span: sourceSpan,
+                            try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
                                                                          maxDecodedBytes: maxDecodedBytes,
                                                                          shouldCancel: { Task.isCancelled })
                         }.value

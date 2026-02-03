@@ -592,7 +592,7 @@ struct CodexSessionImagesGalleryView: View {
         let sorted = viewModel.items.sorted { a, b in
             if a.sessionModifiedAt != b.sessionModifiedAt { return a.sessionModifiedAt > b.sessionModifiedAt }
             if a.sessionID != b.sessionID { return a.sessionID > b.sessionID }
-            return a.span.startOffset > b.span.startOffset
+            return a.sortOffset > b.sortOffset
         }
 
         var buckets: [Date: [ImageBrowserViewModel.Item]] = [:]
@@ -649,6 +649,9 @@ struct CodexSessionImagesGalleryView: View {
                                     onSelect: { viewModel.selectedItemID = item.id },
                                     onDoubleClick: { openInPreview(item: item) }
                                 )
+                                .contextMenu {
+                                    imageActionsMenu(for: item)
+                                }
                             }
                         }
                     }
@@ -704,6 +707,15 @@ struct CodexSessionImagesGalleryView: View {
                         Button("Navigate to Session") { navigateToSession(item: item) }
                             .buttonStyle(.borderedProminent)
 
+                        Menu {
+                            imageActionsMenu(for: item)
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .help("Image actions")
+
                         Button(isSaving ? "Saving…" : "Save…") { saveWithPanel(item: item) }
                             .disabled(isSaving)
 
@@ -751,7 +763,7 @@ struct CodexSessionImagesGalleryView: View {
                             }
                             GridRow {
                                 metaLabel("SIZE")
-                                metaValue(ByteCountFormatter.string(fromByteCount: Int64(item.span.approxBytes), countStyle: .file))
+                                metaValue(ByteCountFormatter.string(fromByteCount: Int64(item.payload.approxBytes), countStyle: .file))
                             }
                             GridRow {
                                 metaLabel("DIMENSIONS")
@@ -801,8 +813,6 @@ struct CodexSessionImagesGalleryView: View {
 
         guard let item = selectedItem else { return }
 
-        let url = item.sessionFileURL
-        let span = item.span
         let maxDecodedBytes = 25 * 1024 * 1024
         let previewMaxPixelSize = 3600
         let itemID = item.id
@@ -812,8 +822,7 @@ struct CodexSessionImagesGalleryView: View {
         async let prompt: String? = loadPromptText(item: item)
         async let preview: (NSImage?, String?, String?) = Task.detached(priority: .userInitiated) {
             do {
-                let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
-                                                                          span: span,
+                let decoded = try CodexSessionImagePayload.decodeImageData(payload: item.payload,
                                                                           maxDecodedBytes: maxDecodedBytes,
                                                                           shouldCancel: { Task.isCancelled })
                 guard let img = CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: previewMaxPixelSize) else {
@@ -848,26 +857,39 @@ struct CodexSessionImagesGalleryView: View {
     private func loadPromptText(item: ImageBrowserViewModel.Item) async -> String? {
         if Task.isCancelled { return nil }
         if let fromLoaded = viewModel.loadedUserPromptText(for: item) { return fromLoaded }
-        guard item.sessionSource == .codex || item.sessionSource == .claude else { return nil }
-        return ImageAttachmentPromptContextExtractor.extractPromptText(url: item.sessionFileURL, span: item.span)
+        // Performance-first: do not scan files for prompt context. Prompt text appears only when the
+        // selected session was fully parsed and prompt text is already in memory.
+        return nil
     }
 
     private func navigateToSession(item: ImageBrowserViewModel.Item) {
         NotificationCenter.default.post(
             name: .navigateToSessionFromImages,
             object: item.sessionID,
-            userInfo: ["eventID": item.eventID]
+            userInfo: ["eventID": item.eventID, "userPromptIndex": item.userPromptIndex as Any]
         )
     }
 
+    @ViewBuilder
+    private func imageActionsMenu(for item: ImageBrowserViewModel.Item) -> some View {
+        Button("Open in Preview") { openInPreview(item: item) }
+
+        Divider()
+
+        Button("Copy Image Path (for CLI agent)") { copyImagePath(item: item) }
+        Button("Copy Image") { copyImage(item: item) }
+
+        Divider()
+
+        Button("Save to Downloads") { saveToDownloads(item: item) }
+        Button("Save…") { saveWithPanel(item: item) }
+    }
+
     private func copyImage(item: ImageBrowserViewModel.Item) {
-        let url = item.sessionFileURL
-        let span = item.span
         let maxDecodedBytes = 25 * 1024 * 1024
         Task(priority: .userInitiated) {
             do {
-                let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
-                                                                          span: span,
+                let decoded = try CodexSessionImagePayload.decodeImageData(payload: item.payload,
                                                                           maxDecodedBytes: maxDecodedBytes)
                 guard let image = NSImage(data: decoded) else { return }
                 await MainActor.run {
@@ -887,15 +909,18 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private func copyImagePath(item: ImageBrowserViewModel.Item) {
-        let url = item.sessionFileURL
-        let span = item.span
         let maxDecodedBytes = 25 * 1024 * 1024
         Task(priority: .userInitiated) {
             do {
-                let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
-                                                                          span: span,
-                                                                          maxDecodedBytes: maxDecodedBytes)
-                let fileURL = try writeClipboardImageFile(item: item, data: decoded)
+                let fileURL: URL
+                switch item.payload {
+                case .file(let originalURL, _, _):
+                    fileURL = originalURL
+                case .base64:
+                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: item.payload,
+                                                                              maxDecodedBytes: maxDecodedBytes)
+                    fileURL = try writeClipboardImageFile(item: item, data: decoded)
+                }
                 await MainActor.run {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
@@ -909,17 +934,19 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private func openInPreview(item: ImageBrowserViewModel.Item) {
-        let url = item.sessionFileURL
-        let span = item.span
         let maxDecodedBytes = 25 * 1024 * 1024
         Task(priority: .userInitiated) {
             do {
-                let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
-                                                                          span: span,
-                                                                          maxDecodedBytes: maxDecodedBytes)
-                let fileURL = try writePreviewImageFile(item: item, data: decoded)
-                await MainActor.run {
-                    openInPreviewApp(fileURL)
+                switch item.payload {
+                case .file(let originalURL, _, _):
+                    await MainActor.run { openInPreviewApp(originalURL) }
+                case .base64:
+                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: item.payload,
+                                                                              maxDecodedBytes: maxDecodedBytes)
+                    let fileURL = try writePreviewImageFile(item: item, data: decoded)
+                    await MainActor.run {
+                        openInPreviewApp(fileURL)
+                    }
                 }
             } catch {
                 // Best-effort open; no UI error.
@@ -933,15 +960,18 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private func quickLook(item: ImageBrowserViewModel.Item) {
-        let url = item.sessionFileURL
-        let span = item.span
         let maxDecodedBytes = 25 * 1024 * 1024
         Task(priority: .userInitiated) {
             do {
-                let decoded = try CodexSessionImagePayload.decodeImageData(url: url,
-                                                                          span: span,
-                                                                          maxDecodedBytes: maxDecodedBytes)
-                let fileURL = try writePreviewImageFile(item: item, data: decoded)
+                let fileURL: URL
+                switch item.payload {
+                case .file(let originalURL, _, _):
+                    fileURL = originalURL
+                case .base64:
+                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: item.payload,
+                                                                              maxDecodedBytes: maxDecodedBytes)
+                    fileURL = try writePreviewImageFile(item: item, data: decoded)
+                }
                 await MainActor.run {
                     QuickLookPreviewController.shared.preview(urls: [fileURL])
                 }
@@ -952,7 +982,7 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private func writeClipboardImageFile(item: ImageBrowserViewModel.Item, data: Data) throws -> URL {
-        let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.span.mediaType)
+        let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.payload.mediaType)
         let tempRoot = FileManager.default.temporaryDirectory
         let dir = tempRoot.appendingPathComponent("AgentSessions/ImageClipboard", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -963,7 +993,7 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private func writePreviewImageFile(item: ImageBrowserViewModel.Item, data: Data) throws -> URL {
-        let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.span.mediaType)
+        let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.payload.mediaType)
         let tempRoot = FileManager.default.temporaryDirectory
         let dir = tempRoot.appendingPathComponent("AgentSessions/ImagesGalleryPreview", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -985,8 +1015,8 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private func saveWithPanel(item: ImageBrowserViewModel.Item) {
-        let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.span.mediaType)
-        let utType = CodexSessionImagePayload.suggestedUTType(for: item.span.mediaType)
+        let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.payload.mediaType)
+        let utType = CodexSessionImagePayload.suggestedUTType(for: item.payload.mediaType)
 
         let panel = NSSavePanel()
         panel.allowedContentTypes = [utType]
@@ -995,8 +1025,6 @@ struct CodexSessionImagesGalleryView: View {
         panel.nameFieldStringValue = suggestedFileName(for: item, ext: ext)
 
         let destinationKeyWindow = NSApp.keyWindow
-        let destinationURL = item.sessionFileURL
-        let span = item.span
         let maxDecodedBytes = 25 * 1024 * 1024
         let token = UUID()
 
@@ -1004,8 +1032,7 @@ struct CodexSessionImagesGalleryView: View {
             guard response == .OK, let destination = panel.url else { return }
             beginSave(token: token,
                       destination: destination,
-                      sourceURL: destinationURL,
-                      span: span,
+                      payload: item.payload,
                       maxDecodedBytes: maxDecodedBytes,
                       successStatus: nil)
         }
@@ -1023,23 +1050,21 @@ struct CodexSessionImagesGalleryView: View {
             return
         }
 
-        let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.span.mediaType)
+        let ext = CodexSessionImagePayload.suggestedFileExtension(for: item.payload.mediaType)
         let filename = suggestedFileName(for: item, ext: ext)
         let destination = uniqueDestinationURL(in: downloads, filename: filename)
         let token = UUID()
 
         beginSave(token: token,
                   destination: destination,
-                  sourceURL: item.sessionFileURL,
-                  span: item.span,
+                  payload: item.payload,
                   maxDecodedBytes: 25 * 1024 * 1024,
                   successStatus: "Saved to Downloads.")
     }
 
     private func beginSave(token: UUID,
                            destination: URL,
-                           sourceURL: URL,
-                           span: Base64ImageDataURLScanner.Span,
+                           payload: SessionImagePayload,
                            maxDecodedBytes: Int,
                            successStatus: String?) {
         saveTask?.cancel()
@@ -1050,8 +1075,7 @@ struct CodexSessionImagesGalleryView: View {
 
         saveTask = Task(priority: .userInitiated) {
             do {
-                let decoded = try CodexSessionImagePayload.decodeImageData(url: sourceURL,
-                                                                          span: span,
+                let decoded = try CodexSessionImagePayload.decodeImageData(payload: payload,
                                                                           maxDecodedBytes: maxDecodedBytes,
                                                                           shouldCancel: { Task.isCancelled })
                 if Task.isCancelled { throw CancellationError() }
