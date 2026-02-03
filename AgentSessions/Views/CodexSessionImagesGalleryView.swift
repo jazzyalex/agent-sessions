@@ -707,14 +707,42 @@ struct CodexSessionImagesGalleryView: View {
                         Button("Navigate to Session") { navigateToSession(item: item) }
                             .buttonStyle(.borderedProminent)
 
-                        Menu {
-                            imageActionsMenu(for: item)
+                        Button {
+                            openInPreview(item: item)
                         } label: {
-                            Image(systemName: "ellipsis.circle")
+                            Image(systemName: "arrow.up.right.square")
                                 .font(.system(size: 14, weight: .semibold))
                         }
-                        .menuStyle(.borderlessButton)
-                        .help("Image actions")
+                        .buttonStyle(.borderless)
+                        .help("Open in Preview")
+
+                        Button {
+                            copyImagePath(item: item)
+                        } label: {
+                            Image(systemName: "link")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy Image Path (for CLI agent)")
+
+                        Button {
+                            copyImage(item: item)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy Image")
+
+                        Button {
+                            saveToDownloads(item: item)
+                        } label: {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(isSaving)
+                        .help("Save to Downloads")
 
                         Button(isSaving ? "Saving…" : "Save…") { saveWithPanel(item: item) }
                             .disabled(isSaving)
