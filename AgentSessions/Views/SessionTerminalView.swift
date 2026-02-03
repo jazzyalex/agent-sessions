@@ -3046,8 +3046,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	            // Layout manager coordinates are in text-container space (not view space).
 	            let containerPoint = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
 
-	            let idx = lm.characterIndex(for: containerPoint, in: tc, fractionOfDistanceBetweenInsertionPoints: nil)
-	            guard idx != NSNotFound else { return nil }
+	            // TextKit layout is lazy (and we allow non-contiguous layout). Ensure the relevant geometry exists
+	            // so bounding rects are non-zero immediately after scroll/content updates.
+	            let probe = NSRect(x: containerPoint.x - 2, y: containerPoint.y - 2, width: 4, height: 4)
+	            lm.ensureLayout(forBoundingRect: probe, in: tc)
 
 	            func matchAt(_ c: Int) -> (id: String, range: NSRange)? {
 	                guard c >= 0 && c < ts.length else { return nil }
@@ -3055,13 +3057,27 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	                guard let id = ts.attribute(Coordinator.inlineImageIDKey, at: c, effectiveRange: &effectiveRange) as? String,
 	                      effectiveRange.location != NSNotFound else { return nil }
 	                let glyphs = lm.glyphRange(forCharacterRange: effectiveRange, actualCharacterRange: nil)
+	                if glyphs.location == NSNotFound || glyphs.length == 0 { return nil }
+	                lm.ensureLayout(forGlyphRange: glyphs)
 	                var rect = lm.boundingRect(forGlyphRange: glyphs, in: tc)
 	                rect = rect.insetBy(dx: -4, dy: -4)
 	                guard rect.contains(containerPoint) else { return nil }
 	                return (id, effectiveRange)
 	            }
 
-	            // Prefer direct point->character mapping, but allow small index drift around attachments.
+	            // Prefer glyph hit testing (more reliable around attachments, tabs, and insertion points).
+	            var fraction: CGFloat = 0
+	            let glyphIndex = lm.glyphIndex(for: containerPoint, in: tc, fractionOfDistanceThroughGlyph: &fraction)
+	            if glyphIndex != NSNotFound, glyphIndex < lm.numberOfGlyphs {
+	                let charIndex = lm.characterIndexForGlyph(at: glyphIndex)
+	                if let hit = matchAt(charIndex) ?? matchAt(charIndex - 1) ?? matchAt(charIndex + 1) {
+	                    return hit
+	                }
+	            }
+
+	            // Fallback to point->character mapping, but allow small index drift around attachments.
+	            let idx = lm.characterIndex(for: containerPoint, in: tc, fractionOfDistanceBetweenInsertionPoints: nil)
+	            guard idx != NSNotFound else { return nil }
 	            if let hit = matchAt(idx) ?? matchAt(idx - 1) ?? matchAt(idx + 1) {
 	                return hit
 	            }
@@ -3076,6 +3092,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	            ts.enumerateAttribute(Coordinator.inlineImageIDKey, in: scan, options: []) { value, range, stop in
 	                guard let id = value as? String else { return }
 	                let glyphs = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+	                if glyphs.location == NSNotFound || glyphs.length == 0 { return }
+	                lm.ensureLayout(forGlyphRange: glyphs)
 	                var rect = lm.boundingRect(forGlyphRange: glyphs, in: tc)
 	                rect = rect.insetBy(dx: -4, dy: -4)
 	                if rect.contains(containerPoint) {
@@ -3141,6 +3159,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                        let tc = textContainer {
                         let charRange = NSRange(location: hit.range.location, length: max(1, hit.range.length))
                         let glyphRange = lm.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+                        lm.ensureLayout(forGlyphRange: glyphRange)
                         var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
                         rect.origin.x += textContainerOrigin.x
                         rect.origin.y += textContainerOrigin.y
@@ -3183,6 +3202,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	            guard let lm = layoutManager, let tc = textContainer else { return }
 	            let charRange = NSRange(location: hit.range.location, length: max(1, hit.range.length))
 	            let glyphRange = lm.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+	            lm.ensureLayout(forGlyphRange: glyphRange)
 	            var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
 	            rect.origin.x += textContainerOrigin.x
 	            rect.origin.y += textContainerOrigin.y
@@ -3192,6 +3212,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	                inlineImageCoordinator.handleInlineImageHover(id: hit.id, anchorRect: rect, in: self)
 	            }
 	        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
 
         override func mouseExited(with event: NSEvent) {
             super.mouseExited(with: event)
