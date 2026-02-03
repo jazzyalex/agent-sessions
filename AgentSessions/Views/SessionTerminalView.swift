@@ -304,8 +304,8 @@ struct SessionTerminalView: View {
         let sessionSnapshot = session
         let sessionFileURL = URL(fileURLWithPath: sessionSnapshot.filePath)
 
-        inlineImagesTask = Task(priority: .utility) { @MainActor in
-            let outcome = await Task.detached(priority: .utility) { () -> (Bool, [Int: [InlineSessionImage]], Int) in
+        inlineImagesTask = Task.detached(priority: .utility) { [sessionSnapshot, sessionFileURL] in
+            let outcome: (Bool, [Int: [InlineSessionImage]], Int) = { () -> (Bool, [Int: [InlineSessionImage]], Int) in
                 guard FileManager.default.fileExists(atPath: sessionFileURL.path) else { return (false, [:], 0) }
 
                 struct InlineScanResult: Hashable, Sendable {
@@ -503,12 +503,15 @@ struct SessionTerminalView: View {
                 }
 
                 return (true, out, hasher.finalize())
-            }.value
+            }()
 
             guard !Task.isCancelled else { return }
-            hasInlineImagesInSession = !outcome.1.isEmpty
-            inlineImagesByUserBlockIndex = outcome.1
-            inlineImagesSignature = outcome.2
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                hasInlineImagesInSession = !outcome.1.isEmpty
+                inlineImagesByUserBlockIndex = outcome.1
+                inlineImagesSignature = outcome.2
+            }
         }
     }
 
@@ -661,60 +664,62 @@ struct SessionTerminalView: View {
         let sessionSnapshot = session
         let skipAgentsPreamble = skipAgentsPreambleEnabled()
 
-        rebuildTask = Task(priority: priority) { @MainActor in
+        rebuildTask = Task.detached(priority: priority) { [sessionSnapshot, skipAgentsPreamble, debounceNanoseconds] in
             if debounceNanoseconds > 0 {
                 try? await Task.sleep(nanoseconds: debounceNanoseconds)
             }
-
-            let result = await Task.detached(priority: priority) {
-                Self.buildRebuildResult(session: sessionSnapshot, skipAgentsPreamble: skipAgentsPreamble)
-            }.value
-
             guard !Task.isCancelled else { return }
 
-            lines = result.lines
-            visibleLines = roleFilteredLines(from: result.lines)
-            fullSnapshot = buildTextSnapshot(lines: result.lines)
-            visibleSnapshot = buildTextSnapshot(lines: visibleLines)
-            conversationStartLineID = result.conversationStartLineID
-            preambleUserBlockIndexes = result.preambleUserBlockIndexes
-            userLineIndices = result.userLineIndices
-            assistantLineIndices = result.assistantLineIndices
-            toolLineIndices = result.toolLineIndices
-            errorLineIndices = result.errorLineIndices
-            eventIDToUserLineID = result.eventIDToUserLineID
+            let result = Self.buildRebuildResult(session: sessionSnapshot, skipAgentsPreamble: skipAgentsPreamble)
+            guard !Task.isCancelled else { return }
 
-            if let pendingIndex = pendingUserPromptIndex, jumpToUserPromptIndex(pendingIndex) {
-                pendingUserPromptIndex = nil
-            }
-            if let pending = pendingEventJumpID, jumpToEventID(pending) {
-                pendingEventJumpID = nil
-            }
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
 
-            // Reset Unified Search + Find state when rebuilding.
-            unifiedMatchOccurrences = []
-            unifiedCurrentMatchLineID = nil
-            unifiedExternalMatchCount = 0
-            unifiedExternalTotalMatchCount = 0
-            unifiedExternalCurrentMatchIndex = 0
+                lines = result.lines
+                visibleLines = roleFilteredLines(from: result.lines)
+                fullSnapshot = buildTextSnapshot(lines: result.lines)
+                visibleSnapshot = buildTextSnapshot(lines: visibleLines)
+                conversationStartLineID = result.conversationStartLineID
+                preambleUserBlockIndexes = result.preambleUserBlockIndexes
+                userLineIndices = result.userLineIndices
+                assistantLineIndices = result.assistantLineIndices
+                toolLineIndices = result.toolLineIndices
+                errorLineIndices = result.errorLineIndices
+                eventIDToUserLineID = result.eventIDToUserLineID
 
-            findMatchOccurrences = []
-            findCurrentMatchLineID = nil
-            roleNavPositions = [:]
-            externalMatchCount = 0
-            externalTotalMatchCount = 0
-            externalCurrentMatchIndex = 0
+                if let pendingIndex = pendingUserPromptIndex, jumpToUserPromptIndex(pendingIndex) {
+                    pendingUserPromptIndex = nil
+                }
+                if let pending = pendingEventJumpID, jumpToEventID(pending) {
+                    pendingEventJumpID = nil
+                }
 
-            if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                recomputeUnifiedMatches(resetIndex: true)
-            }
-            if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                recomputeFindMatches(resetIndex: true)
-            }
+                // Reset Unified Search + Find state when rebuilding.
+                unifiedMatchOccurrences = []
+                unifiedCurrentMatchLineID = nil
+                unifiedExternalMatchCount = 0
+                unifiedExternalTotalMatchCount = 0
+                unifiedExternalCurrentMatchIndex = 0
 
-            if unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                applyAutoScrollIfNeeded(sessionID: sessionSnapshot.id, skipAgentsPreamble: skipAgentsPreamble)
+                findMatchOccurrences = []
+                findCurrentMatchLineID = nil
+                roleNavPositions = [:]
+                externalMatchCount = 0
+                externalTotalMatchCount = 0
+                externalCurrentMatchIndex = 0
+
+                if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    recomputeUnifiedMatches(resetIndex: true)
+                }
+                if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    recomputeFindMatches(resetIndex: true)
+                }
+
+                if unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    applyAutoScrollIfNeeded(sessionID: sessionSnapshot.id, skipAgentsPreamble: skipAgentsPreamble)
+                }
             }
         }
     }

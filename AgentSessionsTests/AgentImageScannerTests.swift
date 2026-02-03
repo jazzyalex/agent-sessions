@@ -42,12 +42,12 @@ final class AgentImageScannerTests: XCTestCase {
 
         let spans = try GeminiInlineDataImageScanner.scanFile(at: sessionURL, maxMatches: 10)
         XCTAssertEqual(spans.count, 1)
-        guard spans.count == 1 else { return }
-        XCTAssertEqual(spans[0].itemIndex, 1)
-        XCTAssertEqual(spans[0].span.mediaType, "image/png")
+        let first = try XCTUnwrap(spans.first)
+        XCTAssertEqual(first.itemIndex, 1)
+        XCTAssertEqual(first.span.mediaType, "image/png")
 
         let decoded = try CodexSessionImagePayload.decodeImageData(url: sessionURL,
-                                                                  span: spans[0].span,
+                                                                  span: first.span,
                                                                   maxDecodedBytes: 1024 * 1024)
         XCTAssertEqual(decoded, decodedExpected)
     }
