@@ -62,7 +62,7 @@ final class ImageBrowserViewModel: ObservableObject {
     private var selectedTask: Task<Void, Never>?
     private var firstThumbnailLogged = false
 
-    private static let thumbnailMaxPixelSize: Int = 480
+    private nonisolated static let thumbnailMaxPixelSize: Int = 480
 
     init(indexCache: ImageBrowserIndexCache = ImageBrowserIndexCache(),
          thumbnailCache: ImageBrowserThumbnailCache = ImageBrowserThumbnailCache(thumbnailMaxPixelSize: ImageBrowserViewModel.thumbnailMaxPixelSize)) {
