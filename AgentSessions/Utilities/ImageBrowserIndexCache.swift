@@ -22,10 +22,18 @@ struct ImageBrowserStoredOpenCodeImage: Codable, Hashable, Sendable {
     let fileLineIndex: Int
 }
 
+struct ImageBrowserStoredCopilotAttachment: Codable, Hashable, Sendable {
+    let eventSequenceIndex: Int
+    let filePath: String
+    let mediaType: String
+    let fileSizeBytes: Int64
+}
+
 struct ImageBrowserStoredIndex: Codable, Sendable {
     let signature: ImageBrowserFileSignature
     let spans: [ImageBrowserStoredSpan]
     let openCodeImages: [ImageBrowserStoredOpenCodeImage]?
+    let copilotAttachments: [ImageBrowserStoredCopilotAttachment]?
     let createdAtUnixSeconds: Int64
 }
 
@@ -112,7 +120,11 @@ actor ImageBrowserIndexCache {
                 )
             }
 
-            let built = ImageBrowserStoredIndex(signature: signature, spans: spans, openCodeImages: nil, createdAtUnixSeconds: createdAt)
+            let built = ImageBrowserStoredIndex(signature: signature,
+                                                spans: spans,
+                                                openCodeImages: nil,
+                                                copilotAttachments: nil,
+                                                createdAtUnixSeconds: createdAt)
             saveIndex(built, forPath: session.filePath)
             return built
 
@@ -143,12 +155,78 @@ actor ImageBrowserIndexCache {
                 )
             }
 
-            let built = ImageBrowserStoredIndex(signature: signature, spans: [], openCodeImages: images, createdAtUnixSeconds: createdAt)
+            let built = ImageBrowserStoredIndex(signature: signature,
+                                                spans: [],
+                                                openCodeImages: images,
+                                                copilotAttachments: nil,
+                                                createdAtUnixSeconds: createdAt)
+            saveIndex(built, forPath: session.filePath)
+            return built
+
+        case .gemini:
+            let located: [GeminiInlineDataImageScanner.LocatedSpan] = {
+                do {
+                    return try GeminiInlineDataImageScanner.scanFile(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
+                } catch {
+                    return []
+                }
+            }()
+
+            let spans: [ImageBrowserStoredSpan] = located.compactMap { item in
+                if shouldCancel() { return nil }
+                let span = item.span
+                guard span.base64PayloadLength >= 64, span.approxBytes >= 32 else { return nil }
+                return ImageBrowserStoredSpan(
+                    startOffset: span.startOffset,
+                    endOffset: span.endOffset,
+                    mediaType: span.mediaType,
+                    base64PayloadOffset: span.base64PayloadOffset,
+                    base64PayloadLength: span.base64PayloadLength,
+                    approxBytes: span.approxBytes,
+                    lineIndex: item.itemIndex
+                )
+            }
+
+            let built = ImageBrowserStoredIndex(signature: signature,
+                                                spans: spans,
+                                                openCodeImages: nil,
+                                                copilotAttachments: nil,
+                                                createdAtUnixSeconds: createdAt)
+            saveIndex(built, forPath: session.filePath)
+            return built
+
+        case .copilot:
+            let located: [CopilotAttachmentScanner.Attachment] = {
+                do {
+                    return try CopilotAttachmentScanner.scanFile(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
+                } catch {
+                    return []
+                }
+            }()
+
+            let attachments: [ImageBrowserStoredCopilotAttachment] = located.map { att in
+                ImageBrowserStoredCopilotAttachment(
+                    eventSequenceIndex: att.eventSequenceIndex,
+                    filePath: att.fileURL.path,
+                    mediaType: att.mediaType,
+                    fileSizeBytes: att.fileSizeBytes
+                )
+            }
+
+            let built = ImageBrowserStoredIndex(signature: signature,
+                                                spans: [],
+                                                openCodeImages: nil,
+                                                copilotAttachments: attachments,
+                                                createdAtUnixSeconds: createdAt)
             saveIndex(built, forPath: session.filePath)
             return built
 
         default:
-            let built = ImageBrowserStoredIndex(signature: signature, spans: [], openCodeImages: nil, createdAtUnixSeconds: createdAt)
+            let built = ImageBrowserStoredIndex(signature: signature,
+                                                spans: [],
+                                                openCodeImages: nil,
+                                                copilotAttachments: nil,
+                                                createdAtUnixSeconds: createdAt)
             saveIndex(built, forPath: session.filePath)
             return built
         }
@@ -175,7 +253,11 @@ actor ImageBrowserIndexCache {
 private extension ImageBrowserIndexCache {
     func emptyIndex(for session: Session) -> ImageBrowserStoredIndex {
         let sig = fileSignature(forPath: session.filePath) ?? ImageBrowserFileSignature(filePath: session.filePath, fileSizeBytes: 0, modifiedAtUnixSeconds: 0)
-        return ImageBrowserStoredIndex(signature: sig, spans: [], openCodeImages: nil, createdAtUnixSeconds: Int64(Date().timeIntervalSince1970))
+        return ImageBrowserStoredIndex(signature: sig,
+                                      spans: [],
+                                      openCodeImages: nil,
+                                      copilotAttachments: nil,
+                                      createdAtUnixSeconds: Int64(Date().timeIntervalSince1970))
     }
 
     func fileSignature(forPath path: String) -> ImageBrowserFileSignature? {

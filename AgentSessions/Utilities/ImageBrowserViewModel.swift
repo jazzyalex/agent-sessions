@@ -21,23 +21,41 @@ final class ImageBrowserViewModel: ObservableObject {
         let sessionImageIndex: Int
         let lineIndex: Int
         let eventID: String
-        let span: Base64ImageDataURLScanner.Span
+        let userPromptIndex: Int?
+        let payload: SessionImagePayload
         let fileSignature: ImageBrowserFileSignature
 
-        var id: String { "\(sessionID)-\(sha256Hex(sessionFileURL.path))-\(span.id)" }
+        var id: String { "\(sessionID)-\(payload.stableID)" }
 
         var approxSizeText: String {
-            ByteCountFormatter.string(fromByteCount: Int64(span.approxBytes), countStyle: .file)
+            ByteCountFormatter.string(fromByteCount: Int64(payload.approxBytes), countStyle: .file)
         }
 
         var imageKey: ImageBrowserImageKey {
-            ImageBrowserImageKey(
+            let offsets: (UInt64, Int) = {
+                switch payload {
+                case .base64(_, let span):
+                    return (span.base64PayloadOffset, span.base64PayloadLength)
+                case .file:
+                    return (0, 0)
+                }
+            }()
+            return ImageBrowserImageKey(
                 signature: fileSignature,
-                base64PayloadOffset: span.base64PayloadOffset,
-                base64PayloadLength: span.base64PayloadLength,
-                mediaType: span.mediaType,
+                base64PayloadOffset: offsets.0,
+                base64PayloadLength: offsets.1,
+                mediaType: payload.mediaType,
                 thumbnailMaxPixelSize: ImageBrowserViewModel.thumbnailMaxPixelSize
             )
+        }
+
+        var sortOffset: UInt64 {
+            switch payload {
+            case .base64(_, let span):
+                return span.base64PayloadOffset
+            case .file:
+                return 0
+            }
         }
     }
 
@@ -135,16 +153,16 @@ final class ImageBrowserViewModel: ObservableObject {
             return
         }
 
+        let thumbnailCache = thumbnailCache
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 let decoded = try CodexSessionImagePayload.decodeImageData(
-                    url: item.sessionFileURL,
-                    span: item.span,
+                    payload: item.payload,
                     maxDecodedBytes: 25 * 1024 * 1024,
                     shouldCancel: { Task.isCancelled }
                 )
                 guard let self else { return }
-                let img = try self.thumbnailCache.loadOrCreateThumbnail(for: key) { decoded }
+                let img = try thumbnailCache.loadOrCreateThumbnail(for: key) { decoded }
                 if Task.isCancelled { return }
                 await MainActor.run {
                     self.thumbnails[item.id] = img
@@ -172,7 +190,7 @@ private extension ImageBrowserViewModel {
         selectedTask?.cancel()
         selectedTask = Task { [weak self] in
             guard let self else { return }
-            if let existing = itemsBySessionID[seedSession.id],
+            if itemsBySessionID[seedSession.id] != nil,
                let currentSig = fileSignature(forPath: seedSession.filePath),
                sessionSignatureBySessionID[seedSession.id] == currentSig {
                 recomputeVisibleItems()
@@ -269,7 +287,7 @@ private extension ImageBrowserViewModel {
         merged.sort { a, b in
             if a.sessionModifiedAt != b.sessionModifiedAt { return a.sessionModifiedAt > b.sessionModifiedAt }
             if a.sessionID != b.sessionID { return a.sessionID > b.sessionID }
-            return a.span.base64PayloadOffset > b.span.base64PayloadOffset
+            return a.sortOffset > b.sortOffset
         }
 
         items = merged
@@ -330,8 +348,110 @@ private extension ImageBrowserViewModel {
                         sessionImageIndex: i + 1,
                         lineIndex: eventIndex,
                         eventID: eventID,
-                        span: span,
+                        userPromptIndex: userPromptIndex(for: session, eventIndex: eventIndex),
+                        payload: .base64(sourceURL: fileURL, span: span),
                         fileSignature: fileSignature
+                    )
+                )
+            }
+
+            return out
+
+        case .copilot:
+            let attachments = index.copilotAttachments ?? []
+
+            var eventIndexByEventID: [String: Int] = [:]
+            eventIndexByEventID.reserveCapacity(min(attachments.count, 64))
+            for (idx, ev) in session.events.enumerated() {
+                eventIndexByEventID[ev.id] = idx
+            }
+
+            var out: [Item] = []
+            out.reserveCapacity(min(attachments.count, 64))
+            for (i, att) in attachments.enumerated() {
+                let eventID = session.id + String(format: "-%04d", att.eventSequenceIndex)
+                let eventIndex = eventIndexByEventID[eventID] ?? 0
+
+                let sig = fileSignature(forPath: att.filePath)
+                    ?? ImageBrowserFileSignature(filePath: att.filePath, fileSizeBytes: att.fileSizeBytes, modifiedAtUnixSeconds: 0)
+                let url = URL(fileURLWithPath: att.filePath)
+
+                out.append(
+                    Item(
+                        sessionID: session.id,
+                        sessionTitle: session.title,
+                        sessionModifiedAt: session.modifiedAt,
+                        sessionFileURL: url,
+                        sessionSource: session.source,
+                        sessionProject: session.repoName,
+                        sessionImageIndex: i + 1,
+                        lineIndex: eventIndex,
+                        eventID: eventID,
+                        userPromptIndex: userPromptIndex(for: session, eventIndex: eventIndex),
+                        payload: .file(fileURL: url, mediaType: att.mediaType, fileSizeBytes: att.fileSizeBytes),
+                        fileSignature: sig
+                    )
+                )
+            }
+            return out
+
+        case .gemini:
+            // For Gemini, we store the message/item index in `lineIndex` and map it back to event IDs.
+            let url = URL(fileURLWithPath: session.filePath)
+            let signature = index.signature
+
+            var userEventIndices: [Int] = []
+            userEventIndices.reserveCapacity(64)
+            var eventIndexByBaseID: [String: Int] = [:]
+            eventIndexByBaseID.reserveCapacity(min(session.events.count, 512))
+
+            for (idx, ev) in session.events.enumerated() {
+                eventIndexByBaseID[ev.id] = idx
+                if ev.kind == .user { userEventIndices.append(idx) }
+            }
+
+            func nearestUserEventIndex(for eventIndex: Int) -> Int? {
+                guard eventIndex >= 0 else { return userEventIndices.first }
+                guard !userEventIndices.isEmpty else { return nil }
+                let prior = userEventIndices.filter { $0 <= eventIndex }
+                if let preferred = prior.last { return preferred }
+                let after = userEventIndices.filter { $0 > eventIndex }
+                return after.first
+            }
+
+            var out: [Item] = []
+            out.reserveCapacity(min(index.spans.count, 64))
+
+            for (i, stored) in index.spans.enumerated() {
+                let span = Base64ImageDataURLScanner.Span(
+                    startOffset: stored.startOffset,
+                    endOffset: stored.endOffset,
+                    mediaType: stored.mediaType,
+                    base64PayloadOffset: stored.base64PayloadOffset,
+                    base64PayloadLength: stored.base64PayloadLength,
+                    approxBytes: stored.approxBytes
+                )
+
+                let itemIndex = stored.lineIndex
+                let baseID = session.id + String(format: "-%04d", itemIndex)
+                let baseEventIndex = eventIndexByBaseID[baseID] ?? 0
+                let userEventIndex = nearestUserEventIndex(for: baseEventIndex) ?? baseEventIndex
+                let eventID = session.events.indices.contains(userEventIndex) ? session.events[userEventIndex].id : baseID
+
+                out.append(
+                    Item(
+                        sessionID: session.id,
+                        sessionTitle: session.title,
+                        sessionModifiedAt: session.modifiedAt,
+                        sessionFileURL: url,
+                        sessionSource: session.source,
+                        sessionProject: session.repoName,
+                        sessionImageIndex: i + 1,
+                        lineIndex: userEventIndex,
+                        eventID: eventID,
+                        userPromptIndex: userPromptIndex(for: session, eventIndex: userEventIndex),
+                        payload: .base64(sourceURL: url, span: span),
+                        fileSignature: signature
                     )
                 )
             }
@@ -381,7 +501,8 @@ private extension ImageBrowserViewModel {
                             if session.events.indices.contains(idx) { return session.events[idx].id }
                             return SessionIndexer.eventID(forPath: url.path, index: stored.lineIndex)
                         }(),
-                        span: span,
+                        userPromptIndex: userPromptIndex(for: session, eventIndex: nearestUserEventIndex(for: stored.lineIndex) ?? stored.lineIndex),
+                        payload: .base64(sourceURL: url, span: span),
                         fileSignature: signature
                     )
                 )
@@ -404,5 +525,25 @@ private extension ImageBrowserViewModel {
         } catch {
             return nil
         }
+    }
+
+    func userPromptIndex(for session: Session, eventIndex: Int) -> Int? {
+        guard eventIndex >= 0 else { return nil }
+        guard !session.events.isEmpty else { return nil }
+
+        var userIndex: Int? = nil
+        var seenUsers = 0
+        for (idx, event) in session.events.enumerated() {
+            if event.kind == .user {
+                if idx <= eventIndex {
+                    userIndex = seenUsers
+                } else if userIndex == nil {
+                    userIndex = seenUsers
+                }
+                seenUsers += 1
+            }
+            if idx > eventIndex, userIndex != nil { break }
+        }
+        return userIndex
     }
 }

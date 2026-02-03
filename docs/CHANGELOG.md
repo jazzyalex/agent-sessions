@@ -23,11 +23,15 @@ All notable changes to this project will be documented in this file.
 - Session view: Added an Images toolbar pill to toggle inline images and jump between prompts that contain images.
 - Session view: Inline image thumbnails now support Claude Code sessions.
 - Session view: Inline image thumbnails now support OpenCode sessions.
+- Session view: Inline image thumbnails now support Gemini and Copilot sessions.
 - Image Browser: Double-click opens the selected image in Preview; Space opens Quick Look.
 - Image Browser: Now supports Claude Code sessions.
 - Image Browser: Now supports OpenCode sessions.
-- Image Browser: Added Project and Agent filters, a larger preview pane, and user prompt context for each image.
+- Image Browser: Now supports Gemini and Copilot sessions.
+- Image Browser: Added Project and Agent filters, a larger preview pane, and user prompt context for each image when available.
+- Image Browser: Thumbnail right-click menu and preview Actions menu now include Open in Preview, Copy Image, Copy Image Path, Save to Downloads, and Save….
 - Image Browser: Caches image indexes and thumbnails for faster open and to avoid reprocessing previously seen sessions.
+- Image Browser: Prompt context is loaded from already-parsed sessions only (no file scanning) to keep browsing fast.
 
 ### Changed
 
