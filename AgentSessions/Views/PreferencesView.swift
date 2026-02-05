@@ -57,6 +57,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) var copilotAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.droidEnabled) var droidAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.openClawEnabled) var openClawAgentEnabled: Bool = AgentEnablement.isAvailable(.openclaw)
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue

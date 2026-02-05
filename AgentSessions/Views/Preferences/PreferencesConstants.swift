@@ -41,6 +41,7 @@ enum PreferencesKey {
         static let openCodeEnabled = "AgentEnabledOpenCode"
         static let copilotEnabled = "AgentEnabledCopilot"
         static let droidEnabled = "AgentEnabledDroid"
+        static let openClawEnabled = "AgentEnabledOpenClaw"
     }
 
     // Polling intervals
@@ -73,6 +74,7 @@ enum PreferencesKey {
         static let enableGitInspector = "EnableGitInspector"
         static let enableDeepToolOutputSearch = "EnableDeepToolOutputSearch"
         static let enableRecentToolIOIndex = "EnableRecentToolIOIndex"
+        static let includeOpenClawDeletedSessions = "OpenClawIncludeDeletedSessions"
     }
 
     enum Paths {

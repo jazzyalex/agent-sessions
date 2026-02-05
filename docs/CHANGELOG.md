@@ -10,15 +10,20 @@ All notable changes to this project will be documented in this file.
 - Transcript (Session view): Render Codex `<image name=[Image #…]>` markers as `[Image #…]` for cleaner copy/paste.
 - Transcript (Session view): Inline image thumbnails ignore data URL strings that are not part of `image_url` payloads, preventing empty placeholders.
 - Session view: Inline image thumbnail clicks are more reliable immediately after scrolling or transcript updates.
+- Sessions: Preserve OpenClaw project metadata after opening a session so the Project column stays consistent.
 - Windows: Image Browser and auxiliary windows now follow system light/dark changes immediately when using System appearance, and update instantly when switching Light/Dark in Settings or the View menu.
 - Image Browser: Bottom status bar no longer shows “Scanning …” after scanning completes.
 - Image Browser: Project scan progress no longer reports “224/224” while the final session is still scanning.
 - Image Browser: Project scope now always includes the selected session to avoid missing images when project grouping is incomplete.
+- Image Browser: OpenClaw sessions with inline images no longer show “No images” due to a stale cached index.
+- OpenClaw: Session view hides the verbose “[media attached: …]” hint text when an inline image payload is present.
+- OpenClaw: Tool outputs from `exec` are formatted like other shell outputs and include exit codes when available.
 
 ### Changed
 
 - Menu: Removed the separator between Image Browser and Saved Sessions, and renamed “Saved Sessions…” to “Saved Sessions”.
 - Preferences: Added a Session View toggle for “Show inline image thumbnails in Session view”.
+- Sessions: Added OpenClaw (clawdbot) session support when the OpenClaw/clawdbot CLI is installed; deleted sessions can be shown via an Advanced toggle.
 - Session view: Inline image thumbnails now support hover popover previews and click open in the Image Browser (auto-selecting the clicked image); the inline thumbnail context menu includes Open in Preview and omits Navigate to Session.
 - Session view: Added an Images toolbar pill to toggle inline images and jump between prompts that contain images.
 - Session view: Inline image thumbnails now support Claude Code sessions.
@@ -28,12 +33,12 @@ All notable changes to this project will be documented in this file.
 - Image Browser: Now supports Claude Code sessions.
 - Image Browser: Now supports OpenCode sessions.
 - Image Browser: Now supports Gemini and Copilot sessions.
+- Image Browser: OpenClaw images appear only when OpenClaw is explicitly selected; “All Agents” is now “All Coding Agents”.
 - Image Browser: Added Project and Agent filters, a larger preview pane, and user prompt context for each image when available.
 - Image Browser: Thumbnail right-click menu and preview Actions menu now include Open in Preview, Copy Image, Copy Image Path, Save to Downloads, and Save….
 - Image Browser: Caches image indexes and thumbnails for faster open and to avoid reprocessing previously seen sessions.
 - Image Browser: Prompt context is loaded from already-parsed sessions only (no file scanning) to keep browsing fast.
-
-### Changed
+- Session view: Inline image thumbnails now support OpenClaw sessions.
 
 - Transcript (Session view): User prompt text now uses semibold weight.
 - Images: Codex sessions with embedded base64 images now show an Image Browser in the main toolbar that opens a thumbnail gallery with preview, save actions, and optional project-wide scope.

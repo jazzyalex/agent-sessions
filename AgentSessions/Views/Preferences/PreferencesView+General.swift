@@ -51,7 +51,7 @@ extension PreferencesView {
 
             sectionHeader("Active CLI agents")
             VStack(alignment: .leading, spacing: 6) {
-                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, copilotAgentEnabled, droidAgentEnabled].filter { $0 }.count
+                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, copilotAgentEnabled, droidAgentEnabled, openClawAgentEnabled].filter { $0 }.count
 
                 agentEnableToggle(title: "Codex", source: .codex, isOn: $codexAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Claude", source: .claude, isOn: $claudeAgentEnabled, enabledCount: enabledCount)
@@ -59,6 +59,7 @@ extension PreferencesView {
                 agentEnableToggle(title: "OpenCode", source: .opencode, isOn: $openCodeAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Copilot", source: .copilot, isOn: $copilotAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Droid", source: .droid, isOn: $droidAgentEnabled, enabledCount: enabledCount)
+                agentEnableToggle(title: "OpenClaw", source: .openclaw, isOn: $openClawAgentEnabled, enabledCount: enabledCount)
 
                 Text("Disabled agents are hidden across the app and background work is paused.")
                     .font(.caption)
@@ -114,6 +115,19 @@ extension PreferencesView {
 	                    .font(.caption)
 	                    .foregroundStyle(.secondary)
 	            }
+
+            sectionHeader("OpenClaw")
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Include deleted OpenClaw sessions", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions) },
+                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions) }
+                ))
+                .help("Show OpenClaw/Clawdbot transcripts ending in .jsonl.deleted.<timestamp>. Hidden by default.")
+
+                Text("Deleted sessions are usually backups or tombstones. Keeping them hidden reduces noise.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             sectionHeader("Saved Sessions")
             VStack(alignment: .leading, spacing: 12) {

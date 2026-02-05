@@ -469,11 +469,11 @@ struct CodexSessionImagesGalleryView: View {
 
             Menu {
                 Button {
-                    viewModel.selectedSources = Set(viewModel.availableSources)
+                    viewModel.selectedSources = viewModel.allCodingSources
                 } label: {
                     agentMenuCheckboxRow(
-                        title: "All Agents",
-                        isOn: viewModel.selectedSources.count == viewModel.availableSources.count
+                        title: "All Coding Agents",
+                        isOn: viewModel.isAllCodingAgentsSelected
                     )
                 }
 
@@ -514,9 +514,8 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private var agentMenuTitle: String {
-        let all = Set(viewModel.availableSources)
         let selected = viewModel.selectedSources
-        if selected == all { return "All Agents" }
+        if viewModel.isAllCodingAgentsSelected { return "All Coding Agents" }
         if selected.count == 1, let one = selected.first { return one.displayName }
         if selected.isEmpty { return "No Agents" }
         return "\(selected.count) selected"

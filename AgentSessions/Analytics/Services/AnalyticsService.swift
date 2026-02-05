@@ -432,7 +432,7 @@ final class AnalyticsService: ObservableObject {
         let raw: [String]
         switch filter {
         case .all:
-            raw = [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue, SessionSource.opencode.rawValue, SessionSource.copilot.rawValue, SessionSource.droid.rawValue]
+            raw = [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue, SessionSource.opencode.rawValue, SessionSource.copilot.rawValue, SessionSource.droid.rawValue, SessionSource.openclaw.rawValue]
         case .codexOnly:
             raw = [SessionSource.codex.rawValue]
         case .claudeOnly:
@@ -445,6 +445,8 @@ final class AnalyticsService: ObservableObject {
             raw = [SessionSource.copilot.rawValue]
         case .droidOnly:
             raw = [SessionSource.droid.rawValue]
+        case .openclawOnly:
+            raw = [SessionSource.openclaw.rawValue]
         }
         return raw.filter { enabled.contains($0) }
     }

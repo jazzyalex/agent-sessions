@@ -14,8 +14,38 @@ enum SessionSearchTextBuilder {
         var out = text
         out = redactDataURLs(in: out)
         out = redactLongBase64Runs(in: out)
+        out = redactCommonSecrets(in: out)
         return out
     }
+
+    private static func redactCommonSecrets(in text: String) -> String {
+        // Only bother if we see suspicious keys or token markers.
+        if !(text.contains("botToken")
+             || text.contains("apiKey")
+             || text.contains("\"token\"")
+             || text.contains("accessToken")
+             || text.contains("refreshToken")) { return text }
+
+        var out = text
+        for rx in secretRegexes {
+            out = rx.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..<out.endIndex, in: out), withTemplate: "$1\"[REDACTED]\"")
+        }
+        return out
+    }
+
+    // Replacement template expects capture group 1 to include the key and colon+whitespace+opening quote.
+    private static let secretRegexes: [NSRegularExpression] = {
+        let patterns: [String] = [
+            // Clawdbot/OpenClaw config dumps
+            "(\"botToken\"\\s*:\\s*)\"[^\"]+\"",
+            "(\"apiKey\"\\s*:\\s*)\"[^\"]+\"",
+            // Generic token, but only when the value is long (avoid false positives for short strings)
+            "(\"token\"\\s*:\\s*)\"[A-Za-z0-9_\\-]{16,}\"",
+            "(\"accessToken\"\\s*:\\s*)\"[A-Za-z0-9_\\-]{16,}\"",
+            "(\"refreshToken\"\\s*:\\s*)\"[A-Za-z0-9_\\-]{16,}\""
+        ]
+        return patterns.compactMap { try? NSRegularExpression(pattern: $0, options: []) }
+    }()
 
     private static func redactDataURLs(in text: String) -> String {
         // Only bother if we see obvious markers.

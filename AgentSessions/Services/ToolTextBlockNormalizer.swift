@@ -290,11 +290,12 @@ enum ToolTextBlockNormalizer {
 
     private static func isShellTool(name: String?, inputObject: Any?) -> Bool {
         let lowered = name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        let shellNames: Set<String> = ["shell_command", "shell", "bash", "execute", "terminal"]
+        let shellNames: Set<String> = ["shell_command", "shell", "bash", "execute", "terminal", "exec"]
         if shellNames.contains(lowered) { return true }
         if lowered.contains("shell") { return true }
         if lowered.contains("bash") { return true }
         if lowered == "execute" { return true }
+        if lowered == "exec" { return true }
 
         if let dict = inputObject as? [String: Any] {
             if dict.keys.contains(where: { $0.lowercased() == "command" }) {
@@ -352,8 +353,17 @@ enum ToolTextBlockNormalizer {
 
     private static func parseJSON(_ text: String) -> Any? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("{") || trimmed.hasPrefix("[") else { return nil }
-        guard let data = trimmed.data(using: .utf8) else { return nil }
+        if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
+            guard let data = trimmed.data(using: .utf8) else { return nil }
+            return try? JSONSerialization.jsonObject(with: data)
+        }
+
+        // Some providers store `rawJSON` as a base64-encoded JSON string (for example Claude/OpenClaw).
+        // Decode + parse that so normalizers can extract nested metadata (exit codes, stdout/stderr, etc).
+        guard trimmed.count >= 16 else { return nil }
+        let base64Like = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=_-")
+        if trimmed.rangeOfCharacter(from: base64Like.inverted) != nil { return nil }
+        guard let data = Data(base64Encoded: trimmed), !data.isEmpty else { return nil }
         return try? JSONSerialization.jsonObject(with: data)
     }
 
@@ -392,7 +402,7 @@ enum ToolTextBlockNormalizer {
     private static func extractShellMeta(from inputObject: Any?) -> String? {
         guard let dict = inputObject as? [String: Any] else { return nil }
         let cwd = firstString(for: ["cwd", "workdir", "workingDir", "working_directory"], in: dict)
-        let timeout = firstInt(for: ["timeout_ms", "timeoutMs", "timeout"], in: dict)
+        let timeout = firstInt(for: ["timeout_ms", "timeoutMs", "timeout", "yieldMs", "yield_ms"], in: dict)
 
         var parts: [String] = []
         if let cwd, !cwd.isEmpty {
@@ -688,8 +698,17 @@ enum ToolTextBlockNormalizer {
             if let toolUseResult = dict["toolUseResult"] {
                 extractOutputInfo(from: toolUseResult, into: &info, depth: depth + 1)
             }
+            if let message = dict["message"] {
+                extractOutputInfo(from: message, into: &info, depth: depth + 1)
+            }
+            if let details = dict["details"] {
+                extractOutputInfo(from: details, into: &info, depth: depth + 1)
+            }
             if let data = dict["data"] {
                 extractOutputInfo(from: data, into: &info, depth: depth + 1)
+            }
+            if let payload = dict["payload"] {
+                extractOutputInfo(from: payload, into: &info, depth: depth + 1)
             }
             if let result = resultValue {
                 extractOutputInfo(from: result, into: &info, depth: depth + 1)

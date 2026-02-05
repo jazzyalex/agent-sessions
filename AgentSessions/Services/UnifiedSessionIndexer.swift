@@ -69,6 +69,12 @@ final class UnifiedSessionIndexer: ObservableObject {
             recomputeNow()
         }
     }
+    @Published var includeOpenClaw: Bool = UserDefaults.standard.object(forKey: "IncludeOpenClawSessions") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(includeOpenClaw, forKey: "IncludeOpenClawSessions")
+            recomputeNow()
+        }
+    }
 
     // Global agent enablement (drives app-wide availability)
     @Published private(set) var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
@@ -77,6 +83,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var openCodeAgentEnabled: Bool = AgentEnablement.isEnabled(.opencode)
     @Published private(set) var copilotAgentEnabled: Bool = AgentEnablement.isEnabled(.copilot)
     @Published private(set) var droidAgentEnabled: Bool = AgentEnablement.isEnabled(.droid)
+    @Published private(set) var openClawAgentEnabled: Bool = AgentEnablement.isEnabled(.openclaw)
 
     // Sorting
     struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title, agent, size } }
@@ -109,6 +116,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let opencode: OpenCodeSessionIndexer
     private let copilot: CopilotSessionIndexer
     private let droid: DroidSessionIndexer
+    private let openclaw: OpenClawSessionIndexer
     private var cancellables = Set<AnyCancellable>()
     private var favorites = FavoritesStore()
     private var hasPublishedInitialSessions = false
@@ -136,19 +144,22 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var lastAutoRefreshOpenCode: Date? = nil
     private var lastAutoRefreshCopilot: Date? = nil
     private var lastAutoRefreshDroid: Date? = nil
+    private var lastAutoRefreshOpenClaw: Date? = nil
 
     init(codexIndexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
          geminiIndexer: GeminiSessionIndexer,
          opencodeIndexer: OpenCodeSessionIndexer,
          copilotIndexer: CopilotSessionIndexer,
-         droidIndexer: DroidSessionIndexer) {
+         droidIndexer: DroidSessionIndexer,
+         openclawIndexer: OpenClawSessionIndexer) {
         self.codex = codexIndexer
         self.claude = claudeIndexer
         self.gemini = geminiIndexer
         self.opencode = opencodeIndexer
         self.copilot = copilotIndexer
         self.droid = droidIndexer
+        self.openclaw = openclawIndexer
 
         syncAgentEnablementFromDefaults()
         // Observe UserDefaults changes to sync external toggles (Preferences) to this model
@@ -162,12 +173,12 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Merge underlying allSessions whenever any changes
         Publishers.CombineLatest(
             Publishers.CombineLatest4(codex.$allSessions, claude.$allSessions, gemini.$allSessions, opencode.$allSessions),
-            Publishers.CombineLatest(copilot.$allSessions, droid.$allSessions)
+            Publishers.CombineLatest3(copilot.$allSessions, droid.$allSessions, openclaw.$allSessions)
         )
             .map { [weak self] combined, tail -> [Session] in
                 guard let self else { return [] }
                 let (codexList, claudeList, geminiList, opencodeList) = combined
-                let (copilotList, droidList) = tail
+                let (copilotList, droidList, openclawList) = tail
                 var merged: [Session] = []
                 if self.codexAgentEnabled { merged.append(contentsOf: codexList) }
                 if self.claudeAgentEnabled { merged.append(contentsOf: claudeList) }
@@ -175,6 +186,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 if self.openCodeAgentEnabled { merged.append(contentsOf: opencodeList) }
                 if self.copilotAgentEnabled { merged.append(contentsOf: copilotList) }
                 if self.droidAgentEnabled { merged.append(contentsOf: droidList) }
+                if self.openClawAgentEnabled { merged.append(contentsOf: openclawList) }
                 for i in merged.indices { merged[i].isFavorite = self.favorites.contains(id: merged[i].id, source: merged[i].source) }
                 return merged.sorted { lhs, rhs in
                     if lhs.modifiedAt == rhs.modifiedAt { return lhs.id > rhs.id }
@@ -191,23 +203,23 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         let agentEnabledFlags = Publishers.CombineLatest(
             Publishers.CombineLatest4($codexAgentEnabled, $claudeAgentEnabled, $geminiAgentEnabled, $openCodeAgentEnabled),
-            Publishers.CombineLatest($copilotAgentEnabled, $droidAgentEnabled)
+            Publishers.CombineLatest3($copilotAgentEnabled, $droidAgentEnabled, $openClawAgentEnabled)
         )
 
         // isIndexing reflects any enabled indexer working
         Publishers.CombineLatest(
             Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, gemini.$isIndexing, opencode.$isIndexing),
-            Publishers.CombineLatest(copilot.$isIndexing, droid.$isIndexing)
+            Publishers.CombineLatest3(copilot.$isIndexing, droid.$isIndexing, openclaw.$isIndexing)
         )
             .combineLatest(agentEnabledFlags)
             .map { states, flags in
                 let (s4, tailStates) = states
                 let (c, cl, g, o) = s4
-                let (copilotState, droidState) = tailStates
+                let (copilotState, droidState, openclawState) = tailStates
                 let (f4, tailFlags) = flags
                 let (ec, ecl, eg, eo) = f4
-                let (eCopilot, eDroid) = tailFlags
-                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eCopilot && copilotState) || (eDroid && droidState)
+                let (eCopilot, eDroid, eOpenClaw) = tailFlags
+                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState)
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -220,17 +232,17 @@ final class UnifiedSessionIndexer: ObservableObject {
         // isProcessingTranscripts reflects any enabled indexer processing transcripts
         Publishers.CombineLatest(
             Publishers.CombineLatest4(codex.$isProcessingTranscripts, claude.$isProcessingTranscripts, gemini.$isProcessingTranscripts, opencode.$isProcessingTranscripts),
-            Publishers.CombineLatest(copilot.$isProcessingTranscripts, droid.$isProcessingTranscripts)
+            Publishers.CombineLatest3(copilot.$isProcessingTranscripts, droid.$isProcessingTranscripts, openclaw.$isProcessingTranscripts)
         )
             .combineLatest(agentEnabledFlags)
             .map { states, flags in
                 let (s4, tailStates) = states
                 let (c, cl, g, o) = s4
-                let (copilotState, droidState) = tailStates
+                let (copilotState, droidState, openclawState) = tailStates
                 let (f4, tailFlags) = flags
                 let (ec, ecl, eg, eo) = f4
-                let (eCopilot, eDroid) = tailFlags
-                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eCopilot && copilotState) || (eDroid && droidState)
+                let (eCopilot, eDroid, eOpenClaw) = tailFlags
+                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState)
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -243,23 +255,24 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Forward errors (preference order codex → claude → gemini → opencode → copilot), ignoring disabled agents
         Publishers.CombineLatest(
             Publishers.CombineLatest4(codex.$indexingError, claude.$indexingError, gemini.$indexingError, opencode.$indexingError),
-            Publishers.CombineLatest(copilot.$indexingError, droid.$indexingError)
+            Publishers.CombineLatest3(copilot.$indexingError, droid.$indexingError, openclaw.$indexingError)
         )
             .combineLatest(agentEnabledFlags)
             .map { errs, flags in
                 let (errs4, tailErrs) = errs
                 let (codexErr, claudeErr, geminiErr, opencodeErr) = errs4
-                let (copilotErr, droidErr) = tailErrs
+                let (copilotErr, droidErr, openclawErr) = tailErrs
                 let (f4, tailFlags) = flags
                 let (ec, ecl, eg, eo) = f4
                 let a = ec ? codexErr : nil
                 let b = ecl ? claudeErr : nil
                 let c = eg ? geminiErr : nil
                 let d = eo ? opencodeErr : nil
-                let (eCopilot, eDroid) = tailFlags
+                let (eCopilot, eDroid, eOpenClaw) = tailFlags
                 let e = eCopilot ? copilotErr : nil
                 let f = eDroid ? droidErr : nil
-                return a ?? b ?? c ?? d ?? e ?? f
+                let g = eOpenClaw ? openclawErr : nil
+                return a ?? b ?? c ?? d ?? e ?? f ?? g
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -278,7 +291,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         )
         let includes = Publishers.CombineLatest(
             Publishers.CombineLatest4($includeCodex, $includeClaude, $includeGemini, $includeOpenCode),
-            Publishers.CombineLatest($includeCopilot, $includeDroid)
+            Publishers.CombineLatest3($includeCopilot, $includeDroid, $includeOpenClaw)
         )
         Publishers.CombineLatest(
             Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, includes.combineLatest(agentEnabledFlags)),
@@ -292,27 +305,29 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let (sources, enabledFlags) = combinedFlags
                 let (src4, tailSources) = sources
                 let (incCodex, incClaude, incGemini, incOpenCode) = src4
-                let (incCopilot, incDroid) = tailSources
+                let (incCopilot, incDroid, incOpenClaw) = tailSources
                 let (en4, tailEnabled) = enabledFlags
                 let (enCodex, enClaude, enGemini, enOpenCode) = en4
-                let (enCopilot, enDroid) = tailEnabled
+                let (enCopilot, enDroid, enOpenClaw) = tailEnabled
                 let effectiveCodex = incCodex && enCodex
                 let effectiveClaude = incClaude && enClaude
                 let effectiveGemini = incGemini && enGemini
                 let effectiveOpenCode = incOpenCode && enOpenCode
                 let effectiveCopilot = incCopilot && enCopilot
                 let effectiveDroid = incDroid && enDroid
+                let effectiveOpenClaw = incOpenClaw && enOpenClaw
 
                 // Start from all sessions, then apply the same filters we use elsewhere.
                 var base = all
-                if !(effectiveCodex && effectiveClaude && effectiveGemini && effectiveOpenCode && effectiveCopilot && effectiveDroid) {
+                if !(effectiveCodex && effectiveClaude && effectiveGemini && effectiveOpenCode && effectiveCopilot && effectiveDroid && effectiveOpenClaw) {
                     base = base.filter { s in
                         (s.source == .codex && effectiveCodex) ||
                         (s.source == .claude && effectiveClaude) ||
                         (s.source == .gemini && effectiveGemini) ||
                         (s.source == .opencode && effectiveOpenCode) ||
                         (s.source == .copilot && effectiveCopilot) ||
-                        (s.source == .droid && effectiveDroid)
+                        (s.source == .droid && effectiveDroid) ||
+                        (s.source == .openclaw && effectiveOpenClaw)
                     }
                 }
 
@@ -427,8 +442,18 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
             .store(in: &cancellables)
 
+        $includeOpenClaw
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                if enabled { self.maybeAutoRefreshOpenClaw() }
+            }
+            .store(in: &cancellables)
+
         Publishers.CombineLatest(Publishers.CombineLatest4(codex.$launchPhase, claude.$launchPhase, gemini.$launchPhase, opencode.$launchPhase),
-                                Publishers.CombineLatest(copilot.$launchPhase, droid.$launchPhase))
+                                Publishers.CombineLatest3(copilot.$launchPhase, droid.$launchPhase, openclaw.$launchPhase))
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _, _ in
                 self?.updateLaunchState()
@@ -437,7 +462,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         Publishers.CombineLatest(
             Publishers.CombineLatest4($includeCodex, $includeClaude, $includeGemini, $includeOpenCode),
-            Publishers.CombineLatest($includeCopilot, $includeDroid)
+            Publishers.CombineLatest3($includeCopilot, $includeDroid, $includeOpenClaw)
         )
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _, _ in
@@ -511,12 +536,14 @@ final class UnifiedSessionIndexer: ObservableObject {
         let c4 = AgentEnablement.isEnabled(.opencode, defaults: defaults)
         let c5 = AgentEnablement.isEnabled(.copilot, defaults: defaults)
         let c6 = AgentEnablement.isEnabled(.droid, defaults: defaults)
+        let c7 = AgentEnablement.isEnabled(.openclaw, defaults: defaults)
         if c1 != codexAgentEnabled { codexAgentEnabled = c1 }
         if c2 != claudeAgentEnabled { claudeAgentEnabled = c2 }
         if c3 != geminiAgentEnabled { geminiAgentEnabled = c3 }
         if c4 != openCodeAgentEnabled { openCodeAgentEnabled = c4 }
         if c5 != copilotAgentEnabled { copilotAgentEnabled = c5 }
         if c6 != droidAgentEnabled { droidAgentEnabled = c6 }
+        if c7 != openClawAgentEnabled { openClawAgentEnabled = c7 }
     }
 
     func refresh() {
@@ -542,6 +569,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let shouldRefreshOpenCode = openCodeAgentEnabled && !opencode.isIndexing
         let shouldRefreshCopilot = copilotAgentEnabled && !copilot.isIndexing
         let shouldRefreshDroid = droidAgentEnabled && !droid.isIndexing
+        let shouldRefreshOpenClaw = openClawAgentEnabled && !openclaw.isIndexing
 
         if shouldRefreshCodex { codex.refresh() }
         if shouldRefreshClaude { claude.refresh() }
@@ -549,6 +577,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if shouldRefreshOpenCode { opencode.refresh() }
         if shouldRefreshCopilot { copilot.refresh() }
         if shouldRefreshDroid { droid.refresh() }
+        if shouldRefreshOpenClaw { openclaw.refresh() }
 
         // Stage 2: analytics enrichment (non-blocking, runs after hydration has begun).
         // Use a simple gate and TTL so only one analytics index run happens at a time
@@ -581,6 +610,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                             if self.openCodeAgentEnabled { s.insert("opencode") }
                             if self.copilotAgentEnabled { s.insert("copilot") }
                             if self.droidAgentEnabled { s.insert("droid") }
+                            if self.openClawAgentEnabled { s.insert("openclaw") }
                             return s
                         }()
                         let indexer = AnalyticsIndexer(db: db, enabledSources: enabledSources)
@@ -638,6 +668,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         phases[.opencode] = (openCodeAgentEnabled && includeOpenCode) ? opencode.launchPhase : .ready
         phases[.copilot] = (copilotAgentEnabled && includeCopilot) ? copilot.launchPhase : .ready
         phases[.droid] = (droidAgentEnabled && includeDroid) ? droid.launchPhase : .ready
+        phases[.openclaw] = (openClawAgentEnabled && includeOpenClaw) ? openclaw.launchPhase : .ready
 
         let overall: LaunchPhase
         if phases.values.contains(.error) {
@@ -685,6 +716,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             case .opencode: return openCodeAgentEnabled && includeOpenCode
             case .copilot:  return copilotAgentEnabled && includeCopilot
             case .droid:    return droidAgentEnabled && includeDroid
+            case .openclaw: return openClawAgentEnabled && includeOpenClaw
             }
         }
 
@@ -696,7 +728,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if hasCommandsOnly {
             results = results.filter { s in
                 // For Codex, Copilot, and OpenCode, require evidence of commands/tool calls (or lightweightCommands>0).
-                if s.source == .codex || s.source == .opencode || s.source == .copilot || s.source == .droid {
+                if s.source == .codex || s.source == .opencode || s.source == .copilot || s.source == .droid || s.source == .openclaw {
                     if !s.events.isEmpty {
                         return s.events.contains { $0.kind == .tool_call }
                     } else {
@@ -708,7 +740,6 @@ final class UnifiedSessionIndexer: ObservableObject {
                     if s.events.isEmpty { return false }
                     return s.events.contains { $0.kind == .tool_call }
                 }
-                // Default: keep other sources (none today).
                 return true
             }
         }
@@ -829,6 +860,14 @@ final class UnifiedSessionIndexer: ObservableObject {
         droid.refresh()
     }
 
+    private func maybeAutoRefreshOpenClaw() {
+        if !openClawAgentEnabled { return }
+        if openclaw.isIndexing { return }
+        if withinGuard(lastAutoRefreshOpenClaw) { return }
+        lastAutoRefreshOpenClaw = Date()
+        openclaw.refresh()
+    }
+
     // MARK: - Favorites
     func toggleFavorite(_ session: Session) {
         let nowStarred = favorites.toggle(id: session.id, source: session.source)
@@ -867,7 +906,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let hasDisplayedSessions: Bool
 
         static let idle = LaunchState(
-            sourcePhases: [.codex: .idle, .claude: .idle, .gemini: .idle, .opencode: .idle, .copilot: .idle, .droid: .idle],
+            sourcePhases: [.codex: .idle, .claude: .idle, .gemini: .idle, .opencode: .idle, .copilot: .idle, .droid: .idle, .openclaw: .idle],
             overallPhase: .idle,
             blockingSources: SessionSource.allCases,
             hasDisplayedSessions: false

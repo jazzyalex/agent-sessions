@@ -18,6 +18,8 @@ extension Color {
     static let agentCopilot: Color = TranscriptColorSystem.agentBrandAccent(source: .copilot)
     /// Droid brand color
     static let agentDroid: Color = TranscriptColorSystem.agentBrandAccent(source: .droid)
+    /// OpenClaw brand color
+    static let agentOpenClaw: Color = TranscriptColorSystem.agentBrandAccent(source: .openclaw)
 
     // MARK: - Monochrome Support
 
@@ -28,6 +30,7 @@ extension Color {
     static let agentOpenCodeGray = Color(white: 0.7) // Lightest gray
     static let agentCopilotGray = Color(white: 0.75) // Very light gray
     static let agentDroidGray = Color(white: 0.8)
+    static let agentOpenClawGray = Color(white: 0.85)
 
     /// Get the brand color for a given session source
     static func agentColor(for source: SessionSource) -> Color {
@@ -38,6 +41,7 @@ extension Color {
         case .opencode: return .agentOpenCode
         case .copilot: return .agentCopilot
         case .droid: return .agentDroid
+        case .openclaw: return .agentOpenClaw
         }
     }
 
@@ -51,6 +55,7 @@ extension Color {
             case .opencode: return .agentOpenCodeGray
             case .copilot: return .agentCopilotGray
             case .droid: return .agentDroidGray
+            case .openclaw: return .agentOpenClawGray
             }
         } else {
             return agentColor(for: source)
@@ -72,6 +77,8 @@ extension Color {
             return .agentCopilot
         } else if lower.contains("droid") {
             return .agentDroid
+        } else if lower.contains("openclaw") || lower.contains("clawdbot") {
+            return .agentOpenClaw
         } else {
             return .accentColor
         }
@@ -93,6 +100,8 @@ extension Color {
                 return .agentCopilotGray
             } else if lower.contains("droid") {
                 return .agentDroidGray
+            } else if lower.contains("openclaw") || lower.contains("clawdbot") {
+                return .agentOpenClawGray
             } else {
                 return .secondary
             }

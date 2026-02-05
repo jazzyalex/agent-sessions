@@ -57,6 +57,9 @@ enum TranscriptColorSystem {
         case .droid:
             // Green brand (disambiguation handled via styling, not hue).
             return NSColor(calibratedRed: 0.16, green: 0.68, blue: 0.28, alpha: 1.0)
+        case .openclaw:
+            // Orange-ish (distinct from tool success green and OpenCode purple).
+            return NSColor(calibratedRed: 0.95, green: 0.55, blue: 0.15, alpha: 1.0)
         }
     }
 

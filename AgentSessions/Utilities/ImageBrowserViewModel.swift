@@ -131,6 +131,16 @@ final class ImageBrowserViewModel: ObservableObject {
         return SessionSource.allCases.filter { present.contains($0) }
     }
 
+    var allCodingSources: Set<SessionSource> {
+        Set(availableSources.filter { $0 != .openclaw })
+    }
+
+    var isAllCodingAgentsSelected: Bool {
+        let allCoding = allCodingSources
+        if allCoding.isEmpty { return selectedSources.isEmpty }
+        return selectedSources == allCoding
+    }
+
     func loadedUserPromptText(for item: Item) -> String? {
         guard let session = sessionByID[item.sessionID] else { return nil }
         guard !session.events.isEmpty else { return nil }
@@ -263,11 +273,12 @@ private extension ImageBrowserViewModel {
         let project = (projectFilter?.isEmpty == false) ? projectFilter : nil
 
         let sources = selectedSources
+        if sources.isEmpty { return [] }
         return allSessions.filter { s in
             if let project {
                 if s.repoName != project { return false }
             }
-            if !sources.isEmpty && !sources.contains(s.source) { return false }
+            if !sources.contains(s.source) { return false }
             return true
         }.sorted(by: { $0.modifiedAt > $1.modifiedAt })
     }
@@ -477,6 +488,16 @@ private extension ImageBrowserViewModel {
             var out: [Item] = []
             out.reserveCapacity(min(index.spans.count, 64))
 
+            func fallbackEventID(forStoredLineIndex storedLineIndex: Int) -> String {
+                switch session.source {
+                case .openclaw:
+                    let base = sha256Hex(url.path)
+                    return base + String(format: "-%06d", storedLineIndex + 1)
+                default:
+                    return SessionIndexer.eventID(forPath: url.path, index: storedLineIndex)
+                }
+            }
+
             for (i, stored) in index.spans.enumerated() {
                 let span = Base64ImageDataURLScanner.Span(
                     startOffset: stored.startOffset,
@@ -486,6 +507,22 @@ private extension ImageBrowserViewModel {
                     base64PayloadLength: stored.base64PayloadLength,
                     approxBytes: stored.approxBytes
                 )
+
+                let openClawEventID: String? = {
+                    guard session.source == .openclaw else { return nil }
+                    return fallbackEventID(forStoredLineIndex: stored.lineIndex)
+                }()
+
+                let openClawEventIndex: Int? = {
+                    guard let openClawEventID else { return nil }
+                    if let exactUser = session.events.firstIndex(where: { $0.kind == .user && $0.id == openClawEventID }) { return exactUser }
+                    if let exact = session.events.firstIndex(where: { $0.id == openClawEventID }) { return exact }
+                    return session.events.firstIndex(where: { $0.id.hasPrefix(openClawEventID) })
+                }()
+
+                let resolvedEventIndex = openClawEventIndex ?? stored.lineIndex
+                let resolvedUserEventIndex = nearestUserEventIndex(for: resolvedEventIndex) ?? resolvedEventIndex
+
                 out.append(
                     Item(
                         sessionID: session.id,
@@ -495,13 +532,10 @@ private extension ImageBrowserViewModel {
                         sessionSource: session.source,
                         sessionProject: session.repoName,
                         sessionImageIndex: i + 1,
-                        lineIndex: nearestUserEventIndex(for: stored.lineIndex) ?? stored.lineIndex,
-                        eventID: {
-                            let idx = nearestUserEventIndex(for: stored.lineIndex) ?? stored.lineIndex
-                            if session.events.indices.contains(idx) { return session.events[idx].id }
-                            return SessionIndexer.eventID(forPath: url.path, index: stored.lineIndex)
-                        }(),
-                        userPromptIndex: userPromptIndex(for: session, eventIndex: nearestUserEventIndex(for: stored.lineIndex) ?? stored.lineIndex),
+                        lineIndex: resolvedUserEventIndex,
+                        eventID: openClawEventID
+                            ?? (session.events.indices.contains(resolvedUserEventIndex) ? session.events[resolvedUserEventIndex].id : fallbackEventID(forStoredLineIndex: stored.lineIndex)),
+                        userPromptIndex: userPromptIndex(for: session, eventIndex: resolvedUserEventIndex),
                         payload: .base64(sourceURL: url, span: span),
                         fileSignature: signature
                     )

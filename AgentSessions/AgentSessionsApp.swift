@@ -24,6 +24,7 @@ struct AgentSessionsApp: App {
     @StateObject private var geminiIndexer = GeminiSessionIndexer()
     @StateObject private var copilotIndexer = CopilotSessionIndexer()
     @StateObject private var droidIndexer = DroidSessionIndexer()
+    @StateObject private var openclawIndexer = OpenClawSessionIndexer()
     @StateObject private var updaterController = {
         let controller = UpdaterController()
         UpdaterController.shared = controller
@@ -73,7 +74,8 @@ struct AgentSessionsApp: App {
                 geminiIndexer: geminiIndexer,
                 opencodeIndexer: opencodeIndexer,
                 copilotIndexer: copilotIndexer,
-                droidIndexer: droidIndexer
+                droidIndexer: droidIndexer,
+                openclawIndexer: openclawIndexer
             )
             let layoutMode = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
             UnifiedSessionsView(
@@ -84,6 +86,7 @@ struct AgentSessionsApp: App {
                 opencodeIndexer: opencodeIndexer,
                 copilotIndexer: copilotIndexer,
                 droidIndexer: droidIndexer,
+                openclawIndexer: openclawIndexer,
                 analyticsReady: analyticsReady,
                 layoutMode: layoutMode,
                 onToggleLayout: {
@@ -153,6 +156,7 @@ struct AgentSessionsApp: App {
                             opencodeIndexer: opencodeIndexer,
                             copilotIndexer: copilotIndexer,
                             droidIndexer: droidIndexer,
+                            openclawIndexer: openclawIndexer,
                             codexUsageModel: codexUsageModel,
                             claudeUsageModel: claudeUsageModel
                         )
@@ -218,7 +222,8 @@ struct AgentSessionsApp: App {
                     geminiIndexer: geminiIndexer,
                     opencodeIndexer: opencodeIndexer,
                     copilotIndexer: copilotIndexer,
-                    droidIndexer: droidIndexer
+                    droidIndexer: droidIndexer,
+                    openclawIndexer: openclawIndexer
                 )
             )
             .environmentObject(archiveManager)
@@ -239,14 +244,16 @@ final class _UnifiedHolder: ObservableObject {
                      geminiIndexer: GeminiSessionIndexer,
                      opencodeIndexer: OpenCodeSessionIndexer,
                      copilotIndexer: CopilotSessionIndexer,
-                     droidIndexer: DroidSessionIndexer) -> UnifiedSessionIndexer {
+                     droidIndexer: DroidSessionIndexer,
+                     openclawIndexer: OpenClawSessionIndexer) -> UnifiedSessionIndexer {
         if let u = unified { return u }
         let u = UnifiedSessionIndexer(codexIndexer: codexIndexer,
                                       claudeIndexer: claudeIndexer,
                                       geminiIndexer: geminiIndexer,
                                       opencodeIndexer: opencodeIndexer,
                                       copilotIndexer: copilotIndexer,
-                                      droidIndexer: droidIndexer)
+                                      droidIndexer: droidIndexer,
+                                      openclawIndexer: openclawIndexer)
         unified = u
         return u
     }
@@ -397,6 +404,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         opencodeIndexer: OpenCodeSessionIndexer,
         copilotIndexer: CopilotSessionIndexer,
         droidIndexer: DroidSessionIndexer,
+        openclawIndexer: OpenClawSessionIndexer,
         codexUsageModel: CodexUsageModel,
         claudeUsageModel: ClaudeUsageModel
     ) {
@@ -410,6 +418,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
             opencodeIndexer: opencodeIndexer,
             copilotIndexer: copilotIndexer,
             droidIndexer: droidIndexer,
+            openclawIndexer: openclawIndexer,
             codexUsageModel: codexUsageModel,
             claudeUsageModel: claudeUsageModel
         )
@@ -499,6 +508,7 @@ private struct OnboardingWindowState {
     let opencodeIndexer: OpenCodeSessionIndexer
     let copilotIndexer: CopilotSessionIndexer
     let droidIndexer: DroidSessionIndexer
+    let openclawIndexer: OpenClawSessionIndexer
     let codexUsageModel: CodexUsageModel
     let claudeUsageModel: ClaudeUsageModel
 }
@@ -517,6 +527,7 @@ private struct OnboardingWindowRoot: View {
             opencodeIndexer: state.opencodeIndexer,
             copilotIndexer: state.copilotIndexer,
             droidIndexer: state.droidIndexer,
+            openclawIndexer: state.openclawIndexer,
             codexUsageModel: state.codexUsageModel,
             claudeUsageModel: state.claudeUsageModel
         )

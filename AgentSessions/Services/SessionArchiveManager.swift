@@ -395,6 +395,14 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                     map[s.id] = url
                 }
             }
+        case .openclaw:
+            let includeDeleted = defaults.bool(forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions)
+            let discovery = OpenClawSessionDiscovery(includeDeleted: includeDeleted)
+            for url in discovery.discoverSessionFiles() {
+                if let s = OpenClawSessionParser.parseFile(at: url), !s.id.isEmpty {
+                    map[s.id] = url
+                }
+            }
         }
 
         return map
@@ -416,6 +424,8 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             return minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .droid:
             return DroidSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .openclaw:
+            return OpenClawSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         }
     }
 
