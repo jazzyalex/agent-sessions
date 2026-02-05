@@ -136,6 +136,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                includeOpenCode: Bool,
                includeCopilot: Bool,
                includeDroid: Bool,
+               includeOpenClaw: Bool,
                all: [Session]) {
         // Cancel any in-flight search
         currentTask?.cancel()
@@ -153,6 +154,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             if includeOpenCode { set.insert(.opencode) }
             if includeCopilot { set.insert(.copilot) }
             if includeDroid { set.insert(.droid) }
+            if includeOpenClaw { set.insert(.openclaw) }
             return set
         }()
         

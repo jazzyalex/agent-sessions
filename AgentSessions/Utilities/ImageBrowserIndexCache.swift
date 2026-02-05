@@ -58,6 +58,15 @@ actor ImageBrowserIndexCache {
             let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(ImageBrowserStoredIndex.self, from: data)
             guard decoded.signature == signature else { return nil }
+            // Migration/bugfix: early OpenClaw builds cached an empty index because they only scanned for `data:image/...`.
+            // If we have a valid cache but it contains zero spans and the session file contains user images, rebuild.
+            if session.source == .openclaw, decoded.spans.isEmpty {
+                let sessionURL = URL(fileURLWithPath: session.filePath)
+                if OpenClawBase64ImageScanner.fileContainsUserBase64Image(at: sessionURL) {
+                    invalidateIndex(for: session)
+                    return nil
+                }
+            }
             return decoded
         } catch {
             return nil
@@ -77,7 +86,7 @@ actor ImageBrowserIndexCache {
         let createdAt = Int64(Date().timeIntervalSince1970)
 
         switch session.source {
-        case .codex, .claude:
+        case .codex, .claude, .openclaw:
             let located: [Base64ImageDataURLScanner.LocatedSpan] = {
                 do {
                     switch session.source {
@@ -85,6 +94,8 @@ actor ImageBrowserIndexCache {
                         return try Base64ImageDataURLScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
                     case .claude:
                         return try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
+                    case .openclaw:
+                        return try OpenClawBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
                     default:
                         return []
                     }
@@ -100,7 +111,7 @@ actor ImageBrowserIndexCache {
                 switch session.source {
                 case .codex:
                     return Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: span.startOffset)
-                case .claude:
+                case .claude, .openclaw:
                     return true
                 default:
                     return false

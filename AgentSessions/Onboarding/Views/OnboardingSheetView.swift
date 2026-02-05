@@ -10,6 +10,7 @@ struct OnboardingSheetView: View {
     @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
     @ObservedObject var copilotIndexer: CopilotSessionIndexer
     @ObservedObject var droidIndexer: DroidSessionIndexer
+    @ObservedObject var openclawIndexer: OpenClawSessionIndexer
     @ObservedObject var codexUsageModel: CodexUsageModel
     @ObservedObject var claudeUsageModel: ClaudeUsageModel
 
@@ -22,6 +23,7 @@ struct OnboardingSheetView: View {
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = AgentEnablement.isAvailable(.openclaw)
 
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
@@ -372,6 +374,11 @@ struct OnboardingSheetView: View {
                 get: { droidAgentEnabled },
                 set: { _ = AgentEnablement.setEnabled(.droid, enabled: $0) }
             )
+        case .openclaw:
+            return Binding(
+                get: { openClawAgentEnabled },
+                set: { _ = AgentEnablement.setEnabled(.openclaw, enabled: $0) }
+            )
         }
     }
 
@@ -434,6 +441,7 @@ struct OnboardingSheetView: View {
         case .opencode: return opencodeIndexer.allSessions
         case .copilot: return copilotIndexer.allSessions
         case .droid: return droidIndexer.allSessions
+        case .openclaw: return openclawIndexer.allSessions
         }
     }
 
@@ -445,6 +453,7 @@ struct OnboardingSheetView: View {
         case .opencode: return openCodeAgentEnabled
         case .copilot: return copilotAgentEnabled
         case .droid: return droidAgentEnabled
+        case .openclaw: return openClawAgentEnabled
         }
     }
 
@@ -494,6 +503,7 @@ struct OnboardingSheetView: View {
             + opencodeIndexer.allSessions
             + copilotIndexer.allSessions
             + droidIndexer.allSessions
+            + openclawIndexer.allSessions
         return WeeklyActivityDay.build(from: sessions, palette: palette)
     }
 
@@ -525,7 +535,7 @@ struct OnboardingSheetView: View {
         // Tool-call-only filter (strict)
         if hasCommandsOnlyPref {
             switch session.source {
-            case .codex, .opencode, .copilot, .droid:
+            case .codex, .opencode, .copilot, .droid, .openclaw:
                 if !session.events.isEmpty {
                     if !session.events.contains(where: { $0.kind == .tool_call }) { return false }
                 } else {
@@ -772,6 +782,7 @@ private struct AgentBadge: View {
         case .opencode: return "OC"
         case .copilot: return "CP"
         case .droid: return "D"
+        case .openclaw: return "CL"
         }
     }
 }
@@ -1570,6 +1581,8 @@ private struct OnboardingPalette {
             return Color(red: 0.82, green: 0.36, blue: 0.78)
         case .droid:
             return Color(red: 0.26, green: 0.72, blue: 0.38)
+        case .openclaw:
+            return Color(red: 0.95, green: 0.55, blue: 0.18)
         }
     }
 }

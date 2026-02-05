@@ -1,4 +1,5 @@
 import XCTest
+import Foundation
 @testable import AgentSessions
 
 final class ToolTextBlockNormalizerTests: XCTestCase {
@@ -171,5 +172,54 @@ final class ToolTextBlockNormalizerTests: XCTestCase {
                                  rawJSON: raw)
         let block = ToolTextBlockNormalizer.normalize(event: event, source: .codex)
         XCTAssertEqual(block?.groupKey, "call_123")
+    }
+
+    func testOpenClawExecToolCallUsesYieldMsAsTimeoutMeta() {
+        let input = #"{"command":"ls -la","yieldMs":10000}"#
+        let event = makeEvent(kind: .tool_call,
+                              toolName: "exec",
+                              toolInput: input,
+                              rawJSON: "{}")
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .openclaw)
+        XCTAssertEqual(block?.toolLabel, "bash")
+        XCTAssertEqual(block?.lines, ["ls -la", "timeout: 10000ms"])
+    }
+
+    func testOpenClawExecToolResultFromBase64RawJSONIncludesExitCode() throws {
+        let rawObject: [String: Any] = [
+            "type": "message",
+            "message": [
+                "role": "toolResult",
+                "toolName": "exec",
+                "details": [
+                    "status": "completed",
+                    "exitCode": 0
+                ]
+            ]
+        ]
+        let rawData = try JSONSerialization.data(withJSONObject: rawObject, options: [])
+        let rawBase64 = rawData.base64EncodedString()
+
+        let event = makeEvent(kind: .tool_result,
+                              toolName: "exec",
+                              toolOutput: "file1\n",
+                              rawJSON: rawBase64)
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .openclaw)
+        XCTAssertEqual(block?.toolLabel, "bash")
+        XCTAssertEqual(block?.lines, ["file1", "exit: 0"])
+    }
+
+    func testOpenClawParserDropsMediaAttachedHintWhenImagePresent() throws {
+        let jsonl = """
+        {\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"timestamp\":\"2026-02-04T00:00:00Z\",\"cwd\":\"/tmp\"}
+        {\"type\":\"message\",\"id\":\"m1\",\"parentId\":null,\"timestamp\":\"2026-02-04T00:00:01Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"[media attached: /tmp/a.jpg (image/jpeg) | /tmp/a.jpg]\\nTo send an image back, prefer the message tool (media/path/filePath).\"},{\"type\":\"image\",\"data\":\"AA==\",\"mimeType\":\"image/jpeg\"}]}}
+        """
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl")
+        try (jsonl + "\n").write(to: url, atomically: true, encoding: .utf8)
+
+        let session = OpenClawSessionParser.parseFileFull(at: url)
+        let user = session?.events.first(where: { $0.kind == .user })
+        XCTAssertEqual(user?.text, "Image attached")
     }
 }

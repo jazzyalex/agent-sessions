@@ -118,6 +118,7 @@ struct SessionTerminalView: View {
         case .opencode: return "OpenCode"
         case .copilot: return "Copilot"
         case .droid: return "Droid"
+        case .openclaw: return "OpenClaw"
         }
     }
 
@@ -225,7 +226,8 @@ struct SessionTerminalView: View {
                         || session.source == .claude
                         || session.source == .opencode
                         || session.source == .gemini
-                        || session.source == .copilot),
+                        || session.source == .copilot
+                        || session.source == .openclaw),
                    hasInlineImagesInSession {
                     imagesPill()
                 }
@@ -248,7 +250,7 @@ struct SessionTerminalView: View {
                     sessionSource: session.source,
                     inlineImagesEnabled: inlineSessionImageThumbnailsEnabled
                         && hasInlineImagesInSession
-                        && (session.source == .codex || session.source == .claude || session.source == .opencode)
+                        && (session.source == .codex || session.source == .claude || session.source == .opencode || session.source == .openclaw)
                         && inlineImagesVisibleInSession,
                     inlineImagesByUserBlockIndex: inlineImagesByUserBlockIndex,
                     inlineImagesSignature: effectiveInlineImagesSignature,
@@ -294,7 +296,8 @@ struct SessionTerminalView: View {
                 || session.source == .claude
                 || session.source == .opencode
                 || session.source == .gemini
-                || session.source == .copilot else {
+                || session.source == .copilot
+                || session.source == .openclaw else {
             hasInlineImagesInSession = false
             inlineImagesByUserBlockIndex = [:]
             inlineImagesSignature = 0
@@ -332,6 +335,8 @@ struct SessionTerminalView: View {
                         } catch {
                             return false
                         }
+                    case .openclaw:
+                        return OpenClawBase64ImageScanner.fileContainsUserBase64Image(at: sessionFileURL, shouldCancel: { Task.isCancelled })
                     default:
                         return false
                     }
@@ -394,6 +399,10 @@ struct SessionTerminalView: View {
                                 return InlineScanResult(payload: .file(fileURL: att.fileURL, mediaType: att.mediaType, fileSizeBytes: att.fileSizeBytes),
                                                        lineIndex: eventIndex)
                             }
+                        case .openclaw:
+                            return try OpenClawBase64ImageScanner
+                                .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
+                                .map { InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: $0.span), lineIndex: $0.lineIndex) }
                         default:
                             return []
                         }
@@ -409,7 +418,7 @@ struct SessionTerminalView: View {
                             guard case .base64(_, let span) = item.payload else { return false }
                             return Base64ImageDataURLScanner.isLikelyImageURLContext(at: sessionFileURL, startOffset: span.startOffset)
                         }
-                    case .claude, .opencode, .gemini, .copilot:
+                    case .claude, .opencode, .gemini, .copilot, .openclaw:
                         return located
                     default:
                         return []
@@ -426,6 +435,16 @@ struct SessionTerminalView: View {
 
                 let userEventIndices: [Int] = sessionSnapshot.events.enumerated().compactMap { (idx, ev) in
                     ev.kind == .user ? idx : nil
+                }
+
+                let openClawEventBase: String? = {
+                    guard sessionSnapshot.source == .openclaw else { return nil }
+                    return sha256Hex(sessionFileURL.path)
+                }()
+
+                func openClawUserEventID(forFileLineIndex fileLineIndex: Int) -> String? {
+                    guard let openClawEventBase else { return nil }
+                    return openClawEventBase + String(format: "-%06d", fileLineIndex + 1)
                 }
 
                 func isPreambleUserEventIndex(_ idx: Int) -> Bool {
@@ -472,15 +491,24 @@ struct SessionTerminalView: View {
                 out.reserveCapacity(min(16, userEventIDToBlockIndex.count))
                 var sessionImageIndex = 1
 
-                for item in filtered {
-                    if Task.isCancelled { break }
+	                for item in filtered {
+	                    if Task.isCancelled { break }
 
-                    guard let targetUserEventIndex = nearestUserEventIndex(for: item.lineIndex) else { continue }
-                    let targetUserEventID = sessionSnapshot.events[targetUserEventIndex].id
-                    guard let targetUserBlockIndex = userEventIDToBlockIndex[targetUserEventID] else { continue }
+	                    let openClawEventID = openClawUserEventID(forFileLineIndex: item.lineIndex)
+	                    let resolved: (String, Int?, Int)? = {
+	                        if let openClawEventID, let blockIndex = userEventIDToBlockIndex[openClawEventID] {
+	                            let eventIndex = sessionSnapshot.events.firstIndex(where: { $0.id == openClawEventID })
+	                            return (openClawEventID,
+	                                    eventIndex.flatMap { userPromptIndexForLineIndex($0) },
+	                                    blockIndex)
+	                        }
 
-                    let imageEventID = targetUserEventID
-                    let userPromptIndex = userPromptIndexForLineIndex(targetUserEventIndex)
+	                        guard let targetUserEventIndex = nearestUserEventIndex(for: item.lineIndex) else { return nil }
+	                        let targetUserEventID = sessionSnapshot.events[targetUserEventIndex].id
+	                        guard let blockIndex = userEventIDToBlockIndex[targetUserEventID] else { return nil }
+	                        return (targetUserEventID, userPromptIndexForLineIndex(targetUserEventIndex), blockIndex)
+	                    }()
+	                    guard let (imageEventID, userPromptIndex, targetUserBlockIndex) = resolved else { continue }
 
                     let img = InlineSessionImage(
                         sessionID: sessionSnapshot.id,

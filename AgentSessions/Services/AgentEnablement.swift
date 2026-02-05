@@ -35,6 +35,9 @@ enum AgentEnablement {
             return defaults.object(forKey: PreferencesKey.Agents.copilotEnabled) as? Bool ?? true
         case .droid:
             return defaults.object(forKey: PreferencesKey.Agents.droidEnabled) as? Bool ?? true
+        case .openclaw:
+            // Default OFF unless OpenClaw/Clawdbot is actually present on disk or in PATH.
+            return defaults.object(forKey: PreferencesKey.Agents.openClawEnabled) as? Bool ?? isAvailable(.openclaw, defaults: defaults)
         }
     }
 
@@ -91,6 +94,7 @@ enum AgentEnablement {
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
             setEnabledInternal(.copilot, enabled: true, defaults: defaults)
             setEnabledInternal(.droid, enabled: isAvailable(.droid, defaults: defaults), defaults: defaults)
+            setEnabledInternal(.openclaw, enabled: isAvailable(.openclaw, defaults: defaults), defaults: defaults)
         } else {
             // Cold start: avoid spawning the user's login shell (can be slow with heavy rc files).
             // Prefer filesystem availability checks and fall back to a fast PATH/common-locations probe.
@@ -100,6 +104,7 @@ enum AgentEnablement {
             let opencode = isAvailable(.opencode, defaults: defaults)
             let copilot = isAvailable(.copilot, defaults: defaults)
             let droid = isAvailable(.droid, defaults: defaults)
+            let openclaw = isAvailable(.openclaw, defaults: defaults)
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
@@ -107,6 +112,7 @@ enum AgentEnablement {
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
             setEnabledInternal(.copilot, enabled: copilot, defaults: defaults)
             setEnabledInternal(.droid, enabled: droid, defaults: defaults)
+            setEnabledInternal(.openclaw, enabled: openclaw, defaults: defaults)
         }
 
         // Guarantee at least one enabled agent.
@@ -142,6 +148,8 @@ enum AgentEnablement {
             let projectsCustom = defaults.string(forKey: PreferencesKey.Paths.droidProjectsRootOverride) ?? ""
             root = DroidSessionDiscovery(customSessionsRoot: sessionsCustom.isEmpty ? nil : sessionsCustom,
                                          customProjectsRoot: projectsCustom.isEmpty ? nil : projectsCustom).sessionsRoot()
+        case .openclaw:
+            root = OpenClawSessionDiscovery().sessionsRoot()
         }
         if fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue { return true }
         if source == .droid {
@@ -164,6 +172,8 @@ enum AgentEnablement {
         case .opencode: return binaryDetectedCached("opencode")
         case .copilot: return binaryDetectedCached("copilot")
         case .droid: return binaryDetectedCached("droid")
+        case .openclaw:
+            return binaryDetectedCached("openclaw") || binaryDetectedCached("clawdbot")
         }
     }
 
@@ -181,6 +191,8 @@ enum AgentEnablement {
             defaults.set(enabled, forKey: PreferencesKey.Agents.copilotEnabled)
         case .droid:
             defaults.set(enabled, forKey: PreferencesKey.Agents.droidEnabled)
+        case .openclaw:
+            defaults.set(enabled, forKey: PreferencesKey.Agents.openClawEnabled)
         }
     }
 
