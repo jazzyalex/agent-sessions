@@ -2,7 +2,7 @@ import Foundation
 
 /// Current git status from live CLI queries
 /// This represents the real-time state of the repository when the inspector is opened.
-public struct CurrentGitStatus: Equatable {
+public struct CurrentGitStatus: Equatable, Sendable {
     /// Current branch name
     public let branch: String?
 

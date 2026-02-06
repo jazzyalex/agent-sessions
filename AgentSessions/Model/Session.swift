@@ -605,11 +605,25 @@ extension Array where Element == Session {
 }
 
 extension ISO8601DateFormatter {
-    private static let cachedDayFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withYear, .withMonth, .withDay]
-        return f
-    }()
+    private final class LockedFormatter: @unchecked Sendable {
+        private let lock = NSLock()
+        private let formatter: ISO8601DateFormatter
+
+        init(formatOptions: ISO8601DateFormatter.Options) {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = formatOptions
+            formatter = f
+        }
+
+        func string(from date: Date) -> String {
+            lock.lock()
+            let result = formatter.string(from: date)
+            lock.unlock()
+            return result
+        }
+    }
+
+    private static let cachedDayFormatter = LockedFormatter(formatOptions: [.withYear, .withMonth, .withDay])
 
     static func cachedDayString(from date: Date) -> String {
         cachedDayFormatter.string(from: date)
@@ -677,6 +691,18 @@ private struct RolloutRegex {
     }
 }
 
+private final class RolloutDateCache: @unchecked Sendable {
+    private let cache = NSCache<NSString, NSDate>()
+
+    func object(forKey key: NSString) -> NSDate? {
+        cache.object(forKey: key)
+    }
+
+    func setObject(_ obj: NSDate, forKey key: NSString) {
+        cache.setObject(obj, forKey: key)
+    }
+}
+
 private extension Session {
     static let rolloutRegex = RolloutRegex()
     static let rolloutDateFormatter: DateFormatter = {
@@ -687,7 +713,7 @@ private extension Session {
         return f
     }()
     static let rolloutDateFormatterLock = NSLock()
-    static let rolloutDateCache = NSCache<NSString, NSDate>()
+    static let rolloutDateCache = RolloutDateCache()
     static func firstCommandLine(from raw: String?) -> String? {
         guard var s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
         // Try to parse JSON object

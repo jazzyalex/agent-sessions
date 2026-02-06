@@ -1,7 +1,7 @@
 import Foundation
 
 /// Represents a single file's change status in git
-public struct GitFileStatus: Equatable, Identifiable {
+public struct GitFileStatus: Equatable, Identifiable, Sendable {
     public let id: String
     public let path: String
     public let changeType: FileChangeType
@@ -24,7 +24,7 @@ public struct GitFileStatus: Equatable, Identifiable {
 }
 
 /// Type of file change in git status
-public enum FileChangeType: String, Equatable {
+public enum FileChangeType: String, Equatable, Sendable {
     case modified = "M"
     case added = "A"
     case deleted = "D"

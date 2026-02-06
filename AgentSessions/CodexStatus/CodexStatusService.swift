@@ -389,6 +389,11 @@ actor CodexStatusService {
     private var backoffSeconds: UInt64 = 1
     private var refresherTask: Task<Void, Never>?
     private var lastStatusProbe: Date? = nil
+    private var lastAppliedSourceFilePath: String? = nil
+    private var lastAppliedSourceFileMTime: Date? = nil
+    private var lastAppliedEventTimestamp: Date? = nil
+    private var lastParseWasStaleOrFailed: Bool = false
+    private let unchangedParseSkipFreshnessSeconds: TimeInterval = 12 * 60
 
     init(updateHandler: @escaping @Sendable (CodexUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (Bool) -> Void) {
@@ -638,7 +643,9 @@ actor CodexStatusService {
         guard !roots.isEmpty else { availabilityHandler(true); return }
         availabilityHandler(false)
 
-        if let summary = probeLatestRateLimits(roots: roots) {
+        let latestCandidate = newestCandidateFile(roots: roots, daysBack: 10, limit: 10)
+        let shouldSkipParse = shouldSkipLogParse(latestCandidate: latestCandidate, now: Date())
+        if !shouldSkipParse, let summary = probeLatestRateLimits(roots: roots, expandSearch: lastParseWasStaleOrFailed) {
             // Do not regress to older data after a successful /status probe.
             // Only apply log-derived snapshots when they are at least as new
             // as the current in-memory snapshot, or when we have no timestamp.
@@ -664,6 +671,15 @@ actor CodexStatusService {
                 snapshot = s
                 updateHandler(snapshot)
             }
+
+            if let sourceFile = summary.sourceFile {
+                lastAppliedSourceFilePath = sourceFile.path
+                lastAppliedSourceFileMTime = fileModificationDate(sourceFile)
+            }
+            lastAppliedEventTimestamp = summary.eventTimestamp
+            lastParseWasStaleOrFailed = summary.stale
+        } else if !shouldSkipParse {
+            lastParseWasStaleOrFailed = true
         }
 
         // Optional: run a one-shot tmux /status probe only when stale (manual or auto)
@@ -1142,9 +1158,39 @@ actor CodexStatusService {
         return roots
     }
 
-    private func probeLatestRateLimits(roots: [URL]) -> RateLimitSummary? {
+    private func shouldSkipLogParse(latestCandidate: URL?, now: Date) -> Bool {
+        guard let latestCandidate else { return false }
+        guard let candidateMTime = fileModificationDate(latestCandidate) else { return false }
+        guard latestCandidate.path == lastAppliedSourceFilePath else { return false }
+        guard candidateMTime == lastAppliedSourceFileMTime else { return false }
+        guard let lastEvent = lastAppliedEventTimestamp else { return false }
+        return now.timeIntervalSince(lastEvent) <= unchangedParseSkipFreshnessSeconds
+    }
+
+    private func newestCandidateFile(roots: [URL], daysBack: Int, limit: Int) -> URL? {
+        var newest: URL? = nil
+        var newestDate: Date = .distantPast
+        for root in roots {
+            let candidates = findCandidateFiles(root: root, daysBack: daysBack, limit: limit)
+            guard let first = candidates.first else { continue }
+            let modified = fileModificationDate(first) ?? .distantPast
+            if modified > newestDate {
+                newest = first
+                newestDate = modified
+            }
+        }
+        return newest
+    }
+
+    private func fileModificationDate(_ url: URL) -> Date? {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
+    }
+
+    private func probeLatestRateLimits(roots: [URL], expandSearch: Bool) -> RateLimitSummary? {
         var files: [URL] = []
-        for r in roots { files.append(contentsOf: findCandidateFiles(root: r, daysBack: 10, limit: 80)) }
+        let preferredLimit = 10
+        let fallbackLimit = 80
+        for r in roots { files.append(contentsOf: findCandidateFiles(root: r, daysBack: 10, limit: preferredLimit)) }
         // Global sort by mtime desc across roots
         files.sort { (a, b) in
             let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
@@ -1154,6 +1200,20 @@ actor CodexStatusService {
         for url in files {
             if let summary = parseTokenCountTail(url: url) { return summary }
         }
+
+        if expandSearch {
+            var expanded: [URL] = []
+            for r in roots { expanded.append(contentsOf: findCandidateFiles(root: r, daysBack: 10, limit: fallbackLimit)) }
+            expanded.sort { (a, b) in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
+                return da > db
+            }
+            for url in expanded {
+                if let summary = parseTokenCountTail(url: url) { return summary }
+            }
+        }
+
         return RateLimitSummary(
             fiveHour: RateLimitWindowInfo(remainingPercent: nil, resetAt: nil, windowMinutes: nil),
             weekly: RateLimitWindowInfo(remainingPercent: nil, resetAt: nil, windowMinutes: nil),

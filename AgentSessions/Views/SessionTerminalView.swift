@@ -2261,7 +2261,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate, AVSpeechSynthesizerDelegate {
+	    final class Coordinator: NSObject, NSTextViewDelegate, AVSpeechSynthesizerDelegate, @unchecked Sendable {
         static let inlineImageIDKey = NSAttributedString.Key("AgentSessionsInlineImageID")
 
         private final class InlineImageHoverPreviewViewController: NSViewController {
@@ -2560,10 +2560,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let token = scrollObserver
             self.scrollObserver = nil
 
-            // `NotificationCenter` removals can contend with lower-QoS posters; avoid doing it on the
-            // user-interactive/UI thread to prevent priority inversion warnings.
-            DispatchQueue.global(qos: .default).async {
+            if Thread.isMainThread {
                 NotificationCenter.default.removeObserver(token)
+            } else {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.removeObserver(token)
+                }
             }
         }
 

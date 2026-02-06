@@ -72,7 +72,7 @@ enum ClaudeProbeProject {
     /// validation passes, otherwise falls back to per-file deletion of validated probe files.
     private static func performCleanup(mode: String) -> ResultStatus {
         var status: ResultStatus
-        var extras: [String: Any] = [:]
+        var extras: [String: any Sendable] = [:]
 
         if let root = probeProjectDirectory() {
             var isDir: ObjCBool = false
@@ -162,7 +162,7 @@ enum ClaudeProbeProject {
                 deleted += 1
             } catch {
                 let status: ResultStatus = .ioError("Failed to delete probe project: \(error.localizedDescription)")
-                var extras: [String: Any] = ["deleted": deleted, "skipped": skipped]
+                var extras: [String: any Sendable] = ["deleted": deleted, "skipped": skipped]
                 if let ts = oldest { extras["oldest_ts"] = ts.timeIntervalSince1970 }
                 postCleanupStatus(status, mode: mode, extra: extras)
                 return status
@@ -170,25 +170,35 @@ enum ClaudeProbeProject {
         }
 
         guard deleted > 0 else { return nil }
-        var extras: [String: Any] = ["deleted": deleted, "skipped": skipped]
+        var extras: [String: any Sendable] = ["deleted": deleted, "skipped": skipped]
         if let ts = oldest { extras["oldest_ts"] = ts.timeIntervalSince1970 }
         let status: ResultStatus = .success
         postCleanupStatus(status, mode: mode, extra: extras)
         return status
     }
 
-    private static func postCleanupStatus(_ status: ResultStatus, mode: String, extra: [String: Any] = [:]) {
-        var info: [String: Any] = [
+    private static func postCleanupStatus(_ status: ResultStatus, mode: String, extra: [String: any Sendable] = [:]) {
+        var info: [String: any Sendable] = [
             "mode": mode,
             "status": status.kind,
             "message": status.message ?? ""
         ]
         for (k, v) in extra { info[k] = v }
+        let payload = info
+
+        func userInfo(from payload: [String: any Sendable]) -> [String: Any] {
+            var out: [String: Any] = [:]
+            for (k, v) in payload {
+                out[k] = v
+            }
+            return out
+        }
+
         if Thread.isMainThread {
-            NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+            NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: userInfo(from: payload))
         } else {
             DispatchQueue.main.async {
-                NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+                NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: userInfo(from: payload))
             }
         }
     }

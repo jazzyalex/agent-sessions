@@ -73,15 +73,16 @@ actor ClaudeStatusService {
     private nonisolated let updateHandler: @Sendable (ClaudeUsageSnapshot) -> Void
     private nonisolated let availabilityHandler: @Sendable (ClaudeServiceAvailability) -> Void
 
-	    private var state: State = .idle
-	    private var activeProbeLabel: String? = nil
-	    private var snapshot = ClaudeUsageSnapshot()
-	    private var hasSnapshot: Bool = false
-	    private var shouldRun: Bool = true
-	    private var visible: Bool = false
-	    private var refresherTask: Task<Void, Never>?
-	    private var tmuxAvailable: Bool = false
-	    private var claudeAvailable: Bool = false
+    private var state: State = .idle
+    private var activeProbeLabel: String? = nil
+    private var snapshot = ClaudeUsageSnapshot()
+    private var hasSnapshot: Bool = false
+    private var shouldRun: Bool = true
+    private var visible: Bool = false
+    private var refresherTask: Task<Void, Never>?
+    private var tmuxAvailable: Bool = false
+    private var claudeAvailable: Bool = false
+    private var cachedScriptURL: URL? = nil
 
     init(updateHandler: @escaping @Sendable (ClaudeUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (ClaudeServiceAvailability) -> Void) {
@@ -138,42 +139,43 @@ actor ClaudeStatusService {
         }
     }
 
-	    func setVisible(_ isVisible: Bool) {
-	        let wasVisible = visible
-	        visible = isVisible
+    func setVisible(_ isVisible: Bool) {
+        let wasVisible = visible
+        visible = isVisible
 
-	        // If transitioning from hidden → visible, immediately refresh to show current data
-	        if !wasVisible && isVisible {
-	            Task { await self.refreshTick(userInitiated: true) }
-	        }
-	    }
+        // Visibility-triggered refreshes are automatic, not user-initiated.
+        if !wasVisible && isVisible {
+            Task { await self.refreshTick(userInitiated: false) }
+        }
+    }
 
-	    func refreshNow() {
-	        Task { await self.refreshTick(userInitiated: true) }
-	    }
+    func refreshNow() {
+        Task { await self.refreshTick(userInitiated: true) }
+    }
 
     // MARK: - Core refresh logic
 
-	    private func refreshTick(userInitiated: Bool = false) async {
-	        guard tmuxAvailable && claudeAvailable else { return }
-	        if !userInitiated {
-	            let urgent = hasSnapshot && snapshot.sessionPercentUsed() >= 80
-	            guard visible || urgent else { return }
-	        }
-	        guard beginProbe() else { return }
-	        defer { endProbe() }
-	        defer { _ = ClaudeProbeProject.cleanupNowIfAuto() }
-	        defer { ClaudeProbeProject.noteProbeRun() }
-	        do {
-	            let json = try await executeScript()
-	            if let parsed = parseUsageJSON(json) {
-	                snapshot = parsed
-	                hasSnapshot = true
-	                updateHandler(snapshot)
-	            } else {
-	                print("ClaudeStatusService: Failed to parse JSON: \(json)")
-	            }
-	        } catch {
+    private func refreshTick(userInitiated: Bool = false) async {
+        guard tmuxAvailable && claudeAvailable else { return }
+        if !userInitiated {
+            guard Self.onACPower() else { return }
+            let urgent = hasSnapshot && snapshot.sessionPercentUsed() >= 80
+            guard visible || urgent else { return }
+        }
+        guard beginProbe() else { return }
+        defer { endProbe() }
+        defer { _ = ClaudeProbeProject.cleanupNowIfAuto() }
+        defer { ClaudeProbeProject.noteProbeRun() }
+        do {
+            let json = try await executeScript()
+            if let parsed = parseUsageJSON(json) {
+                snapshot = parsed
+                hasSnapshot = true
+                updateHandler(snapshot)
+            } else {
+                print("ClaudeStatusService: Failed to parse JSON: \(json)")
+            }
+        } catch {
             print("ClaudeStatusService: Script execution failed: \(error)")
             // Silent failure - keep last known good data
         }
@@ -631,26 +633,28 @@ actor ClaudeStatusService {
     }
 
     private func prepareScript() -> URL? {
-        // Get script from bundle
         guard let bundledScript = Bundle.main.url(forResource: "claude_usage_capture", withExtension: "sh") else {
             return nil
         }
 
-        // Copy to temp with unique name
+        if let cachedScriptURL, FileManager.default.fileExists(atPath: cachedScriptURL.path) {
+            return cachedScriptURL
+        }
+
         let tempDir = FileManager.default.temporaryDirectory
-        let tempScript = tempDir.appendingPathComponent("claude_usage_\(UUID().uuidString).sh")
+            .appendingPathComponent("AgentSessions", isDirectory: true)
+            .appendingPathComponent("Scripts", isDirectory: true)
+        let tempScript = tempDir.appendingPathComponent("claude_usage_capture.sh")
 
         do {
-            // Copy script to temp
-            try? FileManager.default.removeItem(at: tempScript) // Clean up any existing
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            try? FileManager.default.removeItem(at: tempScript)
             try FileManager.default.copyItem(at: bundledScript, to: tempScript)
-
-            // Make executable
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o755],
                 ofItemAtPath: tempScript.path
             )
-
+            cachedScriptURL = tempScript
             return tempScript
         } catch {
             return nil
@@ -703,20 +707,15 @@ actor ClaudeStatusService {
         // Read Claude-specific polling interval (defaults to 900s = 15 min)
         let userInterval = UInt64(UserDefaults.standard.object(forKey: "ClaudePollingInterval") as? Int ?? 900)
 
-	        // Energy optimization: Stop polling entirely when nothing is visible
-	        // (menu bar and strips both hidden)
-	        // Urgent if 5-hour limit is running low (≤20% remaining = ≥80% used)
-	        let urgent = hasSnapshot && snapshot.sessionPercentUsed() >= 80
-	        if !visible && !urgent {
-	            // When hidden and not urgent: don't poll at all (1 hour = effectively disabled)
-	            return 3600 * 1_000_000_000
-	        }
+        // Energy optimization: stop polling entirely when nothing is visible.
+        let urgent = hasSnapshot && snapshot.sessionPercentUsed() >= 80
+        if !visible && !urgent {
+            return 3600 * 1_000_000_000
+        }
 
-        // Policy when visible or urgent:
-        // - Honor the user-selected interval on both AC and battery.
-        // (Battery forcing a more frequent interval can increase usage unexpectedly.)
+        // Automatic background probing is AC-only.
         if !Self.onACPower() {
-            return userInterval * 1_000_000_000
+            return 3600 * 1_000_000_000
         }
         return userInterval * 1_000_000_000
     }

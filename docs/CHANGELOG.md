@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Performance: Removed high-frequency idle background work (Codex warmup loop and archive sync timer) and switched to activation/event-driven refreshes to reduce steady-state battery impact.
+- Session view: Removed a QoS inversion path in terminal view cleanup by avoiding lower-priority observer teardown work from interactive code paths.
 - Transcript (Session view): Treat `<turn_aborted>` blocks embedded in user prompts as system notices so they don’t render as user prompts.
 - Transcript (Session view): Render Codex `<image name=[Image #…]>` markers as `[Image #…]` for cleaner copy/paste.
 - Transcript (Session view): Inline image thumbnails ignore data URL strings that are not part of `image_url` payloads, preventing empty placeholders.
@@ -25,6 +27,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Sessions: Added an app-active foreground monitor (60s cadence) for Codex and Claude new-session detection, replacing always-on idle polling.
+- Claude Usage: Automatic background `/usage` probes now run only on AC power; on battery and Low Power Mode, refresh is manual-only.
+- Codex Usage: Preserved periodic updates while reducing per-tick filesystem/parsing work when source files are unchanged.
 - Menu: Removed the separator between Image Browser and Saved Sessions, and renamed “Saved Sessions…” to “Saved Sessions”.
 - Preferences: Added a Session View toggle for “Show inline image thumbnails in Session view”.
 - Sessions: Added OpenClaw (clawdbot) session support when the OpenClaw/clawdbot CLI is installed; deleted sessions can be shown via an Advanced toggle.
