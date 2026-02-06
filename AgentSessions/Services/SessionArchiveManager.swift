@@ -65,19 +65,19 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     // Pinning is a user action; keep the queue responsive.
     private let ioQueue = DispatchQueue(label: "AgentSessions.SessionArchiveManager.io", qos: .userInitiated)
-    private var timer: DispatchSourceTimer?
     private var inFlightKeys: Set<String> = []
     private var missingResolutionLogged: Set<String> = []
     private var didLogArchivesRoot: Bool = false
     private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private init() {
-        // Eagerly warm cache for UI.
+        // Eagerly warm cache for UI and do a single startup sync pass.
         ioQueue.async { [weak self] in
             self?.reloadCache()
             self?.cleanupOrphanedTempDirs()
+            self?.syncPinnedSessions(reason: "startup")
+            self?.reloadCache()
         }
-        startPeriodicSync()
     }
 
     func key(source: SessionSource, id: String) -> String { "\(source.rawValue):\(id)" }
@@ -282,23 +282,6 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     }
 
     // MARK: - Sync
-
-    private func startPeriodicSync() {
-        let t = DispatchSource.makeTimerSource(queue: ioQueue)
-        t.schedule(deadline: .now() + 8, repeating: .seconds(45), leeway: .seconds(5))
-        t.setEventHandler { [weak self] in
-            self?.syncPinnedSessions(reason: "timer")
-            self?.reloadCache()
-        }
-        t.resume()
-        timer = t
-
-        // Also do a small delayed initial pass.
-        ioQueue.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.syncPinnedSessions(reason: "startup")
-            self?.reloadCache()
-        }
-    }
 
     private func syncPinnedSessions(reason: String) {
         let pinsEnabled = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true

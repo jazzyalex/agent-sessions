@@ -114,8 +114,16 @@ struct AgentSessionsApp: App {
                     LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
                     onboardingCoordinator.checkAndPresentIfNeeded()
                     unifiedIndexerHolder.unified?.refresh()
+                    unifiedIndexerHolder.unified?.setAppActive(NSApp.isActive)
                     updateUsageModels()
                     setupAnalytics()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    unifiedIndexerHolder.unified?.setAppActive(true)
+                    archiveManager.syncPinnedSessionsNow()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                    unifiedIndexerHolder.unified?.setAppActive(false)
                 }
                 .onChange(of: showUsageStrip) { _, _ in
                     updateUsageModels()

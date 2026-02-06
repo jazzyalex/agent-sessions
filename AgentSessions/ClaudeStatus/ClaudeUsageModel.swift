@@ -1,6 +1,9 @@
 import Foundation
 import SwiftUI
 import AppKit
+#if os(macOS)
+import IOKit.ps
+#endif
 
 // Snapshot of parsed values from Claude CLI /usage
 struct ClaudeUsageSnapshot: Equatable {
@@ -169,7 +172,22 @@ final class ClaudeUsageModel: ObservableObject {
         guard isEnabled else { return }
         guard stripVisible || menuVisible else { return }
         if UserDefaults.standard.bool(forKey: PreferencesKey.claudeUsageEnabled) == false { return }
+        guard Self.onACPower() else { return }
         refreshNow()
+    }
+
+    private static func onACPower() -> Bool {
+        #if os(macOS)
+        let blob = IOPSCopyPowerSourcesInfo().takeRetainedValue()
+        if let typeCF = IOPSGetProvidingPowerSourceType(blob)?.takeRetainedValue() {
+            let type = typeCF as String
+            return type == (kIOPSACPowerValue as String)
+        }
+        #endif
+        if #available(macOS 12.0, *) {
+            if ProcessInfo.processInfo.isLowPowerModeEnabled { return false }
+        }
+        return true
     }
 
     // Hard-probe entry: run a one-off /usage probe and return diagnostics

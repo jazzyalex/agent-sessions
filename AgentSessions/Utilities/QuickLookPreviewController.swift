@@ -2,7 +2,7 @@ import AppKit
 import QuickLookUI
 
 final class QuickLookPreviewController: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
-    static let shared = QuickLookPreviewController()
+    @MainActor static let shared = QuickLookPreviewController()
 
     private let lock = NSLock()
     private var urls: [URL] = []

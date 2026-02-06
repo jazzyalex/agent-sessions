@@ -14,22 +14,34 @@ final class DroidSessionParser {
         case streamJSON
     }
 
+    private final class LockedISO8601DateFormatter: @unchecked Sendable {
+        private let lock = NSLock()
+        private let formatter: ISO8601DateFormatter
+
+        init(formatOptions: ISO8601DateFormatter.Options) {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = formatOptions
+            formatter = f
+        }
+
+        func date(from string: String) -> Date? {
+            lock.lock()
+            let date = formatter.date(from: string)
+            lock.unlock()
+            return date
+        }
+    }
+
     private static let previewScanLimit = 200
     private static let sniffScanLimit = 50
     private static let maxRawResultContentBytes = 8_192
 
     private static let systemReminderOpenTag = "<system-reminder>"
     private static let systemReminderCloseTag = "</system-reminder>"
-    private static let dateFormatterWithFractionalSeconds: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-    private static let dateFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
+    private static let dateFormatterWithFractionalSeconds = LockedISO8601DateFormatter(
+        formatOptions: [.withInternetDateTime, .withFractionalSeconds]
+    )
+    private static let dateFormatter = LockedISO8601DateFormatter(formatOptions: [.withInternetDateTime])
 
     // MARK: - Public
 

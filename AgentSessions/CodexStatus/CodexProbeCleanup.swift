@@ -153,8 +153,8 @@ enum CodexProbeCleanup {
         post(status, mode: mode, extra: [:])
     }
 
-    private static func post(_ status: ResultStatus, mode: String, extra: [String: Any]) {
-        var info: [String: Any] = ["mode": mode]
+    private static func post(_ status: ResultStatus, mode: String, extra: [String: any Sendable]) {
+        var info: [String: any Sendable] = ["mode": mode]
         switch status {
         case .success(let n): info["status"] = "success"; info["deleted"] = n
         case .disabled: info["status"] = "disabled"
@@ -164,11 +164,20 @@ enum CodexProbeCleanup {
         }
         // Merge in any extras (e.g., skipped, oldest_ts)
         for (k, v) in extra { info[k] = v }
+        let payload = info
+
+        func userInfo(from payload: [String: any Sendable]) -> [String: Any] {
+            var out: [String: Any] = [:]
+            for (k, v) in payload {
+                out[k] = v
+            }
+            return out
+        }
         if Thread.isMainThread {
-            NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+            NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: userInfo(from: payload))
         } else {
             DispatchQueue.main.async {
-                NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: info)
+                NotificationCenter.default.post(name: didRunCleanupNotification, object: nil, userInfo: userInfo(from: payload))
             }
         }
     }
@@ -176,7 +185,7 @@ enum CodexProbeCleanup {
 
 // MARK: - Shared cleanup core used by auto and manual
 private extension CodexProbeCleanup {
-    struct CleanupAggregate { let status: ResultStatus; let extra: [String: Any] }
+    struct CleanupAggregate { let status: ResultStatus; let extra: [String: any Sendable] }
 
     static func performCleanupCore() -> CleanupAggregate {
         let root = sessionsRoot()
@@ -202,7 +211,7 @@ private extension CodexProbeCleanup {
             do { try FileManager.default.removeItem(at: url); deleted += 1 }
             catch { return CleanupAggregate(status: .ioError(error.localizedDescription), extra: ["deleted": deleted]) }
         }
-        var extra: [String: Any] = ["deleted": deleted]
+        var extra: [String: any Sendable] = ["deleted": deleted]
         if let ts = oldest?.timeIntervalSince1970 { extra["oldest_ts"] = ts }
         return CleanupAggregate(status: .success(deleted), extra: extra)
     }

@@ -1313,19 +1313,21 @@ private struct VisualEffectBlur: NSViewRepresentable {
     }
 }
 
-private struct CountingNumberText: View, Animatable {
+private struct CountingNumberText: View {
     var value: Double
     var font: Font
-
-    var animatableData: Double {
-        get { value }
-        set { value = newValue }
-    }
 
     var body: some View {
         Text("\(Int(value.rounded()))")
             .font(font)
             .monospacedDigit()
+    }
+}
+
+extension CountingNumberText: Animatable {
+    var animatableData: Double {
+        get { value }
+        set { value = newValue }
     }
 }
 
