@@ -1487,7 +1487,7 @@ private struct TerminalLineView: View {
 	                    }
 	                    .font(.system(size: fontSize,
 	                                  weight: lineFontWeight,
-	                                  design: (line.role == .toolInput) ? .monospaced : .default))
+	                                  design: (line.role == .toolInput || line.role == .toolOutput) ? .monospaced : .default))
 	                    .foregroundColor(swatch.foreground)
 			        }
 		        .textSelection(.enabled)
@@ -2400,9 +2400,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
 
         deinit {
-            if let scrollObserver {
-                NotificationCenter.default.removeObserver(scrollObserver)
-            }
+            removeScrollObserver()
             inlineThumbnailTasks.values.forEach { $0.cancel() }
             inlineHoverTask?.cancel()
         }
@@ -2535,10 +2533,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         func installScrollObserver(scrollView: NSScrollView, textView: TerminalTextView) {
             if activeScrollView !== scrollView {
-                if let scrollObserver {
-                    NotificationCenter.default.removeObserver(scrollObserver)
-                }
-                scrollObserver = nil
+                removeScrollObserver()
             }
 
             activeScrollView = scrollView
@@ -2558,6 +2553,18 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
             // Initial load after first render.
             scheduleIdleThumbnailLoad(delay: 0.05)
+        }
+
+        private func removeScrollObserver() {
+            guard let scrollObserver else { return }
+            let token = scrollObserver
+            self.scrollObserver = nil
+
+            // `NotificationCenter` removals can contend with lower-QoS posters; avoid doing it on the
+            // user-interactive/UI thread to prevent priority inversion warnings.
+            DispatchQueue.global(qos: .default).async {
+                NotificationCenter.default.removeObserver(token)
+            }
         }
 
         func updateInlineImages(enabled: Bool, imagesByUserBlockIndex: [Int: [InlineSessionImage]], signature: Int, textView: TerminalTextView) {
@@ -2657,16 +2664,15 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
             inlineThumbnailTasks[id] = Task(priority: .utility) { [weak self] in
                 guard let self else { return }
-                let img: NSImage? = await Task.detached(priority: .utility) {
-                    do {
-                        let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
-                                                                                  maxDecodedBytes: maxDecodedBytes,
-                                                                                  shouldCancel: { Task.isCancelled })
-                        return CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: maxPixels)
-                    } catch {
-                        return nil
-                    }
-                }.value
+                let img: NSImage?
+                do {
+                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
+                                                                              maxDecodedBytes: maxDecodedBytes,
+                                                                              shouldCancel: { Task.isCancelled })
+                    img = CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: maxPixels)
+                } catch {
+                    img = nil
+                }
 
                 await MainActor.run { [weak self] in
                     guard let self else { return }
@@ -2703,7 +2709,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
 
         @MainActor
-        func handleInlineImageDoubleClick(id: String) {
+        func handleInlineImageOpen(id: String) {
             guard inlineImagesEnabled else { return }
             closeInlineHoverPopover()
             guard let meta = inlineImagesByID[id] else { return }
@@ -2782,16 +2788,15 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
             inlineHoverTask = Task(priority: .utility) { [weak self] in
                 guard let self else { return }
-                let preview: NSImage? = await Task.detached(priority: .utility) {
-                    do {
-                        let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
-                                                                                  maxDecodedBytes: maxDecodedBytes,
-                                                                                  shouldCancel: { Task.isCancelled })
-                        return CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: maxPixels)
-                    } catch {
-                        return nil
-                    }
-                }.value
+                let preview: NSImage?
+                do {
+                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
+                                                                              maxDecodedBytes: maxDecodedBytes,
+                                                                              shouldCancel: { Task.isCancelled })
+                    preview = CodexSessionImagePayload.makeThumbnail(from: decoded, maxPixelSize: maxPixels)
+                } catch {
+                    preview = nil
+                }
 
                 await MainActor.run { [weak self] in
                     guard let self else { return }
@@ -2873,6 +2878,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	            let out = NSMenu(title: "Image")
 	            out.autoenablesItems = false
 
+	            let openBrowser = NSMenuItem(title: "Open in Image Browser", action: #selector(openInlineImageInBrowser(_:)), keyEquivalent: "")
+	            openBrowser.target = self
+	            out.addItem(openBrowser)
+
+	            out.addItem(.separator())
+
 	            let openPreview = NSMenuItem(title: "Open in Preview", action: #selector(openInlineImageInPreview(_:)), keyEquivalent: "")
 	            openPreview.target = self
 	            out.addItem(openPreview)
@@ -2898,6 +2909,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             out.addItem(save)
 
             return out
+        }
+
+        @objc private func openInlineImageInBrowser(_ sender: Any?) {
+            guard let id = inlineContextImageID else { return }
+            Task { @MainActor in
+                self.handleInlineImageOpen(id: id)
+            }
         }
 
         @objc private func openInlineImageInPreview(_ sender: Any?) {
@@ -3095,11 +3113,10 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     }
 
 	    final class TerminalTextView: NSTextView {
-	        weak var inlineImageCoordinator: Coordinator?
+		        weak var inlineImageCoordinator: Coordinator?
 
-	        private var mouseDownLocationInWindow: NSPoint? = nil
-	        private var selectionAtMouseDown: NSRange = NSRange(location: 0, length: 0)
-	        private var hoverTrackingArea: NSTrackingArea? = nil
+		        private var mouseDownLocationInWindow: NSPoint? = nil
+		        private var hoverTrackingArea: NSTrackingArea? = nil
 	
 	        private func inlineImageHit(at point: NSPoint) -> (id: String, range: NSRange)? {
 	            guard let ts = textStorage, ts.length > 0 else { return nil }
@@ -3166,71 +3183,44 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	            return found
 	        }
 
-	        private func inlineImageID(at point: NSPoint) -> String? {
-	            inlineImageHit(at: point)?.id
-	        }
-	
 	        private func inlineImageIDWithEffectiveRange(at point: NSPoint) -> (id: String, range: NSRange)? {
 	            inlineImageHit(at: point)
 	        }
 
-	        override func mouseDown(with event: NSEvent) {
-	            let handledModifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
-	            if event.type == .leftMouseDown,
-	               handledModifiers.isEmpty {
-	                let point = convert(event.locationInWindow, from: nil)
-	                if let id = inlineImageID(at: point) {
-	                    Task { @MainActor in
-	                        // Single click opens the Image Browser for the current session and selects this image.
-	                        inlineImageCoordinator?.handleInlineImageDoubleClick(id: id)
-	                    }
-	                    return
-	                }
-	            }
+		        override func mouseDown(with event: NSEvent) {
+		            if event.type == .leftMouseDown {
+		                mouseDownLocationInWindow = event.locationInWindow
+		            } else {
+		                mouseDownLocationInWindow = nil
+		            }
+		            super.mouseDown(with: event)
+		        }
 
-	            if event.type == .leftMouseDown {
-	                mouseDownLocationInWindow = event.locationInWindow
-	                selectionAtMouseDown = selectedRange()
-	            } else {
-	                mouseDownLocationInWindow = nil
-	            }
-	            super.mouseDown(with: event)
-	        }
+			        override func mouseUp(with event: NSEvent) {
+			            super.mouseUp(with: event)
 
-		        override func mouseUp(with event: NSEvent) {
-	            super.mouseUp(with: event)
+			            guard event.type == .leftMouseUp else { return }
+			            guard event.clickCount == 1 else { return }
+			            guard !event.modifierFlags.contains(.command),
+			                  !event.modifierFlags.contains(.shift),
+			                  !event.modifierFlags.contains(.control),
+			                  !event.modifierFlags.contains(.option) else { return }
 
-	            guard event.type == .leftMouseUp else { return }
-	            guard !event.modifierFlags.contains(.command),
-                  !event.modifierFlags.contains(.control),
-                  !event.modifierFlags.contains(.option) else { return }
-
-            if selectedRange().length > 0, selectedRange() != selectionAtMouseDown {
-                return
-            }
-
-	            if let down = mouseDownLocationInWindow {
-	                let dx = abs(down.x - event.locationInWindow.x)
-	                let dy = abs(down.y - event.locationInWindow.y)
-	                if dx > 3 || dy > 3 { return }
-	            }
+			            if let down = mouseDownLocationInWindow {
+			                let dx = abs(down.x - event.locationInWindow.x)
+			                let dy = abs(down.y - event.locationInWindow.y)
+		                if dx > 3 || dy > 3 { return }
+		            }
 
 		            let point = convert(event.locationInWindow, from: nil)
-		            if let hit = inlineImageIDWithEffectiveRange(at: point),
-                       let lm = layoutManager,
-                       let tc = textContainer {
-                        let charRange = NSRange(location: hit.range.location, length: max(1, hit.range.length))
-                        let glyphRange = lm.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
-                        lm.ensureLayout(forGlyphRange: glyphRange)
-                        var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
-                        rect.origin.x += textContainerOrigin.x
-                        rect.origin.y += textContainerOrigin.y
-                        rect = rect.insetBy(dx: -4, dy: -4)
+		            if let hit = inlineImageIDWithEffectiveRange(at: point) {
 		                Task { @MainActor in
-		                    inlineImageCoordinator?.handleInlineImageHover(id: hit.id, anchorRect: rect, in: self)
+		                    // Single click opens the Image Browser for the current session and selects this image.
+		                    inlineImageCoordinator?.handleInlineImageOpen(id: hit.id)
 		                }
+		                return
 		            }
-	        }
+		        }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -3863,6 +3853,9 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let baseFont: NSFont = {
                 if line.role == .toolInput {
                     return isFirstLineOfBlock ? monoSemiboldFont : monoRegularFont
+                }
+                if line.role == .toolOutput || line.role == .error {
+                    return monoRegularFont
                 }
                 if line.role == .user && !isPreambleUserLine { return systemUserFont }
                 return systemRegularFont

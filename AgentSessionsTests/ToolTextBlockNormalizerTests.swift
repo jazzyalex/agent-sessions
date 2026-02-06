@@ -209,6 +209,19 @@ final class ToolTextBlockNormalizerTests: XCTestCase {
         XCTAssertEqual(block?.lines, ["file1", "exit: 0"])
     }
 
+    func testOpenClawExecToolResultTextBlocksWithLiteralNewlinesRendersAsPlainText() {
+        // Non-strict JSON output observed from some tool runners: newline characters inside string literals.
+        let output = "[{\"text\":\"line1\nline2\",\"type\":\"text\"}]"
+        let raw = #"{"exitCode":0}"#
+        let event = makeEvent(kind: .tool_result,
+                              toolName: "exec",
+                              toolOutput: output,
+                              rawJSON: raw)
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .openclaw)
+        XCTAssertEqual(block?.toolLabel, "bash")
+        XCTAssertEqual(block?.lines, ["line1", "line2", "exit: 0"])
+    }
+
     func testOpenClawParserDropsMediaAttachedHintWhenImagePresent() throws {
         let jsonl = """
         {\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"timestamp\":\"2026-02-04T00:00:00Z\",\"cwd\":\"/tmp\"}
