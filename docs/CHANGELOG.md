@@ -9,6 +9,9 @@ All notable changes to this project will be documented in this file.
 - Transcript (Session view): Treat `<turn_aborted>` blocks embedded in user prompts as system notices so they don’t render as user prompts.
 - Transcript (Session view): Render Codex `<image name=[Image #…]>` markers as `[Image #…]` for cleaner copy/paste.
 - Transcript (Session view): Inline image thumbnails ignore data URL strings that are not part of `image_url` payloads, preventing empty placeholders.
+- Transcript (Session view): Tool output blocks now use a monospaced font to preserve formatting.
+- Session view: Inline image thumbnails now open the Image Browser on single click and include an “Open in Image Browser” context menu action.
+- Session view: Shift-clicking an inline image no longer opens the Image Browser, preserving selection behavior.
 - Session view: Inline image thumbnail clicks are more reliable immediately after scrolling or transcript updates.
 - Sessions: Preserve OpenClaw project metadata after opening a session so the Project column stays consistent.
 - Windows: Image Browser and auxiliary windows now follow system light/dark changes immediately when using System appearance, and update instantly when switching Light/Dark in Settings or the View menu.
@@ -18,6 +21,7 @@ All notable changes to this project will be documented in this file.
 - Image Browser: OpenClaw sessions with inline images no longer show “No images” due to a stale cached index.
 - OpenClaw: Session view hides the verbose “[media attached: …]” hint text when an inline image payload is present.
 - OpenClaw: Tool outputs from `exec` are formatted like other shell outputs and include exit codes when available.
+- OpenClaw: Tool outputs that return `{text,type}` block arrays now render as plain text (preserving newlines) instead of showing the wrapper.
 
 ### Changed
 

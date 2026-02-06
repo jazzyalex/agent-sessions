@@ -187,10 +187,16 @@ enum ToolTextBlockNormalizer {
         var info = OutputInfo()
         if let outputText,
            let obj = parseJSON(outputText) {
+            if let blockText = extractTextBlocksDeep(from: obj) {
+                appendStdout(blockText, into: &info)
+            }
             extractOutputInfo(from: obj, into: &info)
         }
 
         if let obj = parseJSON(rawJSON) {
+            if let blockText = extractTextBlocksDeep(from: obj) {
+                appendStdout(blockText, into: &info)
+            }
             extractOutputInfo(from: obj, into: &info)
         }
 
@@ -354,8 +360,14 @@ enum ToolTextBlockNormalizer {
     private static func parseJSON(_ text: String) -> Any? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
-            guard let data = trimmed.data(using: .utf8) else { return nil }
-            return try? JSONSerialization.jsonObject(with: data)
+            if let obj = parseJSONObject(from: trimmed) {
+                return obj
+            }
+            if let sanitized = sanitizeNonStrictJSON(trimmed),
+               let obj = parseJSONObject(from: sanitized) {
+                return obj
+            }
+            return nil
         }
 
         // Some providers store `rawJSON` as a base64-encoded JSON string (for example Claude/OpenClaw).
@@ -365,6 +377,76 @@ enum ToolTextBlockNormalizer {
         if trimmed.rangeOfCharacter(from: base64Like.inverted) != nil { return nil }
         guard let data = Data(base64Encoded: trimmed), !data.isEmpty else { return nil }
         return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    private static func parseJSONObject(from text: String) -> Any? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    /// Best-effort cleanup for "JSON-like" payloads that embed literal control characters (notably newlines)
+    /// inside string literals. Some tool runners print arrays of `{text,type}` blocks without escaping
+    /// those characters, which makes them invalid JSON for `JSONSerialization`.
+    private static func sanitizeNonStrictJSON(_ text: String) -> String? {
+        var out = ""
+        out.reserveCapacity(text.count + 16)
+
+        var inString = false
+        var isEscaped = false
+        var didChange = false
+
+        for scalar in text.unicodeScalars {
+            let v = scalar.value
+
+            if inString {
+                if isEscaped {
+                    isEscaped = false
+                    out.unicodeScalars.append(scalar)
+                    continue
+                }
+                if v == 92 { // '\'
+                    isEscaped = true
+                    out.unicodeScalars.append(scalar)
+                    continue
+                }
+                if v == 34 { // '"'
+                    inString = false
+                    out.unicodeScalars.append(scalar)
+                    continue
+                }
+
+                switch v {
+                case 0x0A:
+                    out.append("\\n")
+                    didChange = true
+                case 0x0D:
+                    out.append("\\r")
+                    didChange = true
+                case 0x09:
+                    out.append("\\t")
+                    didChange = true
+                case 0x08:
+                    out.append("\\b")
+                    didChange = true
+                case 0x0C:
+                    out.append("\\f")
+                    didChange = true
+                case 0x00...0x1F:
+                    let hex = String(format: "%04X", v)
+                    out.append("\\u\(hex)")
+                    didChange = true
+                default:
+                    out.unicodeScalars.append(scalar)
+                }
+            } else {
+                if v == 34 { // '"'
+                    inString = true
+                }
+                out.unicodeScalars.append(scalar)
+            }
+        }
+
+        return didChange ? out : nil
     }
 
     private static func extractCommand(from inputObject: Any?, fallback: String?) -> String? {
@@ -779,6 +861,99 @@ enum ToolTextBlockNormalizer {
     private static func splitAndTrimTrailingEmptyLines(_ text: String) -> [String] {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         return trimTrailingEmptyLines(lines)
+    }
+
+    private static func appendStdout(_ text: String, into info: inout OutputInfo) {
+        guard !text.isEmpty else { return }
+        if let existing = info.stdout, !existing.isEmpty {
+            if existing.hasSuffix("\n") || text.hasPrefix("\n") {
+                info.stdout = existing + text
+            } else {
+                info.stdout = existing + "\n" + text
+            }
+        } else {
+            info.stdout = text
+        }
+    }
+
+    private static func extractTextBlocks(from obj: Any) -> String? {
+        if let arr = obj as? [Any] {
+            return extractTextBlocks(from: arr)
+        }
+        if let dict = obj as? [String: Any] {
+            if let content = dict["content"] as? [Any] {
+                return extractTextBlocks(from: content)
+            }
+            if let blocks = dict["blocks"] as? [Any] {
+                return extractTextBlocks(from: blocks)
+            }
+            if let parts = dict["parts"] as? [Any] {
+                return extractTextBlocks(from: parts)
+            }
+        }
+        return nil
+    }
+
+    private static func extractTextBlocksDeep(from obj: Any, depth: Int = 0) -> String? {
+        guard depth <= 4 else { return nil }
+        if let direct = extractTextBlocks(from: obj) {
+            return direct
+        }
+
+        if let dict = obj as? [String: Any] {
+            for key in dict.keys.sorted() {
+                guard let value = dict[key] else { continue }
+                if let found = extractTextBlocksDeep(from: value, depth: depth + 1) {
+                    return found
+                }
+            }
+            return nil
+        }
+
+        if let arr = obj as? [Any] {
+            for item in arr {
+                if let found = extractTextBlocksDeep(from: item, depth: depth + 1) {
+                    return found
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func extractTextBlocks(from arr: [Any]) -> String? {
+        var parts: [String] = []
+        parts.reserveCapacity(arr.count)
+        var sawBlockLikeDict = false
+
+        for item in arr {
+            if let dict = item as? [String: Any] {
+                let type = (dict["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let text = (dict["text"] as? String) ?? (dict["content"] as? String)
+                if let text, !text.isEmpty {
+                    if type == nil || type == "text" || type == "output_text" || type == "output" {
+                        parts.append(text)
+                        sawBlockLikeDict = true
+                        continue
+                    }
+                }
+                if let nested = extractTextBlocks(from: dict) {
+                    parts.append(nested)
+                    sawBlockLikeDict = true
+                }
+                continue
+            }
+
+            // Avoid treating plain arrays of strings (for example stderr=["a","b"]) as tool output blocks.
+            // Only include raw string entries when we're already in a block-like array.
+            if sawBlockLikeDict, let str = item as? String, !str.isEmpty {
+                parts.append(str)
+            }
+        }
+
+        guard sawBlockLikeDict else { return nil }
+        let joined = parts.joined(separator: "\n")
+        let trimmed = joined.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : joined
     }
 
     private static func trimTrailingEmptyLines(_ lines: [String]) -> [String] {
