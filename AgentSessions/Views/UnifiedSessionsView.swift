@@ -915,9 +915,6 @@ struct UnifiedSessionsView: View {
     private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
 
     private var imagesToolbarHelpText: String {
-        guard let session = selectedSession else {
-            return "Show images for the selected session"
-        }
         return "Show images for the selected session"
     }
 

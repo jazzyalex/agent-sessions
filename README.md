@@ -21,7 +21,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.2/AgentSessions-2.10.2.dmg"><b>Download Agent Sessions 2.10.2 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.11/AgentSessions-2.11.dmg"><b>Download Agent Sessions 2.11 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -62,7 +62,7 @@ Agent Sessions helps you search across large session histories, quickly find the
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.10.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.2/AgentSessions-2.10.2.dmg)
+1. [Download AgentSessions-2.11.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.11/AgentSessions-2.11.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
@@ -101,16 +101,15 @@ open "/Applications/Agent Sessions.app"
 
 ---
 
-## What's New in 2.10
+## What's New in 2.11
 
 Short version:
-- Apple Notes-style Unified Search across all sessions and inside a session, compatible with filters.
-- SQLite-backed search plus richer instant indexing for faster results and better recall.
-- Incremental analytics refresh and faster startup with immediate hydrated lists.
-- Session view (formerly Color view) is now a colored timeline with improved formatting.
-- Unified Search navigation and local Find are more consistent and responsive.
-- Cockpit-style status UI and refreshed session list typography with live counts.
-- Onboarding tour refreshed and always shows supported agents.
+- Major update: Added OpenClaw (clawdbot) session support, with Advanced visibility for deleted sessions.
+- Major update: Expanded Images workflows with inline thumbnails in Session view and a faster, richer Image Browser.
+- Major bug fix: Search coverage for some sessions is now more complete via incremental backfill and changed-file indexing.
+- Major bug fix: Reduced Energy Warning spikes by replacing always-on idle work with activation/event-driven refresh and power-aware indexing/probing.
+- OpenClaw transcript handling is cleaner, including better media-hint suppression and improved tool output formatting.
+- Image Browser now includes Project/Agent filters, cached indexing, and richer image actions.
 
 Details: `docs/CHANGELOG.md` and `docs/summaries/`.
 

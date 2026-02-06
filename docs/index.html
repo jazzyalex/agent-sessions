@@ -6,18 +6,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Agent Sessions — Session browser for Codex CLI, Claude Code, Gemini CLI, Copilot CLI & Droid</title>
   <meta name="description"
-    content="Agent Sessions is a macOS app to search, filter, and review sessions from Codex CLI, Claude Code, Gemini CLI, GitHub Copilot CLI, Droid (Factory CLI), and OpenCode with a unified interface, onboarding tours, and developer-friendly workflows." />
+    content="Agent Sessions 2.11 is a local-first macOS app to search, filter, and review sessions from Codex CLI, Claude Code, Gemini CLI, GitHub Copilot CLI, Droid (Factory CLI), OpenCode, and OpenClaw with unified search and image workflows." />
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://jazzyalex.github.io/agent-sessions/">
   <meta property="og:title" content=" ">
   <meta property="og:description"
-    content="Search, browse, and resume Codex, Claude & Copilot CLI sessions. Now with onboarding tours and saved sessions.">
+    content="Search, browse, and resume sessions across Codex, Claude, Gemini, Copilot, Droid, OpenCode, and OpenClaw. New in 2.11: expanded Images workflows and lower energy spikes.">
   <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/AS-social-media.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@jazzyalex">
   <meta name="twitter:title" content="Agent Sessions — Sessions for Codex, Claude, Gemini, Copilot & Droid CLI">
   <meta name="twitter:description"
-    content="Search, browse, and resume Codex, Claude, Copilot & Droid CLI sessions. Now with onboarding tours and Droid support.">
+    content="Local-first session browser for major coding CLIs. Agent Sessions 2.11 adds OpenClaw support, richer Image Browser + inline images, and power-aware refresh behavior.">
   <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/AS-social-media.png">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/">
   <link rel="icon" href="assets/app-icon-32.png" />
@@ -199,12 +199,8 @@
     </div>
   </header>
   <div class="container">
-    <h1 style="font-size: 24px;">Session Browser for Codex CLI, Claude Code, Gemini CLI, GitHub Copilot CLI & Droid</h1>
-    <p><em>Agent Sessions 2</em> brings <strong>Codex CLI</strong>, <strong>Claude Code</strong>, <strong>Gemini CLI</strong>, <strong>GitHub Copilot CLI</strong>, and <strong>Droid (Factory CLI)</strong> together in a single, powerful
-      interface. Look up any past session — even the ancient ones <code>/resume</code> can't show — or browse visually
-      to find that
-      lost
-      perfect prompt or code snippet, then instantly copy or resume what you need.
+    <h1 style="font-size: 24px;">Session Browser for Codex CLI, Claude Code, Gemini CLI, Copilot CLI, Droid, OpenCode & OpenClaw</h1>
+    <p><em>Agent Sessions 2.11</em> brings <strong>Codex CLI</strong>, <strong>Claude Code</strong>, <strong>Gemini CLI</strong>, <strong>GitHub Copilot CLI</strong>, <strong>Droid (Factory CLI)</strong>, <strong>OpenCode</strong>, and <strong>OpenClaw</strong> together in a single local-first interface. Search deep history, inspect tool output, browse images in context, and resume terminal workflows quickly.
     <p></p>
     <div class="hero-row" style="margin-bottom: 20px;">
       <span
@@ -215,10 +211,10 @@
       <br>
       
     <div class="button-row" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
-      <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.10.2/AgentSessions-2.10.2.dmg"
+      <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.11/AgentSessions-2.11.dmg"
         class="btn primary"
         style="padding:10px 18px;border-radius:8px;background:#007aff;color:#fff;text-decoration:none;font-weight:500">
-        Download Agent Sessions 2.10.2
+        Download Agent Sessions 2.11
       </a>
 
       <a href="https://github.com/jazzyalex/agent-sessions" class="btn secondary"
@@ -232,6 +228,14 @@
       </a>
     </div>
 
+    <h3 style="margin-top:28px;">What's New in 2.11</h3>
+    <ul style="line-height: 1.7; margin-top: 10px;">
+      <li>Major update: OpenClaw sessions are now supported.</li>
+      <li>Major update: Images now span inline thumbnails in Session view and the Image Browser.</li>
+      <li>Major bug fix: Search completeness improved for sessions that were previously under-indexed.</li>
+      <li>Major bug fix: Reduced Energy Warning spikes with activation-driven and power-aware refresh.</li>
+    </ul>
+
     <h3 style="margin-top:40px;">Install with Homebrew Tap</h3>
     
     <pre><code style="font-size: 12px;">brew tap jazzyalex/agent-sessions
@@ -240,7 +244,7 @@ brew install --cask agent-sessions</code></pre>
     <div class="features">
 
       <div class="card double-width">
-        <h3>6 Agents Supported</h3>
+        <h3>7 Agents Supported</h3>
         <p>Browse all your agent sessions in a unified window. Enable only your favorite agents and then filter sessions by agent instantly.</p>
         <ul style="margin: 12px 0 0 0; padding-left: 20px; line-height: 1.8; column-count: 2; column-gap: 20px;">
           <li><strong>Codex CLI</strong></li>
@@ -249,11 +253,12 @@ brew install --cask agent-sessions</code></pre>
           <li><strong>Factory Droid CLI</strong></li>
           <li><strong>GitHub Copilot CLI</strong></li>
           <li><strong>Gemini CLI</strong></li>
+          <li><strong>OpenClaw / Clawdbot</strong></li>
         </ul>
       </div>
       <div class="card">
         <h3>Unified Search</h3>
-        <p>Apple Notes-style search across all agents and within a single session. Combine filters, instant results, and full-text search without losing context.</p>
+        <p>Apple Notes-style search across all agents and within a single session. Incremental indexing and backfill improve coverage for long-running and recently changed sessions.</p>
       </div>
       <div class="card">
         <h3>Instant Resume</h3>
@@ -265,7 +270,7 @@ brew install --cask agent-sessions</code></pre>
       </div>
       <div class="card">
         <h3>Usage Tracking</h3>
-        <p>Always-on tracking of 5-hour and weekly limits for Codex and Claude. Menu bar and in-app indicators show usage with auto-refresh probes.</p>
+        <p>Track Codex and Claude usage in-app and in the menu bar. Power-aware probing and refresh cadence reduce idle load and energy spikes.</p>
       </div>
       <div class="card">
         <h3>Analytics</h3>

@@ -41,6 +41,8 @@ struct OnboardingSheetView: View {
     @State private var didLoadIndexedSessionsSnapshot: Bool = false
     @StateObject private var agentAvailabilityModel = OnboardingAgentAvailabilityModel()
 
+    private let onboardingFeedbackFormURL = URL(string: "https://docs.google.com/forms/d/1SSILAAn0RYmjhWDfJwc5BqpAIunhrJN1SAvy_OzhdaA/viewform")
+
     private var palette: OnboardingPalette { OnboardingPalette(colorScheme: colorScheme) }
     private var slides: [OnboardingSlide] { OnboardingSlide.allCases }
     private var isFirst: Bool { slideIndex == 0 }
@@ -140,7 +142,7 @@ struct OnboardingSheetView: View {
                 palette: palette,
                 icon: .appIcon,
                 iconGradient: palette.iconGradientPrimary,
-                title: "Sessions Found",
+                title: nil,
                 subtitle: "Your CLI agent history is ready to explore"
             )
 
@@ -166,6 +168,10 @@ struct OnboardingSheetView: View {
                 ForEach(displayAgents) { agent in
                     AgentPill(agent: agent, palette: palette)
                 }
+            }
+
+            if let onboardingFeedbackFormURL {
+                FeedbackRequestCard(palette: palette, formURL: onboardingFeedbackFormURL)
             }
         }
     }
@@ -557,7 +563,7 @@ struct OnboardingSheetView: View {
     }
 }
 
-private enum OnboardingAgentAvailability: Equatable {
+private enum OnboardingAgentAvailability: Equatable, Sendable {
     case unknown
     case present
     case missing
@@ -580,12 +586,10 @@ private final class OnboardingAgentAvailabilityModel: ObservableObject {
 
     func refresh() async {
         let computed = await Task.detached(priority: .utility) {
-            var out: [SessionSource: OnboardingAgentAvailability] = [:]
-            for source in SessionSource.allCases {
-                let available = AgentEnablement.isAvailable(source)
-                out[source] = available ? .present : .missing
-            }
-            return out
+            Dictionary(uniqueKeysWithValues: SessionSource.allCases.map { source in
+                let availability: OnboardingAgentAvailability = AgentEnablement.isAvailable(source) ? .present : .missing
+                return (source, availability)
+            })
         }.value
 
         availabilityBySource = computed
@@ -613,17 +617,19 @@ private struct SlideHeader: View {
     let palette: OnboardingPalette
     let icon: SlideIcon
     let iconGradient: LinearGradient
-    let title: String
+    let title: String?
     let subtitle: String
 
     var body: some View {
         VStack(spacing: 10) {
             SlideIconView(icon: icon, gradient: iconGradient)
 
-            Text(title)
-                .font(.system(size: 24, weight: .semibold, design: .default))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.center)
+            if let title, !title.isEmpty {
+                Text(title)
+                    .font(.system(size: 24, weight: .semibold, design: .default))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+            }
 
             Text(subtitle)
                 .font(.system(size: 14, weight: .regular, design: .default))
@@ -808,6 +814,51 @@ private struct TipBox: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
+                .stroke(palette.tipStroke, lineWidth: 1)
+        )
+    }
+}
+
+private struct FeedbackRequestCard: View {
+    let palette: OnboardingPalette
+    let formURL: URL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "square.and.pencil.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(palette.accentBlue)
+
+                Text("Help improve Agent Sessions")
+                    .font(.system(size: 13, weight: .semibold, design: .default))
+                    .foregroundStyle(.primary)
+            }
+
+            Text("Agent Sessions is a local-only app with no telemetry. This short form is the only way for us to receive your feedback.")
+                .font(.system(size: 12, weight: .regular, design: .default))
+                .foregroundStyle(.secondary)
+
+            Link(destination: formURL) {
+                HStack(spacing: 6) {
+                    Text("Fill out the short feedback form")
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .font(.system(size: 12, weight: .semibold, design: .default))
+                .foregroundStyle(palette.accentBlue)
+            }
+            .buttonStyle(.plain)
+
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(palette.tipFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(palette.tipStroke, lineWidth: 1)
         )
     }

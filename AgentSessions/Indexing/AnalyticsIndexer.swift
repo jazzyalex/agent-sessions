@@ -28,6 +28,66 @@ actor AnalyticsIndexer {
         await indexAll(incremental: true)
     }
 
+    func refreshDelta(source: String, changed: [URL], removedPaths: [String]) async {
+        guard enabledSources.contains(source) else { return }
+
+        let toolIOEnabled = toolIOIndexEnabled()
+        let toolIOCutoffTS = Int64(Date().addingTimeInterval(-Double(FeatureFlags.toolIOIndexRecentDays) * 24 * 60 * 60).timeIntervalSince1970)
+
+        var changedFiles = changed
+        var deletedPaths = removedPaths
+        if source == "claude" {
+            changedFiles.removeAll { $0.path.contains("AgentSessions-ClaudeProbeProject") }
+            deletedPaths.removeAll { $0.contains("AgentSessions-ClaudeProbeProject") }
+        }
+        if changedFiles.isEmpty && deletedPaths.isEmpty { return }
+
+        let indexed = (try? await db.fetchIndexedFiles(for: source)) ?? []
+        var indexedByPath: [String: IndexedFileRow] = [:]
+        indexedByPath.reserveCapacity(indexed.count)
+        for row in indexed { indexedByPath[row.path] = row }
+        let searchReadyPaths = (try? await db.fetchSearchReadyPaths(for: source, formatVersion: FeatureFlags.sessionSearchFormatVersion)) ?? []
+        let toolIOReadyPaths = toolIOEnabled
+            ? ((try? await db.fetchToolIOReadyPaths(for: source, formatVersion: FeatureFlags.sessionToolIOFormatVersion)) ?? [])
+            : []
+
+        if !deletedPaths.isEmpty {
+            do {
+                try await db.begin()
+                let affectedDays = try await db.deleteSessionsForPaths(source: source, paths: deletedPaths)
+                for day in Set(affectedDays) {
+                    try await db.recomputeRollups(day: day, source: source)
+                }
+                try await db.commit()
+            } catch {
+                await db.rollbackSilently()
+            }
+        }
+
+        let chunkSize = 4
+        for i in stride(from: 0, to: changedFiles.count, by: chunkSize) {
+            let end = min(i + chunkSize, changedFiles.count)
+            let slice = changedFiles[i..<end]
+            for file in slice {
+                await indexFileIfNeeded(url: file,
+                                        source: source,
+                                        incremental: true,
+                                        indexedByPath: indexedByPath,
+                                        searchReadyPaths: searchReadyPaths,
+                                        toolIOReadyPaths: toolIOReadyPaths,
+                                        toolIOEnabled: toolIOEnabled,
+                                        toolIOCutoffTS: toolIOCutoffTS)
+            }
+            if end < changedFiles.count {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+        }
+
+        if toolIOEnabled {
+            try? await db.pruneOldToolIO(cutoffTS: toolIOCutoffTS, oldBytesCap: FeatureFlags.toolIOIndexOldBytesCap)
+        }
+    }
+
     // MARK: - Core
     private func indexAll(incremental: Bool) async {
         LaunchProfiler.log("Analytics.indexAll start (incremental=\(incremental))")

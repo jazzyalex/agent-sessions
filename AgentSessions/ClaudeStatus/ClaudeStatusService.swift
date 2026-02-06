@@ -83,6 +83,10 @@ actor ClaudeStatusService {
     private var tmuxAvailable: Bool = false
     private var claudeAvailable: Bool = false
     private var cachedScriptURL: URL? = nil
+    private var unchangedAutoProbeStreak: Int = 0
+    private let maxBackoffSeconds: UInt64 = 60 * 60
+    private let hiddenIdleIntervalNanoseconds: UInt64 = 24 * 60 * 60 * 1_000_000_000
+    private let batteryRecheckIntervalNanoseconds: UInt64 = 30 * 60 * 1_000_000_000
 
     init(updateHandler: @escaping @Sendable (ClaudeUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (ClaudeServiceAvailability) -> Void) {
@@ -115,15 +119,7 @@ actor ClaudeStatusService {
             return
         }
 
-        refresherTask?.cancel()
-        refresherTask = Task { [weak self] in
-            guard let self else { return }
-            while await self.shouldRun {
-                await self.refreshTick()
-                let interval = await self.nextInterval()
-                try? await Task.sleep(nanoseconds: interval)
-            }
-        }
+        restartRefresherLoopIfNeeded()
     }
 
     func stop() async {
@@ -147,6 +143,9 @@ actor ClaudeStatusService {
         if !wasVisible && isVisible {
             Task { await self.refreshTick(userInitiated: false) }
         }
+        if wasVisible != isVisible {
+            restartRefresherLoopIfNeeded()
+        }
     }
 
     func refreshNow() {
@@ -158,19 +157,24 @@ actor ClaudeStatusService {
     private func refreshTick(userInitiated: Bool = false) async {
         guard tmuxAvailable && claudeAvailable else { return }
         if !userInitiated {
+            guard visible else { return }
             guard Self.onACPower() else { return }
-            let urgent = hasSnapshot && snapshot.sessionPercentUsed() >= 80
-            guard visible || urgent else { return }
         }
         guard beginProbe() else { return }
         defer { endProbe() }
         defer { _ = ClaudeProbeProject.cleanupNowIfAuto() }
         defer { ClaudeProbeProject.noteProbeRun() }
         do {
+            let previousSnapshot: ClaudeUsageSnapshot? = hasSnapshot ? snapshot : nil
             let json = try await executeScript()
             if let parsed = parseUsageJSON(json) {
                 snapshot = parsed
                 hasSnapshot = true
+                if userInitiated {
+                    unchangedAutoProbeStreak = 0
+                } else {
+                    updateBackoffStreak(previous: previousSnapshot, current: parsed)
+                }
                 updateHandler(snapshot)
             } else {
                 print("ClaudeStatusService: Failed to parse JSON: \(json)")
@@ -707,17 +711,78 @@ actor ClaudeStatusService {
         // Read Claude-specific polling interval (defaults to 900s = 15 min)
         let userInterval = UInt64(UserDefaults.standard.object(forKey: "ClaudePollingInterval") as? Int ?? 900)
 
-        // Energy optimization: stop polling entirely when nothing is visible.
-        let urgent = hasSnapshot && snapshot.sessionPercentUsed() >= 80
-        if !visible && !urgent {
-            return 3600 * 1_000_000_000
+        // Strict hidden policy: no auto probing while hidden.
+        if !visible {
+            return hiddenIdleIntervalNanoseconds
         }
 
         // Automatic background probing is AC-only.
         if !Self.onACPower() {
-            return 3600 * 1_000_000_000
+            return batteryRecheckIntervalNanoseconds
         }
-        return userInterval * 1_000_000_000
+
+        let clampedBase = max(UInt64(60), userInterval)
+        let multiplier: UInt64
+        switch unchangedAutoProbeStreak {
+        case 0:
+            multiplier = 1
+        case 1:
+            multiplier = 2
+        default:
+            multiplier = 4
+        }
+        let backedOffSeconds = min(maxBackoffSeconds, clampedBase * multiplier)
+        return jitteredIntervalNanoseconds(baseSeconds: backedOffSeconds)
+    }
+
+    private func updateBackoffStreak(previous: ClaudeUsageSnapshot?, current: ClaudeUsageSnapshot) {
+        guard let previous else {
+            unchangedAutoProbeStreak = 0
+            return
+        }
+
+        let unchanged =
+            previous.sessionRemainingPercent == current.sessionRemainingPercent &&
+            previous.sessionResetText == current.sessionResetText &&
+            previous.weekAllModelsRemainingPercent == current.weekAllModelsRemainingPercent &&
+            previous.weekAllModelsResetText == current.weekAllModelsResetText &&
+            previous.weekOpusRemainingPercent == current.weekOpusRemainingPercent &&
+            previous.weekOpusResetText == current.weekOpusResetText
+
+        if unchanged {
+            unchangedAutoProbeStreak = min(unchangedAutoProbeStreak + 1, 6)
+        } else {
+            unchangedAutoProbeStreak = 0
+        }
+    }
+
+    private func jitteredIntervalNanoseconds(baseSeconds: UInt64) -> UInt64 {
+        let maxJitterByRatio = UInt64(Double(baseSeconds) * 0.15)
+        let maxJitterSeconds = min(UInt64(120), maxJitterByRatio)
+        guard maxJitterSeconds > 0 else {
+            return baseSeconds * 1_000_000_000
+        }
+        let jitter = Int64.random(in: -Int64(maxJitterSeconds)...Int64(maxJitterSeconds))
+        let jitteredSeconds = max(1, Int64(baseSeconds) + jitter)
+        return UInt64(jitteredSeconds) * 1_000_000_000
+    }
+
+    private func restartRefresherLoopIfNeeded() {
+        refresherTask?.cancel()
+        refresherTask = nil
+
+        guard shouldRun, tmuxAvailable, claudeAvailable, visible else {
+            return
+        }
+
+        refresherTask = Task { [weak self] in
+            guard let self else { return }
+            while await self.shouldRun {
+                await self.refreshTick()
+                let interval = await self.nextInterval()
+                try? await Task.sleep(nanoseconds: interval)
+            }
+        }
     }
 
     // MARK: - Dependency checks
