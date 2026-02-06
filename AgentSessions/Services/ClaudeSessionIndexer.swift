@@ -70,6 +70,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
     private var refreshToken = UUID()
     private var lastPrewarmSignatureByID: [String: Int] = [:]
+    private var lastKnownFileStatsByPath: [String: SessionFileStat] = [:]
     @Published private var filterEpoch: Int = 0
 
     init() {
@@ -162,13 +163,15 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         return FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir) && isDir.boolValue
     }
 
-    func refresh() {
+    func refresh(mode: IndexRefreshMode = .incremental,
+                 trigger: IndexRefreshTrigger = .manual,
+                 executionProfile: IndexRefreshExecutionProfile = .interactive) {
         if !AgentEnablement.isEnabled(.claude) { return }
         let root = discovery.sessionsRoot()
         #if DEBUG
-        print("\n🔵 CLAUDE INDEXING START: root=\(root.path)")
+        print("\n🔵 CLAUDE INDEXING START: root=\(root.path) mode=\(mode) trigger=\(trigger.rawValue)")
         #endif
-        LaunchProfiler.log("Claude.refresh: start")
+        LaunchProfiler.log("Claude.refresh: start (mode=\(mode), trigger=\(trigger.rawValue))")
 
         let token = UUID()
         refreshToken = token
@@ -184,8 +187,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             self.hasEmptyDirectory = false
         }
 
-        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-        Task.detached(priority: prio) { [weak self, token] in
+        Task.detached(priority: .utility) { [weak self, token, mode, executionProfile] in
             guard let self else { return }
 
             // Fast path: hydrate from SQLite index if available.
@@ -208,10 +210,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 }
             }
 
-	            let fm = FileManager.default
-	            let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
-	            let existingSessions = indexed.filter(exists)
-	            let existingPaths = Set(existingSessions.map { $0.filePath })
+            await self.seedKnownFileStatsIfNeeded()
+            let fm = FileManager.default
+            let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
+            let existingSessions = indexed.filter(exists)
 
             #if DEBUG
             if !existingSessions.isEmpty {
@@ -222,27 +224,36 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             LaunchProfiler.log("Claude.refresh: DB hydrate complete (existing=\(existingSessions.count))")
             #endif
 
-            let files = self.discovery.discoverSessionFiles()
+            let deltaScope: SessionDeltaScope = (mode == .fullReconcile) ? .full : .recent
+            let delta = self.discovery.discoverDelta(previousByPath: self.lastKnownFileStatsByPath, scope: deltaScope)
+            let files: [URL] = {
+                if mode == .fullReconcile {
+                    return delta.currentByPath.keys.map { URL(fileURLWithPath: $0) }
+                }
+                return delta.changedFiles
+            }()
             #if DEBUG
-            print("📁 Found \(files.count) Claude Code session files")
+            print("📁 Found \(files.count) Claude Code changed/new files (removed=\(delta.removedPaths.count), drift=\(delta.driftDetected))")
             #endif
-            LaunchProfiler.log("Claude.refresh: file enumeration done (files=\(files.count))")
+            LaunchProfiler.log("Claude.refresh: file enumeration done (changed=\(files.count), removed=\(delta.removedPaths.count), drift=\(delta.driftDetected))")
 
             let config = SessionIndexingEngine.ScanConfig(
                 source: .claude,
                 discoverFiles: { files },
-                shouldParseFile: { !existingPaths.contains($0.path) },
                 parseLightweight: { ClaudeSessionParser.parseFile(at: $0) },
                 shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
                 throttler: self.progressThrottler,
                 shouldContinue: { self.refreshToken == token },
                 shouldMergeArchives: false,
+                workerCount: executionProfile.workerCount,
+                sliceSize: executionProfile.sliceSize,
+                interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
                 onProgress: { processed, total in
                     self.publishAfterCurrentUpdate { [weak self] in
                         guard let self, self.refreshToken == token else { return }
-                        self.totalFiles = total
-                        self.hasEmptyDirectory = total == 0
-                        self.filesProcessed = processed
+                        self.totalFiles = existingSessions.count + total
+                        self.hasEmptyDirectory = existingSessions.isEmpty && total == 0
+                        self.filesProcessed = existingSessions.count + processed
                         if processed > 0 {
                             self.progressText = "Indexed \(processed)/\(total)"
                         }
@@ -252,14 +263,37 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             )
 
             let scanResult = await SessionIndexingEngine.hydrateOrScan(config: config)
-            let newSessions = scanResult.sessions
+            let changedSessions = scanResult.sessions
 
-            // Merge existing + new, prune non-existent again, and apply probe visibility filter
+            var mergedByPath: [String: Session] = [:]
+            mergedByPath.reserveCapacity(existingSessions.count + changedSessions.count)
+            for session in existingSessions {
+                mergedByPath[session.filePath] = session
+            }
+            for removed in delta.removedPaths {
+                mergedByPath.removeValue(forKey: removed)
+            }
+            for session in changedSessions {
+                mergedByPath[session.filePath] = session
+            }
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
-            let merged = (existingSessions + newSessions).filter(exists)
+            let merged = Array(mergedByPath.values).filter(exists)
             let filtered = merged.filter { hideProbes ? !ClaudeProbeConfig.isProbeSession($0) : true }
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .claude)
+            if mode == .fullReconcile {
+                self.lastKnownFileStatsByPath = delta.currentByPath
+            } else {
+                for removed in delta.removedPaths {
+                    self.lastKnownFileStatsByPath.removeValue(forKey: removed)
+                }
+                for (path, stat) in delta.currentByPath {
+                    self.lastKnownFileStatsByPath[path] = stat
+                }
+            }
+            self.scheduleAnalyticsDelta(changedFiles: files,
+                                        removedPaths: delta.removedPaths,
+                                        executionProfile: executionProfile)
 
             self.publishAfterCurrentUpdate { [weak self] in
                 guard let self, self.refreshToken == token else { return }
@@ -267,11 +301,11 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 self.allSessions = mergedWithArchives
                 self.isIndexing = false
                 #if DEBUG
-                print("✅ CLAUDE INDEXING DONE: total=\(mergedWithArchives.count) (existing=\(existingSessions.count), new=\(newSessions.count))")
+                print("✅ CLAUDE INDEXING DONE: total=\(mergedWithArchives.count) (existing=\(existingSessions.count), changed=\(changedSessions.count), removed=\(delta.removedPaths.count))")
                 #endif
 
                 // Delta-based transcript prewarm for Claude sessions.
-                let delta: [Session] = {
+                let prewarmDelta: [Session] = {
                     var out: [Session] = []
                     out.reserveCapacity(mergedWithArchives.count)
                     for s in mergedWithArchives {
@@ -286,30 +320,67 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                     }
                     return out
                 }()
-	                if !delta.isEmpty {
-	                    self.isProcessingTranscripts = true
-	                    self.progressText = "Processing transcripts..."
-	                    self.launchPhase = .transcripts
-	                    let cache = self.transcriptCache
-		                    let finishPrewarm: @Sendable @MainActor () -> Void = { [weak self, token] in
-		                        guard let self, self.refreshToken == token else { return }
-		                        LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
-		                        self.publishAfterCurrentUpdate { [weak self, token] in
-		                            guard let self, self.refreshToken == token else { return }
-		                            self.isProcessingTranscripts = false
-		                            self.progressText = "Ready"
-		                            self.launchPhase = .ready
-		                        }
-		                    }
-	                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [delta, cache, finishPrewarm] in
-	                        LaunchProfiler.log("Claude.refresh: transcript prewarm start (delta=\(delta.count))")
-	                        await cache.generateAndCache(sessions: delta)
-	                        await finishPrewarm()
-	                    }
-	                } else {
-	                    self.progressText = "Ready"
-	                    self.launchPhase = .ready
-	                }
+                if !prewarmDelta.isEmpty && !executionProfile.deferNonCriticalWork {
+                    self.isProcessingTranscripts = true
+                    self.progressText = "Processing transcripts..."
+                    self.launchPhase = .transcripts
+                    let cache = self.transcriptCache
+                    let finishPrewarm: @Sendable @MainActor () -> Void = { [weak self, token] in
+                        guard let self, self.refreshToken == token else { return }
+                        LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
+                        self.publishAfterCurrentUpdate { [weak self, token] in
+                            guard let self, self.refreshToken == token else { return }
+                            self.isProcessingTranscripts = false
+                            self.progressText = "Ready"
+                            self.launchPhase = .ready
+                        }
+                    }
+                    Task.detached(priority: .utility) { [prewarmDelta, cache, finishPrewarm] in
+                        LaunchProfiler.log("Claude.refresh: transcript prewarm start (delta=\(prewarmDelta.count))")
+                        await cache.generateAndCache(sessions: prewarmDelta)
+                        await finishPrewarm()
+                    }
+                } else {
+                    self.progressText = "Ready"
+                    self.launchPhase = .ready
+                }
+            }
+        }
+    }
+
+    private func seedKnownFileStatsIfNeeded() async {
+        if !lastKnownFileStatsByPath.isEmpty { return }
+        do {
+            let db = try IndexDB()
+            let indexed = try await db.fetchIndexedFiles(for: SessionSource.claude.rawValue)
+            var map: [String: SessionFileStat] = [:]
+            map.reserveCapacity(indexed.count)
+            for row in indexed {
+                map[row.path] = SessionFileStat(mtime: row.mtime, size: row.size)
+            }
+            lastKnownFileStatsByPath = map
+        } catch {
+            // Non-fatal. Cache will be built from runtime deltas.
+        }
+    }
+
+    private func scheduleAnalyticsDelta(changedFiles: [URL],
+                                        removedPaths: [String],
+                                        executionProfile: IndexRefreshExecutionProfile) {
+        guard !(changedFiles.isEmpty && removedPaths.isEmpty) else { return }
+        let delay = executionProfile.deferNonCriticalWork ? UInt64(500_000_000) : UInt64(120_000_000)
+        Task.detached(priority: .utility) {
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+            }
+            do {
+                let db = try IndexDB()
+                let indexer = AnalyticsIndexer(db: db, enabledSources: [SessionSource.claude.rawValue])
+                await indexer.refreshDelta(source: SessionSource.claude.rawValue,
+                                           changed: changedFiles,
+                                           removedPaths: removedPaths)
+            } catch {
+                // Non-fatal: analytics delta indexing is best-effort.
             }
         }
     }

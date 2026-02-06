@@ -118,10 +118,10 @@ final class OpenClawSessionParser {
         }
 
         let agentID = agentIDFromPath(url)
+        let pathBaseID = url.deletingPathExtension().lastPathComponent
         let baseID = forcedID
             ?? sessionID
-            ?? url.deletingPathExtension().lastPathComponent
-            ?? sha256(path: url.path)
+            ?? (pathBaseID.isEmpty ? sha256(path: url.path) : pathBaseID)
         let id: String = {
             if let forcedID, forcedID.hasPrefix("openclaw:") { return forcedID }
             return "openclaw:\(agentID):\(baseID)"
@@ -394,10 +394,10 @@ final class OpenClawSessionParser {
         }
 
         let agentID = agentIDFromPath(url)
+        let pathBaseID = url.deletingPathExtension().lastPathComponent
         let baseID = forcedID
             ?? sessionID
-            ?? url.deletingPathExtension().lastPathComponent
-            ?? sha256(path: url.path)
+            ?? (pathBaseID.isEmpty ? sha256(path: url.path) : pathBaseID)
         let id: String = {
             if let forcedID, forcedID.hasPrefix("openclaw:") { return forcedID }
             return "openclaw:\(agentID):\(baseID)"

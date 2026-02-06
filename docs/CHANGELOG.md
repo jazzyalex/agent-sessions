@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Onboarding: Added a visible “Help improve Agent Sessions” feedback card on the first slide (below session/agent counters) that links to the short feedback form and clarifies that Agent Sessions is local-only with no telemetry.
+
+## [2.11] - 2026-02-06
+
+### Major Updates
+
+- OpenClaw sessions: Added OpenClaw (clawdbot) session support, including Advanced visibility for deleted transcripts.
+- Images: Expanded image workflows across both Session view (inline thumbnails) and Image Browser (cross-agent browsing, filters, and actions).
+
+### Major Bug Fixes
+
+- Search completeness: Reduced missing/incomplete search results for some sessions with incremental changed-file indexing, search backfill paths, and stale-row cleanup.
+- Energy spikes: Reduced Energy Warning spikes by replacing always-on idle refresh with app-activation/event-driven behavior and power-aware probing/indexing cadence.
+
 ### Fixed
 
 - Performance: Removed high-frequency idle background work (Codex warmup loop and archive sync timer) and switched to activation/event-driven refreshes to reduce steady-state battery impact.
@@ -30,6 +44,7 @@ All notable changes to this project will be documented in this file.
 - Sessions: Added an app-active foreground monitor (60s cadence) for Codex and Claude new-session detection, replacing always-on idle polling.
 - Claude Usage: Automatic background `/usage` probes now run only on AC power; on battery and Low Power Mode, refresh is manual-only.
 - Codex Usage: Preserved periodic updates while reducing per-tick filesystem/parsing work when source files are unchanged.
+- Sessions/Search: Codex and Claude refresh now use incremental changed-file indexing with batched slices, limited worker concurrency, and deferred non-critical work in inactive/battery modes to reduce burst energy spikes.
 - Menu: Removed the separator between Image Browser and Saved Sessions, and renamed “Saved Sessions…” to “Saved Sessions”.
 - Preferences: Added a Session View toggle for “Show inline image thumbnails in Session view”.
 - Sessions: Added OpenClaw (clawdbot) session support when the OpenClaw/clawdbot CLI is installed; deleted sessions can be shown via an Advanced toggle.

@@ -193,6 +193,7 @@ final class SessionIndexer: ObservableObject {
     private var recomputeDebouncer: DispatchWorkItem? = nil
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
     private var refreshToken = UUID()
+    private var lastKnownFileStatsByPath: [String: SessionFileStat] = [:]
 
     init(columnVisibility: ColumnVisibilityStore = ColumnVisibilityStore()) {
         self.columnVisibility = columnVisibility
@@ -527,11 +528,13 @@ final class SessionIndexer: ObservableObject {
         return found
     }
 
-    func refresh() {
+    func refresh(mode: IndexRefreshMode = .incremental,
+                 trigger: IndexRefreshTrigger = .manual,
+                 executionProfile: IndexRefreshExecutionProfile = .interactive) {
         if !AgentEnablement.isEnabled(.codex) { return }
         let root = sessionsRoot()
-        DBG("\n🔄 INDEXING START: root=\(root.path)")
-        LaunchProfiler.log("Codex.refresh: start")
+        DBG("\n🔄 INDEXING START: root=\(root.path) mode=\(mode) trigger=\(trigger.rawValue)")
+        LaunchProfiler.log("Codex.refresh: start (mode=\(mode), trigger=\(trigger.rawValue))")
 
         let token = UUID()
         refreshToken = token
@@ -545,8 +548,7 @@ final class SessionIndexer: ObservableObject {
         hasEmptyDirectory = false
 
         let fm = FileManager.default
-        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-        Task.detached(priority: prio) { [weak self, token, root] in
+        Task.detached(priority: .utility) { [weak self, token, root, mode, trigger, executionProfile] in
             guard let self else { return }
 
             // Fast path: hydrate from SQLite index if available.
@@ -569,9 +571,11 @@ final class SessionIndexer: ObservableObject {
                 }
             }
 
-            // Even if we have indexed sessions, scan for NEW files and parse them.
+            await self.seedKnownFileStatsIfNeeded()
+
+            // Even if we have indexed sessions, scan for NEW/CHANGED files and parse them.
             // If DB hydration succeeded, publish those sessions immediately so the UI is usable
-            // while we continue scanning for any newly created files in the background.
+            // while we continue scanning incrementally in the background.
             let existingSessions = indexed
             let presentedHydration = !existingSessions.isEmpty
             if presentedHydration {
@@ -585,11 +589,10 @@ final class SessionIndexer: ObservableObject {
                     self.launchPhase = .ready
                 }
             }
-	            let existingPaths = Set(existingSessions.map { $0.filePath })
 
             #if DEBUG
             if !existingSessions.isEmpty {
-                print("[Launch] Hydrated \(existingSessions.count) Codex sessions from DB, now scanning for new files...")
+                print("[Launch] Hydrated \(existingSessions.count) Codex sessions from DB, now scanning incrementally...")
             } else {
                 print("[Launch] DB hydration returned nil for Codex – scanning all files")
             }
@@ -609,79 +612,111 @@ final class SessionIndexer: ObservableObject {
                 return
             }
 
-            let found = Self.enumerateCodexSessionFiles(root: root, fileManager: fm)
+            let discovery = CodexSessionDiscovery(customRoot: self.sessionsRootOverride.isEmpty ? nil : self.sessionsRootOverride)
+            let deltaScope: SessionDeltaScope = (mode == .fullReconcile || trigger == .manual) ? .full : .recent
+            let delta = discovery.discoverDelta(previousByPath: self.lastKnownFileStatsByPath, scope: deltaScope)
+            let found = delta.currentByPath.keys.map { URL(fileURLWithPath: $0) }
             let foundIsEmpty = found.isEmpty
+            let currentStatsByPath = delta.currentByPath
+            let removedPaths = delta.removedPaths
+            let changedOrNewFiles: [URL]
+            switch mode {
+            case .fullReconcile:
+                changedOrNewFiles = found
+            case .incremental:
+                changedOrNewFiles = delta.changedFiles
+            }
 
-            // Filter out files that are already indexed
-            let newFiles = found.filter { !existingPaths.contains($0.path) }
+            DBG("📁 Found \(found.count) total files, \(changedOrNewFiles.count) changed/new, \(removedPaths.count) removed")
+            LaunchProfiler.log("Codex.refresh: file enumeration done (found=\(found.count), changed=\(changedOrNewFiles.count), removed=\(removedPaths.count))")
 
-            DBG("📁 Found \(found.count) total files, \(newFiles.count) are new (not in DB)")
-            LaunchProfiler.log("Codex.refresh: file enumeration done (found=\(found.count), new=\(newFiles.count))")
-
-            let sortedFiles = newFiles.sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
+            let sortedFiles = changedOrNewFiles.sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 self.totalFiles = existingSessions.count + sortedFiles.count
                 self.hasEmptyDirectory = foundIsEmpty
                 if !presentedHydration {
-                    if !existingSessions.isEmpty {
-                        self.progressText = "Scanning \(sortedFiles.count) new files..."
-                    }
+                    self.progressText = "Scanning \(sortedFiles.count) changed files..."
                     self.launchPhase = .scanning
                 }
             }
 
-		            let config = SessionIndexingEngine.ScanConfig(
-		                source: .codex,
-		                discoverFiles: { sortedFiles },
-		                parseLightweight: { self.parseFile(at: $0) },
-		                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
-		                throttler: self.progressThrottler,
-		                shouldContinue: { self.refreshToken == token },
-		                shouldMergeArchives: false,
-		                onProgress: { processed, total in
-		                    guard !presentedHydration else { return }
-		                    guard self.refreshToken == token else { return }
-		                    DispatchQueue.main.async {
-		                        Task { @MainActor in
-		                            await Task.yield()
-		                            guard self.refreshToken == token else { return }
-		                            self.filesProcessed = processed
-		                            if processed > 0 {
-		                                self.progressText = "Indexed \(processed)/\(total)"
-		                            }
-		                        }
-		                    }
-		                }
-		            )
+            let config = SessionIndexingEngine.ScanConfig(
+                source: .codex,
+                discoverFiles: { sortedFiles },
+                parseLightweight: { self.parseFile(at: $0) },
+                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+                throttler: self.progressThrottler,
+                shouldContinue: { self.refreshToken == token },
+                shouldMergeArchives: false,
+                workerCount: executionProfile.workerCount,
+                sliceSize: executionProfile.sliceSize,
+                interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
+                onProgress: { processed, total in
+                    guard !presentedHydration else { return }
+                    guard self.refreshToken == token else { return }
+                    DispatchQueue.main.async {
+                        Task { @MainActor in
+                            await Task.yield()
+                            guard self.refreshToken == token else { return }
+                            self.filesProcessed = processed
+                            if processed > 0 {
+                                self.progressText = "Indexed \(processed)/\(total)"
+                            }
+                        }
+                    }
+                }
+            )
 
             let scanResult = await SessionIndexingEngine.hydrateOrScan(config: config)
-            let newSessions = scanResult.sessions
+            let changedSessions = scanResult.sessions
 
-            // Merge existing sessions with newly parsed ones, then prune files that no longer exist
+            // Merge existing sessions with changed ones, then prune removed and missing files.
+            var mergedByPath: [String: Session] = [:]
+            mergedByPath.reserveCapacity(existingSessions.count + changedSessions.count)
+            for session in existingSessions {
+                mergedByPath[session.filePath] = session
+            }
+            for removed in removedPaths {
+                mergedByPath.removeValue(forKey: removed)
+            }
+            for session in changedSessions {
+                mergedByPath[session.filePath] = session
+            }
             let fmExists: (Session) -> Bool = { s in
                 FileManager.default.fileExists(atPath: s.filePath)
             }
-            let allParsedSessions = (existingSessions + newSessions).filter(fmExists)
+            let allParsedSessions = Array(mergedByPath.values).filter(fmExists)
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 .filter { hideProbes ? !CodexProbeConfig.isProbeSession($0) : true }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .codex)
+            if deltaScope == .full {
+                self.lastKnownFileStatsByPath = currentStatsByPath
+            } else {
+                for removed in removedPaths {
+                    self.lastKnownFileStatsByPath.removeValue(forKey: removed)
+                }
+                for (path, stat) in currentStatsByPath {
+                    self.lastKnownFileStatsByPath[path] = stat
+                }
+            }
+            self.scheduleAnalyticsDelta(changedFiles: sortedFiles, removedPaths: removedPaths, executionProfile: executionProfile)
 
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 LaunchProfiler.log("Codex.refresh: sessions merged (total=\(mergedWithArchives.count))")
                 self.allSessions = mergedWithArchives
                 self.isIndexing = false
-                let lightCount = newSessions.filter { $0.events.isEmpty }.count
-                let heavyCount = newSessions.count - lightCount
+                let lightCount = changedSessions.filter { $0.events.isEmpty }.count
+                let heavyCount = changedSessions.count - lightCount
                 if !existingSessions.isEmpty {
-                    DBG("✅ INDEXING DONE: total=\(allParsedSessions.count) (existing=\(existingSessions.count), new=\(newSessions.count), new_lightweight=\(lightCount), new_fullParse=\(heavyCount))")
+                    DBG("✅ INDEXING DONE: total=\(allParsedSessions.count) (existing=\(existingSessions.count), changed=\(changedSessions.count), removed=\(removedPaths.count), lightweight=\(lightCount), fullParse=\(heavyCount))")
                 } else {
-                    DBG("✅ INDEXING DONE: total=\(allParsedSessions.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
+                    DBG("✅ INDEXING DONE: total=\(allParsedSessions.count) changed=\(changedSessions.count) removed=\(removedPaths.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
                 }
 
-                if presentedHydration {
+                if presentedHydration || executionProfile.deferNonCriticalWork {
                     self.isProcessingTranscripts = false
                     self.progressText = "Ready"
                     self.launchPhase = .ready
@@ -711,7 +746,7 @@ final class SessionIndexer: ObservableObject {
                         self.launchPhase = .transcripts
                         let cache = self.transcriptCache
                         let deltaToWarm = delta
-                        Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [weak self, token] in
+                        Task.detached(priority: .utility) { [weak self, token] in
                             LaunchProfiler.log("Codex.refresh: transcript prewarm start (delta=\(deltaToWarm.count))")
                             await cache.generateAndCache(sessions: deltaToWarm)
                             guard let strongSelf = self else { return }
@@ -729,8 +764,8 @@ final class SessionIndexer: ObservableObject {
                     }
                 }
 
-                // Show lightweight sessions details (only for newly parsed ones)
-                let lightSessions = newSessions.filter { $0.events.isEmpty }
+                // Show lightweight sessions details (only for changed/newly parsed ones)
+                let lightSessions = changedSessions.filter { $0.events.isEmpty }
                 for s in lightSessions {
                     DBG("  💡 Lightweight: \(s.filePath.components(separatedBy: "/").last ?? "?") msgCount=\(s.messageCount)")
                 }
@@ -752,6 +787,51 @@ final class SessionIndexer: ObservableObject {
                         DBG("   hideZeroMessageSessionsPref=\(self.hideZeroMessageSessionsPref)")
                     }
                 }
+            }
+        }
+    }
+
+    private func seedKnownFileStatsIfNeeded() async {
+        if !lastKnownFileStatsByPath.isEmpty { return }
+        do {
+            let db = try IndexDB()
+            let indexed = try await db.fetchIndexedFiles(for: SessionSource.codex.rawValue)
+            var map: [String: SessionFileStat] = [:]
+            map.reserveCapacity(indexed.count)
+            for row in indexed {
+                map[row.path] = SessionFileStat(mtime: row.mtime, size: row.size)
+            }
+            lastKnownFileStatsByPath = map
+        } catch {
+            // Non-fatal. We'll build cache from filesystem deltas after this pass.
+        }
+    }
+
+    private static func fileStat(for url: URL) -> SessionFileStat? {
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
+        guard values?.isRegularFile == true else { return nil }
+        let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
+        let size = Int64(values?.fileSize ?? 0)
+        return SessionFileStat(mtime: mtime, size: size)
+    }
+
+    private func scheduleAnalyticsDelta(changedFiles: [URL],
+                                        removedPaths: [String],
+                                        executionProfile: IndexRefreshExecutionProfile) {
+        guard !(changedFiles.isEmpty && removedPaths.isEmpty) else { return }
+        let delay = executionProfile.deferNonCriticalWork ? UInt64(500_000_000) : UInt64(120_000_000)
+        Task.detached(priority: .utility) {
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+            }
+            do {
+                let db = try IndexDB()
+                let indexer = AnalyticsIndexer(db: db, enabledSources: [SessionSource.codex.rawValue])
+                await indexer.refreshDelta(source: SessionSource.codex.rawValue,
+                                           changed: changedFiles,
+                                           removedPaths: removedPaths)
+            } catch {
+                // Non-fatal: analytics delta indexing is best-effort.
             }
         }
     }
