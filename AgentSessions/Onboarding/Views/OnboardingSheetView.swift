@@ -54,18 +54,14 @@ struct OnboardingSheetView: View {
 
             OnboardingGlassCard(palette: palette) {
                 VStack(spacing: 0) {
-                    ScrollView {
-                        VStack(spacing: 22) {
-                            ZStack {
-                                slideView
-                                    .transition(slideTransition)
-                            }
-                        }
-                        .frame(maxWidth: 600)
-                        .padding(.horizontal, 32)
-                        .padding(.top, 28)
-                        .padding(.bottom, 22)
+                    ZStack {
+                        slideView
+                            .transition(slideTransition)
                     }
+                    .frame(maxWidth: 620, maxHeight: .infinity, alignment: .top)
+                    .padding(.horizontal, 30)
+                    .padding(.top, 24)
+                    .padding(.bottom, 18)
 
                     Rectangle()
                         .fill(palette.divider)
@@ -76,10 +72,10 @@ struct OnboardingSheetView: View {
                         .padding(.vertical, 16)
                 }
             }
-            .frame(minWidth: 720, minHeight: 560)
-            .padding(24)
+            .frame(minWidth: 780, minHeight: 640)
+            .padding(20)
         }
-        .frame(minWidth: 780, minHeight: 620)
+        .frame(minWidth: 820, minHeight: 700)
         .interactiveDismissDisabled(true)
         .task {
             await agentAvailabilityModel.refreshIfNeeded()
@@ -177,7 +173,7 @@ struct OnboardingSheetView: View {
     }
 
     private var connectAgentsSlide: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 14) {
             SlideHeader(
                 palette: palette,
                 icon: .symbol("display"),
@@ -186,18 +182,20 @@ struct OnboardingSheetView: View {
                 subtitle: "Enable the agents you use. Disabled agents will not appear in filters or analytics."
             )
 
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 if totalSessions == 0 {
                     OnboardingEmptyState(text: "No sessions found yet. Check Settings → Paths to connect an agent.", palette: palette)
                 }
 
-                ForEach(agentsForToggles) { agent in
-                    AgentToggleRow(
-                        agent: agent,
-                        palette: palette,
-                        isOn: agentBinding(for: agent.source),
-                        isDisabled: isToggleDisabled(for: agent.source)
-                    )
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                    ForEach(agentsForToggles) { agent in
+                        AgentToggleTile(
+                            agent: agent,
+                            palette: palette,
+                            isOn: agentBinding(for: agent.source),
+                            isDisabled: isToggleDisabled(for: agent.source)
+                        )
+                    }
                 }
             }
 
@@ -263,18 +261,27 @@ struct OnboardingSheetView: View {
 
             WeeklyActivityCard(data: weeklyActivity, palette: palette)
 
-            UsageTrackingCard(
-                palette: palette,
-                isEnabled: Binding(
-                    get: { codexUsageEnabled || claudeUsageEnabled },
-                    set: { newValue in
-                        codexUsageEnabled = newValue
-                        claudeUsageEnabled = newValue
-                    }
-                ),
-                codex: codexUsageModel,
-                claude: claudeUsageModel
-            )
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Usage Limit Tracking")
+                    .font(.system(size: 13, weight: .semibold, design: .default))
+                    .foregroundStyle(.primary)
+
+                UsageTrackingCard(
+                    palette: palette,
+                    source: .claude,
+                    isEnabled: $claudeUsageEnabled,
+                    codex: codexUsageModel,
+                    claude: claudeUsageModel
+                )
+
+                UsageTrackingCard(
+                    palette: palette,
+                    source: .codex,
+                    isEnabled: $codexUsageEnabled,
+                    codex: codexUsageModel,
+                    claude: claudeUsageModel
+                )
+            }
 
             Text("Limit tracking syncs with your terminal. Toggle off anytime in Settings.")
                 .font(.system(size: 12, weight: .regular, design: .default))
@@ -718,27 +725,27 @@ private struct AgentPill: View {
     }
 }
 
-private struct AgentToggleRow: View {
+private struct AgentToggleTile: View {
     let agent: AgentCount
     let palette: OnboardingPalette
     let isOn: Binding<Bool>
     let isDisabled: Bool
 
     var body: some View {
-        HStack(spacing: 14) {
-            AgentBadge(source: agent.source, palette: palette, size: 36)
+        HStack(spacing: 10) {
+            AgentBadge(source: agent.source, palette: palette, size: 30)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(agent.source.displayName)
-                    .font(.system(size: 14, weight: .semibold, design: .default))
+                    .font(.system(size: 12, weight: .semibold, design: .default))
                     .foregroundStyle(.primary)
                     .opacity(agent.isEnabled ? 1.0 : 0.7)
                 HStack(spacing: 4) {
                     Text("\(agent.displayCount)")
-                        .font(.system(size: 12, weight: .regular, design: .default))
+                        .font(.system(size: 11, weight: .regular, design: .default))
                         .monospacedDigit()
                     Text("sessions found")
-                        .font(.system(size: 12, weight: .regular, design: .default))
+                        .font(.system(size: 11, weight: .regular, design: .default))
                 }
                 .foregroundStyle(.secondary)
             }
@@ -749,9 +756,10 @@ private struct AgentToggleRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .disabled(isDisabled)
+                .scaleEffect(0.9, anchor: .trailing)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 14)
                 .fill(palette.rowFill)
@@ -962,24 +970,29 @@ private struct WeeklyActivityChart: View {
     let palette: OnboardingPalette
 
     var body: some View {
+        let barWidth: CGFloat = 36
+        let maxBarHeight: CGFloat = 72
         let maxTotal = max(1, data.map { $0.total }.max() ?? 1)
         HStack(alignment: .bottom, spacing: 12) {
             ForEach(data) { day in
+                let filledHeight = day.filledHeight(maxTotal: maxTotal, maxBarHeight: maxBarHeight)
+                let segmentHeights = day.segmentHeights(maxTotal: maxTotal, maxBarHeight: maxBarHeight)
                 VStack(spacing: 6) {
                     ZStack(alignment: .bottom) {
                         RoundedRectangle(cornerRadius: 6)
                             .fill(palette.chartBase)
-                            .frame(width: 36, height: 72)
+                            .frame(width: barWidth, height: maxBarHeight)
 
-                        VStack(spacing: 2) {
-                            ForEach(day.segments) { segment in
+                        VStack(spacing: 0) {
+                            ForEach(Array(day.segments.indices), id: \.self) { index in
+                                let segment = day.segments[index]
                                 RoundedRectangle(cornerRadius: 4)
                                     .fill(segment.color)
-                                    .frame(width: 36, height: segment.height(total: day.total, maxTotal: maxTotal))
+                                    .frame(width: barWidth, height: segmentHeights[index])
                             }
                         }
-                        .frame(height: CGFloat(day.total) / CGFloat(maxTotal) * 72)
-                        .padding(.bottom, 2)
+                        .frame(width: barWidth, height: filledHeight, alignment: .bottom)
+                        .clipped()
                     }
 
                     Text(day.label)
@@ -996,18 +1009,25 @@ private struct WeeklyActivityDay: Identifiable {
         let id = UUID()
         let color: Color
         let count: Int
-
-        func height(total: Int, maxTotal: Int) -> CGFloat {
-            guard total > 0 else { return 6 }
-            let scaled = CGFloat(count) / CGFloat(total)
-            return Swift.max(6, scaled * CGFloat(total) / CGFloat(maxTotal) * 72)
-        }
     }
 
     let id = UUID()
     let label: String
     let total: Int
     let segments: [Segment]
+
+    func filledHeight(maxTotal: Int, maxBarHeight: CGFloat) -> CGFloat {
+        guard total > 0, maxTotal > 0 else { return 0 }
+        return (CGFloat(total) / CGFloat(maxTotal)) * maxBarHeight
+    }
+
+    func segmentHeights(maxTotal: Int, maxBarHeight: CGFloat) -> [CGFloat] {
+        guard total > 0 else { return segments.map { _ in 0 } }
+        let fillHeight = filledHeight(maxTotal: maxTotal, maxBarHeight: maxBarHeight)
+        return segments.map { segment in
+            (CGFloat(segment.count) / CGFloat(total)) * fillHeight
+        }
+    }
 
     static func build(from sessions: [Session], palette: OnboardingPalette) -> [WeeklyActivityDay] {
         let calendar = Calendar.current
@@ -1057,15 +1077,18 @@ private struct WeeklyActivityDay: Identifiable {
 
 private struct UsageTrackingCard: View {
     let palette: OnboardingPalette
+    let source: SessionSource
     let isEnabled: Binding<Bool>
     let codex: CodexUsageModel
     let claude: ClaudeUsageModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Text("Usage Limit Tracking")
-                    .font(.system(size: 13, weight: .semibold, design: .default))
+                AgentBadge(source: source, palette: palette, size: 28)
+
+                Text(source.displayName)
+                    .font(.system(size: 12, weight: .semibold, design: .default))
                     .foregroundStyle(.primary)
 
                 Text("Live")
@@ -1083,22 +1106,20 @@ private struct UsageTrackingCard: View {
                 Toggle("", isOn: isEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch)
+                    .scaleEffect(0.9, anchor: .trailing)
             }
 
-            UsageMeterRow(
-                palette: palette,
-                source: .claude,
-                usageText: usageText(for: .claude),
-                progress: usageProgress(for: .claude)
-            )
-            UsageMeterRow(
-                palette: palette,
-                source: .codex,
-                usageText: usageText(for: .codex),
-                progress: usageProgress(for: .codex)
-            )
+            HStack {
+                Spacer()
+                Text(usageText(for: source))
+                    .font(.system(size: 11, weight: .regular, design: .default))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            ProgressBar(progress: usageProgress(for: source), palette: palette, accent: palette.agentAccent(for: source))
         }
-        .padding(16)
+        .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 14)
                 .fill(palette.rowFill)
@@ -1153,34 +1174,6 @@ private struct UsageTrackingCard: View {
             return "\(hours)h \(minutes)m"
         }
         return "\(minutes)m"
-    }
-}
-
-private struct UsageMeterRow: View {
-    let palette: OnboardingPalette
-    let source: SessionSource
-    let usageText: String
-    let progress: Double
-
-    var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                AgentBadge(source: source, palette: palette, size: 28)
-
-                Text(source.displayName)
-                    .font(.system(size: 12, weight: .semibold, design: .default))
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                Text(usageText)
-                    .font(.system(size: 11, weight: .regular, design: .default))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-
-            ProgressBar(progress: progress, palette: palette, accent: palette.agentAccent(for: source))
-        }
     }
 }
 

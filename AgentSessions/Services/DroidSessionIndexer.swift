@@ -97,7 +97,9 @@ final class DroidSessionIndexer: ObservableObject, SessionIndexerProtocol, @unch
         return fm.fileExists(atPath: b.path, isDirectory: &isDir2) && isDir2.boolValue
     }
 
-    func refresh() {
+    func refresh(mode: IndexRefreshMode = .incremental,
+                 trigger: IndexRefreshTrigger = .manual,
+                 executionProfile: IndexRefreshExecutionProfile = .interactive) {
         if !AgentEnablement.isEnabled(.droid) { return }
 
         // Update discovery if overrides changed
@@ -108,6 +110,13 @@ final class DroidSessionIndexer: ObservableObject, SessionIndexerProtocol, @unch
                                               customProjectsRoot: projects.isEmpty ? nil : projects)
             lastOverrides = (sessions, projects)
         }
+
+        #if DEBUG
+        let sessionsRoot = discovery.sessionsRoot()
+        let projectsRoot = discovery.projectsRoot()
+        print("\n🟠 DROID INDEXING START: sessions=\(sessionsRoot.path) projects=\(projectsRoot.path) mode=\(mode) trigger=\(trigger.rawValue)")
+        #endif
+        LaunchProfiler.log("Droid.refresh: start (mode=\(mode), trigger=\(trigger.rawValue))")
 
         let token = UUID()
         refreshToken = token
@@ -120,17 +129,21 @@ final class DroidSessionIndexer: ObservableObject, SessionIndexerProtocol, @unch
         indexingError = nil
         hasEmptyDirectory = false
 
-        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-	        Task.detached(priority: prio) { [weak self, token] in
+        let requestedPriority: TaskPriority = executionProfile.deferNonCriticalWork ? .utility : .userInitiated
+        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : requestedPriority
+	        Task.detached(priority: prio) { [weak self, token, executionProfile] in
 	            guard let self else { return }
 
-		            let config = SessionIndexingEngine.ScanConfig(
+	            let config = SessionIndexingEngine.ScanConfig(
 		                source: .droid,
 		                discoverFiles: { self.discovery.discoverSessionFiles() },
 		                parseLightweight: { DroidSessionParser.parseFile(at: $0) },
 		                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
 		                throttler: self.progressThrottler,
 		                shouldContinue: { self.refreshToken == token },
+                        workerCount: executionProfile.workerCount,
+                        sliceSize: executionProfile.sliceSize,
+                        interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
 		                onProgress: { processed, total in
 		                    guard self.refreshToken == token else { return }
 		                    self.totalFiles = total

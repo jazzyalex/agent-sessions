@@ -68,6 +68,10 @@ extension PreferencesView {
                         Button("Check Version") { probeOpenCode() }
                             .buttonStyle(.bordered)
                             .help("Query the detected OpenCode CLI for its version")
+                        Button(agentUpdateButtonTitle(for: .opencode)) { runAgentUpdateFlow(for: .opencode) }
+                            .buttonStyle(.bordered)
+                            .help("Check for a newer OpenCode CLI version and optionally update it")
+                            .disabled(isAgentUpdateBusy(.opencode))
                         Button("Copy Path") {
                             if let p = opencodeResolvedPath {
                                 NSPasteboard.general.clearContents()
