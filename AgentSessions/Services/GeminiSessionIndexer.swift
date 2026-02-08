@@ -72,13 +72,15 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
         return FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir) && isDir.boolValue
     }
 
-    func refresh() {
+    func refresh(mode: IndexRefreshMode = .incremental,
+                 trigger: IndexRefreshTrigger = .manual,
+                 executionProfile: IndexRefreshExecutionProfile = .interactive) {
         if !AgentEnablement.isEnabled(.gemini) { return }
         let root = discovery.sessionsRoot()
         #if DEBUG
-        print("\n🔵 GEMINI INDEXING START: root=\(root.path)")
+        print("\n🔵 GEMINI INDEXING START: root=\(root.path) mode=\(mode) trigger=\(trigger.rawValue)")
         #endif
-        LaunchProfiler.log("Gemini.refresh: start")
+        LaunchProfiler.log("Gemini.refresh: start (mode=\(mode), trigger=\(trigger.rawValue))")
 
         let token = UUID()
         refreshToken = token
@@ -91,11 +93,12 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
         indexingError = nil
         hasEmptyDirectory = false
 
-	        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-		        Task.detached(priority: prio) { [weak self, token] in
+	        let requestedPriority: TaskPriority = executionProfile.deferNonCriticalWork ? .utility : .userInitiated
+	        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : requestedPriority
+		        Task.detached(priority: prio) { [weak self, token, executionProfile] in
 		            guard let self else { return }
 
-		            let config = SessionIndexingEngine.ScanConfig(
+	            let config = SessionIndexingEngine.ScanConfig(
 		                source: .gemini,
 		                discoverFiles: {
 		                    let files = self.discovery.discoverSessionFiles()
@@ -105,6 +108,9 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
 	                parseLightweight: { GeminiSessionParser.parseFile(at: $0) },
 		                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
 		                throttler: self.progressThrottler,
+                        workerCount: executionProfile.workerCount,
+                        sliceSize: executionProfile.sliceSize,
+                        interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
 		                onProgress: { processed, total in
 		                    guard self.refreshToken == token else { return }
 		                    self.totalFiles = total
@@ -182,7 +188,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
                     }
                     return out
                 }()
-                if !delta.isEmpty {
+                if !delta.isEmpty && !executionProfile.deferNonCriticalWork {
                     self.isProcessingTranscripts = true
 	                    self.progressText = "Processing transcripts..."
 	                    self.launchPhase = .transcripts

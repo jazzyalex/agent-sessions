@@ -63,6 +63,10 @@ extension PreferencesView {
                             Button("Check Version") { probeDroid() }
                                 .buttonStyle(.bordered)
                                 .help("Query the detected Droid CLI for its version")
+                            Button(agentUpdateButtonTitle(for: .droid)) { runAgentUpdateFlow(for: .droid) }
+                                .buttonStyle(.bordered)
+                                .help("Check for a newer Droid CLI version and optionally update it")
+                                .disabled(isAgentUpdateBusy(.droid))
                             Button("Copy Path") {
                                 if let p = droidResolvedPath {
                                     NSPasteboard.general.clearContents()
@@ -192,6 +196,175 @@ extension PreferencesView {
 }
 
 extension PreferencesView {
+    var openClawCLITab: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("OpenClaw").font(.title2).fontWeight(.semibold)
+
+            if !openClawAgentEnabled {
+                PreferenceCallout {
+                    Text("This agent is disabled in General → Active CLI agents.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Group {
+                sectionHeader("OpenClaw CLI Binary")
+                VStack(alignment: .leading, spacing: 10) {
+                    labeledRow("Binary Source") {
+                        Picker("", selection: Binding(
+                            get: { openClawBinaryPath.isEmpty ? 0 : 1 },
+                            set: { idx in
+                                if idx == 0 {
+                                    openClawBinaryPath = ""
+                                    validateOpenClawBinaryPath()
+                                    scheduleOpenClawProbe()
+                                } else {
+                                    pickOpenClawBinary()
+                                }
+                            }
+                        )) {
+                            Text("Auto").tag(0)
+                            Text("Custom").tag(1)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 220)
+                        .help("Use the auto-detected OpenClaw binary or supply a custom path")
+                    }
+
+                    if openClawBinaryPath.isEmpty {
+                        HStack {
+                            Text("Detected:").font(.caption)
+                            Text(openClawVersionString ?? "unknown").font(.caption).monospaced()
+                        }
+                        if let path = openClawResolvedPath {
+                            Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+
+                        if openClawProbeState == .failure && openClawVersionString == nil {
+                            PreferenceCallout {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("OpenClaw CLI not found")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                    Text("Install OpenClaw (or clawdbot) and ensure `openclaw`/`clawdbot` is available on PATH, or set a custom binary path.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 12) {
+                            Button("Check Version") { probeOpenClaw() }
+                                .buttonStyle(.bordered)
+                                .help("Query the detected OpenClaw CLI for its version")
+                            Button(agentUpdateButtonTitle(for: .openclaw)) { runAgentUpdateFlow(for: .openclaw) }
+                                .buttonStyle(.bordered)
+                                .help("Check for a newer OpenClaw CLI version and optionally update it")
+                                .disabled(isAgentUpdateBusy(.openclaw))
+                            Button("Copy Path") {
+                                if let p = openClawResolvedPath {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(p, forType: .string)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Copy the detected OpenClaw binary path to clipboard")
+                            .disabled(openClawResolvedPath == nil)
+                            Button("Reveal") {
+                                if let p = openClawResolvedPath {
+                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Reveal the detected OpenClaw binary in Finder")
+                            .disabled(openClawResolvedPath == nil)
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            TextField("/path/to/openclaw", text: $openClawBinaryPath)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 360)
+                                .onSubmit {
+                                    validateOpenClawBinaryPath()
+                                    commitOpenClawBinaryPathIfValid()
+                                }
+                                .onChange(of: openClawBinaryPath) { _, _ in
+                                    validateOpenClawBinaryPath()
+                                    commitOpenClawBinaryPathIfValid()
+                                }
+                                .help("Enter the full path to a custom OpenClaw (or clawdbot) binary")
+                            Button("Choose…", action: pickOpenClawBinary)
+                                .buttonStyle(.borderedProminent)
+                                .help("Select the OpenClaw binary from the filesystem")
+                            Button("Clear") {
+                                openClawBinaryPath = ""
+                                validateOpenClawBinaryPath()
+                                scheduleOpenClawProbe()
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Remove the custom binary override")
+                        }
+
+                        if !openClawBinaryValid {
+                            Text("Must be an executable file.")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        } else if openClawProbeState == .failure {
+                            Text("Unable to execute the specified binary. Check the path and try again.")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+
+                sectionHeader("Sessions Directory")
+                VStack(alignment: .leading, spacing: 8) {
+                    labeledRow("Storage Root") {
+                        HStack(spacing: 10) {
+                            TextField("~/.openclaw", text: $openClawSessionsPath)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 360)
+                                .onSubmit {
+                                    validateOpenClawSessionsPath()
+                                    commitOpenClawSessionsPathIfValid()
+                                }
+                                .onChange(of: openClawSessionsPath) { _, _ in
+                                    openClawSessionsPathDebounce?.cancel()
+                                    let work = DispatchWorkItem {
+                                        validateOpenClawSessionsPath()
+                                        commitOpenClawSessionsPathIfValid()
+                                    }
+                                    openClawSessionsPathDebounce = work
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                                }
+                                .help("Override where Agent Sessions scans for OpenClaw and clawdbot transcripts")
+                            Button("Choose…", action: pickOpenClawSessionsFolder)
+                                .buttonStyle(.borderedProminent)
+                                .help("Pick a folder to scan for OpenClaw sessions")
+                        }
+                    }
+
+                    if !openClawSessionsPathValid {
+                        Text("Folder does not exist or is not a directory.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else {
+                        Text("Default: $OPENCLAW_STATE_DIR, ~/.openclaw, or ~/.clawdbot")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .disabled(!openClawAgentEnabled)
+        }
+        .onAppear {
+            scheduleOpenClawProbe()
+        }
+    }
+}
+
+extension PreferencesView {
     func pickDroidBinary() {
         let panel = NSOpenPanel()
         panel.title = "Select Droid CLI Binary"
@@ -255,6 +428,47 @@ extension PreferencesView {
         }
     }
 
+    func pickOpenClawBinary() {
+        let panel = NSOpenPanel()
+        panel.title = "Select OpenClaw CLI Binary"
+        panel.message = "Choose the openclaw or clawdbot executable file"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = false
+
+        panel.directoryURL = URL(fileURLWithPath: "/opt/homebrew/bin", isDirectory: true)
+
+        if panel.runModal() == .OK, let url = panel.url {
+            openClawBinaryPath = url.path
+            validateOpenClawBinaryPath()
+            commitOpenClawBinaryPathIfValid()
+        }
+    }
+
+    func pickOpenClawSessionsFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Select OpenClaw Sessions Directory"
+        panel.message = "Choose the OpenClaw state folder (contains agents/*/sessions)"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+
+        if !openClawSessionsPath.isEmpty {
+            let expanded = (openClawSessionsPath as NSString).expandingTildeInPath
+            panel.directoryURL = URL(fileURLWithPath: expanded)
+        } else {
+            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".openclaw")
+        }
+
+        if panel.runModal() == .OK, let url = panel.url {
+            openClawSessionsPath = url.path
+            validateOpenClawSessionsPath()
+            commitOpenClawSessionsPathIfValid()
+        }
+    }
+
     func validateDroidSessionsPath() {
         guard !droidSessionsPath.isEmpty else {
             droidSessionsPathValid = true
@@ -277,6 +491,26 @@ extension PreferencesView {
         droidProjectsPathValid = exists && isDir.boolValue
     }
 
+    func validateOpenClawBinaryPath() {
+        guard !openClawBinaryPath.isEmpty else {
+            openClawBinaryValid = true
+            return
+        }
+        let expanded = (openClawBinaryPath as NSString).expandingTildeInPath
+        openClawBinaryValid = FileManager.default.isExecutableFile(atPath: expanded)
+    }
+
+    func validateOpenClawSessionsPath() {
+        guard !openClawSessionsPath.isEmpty else {
+            openClawSessionsPathValid = true
+            return
+        }
+        let expanded = (openClawSessionsPath as NSString).expandingTildeInPath
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir)
+        openClawSessionsPathValid = exists && isDir.boolValue
+    }
+
     func commitDroidSessionsPathIfValid() {
         guard droidSessionsPathValid else { return }
         // @AppStorage persists automatically; indexers update on refresh.
@@ -285,5 +519,15 @@ extension PreferencesView {
     func commitDroidProjectsPathIfValid() {
         guard droidProjectsPathValid else { return }
         // @AppStorage persists automatically; indexers update on refresh.
+    }
+
+    func commitOpenClawBinaryPathIfValid() {
+        guard openClawBinaryValid else { return }
+        scheduleOpenClawProbe()
+    }
+
+    func commitOpenClawSessionsPathIfValid() {
+        guard openClawSessionsPathValid else { return }
+        // @AppStorage persists automatically; OpenClawSessionIndexer listens to UserDefaults changes.
     }
 }

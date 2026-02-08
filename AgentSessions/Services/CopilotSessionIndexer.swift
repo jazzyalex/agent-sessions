@@ -84,7 +84,9 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol, @un
         return FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir) && isDir.boolValue
     }
 
-    func refresh() {
+    func refresh(mode: IndexRefreshMode = .incremental,
+                 trigger: IndexRefreshTrigger = .manual,
+                 executionProfile: IndexRefreshExecutionProfile = .interactive) {
         if !AgentEnablement.isEnabled(.copilot) { return }
 
         // Update discovery if override changed
@@ -96,9 +98,9 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol, @un
 
         let root = discovery.sessionsRoot()
         #if DEBUG
-        print("\n🟡 COPILOT INDEXING START: root=\(root.path)")
+        print("\n🟡 COPILOT INDEXING START: root=\(root.path) mode=\(mode) trigger=\(trigger.rawValue)")
         #endif
-        LaunchProfiler.log("Copilot.refresh: start")
+        LaunchProfiler.log("Copilot.refresh: start (mode=\(mode), trigger=\(trigger.rawValue))")
 
         let token = UUID()
         refreshToken = token
@@ -111,16 +113,20 @@ final class CopilotSessionIndexer: ObservableObject, SessionIndexerProtocol, @un
         indexingError = nil
         hasEmptyDirectory = false
 
-        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-	        Task.detached(priority: prio) { [weak self, token] in
+        let requestedPriority: TaskPriority = executionProfile.deferNonCriticalWork ? .utility : .userInitiated
+        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : requestedPriority
+	        Task.detached(priority: prio) { [weak self, token, executionProfile] in
 	            guard let self else { return }
 
-		            let config = SessionIndexingEngine.ScanConfig(
+	            let config = SessionIndexingEngine.ScanConfig(
 		                source: .copilot,
 		                discoverFiles: { self.discovery.discoverSessionFiles() },
 		                parseLightweight: { CopilotSessionParser.parseFile(at: $0) },
 		                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
 		                throttler: self.progressThrottler,
+                        workerCount: executionProfile.workerCount,
+                        sliceSize: executionProfile.sliceSize,
+                        interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
 		                onProgress: { processed, total in
 		                    guard self.refreshToken == token else { return }
 		                    self.totalFiles = total

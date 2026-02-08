@@ -894,7 +894,25 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     @MainActor
     private func refreshExecutionProfile(for source: SessionSource) -> IndexRefreshExecutionProfile {
-        guard source == .codex || source == .claude else {
+        let onAC = Self.onACPower()
+        let isHighVolumeProvider = (source == .codex || source == .claude)
+
+        if isHighVolumeProvider && appIsActive && onAC {
+            return .interactive
+        }
+        if isHighVolumeProvider && appIsActive && !onAC {
+            return IndexRefreshExecutionProfile(
+                workerCount: 1,
+                sliceSize: 6,
+                interSliceYieldNanoseconds: 50_000_000,
+                deferNonCriticalWork: true
+            )
+        }
+        if isHighVolumeProvider {
+            return .lightBackground
+        }
+
+        if appIsActive && onAC {
             return IndexRefreshExecutionProfile(
                 workerCount: 1,
                 sliceSize: 8,
@@ -902,15 +920,11 @@ final class UnifiedSessionIndexer: ObservableObject {
                 deferNonCriticalWork: false
             )
         }
-        let onAC = Self.onACPower()
-        if appIsActive && onAC {
-            return .interactive
-        }
         if appIsActive && !onAC {
             return IndexRefreshExecutionProfile(
                 workerCount: 1,
                 sliceSize: 6,
-                interSliceYieldNanoseconds: 50_000_000,
+                interSliceYieldNanoseconds: 60_000_000,
                 deferNonCriticalWork: true
             )
         }
@@ -939,11 +953,11 @@ final class UnifiedSessionIndexer: ObservableObject {
         switch source {
         case .codex: codex.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .claude: claude.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .gemini: gemini.refresh()
+        case .gemini: gemini.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .opencode: opencode.refresh()
-        case .copilot: copilot.refresh()
-        case .droid: droid.refresh()
-        case .openclaw: openclaw.refresh()
+        case .copilot: copilot.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
+        case .droid: droid.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
+        case .openclaw: openclaw.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         }
     }
 

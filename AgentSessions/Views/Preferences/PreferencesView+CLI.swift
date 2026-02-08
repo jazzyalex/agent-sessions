@@ -72,6 +72,10 @@ extension PreferencesView {
                         Button("Check Version") { probeCodex() }
                             .buttonStyle(.bordered)
                             .help("Query the currently detected Codex binary for its version")
+                        Button(agentUpdateButtonTitle(for: .codex)) { runAgentUpdateFlow(for: .codex) }
+                            .buttonStyle(.bordered)
+                            .help("Check for a newer Codex CLI version and optionally update it")
+                            .disabled(isAgentUpdateBusy(.codex))
                         Button("Copy Path") {
                             if let p = resolvedCodexPath {
                                 NSPasteboard.general.clearContents()
@@ -228,6 +232,10 @@ extension PreferencesView {
                         Button("Check Version") { probeClaude() }
                             .buttonStyle(.bordered)
                             .help("Query the detected Claude CLI for its version")
+                        Button(agentUpdateButtonTitle(for: .claude)) { runAgentUpdateFlow(for: .claude) }
+                            .buttonStyle(.bordered)
+                            .help("Check for a newer Claude CLI version and optionally update it")
+                            .disabled(isAgentUpdateBusy(.claude))
                         Button("Copy Path") {
                             if let p = claudeResolvedPath {
                                 NSPasteboard.general.clearContents()
@@ -380,6 +388,10 @@ extension PreferencesView {
                         Button("Check Version") { probeGemini() }
                             .buttonStyle(.bordered)
                             .help("Query the detected Gemini CLI for its version")
+                        Button(agentUpdateButtonTitle(for: .gemini)) { runAgentUpdateFlow(for: .gemini) }
+                            .buttonStyle(.bordered)
+                            .help("Check for a newer Gemini CLI version and optionally update it")
+                            .disabled(isAgentUpdateBusy(.gemini))
                         Button("Copy Path") {
                             if let p = geminiResolvedPath {
                                 NSPasteboard.general.clearContents()

@@ -82,6 +82,8 @@ enum PreferencesKey {
         static let copilotSessionsRootOverride = "CopilotSessionsRootOverride"
         static let droidSessionsRootOverride = "DroidSessionsRootOverride"
         static let droidProjectsRootOverride = "DroidProjectsRootOverride"
+        static let openClawSessionsRootOverride = "OpenClawSessionsRootOverride"
+        static let openClawBinaryOverride = "OpenClawBinaryOverride"
     }
 
     enum Archives {

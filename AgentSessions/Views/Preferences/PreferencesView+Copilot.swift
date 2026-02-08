@@ -63,6 +63,10 @@ extension PreferencesView {
                             Button("Check Version") { probeCopilot() }
                                 .buttonStyle(.bordered)
                                 .help("Query the detected Copilot CLI for its version")
+                            Button(agentUpdateButtonTitle(for: .copilot)) { runAgentUpdateFlow(for: .copilot) }
+                                .buttonStyle(.bordered)
+                                .help("Check for a newer GitHub Copilot CLI version and optionally update it")
+                                .disabled(isAgentUpdateBusy(.copilot))
                             Button("Copy Path") {
                                 if let p = copilotResolvedPath {
                                     NSPasteboard.general.clearContents()

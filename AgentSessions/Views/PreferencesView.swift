@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 
 struct PreferencesView: View {
+    private let agentUpdateService = AgentUpdateService()
     @EnvironmentObject var indexer: SessionIndexer
     @EnvironmentObject var updaterController: UpdaterController
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
@@ -147,6 +148,13 @@ struct PreferencesView: View {
     @State var droidVersionString: String? = nil
     @State var droidResolvedPath: String? = nil
     @State var droidProbeDebounce: DispatchWorkItem? = nil
+    // OpenClaw probe state
+    @AppStorage(PreferencesKey.Paths.openClawBinaryOverride) var openClawBinaryPath: String = ""
+    @State var openClawBinaryValid: Bool = true
+    @State var openClawProbeState: ProbeState = .idle
+    @State var openClawVersionString: String? = nil
+    @State var openClawResolvedPath: String? = nil
+    @State var openClawProbeDebounce: DispatchWorkItem? = nil
 
     // Droid sessions/projects roots
     @AppStorage(PreferencesKey.Paths.droidSessionsRootOverride) var droidSessionsPath: String = ""
@@ -155,16 +163,28 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Paths.droidProjectsRootOverride) var droidProjectsPath: String = ""
     @State var droidProjectsPathValid: Bool = true
     @State var droidProjectsPathDebounce: DispatchWorkItem? = nil
+    // OpenClaw sessions root
+    @AppStorage(PreferencesKey.Paths.openClawSessionsRootOverride) var openClawSessionsPath: String = ""
+    @State var openClawSessionsPathValid: Bool = true
+    @State var openClawSessionsPathDebounce: DispatchWorkItem? = nil
+    // Per-agent update flow state
+    @State var agentUpdateCheckingSources: Set<SessionSource> = []
+    @State var agentUpdatingSources: Set<SessionSource> = []
 
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selectedTab) {
-                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .copilotCLI && $0 != .droidCLI }, id: \.self) { tab in
+                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
                 Divider()
                 ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI], id: \.self) { tab in
+                    Label(tab.title, systemImage: tab.iconName)
+                        .tag(tab)
+                }
+                Divider()
+                ForEach([PreferencesTab.openClawCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -283,6 +303,8 @@ struct PreferencesView: View {
                 copilotCLITab
             case .droidCLI:
                 droidCLITab
+            case .openClawCLI:
+                openClawCLITab
             case .about:
                 aboutTab
             }
@@ -378,6 +400,8 @@ struct PreferencesView: View {
         defaultResumeDirectory = resumeSettings.defaultWorkingDirectory
         validateDefaultDirectory()
         preferredLaunchMode = resumeSettings.launchMode
+        validateOpenClawBinaryPath()
+        validateOpenClawSessionsPath()
         // Reset probe state; actual probing is triggered when related tab is shown
         probeState = .idle
         probeVersion = nil
@@ -554,13 +578,17 @@ struct PreferencesView: View {
         geminiSettings.setBinaryOverride("")
         copilotSettings.setBinaryPath("")
         droidSettings.setBinaryPath("")
+        openClawBinaryPath = ""
+        validateOpenClawBinaryPath()
 
         // Reset agent storage overrides
         copilotSessionsPath = ""
         droidSessionsPath = ""
         droidProjectsPath = ""
+        openClawSessionsPath = ""
         validateDroidSessionsPath()
         validateDroidProjectsPath()
+        validateOpenClawSessionsPath()
 
         // Reset usage strip preferences
         UserDefaults.standard.set(false, forKey: PreferencesKey.showClaudeUsageStrip)
@@ -572,10 +600,189 @@ struct PreferencesView: View {
         scheduleGeminiProbe()
         scheduleCopilotProbe()
         scheduleDroidProbe()
+        scheduleOpenClawProbe()
     }
 
     func closeWindow() {
         NSApp.keyWindow?.performClose(nil)
+    }
+
+    // MARK: - Agent Update Flow
+
+    func isAgentUpdateBusy(_ source: SessionSource) -> Bool {
+        agentUpdateCheckingSources.contains(source) || agentUpdatingSources.contains(source)
+    }
+
+    func agentUpdateButtonTitle(for source: SessionSource) -> String {
+        if agentUpdatingSources.contains(source) { return "Updating..." }
+        if agentUpdateCheckingSources.contains(source) { return "Checking..." }
+        return "Update..."
+    }
+
+    func runAgentUpdateFlow(for source: SessionSource) {
+        if isAgentUpdateBusy(source) { return }
+
+        let resolved = resolvedBinaryPath(for: source)
+        let custom = customBinaryPath(for: source)
+        let service = agentUpdateService
+        agentUpdateCheckingSources.insert(source)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = service.checkForUpdates(
+                source: source,
+                resolvedBinaryPath: resolved,
+                customBinaryPath: custom
+            )
+            DispatchQueue.main.async {
+                self.agentUpdateCheckingSources.remove(source)
+                self.handleAgentUpdateCheckResult(result)
+            }
+        }
+    }
+
+    func handleAgentUpdateCheckResult(_ result: AgentUpdateCheckResult) {
+        switch result.status {
+        case .upToDate:
+            showUpdateAlert(
+                title: "\(result.source.displayName): No Update Available",
+                message: result.detailMessage
+            )
+        case .updateAvailable:
+            let latest = result.latestVersion ?? "newer version"
+            let shouldUpdate = showUpdateConfirmationAlert(
+                title: "\(result.source.displayName) Update Available",
+                message: "Update \(latest) is available via \(result.primaryManager.displayName).\n\n\(result.detailMessage)\n\nUpdate now?"
+            )
+            if shouldUpdate {
+                runAgentUpdate(source: result.source, manager: result.primaryManager, packageIdentifier: result.packageIdentifier)
+            }
+        case .noPackageManagerDetected, .latestVersionUnavailable, .unsupportedForManager, .failed:
+            showUpdateAlert(
+                title: "\(result.source.displayName): Update Check",
+                message: result.detailMessage
+            )
+        }
+    }
+
+    func runAgentUpdate(source: SessionSource, manager: AgentPackageManager, packageIdentifier: String? = nil) {
+        if isAgentUpdateBusy(source) { return }
+        let service = agentUpdateService
+        agentUpdatingSources.insert(source)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = service.performUpdate(source: source, manager: manager, packageIdentifier: packageIdentifier)
+            DispatchQueue.main.async {
+                self.agentUpdatingSources.remove(source)
+                self.handleAgentUpdateExecutionResult(result)
+            }
+        }
+    }
+
+    func handleAgentUpdateExecutionResult(_ result: AgentUpdateExecutionResult) {
+        if result.success {
+            showUpdateAlert(
+                title: "\(result.source.displayName): Update Complete",
+                message: result.detailMessage
+            )
+            reprobeAgentBinary(result.source)
+            return
+        }
+
+        let stderr = trimmedForAlert(result.stderr)
+        let stdout = trimmedForAlert(result.stdout)
+        var details = result.detailMessage
+        if !stderr.isEmpty {
+            details += "\n\nstderr:\n\(stderr)"
+        } else if !stdout.isEmpty {
+            details += "\n\noutput:\n\(stdout)"
+        }
+        showUpdateAlert(
+            title: "\(result.source.displayName): Update Failed",
+            message: details
+        )
+    }
+
+    func reprobeAgentBinary(_ source: SessionSource) {
+        switch source {
+        case .codex: scheduleCodexProbe()
+        case .claude: scheduleClaudeProbe()
+        case .gemini: scheduleGeminiProbe()
+        case .opencode: scheduleOpenCodeProbe()
+        case .copilot: scheduleCopilotProbe()
+        case .droid: scheduleDroidProbe()
+        case .openclaw: scheduleOpenClawProbe()
+        }
+    }
+
+    func resolvedBinaryPath(for source: SessionSource) -> String? {
+        switch source {
+        case .codex:
+            return resolvedCodexPath
+        case .claude:
+            return claudeResolvedPath
+        case .gemini:
+            return geminiResolvedPath
+        case .opencode:
+            return opencodeResolvedPath
+        case .copilot:
+            return copilotResolvedPath
+        case .droid:
+            return droidResolvedPath
+        case .openclaw:
+            return openClawResolvedPath
+        }
+    }
+
+    func customBinaryPath(for source: SessionSource) -> String? {
+        switch source {
+        case .codex:
+            let value = codexBinaryOverride.isEmpty ? resumeSettings.binaryOverride : codexBinaryOverride
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .claude:
+            let value = claudeSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .gemini:
+            let value = geminiSettings.binaryOverride
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .opencode:
+            let value = opencodeSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .copilot:
+            let value = copilotSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .droid:
+            let value = droidSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .openclaw:
+            let value = openClawBinaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        }
+    }
+
+    func showUpdateConfirmationAlert(title: String, message: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Update")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    func showUpdateAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        _ = alert.runModal()
+    }
+
+    func trimmedForAlert(_ text: String, maxLength: Int = 1400) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= maxLength { return trimmed }
+        let index = trimmed.index(trimmed.startIndex, offsetBy: maxLength)
+        return String(trimmed[..<index]) + "\n…"
     }
 
 }
@@ -595,6 +802,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case geminiCLI
     case copilotCLI
     case droidCLI
+    case openClawCLI
     case about
 
     var id: String { rawValue }
@@ -613,6 +821,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .geminiCLI: return "Gemini CLI"
         case .copilotCLI: return "GitHub Copilot CLI"
         case .droidCLI: return "Droid"
+        case .openClawCLI: return "OpenClaw"
         case .about: return "About"
         }
     }
@@ -631,14 +840,15 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .geminiCLI: return "g.circle"
         case .copilotCLI: return "bolt.horizontal.circle"
         case .droidCLI: return "d.circle"
+        case .openClawCLI: return "o.circle"
         case .about: return "info.circle"
         }
     }
 }
 
 private extension PreferencesView {
-    // Sidebar order: General → Unified Window → Usage Tracking → Usage Probes → Menu Bar → [4 Agents] → About
-    var visibleTabs: [PreferencesTab] { [.general, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI, .about] }
+    // Sidebar order: General → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Agents → About
+    var visibleTabs: [PreferencesTab] { [.general, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI, .openClawCLI, .about] }
 }
 
 // MARK: - Probe helpers
@@ -750,6 +960,29 @@ extension PreferencesView {
         }
     }
 
+    func probeOpenClaw() {
+        if openClawProbeState == .probing { return }
+        openClawProbeState = .probing
+        openClawVersionString = nil
+        openClawResolvedPath = nil
+        let override = openClawBinaryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = probeOpenClawEnvironment(customPath: override.isEmpty ? nil : override)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let resolved):
+                    self.openClawVersionString = resolved.version
+                    self.openClawResolvedPath = resolved.binary.path
+                    self.openClawProbeState = .success
+                case .failure:
+                    self.openClawVersionString = nil
+                    self.openClawResolvedPath = nil
+                    self.openClawProbeState = .failure
+                }
+            }
+        }
+    }
+
     // Trigger background probes only when a relevant pane is active
     func maybeProbe(for tab: PreferencesTab) {
         switch tab {
@@ -765,6 +998,8 @@ extension PreferencesView {
             if copilotVersionString == nil && copilotProbeState != .probing { probeCopilot() }
         case .droidCLI:
             if droidVersionString == nil && droidProbeState != .probing { probeDroid() }
+        case .openClawCLI:
+            if openClawVersionString == nil && openClawProbeState != .probing { probeOpenClaw() }
         case .menuBar, .usageProbes, .general, .unified, .advanced, .about:
             break
         }
@@ -804,4 +1039,128 @@ extension PreferencesView {
         droidProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
+
+    func scheduleOpenClawProbe() {
+        openClawProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeOpenClaw() }
+        openClawProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+}
+
+private extension PreferencesView {
+    struct OpenClawProbeResult {
+        let version: String
+        let binary: URL
+    }
+
+    func probeOpenClawEnvironment(customPath: String?) -> Result<OpenClawProbeResult, Error> {
+        guard let binary = resolveOpenClawBinary(customPath: customPath) else {
+            return .failure(OpenClawProbeError.binaryNotFound)
+        }
+        guard let version = openClawVersionString(for: binary) else {
+            return .failure(OpenClawProbeError.versionQueryFailed)
+        }
+        return .success(OpenClawProbeResult(version: version, binary: binary))
+    }
+
+    func resolveOpenClawBinary(customPath: String?) -> URL? {
+        if let customPath, !customPath.isEmpty {
+            let expanded = (customPath as NSString).expandingTildeInPath
+            if FileManager.default.isExecutableFile(atPath: expanded) {
+                return URL(fileURLWithPath: expanded)
+            }
+        }
+
+        if let loginOpenClaw = whichViaLoginShell("openclaw"),
+           FileManager.default.isExecutableFile(atPath: loginOpenClaw) {
+            return URL(fileURLWithPath: loginOpenClaw)
+        }
+        if let loginClawdbot = whichViaLoginShell("clawdbot"),
+           FileManager.default.isExecutableFile(atPath: loginClawdbot) {
+            return URL(fileURLWithPath: loginClawdbot)
+        }
+
+        if let openClaw = whichInCurrentPath("openclaw") {
+            return URL(fileURLWithPath: openClaw)
+        }
+        if let clawdbot = whichInCurrentPath("clawdbot") {
+            return URL(fileURLWithPath: clawdbot)
+        }
+
+        for candidate in ["/opt/homebrew/bin/openclaw", "/usr/local/bin/openclaw", "/opt/homebrew/bin/clawdbot", "/usr/local/bin/clawdbot"] {
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return URL(fileURLWithPath: candidate)
+            }
+        }
+
+        return nil
+    }
+
+    func openClawVersionString(for binaryURL: URL) -> String? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let escapedBinary = shellEscape(binaryURL.path)
+        let versionResult = runOpenClawCommand([shell, "-lic", "\(escapedBinary) --version"])
+        if versionResult.status == 0 {
+            let text = (versionResult.stdout + "\n" + versionResult.stderr).trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? "unknown" : text
+        }
+        let fallbackResult = runOpenClawCommand([shell, "-lic", "\(escapedBinary) version"])
+        guard fallbackResult.status == 0 else { return nil }
+        let fallbackText = (fallbackResult.stdout + "\n" + fallbackResult.stderr).trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallbackText.isEmpty ? "unknown" : fallbackText
+    }
+
+    func whichInCurrentPath(_ command: String) -> String? {
+        guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
+        for component in path.split(separator: ":") {
+            let candidate = URL(fileURLWithPath: String(component), isDirectory: true).appendingPathComponent(command)
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                return candidate.path
+            }
+        }
+        return nil
+    }
+
+    func whichViaLoginShell(_ command: String) -> String? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let result = runOpenClawCommand([shell, "-lic", "command -v \(command) || true"])
+        let resolved = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !resolved.isEmpty, resolved != command else { return nil }
+        return resolved.split(whereSeparator: \.isNewline).first.map(String.init)
+    }
+
+    func runOpenClawCommand(_ argv: [String]) -> (status: Int32, stdout: String, stderr: String) {
+        guard let executable = argv.first else { return (127, "", "No command provided") }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = Array(argv.dropFirst())
+        process.environment = ProcessInfo.processInfo.environment
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        do {
+            try process.run()
+        } catch {
+            return (127, "", error.localizedDescription)
+        }
+        process.waitUntilExit()
+        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+        let outString = String(data: outData, encoding: .utf8) ?? ""
+        let errString = String(data: errData, encoding: .utf8) ?? ""
+        return (process.terminationStatus, outString, errString)
+    }
+
+    func shellEscape(_ value: String) -> String {
+        if value.isEmpty { return "''" }
+        if !value.contains("'") { return "'\(value)'" }
+        return "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
+private enum OpenClawProbeError: Error {
+    case binaryNotFound
+    case versionQueryFailed
 }

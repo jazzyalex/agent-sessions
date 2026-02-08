@@ -149,7 +149,8 @@ enum AgentEnablement {
             root = DroidSessionDiscovery(customSessionsRoot: sessionsCustom.isEmpty ? nil : sessionsCustom,
                                          customProjectsRoot: projectsCustom.isEmpty ? nil : projectsCustom).sessionsRoot()
         case .openclaw:
-            root = OpenClawSessionDiscovery().sessionsRoot()
+            let custom = defaults.string(forKey: PreferencesKey.Paths.openClawSessionsRootOverride) ?? ""
+            root = OpenClawSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         }
         if fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue { return true }
         if source == .droid {

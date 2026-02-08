@@ -452,8 +452,8 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         window.contentView = hv
         window.title = "Onboarding"
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 780, height: 620))
-        window.minSize = NSSize(width: 780, height: 620)
+        window.setContentSize(NSSize(width: 820, height: 700))
+        window.minSize = NSSize(width: 820, height: 700)
         window.center()
         window.delegate = self
 

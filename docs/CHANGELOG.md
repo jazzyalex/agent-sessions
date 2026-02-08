@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Onboarding: Added a visible “Help improve Agent Sessions” feedback card on the first slide (below session/agent counters) that links to the short feedback form and clarifies that Agent Sessions is local-only with no telemetry.
+- Onboarding: Fixed overlap in the “Sessions by Agent” weekly chart, split usage limit tracking into separate Claude/Codex cards, and removed onboarding slide scrolling by fitting all slides within the onboarding window.
+- Sessions/Search: Gemini, Copilot, Droid, and OpenClaw indexing now use the same power-aware idle execution profiles as Codex/Claude (lower-priority slices and deferred non-critical work on battery/background).
+- Preferences: Added an OpenClaw pane after the other agent panes with Binary Source and Sessions Directory controls, matching the other CLI agent preference sections.
+- Preferences: Added a sidebar divider between Droid and OpenClaw, and added per-agent `Update...` actions that detect install manager, check latest versions, and run updates with confirmation.
+- Preferences: Improved per-agent `Update...` detection to resolve package-manager binaries from common PATH locations and infer npm package names from the installed binary path (fixes false "manager not detected" and OpenClaw package-name mismatches).
 
 ## [2.11] - 2026-02-06
 
