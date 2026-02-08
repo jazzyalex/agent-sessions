@@ -96,6 +96,7 @@ final class SessionIndexer: ObservableObject {
     // Transcript cache for accurate search
     private let transcriptCache = TranscriptCache()
     private let progressThrottler = ProgressThrottler()
+    private var refreshTask: Task<Void, Never>? = nil
 
     // Expose cache for SearchCoordinator (internal - not public API)
     internal var searchTranscriptCache: TranscriptCache { transcriptCache }
@@ -162,6 +163,7 @@ final class SessionIndexer: ObservableObject {
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
     private var lastPrewarmSignatureByID: [String: Int] = [:]
+    private var transcriptPrewarmTask: Task<Void, Never>? = nil
 
     var prefTheme: TranscriptTheme { TranscriptTheme(rawValue: themeRaw) ?? .codexDark }
     func setTheme(_ t: TranscriptTheme) { themeRaw = t.rawValue }
@@ -538,6 +540,10 @@ final class SessionIndexer: ObservableObject {
 
         let token = UUID()
         refreshToken = token
+        refreshTask?.cancel()
+        refreshTask = nil
+        transcriptPrewarmTask?.cancel()
+        transcriptPrewarmTask = nil
         launchPhase = .hydrating
         isIndexing = true
         isProcessingTranscripts = false
@@ -548,7 +554,7 @@ final class SessionIndexer: ObservableObject {
         hasEmptyDirectory = false
 
         let fm = FileManager.default
-        Task.detached(priority: .utility) { [weak self, token, root, mode, trigger, executionProfile] in
+        let task = Task.detached(priority: .utility) { [weak self, token, root, mode, trigger, executionProfile] in
             guard let self else { return }
 
             // Fast path: hydrate from SQLite index if available.
@@ -717,6 +723,8 @@ final class SessionIndexer: ObservableObject {
                 }
 
                 if presentedHydration || executionProfile.deferNonCriticalWork {
+                    self.transcriptPrewarmTask?.cancel()
+                    self.transcriptPrewarmTask = nil
                     self.isProcessingTranscripts = false
                     self.progressText = "Ready"
                     self.launchPhase = .ready
@@ -724,19 +732,20 @@ final class SessionIndexer: ObservableObject {
                     // Start background transcript indexing for accurate search (delta-based).
                     // Only warm sessions that have real events, are not trivially empty/low,
                     // and whose (size,eventCount) signature changed since last prewarm.
-                    let delta: [Session] = {
-                        let all = mergedWithArchives
-                        var out: [Session] = []
-                        out.reserveCapacity(all.count)
-                        for s in all {
-                            if s.events.isEmpty { continue }
-                            if s.messageCount <= 2 { continue }
-                            let size = s.fileSizeBytes ?? 0
-                            let sig = size ^ (s.eventCount << 16)
-                            if self.lastPrewarmSignatureByID[s.id] == sig { continue }
-                            self.lastPrewarmSignatureByID[s.id] = sig
-                            out.append(s)
-                            if out.count >= 256 { break } // bound initial work per refresh
+	                    let delta: [Session] = {
+	                        let all = mergedWithArchives
+	                        var out: [Session] = []
+	                        out.reserveCapacity(all.count)
+	                        for s in all {
+	                            if s.events.isEmpty { continue }
+	                            if s.messageCount <= 2 { continue }
+	                            if let sizeBytes = s.fileSizeBytes, sizeBytes > FeatureFlags.transcriptPrewarmMaxSessionBytes { continue }
+	                            let size = s.fileSizeBytes ?? 0
+	                            let sig = size ^ (s.eventCount << 16)
+	                            if self.lastPrewarmSignatureByID[s.id] == sig { continue }
+	                            self.lastPrewarmSignatureByID[s.id] = sig
+	                            out.append(s)
+	                            if out.count >= FeatureFlags.transcriptPrewarmMaxSessionsPerRefresh { break } // bound work per refresh
                         }
                         return out
                     }()
@@ -746,19 +755,23 @@ final class SessionIndexer: ObservableObject {
                         self.launchPhase = .transcripts
                         let cache = self.transcriptCache
                         let deltaToWarm = delta
-                        Task.detached(priority: .utility) { [weak self, token] in
+                        self.transcriptPrewarmTask?.cancel()
+                        self.transcriptPrewarmTask = Task.detached(priority: .utility) { [weak self, token] in
                             LaunchProfiler.log("Codex.refresh: transcript prewarm start (delta=\(deltaToWarm.count))")
                             await cache.generateAndCache(sessions: deltaToWarm)
+                            if Task.isCancelled { return }
                             guard let strongSelf = self else { return }
                             await MainActor.run {
                                 guard strongSelf.refreshToken == token else { return }
                                 LaunchProfiler.log("Codex.refresh: transcript prewarm complete")
+                                strongSelf.transcriptPrewarmTask = nil
                                 strongSelf.isProcessingTranscripts = false
                                 strongSelf.progressText = "Ready"
                                 strongSelf.launchPhase = .ready
                             }
                         }
                     } else {
+                        self.transcriptPrewarmTask = nil
                         self.progressText = "Ready"
                         self.launchPhase = .ready
                     }
@@ -788,6 +801,22 @@ final class SessionIndexer: ObservableObject {
                     }
                 }
             }
+        }
+        refreshTask = task
+    }
+
+    @MainActor
+    func cancelInFlightWork() {
+        refreshToken = UUID()
+        refreshTask?.cancel()
+        refreshTask = nil
+        transcriptPrewarmTask?.cancel()
+        transcriptPrewarmTask = nil
+        isIndexing = false
+        isProcessingTranscripts = false
+        progressText = "Ready"
+        if launchPhase != .error {
+            launchPhase = .ready
         }
     }
 

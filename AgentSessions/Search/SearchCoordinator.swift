@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 // Actor for thread-safe promotion state
 private actor PromotionState {
@@ -49,11 +50,30 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     // Generation token to ignore stale appends after cancel/restart
     private var runID = UUID()
     private var prewarmInFlight: Set<String> = []
+    private var prewarmTasksByID: [String: Task<Void, Never>] = [:]
+    private var appIsActive: Bool = true
     // Throttle guards for progress updates
     private var progressThrottleLastFlush = DispatchTime.now()
 
     init(store: SearchSessionStoring) {
         self.store = store
+    }
+
+    deinit {
+        currentTask?.cancel()
+        deepScanTask?.cancel()
+        prewarmTasksByID.values.forEach { $0.cancel() }
+    }
+
+    @MainActor
+    func setAppActive(_ active: Bool) {
+        appIsActive = active
+        if !active {
+            cancel(clearResults: false)
+            prewarmTasksByID.values.forEach { $0.cancel() }
+            prewarmTasksByID.removeAll()
+            prewarmInFlight.removeAll()
+        }
     }
 
     // Get appropriate transcript cache based on session source
@@ -76,6 +96,10 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     }
 
     func cancel() {
+        cancel(clearResults: true)
+    }
+
+    private func cancel(clearResults: Bool) {
         currentTask?.cancel()
         currentTask = nil
         deepScanTask?.cancel()
@@ -86,7 +110,9 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             self.isRunning = false
             self.wasCanceled = true
             self.progress = .init()
-            self.results = []
+            if clearResults {
+                self.results = []
+            }
         }
     }
 
@@ -98,16 +124,20 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     }
 
     func prewarmTranscriptIfNeeded(for session: Session) {
+        if !appIsActive { return }
+        if !NSApp.isActive { return }
         guard let cache = transcriptCache(for: session.source) else { return }
         if cache.getCached(session.id) != nil { return }
         if prewarmInFlight.contains(session.id) { return }
+        if prewarmTasksByID[session.id] != nil { return }
         prewarmInFlight.insert(session.id)
 
         let sessionSnapshot = session
-        Task.detached(priority: .utility) { [weak self] in
+        let task = Task.detached(priority: .utility) { [weak self] in
             defer {
                 DispatchQueue.main.async { [weak self] in
                     self?.prewarmInFlight.remove(sessionSnapshot.id)
+                    self?.prewarmTasksByID[sessionSnapshot.id] = nil
                 }
             }
 
@@ -124,8 +154,9 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                 }
             }
 
-            _ = cache.getOrGenerate(session: target)
+            await cache.generateAndCache(sessions: [target])
         }
+        prewarmTasksByID[session.id] = task
     }
 
     func start(query: String,
@@ -137,6 +168,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                includeCopilot: Bool,
                includeDroid: Bool,
                includeOpenClaw: Bool,
+               enableDeepScan: Bool,
                all: [Session]) {
         // Cancel any in-flight search
         currentTask?.cancel()
@@ -184,7 +216,12 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                 if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
                 guard hasData else {
                     // Fall back to legacy search until the DB is warmed.
-                    await self.startLegacySearch(runID: newRunID, query: query, filters: filters, allowed: allowed, all: all)
+                    await self.startLegacySearch(runID: newRunID,
+                                                 query: query,
+                                                 filters: filters,
+                                                 allowed: allowed,
+                                                 all: all,
+                                                 allowDeepScan: enableDeepScan)
                     return
                 }
 
@@ -211,7 +248,12 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     // Use FTS for indexed sessions, then fall back to legacy matching for unindexed ones.
                     let indexedIDs = Set((try? await db.indexedSessionIDs(sources: allowedRaw)) ?? [])
                     if indexedIDs.isEmpty {
-                        await self.startLegacySearch(runID: newRunID, query: query, filters: filters, allowed: allowed, all: all)
+                        await self.startLegacySearch(runID: newRunID,
+                                                     query: query,
+                                                     filters: filters,
+                                                     allowed: allowed,
+                                                     all: all,
+                                                     allowDeepScan: enableDeepScan)
                         return
                     }
 
@@ -228,7 +270,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     )) ?? []
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
-                    let deepEnabled = self.deepToolOutputsEnabled()
+                    let deepEnabled = enableDeepScan && self.deepToolOutputsEnabled()
 	                    var mergedIDs = ids
 	                    var mergedSet = Set(ids)
 	                    var out = mergedIDs.compactMap { byID[$0] }
@@ -272,7 +314,9 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                         }
                     }
 
-                    let unindexedCandidates = candidates.filter { !indexedIDs.contains($0.id) && !seen.contains($0.id) }
+                    let unindexedCandidates = enableDeepScan
+                        ? candidates.filter { !indexedIDs.contains($0.id) && !seen.contains($0.id) }
+                        : []
                     let deepCandidates = deepEnabled
                         ? candidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
                         : []
@@ -338,11 +382,21 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         // Launch orchestration
         Task { [weak self] in
             guard let self else { return }
-            await self.startLegacySearch(runID: newRunID, query: query, filters: filters, allowed: allowed, all: all)
+            await self.startLegacySearch(runID: newRunID,
+                                         query: query,
+                                         filters: filters,
+                                         allowed: allowed,
+                                         all: all,
+                                         allowDeepScan: enableDeepScan)
         }
     }
 
-    private func startLegacySearch(runID: UUID, query: String, filters: Filters, allowed: Set<SessionSource>, all: [Session]) async {
+    private func startLegacySearch(runID: UUID,
+                                   query: String,
+                                   filters: Filters,
+                                   allowed: Set<SessionSource>,
+                                   all: [Session],
+                                   allowDeepScan: Bool) async {
         let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
         currentTask = Task.detached(priority: prio) { [weak self, runID] in
             guard let self else { return }
@@ -375,7 +429,13 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                 if Task.isCancelled { await self.finishCanceled(runID: runID); return }
                 let end = min(start + batchSize, nonLarge.count)
                 let batch = Array(nonLarge[start..<end])
-                let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold, textScope: .all)
+                let hits = await self.searchBatch(batch: batch,
+                                                  query: query,
+                                                  filters: filters,
+                                                  threshold: threshold,
+                                                  textScope: .all,
+                                                  allowDeepParse: allowDeepScan,
+                                                  allowTranscriptGeneration: false)
                 if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
                 // Filter out duplicates before entering MainActor
@@ -415,16 +475,22 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
                 let s = large[idx]
                 if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-                if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
+                if let parsed = await self.parseFullIfNeeded(session: s,
+                                                             threshold: threshold,
+                                                             allowDeepParse: allowDeepScan) {
                     if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
                     // Optionally persist parsed session back to indexers for accuracy outside search
-                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
+                    if allowDeepScan, !FeatureFlags.disableSessionUpdatesDuringSearch {
                         self.store.updateSession(parsed)
                     }
 
                     let cache = self.transcriptCache(for: parsed.source)
-                    if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
+                    if FilterEngine.sessionMatches(parsed,
+                                                  filters: filters,
+                                                  transcriptCache: cache,
+                                                  allowTranscriptGeneration: false,
+                                                  textScope: .all) {
                         // Check and update seen outside MainActor
                         let shouldAdd = !seen.contains(parsed.id)
                         if shouldAdd {
@@ -630,7 +696,13 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             if Task.isCancelled { await self.finishCanceled(runID: runID); return }
             let end = min(start + batchSize, nonLarge.count)
             let batch = Array(nonLarge[start..<end])
-            let hits = await self.searchBatch(batch: batch, query: query, filters: filters, threshold: threshold, textScope: textScope)
+            let hits = await self.searchBatch(batch: batch,
+                                              query: query,
+                                              filters: filters,
+                                              threshold: threshold,
+                                              textScope: textScope,
+                                              allowDeepParse: true,
+                                              allowTranscriptGeneration: false)
             if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
             let newHits = hits.filter { !seen.contains($0.id) }
@@ -667,7 +739,9 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
             let s = large[idx]
             if Task.isCancelled { await self.finishCanceled(runID: runID); return }
-            if let parsed = await self.parseFullIfNeeded(session: s, threshold: threshold) {
+            if let parsed = await self.parseFullIfNeeded(session: s,
+                                                         threshold: threshold,
+                                                         allowDeepParse: true) {
                 if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
                 if !FeatureFlags.disableSessionUpdatesDuringSearch {
@@ -676,7 +750,11 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
                 if textScope == .all {
                     let cache = self.transcriptCache(for: parsed.source)
-                    if FilterEngine.sessionMatches(parsed, filters: filters, transcriptCache: cache) {
+                    if FilterEngine.sessionMatches(parsed,
+                                                  filters: filters,
+                                                  transcriptCache: cache,
+                                                  allowTranscriptGeneration: false,
+                                                  textScope: .all) {
                         let shouldAdd = !seen.contains(parsed.id)
                         if shouldAdd {
                             seen.insert(parsed.id)
@@ -778,7 +856,9 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                              query: String,
                              filters: Filters,
                              threshold: Int,
-                             textScope: FilterEngine.TextScope) async -> [Session] {
+                             textScope: FilterEngine.TextScope,
+                             allowDeepParse: Bool,
+                             allowTranscriptGeneration: Bool) async -> [Session] {
         var out: [Session] = []
         out.reserveCapacity(batch.count / 4)
         for var s in batch {
@@ -786,9 +866,12 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             if s.events.isEmpty {
                 // For non-large sessions only, parse quickly if needed
                 let size = Self.sizeBytes(for: s)
-                if size < threshold, let parsed = await parseFullIfNeeded(session: s, threshold: threshold) {
+                if size < threshold,
+                   let parsed = await parseFullIfNeeded(session: s,
+                                                        threshold: threshold,
+                                                        allowDeepParse: allowDeepParse) {
                     s = parsed
-                    if !FeatureFlags.disableSessionUpdatesDuringSearch {
+                    if allowDeepParse, !FeatureFlags.disableSessionUpdatesDuringSearch {
                         self.store.updateSession(parsed)
                     }
                 }
@@ -797,7 +880,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             if FilterEngine.sessionMatches(s,
                                           filters: filters,
                                           transcriptCache: cache,
-                                          allowTranscriptGeneration: textScope == .all,
+                                          allowTranscriptGeneration: allowTranscriptGeneration,
                                           textScope: textScope) {
                 out.append(s)
             }
@@ -805,8 +888,12 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         return out
     }
 
-    private func parseFullIfNeeded(session s: Session, threshold: Int) async -> Session? {
-        await store.parseFull(session: s)
+    private func parseFullIfNeeded(session s: Session,
+                                   threshold: Int,
+                                   allowDeepParse: Bool) async -> Session? {
+        guard !Task.isCancelled else { return nil }
+        guard allowDeepParse else { return s }
+        return await store.parseFull(session: s)
     }
 
     private static func sizeBytes(for s: Session) -> Int {

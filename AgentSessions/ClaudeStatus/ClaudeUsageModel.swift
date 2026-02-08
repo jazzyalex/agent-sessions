@@ -54,6 +54,7 @@ final class ClaudeUsageModel: ObservableObject {
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
+    private var appIsActive: Bool = NSApp.isActive
     private var wakeObservers: [NSObjectProtocol] = []
 
     func setEnabled(_ enabled: Bool) {
@@ -81,11 +82,21 @@ final class ClaudeUsageModel: ObservableObject {
         propagateVisibility()
     }
 
+    func setAppActive(_ active: Bool) {
+        appIsActive = active
+        propagateVisibility()
+    }
+
     private func propagateVisibility() {
-        let union = stripVisible || menuVisible
+        // Treat the in-app strip as non-visible while the app is inactive to avoid
+        // background polling. Menu bar visibility should remain effective even when
+        // the app is inactive so the user can still read live usage in the menu bar.
         let svc = self.service
+        let menuVisible = self.menuVisible
+        let stripVisible = self.stripVisible
+        let appIsActive = self.appIsActive
         Task.detached {
-            await svc?.setVisible(union)
+            await svc?.setVisibility(menuVisible: menuVisible, stripVisible: stripVisible, appIsActive: appIsActive)
         }
     }
 

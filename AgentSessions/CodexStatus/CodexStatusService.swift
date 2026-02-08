@@ -137,6 +137,7 @@ final class CodexUsageModel: ObservableObject {
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
+    private var appIsActive: Bool = NSApp.isActive
 
     func setEnabled(_ enabled: Bool) {
         guard enabled != isEnabled else { return }
@@ -163,10 +164,20 @@ final class CodexUsageModel: ObservableObject {
         propagateVisibility()
     }
 
+    func setAppActive(_ active: Bool) {
+        appIsActive = active
+        propagateVisibility()
+    }
+
     private func propagateVisibility() {
-        let union = stripVisible || menuVisible
+        // Treat the in-app strip as non-visible while the app is inactive to avoid
+        // background polling. Menu bar visibility should remain effective even when
+        // the app is inactive so the user can still read live usage in the menu bar.
+        let menuVisible = self.menuVisible
+        let stripVisible = self.stripVisible
+        let appIsActive = self.appIsActive
         Task.detached { [weak self] in
-            await self?.service?.setVisible(union)
+            await self?.service?.setVisibility(menuVisible: menuVisible, stripVisible: stripVisible, appIsActive: appIsActive)
         }
     }
 
@@ -360,6 +371,27 @@ struct RateLimitSummary {
 // MARK: - Service
 
 actor CodexStatusService {
+    enum VisibilityMode: Sendable {
+        case hidden
+        case menuBackground
+        case active
+    }
+
+    struct VisibilityContext: Sendable, Equatable {
+        var menuVisible: Bool
+        var stripVisible: Bool
+        var appIsActive: Bool
+
+        var effectiveVisible: Bool { menuVisible || (stripVisible && appIsActive) }
+        var mode: VisibilityMode {
+            if effectiveVisible {
+                if appIsActive { return .active }
+                if menuVisible { return .menuBackground }
+            }
+            return .hidden
+        }
+    }
+
     private enum State { case idle, starting, running, stopping }
     private static let probeSessionName = "status"
     private static let probeLabelPrefix = "as-cx-"
@@ -386,6 +418,8 @@ actor CodexStatusService {
     private var lastFiveHourResetDate: Date?
     private var shouldRun: Bool = true
     private var visible: Bool = false
+    private var visibilityContext = VisibilityContext(menuVisible: false, stripVisible: false, appIsActive: false)
+    private var visibilityMode: VisibilityMode { visibilityContext.mode }
     private var backoffSeconds: UInt64 = 1
     private var refresherTask: Task<Void, Never>?
     private var lastStatusProbe: Date? = nil
@@ -394,6 +428,15 @@ actor CodexStatusService {
     private var lastAppliedEventTimestamp: Date? = nil
     private var lastParseWasStaleOrFailed: Bool = false
     private let unchangedParseSkipFreshnessSeconds: TimeInterval = 12 * 60
+    private let automaticProbeCooldownSeconds: TimeInterval = 20 * 60
+    private let preferredLogProbeCandidateLimit: Int = 8
+    private let fallbackLogProbeCandidateLimit: Int = 32
+    private let logTailReadMaxBytes: Int = 192 * 1024
+    private var hasResolvedTerminalPATH: Bool = false
+    private var cachedTerminalPATH: String? = nil
+    private var hasResolvedTmuxPath: Bool = false
+    private var cachedTmuxPath: String? = nil
+    private var didRunOrphanCleanup: Bool = false
 
     init(updateHandler: @escaping @Sendable (CodexUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (Bool) -> Void) {
@@ -408,14 +451,25 @@ actor CodexStatusService {
 
     func start() async {
         shouldRun = true
-        await cleanupOrphanedProbeProcesses()
+        // Orphan cleanup is deferred until a usage surface becomes visible
+        // to avoid heavy background work when the app is inactive/hidden.
+        restartRefresherLoop()
+    }
+
+    private func restartRefresherLoop() {
         refresherTask?.cancel()
         refresherTask = Task { [weak self] in
             guard let self else { return }
-            while await self.shouldRun {
+            while !Task.isCancelled {
+                if !(await self.shouldRun) { break }
                 await self.refreshTick()
+                if Task.isCancelled { break }
                 let interval = await self.nextInterval()
-                try? await Task.sleep(nanoseconds: interval)
+                do {
+                    try await Task.sleep(nanoseconds: interval)
+                } catch {
+                    break
+                }
             }
         }
     }
@@ -432,18 +486,52 @@ actor CodexStatusService {
     }
 
     func setVisible(_ isVisible: Bool) {
-        let wasVisible = visible
-        visible = isVisible
+        // Back-compat shim: treat this as in-app visibility while active.
+        setVisibility(menuVisible: false, stripVisible: isVisible, appIsActive: true)
+    }
 
-        // If transitioning from hidden → visible, immediately refresh to show current data
-        if !wasVisible && isVisible {
-            Task { await self.refreshTick() }
+    func setVisibility(menuVisible: Bool, stripVisible: Bool, appIsActive: Bool) {
+        let previousMode = visibilityMode
+        visibilityContext = VisibilityContext(menuVisible: menuVisible, stripVisible: stripVisible, appIsActive: appIsActive)
+
+        let wasVisible = visible
+        visible = visibilityContext.effectiveVisible
+        let mode = visibilityMode
+        let becameActive = (previousMode != .active && mode == .active)
+        let visibilityModeChanged = previousMode != mode
+
+        // If transitioning from hidden → visible, immediately refresh to show current data.
+        // Menu-background visibility uses a cheap refresh path (no directory scans).
+        if previousMode == .hidden, mode != .hidden, !wasVisible, visible {
+            Task { [weak self] in
+                guard let self else { return }
+                if becameActive {
+                    await self.ensureOrphanCleanupIfNeeded()
+                }
+                await self.refreshTick()
+            }
+        } else if becameActive {
+            // When transitioning from menu-background → active, clean up orphans once per launch.
+            Task { [weak self] in
+                guard let self else { return }
+                await self.ensureOrphanCleanupIfNeeded()
+            }
+        }
+
+        // Wake the refresher loop when visibility changes so we don't stay asleep
+        // on a long hidden interval after becoming visible.
+        if visibilityModeChanged, refresherTask != nil, shouldRun {
+            restartRefresherLoop()
         }
     }
 
     func refreshNow() {
         // Manual refresh from strip/menu uses the same stale-only probe rule.
-        Task { await self.refreshTick(userInitiated: true) }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.ensureOrphanCleanupIfNeeded()
+            await self.refreshTick(userInitiated: true)
+        }
     }
 
     private func beginTmuxProbe() -> Bool {
@@ -481,7 +569,7 @@ actor CodexStatusService {
         proc.arguments = ["bash", "-lc", command]
 
         var env = ProcessInfo.processInfo.environment
-        if let terminalPATH = Self.terminalPATH() { env["PATH"] = terminalPATH }
+        if let terminalPATH = terminalPATHCached() { env["PATH"] = terminalPATH }
         proc.environment = env
 
         let stdin = Pipe()
@@ -638,13 +726,26 @@ actor CodexStatusService {
     }
 
     private func refreshTick(userInitiated: Bool = false) async {
+        let mode = visibilityMode
+        if mode == .hidden && !userInitiated { return }
         // Log-probe path: scan latest JSONL for token_count/rate_limits across known roots
         let roots = sessionsRoots()
         guard !roots.isEmpty else { availabilityHandler(true); return }
         availabilityHandler(false)
 
-        let latestCandidate = newestCandidateFile(roots: roots, daysBack: 10, limit: 10)
-        let shouldSkipParse = shouldSkipLogParse(latestCandidate: latestCandidate, now: Date())
+        if mode == .menuBackground && !userInitiated {
+            await refreshTickMenuBackground(roots: roots, now: Date())
+            return
+        }
+
+        let candidateDaysBack = lastParseWasStaleOrFailed ? 10 : 2
+        var latestCandidate = newestCandidateFile(roots: roots, daysBack: candidateDaysBack, limit: 10)
+        if latestCandidate == nil, candidateDaysBack < 10 {
+            latestCandidate = newestCandidateFile(roots: roots, daysBack: 10, limit: 10)
+        }
+
+        let now = Date()
+        let shouldSkipParse = shouldSkipLogParse(latestCandidate: latestCandidate, now: now)
         if !shouldSkipParse, let summary = probeLatestRateLimits(roots: roots, expandSearch: lastParseWasStaleOrFailed) {
             // Do not regress to older data after a successful /status probe.
             // Only apply log-derived snapshots when they are at least as new
@@ -683,8 +784,80 @@ actor CodexStatusService {
         }
 
         // Optional: run a one-shot tmux /status probe only when stale (manual or auto)
-        if !FeatureFlags.disableCodexProbes {
+        if !FeatureFlags.disableCodexProbes, (mode == .active || userInitiated) {
             await maybeProbeStatusViaTMUX(userInitiated: userInitiated)
+        }
+    }
+
+    private func refreshTickMenuBackground(roots: [URL], now: Date) async {
+        // Menu bar should remain functional while the app is inactive, but background ticks
+        // must stay extremely cheap to avoid energy warnings. Avoid directory scans.
+
+        if let eventTime = snapshot.eventTimestamp {
+            let stale = now.timeIntervalSince(eventTime) > 3 * 60
+            if snapshot.usageLine != (stale ? "Usage is stale (>3m)" : nil) {
+                var s = snapshot
+                s.usageLine = stale ? "Usage is stale (>3m)" : nil
+                snapshot = s
+                updateHandler(snapshot)
+            }
+        }
+
+        // If we've never applied a log-derived source file, seed it once with a tiny scan.
+        // Important: do not set `lastAppliedSourceFileMTime` during seeding, otherwise we
+        // can skip parsing the seed file and never populate the menu snapshot until a new write.
+        var sourceFile: URL? = nil
+        if let path = lastAppliedSourceFilePath {
+            let candidate = URL(fileURLWithPath: path)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                sourceFile = candidate
+            } else {
+                // The previously seeded file was rotated/removed. Clear and re-seed.
+                lastAppliedSourceFilePath = nil
+                lastAppliedSourceFileMTime = nil
+            }
+        }
+        if sourceFile == nil {
+            guard let seed = newestCandidateFile(roots: roots, daysBack: 1, limit: 3) else { return }
+            lastAppliedSourceFilePath = seed.path
+            sourceFile = seed
+        }
+        guard let sourceFile else { return }
+
+        // Only parse when the file changes; otherwise rely on the cached snapshot.
+        guard let mtime = fileModificationDate(sourceFile) else { return }
+        if let lastAppliedSourceFileMTime,
+           mtime == lastAppliedSourceFileMTime,
+           lastAppliedEventTimestamp != nil {
+            return
+        }
+
+        if let summary = parseTokenCountTail(url: sourceFile) {
+            let previousEvent = snapshot.eventTimestamp
+            let newEvent = summary.eventTimestamp
+            let shouldApply: Bool
+            if let newEvent, let previousEvent {
+                shouldApply = newEvent >= previousEvent
+            } else {
+                shouldApply = true
+            }
+            if shouldApply {
+                var s = snapshot
+                if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
+                if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
+                s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
+                s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
+                lastFiveHourResetDate = summary.fiveHour.resetAt
+                s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
+                s.eventTimestamp = summary.eventTimestamp
+                snapshot = s
+                updateHandler(snapshot)
+            }
+            lastAppliedSourceFileMTime = mtime
+            lastAppliedEventTimestamp = summary.eventTimestamp
+            lastParseWasStaleOrFailed = summary.stale
+        } else {
+            lastParseWasStaleOrFailed = true
         }
     }
 
@@ -707,8 +880,11 @@ actor CodexStatusService {
         let stale5h = isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
         let staleWeek = isResetInfoStale(kind: "week", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
 
-        // Probe if: no recent sessions OR data looks stale (for monitoring when visible)
-        guard noRecentSessions || stale5h || staleWeek else { return }
+        // Auto probes are intentionally strict to avoid energy spikes from low-value tmux launches.
+        let shouldProbe = userInitiated
+            ? (noRecentSessions || stale5h || staleWeek)
+            : (noRecentSessions && (stale5h || staleWeek))
+        guard shouldProbe else { return }
 
         // Additional gates for automatic/background path only
         if !userInitiated {
@@ -720,7 +896,7 @@ actor CodexStatusService {
             let allowAuto = UserDefaults.standard.bool(forKey: "CodexAllowStatusProbe")
             guard allowAuto else { return }
             guard visible else { return }
-            if let last = lastStatusProbe, now.timeIntervalSince(last) < 600 { return }
+            if let last = lastStatusProbe, now.timeIntervalSince(last) < automaticProbeCooldownSeconds { return }
         }
 
         guard let tmuxSnap = await runCodexStatusViaTMUX() else { return }
@@ -785,7 +961,7 @@ actor CodexStatusService {
         let resolver = CodexCLIEnvironment()
         let codexBin = resolver.resolveBinary(customPath: nil)?.path
         if let codexBin { env["CODEX_BIN"] = codexBin }
-        let tmuxBin = resolveTmuxPath()
+        let tmuxBin = resolveTmuxPathCached()
         if let tmuxBin { env["TMUX_BIN"] = tmuxBin }
         let probeLabel = makeProbeLabel()
         env["TMUX_LABEL"] = probeLabel
@@ -795,7 +971,7 @@ actor CodexStatusService {
         let scriptTimeoutSeconds = max(20, timeoutValue + 8)
 
         // Provide a Terminal-like PATH so Node and vendor binaries resolve inside tmux
-        if let terminalPATH = Self.terminalPATH() { env["PATH"] = terminalPATH }
+        if let terminalPATH = terminalPATHCached() { env["PATH"] = terminalPATH }
         process.environment = env
         let out = Pipe(); let err = Pipe()
         process.standardOutput = out; process.standardError = err
@@ -991,7 +1167,7 @@ actor CodexStatusService {
     private func tmuxServerLooksLikeProbe(label: String,
                                           session: String,
                                           expectedCommandToken: String) async -> Bool {
-        guard let tmuxPath = resolveTmuxPath() else { return false }
+        guard let tmuxPath = resolveTmuxPathCached() else { return false }
         let sessions = await runProcess(executable: tmuxPath,
                                         arguments: ["-L", label, "list-sessions", "-F", "#{session_name}"],
                                         timeoutSeconds: 2)
@@ -1023,7 +1199,7 @@ actor CodexStatusService {
     }
 
     private func cleanupTmuxProbe(label: String, session: String) async {
-        guard let tmuxPath = resolveTmuxPath() else { return }
+        guard let tmuxPath = resolveTmuxPathCached() else { return }
         if let panePid = await tmuxPanePID(tmuxPath: tmuxPath, label: label, session: session) {
             await terminateProcessGroup(pid: panePid)
         }
@@ -1095,9 +1271,18 @@ actor CodexStatusService {
         // Energy optimization: Stop polling entirely when nothing is visible
         // (menu bar and strips both hidden)
         let urgent = isUrgent()
-        if !visible && !urgent {
+        if visibilityMode == .hidden && !urgent {
             // When hidden and not urgent: don't poll at all (1 hour = effectively disabled)
             return 3600 * 1_000_000_000
+        }
+
+        // Energy optimization: Menu-bar background visibility should tick rarely and cheaply.
+        if visibilityMode == .menuBackground && !urgent {
+            if !Self.onACPower() {
+                return 10 * 60 * 1_000_000_000
+            }
+            // Clamp to at least 5 minutes to avoid high-frequency wakeups when hidden.
+            return max(UInt64(300), userInterval) * 1_000_000_000
         }
 
         // Policy when visible or urgent:
@@ -1116,6 +1301,12 @@ actor CodexStatusService {
             if reset.timeIntervalSinceNow <= 15 * 60 { return true }
         }
         return false
+    }
+
+    private func ensureOrphanCleanupIfNeeded() async {
+        guard !didRunOrphanCleanup else { return }
+        didRunOrphanCleanup = true
+        await cleanupOrphanedProbeProcesses()
     }
 
     private static func onACPower() -> Bool {
@@ -1188,9 +1379,11 @@ actor CodexStatusService {
 
     private func probeLatestRateLimits(roots: [URL], expandSearch: Bool) -> RateLimitSummary? {
         var files: [URL] = []
-        let preferredLimit = 10
-        let fallbackLimit = 80
-        for r in roots { files.append(contentsOf: findCandidateFiles(root: r, daysBack: 10, limit: preferredLimit)) }
+        for r in roots {
+            files.append(contentsOf: findCandidateFiles(root: r,
+                                                        daysBack: 10,
+                                                        limit: preferredLogProbeCandidateLimit))
+        }
         // Global sort by mtime desc across roots
         files.sort { (a, b) in
             let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
@@ -1203,7 +1396,11 @@ actor CodexStatusService {
 
         if expandSearch {
             var expanded: [URL] = []
-            for r in roots { expanded.append(contentsOf: findCandidateFiles(root: r, daysBack: 10, limit: fallbackLimit)) }
+            for r in roots {
+                expanded.append(contentsOf: findCandidateFiles(root: r,
+                                                               daysBack: 10,
+                                                               limit: fallbackLogProbeCandidateLimit))
+            }
             expanded.sort { (a, b) in
                 let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
                 let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date.distantPast
@@ -1256,7 +1453,7 @@ actor CodexStatusService {
     }
 
     private func parseTokenCountTail(url: URL) -> RateLimitSummary? {
-        guard let lines = tailLines(url: url, maxBytes: 512 * 1024) else { return nil }
+        guard let lines = tailLines(url: url, maxBytes: logTailReadMaxBytes) else { return nil }
         // Walk most-recent → older. Be permissive about shape; Codex logs can vary.
         for raw in lines.reversed() {
             guard let data = raw.data(using: .utf8) else { continue }
@@ -1503,7 +1700,23 @@ actor CodexStatusService {
         return result
     }
 
-    private static func terminalPATH() -> String? {
+    private func terminalPATHCached() -> String? {
+        if !hasResolvedTerminalPATH {
+            cachedTerminalPATH = Self.resolveTerminalPATHFromLoginShell()
+            hasResolvedTerminalPATH = true
+        }
+        return cachedTerminalPATH
+    }
+
+    private func resolveTmuxPathCached() -> String? {
+        if !hasResolvedTmuxPath {
+            cachedTmuxPath = Self.resolveTmuxPathFromLoginShell()
+            hasResolvedTmuxPath = true
+        }
+        return cachedTmuxPath
+    }
+
+    private static func resolveTerminalPATHFromLoginShell() -> String? {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let p = Process()
         p.executableURL = URL(fileURLWithPath: shell)
@@ -1520,7 +1733,7 @@ actor CodexStatusService {
     }
 
     // Resolve tmux path via the user's login shell so GUI-launched app can find Homebrew installs.
-    private func resolveTmuxPath() -> String? {
+    private static func resolveTmuxPathFromLoginShell() -> String? {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let p = Process()
         p.executableURL = URL(fileURLWithPath: shell)
