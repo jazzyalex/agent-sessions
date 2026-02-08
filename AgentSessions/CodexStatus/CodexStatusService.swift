@@ -437,6 +437,7 @@ actor CodexStatusService {
     private var hasResolvedTmuxPath: Bool = false
     private var cachedTmuxPath: String? = nil
     private var didRunOrphanCleanup: Bool = false
+    private var didRunMenuBarOrphanCleanup: Bool = false
 
     init(updateHandler: @escaping @Sendable (CodexUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (Bool) -> Void) {
@@ -498,6 +499,7 @@ actor CodexStatusService {
         visible = visibilityContext.effectiveVisible
         let mode = visibilityMode
         let becameActive = (previousMode != .active && mode == .active)
+        let becameMenuBackground = (previousMode == .hidden && mode == .menuBackground)
         let visibilityModeChanged = previousMode != mode
 
         // If transitioning from hidden → visible, immediately refresh to show current data.
@@ -507,6 +509,8 @@ actor CodexStatusService {
                 guard let self else { return }
                 if becameActive {
                     await self.ensureOrphanCleanupIfNeeded()
+                } else if becameMenuBackground {
+                    await self.ensureMenuBarOrphanCleanupIfNeeded()
                 }
                 await self.refreshTick()
             }
@@ -515,6 +519,13 @@ actor CodexStatusService {
             Task { [weak self] in
                 guard let self else { return }
                 await self.ensureOrphanCleanupIfNeeded()
+            }
+        } else if becameMenuBackground {
+            // If the user only uses the menu bar while the app stays inactive, we still want
+            // to clean up any orphaned tmux probes from prior crashes.
+            Task { [weak self] in
+                guard let self else { return }
+                await self.ensureMenuBarOrphanCleanupIfNeeded()
             }
         }
 
@@ -1307,6 +1318,17 @@ actor CodexStatusService {
         guard !didRunOrphanCleanup else { return }
         didRunOrphanCleanup = true
         await cleanupOrphanedProbeProcesses()
+    }
+
+    private func ensureMenuBarOrphanCleanupIfNeeded() async {
+        if didRunOrphanCleanup { return }
+        guard !didRunMenuBarOrphanCleanup else { return }
+        didRunMenuBarOrphanCleanup = true
+
+        // Cheap guard: if there are no tmux labels, avoid resolving tmux or running commands.
+        let labels = scanTmuxLabels(prefix: Self.probeLabelPrefix)
+        guard !labels.isEmpty else { return }
+        await cleanupOrphanedTmuxLabels()
     }
 
     private static func onACPower() -> Bool {
