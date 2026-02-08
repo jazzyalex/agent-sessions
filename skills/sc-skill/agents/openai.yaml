@@ -1,0 +1,4 @@
+interface:
+  display_name: "Screenshot Capture"
+  short_description: "Deterministic screenshots for test and marketing"
+  default_prompt: "Use $sc-skill to capture repeatable app screenshots for testing or marketing assets."
