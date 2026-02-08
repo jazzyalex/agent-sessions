@@ -65,6 +65,27 @@ import IOKit.ps
 //
 // Service for fetching Claude CLI usage via headless script execution
 actor ClaudeStatusService {
+    enum VisibilityMode: Sendable {
+        case hidden
+        case menuBackground
+        case active
+    }
+
+    struct VisibilityContext: Sendable, Equatable {
+        var menuVisible: Bool
+        var stripVisible: Bool
+        var appIsActive: Bool
+
+        var effectiveVisible: Bool { menuVisible || (stripVisible && appIsActive) }
+        var mode: VisibilityMode {
+            if effectiveVisible {
+                if appIsActive { return .active }
+                if menuVisible { return .menuBackground }
+            }
+            return .hidden
+        }
+    }
+
     private enum State { case idle, running, stopping }
     private static let probeSessionName = "usage"
     private static let probeLabelPrefix = "as-cc-"
@@ -79,6 +100,8 @@ actor ClaudeStatusService {
     private var hasSnapshot: Bool = false
     private var shouldRun: Bool = true
     private var visible: Bool = false
+    private var visibilityContext = VisibilityContext(menuVisible: false, stripVisible: false, appIsActive: false)
+    private var visibilityMode: VisibilityMode { visibilityContext.mode }
     private var refresherTask: Task<Void, Never>?
     private var tmuxAvailable: Bool = false
     private var claudeAvailable: Bool = false
@@ -87,6 +110,7 @@ actor ClaudeStatusService {
     private let maxBackoffSeconds: UInt64 = 60 * 60
     private let hiddenIdleIntervalNanoseconds: UInt64 = 24 * 60 * 60 * 1_000_000_000
     private let batteryRecheckIntervalNanoseconds: UInt64 = 30 * 60 * 1_000_000_000
+    private var didRunOrphanCleanup: Bool = false
 
     init(updateHandler: @escaping @Sendable (ClaudeUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (ClaudeServiceAvailability) -> Void) {
@@ -112,8 +136,6 @@ actor ClaudeStatusService {
         )
         availabilityHandler(availability)
 
-        await cleanupOrphanedProbeProcesses()
-
         guard tmuxAvailable && claudeAvailable else {
             // Don't start refresh loop if dependencies missing
             return
@@ -136,20 +158,44 @@ actor ClaudeStatusService {
     }
 
     func setVisible(_ isVisible: Bool) {
+        // Back-compat shim: treat this as in-app visibility while active.
+        setVisibility(menuVisible: false, stripVisible: isVisible, appIsActive: true)
+    }
+
+    func setVisibility(menuVisible: Bool, stripVisible: Bool, appIsActive: Bool) {
+        let previousMode = visibilityMode
         let wasVisible = visible
-        visible = isVisible
+
+        visibilityContext = VisibilityContext(menuVisible: menuVisible, stripVisible: stripVisible, appIsActive: appIsActive)
+        visible = visibilityContext.effectiveVisible
+        let mode = visibilityMode
+        let becameActive = (previousMode != .active && mode == .active)
 
         // Visibility-triggered refreshes are automatic, not user-initiated.
-        if !wasVisible && isVisible {
-            Task { await self.refreshTick(userInitiated: false) }
+        if becameActive {
+            Task { [weak self] in
+                guard let self else { return }
+                await self.ensureOrphanCleanupIfNeeded()
+                await self.refreshTick(userInitiated: false)
+            }
         }
-        if wasVisible != isVisible {
+        if wasVisible != visible || previousMode != mode {
             restartRefresherLoopIfNeeded()
         }
     }
 
     func refreshNow() {
-        Task { await self.refreshTick(userInitiated: true) }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.ensureOrphanCleanupIfNeeded()
+            await self.refreshTick(userInitiated: true)
+        }
+    }
+
+    private func ensureOrphanCleanupIfNeeded() async {
+        guard !didRunOrphanCleanup else { return }
+        didRunOrphanCleanup = true
+        await cleanupOrphanedProbeProcesses()
     }
 
     // MARK: - Core refresh logic
@@ -157,6 +203,9 @@ actor ClaudeStatusService {
     private func refreshTick(userInitiated: Bool = false) async {
         guard tmuxAvailable && claudeAvailable else { return }
         if !userInitiated {
+            // Never auto-probe when the app is inactive; keep menu bar showing cached data.
+            // Probing can trigger network activity and can cost usage.
+            guard visibilityMode == .active else { return }
             guard visible else { return }
             guard Self.onACPower() else { return }
         }
@@ -712,7 +761,7 @@ actor ClaudeStatusService {
         let userInterval = UInt64(UserDefaults.standard.object(forKey: "ClaudePollingInterval") as? Int ?? 900)
 
         // Strict hidden policy: no auto probing while hidden.
-        if !visible {
+        if visibilityMode != .active || !visible {
             return hiddenIdleIntervalNanoseconds
         }
 
@@ -771,7 +820,8 @@ actor ClaudeStatusService {
         refresherTask?.cancel()
         refresherTask = nil
 
-        guard shouldRun, tmuxAvailable, claudeAvailable, visible else {
+        // Auto probes only run while the app is active.
+        guard shouldRun, tmuxAvailable, claudeAvailable, visible, visibilityMode == .active else {
             return
         }
 

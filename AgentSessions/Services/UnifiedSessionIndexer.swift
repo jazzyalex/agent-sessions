@@ -199,9 +199,13 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let analyticsStartDelaySeconds: TimeInterval = 2.0     // small delay to avoid launch contention
     private let providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
     private let newSessionMonitorIntervalSeconds: UInt64 = 60
+    private let monitorRefreshMinimumIntervalSeconds: TimeInterval = 3 * 60
     private var newSessionMonitorTask: Task<Void, Never>? = nil
     private var lastSeenCodexSignature: FileSignature? = nil
     private var lastSeenClaudeSignature: FileSignature? = nil
+    private var lastMonitorRefreshBySource: [SessionSource: Date] = [:]
+    private var pendingMonitorRefreshSignatureBySource: [SessionSource: FileSignature] = [:]
+    private var pendingRefreshSourcesWhileInactive: Set<SessionSource> = []
     private var hasInitializedNewSessionMonitorBaseline: Bool = false
     private var appIsActive: Bool = false
     private var lastFullReconcileBySource: [SessionSource: Date] = [:]
@@ -579,28 +583,53 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     func refresh() {
         LaunchProfiler.log("Unified.refresh: request enqueued")
-        requestProviderRefresh(source: .codex, reason: "unified-refresh", trigger: .manual)
-        requestProviderRefresh(source: .claude, reason: "unified-refresh", trigger: .manual)
-        requestProviderRefresh(source: .gemini, reason: "unified-refresh", trigger: .manual)
-        requestProviderRefresh(source: .opencode, reason: "unified-refresh", trigger: .manual)
-        requestProviderRefresh(source: .copilot, reason: "unified-refresh", trigger: .manual)
-        requestProviderRefresh(source: .droid, reason: "unified-refresh", trigger: .manual)
-        requestProviderRefresh(source: .openclaw, reason: "unified-refresh", trigger: .manual)
+        let sources: [SessionSource] = [
+            codexAgentEnabled ? .codex : nil,
+            claudeAgentEnabled ? .claude : nil,
+            geminiAgentEnabled ? .gemini : nil,
+            openCodeAgentEnabled ? .opencode : nil,
+            copilotAgentEnabled ? .copilot : nil,
+            droidAgentEnabled ? .droid : nil,
+            openClawAgentEnabled ? .openclaw : nil
+        ].compactMap { $0 }
+        for source in sources {
+            requestProviderRefresh(source: source, reason: "unified-refresh", trigger: .manual)
+        }
     }
 
     @MainActor
     func setAppActive(_ active: Bool) {
         appIsActive = active
         if active {
-            guard newSessionMonitorTask == nil else { return }
-            let task = Task.detached(priority: .utility) { [weak self] in
-                guard let self else { return }
-                await self.runNewSessionMonitorLoop()
+            if newSessionMonitorTask == nil {
+                let task = Task.detached(priority: .utility) { [weak self] in
+                    guard let self else { return }
+                    await self.runNewSessionMonitorLoop()
+                }
+                newSessionMonitorTask = task
             }
-            newSessionMonitorTask = task
+
+            let pending = pendingRefreshSourcesWhileInactive
+            pendingRefreshSourcesWhileInactive.removeAll()
+            if !pending.isEmpty {
+                for source in pending {
+                    requestProviderRefresh(source: source, reason: "deferred-foreground", trigger: .monitor)
+                }
+            }
         } else {
             newSessionMonitorTask?.cancel()
             newSessionMonitorTask = nil
+
+            let wasCodexBusy = codex.isIndexing || codex.isProcessingTranscripts
+            if wasCodexBusy {
+                pendingRefreshSourcesWhileInactive.insert(.codex)
+                codex.cancelInFlightWork()
+            }
+            let wasClaudeBusy = claude.isIndexing || claude.isProcessingTranscripts
+            if wasClaudeBusy {
+                pendingRefreshSourcesWhileInactive.insert(.claude)
+                claude.cancelInFlightWork()
+            }
         }
     }
 
@@ -621,6 +650,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             if establishBaselineIfNeeded && !self.hasInitializedNewSessionMonitorBaseline {
                 self.lastSeenCodexSignature = codexSignature
                 self.lastSeenClaudeSignature = claudeSignature
+                self.pendingMonitorRefreshSignatureBySource[.codex] = nil
+                self.pendingMonitorRefreshSignatureBySource[.claude] = nil
                 self.hasInitializedNewSessionMonitorBaseline = true
                 return
             }
@@ -631,16 +662,56 @@ final class UnifiedSessionIndexer: ObservableObject {
             if codexSignature != self.lastSeenCodexSignature {
                 self.lastSeenCodexSignature = codexSignature
                 if codexSignature != nil {
+                    if self.shouldTriggerMonitorRefresh(source: .codex, now: Date()) {
+                        // Preserve the pending marker until the refresh is actually accepted
+                        // (performProviderRefresh clears it when it triggers).
+                        if let codexSignature {
+                            self.pendingMonitorRefreshSignatureBySource[.codex] = codexSignature
+                        }
+                        self.requestProviderRefresh(source: .codex, reason: "foreground-new-session", trigger: .monitor)
+                    } else if let codexSignature {
+                        self.pendingMonitorRefreshSignatureBySource[.codex] = codexSignature
+                    }
+                } else {
+                    self.pendingMonitorRefreshSignatureBySource[.codex] = nil
+                }
+            } else if self.pendingMonitorRefreshSignatureBySource[.codex] != nil {
+                if self.shouldTriggerMonitorRefresh(source: .codex, now: Date()) {
                     self.requestProviderRefresh(source: .codex, reason: "foreground-new-session", trigger: .monitor)
                 }
             }
             if claudeSignature != self.lastSeenClaudeSignature {
                 self.lastSeenClaudeSignature = claudeSignature
                 if claudeSignature != nil {
+                    if self.shouldTriggerMonitorRefresh(source: .claude, now: Date()) {
+                        // Preserve the pending marker until the refresh is actually accepted
+                        // (performProviderRefresh clears it when it triggers).
+                        if let claudeSignature {
+                            self.pendingMonitorRefreshSignatureBySource[.claude] = claudeSignature
+                        }
+                        self.requestProviderRefresh(source: .claude, reason: "foreground-new-session", trigger: .monitor)
+                    } else if let claudeSignature {
+                        self.pendingMonitorRefreshSignatureBySource[.claude] = claudeSignature
+                    }
+                } else {
+                    self.pendingMonitorRefreshSignatureBySource[.claude] = nil
+                }
+            } else if self.pendingMonitorRefreshSignatureBySource[.claude] != nil {
+                if self.shouldTriggerMonitorRefresh(source: .claude, now: Date()) {
                     self.requestProviderRefresh(source: .claude, reason: "foreground-new-session", trigger: .monitor)
                 }
             }
         }
+    }
+
+    @MainActor
+    private func shouldTriggerMonitorRefresh(source: SessionSource, now: Date) -> Bool {
+        if let last = lastMonitorRefreshBySource[source],
+           now.timeIntervalSince(last) < monitorRefreshMinimumIntervalSeconds {
+            return false
+        }
+        lastMonitorRefreshBySource[source] = now
+        return true
     }
 
     private func detectLatestCodexSignature() -> FileSignature? {
@@ -834,6 +905,13 @@ final class UnifiedSessionIndexer: ObservableObject {
                 return (didTrigger: false,
                         requestGlobalAnalytics: false)
             }
+            if !self.appIsActive && trigger != .manual {
+                self.pendingRefreshSourcesWhileInactive.insert(source)
+                LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: deferred (inactive, trigger=\(trigger.rawValue))")
+                return (didTrigger: false,
+                        requestGlobalAnalytics: false)
+            }
+            self.pendingMonitorRefreshSignatureBySource[source] = nil
             let mode = self.refreshMode(for: source, trigger: trigger)
             let executionProfile = self.refreshExecutionProfile(for: source)
             LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: trigger (\(reason), mode=\(mode), trigger=\(trigger.rawValue))")

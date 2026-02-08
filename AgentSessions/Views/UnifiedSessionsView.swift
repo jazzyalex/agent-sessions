@@ -178,11 +178,18 @@ struct UnifiedSessionsView: View {
 					if sortOrder.isEmpty { sortOrder = [KeyPathComparator(\Session.modifiedAt, order: .reverse)] }
 					updateCachedRows()
 					updateSelectionBridge()
+                    searchCoordinator.setAppActive(NSApp.isActive)
 				}
 				.onDisappear {
 					codexUsageModel.setStripVisible(false)
 					claudeUsageModel.setStripVisible(false)
 				}
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    searchCoordinator.setAppActive(true)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                    searchCoordinator.setAppActive(false)
+                }
 		)
 
 		let afterAnalytics = lifecycle
@@ -1224,6 +1231,7 @@ struct UnifiedSessionsView: View {
                                 includeCopilot: unified.includeCopilot && copilotAgentEnabled,
                                 includeDroid: unified.includeDroid && droidAgentEnabled,
                                 includeOpenClaw: unified.includeOpenClaw && openClawAgentEnabled,
+                                enableDeepScan: true,
                                 all: unified.allSessions)
     }
 
@@ -1520,7 +1528,7 @@ private struct UnifiedSearchFiltersView: View {
                                        focusRequestToken: focusRequestToken,
                                        onCommit: { startSearchImmediate() })
                     .frame(minWidth: 220)
-                    .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\.")
+                    .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\. Press Return for full deep scan.")
 
                 if unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text("⌥⌘F")
@@ -1556,7 +1564,7 @@ private struct UnifiedSearchFiltersView: View {
                     .stroke(searchFocus == .field ? UnifiedSessionsStyle.toolbarFocusRingColor : Color(nsColor: .separatorColor).opacity(0.6),
                             lineWidth: searchFocus == .field ? 2 : 1)
             )
-            .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\.")
+            .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\. Press Return for full deep scan.")
             .onAppear {
                 if searchState.query != unified.queryDraft {
                     searchState.query = unified.queryDraft
@@ -1612,7 +1620,7 @@ private struct UnifiedSearchFiltersView: View {
         }
     }
 
-    private func startSearch() {
+    private func startSearch(deepScan: Bool = false) {
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { search.cancel(); return }
         let filters = Filters(query: q,
@@ -1631,12 +1639,13 @@ private struct UnifiedSearchFiltersView: View {
                      includeCopilot: unified.includeCopilot,
                      includeDroid: unified.includeDroid,
                      includeOpenClaw: unified.includeOpenClaw,
+                     enableDeepScan: deepScan,
                      all: unified.allSessions)
     }
 
     private func startSearchImmediate() {
         searchDebouncer?.cancel(); searchDebouncer = nil
-        startSearch()
+        startSearch(deepScan: true)
     }
 
     private func scheduleSearch() {
@@ -1661,6 +1670,7 @@ private struct UnifiedSearchFiltersView: View {
                          includeCopilot: unified.includeCopilot,
                          includeDroid: unified.includeDroid,
                          includeOpenClaw: unified.includeOpenClaw,
+                         enableDeepScan: false,
                          all: unified.allSessions)
         }
         searchDebouncer = work

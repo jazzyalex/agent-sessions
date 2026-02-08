@@ -55,6 +55,7 @@ docs/Sonnet-4.5-review.md
 # Local scan outputs (can contain absolute paths / private data)
 scripts/probe_scan_output/
 scripts/agent_captures/
+scripts/energy_samples*/
 
 # Local release artifacts (use GitHub Releases instead of tracking binaries)
 *.dmg

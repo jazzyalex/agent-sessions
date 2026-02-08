@@ -19,6 +19,8 @@ enum FeatureFlags {
     static let instantToolOutputIndexMaxChars: Int = 32_000
     static let sessionSearchFormatVersion: Int = 4
     static let sessionToolIOFormatVersion: Int = 1
+    static let transcriptPrewarmMaxSessionsPerRefresh: Int = 96
+    static let transcriptPrewarmMaxSessionBytes: Int = 50 * 1024 * 1024
 
     // Tool I/O FTS index (recent window + retention cap for older rows).
     static let toolIOIndexRecentDays: Int = 90

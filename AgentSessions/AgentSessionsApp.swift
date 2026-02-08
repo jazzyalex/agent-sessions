@@ -52,7 +52,6 @@ struct AgentSessionsApp: App {
     @State private var selectedSessionID: String?
     @State private var selectedEventID: String?
     @State private var focusSearchToggle: Bool = false
-    @State private var didRunProbeCleanup: Bool = false
     // Legacy first-run prompt removed
 
     // Analytics
@@ -102,13 +101,6 @@ struct AgentSessionsApp: App {
                 .background(WindowAutosave(name: "MainWindow"))
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
-                    if !didRunProbeCleanup {
-                        didRunProbeCleanup = true
-                        Task.detached(priority: .background) {
-                            await ClaudeStatusService.cleanupOrphansOnLaunch()
-                            await CodexStatusService.cleanupOrphansOnLaunch()
-                        }
-                    }
                     LaunchProfiler.reset("Unified main window")
                     LaunchProfiler.log("Window appeared")
                     LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
@@ -120,10 +112,14 @@ struct AgentSessionsApp: App {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     unifiedIndexerHolder.unified?.setAppActive(true)
+                    codexUsageModel.setAppActive(true)
+                    claudeUsageModel.setAppActive(true)
                     archiveManager.syncPinnedSessionsNow()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
                     unifiedIndexerHolder.unified?.setAppActive(false)
+                    codexUsageModel.setAppActive(false)
+                    claudeUsageModel.setAppActive(false)
                 }
                 .onChange(of: showUsageStrip) { _, _ in
                     updateUsageModels()

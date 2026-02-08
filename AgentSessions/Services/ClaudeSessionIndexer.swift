@@ -72,6 +72,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     private var lastPrewarmSignatureByID: [String: Int] = [:]
     private var lastKnownFileStatsByPath: [String: SessionFileStat] = [:]
     @Published private var filterEpoch: Int = 0
+    private var transcriptPrewarmTask: Task<Void, Never>? = nil
+    private var refreshTask: Task<Void, Never>? = nil
 
     init() {
         // Initialize discovery with current override (if any)
@@ -175,6 +177,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 
         let token = UUID()
         refreshToken = token
+        refreshTask?.cancel()
+        refreshTask = nil
+        transcriptPrewarmTask?.cancel()
+        transcriptPrewarmTask = nil
         publishAfterCurrentUpdate { [weak self] in
             guard let self else { return }
             self.launchPhase = .hydrating
@@ -187,7 +193,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             self.hasEmptyDirectory = false
         }
 
-        Task.detached(priority: .utility) { [weak self, token, mode, executionProfile] in
+        let task = Task.detached(priority: .utility) { [weak self, token, mode, executionProfile] in
             guard let self else { return }
 
             // Fast path: hydrate from SQLite index if available.
@@ -305,21 +311,22 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 #endif
 
                 // Delta-based transcript prewarm for Claude sessions.
-                let prewarmDelta: [Session] = {
-                    var out: [Session] = []
-                    out.reserveCapacity(mergedWithArchives.count)
-                    for s in mergedWithArchives {
-                        if s.events.isEmpty { continue }
-                        if s.messageCount <= 2 { continue }
-                        let size = s.fileSizeBytes ?? 0
-                        let sig = size ^ (s.eventCount << 16)
-                        if self.lastPrewarmSignatureByID[s.id] == sig { continue }
-                        self.lastPrewarmSignatureByID[s.id] = sig
-                        out.append(s)
-                        if out.count >= 256 { break }
-                    }
-                    return out
-                }()
+	                let prewarmDelta: [Session] = {
+	                    var out: [Session] = []
+	                    out.reserveCapacity(mergedWithArchives.count)
+	                    for s in mergedWithArchives {
+	                        if s.events.isEmpty { continue }
+	                        if s.messageCount <= 2 { continue }
+	                        if let sizeBytes = s.fileSizeBytes, sizeBytes > FeatureFlags.transcriptPrewarmMaxSessionBytes { continue }
+	                        let size = s.fileSizeBytes ?? 0
+	                        let sig = size ^ (s.eventCount << 16)
+	                        if self.lastPrewarmSignatureByID[s.id] == sig { continue }
+	                        self.lastPrewarmSignatureByID[s.id] = sig
+	                        out.append(s)
+	                        if out.count >= FeatureFlags.transcriptPrewarmMaxSessionsPerRefresh { break }
+	                    }
+	                    return out
+	                }()
                 if !prewarmDelta.isEmpty && !executionProfile.deferNonCriticalWork {
                     self.isProcessingTranscripts = true
                     self.progressText = "Processing transcripts..."
@@ -328,6 +335,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                     let finishPrewarm: @Sendable @MainActor () -> Void = { [weak self, token] in
                         guard let self, self.refreshToken == token else { return }
                         LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
+                        self.transcriptPrewarmTask = nil
                         self.publishAfterCurrentUpdate { [weak self, token] in
                             guard let self, self.refreshToken == token else { return }
                             self.isProcessingTranscripts = false
@@ -335,16 +343,35 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                             self.launchPhase = .ready
                         }
                     }
-                    Task.detached(priority: .utility) { [prewarmDelta, cache, finishPrewarm] in
+                    self.transcriptPrewarmTask?.cancel()
+                    self.transcriptPrewarmTask = Task.detached(priority: .utility) { [prewarmDelta, cache, finishPrewarm] in
                         LaunchProfiler.log("Claude.refresh: transcript prewarm start (delta=\(prewarmDelta.count))")
                         await cache.generateAndCache(sessions: prewarmDelta)
+                        if Task.isCancelled { return }
                         await finishPrewarm()
                     }
                 } else {
+                    self.transcriptPrewarmTask = nil
                     self.progressText = "Ready"
                     self.launchPhase = .ready
                 }
             }
+        }
+        refreshTask = task
+    }
+
+    @MainActor
+    func cancelInFlightWork() {
+        refreshToken = UUID()
+        refreshTask?.cancel()
+        refreshTask = nil
+        transcriptPrewarmTask?.cancel()
+        transcriptPrewarmTask = nil
+        isIndexing = false
+        isProcessingTranscripts = false
+        progressText = "Ready"
+        if launchPhase != .error {
+            launchPhase = .ready
         }
     }
 

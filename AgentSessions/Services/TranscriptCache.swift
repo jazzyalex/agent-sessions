@@ -39,21 +39,25 @@ final class TranscriptCache: @unchecked Sendable {
         var indexed = 0
 
         for session in sessions {
+            if Task.isCancelled { break }
             if FeatureFlags.gatePrewarmWhileTyping && TypingActivity.shared.isUserLikelyTyping {
                 // Back off while the user is actively typing to avoid contention
                 try? await Task.sleep(nanoseconds: 350_000_000)
+                if Task.isCancelled { break }
                 continue
             }
             let alreadyCached = withLock { cache[session.id] != nil }
 
             // Skip if already cached or lightweight (no events)
             guard !alreadyCached, !session.events.isEmpty else { continue }
+            if Task.isCancelled { break }
 
             let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
                 session: session,
                 filters: filters,
                 mode: .normal
             )
+            if Task.isCancelled { break }
 
             withLock { cache[session.id] = transcript }
 
@@ -61,7 +65,11 @@ final class TranscriptCache: @unchecked Sendable {
 
             // Cooperative yield after each item to avoid long bursts
             try? await Task.sleep(nanoseconds: 10_000_000)
-            if indexed % 50 == 0 { await Task.yield() }
+            if Task.isCancelled { break }
+            if indexed % 50 == 0 {
+                await Task.yield()
+                if Task.isCancelled { break }
+            }
         }
 
         let totalCount = withLock { cache.count }
