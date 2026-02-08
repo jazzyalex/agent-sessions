@@ -24,6 +24,9 @@ build.bundle/
 # Local build artifacts
 /dist/
 
+# Local capture outputs
+artifacts/
+
 # Local release env (excluded)
 tools/release/.env
 
