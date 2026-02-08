@@ -40,6 +40,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     @Published private(set) var wasCanceled: Bool = false
     @Published private(set) var results: [Session] = []
     @Published private(set) var progress: Progress = .init()
+    @Published private(set) var deepScanEnabled: Bool = false
 
     private var currentTask: Task<Void, Never>? = nil
     private var deepScanTask: Task<Void, Never>? = nil
@@ -109,6 +110,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             self.runID = UUID()
             self.isRunning = false
             self.wasCanceled = true
+            self.deepScanEnabled = false
             self.progress = .init()
             if clearResults {
                 self.results = []
@@ -194,6 +196,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         Task { @MainActor [weak self] in
             guard let self, self.runID == newRunID else { return }
             self.isRunning = true
+            self.deepScanEnabled = enableDeepScan
             self.results = []
             self.progress = .init(phase: .indexed, scannedSmall: 0, totalSmall: 0, scannedLarge: 0, totalLarge: 0)
         }

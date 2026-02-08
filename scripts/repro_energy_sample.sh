@@ -27,6 +27,14 @@ tell application "System Events" to keystroke "${key}" using ${mods}
 OSA
 }
 
+key_code() {
+  local code="$1"
+  local mods="$2"
+  /usr/bin/osascript >/dev/null <<OSA || return 1
+tell application "System Events" to key code ${code} using ${mods}
+OSA
+}
+
 type_text() {
   local text="$1"
   /usr/bin/osascript >/dev/null <<OSA || return 1
@@ -92,7 +100,8 @@ if [[ "$can_drive" -eq 1 ]]; then
     sleep 0.4
     type_text "git" || true
     sleep 0.2
-    keystroke return "{}" || true
+    # Return key (key code 36)
+    key_code 36 "{}" || true
   fi
 
   sleep 3

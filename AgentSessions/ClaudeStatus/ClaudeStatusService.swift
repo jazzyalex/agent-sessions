@@ -111,6 +111,7 @@ actor ClaudeStatusService {
     private let hiddenIdleIntervalNanoseconds: UInt64 = 24 * 60 * 60 * 1_000_000_000
     private let batteryRecheckIntervalNanoseconds: UInt64 = 30 * 60 * 1_000_000_000
     private var didRunOrphanCleanup: Bool = false
+    private var didRunMenuBarOrphanCleanup: Bool = false
 
     init(updateHandler: @escaping @Sendable (ClaudeUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (ClaudeServiceAvailability) -> Void) {
@@ -170,6 +171,7 @@ actor ClaudeStatusService {
         visible = visibilityContext.effectiveVisible
         let mode = visibilityMode
         let becameActive = (previousMode != .active && mode == .active)
+        let becameMenuBackground = (previousMode == .hidden && mode == .menuBackground)
 
         // Visibility-triggered refreshes are automatic, not user-initiated.
         if becameActive {
@@ -177,6 +179,11 @@ actor ClaudeStatusService {
                 guard let self else { return }
                 await self.ensureOrphanCleanupIfNeeded()
                 await self.refreshTick(userInitiated: false)
+            }
+        } else if becameMenuBackground {
+            Task { [weak self] in
+                guard let self else { return }
+                await self.ensureMenuBarOrphanCleanupIfNeeded()
             }
         }
         if wasVisible != visible || previousMode != mode {
@@ -196,6 +203,16 @@ actor ClaudeStatusService {
         guard !didRunOrphanCleanup else { return }
         didRunOrphanCleanup = true
         await cleanupOrphanedProbeProcesses()
+    }
+
+    private func ensureMenuBarOrphanCleanupIfNeeded() async {
+        if didRunOrphanCleanup { return }
+        guard !didRunMenuBarOrphanCleanup else { return }
+        didRunMenuBarOrphanCleanup = true
+
+        let labels = scanTmuxLabels(prefix: Self.probeLabelPrefix)
+        guard !labels.isEmpty else { return }
+        await cleanupOrphanedTmuxLabels()
     }
 
     // MARK: - Core refresh logic

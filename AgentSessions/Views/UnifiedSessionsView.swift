@@ -1211,10 +1211,10 @@ struct UnifiedSessionsView: View {
         return "~\(count)"
     }
     
-    private func restartSearchIfRunning() {
-        guard searchCoordinator.isRunning else { return }
-        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { searchCoordinator.cancel(); return }
+	    private func restartSearchIfRunning() {
+	        guard searchCoordinator.isRunning else { return }
+	        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+	        guard !q.isEmpty else { searchCoordinator.cancel(); return }
         let filters = Filters(query: q,
                               dateFrom: unified.dateFrom,
                               dateTo: unified.dateTo,
@@ -1222,18 +1222,18 @@ struct UnifiedSessionsView: View {
                               kinds: unified.selectedKinds,
                               repoName: unified.projectFilter,
                               pathContains: nil)
-        searchCoordinator.start(query: q,
-                                filters: filters,
-                                includeCodex: unified.includeCodex && codexAgentEnabled,
-                                includeClaude: unified.includeClaude && claudeAgentEnabled,
-                                includeGemini: unified.includeGemini && geminiAgentEnabled,
-                                includeOpenCode: unified.includeOpenCode && openCodeAgentEnabled,
-                                includeCopilot: unified.includeCopilot && copilotAgentEnabled,
-                                includeDroid: unified.includeDroid && droidAgentEnabled,
-                                includeOpenClaw: unified.includeOpenClaw && openClawAgentEnabled,
-                                enableDeepScan: true,
-                                all: unified.allSessions)
-    }
+	        searchCoordinator.start(query: q,
+	                                filters: filters,
+	                                includeCodex: unified.includeCodex && codexAgentEnabled,
+	                                includeClaude: unified.includeClaude && claudeAgentEnabled,
+	                                includeGemini: unified.includeGemini && geminiAgentEnabled,
+	                                includeOpenCode: unified.includeOpenCode && openCodeAgentEnabled,
+	                                includeCopilot: unified.includeCopilot && copilotAgentEnabled,
+	                                includeDroid: unified.includeDroid && droidAgentEnabled,
+	                                includeOpenClaw: unified.includeOpenClaw && openClawAgentEnabled,
+	                                enableDeepScan: searchCoordinator.deepScanEnabled,
+	                                all: unified.allSessions)
+	    }
 
     private func flashAgentEnablementNoticeIfNeeded() {
         let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled)
