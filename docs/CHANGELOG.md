@@ -6,18 +6,21 @@ All notable changes to this project will be documented in this file.
 
 ## [2.11.1] - 2026-02-08
 
-- Onboarding: Added a visible “Help improve Agent Sessions” feedback card on the first slide (below session/agent counters) that links to the short feedback form and clarifies that Agent Sessions is local-only with no telemetry.
-- Onboarding: Fixed overlap in the “Sessions by Agent” weekly chart, split usage limit tracking into separate Claude/Codex cards, and removed onboarding slide scrolling by fitting all slides within the onboarding window.
-- Transcript (Session view): Real user prompts now use the same narrative font as other blocks, remove side accent strips, keep inverted contrast in dark mode, and use a dark gray (`white: 0.20`) bubble with white text in light mode.
-- Transcript (Session view): Removed the synthetic “Conversation starts here” divider line for all agents; preamble-skip jump behavior still targets the first real user prompt.
-- Transcript (Session view): The Images toolbar pill now shows only the icon and count (no “Images” text label).
-- Transcript (Session view): The Images toolbar pill is now always visible and is disabled until the selected session has detected images; once detected it enables and supports prompt navigation with count.
+### Fixed
+- Session view UI polish: Real user prompts now use the same narrative font as other blocks, remove side accent strips, keep inverted contrast in dark mode, and use a dark gray (`white: 0.20`) bubble with white text in light mode.
+- Session view UI polish: Removed the synthetic “Conversation starts here” divider line, and the Images toolbar pill now shows icon + count while remaining visible/disabled until images are detected.
+- CPU spikes optimization: Global Search now stays on fast indexed results while typing (Return still triggers deep scan), reducing long CPU bursts during active search.
+
+### Performance
 - Sessions/Search: Gemini, Copilot, Droid, and OpenClaw indexing now use the same power-aware idle execution profiles as Codex/Claude (lower-priority slices and deferred non-critical work on battery/background).
-- Sessions/Search: Typing in global Search now runs instant indexed results only, while pressing Return triggers full deep scan/backfill; this reduces long CPU bursts during active typing.
 - Sessions/Search: Global Search no longer generates transcripts on-demand during scans; it searches cached transcripts when available and otherwise falls back to raw event fields to avoid multi-minute CPU bursts.
 - Sessions/Indexing: Codex and Claude transcript prewarm runs now cancel previous runs and cap per-refresh work to reduce sustained post-refresh energy spikes.
 - Sessions/Indexing: Non-manual refresh work is deferred while the app is inactive and replays on foreground activation to avoid background energy warnings.
 - Codex Usage: Automatic tmux `/status` fallback probes now run with stricter stale/no-recent gates, longer cooldown, and lighter file-tail scans to reduce background energy spikes.
+
+### Changed
+- Onboarding: Added a visible “Help improve Agent Sessions” feedback card on the first slide (below session/agent counters) that links to the short feedback form and clarifies that Agent Sessions is local-only with no telemetry.
+- Onboarding: Fixed overlap in the “Sessions by Agent” weekly chart, split usage limit tracking into separate Claude/Codex cards, and removed onboarding slide scrolling by fitting all slides within the onboarding window.
 - Preferences: Added an OpenClaw pane after the other agent panes with Binary Source and Sessions Directory controls, matching the other CLI agent preference sections.
 - Preferences: Added a sidebar divider between Droid and OpenClaw, and added per-agent `Update...` actions that detect install manager, check latest versions, and run updates with confirmation.
 - Preferences: Improved per-agent `Update...` detection to resolve package-manager binaries from common PATH locations and infer npm package names from the installed binary path (fixes false "manager not detected" and OpenClaw package-name mismatches).

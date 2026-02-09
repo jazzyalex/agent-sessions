@@ -7,6 +7,25 @@
             <pubDate>Sun, 08 Feb 2026 19:31:37 -0800</pubDate>
             <description><![CDATA[
 <h2>What&#x27;s New in 2.11.1</h2>
+<h3>Highlights</h3>
+<ul>
+<li>Session view UI polish: Real user prompts now use the same narrative font as other blocks, remove side accent strips, keep inverted contrast in dark mode, and use a dark gray (`white: 0.20`) bubble with white text in light mode.</li>
+<li>Session view UI polish: Removed the synthetic “Conversation starts here” divider line, and the Images toolbar pill now shows icon + count while remaining visible/disabled until images are detected.</li>
+<li>CPU spikes optimization: Global Search now stays on fast indexed results while typing (Return still triggers deep scan), reducing long CPU bursts during active search.</li>
+<li>Onboarding: Added a visible “Help improve Agent Sessions” feedback card on the first slide (below session/agent counters) that links to the short feedback form and clarifies that Agent Sessions is local-only with no telemetry.</li>
+<li>Sessions/Search: Gemini, Copilot, Droid, and OpenClaw indexing now use the same power-aware idle execution profiles as Codex/Claude (lower-priority slices and deferred non-critical work on battery/background).</li>
+<li>Sessions/Search: Global Search no longer generates transcripts on-demand during scans; it searches cached transcripts when available and otherwise falls back to raw event fields to avoid multi-minute CPU bursts.</li>
+</ul>
+<h3>Other Changes</h3>
+<ul>
+<li>Onboarding: Fixed overlap in the “Sessions by Agent” weekly chart, split usage limit tracking into separate Claude/Codex cards, and removed onboarding slide scrolling by fitting all slides within the onboarding window.</li>
+<li>Preferences: Added an OpenClaw pane after the other agent panes with Binary Source and Sessions Directory controls, matching the other CLI agent preference sections.</li>
+<li>Preferences: Added a sidebar divider between Droid and OpenClaw, and added per-agent `Update...` actions that detect install manager, check latest versions, and run updates with confirmation.</li>
+<li>Preferences: Improved per-agent `Update...` detection to resolve package-manager binaries from common PATH locations and infer npm package names from the installed binary path (fixes false &quot;manager not detected&quot; and OpenClaw package-name mismatches).</li>
+<li>Sessions/Indexing: Codex and Claude transcript prewarm runs now cancel previous runs and cap per-refresh work to reduce sustained post-refresh energy spikes.</li>
+<li>Sessions/Indexing: Non-manual refresh work is deferred while the app is inactive and replays on foreground activation to avoid background energy warnings.</li>
+<li>Codex Usage: Automatic tmux `/status` fallback probes now run with stricter stale/no-recent gates, longer cooldown, and lighter file-tail scans to reduce background energy spikes.</li>
+</ul>
 <h3>Reminder: What You Got in 2.11</h3>
 <ul>
 <li>OpenClaw sessions: Added OpenClaw (clawdbot) session support, including Advanced visibility for deleted transcripts.</li>
@@ -16,7 +35,7 @@
 </ul>
 <p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v2.11.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v2.11.1</a></p>
             ]]></description>
-            <sparkle:version>20</sparkle:version>
+<sparkle:version>20</sparkle:version>
             <sparkle:shortVersionString>2.11.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.11.1/AgentSessions-2.11.1.dmg" length="11484833" type="application/octet-stream" sparkle:edSignature="Knh3OZ/97WlZQasC7fxRbkCcyt7a8uiDF6+aAi8D/puk2btvC3W8eFq3D5SB9Iho7LR+Ora9XokFAGHzTkBQBg=="/>
