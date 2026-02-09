@@ -3,45 +3,23 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.11</title>
-            <pubDate>Fri, 06 Feb 2026 12:53:11 -0800</pubDate>
+            <title>2.11.1</title>
+            <pubDate>Sun, 08 Feb 2026 19:31:37 -0800</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 2.11</h2>
-<h3>Highlights</h3>
+<h2>What&#x27;s New in 2.11.1</h2>
+<h3>Reminder: What You Got in 2.11</h3>
 <ul>
-<li>Performance: Removed high-frequency idle background work (Codex warmup loop and archive sync timer) and switched to activation/event-driven refreshes to reduce steady-state battery impact.</li>
-<li>Session view: Removed a QoS inversion path in terminal view cleanup by avoiding lower-priority observer teardown work from interactive code paths.</li>
-<li>Transcript (Session view): Treat `&lt;turn_aborted&gt;` blocks embedded in user prompts as system notices so they don’t render as user prompts.</li>
-<li>Sessions: Added an app-active foreground monitor (60s cadence) for Codex and Claude new-session detection, replacing always-on idle polling.</li>
-<li>Claude Usage: Automatic background `/usage` probes now run only on AC power; on battery and Low Power Mode, refresh is manual-only.</li>
-<li>Codex Usage: Preserved periodic updates while reducing per-tick filesystem/parsing work when source files are unchanged.</li>
+<li>OpenClaw sessions: Added OpenClaw (clawdbot) session support, including Advanced visibility for deleted transcripts.</li>
+<li>Images: Expanded image workflows across both Session view (inline thumbnails) and Image Browser (cross-agent browsing, filters, and actions).</li>
+<li>Search completeness: Reduced missing/incomplete search results for some sessions with incremental changed-file indexing, search backfill paths, and stale-row cleanup.</li>
+<li>Energy spikes: Reduced Energy Warning spikes by replacing always-on idle refresh with app-activation/event-driven behavior and power-aware probing/indexing cadence.</li>
 </ul>
-<h3>Other Changes</h3>
-<ul>
-<li>Sessions/Search: Codex and Claude refresh now use incremental changed-file indexing with batched slices, limited worker concurrency, and deferred non-critical work in inactive/battery modes to reduce burst energy spikes.</li>
-<li>Menu: Removed the separator between Image Browser and Saved Sessions, and renamed “Saved Sessions…” to “Saved Sessions”.</li>
-<li>Preferences: Added a Session View toggle for “Show inline image thumbnails in Session view”.</li>
-<li>Sessions: Added OpenClaw (clawdbot) session support when the OpenClaw/clawdbot CLI is installed; deleted sessions can be shown via an Advanced toggle.</li>
-<li>Session view: Inline image thumbnails now support hover popover previews and click open in the Image Browser (auto-selecting the clicked image); the inline thumbnail context menu includes Open in Preview and omits Navigate to Session.</li>
-<li>Session view: Added an Images toolbar pill to toggle inline images and jump between prompts that contain images.</li>
-<li>Session view: Inline image thumbnails now support Claude Code sessions.</li>
-<li>Session view: Inline image thumbnails now support OpenCode sessions.</li>
-<li>Session view: Inline image thumbnails now support Gemini and Copilot sessions.</li>
-<li>Image Browser: Double-click opens the selected image in Preview; Space opens Quick Look.</li>
-</ul>
-<h3>Reminder: What You Got in 2.10</h3>
-<ul>
-<li>Apple Notes-style Unified Search across all sessions and inside a session, compatible with filters.</li>
-<li>SQLite-backed search plus richer instant indexing for faster results and better recall.</li>
-<li>Incremental analytics refresh and faster startup with immediate hydrated lists.</li>
-<li>Session view (formerly Color view) is now a colored timeline with improved formatting.</li>
-</ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v2.11">https://github.com/jazzyalex/agent-sessions/releases/tag/v2.11</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v2.11.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v2.11.1</a></p>
             ]]></description>
-            <sparkle:version>19</sparkle:version>
-            <sparkle:shortVersionString>2.11</sparkle:shortVersionString>
+            <sparkle:version>20</sparkle:version>
+            <sparkle:shortVersionString>2.11.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.11/AgentSessions-2.11.dmg" length="11276716" type="application/octet-stream" sparkle:edSignature="/JR1AvrffjixzUSg9yvcZj9ZcE6VjEJbH+PDb55e1B7X5tKFlynQYzBLvu6yfK5Nx4gd+xmG4iTOyFvMuBwQAw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.11.1/AgentSessions-2.11.1.dmg" length="11484833" type="application/octet-stream" sparkle:edSignature="Knh3OZ/97WlZQasC7fxRbkCcyt7a8uiDF6+aAi8D/puk2btvC3W8eFq3D5SB9Iho7LR+Ora9XokFAGHzTkBQBg=="/>
         </item>
     </channel>
 </rss>
