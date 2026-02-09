@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-02-08
+
 - Onboarding: Added a visible “Help improve Agent Sessions” feedback card on the first slide (below session/agent counters) that links to the short feedback form and clarifies that Agent Sessions is local-only with no telemetry.
 - Onboarding: Fixed overlap in the “Sessions by Agent” weekly chart, split usage limit tracking into separate Claude/Codex cards, and removed onboarding slide scrolling by fitting all slides within the onboarding window.
 - Transcript (Session view): Real user prompts now use the same narrative font as other blocks, remove side accent strips, keep inverted contrast in dark mode, and use a dark gray (`white: 0.20`) bubble with white text in light mode.
