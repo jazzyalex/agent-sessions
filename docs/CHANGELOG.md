@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 - Onboarding: Added a visible “Help improve Agent Sessions” feedback card on the first slide (below session/agent counters) that links to the short feedback form and clarifies that Agent Sessions is local-only with no telemetry.
 - Onboarding: Fixed overlap in the “Sessions by Agent” weekly chart, split usage limit tracking into separate Claude/Codex cards, and removed onboarding slide scrolling by fitting all slides within the onboarding window.
+- Transcript (Session view): Real user prompts now use the same narrative font as other blocks, remove side accent strips, keep inverted contrast in dark mode, and use a dark gray (`white: 0.20`) bubble with white text in light mode.
+- Transcript (Session view): Removed the synthetic “Conversation starts here” divider line for all agents; preamble-skip jump behavior still targets the first real user prompt.
+- Transcript (Session view): The Images toolbar pill now shows only the icon and count (no “Images” text label).
+- Transcript (Session view): The Images toolbar pill is now always visible and is disabled until the selected session has detected images; once detected it enables and supports prompt navigation with count.
 - Sessions/Search: Gemini, Copilot, Droid, and OpenClaw indexing now use the same power-aware idle execution profiles as Codex/Claude (lower-priority slices and deferred non-critical work on battery/background).
 - Sessions/Search: Typing in global Search now runs instant indexed results only, while pressing Return triggers full deep scan/backfill; this reduces long CPU bursts during active typing.
 - Sessions/Search: Global Search no longer generates transcripts on-demand during scans; it searches cached transcripts when available and otherwise falls back to raw event fields to avoid multi-minute CPU bursts.

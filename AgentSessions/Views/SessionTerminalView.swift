@@ -222,15 +222,7 @@ struct SessionTerminalView: View {
                 legendToggle(label: agentLegendLabel, role: .assistant)
                 legendToggle(label: "Tools", role: .tools)
                 legendToggle(label: "Errors", role: .errors)
-                if (session.source == .codex
-                        || session.source == .claude
-                        || session.source == .opencode
-                        || session.source == .gemini
-                        || session.source == .copilot
-                        || session.source == .openclaw),
-                   hasInlineImagesInSession {
-                    imagesPill()
-                }
+                imagesPill()
             }
             .foregroundStyle(.secondary)
 
@@ -546,6 +538,7 @@ struct SessionTerminalView: View {
     private func imagesPill() -> some View {
         let isOn = inlineImagesVisibleInSession
         let imageBlockIndices = sortedInlineImageUserBlockIndices()
+        let hasImages = !imageBlockIndices.isEmpty
         let navDisabled = imageBlockIndices.isEmpty
         let status = inlineImageNavigationStatus()
         let countText = "\(formattedCount(status.current))/\(formattedCount(status.total))"
@@ -557,18 +550,22 @@ struct SessionTerminalView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "photo.on.rectangle")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(isOn ? Color.secondary : Color.secondary.opacity(0.55))
-                    Text("Images")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(isOn ? .primary : .secondary)
+                        .foregroundStyle(
+                            hasImages
+                                ? (isOn ? Color.secondary : Color.secondary.opacity(0.55))
+                                : Color.secondary.opacity(0.35)
+                        )
                     Text(countText)
                         .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Color.secondary)
+                        .foregroundStyle(hasImages ? Color.secondary : Color.secondary.opacity(0.45))
                         .monospacedDigit()
                 }
             }
             .buttonStyle(.plain)
-            .help(isOn ? "Hide inline images in this view" : "Show inline images in this view")
+            .disabled(!hasImages)
+            .help(hasImages
+                ? (isOn ? "Hide inline images in this view" : "Show inline images in this view")
+                : "No images found in this session")
 
             HStack(spacing: 4) {
                 ZStack {
@@ -773,7 +770,7 @@ struct SessionTerminalView: View {
     nonisolated private static func buildRebuildResult(session: Session, skipAgentsPreamble: Bool) -> RebuildResult {
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
         let built = TerminalBuilder.buildLines(for: session, showMeta: false)
-        let (decorated, dividerID) = applyConversationStartDividerIfNeeded(session: session, lines: built, enabled: skipAgentsPreamble)
+        let startLineID = conversationStartLineIDIfNeeded(session: session, lines: built, enabled: skipAgentsPreamble)
         let preambleUserBlockIndexes = computePreambleUserBlockIndexes(session: session)
 
         // Collapse multi-line blocks into single navigable/message entries per role.
@@ -783,7 +780,7 @@ struct SessionTerminalView: View {
         var lastToolGroupKey: String? = nil
         var lastToolName: String? = nil
 
-        for line in decorated {
+        for line in built {
             guard let blockIndex = line.blockIndex else { continue }
             if firstLineForBlock[blockIndex] == nil {
                 firstLineForBlock[blockIndex] = line.id
@@ -880,8 +877,8 @@ struct SessionTerminalView: View {
         }
 
         return RebuildResult(
-            lines: decorated,
-            conversationStartLineID: dividerID,
+            lines: built,
+            conversationStartLineID: startLineID,
             preambleUserBlockIndexes: preambleUserBlockIndexes,
             userLineIndices: messageIDs { $0 == .user },
             assistantLineIndices: messageIDs { $0 == .assistant },
@@ -1309,9 +1306,9 @@ struct SessionTerminalView: View {
         case .lastUserPrompt:
             return userLineIndices.last
         case .firstUserPrompt:
-            if skipAgentsPreamble, let dividerID = conversationStartLineID {
-                if let after = userLineIndices.first(where: { $0 > dividerID }) {
-                    return after
+            if skipAgentsPreamble, let startLineID = conversationStartLineID {
+                if let line = userLineIndices.first(where: { $0 >= startLineID }) {
+                    return line
                 }
             }
             return userLineIndices.first
@@ -1356,12 +1353,11 @@ struct SessionTerminalView: View {
         }
     }
 
-    nonisolated private static func applyConversationStartDividerIfNeeded(session: Session, lines: [TerminalLine], enabled: Bool) -> ([TerminalLine], Int?) {
-        guard enabled else { return (lines, nil) }
+    nonisolated private static func conversationStartLineIDIfNeeded(session: Session, lines: [TerminalLine], enabled: Bool) -> Int? {
+        guard enabled else { return nil }
 
         // Droid: system reminders can be embedded in the first user message but should be hidden by default.
-        // When present, insert the divider above the first real user prompt while keeping the preamble
-        // visible above (Codex-style: auto-jump, but you can scroll up).
+        // When present, jump to the first real user prompt while keeping preamble content above.
         if session.source == .droid {
             func firstNonEmptyLine(_ text: String) -> String? {
                 for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -1383,69 +1379,39 @@ struct SessionTerminalView: View {
                 promptLine = firstNonEmptyLine(raw)
                 break
             }
-            if let promptLine {
-                if let insertAt = lines.firstIndex(where: { $0.role == .user && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == promptLine }) {
-                    return insertConversationStartDivider(lines: lines, insertAt: insertAt)
-                }
+            if let promptLine,
+               let targetIndex = lines.firstIndex(where: { $0.role == .user && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == promptLine }) {
+                return lineID(at: targetIndex, in: lines)
             }
         }
 
         let marker = "</INSTRUCTIONS>"
         guard let closeIndex = lines.firstIndex(where: { $0.text.contains(marker) }) else {
-            guard let insertAt = claudeConversationStartLineIndexIfNeeded(lines: lines) else { return (lines, nil) }
-            return insertConversationStartDivider(lines: lines, insertAt: insertAt)
+            guard let targetIndex = claudeConversationStartLineIndexIfNeeded(lines: lines) else { return nil }
+            return lineID(at: targetIndex, in: lines)
         }
+
         // Find first non-empty user line after the closing marker.
-        var promptIndex: Int? = nil
-        var i = closeIndex + 1
-        while i < lines.count {
-            let line = lines[i]
+        var targetIndex: Int? = nil
+        var index = closeIndex + 1
+        while index < lines.count {
+            let line = lines[index]
             if line.role == .user {
                 let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty, !trimmed.contains(marker) {
-                    promptIndex = i
+                    targetIndex = index
                     break
                 }
             }
-            i += 1
+            index += 1
         }
-        guard let insertAt = promptIndex else { return (lines, nil) }
-        return insertConversationStartDivider(lines: lines, insertAt: insertAt)
+        guard let targetIndex else { return nil }
+        return lineID(at: targetIndex, in: lines)
     }
 
-    nonisolated private static func insertConversationStartDivider(lines: [TerminalLine], insertAt: Int) -> ([TerminalLine], Int?) {
-        // Avoid double insertion.
-        if lines.contains(where: { $0.role == .meta && $0.text.contains("Conversation starts here") }) {
-            return (lines, insertAt)
-        }
-
-        var out: [TerminalLine] = []
-        out.reserveCapacity(lines.count + 1)
-        for (idx, line) in lines.enumerated() {
-            if idx == insertAt {
-                out.append(TerminalLine(
-                    id: -1,
-                    text: "──────── Conversation starts here ────────",
-                    role: .meta,
-                    eventIndex: nil,
-                    blockIndex: nil
-                ))
-            }
-            out.append(line)
-        }
-        // Reindex IDs to remain stable/incremental.
-        out = out.enumerated().map { newIdx, line in
-            TerminalLine(
-                id: newIdx,
-                text: line.text,
-                role: line.role,
-                eventIndex: line.eventIndex,
-                blockIndex: line.blockIndex
-            )
-        }
-
-        // Divider line is at insertAt after reindex.
-        return (out, insertAt)
+    nonisolated private static func lineID(at index: Int, in lines: [TerminalLine]) -> Int? {
+        guard index >= 0, index < lines.count else { return nil }
+        return lines[index].id
     }
 
     nonisolated private static func claudeConversationStartLineIndexIfNeeded(lines: [TerminalLine]) -> Int? {
@@ -1534,7 +1500,6 @@ private struct TerminalLineView: View {
 	    }
 	
 	    private var lineFontWeight: Font.Weight {
-	        if line.role == .user { return .semibold }
 	        if line.role == .toolInput && isToolLabelLine(line.text) { return .semibold }
 	        return .regular
 	    }
@@ -1611,9 +1576,13 @@ private struct TerminalRolePalette {
             switch role {
             case .user:
                 return AppKitSwatch(
-                    foreground: NSColor.labelColor,
-                    background: NSColor(white: 0.5, alpha: isDark ? 0.20 : 0.12),
-                    accent: NSColor(white: 0.5, alpha: 1.0)
+                    foreground: isDark ? NSColor.black : NSColor.white,
+                    background: isDark
+                        ? NSColor(white: 0.94, alpha: 0.96)
+                        : NSColor(white: 0.20, alpha: 0.90),
+                    accent: isDark
+                        ? NSColor(white: 0.30, alpha: 1.0)
+                        : NSColor(white: 0.75, alpha: 1.0)
                 )
             case .assistant:
                 return AppKitSwatch(
@@ -1651,8 +1620,10 @@ private struct TerminalRolePalette {
             switch role {
             case .user:
                 return AppKitSwatch(
-                    foreground: NSColor.labelColor,
-                    background: tinted(NSColor.systemBlue, light: 0.20, dark: 0.25),
+                    foreground: isDark ? NSColor.black : NSColor.white,
+                    background: isDark
+                        ? NSColor(white: 0.94, alpha: 0.96)
+                        : NSColor(white: 0.20, alpha: 0.90),
                     accent: NSColor.systemBlue
                 )
             case .assistant:
@@ -1773,7 +1744,17 @@ private extension TerminalLineRole {
         func rgba(_ color: NSColor, alpha: CGFloat) -> NSColor { color.withAlphaComponent(alpha) }
 
         switch kind {
-        case .user, .userPreamble:
+        case .user:
+            let fill = dark
+                ? NSColor(white: 0.94, alpha: 0.96)
+                : NSColor(white: 0.20, alpha: 0.90)
+            return BlockStyle(
+                fill: fill,
+                accent: nil,
+                accentWidth: 0,
+                paddingY: 6
+            )
+        case .userPreamble:
             let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
             return BlockStyle(
                 fill: rgba(base, alpha: dark ? 0.12 : 0.04),
@@ -3718,18 +3699,6 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         ranges.reserveCapacity(lines.count)
 
         let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-        let systemUserFont: NSFont = {
-            let userFontSize = fontSize + 1
-            if let optima = NSFont(name: "Optima", size: userFontSize) {
-                let descriptor = optima.fontDescriptor.addingAttributes([
-                    .traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.semibold]
-                ])
-                if let weighted = NSFont(descriptor: descriptor, size: userFontSize) {
-                    return weighted
-                }
-            }
-            return NSFont.systemFont(ofSize: userFontSize, weight: .semibold)
-        }()
         let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         let monoSemiboldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .semibold)
 
@@ -3868,7 +3837,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 return preambleUserBlockIndexes.contains(blockIndex)
             }()
 
-            let lineSwatch = swatch(for: line.role)
+            let lineSwatch = (isPreambleUserLine ? assistantSwatch : swatch(for: line.role))
             let baseFont: NSFont = {
                 if line.role == .toolInput {
                     return isFirstLineOfBlock ? monoSemiboldFont : monoRegularFont
@@ -3876,7 +3845,6 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 if line.role == .toolOutput || line.role == .error {
                     return monoRegularFont
                 }
-                if line.role == .user && !isPreambleUserLine { return systemUserFont }
                 return systemRegularFont
             }()
 
