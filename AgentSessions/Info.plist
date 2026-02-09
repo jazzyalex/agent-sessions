@@ -28,7 +28,7 @@
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
 	<key>SUAutomaticallyUpdate</key>
-	<false/>
+	<true/>
 	<key>SUShowReleaseNotes</key>
 	<true/>
 </dict>

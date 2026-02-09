@@ -85,11 +85,21 @@ extension PreferencesView {
                     }
                 }
 
-                Button("Check for Updates...") {
-                    updaterController.checkForUpdates(nil)
+                HStack(spacing: 12) {
+                    Toggle("Auto-Update", isOn: Binding(
+                        get: { updaterController.autoUpdateEnabled },
+                        set: { updaterController.autoUpdateEnabled = $0 }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .help("Automatically download and install app updates")
+                    .disabled(updaterController.updater == nil)
+
+                    Button("Check for Updates...") {
+                        updaterController.checkForUpdates(nil)
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Check for new versions and install updates")
                 }
-                .buttonStyle(.bordered)
-                .help("Check for new versions and install updates")
             }
 
             Spacer()

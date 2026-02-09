@@ -35,10 +35,12 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     // MARK: - Private Properties
 
     private var controller: SPUStandardUpdaterController?
+    private let defaultAutoUpdateEnabled: Bool
 
     // MARK: - Initialization
 
     override init() {
+        self.defaultAutoUpdateEnabled = (Bundle.main.object(forInfoDictionaryKey: "SUAutomaticallyUpdate") as? Bool) ?? false
         super.init()
 
         // Skip initializing Sparkle when running tests to avoid timeouts and dialogs
@@ -71,6 +73,17 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
 
     /// Exposes the underlying SPUUpdater for advanced use cases.
     var updater: SPUUpdater? { controller?.updater }
+
+    /// Controls whether updates are automatically downloaded and installed.
+    /// This value persists in Sparkle's user defaults once changed by the user.
+    var autoUpdateEnabled: Bool {
+        get { controller?.updater.automaticallyDownloadsUpdates ?? defaultAutoUpdateEnabled }
+        set {
+            guard let updater = controller?.updater else { return }
+            updater.automaticallyDownloadsUpdates = newValue
+            objectWillChange.send()
+        }
+    }
 
     /// Triggers a manual update check (ignores scheduled interval).
     /// Wired to "Check for Updates…" menu item.
