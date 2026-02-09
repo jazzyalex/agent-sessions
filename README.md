@@ -21,7 +21,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.11/AgentSessions-2.11.dmg"><b>Download Agent Sessions 2.11 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.11.1/AgentSessions-2.11.1.dmg"><b>Download Agent Sessions 2.11.1 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -62,7 +62,7 @@ Agent Sessions helps you search across large session histories, quickly find the
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.11.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.11/AgentSessions-2.11.dmg)
+1. [Download AgentSessions-2.11.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.11.1/AgentSessions-2.11.1.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
