@@ -2261,7 +2261,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
     }
 
-	    final class Coordinator: NSObject, NSTextViewDelegate, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+    final class Coordinator: NSObject, NSTextViewDelegate, AVSpeechSynthesizerDelegate, @unchecked Sendable {
         static let inlineImageIDKey = NSAttributedString.Key("AgentSessionsInlineImageID")
 
         private final class InlineImageHoverPreviewViewController: NSViewController {
@@ -2373,8 +2373,9 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         private weak var activeScrollView: NSScrollView?
         weak var activeLayoutManager: TerminalLayoutManager?
         private var activeBlockText: String = ""
-        private let speechSynthesizer: AVSpeechSynthesizer = AVSpeechSynthesizer()
-	        private let speechQueue = DispatchQueue(label: "com.agentsessions.speechSynthesizer", qos: .userInitiated)
+        private static let speechTeardownQueue = DispatchQueue(label: "com.agentsessions.speechSynthesizer.teardown", qos: .utility)
+        private let speechQueue = DispatchQueue(label: "com.agentsessions.speechSynthesizer", qos: .userInitiated)
+        private var speechSynthesizer: AVSpeechSynthesizer? = nil
         private var isSpeaking: Bool = false
 
         var inlineImagesEnabled: Bool = false
@@ -2396,13 +2397,29 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         override init() {
             super.init()
-            speechSynthesizer.delegate = self
+            let synthesizer = AVSpeechSynthesizer()
+            synthesizer.delegate = self
+            speechSynthesizer = synthesizer
         }
 
         deinit {
             removeScrollObserver()
             inlineThumbnailTasks.values.forEach { $0.cancel() }
             inlineHoverTask?.cancel()
+
+            // AVSpeechSynthesizer teardown can synchronously block waiting on its internal worker thread.
+            // If coordinator deallocation happens on the UI thread, that can show up as a QoS priority
+            // inversion. Detach the synthesizer and let it stop + deallocate off the UI thread.
+            let synthesizer = speechSynthesizer
+            speechSynthesizer = nil
+            synthesizer?.delegate = nil
+            guard let synthesizer else { return }
+            speechQueue.async {
+                synthesizer.stopSpeaking(at: .immediate)
+                Self.speechTeardownQueue.async {
+                    _ = synthesizer
+                }
+            }
         }
 
         func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange oldSelectedCharRange: NSRange, toCharacterRange newSelectedCharRange: NSRange) -> NSRange {
@@ -2497,17 +2514,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             utterance.rate = AVSpeechUtteranceDefaultSpeechRate
             utterance.volume = 1.0
             speechQueue.async { [weak self] in
-                guard let self else { return }
-                if self.speechSynthesizer.isSpeaking {
-                    self.speechSynthesizer.stopSpeaking(at: .immediate)
+                guard let self, let synthesizer = self.speechSynthesizer else { return }
+                if synthesizer.isSpeaking {
+                    synthesizer.stopSpeaking(at: .immediate)
                 }
-                self.speechSynthesizer.speak(utterance)
+                synthesizer.speak(utterance)
             }
         }
 
         @objc private func stopSpeaking(_ sender: Any?) {
             speechQueue.async { [weak self] in
-                self?.speechSynthesizer.stopSpeaking(at: .immediate)
+                self?.speechSynthesizer?.stopSpeaking(at: .immediate)
             }
         }
 
@@ -2876,35 +2893,35 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             NSWorkspace.shared.open([url], withApplicationAt: previewURL, configuration: config, completionHandler: nil)
         }
 
-	        private func inlineImageContextMenu() -> NSMenu {
-	            let out = NSMenu(title: "Image")
-	            out.autoenablesItems = false
+        private func inlineImageContextMenu() -> NSMenu {
+            let out = NSMenu(title: "Image")
+            out.autoenablesItems = false
 
-	            let openBrowser = NSMenuItem(title: "Open in Image Browser", action: #selector(openInlineImageInBrowser(_:)), keyEquivalent: "")
-	            openBrowser.target = self
-	            out.addItem(openBrowser)
+            let openBrowser = NSMenuItem(title: "Open in Image Browser", action: #selector(openInlineImageInBrowser(_:)), keyEquivalent: "")
+            openBrowser.target = self
+            out.addItem(openBrowser)
 
-	            out.addItem(.separator())
+            out.addItem(.separator())
 
-	            let openPreview = NSMenuItem(title: "Open in Preview", action: #selector(openInlineImageInPreview(_:)), keyEquivalent: "")
-	            openPreview.target = self
-	            out.addItem(openPreview)
+            let openPreview = NSMenuItem(title: "Open in Preview", action: #selector(openInlineImageInPreview(_:)), keyEquivalent: "")
+            openPreview.target = self
+            out.addItem(openPreview)
 
-	            out.addItem(.separator())
+            out.addItem(.separator())
 
-	            let copyPath = NSMenuItem(title: "Copy Image Path (for CLI agent)", action: #selector(copyInlineImagePath(_:)), keyEquivalent: "")
-	            copyPath.target = self
-	            out.addItem(copyPath)
+            let copyPath = NSMenuItem(title: "Copy Image Path (for CLI agent)", action: #selector(copyInlineImagePath(_:)), keyEquivalent: "")
+            copyPath.target = self
+            out.addItem(copyPath)
 
-	            let copyImage = NSMenuItem(title: "Copy Image", action: #selector(copyInlineImage(_:)), keyEquivalent: "")
-	            copyImage.target = self
-	            out.addItem(copyImage)
+            let copyImage = NSMenuItem(title: "Copy Image", action: #selector(copyInlineImage(_:)), keyEquivalent: "")
+            copyImage.target = self
+            out.addItem(copyImage)
 
-	            out.addItem(.separator())
+            out.addItem(.separator())
 
-	            let saveDownloads = NSMenuItem(title: "Save to Downloads", action: #selector(saveInlineImageToDownloads(_:)), keyEquivalent: "")
-	            saveDownloads.target = self
-	            out.addItem(saveDownloads)
+            let saveDownloads = NSMenuItem(title: "Save to Downloads", action: #selector(saveInlineImageToDownloads(_:)), keyEquivalent: "")
+            saveDownloads.target = self
+            out.addItem(saveDownloads)
 
             let save = NSMenuItem(title: "Save…", action: #selector(saveInlineImageWithPanel(_:)), keyEquivalent: "")
             save.target = self
@@ -2931,7 +2948,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-	        @objc private func copyInlineImagePath(_ sender: Any?) {
+        @objc private func copyInlineImagePath(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
             let maxDecodedBytes = 25 * 1024 * 1024
 
@@ -2948,12 +2965,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let ext = CodexSessionImagePayload.suggestedFileExtension(for: meta.payload.mediaType)
             let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
 
-	            Task(priority: .userInitiated) {
-	                do {
-	                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
-	                                                                             maxDecodedBytes: maxDecodedBytes,
-	                                                                             shouldCancel: { Task.isCancelled })
-	                    if Task.isCancelled { return }
+            Task(priority: .userInitiated) {
+                do {
+                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
+                                                                             maxDecodedBytes: maxDecodedBytes,
+                                                                             shouldCancel: { Task.isCancelled })
+                    if Task.isCancelled { return }
 
                     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("AgentSessions/ImageClipboard", isDirectory: true)
                     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -2972,17 +2989,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-	        @objc private func copyInlineImage(_ sender: Any?) {
+        @objc private func copyInlineImage(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
             let maxDecodedBytes = 25 * 1024 * 1024
 
-	            Task(priority: .userInitiated) {
-	                do {
-	                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
-	                                                                             maxDecodedBytes: maxDecodedBytes,
-	                                                                             shouldCancel: { Task.isCancelled })
-	                    if Task.isCancelled { return }
-	                    guard let image = NSImage(data: decoded) else { return }
+            Task(priority: .userInitiated) {
+                do {
+                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
+                                                                             maxDecodedBytes: maxDecodedBytes,
+                                                                             shouldCancel: { Task.isCancelled })
+                    if Task.isCancelled { return }
+                    guard let image = NSImage(data: decoded) else { return }
 
                     await MainActor.run {
                         let pasteboard = NSPasteboard.general
@@ -3000,7 +3017,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-	        @objc private func saveInlineImageToDownloads(_ sender: Any?) {
+        @objc private func saveInlineImageToDownloads(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
             guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
             let maxDecodedBytes = 25 * 1024 * 1024
@@ -3008,20 +3025,20 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let filename = "image-\(String(meta.sessionID.prefix(6)))-\(meta.sessionImageIndex).\(ext)"
             let destination = uniqueDestinationURL(in: downloads, filename: filename)
 
-	            Task(priority: .userInitiated) {
-	                do {
-	                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
-	                                                                             maxDecodedBytes: maxDecodedBytes,
-	                                                                             shouldCancel: { Task.isCancelled })
-	                    if Task.isCancelled { return }
-	                    try decoded.write(to: destination, options: [.atomic])
-	                } catch {
+            Task(priority: .userInitiated) {
+                do {
+                    let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
+                                                                             maxDecodedBytes: maxDecodedBytes,
+                                                                             shouldCancel: { Task.isCancelled })
+                    if Task.isCancelled { return }
+                    try decoded.write(to: destination, options: [.atomic])
+                } catch {
                     // Best-effort save; no UI error.
                 }
             }
         }
 
-	        @objc private func saveInlineImageWithPanel(_ sender: Any?) {
+        @objc private func saveInlineImageWithPanel(_ sender: Any?) {
             guard let id = inlineContextImageID, let meta = inlineImagesByID[id] else { return }
 
             let ext = CodexSessionImagePayload.suggestedFileExtension(for: meta.payload.mediaType)
@@ -3037,17 +3054,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let maxDecodedBytes = 25 * 1024 * 1024
 
             let destinationKeyWindow = NSApp.keyWindow
-	            let onComplete: (NSApplication.ModalResponse) -> Void = { response in
-	                guard response == .OK, let destination = panel.url else { return }
-	                Task(priority: .userInitiated) {
-	                    do {
-	                        let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
-	                                                                                 maxDecodedBytes: maxDecodedBytes,
-	                                                                                 shouldCancel: { Task.isCancelled })
-	                        if Task.isCancelled { return }
-	                        try decoded.write(to: destination, options: [.atomic])
-	                    } catch {
-	                        // Best-effort save; no UI error.
+            let onComplete: (NSApplication.ModalResponse) -> Void = { response in
+                guard response == .OK, let destination = panel.url else { return }
+                Task(priority: .userInitiated) {
+                    do {
+                        let decoded = try CodexSessionImagePayload.decodeImageData(payload: meta.payload,
+                                                                                 maxDecodedBytes: maxDecodedBytes,
+                                                                                 shouldCancel: { Task.isCancelled })
+                        if Task.isCancelled { return }
+                        try decoded.write(to: destination, options: [.atomic])
+                    } catch {
+                        // Best-effort save; no UI error.
                     }
                 }
             }
