@@ -102,6 +102,22 @@ def _items_by_heading(section_body: str) -> Dict[str, List[str]]:
     return items
 
 
+def _items_with_fallback(section_body: str) -> Dict[str, List[str]]:
+    """
+    Returns changelog items keyed by heading.
+    If a section uses plain bullets without "###" headings, map them to Changed.
+    """
+    items = _items_by_heading(section_body)
+    if items:
+        return items
+
+    flat_bullets = _extract_bullets(section_body.splitlines())
+    if flat_bullets:
+        return {"Changed": flat_bullets}
+
+    return {}
+
+
 def _pick_highlights(items: Dict[str, List[str]], max_items: int = 6) -> List[str]:
     """
     Heuristic:
@@ -224,9 +240,12 @@ def build_notes_bundle(version: str, changelog_path: str, github_url: Optional[s
     if version not in sections:
         raise SystemExit(f"ERROR: CHANGELOG missing section for [{version}]")
 
-    current_items = _items_by_heading(sections[version])
+    current_items = _items_with_fallback(sections[version])
     highlights = _pick_highlights(current_items, max_items=6)
     other = _other_changes(current_items, highlights, max_items=10)
+
+    if not highlights and not other:
+        highlights = ["Small bug fixes and stability improvements."]
 
     baseline_version = _baseline_version_for(version, sections)
     baseline_items: List[str] = []

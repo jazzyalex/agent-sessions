@@ -34,6 +34,7 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 - During `tools/release/deploy release <VERSION>`, the deploy script prints a **Sparkle release notes preview** after build/sign/notarization and appcast validation.
 - If `SKIP_CONFIRM` is not `1`, it will pause and ask for approval before publishing (pushing appcast, updating Homebrew, updating the GitHub release).
 - If you want fully unattended deploys, set `SKIP_CONFIRM=1` (skips the notes prompt).
+- If the current release has no structured bullets, the generator adds a fallback highlight: `Small bug fixes and stability improvements.`
 
 ## Standard Workflow (Use the Unified Tool)
 
