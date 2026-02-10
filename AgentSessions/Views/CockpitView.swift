@@ -15,6 +15,7 @@ struct CockpitView: View {
         let date: Date?
         let dateLabel: String
         let terminal: String
+        let termProgram: String?
         let focusURL: URL?
         let itermSessionId: String?
         let tty: String?
@@ -58,11 +59,14 @@ struct CockpitView: View {
             }()
 
             let focusHelp: String = {
-                if p.revealURL != nil { return "Focus the existing iTerm2 tab/window for this session." }
-                if let id = p.terminal?.itermSessionId, !id.isEmpty {
-                    return "iTerm2 session id present but reveal URL could not be formed."
+                if CodexActiveSessionsModel.canAttemptITerm2Focus(
+                    itermSessionId: p.terminal?.itermSessionId,
+                    tty: p.tty,
+                    termProgram: p.terminal?.termProgram
+                ) || p.revealURL != nil {
+                    return "Focus the existing iTerm2 tab/window for this session."
                 }
-                return "Focus is unavailable (missing iTerm2 session id)."
+                return "Focus is unavailable for this terminal session."
             }()
 
             let stableID: String =
@@ -80,6 +84,7 @@ struct CockpitView: View {
                 date: date,
                 dateLabel: dateLabel,
                 terminal: terminal,
+                termProgram: p.terminal?.termProgram,
                 focusURL: p.revealURL,
                 itermSessionId: p.terminal?.itermSessionId,
                 tty: p.tty,
@@ -152,7 +157,7 @@ struct CockpitView: View {
                 TableColumn("Focus") { row in
                     Button("Focus") { focus(row) }
                         .buttonStyle(.bordered)
-                        .disabled(row.focusURL == nil)
+                        .disabled(!canFocus(row))
                         .help(row.focusHelp)
                 }
                 .width(min: 78, ideal: 90, max: 100)
@@ -161,7 +166,7 @@ struct CockpitView: View {
             .contextMenu(forSelectionType: String.self) { ids in
                 if ids.count == 1, let id = ids.first, let row = activeRows.first(where: { $0.id == id }) {
                     Button("Focus in iTerm2") { focus(row) }
-                        .disabled(row.focusURL == nil)
+                        .disabled(!canFocus(row))
                         .help(row.focusHelp)
                     Divider()
                     Button("Reveal Log") { revealLog(row) }
@@ -212,11 +217,12 @@ struct CockpitView: View {
     }
 
     private func focus(_ row: Row) {
-        guard let url = row.focusURL else { return }
         if CodexActiveSessionsModel.tryFocusITerm2(itermSessionId: row.itermSessionId, tty: row.tty) {
             return
         }
-        NSWorkspace.shared.open(url)
+        if let url = row.focusURL {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func revealLog(_ row: Row) {
@@ -246,6 +252,14 @@ struct CockpitView: View {
     private func normalizePath(_ raw: String) -> String {
         let expanded = (raw as NSString).expandingTildeInPath
         return URL(fileURLWithPath: expanded).standardizedFileURL.path
+    }
+
+    private func canFocus(_ row: Row) -> Bool {
+        CodexActiveSessionsModel.canAttemptITerm2Focus(
+            itermSessionId: row.itermSessionId,
+            tty: row.tty,
+            termProgram: row.termProgram
+        ) || row.focusURL != nil
     }
 
     private func parseRolloutTimestamp(from path: String?) -> Date? {

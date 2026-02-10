@@ -55,6 +55,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     static let defaultPollInterval: TimeInterval = 2
     static let defaultStaleTTL: TimeInterval = 10
     nonisolated private static let processProbeTimeout: TimeInterval = 0.75
+    nonisolated private static let processProbeMinInterval: TimeInterval = 6
 
     @Published private(set) var presences: [CodexActivePresence] = []
     @Published private(set) var lastRefreshAt: Date? = nil
@@ -77,6 +78,8 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     private var bySessionID: [String: CodexActivePresence] = [:]
     private var byLogPath: [String: CodexActivePresence] = [:]
+    private var cachedProcessPresences: [CodexActivePresence] = []
+    private var lastProcessProbeAt: Date? = nil
 
     init() {
         // Avoid background activity under `xcodebuild test`.
@@ -139,6 +142,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             presences = []
             bySessionID = [:]
             byLogPath = [:]
+            cachedProcessPresences = []
+            lastProcessProbeAt = nil
         }
     }
 
@@ -158,20 +163,42 @@ final class CodexActiveSessionsModel: ObservableObject {
         let ttl = Self.defaultStaleTTL
         let rootPaths = registryRoots().map(\.path)
         let sessionsRoots = codexSessionsRoots().map(\.path)
+        let shouldProbeProcesses: Bool = {
+            guard let last = lastProcessProbeAt else { return true }
+            return now.timeIntervalSince(last) >= Self.processProbeMinInterval
+        }()
+        let cachedProbeSnapshot = cachedProcessPresences
 
-        let loaded: [CodexActivePresence] = await Task.detached(priority: .utility) {
+        let probeResult: (loaded: [CodexActivePresence], didProbe: Bool) = await Task.detached(priority: .utility) {
             var out: [CodexActivePresence] = []
             let decoder = Self.makeDecoder()
             for path in rootPaths {
                 out.append(contentsOf: Self.loadPresences(from: URL(fileURLWithPath: path), decoder: decoder, now: now, ttl: ttl))
             }
-            out.append(contentsOf: Self.discoverPresencesFromRunningCodexProcesses(
-                now: now,
-                sessionsRoots: sessionsRoots,
-                timeout: Self.processProbeTimeout
-            ))
-            return out
+            let needsProbe = shouldProbeProcesses || out.isEmpty
+            if needsProbe {
+                // Periodic fallback probe keeps mixed registry/non-registry environments complete.
+                out.append(contentsOf: Self.discoverPresencesFromRunningCodexProcesses(
+                    now: now,
+                    sessionsRoots: sessionsRoots,
+                    timeout: Self.processProbeTimeout
+                ))
+                return (out, true)
+            } else {
+                // Reuse recent probe findings between probe intervals.
+                out.append(contentsOf: cachedProbeSnapshot.filter { !$0.isStale(now: now, ttl: ttl) })
+                return (out, false)
+            }
         }.value
+        let loaded = probeResult.loaded
+
+        if probeResult.didProbe {
+            let latestProbe = loaded.filter { $0.sourceFilePath == nil }
+            cachedProcessPresences = latestProbe
+            lastProcessProbeAt = now
+        } else {
+            cachedProcessPresences = cachedProcessPresences.filter { !$0.isStale(now: now, ttl: ttl) }
+        }
 
         // Deduplicate and merge: keep freshest lastSeenAt, but preserve metadata from any source.
         var sessionMap: [String: CodexActivePresence] = [:]
@@ -351,6 +378,14 @@ final class CodexActiveSessionsModel: ObservableObject {
             return tail.isEmpty ? nil : String(tail)
         }
         return trimmed
+    }
+
+    nonisolated static func canAttemptITerm2Focus(itermSessionId: String?, tty: String?, termProgram: String?) -> Bool {
+        if let guid = itermSessionGuid(from: itermSessionId), !guid.isEmpty { return true }
+        guard let tty = tty?.trimmingCharacters(in: .whitespacesAndNewlines), !tty.isEmpty else { return false }
+        let term = (termProgram ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if term.contains("iterm") { return true }
+        return false
     }
 
     /// Best-effort focus for iTerm2 sessions that works across windows/tabs (and usually Spaces).
