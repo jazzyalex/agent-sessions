@@ -101,10 +101,12 @@ actor CrashReportStore {
         persistPending(filtered)
     }
 
-    func clear() async {
+    func clear() async -> Bool {
         await ensureLoaded()
-        cachedPending = []
-        persistPending([])
+        let cleared: [CrashReportEnvelope] = []
+        guard persistPending(cleared) else { return false }
+        cachedPending = cleared
+        return true
     }
 
     func contains(id: String) async -> Bool {
@@ -135,15 +137,25 @@ actor CrashReportStore {
         return []
     }
 
-    private func persistPending(_ pending: [CrashReportEnvelope]) {
+    @discardableResult
+    private func persistPending(_ pending: [CrashReportEnvelope]) -> Bool {
         let parent = pendingFileURL.deletingLastPathComponent()
-        try? fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        } catch {
+            return false
+        }
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
 
-        guard let data = try? encoder.encode(pending) else { return }
-        try? data.write(to: pendingFileURL, options: [.atomic])
+        do {
+            let data = try encoder.encode(pending)
+            try data.write(to: pendingFileURL, options: [.atomic])
+            return true
+        } catch {
+            return false
+        }
     }
 }

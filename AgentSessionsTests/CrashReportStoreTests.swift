@@ -26,6 +26,25 @@ final class CrashReportStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.map(\.id), ["crash-2", "crash-1"])
     }
 
+    func testClearReturnsFalseWhenPersistFails() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let pendingURL = root.appendingPathComponent("pending.json", isDirectory: true)
+        try FileManager.default.createDirectory(at: pendingURL, withIntermediateDirectories: true)
+
+        let store = CrashReportStore(fileManager: .default, pendingFileURL: pendingURL, maxPendingCount: 50)
+        await store.enqueue(makeEnvelope(id: "crash-1", detectedAt: Date(timeIntervalSince1970: 1_000)))
+        let pendingCountBeforeClear = await store.pendingCount()
+        XCTAssertEqual(pendingCountBeforeClear, 1)
+
+        let didClear = await store.clear()
+        XCTAssertFalse(didClear)
+        let pendingCountAfterClear = await store.pendingCount()
+        XCTAssertEqual(pendingCountAfterClear, 1)
+    }
+
     private func makeEnvelope(id: String, detectedAt: Date) -> CrashReportEnvelope {
         CrashReportEnvelope(
             id: id,

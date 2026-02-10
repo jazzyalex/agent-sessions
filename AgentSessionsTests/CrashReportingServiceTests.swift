@@ -118,6 +118,36 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertEqual(pendingAfterClear, 0)
     }
 
+    func testClearPendingReportsDoesNotMarkSeenWhenStoreClearFails() async throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let failingPendingURL = tempRoot.appendingPathComponent("pending.json", isDirectory: true)
+        try FileManager.default.createDirectory(at: failingPendingURL, withIntermediateDirectories: true)
+
+        let store = CrashReportStore(fileManager: .default, pendingFileURL: failingPendingURL, maxPendingCount: 5)
+        await store.enqueue(contentsOf: [
+            makeEnvelope(id: "clear-fail-1"),
+            makeEnvelope(id: "clear-fail-2")
+        ])
+
+        let defaults = testDefaults("CrashReportingServiceTests.clearFailSeen")
+        let service = CrashReportingService(
+            store: store,
+            detector: CrashReportDetector(reportsRootURL: tempRoot),
+            userDefaults: defaults,
+            nowProvider: Date.init
+        )
+
+        await service.clearPendingReports()
+
+        let seenAfterClearAttempt = defaults.stringArray(forKey: PreferencesKey.Diagnostics.seenCrashIDs) ?? []
+        XCTAssertTrue(seenAfterClearAttempt.isEmpty)
+
+        let pendingAfterClearAttempt = await store.pendingCount()
+        XCTAssertEqual(pendingAfterClearAttempt, 2)
+    }
+
     func testDetectOnLaunchFindsAgentCrashAmidManyNewerNonAgentReports() async throws {
         let tempRoot = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }

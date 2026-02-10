@@ -65,12 +65,12 @@ actor CrashReportingService {
     func clearPendingReports() async {
         let pending = await store.pending()
         let pendingIDsByRecency = pending.map(\.id).filter { !$0.isEmpty }
-        if !pendingIDsByRecency.isEmpty {
-            let seenHistory = loadedSeenCrashIDHistory()
-            let updatedSeenHistory = mergedSeenCrashIDHistory(existing: seenHistory, newlySeenIDsByRecency: pendingIDsByRecency)
-            persistSeenCrashIDHistory(updatedSeenHistory, lastSeenID: pendingIDsByRecency.first)
-        }
-        await store.clear()
+        let didClear = await store.clear()
+        guard didClear, !pendingIDsByRecency.isEmpty else { return }
+
+        let seenHistory = loadedSeenCrashIDHistory()
+        let updatedSeenHistory = mergedSeenCrashIDHistory(existing: seenHistory, newlySeenIDsByRecency: pendingIDsByRecency)
+        persistSeenCrashIDHistory(updatedSeenHistory, lastSeenID: pendingIDsByRecency.first)
     }
 
     func exportLatestPendingReport(to url: URL) async throws {
