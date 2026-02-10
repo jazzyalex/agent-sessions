@@ -39,6 +39,85 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertEqual(pending.count, 1)
     }
 
+    func testDetectOnLaunchMarksSeenOnlyAfterPendingIsCleared() async throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let reportURL = tempRoot.appendingPathComponent("Agent Sessions_2026-02-10-121000.crash")
+        try makeCrashReportFile(at: reportURL)
+
+        let storeURL = tempRoot.appendingPathComponent("pending.json")
+        let store = CrashReportStore(fileManager: .default, pendingFileURL: storeURL, maxPendingCount: 1)
+        let detector = CrashReportDetector(
+            fileManager: .default,
+            reportsRootURL: tempRoot,
+            appName: "Agent Sessions",
+            bundleIdentifier: "com.triada.AgentSessions",
+            appVersion: "2.11.2",
+            appBuild: "21",
+            nowProvider: Date.init,
+            lookbackWindow: 60 * 60 * 24 * 30,
+            maxReports: 10
+        )
+
+        let defaults = testDefaults("CrashReportingServiceTests.markSeenOnClear")
+        let service = CrashReportingService(
+            store: store,
+            detector: detector,
+            userDefaults: defaults,
+            nowProvider: Date.init
+        )
+
+        let detectedCount = await service.detectAndQueueOnLaunch()
+        XCTAssertEqual(detectedCount, 1)
+
+        let seenBeforeClear = defaults.stringArray(forKey: PreferencesKey.Diagnostics.seenCrashIDs) ?? []
+        XCTAssertTrue(seenBeforeClear.isEmpty)
+
+        let pendingBeforeClear = await store.pending()
+        let pendingID = try XCTUnwrap(pendingBeforeClear.first?.id)
+
+        await service.clearPendingReports()
+
+        let seenAfterClear = defaults.stringArray(forKey: PreferencesKey.Diagnostics.seenCrashIDs) ?? []
+        XCTAssertEqual(seenAfterClear.count, 1)
+        XCTAssertTrue(seenAfterClear.contains(pendingID))
+    }
+
+    func testClearPendingReportsMarksAllPendingIDsAsSeen() async throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let storeURL = tempRoot.appendingPathComponent("pending.json")
+        let store = CrashReportStore(fileManager: .default, pendingFileURL: storeURL, maxPendingCount: 5)
+        await store.enqueue(contentsOf: [
+            makeEnvelope(id: "clear-1"),
+            makeEnvelope(id: "clear-2"),
+            makeEnvelope(id: "clear-3")
+        ])
+
+        let defaults = testDefaults("CrashReportingServiceTests.clearAllSeen")
+        let service = CrashReportingService(
+            store: store,
+            detector: CrashReportDetector(reportsRootURL: tempRoot),
+            userDefaults: defaults,
+            nowProvider: Date.init
+        )
+
+        let pendingBeforeClear = await store.pending()
+        let pendingIDs = Set(pendingBeforeClear.map(\.id))
+        XCTAssertEqual(pendingIDs.count, 3)
+
+        await service.clearPendingReports()
+
+        let seenAfterClear = defaults.stringArray(forKey: PreferencesKey.Diagnostics.seenCrashIDs) ?? []
+        XCTAssertEqual(Set(seenAfterClear), pendingIDs)
+        XCTAssertEqual(seenAfterClear.count, pendingIDs.count)
+
+        let pendingAfterClear = await store.pendingCount()
+        XCTAssertEqual(pendingAfterClear, 0)
+    }
+
     func testDetectOnLaunchFindsAgentCrashAmidManyNewerNonAgentReports() async throws {
         let tempRoot = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -150,7 +229,7 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertEqual(seenCrashIDs.count, 2)
     }
 
-    func testDetectOnLaunchRetainsNewlySeenIDWhenHistoryIsAtCapacity() async throws {
+    func testClearPendingReportsRetainsNewlySeenIDWhenHistoryIsAtCapacity() async throws {
         let tempRoot = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
@@ -191,11 +270,17 @@ final class CrashReportingServiceTests: XCTestCase {
 
         let seenAfterFirstDetect = defaults.stringArray(forKey: PreferencesKey.Diagnostics.seenCrashIDs) ?? []
         XCTAssertEqual(seenAfterFirstDetect.count, 200)
-        XCTAssertTrue(seenAfterFirstDetect.contains(newSeenID))
+        XCTAssertFalse(seenAfterFirstDetect.contains(newSeenID))
         let retainedSeedCount = seenAfterFirstDetect.filter { $0.hasPrefix("z-seen-") }.count
-        XCTAssertEqual(retainedSeedCount, 199)
+        XCTAssertEqual(retainedSeedCount, 200)
 
         await firstLaunchService.clearPendingReports()
+
+        let seenAfterClear = defaults.stringArray(forKey: PreferencesKey.Diagnostics.seenCrashIDs) ?? []
+        XCTAssertEqual(seenAfterClear.count, 200)
+        XCTAssertTrue(seenAfterClear.contains(newSeenID))
+        let retainedSeedCountAfterClear = seenAfterClear.filter { $0.hasPrefix("z-seen-") }.count
+        XCTAssertEqual(retainedSeedCountAfterClear, 199)
 
         let secondLaunchService = CrashReportingService(
             store: store,
@@ -245,6 +330,44 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertTrue(body.contains("\"id\" : \"email-1\""))
     }
 
+    func testDetectOnLaunchUsesVersionBuildFromCrashReportText() async throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let reportURL = tempRoot.appendingPathComponent("Agent Sessions_2026-02-10-122000.crash")
+        try makeCrashReportFile(at: reportURL, versionLine: "1.2.3 (456)")
+
+        let storeURL = tempRoot.appendingPathComponent("pending.json")
+        let store = CrashReportStore(fileManager: .default, pendingFileURL: storeURL, maxPendingCount: 1)
+        let detector = CrashReportDetector(
+            fileManager: .default,
+            reportsRootURL: tempRoot,
+            appName: "Agent Sessions",
+            bundleIdentifier: "com.triada.AgentSessions",
+            appVersion: "9.9.9",
+            appBuild: "999",
+            nowProvider: Date.init,
+            lookbackWindow: 60 * 60 * 24 * 30,
+            maxReports: 10
+        )
+
+        let defaults = testDefaults("CrashReportingServiceTests.reportVersionBuild")
+        let service = CrashReportingService(
+            store: store,
+            detector: detector,
+            userDefaults: defaults,
+            nowProvider: Date.init
+        )
+
+        let detectedCount = await service.detectAndQueueOnLaunch()
+        XCTAssertEqual(detectedCount, 1)
+
+        let pending = await store.pending()
+        let report = try XCTUnwrap(pending.first)
+        XCTAssertEqual(report.appVersion, "1.2.3")
+        XCTAssertEqual(report.appBuild, "456")
+    }
+
     func testSupportEmailDraftWithoutPendingReportsHasTemplateBody() async throws {
         let tempRoot = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -286,11 +409,11 @@ final class CrashReportingServiceTests: XCTestCase {
         return defaults
     }
 
-    private func makeCrashReportFile(at url: URL) throws {
+    private func makeCrashReportFile(at url: URL, versionLine: String = "2.11.2 (21)") throws {
         let text = """
         Process:               Agent Sessions [100]
         Identifier:            com.triada.AgentSessions
-        Version:               2.11.2 (21)
+        Version:               \(versionLine)
         Date/Time:             2026-02-10 12:00:00.000 +0000
         Exception Type:        EXC_BAD_ACCESS (SIGSEGV)
         Exception Codes:       KERN_INVALID_ADDRESS at 0x0000000000000000

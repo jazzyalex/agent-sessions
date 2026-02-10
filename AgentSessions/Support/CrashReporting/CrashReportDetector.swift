@@ -115,8 +115,8 @@ struct CrashReportDetector {
             reportSourcePathHash: sourceHash,
             reportFilename: url.lastPathComponent,
             crashTimestamp: crashTime,
-            appVersion: appVersion,
-            appBuild: appBuild,
+            appVersion: parsed.appVersion ?? appVersion,
+            appBuild: parsed.appBuild ?? appBuild,
             macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
             architecture: machineArchitecture(),
             terminationSummary: CrashReportSanitizer.truncate(parsed.terminationSummary, limit: 400),
@@ -136,6 +136,8 @@ struct CrashReportDetector {
 
         let lines = text.components(separatedBy: .newlines)
         let crashTimestamp = parseCrashTimestamp(from: lines)
+        let rawVersion = firstValue(after: "Version:", in: lines)
+        let parsedVersionBuild = parseVersionAndBuild(from: rawVersion)
 
         let exceptionType = firstValue(after: "Exception Type:", in: lines)
         let exceptionCodes = firstValue(after: "Exception Codes:", in: lines)
@@ -149,16 +151,24 @@ struct CrashReportDetector {
 
         let topFrames = parseTopFramesFromCrashLines(lines)
 
-        let meta = [
+        var meta = [
             "format": "crash",
             "exceptionType": exceptionType ?? "",
             "terminationReason": terminationReason ?? ""
         ]
+        if let appVersion = parsedVersionBuild.version {
+            meta["reportAppVersion"] = appVersion
+        }
+        if let appBuild = parsedVersionBuild.build {
+            meta["reportAppBuild"] = appBuild
+        }
 
         return ParsedCrash(crashTimestamp: crashTimestamp,
                            terminationSummary: summary,
                            topFrames: topFrames,
-                           metadata: meta)
+                           metadata: meta,
+                           appVersion: parsedVersionBuild.version,
+                           appBuild: parsedVersionBuild.build)
     }
 
     private func parseIPS(text: String) -> ParsedCrash? {
@@ -191,6 +201,7 @@ struct CrashReportDetector {
         guard appMatch else { return nil }
 
         let crashTimestamp = parseIPSTimestamp(headerJSON: headerJSON, payloadJSON: payloadJSON)
+        let parsedVersionBuild = parseIPSVersionBuild(headerJSON: headerJSON, payloadJSON: payloadJSON)
 
         var summaryParts: [String] = []
         if let exception = payloadJSON?["exception"] as? [String: Any] {
@@ -212,11 +223,15 @@ struct CrashReportDetector {
         metadata["procName"] = procName
         if !bundleID.isEmpty { metadata["bundleID"] = bundleID }
         if let incident = headerJSON?["incident"] as? String { metadata["incident"] = incident }
+        if let appVersion = parsedVersionBuild.version { metadata["reportAppVersion"] = appVersion }
+        if let appBuild = parsedVersionBuild.build { metadata["reportAppBuild"] = appBuild }
 
         return ParsedCrash(crashTimestamp: crashTimestamp,
                            terminationSummary: summaryParts.joined(separator: " | "),
                            topFrames: topFrames,
-                           metadata: metadata)
+                           metadata: metadata,
+                           appVersion: parsedVersionBuild.version,
+                           appBuild: parsedVersionBuild.build)
     }
 
     private func parseTopFramesFromCrashLines(_ lines: [String]) -> [String] {
@@ -311,6 +326,60 @@ struct CrashReportDetector {
         return formatter
     }
 
+    private func parseVersionAndBuild(from versionField: String?) -> (version: String?, build: String?) {
+        guard let raw = versionField?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return (nil, nil)
+        }
+
+        guard let openParen = raw.lastIndex(of: "("),
+              let closeParen = raw.lastIndex(of: ")"),
+              openParen < closeParen else {
+            return (raw, nil)
+        }
+
+        let versionPart = String(raw[..<openParen]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let buildPart = String(raw[raw.index(after: openParen)..<closeParen]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let version = versionPart.isEmpty ? nil : versionPart
+        let build = buildPart.isEmpty ? nil : buildPart
+        return (version, build)
+    }
+
+    private func parseIPSVersionBuild(headerJSON: [String: Any]?, payloadJSON: [String: Any]?) -> (version: String?, build: String?) {
+        var version = firstNonEmptyString(from: headerJSON, keys: ["app_version", "appVersion", "appVersionString"])
+            ?? firstNonEmptyString(from: payloadJSON, keys: ["app_version", "appVersion", "appVersionString"])
+        var build = firstNonEmptyString(from: headerJSON, keys: ["build_version", "app_build", "appBuild", "buildVersion"])
+            ?? firstNonEmptyString(from: payloadJSON, keys: ["build_version", "app_build", "appBuild", "buildVersion"])
+
+        if let bundleInfo = headerJSON?["bundleInfo"] as? [String: Any] {
+            version = version ?? firstNonEmptyString(from: bundleInfo, keys: ["CFBundleShortVersionString", "CFBundleVersionString"])
+            build = build ?? firstNonEmptyString(from: bundleInfo, keys: ["CFBundleVersion"])
+        }
+        if let bundleInfo = payloadJSON?["bundleInfo"] as? [String: Any] {
+            version = version ?? firstNonEmptyString(from: bundleInfo, keys: ["CFBundleShortVersionString", "CFBundleVersionString"])
+            build = build ?? firstNonEmptyString(from: bundleInfo, keys: ["CFBundleVersion"])
+        }
+
+        if build == nil, let currentVersion = version {
+            let parsed = parseVersionAndBuild(from: currentVersion)
+            version = parsed.version ?? currentVersion
+            build = parsed.build
+        }
+
+        return (version, build)
+    }
+
+    private func firstNonEmptyString(from dictionary: [String: Any]?, keys: [String]) -> String? {
+        guard let dictionary else { return nil }
+        for key in keys {
+            guard let value = dictionary[key] as? String else { continue }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+
     private func stableHash(_ value: String) -> String {
         var hash: UInt64 = 0xcbf29ce484222325
         let prime: UInt64 = 0x100000001b3
@@ -339,4 +408,6 @@ private struct ParsedCrash {
     let terminationSummary: String
     let topFrames: [String]
     let metadata: [String: String]
+    let appVersion: String?
+    let appBuild: String?
 }
