@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Crash reporting reliability: Launch recovery now uses a single queued crash-report model (newest-first), so successful sharing clears only that one pending report and cannot silently drop additional queued items.
 - Crash reporting reliability: Crash IDs are now marked seen only when the pending report is actually handled/cleared, and queued report metadata now preserves app version/build from the crash file (not the currently running app).
 - Crash reporting reliability: Clearing pending reports now marks every cleared crash ID as seen (not just the latest), preventing re-prompts from legacy or multi-entry pending stores.
+- Crash reporting reliability: Seen-ID persistence now happens only after pending clear succeeds; failed/partial clear attempts no longer suppress future crash prompts.
 
 ### Changed
 - Preferences/About: Added a new Diagnostics section for crash reporting with local pending queue controls (`Email Crash Report`, `Export Report`, `Clear Pending`) and a direct support email link.
