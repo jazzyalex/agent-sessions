@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import UniformTypeIdentifiers
 
 extension Notification.Name {
     static let openSessionsSearchFromMenu = Notification.Name("AgentSessionsOpenSessionsSearchFromMenu")
@@ -104,6 +105,12 @@ struct AgentSessionsApp: App {
                     LaunchProfiler.reset("Unified main window")
                     LaunchProfiler.log("Window appeared")
                     LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
+                    Task {
+                        let detectedCount = await CrashReportingService.shared.detectAndQueueOnLaunch()
+                        if detectedCount > 0 {
+                            await presentCrashRecoveryPrompt(newCrashCount: detectedCount)
+                        }
+                    }
                     onboardingCoordinator.checkAndPresentIfNeeded()
                     unifiedIndexerHolder.unified?.refresh()
                     let isAppActive = NSApp?.isActive ?? true
@@ -295,6 +302,9 @@ private struct OpenPinnedSessionsWindowButton: View {
 }
 
 extension AgentSessionsApp {
+    private static let crashSupportRecipient = "jazzyalex@gmail.com"
+    private static let crashIssueURL = URL(string: "https://github.com/jazzyalex/agent-sessions/issues/new?title=Crash%20Report&body=Please%20attach%20the%20exported%20crash%20report%20JSON%20file%20and%20steps%20to%20reproduce.")!
+
     private func handleAgentEnablementChange() {
         unifiedIndexerHolder.unified?.recomputeNow()
         analyticsService?.refreshReadiness()
@@ -388,6 +398,84 @@ extension AgentSessionsApp {
         }
     }
 
+    @MainActor
+    private func presentCrashRecoveryPrompt(newCrashCount: Int) async {
+        let noun = newCrashCount == 1 ? "report" : "reports"
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Crash report detected"
+        alert.informativeText = """
+        Agent Sessions detected \(newCrashCount) new crash \(noun) from a prior run.
+        You can email the report directly or export it and open a GitHub issue:
+        https://github.com/jazzyalex/agent-sessions/issues/new
+        """
+        alert.addButton(withTitle: "Email Crash Report")
+        alert.addButton(withTitle: "Export + Open GitHub Issue")
+        alert.addButton(withTitle: "Later")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            let didOpen = await openCrashReportEmailDraft()
+            if didOpen {
+                await CrashReportingService.shared.clearPendingReports()
+            }
+        case .alertSecondButtonReturn:
+            let didExport = await exportCrashReportAndOpenIssue()
+            if didExport {
+                await CrashReportingService.shared.clearPendingReports()
+            }
+        default:
+            break
+        }
+    }
+
+    @MainActor
+    private func openCrashReportEmailDraft() async -> Bool {
+        let maybeURL = await CrashReportingService.shared.supportEmailDraftURL(recipient: Self.crashSupportRecipient)
+        guard let url = maybeURL else {
+            await CrashReportingService.shared.setLastEmailError("Failed to build email draft URL.")
+            showCrashPromptError(title: "Unable to Prepare Email", message: "The crash email draft could not be prepared.")
+            return false
+        }
+
+        if NSWorkspace.shared.open(url) {
+            await CrashReportingService.shared.markEmailDraftOpened()
+            return true
+        } else {
+            await CrashReportingService.shared.setLastEmailError("Could not open the default email app.")
+            showCrashPromptError(title: "Unable to Open Email App", message: "Please ensure a default email app is configured, or export the report and file a GitHub issue.")
+            return false
+        }
+    }
+
+    @MainActor
+    private func exportCrashReportAndOpenIssue() async -> Bool {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "agent-sessions-crash-report-\(Int(Date().timeIntervalSince1970)).json"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+
+        do {
+            try await CrashReportingService.shared.exportLatestPendingReport(to: url)
+            _ = NSWorkspace.shared.open(Self.crashIssueURL)
+            return true
+        } catch {
+            showCrashPromptError(title: "Export Failed", message: error.localizedDescription)
+            return false
+        }
+    }
+
+    @MainActor
+    private func showCrashPromptError(title: String, message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        _ = alert.runModal()
+    }
 }
 // MARK: - Onboarding window presentation
 

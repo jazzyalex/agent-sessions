@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Crash reporting reliability: Launch recovery now keeps pending crash reports when email/export is canceled or fails, and launch deduplication now tracks all previously handled crash IDs to prevent repeat prompts for old reports.
+- Crash reporting reliability: Launch crash scan now checks the full lookback window (not just an early truncated candidate slice), and seen crash-ID history now evicts by recency so recently handled crashes are not re-prompted after history capping.
+- Crash reporting reliability: Launch recovery now uses a single queued crash-report model (newest-first), so successful sharing clears only that one pending report and cannot silently drop additional queued items.
+
+### Changed
+- Preferences/About: Added a new Diagnostics section for crash reporting with local pending queue controls (`Email Crash Report`, `Export Report`, `Clear Pending`) and a direct support email link.
+- Crash reporting: Crash diagnostics are queued locally on launch and shared only through an explicit pre-filled email draft action; no automatic startup/background upload occurs.
+- Crash reporting UX: Crash capture is always on (toggle removed), and when a new crash report is detected at launch the app now prompts to either `Email Crash Report` or `Export + Open GitHub Issue`.
+
 ## [2.11.2] - 2026-02-09
 
 ### Fixed

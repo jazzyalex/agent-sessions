@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct PreferencesView: View {
     private let agentUpdateService = AgentUpdateService()
@@ -77,6 +78,17 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Archives.starPinsSessions) var starPinsSessions: Bool = true
     @AppStorage(PreferencesKey.Archives.stopSyncAfterInactivityMinutes) var stopSyncAfterInactivityMinutes: Int = 30
     @AppStorage(PreferencesKey.Archives.unstarRemovesArchive) var unstarRemovesArchive: Bool = false
+    // Diagnostics
+    @State var crashPendingCount: Int = 0
+    @State var crashLastDetectedAt: Date? = nil
+    @State var crashLastSendAt: Date? = nil
+    @State var crashLastSendError: String? = nil
+    @State var isCrashSendRunning: Bool = false
+    @State var showCrashSendResult: Bool = false
+    @State var crashSendResultMessage: String = ""
+    @State var showCrashClearConfirm: Bool = false
+    @State var showCrashExportError: Bool = false
+    @State var crashExportErrorMessage: String = ""
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
@@ -183,7 +195,6 @@ struct PreferencesView: View {
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
-                Divider()
                 ForEach([PreferencesTab.openClawCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
@@ -216,6 +227,9 @@ struct PreferencesView: View {
             }
             // Trigger any probes needed for the initial/visible tab
             if let tab = selectedTab ?? .some(initialTabArg) { maybeProbe(for: tab) }
+            if (selectedTab ?? initialTabArg) == .about {
+                refreshCrashDiagnosticsState()
+            }
         }
         // Keep UI feeling responsive when switching between panes
         .animation(.easeInOut(duration: 0.12), value: selectedTab)
@@ -245,6 +259,9 @@ struct PreferencesView: View {
             guard let t = newValue else { return }
             lastSelectedTabRaw = t.rawValue
             maybeProbe(for: t)
+            if t == .about {
+                refreshCrashDiagnosticsState()
+            }
         }
         .alert("Claude Usage Tracking (Experimental)", isPresented: $showClaudeExperimentalWarning) {
             Button("Cancel", role: .cancel) { }
@@ -783,6 +800,88 @@ struct PreferencesView: View {
         if trimmed.count <= maxLength { return trimmed }
         let index = trimmed.index(trimmed.startIndex, offsetBy: maxLength)
         return String(trimmed[..<index]) + "\n…"
+    }
+
+    // MARK: - Crash diagnostics
+
+    func refreshCrashDiagnosticsState() {
+        Task {
+            let snapshot = await CrashReportingService.shared.diagnosticsSnapshot()
+            await MainActor.run {
+                crashPendingCount = snapshot.pendingCount
+                crashLastDetectedAt = snapshot.lastDetectedAt
+                crashLastSendAt = snapshot.lastSendAt
+                crashLastSendError = snapshot.lastSendError
+            }
+        }
+    }
+
+    func sendPendingCrashReports() {
+        if isCrashSendRunning { return }
+        isCrashSendRunning = true
+        Task {
+            let recipient = "jazzyalex@gmail.com"
+            let maybeURL = await CrashReportingService.shared.supportEmailDraftURL(recipient: recipient)
+            guard let url = maybeURL else {
+                await CrashReportingService.shared.setLastEmailError("Failed to build email draft URL.")
+                await MainActor.run {
+                    isCrashSendRunning = false
+                    crashSendResultMessage = "Could not prepare the email draft."
+                    showCrashSendResult = true
+                }
+                refreshCrashDiagnosticsState()
+                return
+            }
+
+            let opened = await MainActor.run { NSWorkspace.shared.open(url) }
+            if opened {
+                await CrashReportingService.shared.markEmailDraftOpened()
+            } else {
+                await CrashReportingService.shared.setLastEmailError("Could not open the default email app.")
+            }
+
+            await MainActor.run {
+                isCrashSendRunning = false
+                if opened {
+                    if crashPendingCount > 0 {
+                        crashSendResultMessage = "Opened an email draft to \(recipient) with the latest crash report in the message body."
+                    } else {
+                        crashSendResultMessage = "Opened an email draft to \(recipient). No pending crash report was available."
+                    }
+                } else {
+                    crashSendResultMessage = "Unable to open the email draft."
+                }
+                showCrashSendResult = true
+            }
+            refreshCrashDiagnosticsState()
+        }
+    }
+
+    func exportLatestCrashReport() {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "agent-sessions-crash-report-\(Int(Date().timeIntervalSince1970)).json"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task {
+                do {
+                    try await CrashReportingService.shared.exportLatestPendingReport(to: url)
+                } catch {
+                    await MainActor.run {
+                        crashExportErrorMessage = error.localizedDescription
+                        showCrashExportError = true
+                    }
+                }
+            }
+        }
+    }
+
+    func clearPendingCrashReports() {
+        Task {
+            await CrashReportingService.shared.clearPendingReports()
+            refreshCrashDiagnosticsState()
+        }
     }
 
 }
