@@ -91,6 +91,11 @@ enum PreferencesKey {
         static let stopSyncAfterInactivityMinutes = "ArchiveStopSyncAfterInactivityMinutes"
         static let unstarRemovesArchive = "UnstarRemovesLocalArchive"
     }
+
+    enum Cockpit {
+        static let codexActiveSessionsEnabled = "CockpitCodexActiveSessionsEnabled"
+        static let codexActiveRegistryRootOverride = "CockpitCodexActiveRegistryRootOverride"
+    }
 }
 
 enum SessionViewAutoScrollTarget: String, CaseIterable, Identifiable {

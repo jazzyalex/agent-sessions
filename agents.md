@@ -138,6 +138,13 @@ If you modify `AgentSessions.xcodeproj/project.pbxproj` directly (NOT using the 
 - Avoid shelling out when a safe `Process` + argument list is possible. Use timeouts and clear, inline error messages for failures.
 - Never run network operations without an explicit user action and clear UX affordances.
 
+### Remote Doc/Header Fetch Guardrails
+- For remote documentation, header, or API inspection tasks, delegate the fetch to a sub-agent first so the main agent remains responsive.
+- Use a hard timeout of 20 seconds per delegated fetch attempt.
+- If no useful output is returned within 20 seconds, cancel the attempt and immediately switch to a fallback source.
+- Fallback order is: local repository docs/files, then a narrower targeted remote source.
+- Do not run repeated unbounded retries; after fallback failure, report the limitation promptly and continue with best-effort local reasoning.
+
 
 ## Pattern Search & Deletion Safety (General)
 

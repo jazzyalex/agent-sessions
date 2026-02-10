@@ -21,6 +21,7 @@ struct AgentSessionsApp: App {
     @StateObject private var archiveManager = SessionArchiveManager.shared
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
+    @StateObject private var activeCodexSessions = CodexActiveSessionsModel()
     @StateObject private var geminiIndexer = GeminiSessionIndexer()
     @StateObject private var copilotIndexer = CopilotSessionIndexer()
     @StateObject private var droidIndexer = DroidSessionIndexer()
@@ -95,6 +96,7 @@ struct AgentSessionsApp: App {
             )
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
+                .environmentObject(activeCodexSessions)
                 .environmentObject(indexer.columnVisibility)
                 .environmentObject(archiveManager)
                 .environmentObject(updaterController)
@@ -208,6 +210,7 @@ struct AgentSessionsApp: App {
                 Button("Image Browser") {
                     NotificationCenter.default.post(name: .showImagesFromMenu, object: nil)
                 }
+                OpenCockpitWindowButton()
                 OpenPinnedSessionsWindowButton()
             }
             CommandGroup(after: .help) {
@@ -231,6 +234,12 @@ struct AgentSessionsApp: App {
                 )
             )
             .environmentObject(archiveManager)
+        }
+
+        WindowGroup("Cockpit", id: "Cockpit") {
+            CockpitView(codexIndexer: indexer)
+                .environmentObject(activeCodexSessions)
+                .background(WindowAutosave(name: "CockpitWindow"))
         }
 
         // Legacy windows removed; Unified is the single window.
@@ -288,6 +297,16 @@ private struct OpenPinnedSessionsWindowButton: View {
             openWindow(id: "PinnedSessions")
         }
         .keyboardShortcut("p", modifiers: [.command, .option, .shift])
+    }
+}
+
+private struct OpenCockpitWindowButton: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button("Cockpit") {
+            openWindow(id: "Cockpit")
+        }
+        .keyboardShortcut("c", modifiers: [.command, .option, .shift])
     }
 }
 

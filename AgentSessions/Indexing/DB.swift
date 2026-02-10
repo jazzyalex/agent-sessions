@@ -81,10 +81,12 @@ actor IndexDB {
         )
 
         // Best-effort migration for existing installs.
-        // If the column already exists, SQLite will throw and we can ignore it.
-        do {
-            try exec(db, "ALTER TABLE session_meta ADD COLUMN is_housekeeping INTEGER NOT NULL DEFAULT 0;")
-        } catch { }
+        // Avoid noisy logs by checking schema first.
+        if !tableHasColumn(db, table: "session_meta", column: "is_housekeeping") {
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN is_housekeeping INTEGER NOT NULL DEFAULT 0;")
+            } catch { }
+        }
 
         // Create this index only after the column exists (older installs won't have it yet).
         if tableHasColumn(db, table: "session_meta", column: "is_housekeeping") {
@@ -154,10 +156,12 @@ actor IndexDB {
         )
 
         // Best-effort migration for existing installs.
-        // If the column already exists, SQLite will throw and we can ignore it.
-        do {
-            try exec(db, "ALTER TABLE session_search ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1;")
-        } catch { }
+        // Avoid noisy logs by checking schema first.
+        if !tableHasColumn(db, table: "session_search", column: "format_version") {
+            do {
+                try exec(db, "ALTER TABLE session_search ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1;")
+            } catch { }
+        }
 
         // Full-text search (FTS5) over per-session searchable text.
         // External content table lets us upsert via regular SQL + triggers.
