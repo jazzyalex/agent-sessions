@@ -12,6 +12,12 @@ final class UnifiedSessionIndexer: ObservableObject {
         let modifiedAt: Date
     }
 
+    private struct FocusedSessionContext: Equatable {
+        let source: SessionSource
+        let sessionID: String
+        let filePath: String
+    }
+
     private actor ProviderRefreshCoordinator {
         enum RequestResult {
             case startNow
@@ -201,8 +207,11 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let newSessionMonitorIntervalSeconds: UInt64 = 60
     private let monitorRefreshMinimumIntervalSeconds: TimeInterval = 3 * 60
     private var newSessionMonitorTask: Task<Void, Never>? = nil
+    private var focusedSessionMonitorTask: Task<Void, Never>? = nil
     private var lastSeenCodexSignature: FileSignature? = nil
     private var lastSeenClaudeSignature: FileSignature? = nil
+    private var focusedSessionContext: FocusedSessionContext? = nil
+    private var lastFocusedCodexSignature: FileSignature? = nil
     private var lastMonitorRefreshBySource: [SessionSource: Date] = [:]
     private var pendingMonitorRefreshSignatureBySource: [SessionSource: FileSignature] = [:]
     private var pendingRefreshSourcesWhileInactive: Set<SessionSource> = []
@@ -598,6 +607,33 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     @MainActor
+    func setFocusedSession(_ session: Session?) {
+        let newContext = session.map {
+            FocusedSessionContext(source: $0.source, sessionID: $0.id, filePath: $0.filePath)
+        }
+        if focusedSessionContext == newContext { return }
+
+        focusedSessionContext = newContext
+        focusedSessionMonitorTask?.cancel()
+        focusedSessionMonitorTask = nil
+
+        guard let context = newContext else {
+            lastFocusedCodexSignature = nil
+            return
+        }
+        guard context.source == .codex else {
+            // Hooks for other providers; active monitor currently implemented for Codex.
+            return
+        }
+
+        lastFocusedCodexSignature = fileSignature(atPath: context.filePath)
+        refreshFocusedCodexSession(reason: .selection)
+        focusedSessionMonitorTask = Task.detached(priority: .utility) { [weak self, context] in
+            await self?.runFocusedSessionMonitorLoop(context: context)
+        }
+    }
+
+    @MainActor
     func setAppActive(_ active: Bool) {
         appIsActive = active
         if active {
@@ -639,6 +675,35 @@ final class UnifiedSessionIndexer: ObservableObject {
             try? await Task.sleep(nanoseconds: newSessionMonitorIntervalSeconds * 1_000_000_000)
             if Task.isCancelled { break }
             await checkForNewSessions()
+        }
+    }
+
+    private func runFocusedSessionMonitorLoop(context: FocusedSessionContext) async {
+        while !Task.isCancelled {
+            let currentContext = await MainActor.run { [weak self] in
+                self?.focusedSessionContext
+            }
+            guard let currentContext, currentContext == context, currentContext.source == .codex else { return }
+
+            let signature = fileSignature(atPath: currentContext.filePath)
+            let shouldReload = await MainActor.run { [weak self] () -> Bool in
+                guard let self else { return false }
+                if signature != self.lastFocusedCodexSignature {
+                    self.lastFocusedCodexSignature = signature
+                    return signature != nil
+                }
+                return false
+            }
+            if shouldReload {
+                await MainActor.run { [weak self] in
+                    self?.refreshFocusedCodexSession(reason: .focusedSessionMonitor)
+                }
+            }
+
+            let intervalSeconds = await MainActor.run { [weak self] in
+                self?.focusedSessionRefreshIntervalSeconds() ?? 15
+            }
+            try? await Task.sleep(nanoseconds: UInt64(intervalSeconds * 1_000_000_000))
         }
     }
 
@@ -720,7 +785,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let now = Date()
         var newest: FileSignature? = nil
 
-        for offset in 0...1 {
+        for offset in 0...2 {
             guard let day = calendar.date(byAdding: .day, value: -offset, to: now) else { continue }
             let comps = calendar.dateComponents([.year, .month, .day], from: day)
             guard let y = comps.year, let m = comps.month, let d = comps.day else { continue }
@@ -740,6 +805,13 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
 
         return newest
+    }
+
+    private func fileSignature(atPath path: String) -> FileSignature? {
+        let url = URL(fileURLWithPath: path)
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
+        guard values?.isRegularFile == true else { return nil }
+        return FileSignature(path: path, modifiedAt: values?.contentModificationDate ?? .distantPast)
     }
 
     private func detectLatestClaudeSignature() -> FileSignature? {
@@ -933,6 +1005,12 @@ final class UnifiedSessionIndexer: ObservableObject {
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
 
+        if source == .codex, trigger == .manual {
+            await MainActor.run { [weak self] in
+                self?.refreshFocusedCodexSession(reason: .manualRefresh)
+            }
+        }
+
         if context.requestGlobalAnalytics {
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -1021,6 +1099,19 @@ final class UnifiedSessionIndexer: ObservableObject {
             if ProcessInfo.processInfo.isLowPowerModeEnabled { return false }
         }
         return true
+    }
+
+    @MainActor
+    private func focusedSessionRefreshIntervalSeconds() -> TimeInterval {
+        let onAC = Self.onACPower()
+        return (appIsActive && onAC) ? 5 : 15
+    }
+
+    @MainActor
+    private func refreshFocusedCodexSession(reason: SessionIndexer.ReloadReason) {
+        guard codexAgentEnabled else { return }
+        guard let context = focusedSessionContext, context.source == .codex else { return }
+        codex.reloadSession(id: context.sessionID, force: true, reason: reason)
     }
 
     @MainActor
@@ -1400,6 +1491,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     deinit {
         newSessionMonitorTask?.cancel()
+        focusedSessionMonitorTask?.cancel()
     }
 }
     struct LaunchState {

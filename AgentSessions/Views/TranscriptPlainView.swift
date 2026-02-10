@@ -248,6 +248,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 rebuild(session: session)
             }
             .onChange(of: session.events.count) { _, _ in rebuild(session: session) }
+            .onChange(of: session.eventCount) { _, _ in rebuild(session: session) }
+            .onChange(of: session.fileSizeBytes) { _, _ in rebuild(session: session) }
+            .onChange(of: session.endTime) { _, _ in rebuild(session: session) }
             .onChange(of: searchState.query) { _, newValue in
                 unifiedSearchJumpWorkItem?.cancel()
                 unifiedSearchJumpWorkItem = nil
@@ -642,14 +645,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
         let mode = viewMode.transcriptRenderMode
         let skipFlag = skipAgentsPreambleEnabled() ? 1 : 0
-        let buildKey = "\(session.id)|\(session.events.count)|\(viewMode.rawValue)|\(showTimestamps ? 1 : 0)|\(skipFlag)"
+        let fileSizeToken = session.fileSizeBytes ?? -1
+        let endTimeToken = Int((session.endTime ?? .distantPast).timeIntervalSince1970)
+        let buildKey = "\(session.id)|\(session.events.count)|\(session.eventCount)|\(fileSizeToken)|\(endTimeToken)|\(viewMode.rawValue)|\(showTimestamps ? 1 : 0)|\(skipFlag)"
 
         #if DEBUG
         print("🔨 REBUILD: mode=\(mode) shouldColorize=\(shouldColorize) enableCaching=\(enableCaching)")
         #endif
 
         if enableCaching {
-            // Memoization key: session identity, event count, render mode, and timestamp setting
+            // Memoization key includes lightweight metadata so active-session tails refresh
+            // even when events are lazily loaded.
             let key = buildKey
             if lastBuildKey == key { return }
             // Try in-view memo cache first

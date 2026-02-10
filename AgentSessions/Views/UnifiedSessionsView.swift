@@ -173,21 +173,27 @@ struct UnifiedSessionsView: View {
 
 		let lifecycle = AnyView(
 			base
-				.onAppear {
-					updateFooterUsageVisibility()
-					if sortOrder.isEmpty { sortOrder = [KeyPathComparator(\Session.modifiedAt, order: .reverse)] }
-					updateCachedRows()
-					updateSelectionBridge()
+                .onAppear {
+                    updateFooterUsageVisibility()
+                    if sortOrder.isEmpty { sortOrder = [KeyPathComparator(\Session.modifiedAt, order: .reverse)] }
+                    updateCachedRows()
+                    updateSelectionBridge()
+                    unified.setAppActive(NSApp.isActive)
+                    unified.setFocusedSession(selectedSession)
                     searchCoordinator.setAppActive(NSApp.isActive)
-				}
-				.onDisappear {
-					codexUsageModel.setStripVisible(false)
-					claudeUsageModel.setStripVisible(false)
-				}
+                }
+                .onDisappear {
+                    unified.setFocusedSession(nil)
+                    unified.setAppActive(false)
+                    codexUsageModel.setStripVisible(false)
+                    claudeUsageModel.setStripVisible(false)
+                }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    unified.setAppActive(true)
                     searchCoordinator.setAppActive(true)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                    unified.setAppActive(false)
                     searchCoordinator.setAppActive(false)
                 }
 		)
@@ -586,6 +592,7 @@ struct UnifiedSessionsView: View {
             // Update cached rows first, then reconcile selection so auto-select uses fresh data.
             updateCachedRows()
             updateSelectionBridge()
+            unified.setFocusedSession(selectedSession)
         }
         .onChange(of: columnVisibility.changeToken) { _, _ in refreshColumnLayout() }
         .onChange(of: showSourceColumn) { _, _ in refreshColumnLayout() }
@@ -966,7 +973,11 @@ struct UnifiedSessionsView: View {
     }
 
     private func handleSelectionChange(_ id: String?) {
-        guard let id, let s = cachedRows.first(where: { $0.id == id }) else { return }
+        guard let id, let s = cachedRows.first(where: { $0.id == id }) else {
+            cancelAutoJump()
+            unified.setFocusedSession(nil)
+            return
+        }
         if !searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let immediate = consumeImmediateSelectionJump()
             scheduleAutoJump(for: id, immediate: immediate)
@@ -1002,6 +1013,7 @@ struct UnifiedSessionsView: View {
         }
 
         searchCoordinator.prewarmTranscriptIfNeeded(for: s)
+        unified.setFocusedSession(s)
     }
 
     private func updateCachedRows() {
