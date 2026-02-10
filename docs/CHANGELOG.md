@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Usage tracking/menu bar: Codex and Claude polling now continues when usage is visible (including active in-app strip visibility), while inactive/background polling remains tied to that specific agent being shown in the menu bar; Codex menu-background polling also now re-seeds to newer JSONL session files instead of stalling on an older file.
 - Crash reporting reliability: Launch recovery now keeps pending crash reports when email/export is canceled or fails, and launch deduplication now tracks all previously handled crash IDs to prevent repeat prompts for old reports.
 - Crash reporting reliability: Launch crash scan now checks the full lookback window (not just an early truncated candidate slice), and seen crash-ID history now evicts by recency so recently handled crashes are not re-prompted after history capping.
 - Crash reporting reliability: Launch recovery now uses a single queued crash-report model (newest-first), so successful sharing clears only that one pending report and cannot silently drop additional queued items.
