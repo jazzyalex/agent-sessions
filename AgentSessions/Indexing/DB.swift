@@ -1,6 +1,12 @@
 import Foundation
 import SQLite3
 
+#if DEBUG
+enum IndexDBTestHooks {
+    static var applicationSupportDirectoryProvider: (() -> URL?)?
+}
+#endif
+
 /// Lightweight SQLite helper wrapped in an actor for thread-safety.
 /// Schema stores file scan state, per-session daily metrics and day rollups.
 actor IndexDB {
@@ -11,7 +17,9 @@ actor IndexDB {
     // MARK: - Init / Open
     init() throws {
         let fm = FileManager.default
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        guard let appSupport = Self.resolveApplicationSupportDirectoryURL(fileManager: fm) else {
+            throw DBError.openFailed("Application Support directory unavailable")
+        }
         let dir = appSupport.appendingPathComponent("AgentSessions", isDirectory: true)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let dbURL = dir.appendingPathComponent("index.db", isDirectory: false)
@@ -32,6 +40,15 @@ actor IndexDB {
 
     deinit {
         if let db = handle { sqlite3_close(db) }
+    }
+
+    private static func resolveApplicationSupportDirectoryURL(fileManager: FileManager) -> URL? {
+#if DEBUG
+        if let provider = IndexDBTestHooks.applicationSupportDirectoryProvider {
+            return provider()
+        }
+#endif
+        return fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
     }
 
     // MARK: - Schema (static helpers usable during init)

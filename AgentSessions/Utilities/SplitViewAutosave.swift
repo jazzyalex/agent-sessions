@@ -16,13 +16,24 @@ struct SplitViewAutosave: NSViewRepresentable {
 
 private final class SplitFinderView: NSView {
     private let key: String
+    private let shouldApplyAutosave: Bool
     private var didRegisterResizeObserve = false
     private var isApplying = false
     private var lastAxisLength: CGFloat = 0
     private var isUserDraggingDivider = false
     private var eventMonitor: Any?
-    init(key: String) { self.key = key; super.init(frame: .zero) }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    init(key: String) {
+        self.key = key
+        self.shouldApplyAutosave = true
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        self.key = ""
+        self.shouldApplyAutosave = false
+        super.init(coder: coder)
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -39,6 +50,7 @@ private final class SplitFinderView: NSView {
     }
 
     private func apply() {
+        guard shouldApplyAutosave else { return }
         guard let split = findSplitView(from: self) else { return }
         if split.autosaveName != key {
             split.autosaveName = key
@@ -323,3 +335,10 @@ private final class SplitFinderView: NSView {
         return rect.contains(pt)
     }
 }
+
+#if DEBUG
+@MainActor
+func makeSplitFinderViewFromCoderForTesting(_ coder: NSCoder) -> NSView? {
+    SplitFinderView(coder: coder)
+}
+#endif

@@ -290,4 +290,45 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertNotNil(model)
         XCTAssertNotNil(ClaudeUsageModel.shared)
     }
+
+#if DEBUG
+    func testCodexStatusRegexFactoryFallbackAndValidPattern() {
+        let invalid = CodexStatusService.buildRegexForTesting(
+            pattern: "(",
+            label: "invalid-regex-test"
+        )
+        XCTAssertNotNil(invalid, "Invalid pattern should fall back to a usable never-match regex")
+
+        let normalText = "Current usage: 73% remaining"
+        let normalRange = NSRange(normalText.startIndex..<normalText.endIndex, in: normalText)
+        XCTAssertNil(
+            invalid?.firstMatch(in: normalText, options: [], range: normalRange),
+            "Fallback regex should not match normal text"
+        )
+
+        let valid = CodexStatusService.buildRegexForTesting(
+            pattern: "(\\d{1,3})\\s*%",
+            options: [.caseInsensitive],
+            label: "valid-regex-test"
+        )
+        XCTAssertNotNil(valid, "Valid pattern should produce a regex")
+
+        let percentLine = "Primary window: 19% remaining"
+        let percentRange = NSRange(percentLine.startIndex..<percentLine.endIndex, in: percentLine)
+        let match = valid?.firstMatch(in: percentLine, options: [], range: percentRange)
+        XCTAssertNotNil(match, "Valid regex should match a percent status line")
+    }
+
+    @MainActor
+    func testMakeSplitFinderViewFromCoderForTestingWithRealCoderDoesNotCrash() throws {
+        let archiveData = try NSKeyedArchiver.archivedData(
+            withRootObject: ["probe": "split-coder"],
+            requiringSecureCoding: false
+        )
+        let coder = try NSKeyedUnarchiver(forReadingFrom: archiveData)
+        defer { coder.finishDecoding() }
+
+        _ = makeSplitFinderViewFromCoderForTesting(coder)
+    }
+#endif
 }

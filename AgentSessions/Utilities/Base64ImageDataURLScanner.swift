@@ -91,22 +91,18 @@ enum Base64ImageDataURLScanner {
             let lineData = Data(bytes[lineStart..<lineEnd])
             guard let s = String(data: lineData, encoding: .utf8) else { return false }
             let range = NSRange(s.startIndex..<s.endIndex, in: s)
-            return imageURLContextRegex.firstMatch(in: s, options: [], range: range) != nil
+            guard let regex = imageURLContextRegex else { return false }
+            return regex.firstMatch(in: s, options: [], range: range) != nil
         } catch {
             return false
         }
     }
 
-    private static let imageURLContextRegex: NSRegularExpression = {
+    private static let imageURLContextRegex: NSRegularExpression? = {
         // Supports both `"image_url":"data:image/...` and `"image_url":{"url":"data:image/...`.
         // Require unescaped quotes so we don't match JSON-looking text inside escaped tool output strings.
         let pattern = "(?<!\\\\\\\\)\"image_url\"\\s*:\\s*(?:\\{\\s*(?<!\\\\\\\\)\"url\"\\s*:\\s*)?(?<!\\\\\\\\)\"data:image"
-        do {
-            return try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
-        } catch {
-            // Never match.
-            return try! NSRegularExpression(pattern: "(?!)", options: [])
-        }
+        return try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
     }()
 
     // MARK: - Internals
