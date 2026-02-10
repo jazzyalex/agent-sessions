@@ -31,12 +31,16 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
     // Local-only metadata (not part of the on-disk schema).
     var sourceFilePath: String? = nil
 
+    var itermSessionGuid: String? {
+        CodexActiveSessionsModel.itermSessionGuid(from: terminal?.itermSessionId)
+    }
+
     var revealURL: URL? {
-        if let raw = terminal?.revealUrl, let url = URL(string: raw) { return url }
-        if let id = terminal?.itermSessionId, !id.isEmpty {
-            // iTerm2 supports: iterm2:///reveal?sessionid=<ITERM_SESSION_ID>
-            return URL(string: "iterm2:///reveal?sessionid=\(id)")
+        if let guid = itermSessionGuid, !guid.isEmpty {
+            // iTerm2 session `id` (AppleScript) is the GUID. `ITERM_SESSION_ID` is often `w0t0p0:<GUID>`.
+            return URL(string: "iterm2:///reveal?sessionid=\(guid)")
         }
+        if let raw = terminal?.revealUrl, let url = URL(string: raw) { return url }
         return nil
     }
 
@@ -333,6 +337,89 @@ final class CodexActiveSessionsModel: ObservableObject {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 timestamp: \(raw)")
         }
         return d
+    }
+
+    // MARK: - iTerm2 Focus
+
+    /// iTerm2's AppleScript session id is the GUID portion; env vars are often `w0t0p0:<GUID>`.
+    nonisolated static func itermSessionGuid(from raw: String?) -> String? {
+        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let idx = trimmed.lastIndex(of: ":") {
+            let next = trimmed.index(after: idx)
+            let tail = trimmed[next...].trimmingCharacters(in: .whitespacesAndNewlines)
+            return tail.isEmpty ? nil : String(tail)
+        }
+        return trimmed
+    }
+
+    /// Best-effort focus for iTerm2 sessions that works across windows/tabs (and usually Spaces).
+    /// Returns `true` if iTerm2 reported the target session was selected.
+    nonisolated static func tryFocusITerm2(itermSessionId: String?, tty: String?) -> Bool {
+        let guid = itermSessionGuid(from: itermSessionId) ?? ""
+        let ttyValue = (tty ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetTTY = ttyValue.isEmpty ? "" : ttyValue
+
+        guard !guid.isEmpty || !targetTTY.isEmpty else { return false }
+
+        let scriptLines = [
+            "on run argv",
+            "set targetGuid to \"\"",
+            "set targetTTY to \"\"",
+            "if (count of argv) >= 1 then set targetGuid to item 1 of argv",
+            "if (count of argv) >= 2 then set targetTTY to item 2 of argv",
+            "set targetTTYBase to targetTTY",
+            "if targetTTYBase starts with \"/dev/\" then set targetTTYBase to text 6 thru -1 of targetTTYBase",
+            "tell application \"iTerm2\"",
+            "activate",
+            "repeat with w in windows",
+            "repeat with t in tabs of w",
+            "repeat with s in sessions of t",
+            "set sid to id of s",
+            "set stty to tty of s",
+            "set sttyBase to stty",
+            "if sttyBase starts with \"/dev/\" then set sttyBase to text 6 thru -1 of sttyBase",
+            "if ((targetGuid is not \"\" and sid is targetGuid) or (targetTTYBase is not \"\" and (stty is targetTTY or stty is targetTTYBase or sttyBase is targetTTYBase))) then",
+            "try",
+            "select w",
+            "end try",
+            "try",
+            "select t",
+            "end try",
+            "select s",
+            "return \"ok\"",
+            "end if",
+            "end repeat",
+            "end repeat",
+            "end repeat",
+            "end tell",
+            "return \"not found\"",
+            "end run"
+        ]
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = scriptLines.flatMap { ["-e", $0] } + [guid, targetTTY]
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return false
+        }
+
+        guard process.terminationStatus == 0 else {
+            return false
+        }
+
+        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
+        let out = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return out == "ok"
     }
 
     // MARK: - Live Process Discovery (Fallback)

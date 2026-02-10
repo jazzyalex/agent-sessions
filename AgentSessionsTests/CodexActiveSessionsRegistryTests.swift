@@ -20,7 +20,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
           "last_seen_at": "\(nowISO)",
           "terminal": {
             "term_program": "iTerm.app",
-            "iterm_session_id": "w0t0p0.guid"
+            "iterm_session_id": "w0t0p0:66920DBE-B426-4370-A1BD-AA0BEAF3A3B6"
           }
         }
         """
@@ -28,7 +28,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let decoder = CodexActiveSessionsModel.makeDecoder()
         let presence = try decoder.decode(CodexActivePresence.self, from: Data(json.utf8))
         XCTAssertEqual(presence.sessionId, "abc-123")
-        XCTAssertEqual(presence.revealURL?.absoluteString, "iterm2:///reveal?sessionid=w0t0p0.guid")
+        XCTAssertEqual(presence.revealURL?.absoluteString, "iterm2:///reveal?sessionid=66920DBE-B426-4370-A1BD-AA0BEAF3A3B6")
     }
 
     func testLoadPresences_filtersStaleByTTL() throws {

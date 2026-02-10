@@ -515,20 +515,25 @@ struct UnifiedSessionsView: View {
 	                        .help("Resume the selected session in its original CLI (⌃⌘R)")
 	                    Divider()
 	                }
-                    if s.source == .codex {
-                        let focusURL = activeCodexSessions.revealURL(for: s)
-                        let helpText: String = {
-                            if focusURL != nil { return "Focus the existing iTerm2 tab/window for this session." }
-                            if activeCodexSessions.isActive(s) { return "Focus is unavailable (missing iTerm2 session id)." }
-                            return "This session is not currently active."
-                        }()
-                        Button("Focus in iTerm2") {
-                            if let focusURL { NSWorkspace.shared.open(focusURL) }
-                        }
-                        .disabled(focusURL == nil)
-                        .help(helpText)
-                        Divider()
-                    }
+	                    if s.source == .codex {
+	                        let focusURL = activeCodexSessions.revealURL(for: s)
+	                        let helpText: String = {
+	                            if focusURL != nil { return "Focus the existing iTerm2 tab/window for this session." }
+	                            if activeCodexSessions.isActive(s) { return "Focus is unavailable (missing iTerm2 session id)." }
+	                            return "This session is not currently active."
+	                        }()
+	                        Button("Focus in iTerm2") {
+	                            let presence = activeCodexSessions.presence(for: s)
+	                            let didFocus = CodexActiveSessionsModel.tryFocusITerm2(
+	                                itermSessionId: presence?.terminal?.itermSessionId,
+	                                tty: presence?.tty
+	                            )
+	                            if !didFocus, let focusURL { NSWorkspace.shared.open(focusURL) }
+	                        }
+	                        .disabled(focusURL == nil)
+	                        .help(helpText)
+	                        Divider()
+	                    }
 	                Button("Open Working Directory") { openDir(s) }
 	                    .keyboardShortcut("o", modifiers: [.command, .shift])
 	                    .help("Reveal working directory in Finder (⌘⇧O)")
