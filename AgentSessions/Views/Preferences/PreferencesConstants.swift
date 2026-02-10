@@ -91,6 +91,13 @@ enum PreferencesKey {
         static let stopSyncAfterInactivityMinutes = "ArchiveStopSyncAfterInactivityMinutes"
         static let unstarRemovesArchive = "UnstarRemovesLocalArchive"
     }
+
+    enum Diagnostics {
+        static let lastSeenCrashID = "DiagnosticsLastSeenCrashID"
+        static let seenCrashIDs = "DiagnosticsSeenCrashIDs"
+        static let lastSendAt = "DiagnosticsLastSendAt"
+        static let lastSendError = "DiagnosticsLastSendError"
+    }
 }
 
 enum SessionViewAutoScrollTarget: String, CaseIterable, Identifiable {

@@ -9,21 +9,20 @@ extension PreferencesView {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            // App Icon
-            HStack {
-                Spacer()
-                if let appIcon = NSImage(named: NSImage.applicationIconName) {
-                    Image(nsImage: appIcon)
-                        .resizable()
-                        .frame(width: 85, height: 85)
-                        .cornerRadius(11)
-                        .shadow(radius: 3)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    if let appIcon = NSImage(named: NSImage.applicationIconName) {
+                        Image(nsImage: appIcon)
+                            .resizable()
+                            .frame(width: 16, height: 16)
+                            .cornerRadius(3)
+                    }
+                    Text("Agent Sessions")
+                        .font(.headline)
+                        .fontWeight(.semibold)
                 }
-                Spacer()
+                Divider()
             }
-            .padding(.vertical, 8)
-
-            sectionHeader("Agent Sessions")
             VStack(alignment: .leading, spacing: 12) {
                 labeledRow("Version:") {
                     if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
@@ -102,7 +101,102 @@ extension PreferencesView {
                 }
             }
 
+            sectionHeader("Diagnostics")
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Crash reports are collected locally. Use the email link below to open a pre-filled report email.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                labeledRow("Email:") {
+                    Button("jazzyalex@gmail.com") {
+                        sendPendingCrashReports()
+                    }
+                    .buttonStyle(.link)
+                    .help("Open a pre-filled email draft with the latest crash report in the message body.")
+                }
+
+                labeledRow("Pending reports:") {
+                    Text("\(crashPendingCount)")
+                        .font(.system(.body, design: .monospaced))
+                }
+
+                labeledRow("Last detected:") {
+                    if let date = crashLastDetectedAt {
+                        Text(AppDateFormatting.dateTimeMedium(date))
+                            .font(.system(.body, design: .monospaced))
+                    } else {
+                        Text("None")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                labeledRow("Last email draft:") {
+                    if let date = crashLastSendAt {
+                        Text(AppDateFormatting.dateTimeMedium(date))
+                            .font(.system(.body, design: .monospaced))
+                    } else {
+                        Text("Never")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let sendError = crashLastSendError, !sendError.isEmpty {
+                    PreferenceCallout(
+                        iconName: "exclamationmark.triangle.fill",
+                        tint: .orange
+                    ) {
+                        Text(sendError)
+                            .font(.caption)
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    Button(isCrashSendRunning ? "Preparing..." : "Email Crash Report") {
+                        sendPendingCrashReports()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isCrashSendRunning || crashPendingCount == 0)
+                    .help("Open the default email app with a pre-filled crash report draft.")
+
+                    Button("Export Report") {
+                        exportLatestCrashReport()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(crashPendingCount == 0)
+                    .help("Export the most recent queued crash report as JSON.")
+
+                    Button("Clear Pending") {
+                        showCrashClearConfirm = true
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(crashPendingCount == 0)
+                    .help("Delete all queued crash reports from local storage.")
+                }
+
+            }
+
             Spacer()
+        }
+        .onAppear {
+            refreshCrashDiagnosticsState()
+        }
+        .alert("Crash Reports", isPresented: $showCrashSendResult) {
+            Button("Close", role: .cancel) {}
+        } message: {
+            Text(crashSendResultMessage)
+        }
+        .alert("Clear Pending Crash Reports?", isPresented: $showCrashClearConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear", role: .destructive) {
+                clearPendingCrashReports()
+            }
+        } message: {
+            Text("This removes all queued crash reports from local storage.")
+        }
+        .alert("Export Failed", isPresented: $showCrashExportError) {
+            Button("Close", role: .cancel) {}
+        } message: {
+            Text(crashExportErrorMessage)
         }
     }
 
