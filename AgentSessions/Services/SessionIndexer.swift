@@ -162,6 +162,7 @@ final class SessionIndexer: ObservableObject {
     // Track sessions currently being reloaded to prevent duplicate loads
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
+    private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
     private var lastPrewarmSignatureByID: [String: Int] = [:]
     private var transcriptPrewarmTask: Task<Void, Never>? = nil
 
@@ -303,8 +304,20 @@ final class SessionIndexer: ObservableObject {
         }
     }
 
-    // Reload a specific lightweight session with full parse
-    func reloadSession(id: String) {
+    enum ReloadReason: String {
+        case selection
+        case focusedSessionMonitor
+        case manualRefresh
+    }
+
+    // Reload a session with full parse.
+    // - Parameters:
+    //   - id: Session identifier
+    //   - force: Reload even when session already has events
+    //   - reason: Origin for diagnostics and force semantics
+    func reloadSession(id: String,
+                       force: Bool = false,
+                       reason: ReloadReason = .selection) {
         // Check if already reloading this session
         reloadLock.lock()
         if reloadingSessionIDs.contains(id) {
@@ -326,9 +339,8 @@ final class SessionIndexer: ObservableObject {
                 self.reloadLock.unlock()
             }
 
-            guard let existing = self.allSessions.first(where: { $0.id == id }),
-                  existing.events.isEmpty else {
-                DBG("⏭️ Skip reload: session already loaded or not found")
+            guard let existing = self.allSessions.first(where: { $0.id == id }) else {
+                DBG("⏭️ Skip reload: session not found")
                 // Clear loading state on early exit
                 DispatchQueue.main.async {
                     if self.loadingSessionID == id {
@@ -339,8 +351,43 @@ final class SessionIndexer: ObservableObject {
                 return
             }
 
+            let hasLoadedEvents = !existing.events.isEmpty
+            if hasLoadedEvents && !force {
+                DBG("⏭️ Skip reload: session already loaded")
+                DispatchQueue.main.async {
+                    if self.loadingSessionID == id {
+                        self.isLoadingSession = false
+                        self.loadingSessionID = nil
+                    }
+                }
+                return
+            }
+
+            let url = URL(fileURLWithPath: existing.filePath)
+            let preParseStat = Self.fileStat(for: url)
+            var lastReloadStat: SessionFileStat? = nil
+            self.reloadLock.lock()
+            lastReloadStat = self.lastFullReloadFileStatsBySessionID[id]
+            self.reloadLock.unlock()
+
+            if force,
+               reason != .manualRefresh,
+               hasLoadedEvents,
+               let preParseStat,
+               let lastReloadStat,
+               preParseStat == lastReloadStat {
+                DBG("⏭️ Skip reload: unchanged file for \(id.prefix(8)) reason=\(reason.rawValue)")
+                DispatchQueue.main.async {
+                    if self.loadingSessionID == id {
+                        self.isLoadingSession = false
+                        self.loadingSessionID = nil
+                    }
+                }
+                return
+            }
+
             let filename = existing.filePath.components(separatedBy: "/").last ?? "?"
-            DBG("🔄 Reloading lightweight session: \(filename)")
+            DBG("🔄 Reloading session: \(filename) force=\(force) reason=\(reason.rawValue)")
             DBG("  📂 Path: \(existing.filePath)")
 
             // Show loading state immediately for better responsiveness
@@ -349,7 +396,6 @@ final class SessionIndexer: ObservableObject {
                 self.loadingSessionID = id
             }
 
-            let url = URL(fileURLWithPath: existing.filePath)
             let startTime = Date()
 
             DBG("  🚀 Starting parseFileFull...")
@@ -357,6 +403,19 @@ final class SessionIndexer: ObservableObject {
             if let fullSession = self.parseFileFull(at: url, forcedID: id) {
                 let elapsed = Date().timeIntervalSince(startTime)
                 DBG("  ⏱️ Parse took \(String(format: "%.1f", elapsed))s - events=\(fullSession.events.count)")
+                let postParseStat = Self.fileStat(for: url)
+                self.reloadLock.lock()
+                if let preParseStat {
+                    // Persist the pre-parse stat so follow-up monitor ticks can still
+                    // reload if the file advanced while parse was in flight.
+                    self.lastFullReloadFileStatsBySessionID[id] = preParseStat
+                } else {
+                    self.lastFullReloadFileStatsBySessionID.removeValue(forKey: id)
+                }
+                self.reloadLock.unlock()
+                if preParseStat != postParseStat {
+                    DBG("  ℹ️ File changed during reload; next monitor tick will perform a follow-up parse")
+                }
 
                 DispatchQueue.main.async {
                     // Replace in allSessions
@@ -384,6 +443,7 @@ final class SessionIndexer: ObservableObject {
 
                         // Update transcript cache for accurate search
                         let cache = self.transcriptCache
+                        cache.remove(merged.id)
                         Task.detached(priority: .utility) {
                             let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
                             let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(

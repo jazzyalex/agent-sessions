@@ -23,6 +23,11 @@ final class TranscriptCache: @unchecked Sendable {
         withLock { cache[sessionID] = transcript }
     }
 
+    /// Remove a single cached transcript (thread-safe)
+    func remove(_ sessionID: String) {
+        _ = withLock { cache.removeValue(forKey: sessionID) }
+    }
+
     /// Generate and cache transcripts for multiple sessions in background
     /// Skips sessions that are already cached or have no events (lightweight sessions)
     func generateAndCache(sessions: [Session]) async {

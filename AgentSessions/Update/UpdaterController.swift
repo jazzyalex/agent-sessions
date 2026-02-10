@@ -24,7 +24,7 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     // MARK: - Shared Instance
 
     /// Shared instance for app-wide access (set by App during initialization)
-    static weak var shared: UpdaterController?
+    static var shared: UpdaterController?
 
     // MARK: - Published State
 

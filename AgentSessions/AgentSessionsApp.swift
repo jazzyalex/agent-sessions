@@ -26,14 +26,12 @@ struct AgentSessionsApp: App {
     @StateObject private var copilotIndexer = CopilotSessionIndexer()
     @StateObject private var droidIndexer = DroidSessionIndexer()
     @StateObject private var openclawIndexer = OpenClawSessionIndexer()
-    @StateObject private var updaterController = {
-        let controller = UpdaterController()
-        UpdaterController.shared = controller
-        return controller
-    }()
+    @StateObject private var updaterController = UpdaterController()
     @StateObject private var onboardingCoordinator = OnboardingCoordinator()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @State private var statusItemController: StatusItemController? = nil
+    @State private var analyticsToggleObserver: NSObjectProtocol?
+    @State private var didRunStartupTasks: Bool = false
     private let onboardingWindowPresenter = OnboardingWindowPresenter()
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -102,23 +100,37 @@ struct AgentSessionsApp: App {
                 .background(WindowAutosave(name: "MainWindow"))
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
-                    LaunchProfiler.reset("Unified main window")
-                    LaunchProfiler.log("Window appeared")
-                    LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
-                    Task {
-                        let detectedCount = await CrashReportingService.shared.detectAndQueueOnLaunch()
-                        if detectedCount > 0 {
-                            await presentCrashRecoveryPrompt(newCrashCount: detectedCount)
-                        }
+                    if UpdaterController.shared == nil || UpdaterController.shared !== updaterController {
+                        UpdaterController.shared = updaterController
                     }
-                    onboardingCoordinator.checkAndPresentIfNeeded()
-                    unifiedIndexerHolder.unified?.refresh()
+
+                    if !didRunStartupTasks {
+                        didRunStartupTasks = true
+                        LaunchProfiler.reset("Unified main window")
+                        LaunchProfiler.log("Window appeared")
+                        LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
+                        Task {
+                            let detectedCount = await CrashReportingService.shared.detectAndQueueOnLaunch()
+                            if detectedCount > 0 {
+                                await presentCrashRecoveryPrompt(newCrashCount: detectedCount)
+                            }
+                        }
+                        onboardingCoordinator.checkAndPresentIfNeeded()
+                        unifiedIndexerHolder.unified?.refresh()
+                        setupAnalytics()
+                    }
+
                     let isAppActive = NSApp?.isActive ?? true
                     unifiedIndexerHolder.unified?.setAppActive(isAppActive)
                     codexUsageModel.setAppActive(isAppActive)
                     claudeUsageModel.setAppActive(isAppActive)
                     updateUsageModels()
-                    setupAnalytics()
+                }
+                .onDisappear {
+                    if let observer = analyticsToggleObserver {
+                        NotificationCenter.default.removeObserver(observer)
+                        analyticsToggleObserver = nil
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     unifiedIndexerHolder.unified?.setAppActive(true)
@@ -345,6 +357,10 @@ extension AgentSessionsApp {
     private func setupAnalytics() {
         if AppRuntime.isRunningTests { return }
         guard analyticsService == nil else { return }
+        if let observer = analyticsToggleObserver {
+            NotificationCenter.default.removeObserver(observer)
+            analyticsToggleObserver = nil
+        }
 
         // Create analytics service with indexers
         let service = AnalyticsService(
@@ -382,12 +398,13 @@ extension AgentSessionsApp {
         analyticsWindowController = controller
 
         // Observe toggle notifications
-        NotificationCenter.default.addObserver(
+        analyticsToggleObserver = NotificationCenter.default.addObserver(
             forName: Notification.Name("ToggleAnalyticsWindow"),
             object: nil,
             queue: .main
-        ) { _ in
+        ) { [weak service, weak controller] _ in
             Task { @MainActor in
+                guard let service, let controller else { return }
                 guard service.isReady else {
                     NSSound.beep()
                     print("[Analytics] Ignoring toggle – analytics still warming up")
@@ -574,10 +591,13 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
     }
 
     func hide() {
+        teardownObservers()
         windowController?.close()
     }
 
     func windowWillClose(_ notification: Notification) {
+        teardownObservers()
+        hostingView?.onAppearanceChanged = nil
         if coordinator?.isPresented == true {
             coordinator?.skip()
         }
@@ -586,10 +606,6 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         hostingView = nil
         window = nil
         state = nil
-        if let o = distributedObserver { DistributedNotificationCenter.default().removeObserver(o) }
-        distributedObserver = nil
-        if let o = defaultsObserver { NotificationCenter.default.removeObserver(o) }
-        defaultsObserver = nil
     }
 }
 // (Legacy ContentView and FirstRunPrompt removed)
@@ -639,12 +655,20 @@ private struct OnboardingWindowRoot: View {
 }
 
 private extension OnboardingWindowPresenter {
+    func teardownObservers() {
+        if let o = distributedObserver { DistributedNotificationCenter.default().removeObserver(o) }
+        distributedObserver = nil
+        if let o = defaultsObserver { NotificationCenter.default.removeObserver(o) }
+        defaultsObserver = nil
+    }
+
     func makeRootView() -> AnyView {
         guard let state else { return AnyView(EmptyView()) }
         return AnyView(OnboardingWindowRoot(state: state))
     }
 
     func handleEffectiveAppearanceChange() {
+        guard window != nil, hostingView != nil else { return }
         let raw = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
         let appAppearance = AppAppearance(rawValue: raw) ?? .system
         guard appAppearance == .system else { return }
@@ -652,6 +676,7 @@ private extension OnboardingWindowPresenter {
     }
 
     func handleAppearancePreferenceChange() {
+        guard window != nil, hostingView != nil else { return }
         let raw = UserDefaults.standard.string(forKey: "AppAppearance") ?? AppAppearance.system.rawValue
         guard raw != lastAppAppearanceRaw else { return }
         lastAppAppearanceRaw = raw
