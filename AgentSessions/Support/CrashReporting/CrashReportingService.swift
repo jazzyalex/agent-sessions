@@ -41,8 +41,6 @@ actor CrashReportingService {
 
         guard let newestUnseen = filtered.first else { return 0 }
         await store.enqueue(contentsOf: [newestUnseen])
-        let updatedSeenHistory = mergedSeenCrashIDHistory(existing: seenHistory, newlySeenIDsByRecency: [newestUnseen.id])
-        persistSeenCrashIDHistory(updatedSeenHistory, lastSeenID: newestUnseen.id)
         return 1
     }
 
@@ -65,6 +63,13 @@ actor CrashReportingService {
     }
 
     func clearPendingReports() async {
+        let pending = await store.pending()
+        let pendingIDsByRecency = pending.map(\.id).filter { !$0.isEmpty }
+        if !pendingIDsByRecency.isEmpty {
+            let seenHistory = loadedSeenCrashIDHistory()
+            let updatedSeenHistory = mergedSeenCrashIDHistory(existing: seenHistory, newlySeenIDsByRecency: pendingIDsByRecency)
+            persistSeenCrashIDHistory(updatedSeenHistory, lastSeenID: pendingIDsByRecency.first)
+        }
         await store.clear()
     }
 
