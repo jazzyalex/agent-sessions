@@ -6,25 +6,15 @@ struct CockpitView: View {
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
-
-    private enum Mode: String, CaseIterable, Identifiable {
-        case active
-        case all
-        var id: String { rawValue }
-        var title: String { self == .active ? "Active" : "All" }
-    }
-
-    @State private var mode: Mode = .active
     @State private var selection: Set<String> = []
 
     private struct Row: Identifiable {
         let id: String
         let title: String
         let repo: String
-        let workspace: String
+        let date: Date?
+        let dateLabel: String
         let terminal: String
-        let lastSeenLabel: String
-        let isActive: Bool
         let focusURL: URL?
         let focusHelp: String
         let sessionID: String?
@@ -33,109 +23,77 @@ struct CockpitView: View {
     }
 
     private var activeRows: [Row] {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = .current
+        dateFormatter.timeZone = .current
+        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
 
-        let now = Date()
         var sessionsByLogPath: [String: Session] = [:]
         for s in codexIndexer.allSessions where s.source == .codex {
             sessionsByLogPath[normalizePath(s.filePath)] = s
         }
 
-        return activeCodex.presences
-            .sorted(by: { ($0.lastSeenAt ?? .distantPast) > ($1.lastSeenAt ?? .distantPast) })
-            .map { p in
-                let logNorm = p.sessionLogPath.map(normalizePath)
-                let session = logNorm.flatMap { sessionsByLogPath[$0] } ?? resolveBySessionID(p.sessionId)
+        let mapped: [Row] = activeCodex.presences.map { p in
+            let logNorm = p.sessionLogPath.map(normalizePath)
+            let session = logNorm.flatMap { sessionsByLogPath[$0] } ?? resolveBySessionID(p.sessionId)
 
-                let title = session?.title
-                    ?? p.sessionId.map { "Session \($0.prefix(8))" }
-                    ?? "Active Codex session"
+            let title = session?.title
+                ?? p.sessionId.map { "Session \($0.prefix(8))" }
+                ?? "Active Codex session"
 
-                let repo = session?.repoName ?? session?.repoDisplay ?? "—"
-                let workspace = session?.cwd ?? p.workspaceRoot ?? "—"
-                let termProgram = p.terminal?.termProgram ?? ""
-                let terminal: String = {
-                    if p.revealURL != nil { return "iTerm2" }
-                    if termProgram.lowercased().contains("iterm") { return "iTerm2" }
-                    if termProgram.lowercased().contains("terminal") { return "Terminal" }
-                    return termProgram.isEmpty ? "—" : termProgram
-                }()
+            let repo = session?.repoName ?? session?.repoDisplay ?? "—"
 
-                let lastSeenLabel: String = {
-                    guard let t = p.lastSeenAt else { return "—" }
-                    return formatter.localizedString(for: t, relativeTo: now)
-                }()
+            // Use a stable session timestamp (Codex filename timestamp / start time), not a heartbeat.
+            let date = session?.modifiedAt ?? parseRolloutTimestamp(from: p.sessionLogPath)
+            let dateLabel = date.map { dateFormatter.string(from: $0) } ?? "—"
 
-                let focusHelp: String = {
-                    if p.revealURL != nil { return "Focus the existing iTerm2 tab/window for this session." }
-                    if let id = p.terminal?.itermSessionId, !id.isEmpty {
-                        return "iTerm2 session id present but reveal URL could not be formed."
-                    }
-                    return "Focus is unavailable (missing iTerm2 session id)."
-                }()
+            let termProgram = p.terminal?.termProgram ?? ""
+            let terminal: String = {
+                if p.revealURL != nil { return "iTerm2" }
+                if termProgram.lowercased().contains("iterm") { return "iTerm2" }
+                if termProgram.lowercased().contains("terminal") { return "Terminal" }
+                return termProgram.isEmpty ? "—" : termProgram
+            }()
 
-                return Row(
-                    id: p.sourceFilePath ?? "\(p.sessionId ?? "unknown")|\(p.sessionLogPath ?? "unknown")",
-                    title: title,
-                    repo: repo,
-                    workspace: workspace,
-                    terminal: terminal,
-                    lastSeenLabel: lastSeenLabel,
-                    isActive: true,
-                    focusURL: p.revealURL,
-                    focusHelp: focusHelp,
-                    sessionID: p.sessionId,
-                    logPath: p.sessionLogPath,
-                    workingDirectory: session?.cwd ?? p.workspaceRoot
-                )
-            }
-    }
+            let focusHelp: String = {
+                if p.revealURL != nil { return "Focus the existing iTerm2 tab/window for this session." }
+                if let id = p.terminal?.itermSessionId, !id.isEmpty {
+                    return "iTerm2 session id present but reveal URL could not be formed."
+                }
+                return "Focus is unavailable (missing iTerm2 session id)."
+            }()
 
-    private var allRows: [Row] {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        let now = Date()
+            let stableID: String =
+                logNorm
+                ?? p.sessionId
+                ?? p.sourceFilePath
+                ?? p.pid.map { "pid:\($0)" }
+                ?? p.tty
+                ?? "\(p.sessionLogPath ?? "unknown")|\(p.pid ?? -1)"
 
-        return codexIndexer.allSessions
-            .filter { $0.source == .codex }
-            .sorted(by: { $0.modifiedAt > $1.modifiedAt })
-            .map { s in
-                let p = activeCodex.presence(for: s)
-                let termProgram = p?.terminal?.termProgram ?? ""
-                let terminal: String = {
-                    if p?.revealURL != nil { return "iTerm2" }
-                    if termProgram.lowercased().contains("iterm") { return "iTerm2" }
-                    if termProgram.lowercased().contains("terminal") { return "Terminal" }
-                    return termProgram.isEmpty ? "—" : termProgram
-                }()
-                let lastSeenLabel: String = {
-                    guard let t = p?.lastSeenAt else { return "—" }
-                    return formatter.localizedString(for: t, relativeTo: now)
-                }()
-                let focusHelp: String = {
-                    if let url = p?.revealURL, url.absoluteString.hasPrefix("iterm2:") {
-                        return "Focus the existing iTerm2 tab/window for this session."
-                    }
-                    if p == nil { return "This session is not currently active." }
-                    return "Focus is unavailable (missing iTerm2 session id)."
-                }()
+            return Row(
+                id: stableID,
+                title: title,
+                repo: repo,
+                date: date,
+                dateLabel: dateLabel,
+                terminal: terminal,
+                focusURL: p.revealURL,
+                focusHelp: focusHelp,
+                sessionID: p.sessionId,
+                logPath: p.sessionLogPath,
+                workingDirectory: session?.cwd ?? p.workspaceRoot
+            )
+        }
 
-                return Row(
-                    id: s.id,
-                    title: s.title,
-                    repo: s.repoName ?? s.repoDisplay,
-                    workspace: s.cwd ?? "—",
-                    terminal: terminal,
-                    lastSeenLabel: lastSeenLabel,
-                    isActive: p != nil,
-                    focusURL: p?.revealURL,
-                    focusHelp: focusHelp,
-                    sessionID: s.codexInternalSessionID ?? s.codexFilenameUUID,
-                    logPath: s.filePath,
-                    workingDirectory: s.cwd
-                )
-            }
+        // Sort by session timestamp (newest first) so rows don't jump on heartbeat updates.
+        return mapped.sorted { a, b in
+            let da = a.date ?? .distantPast
+            let db = b.date ?? .distantPast
+            if da != db { return da > db }
+            if a.repo != b.repo { return a.repo < b.repo }
+            return a.title < b.title
+        }
     }
 
     var body: some View {
@@ -162,21 +120,9 @@ struct CockpitView: View {
                 .padding(.horizontal, 12)
             }
 
-            Table(rows, selection: $selection) {
-                TableColumn("Session") { row in
+            Table(activeRows, selection: $selection) {
+                TableColumn("Name") { row in
                     HStack(spacing: 8) {
-                        if row.isActive {
-                            Text("ACTIVE")
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color(nsColor: .controlBackgroundColor))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
-                                )
-                                .cornerRadius(6)
-                        }
                         Text(row.title)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -188,18 +134,15 @@ struct CockpitView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                TableColumn("Workspace") { row in
-                    Text(row.workspace)
+                TableColumn("Date") { row in
+                    Text(row.dateLabel)
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                        .help(row.dateLabel)
                 }
+                .width(min: 140, ideal: 150, max: 170)
                 TableColumn("Terminal") { row in
                     Text(row.terminal)
-                        .foregroundStyle(.secondary)
-                }
-                TableColumn("Seen") { row in
-                    Text(row.lastSeenLabel)
                         .foregroundStyle(.secondary)
                 }
                 TableColumn("Focus") { row in
@@ -212,7 +155,7 @@ struct CockpitView: View {
             }
             .frame(minHeight: 360)
             .contextMenu(forSelectionType: String.self) { ids in
-                if ids.count == 1, let id = ids.first, let row = rows.first(where: { $0.id == id }) {
+                if ids.count == 1, let id = ids.first, let row = activeRows.first(where: { $0.id == id }) {
                     Button("Focus in iTerm2") { focus(row) }
                         .disabled(row.focusURL == nil)
                         .help(row.focusHelp)
@@ -243,13 +186,6 @@ struct CockpitView: View {
             Text("Cockpit")
                 .font(.system(size: 14, weight: .semibold))
             Spacer()
-            Picker("", selection: $mode) {
-                ForEach(Mode.allCases) { m in
-                    Text(m.title).tag(m)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 180)
         }
         .padding(.horizontal, 12)
         .padding(.top, 10)
@@ -268,19 +204,7 @@ struct CockpitView: View {
     }
 
     private var footerText: String {
-        switch mode {
-        case .active:
-            return "\(activeRows.count) active"
-        case .all:
-            return "\(allRows.count) sessions"
-        }
-    }
-
-    private var rows: [Row] {
-        switch mode {
-        case .active: return activeRows
-        case .all: return allRows
-        }
+        "\(activeRows.count) active"
     }
 
     private func focus(_ row: Row) {
@@ -315,5 +239,26 @@ struct CockpitView: View {
     private func normalizePath(_ raw: String) -> String {
         let expanded = (raw as NSString).expandingTildeInPath
         return URL(fileURLWithPath: expanded).standardizedFileURL.path
+    }
+
+    private func parseRolloutTimestamp(from path: String?) -> Date? {
+        guard let path else { return nil }
+        let filename = URL(fileURLWithPath: path).lastPathComponent
+        // rollout-YYYY-MM-DDThh-mm-ss-<uuid>.jsonl
+        guard filename.hasPrefix("rollout-") else { return nil }
+        guard let tRange = filename.range(of: #"rollout-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})-"#,
+                                          options: .regularExpression) else {
+            return nil
+        }
+        let match = String(filename[tRange])
+        let ts = match
+            .replacingOccurrences(of: "rollout-", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
+        return f.date(from: ts)
     }
 }
