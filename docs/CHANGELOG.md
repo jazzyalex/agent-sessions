@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Preferences/Updates: Added an `Auto-Update` checkbox in Settings → About (next to `Check for Updates...`) and enabled Sparkle auto-update by default for new installs while keeping user opt-out.
 
+### Fixed
+- Cockpit: Active Codex session detection now keeps mixed registry/probe sessions visible, and Focus in iTerm2 is only enabled when iTerm-targetable metadata is present.
+
 ## [2.11.1] - 2026-02-08
 
 ### Fixed

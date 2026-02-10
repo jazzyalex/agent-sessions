@@ -516,21 +516,26 @@ struct UnifiedSessionsView: View {
 	                    Divider()
 	                }
 	                    if s.source == .codex {
-	                        let focusURL = activeCodexSessions.revealURL(for: s)
+	                        let presence = activeCodexSessions.presence(for: s)
+	                        let focusURL = presence?.revealURL
+	                        let canFocus = CodexActiveSessionsModel.canAttemptITerm2Focus(
+	                            itermSessionId: presence?.terminal?.itermSessionId,
+	                            tty: presence?.tty,
+	                            termProgram: presence?.terminal?.termProgram
+	                        ) || focusURL != nil
 	                        let helpText: String = {
-	                            if focusURL != nil { return "Focus the existing iTerm2 tab/window for this session." }
-	                            if activeCodexSessions.isActive(s) { return "Focus is unavailable (missing iTerm2 session id)." }
+	                            if canFocus { return "Focus the existing iTerm2 tab/window for this session." }
+	                            if activeCodexSessions.isActive(s) { return "Focus is unavailable for this terminal session." }
 	                            return "This session is not currently active."
 	                        }()
 	                        Button("Focus in iTerm2") {
-	                            let presence = activeCodexSessions.presence(for: s)
 	                            let didFocus = CodexActiveSessionsModel.tryFocusITerm2(
 	                                itermSessionId: presence?.terminal?.itermSessionId,
 	                                tty: presence?.tty
 	                            )
 	                            if !didFocus, let focusURL { NSWorkspace.shared.open(focusURL) }
 	                        }
-	                        .disabled(focusURL == nil)
+	                        .disabled(!canFocus)
 	                        .help(helpText)
 	                        Divider()
 	                    }
