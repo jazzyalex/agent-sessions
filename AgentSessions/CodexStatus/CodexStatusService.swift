@@ -137,7 +137,9 @@ final class CodexUsageModel: ObservableObject {
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
-    private var appIsActive: Bool = NSApp.isActive
+    // Avoid touching NSApp during singleton initialization at app launch.
+    // NSApp is an IUO and can be nil this early in startup.
+    private var appIsActive: Bool = false
 
     func setEnabled(_ enabled: Bool) {
         guard enabled != isEnabled else { return }

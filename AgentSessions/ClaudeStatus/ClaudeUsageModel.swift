@@ -54,7 +54,9 @@ final class ClaudeUsageModel: ObservableObject {
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
-    private var appIsActive: Bool = NSApp.isActive
+    // Avoid touching NSApp during singleton initialization at app launch.
+    // NSApp is an IUO and can be nil this early in startup.
+    private var appIsActive: Bool = false
     private var wakeObservers: [NSObjectProtocol] = []
 
     func setEnabled(_ enabled: Bool) {
