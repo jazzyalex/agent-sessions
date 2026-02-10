@@ -33,6 +33,7 @@ struct UnifiedSessionsView: View {
     @ObservedObject var openclawIndexer: OpenClawSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
+    @EnvironmentObject var activeCodexSessions: CodexActiveSessionsModel
     @EnvironmentObject var updaterController: UpdaterController
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -420,12 +421,12 @@ struct UnifiedSessionsView: View {
                        ideal: showSourceColumn ? 100 : 0,
                        max: showSourceColumn ? 120 : 0)
 
-            TableColumn("Session", value: \Session.title) { s in
-                SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        selectionChangeSource = .mouse
-                        // Explicitly select the tapped row to avoid relying solely on Table's mouse handling.
+	            TableColumn("Session", value: \Session.title) { s in
+	                SessionTitleCell(session: s, geminiIndexer: geminiIndexer, activeCodexSessions: activeCodexSessions)
+	                    .contentShape(Rectangle())
+	                    .onTapGesture {
+	                        selectionChangeSource = .mouse
+	                        // Explicitly select the tapped row to avoid relying solely on Table's mouse handling.
                         selection = s.id
                         let desired: Set<String> = [s.id]
                         if tableSelection != desired {
@@ -505,20 +506,34 @@ struct UnifiedSessionsView: View {
 		        })
 		        }
 		        .contextMenu(forSelectionType: String.self) { ids in
-		            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
-		                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
-		                Divider()
-                if s.source == .codex || s.source == .claude {
-                    Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code") (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
-                        .keyboardShortcut("r", modifiers: [.command, .control])
-                        .help("Resume the selected session in its original CLI (⌃⌘R)")
-                    Divider()
-                }
-                Button("Open Working Directory") { openDir(s) }
-                    .keyboardShortcut("o", modifiers: [.command, .shift])
-                    .help("Reveal working directory in Finder (⌘⇧O)")
-                Button("Reveal Session Log") { revealSessionFile(s) }
-                    .keyboardShortcut("l", modifiers: [.command, .option])
+			            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
+			                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
+			                Divider()
+	                if s.source == .codex || s.source == .claude {
+	                    Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code") (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
+	                        .keyboardShortcut("r", modifiers: [.command, .control])
+	                        .help("Resume the selected session in its original CLI (⌃⌘R)")
+	                    Divider()
+	                }
+                    if s.source == .codex {
+                        let focusURL = activeCodexSessions.revealURL(for: s)
+                        let helpText: String = {
+                            if focusURL != nil { return "Focus the existing iTerm2 tab/window for this session." }
+                            if activeCodexSessions.isActive(s) { return "Focus is unavailable (missing iTerm2 session id)." }
+                            return "This session is not currently active."
+                        }()
+                        Button("Focus in iTerm2") {
+                            if let focusURL { NSWorkspace.shared.open(focusURL) }
+                        }
+                        .disabled(focusURL == nil)
+                        .help(helpText)
+                        Divider()
+                    }
+	                Button("Open Working Directory") { openDir(s) }
+	                    .keyboardShortcut("o", modifiers: [.command, .shift])
+	                    .help("Reveal working directory in Finder (⌘⇧O)")
+	                Button("Reveal Session Log") { revealSessionFile(s) }
+	                    .keyboardShortcut("l", modifiers: [.command, .option])
                     .help("Show session log file in Finder (⌥⌘L)")
                 Button("Copy Session ID") { copySessionID(id) }
                     .help("Copy the session ID to the clipboard")
@@ -1457,35 +1472,52 @@ private struct TranscriptHostView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
     }
-}
+	}
 
-// Session title cell with inline Gemini refresh affordance (hover-only)
-private struct SessionTitleCell: View {
-    let session: Session
-    @ObservedObject var geminiIndexer: GeminiSessionIndexer
-    @State private var hover: Bool = false
+		// Session title cell with inline Gemini refresh affordance (hover-only)
+		private struct SessionTitleCell: View {
+		    let session: Session
+		    @ObservedObject var geminiIndexer: GeminiSessionIndexer
+	        @ObservedObject var activeCodexSessions: CodexActiveSessionsModel
+		    @State private var hover: Bool = false
 
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            Text(session.title)
-                .font(.system(size: 13, weight: .regular, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .background(Color.clear)
-            if session.source == .gemini, geminiIndexer.isPreviewStale(id: session.id) {
-                Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {
-                    Text("Refresh")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+	    var body: some View {
+	        HStack(spacing: 8) {
+	            Text(session.title)
+	                .font(.system(size: 13, weight: .regular, design: .monospaced))
+	                .lineLimit(1)
+	                .truncationMode(.tail)
+	                .background(Color.clear)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if session.source == .codex, activeCodexSessions.isActive(session) {
+                    Text("ACTIVE")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(UnifiedSessionsStyle.agentPillFill)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
+                        )
+                        .cornerRadius(6)
+                        .help("A live terminal tab is present for this session.")
                 }
-                .buttonStyle(.bordered)
-                .tint(.teal)
-                .opacity(hover ? 1 : 0)
-                .help("Update this session's preview to reflect the latest file contents")
-            }
-        }
-        .onHover { hover = $0 }
-    }
-}
+
+	            if session.source == .gemini, geminiIndexer.isPreviewStale(id: session.id) {
+	                Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {
+	                    Text("Refresh")
+	                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+	                }
+	                .buttonStyle(.bordered)
+	                .tint(.teal)
+	                .opacity(hover ? 1 : 0)
+	                .help("Update this session's preview to reflect the latest file contents")
+	            }
+	        }
+	        .onHover { hover = $0 }
+	    }
+	}
 
 // Stable cell to prevent Table reuse glitches in Project column
 private struct ProjectCellView: View {

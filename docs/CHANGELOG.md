@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Cockpit: Added a Cockpit window for active Codex sessions with iTerm2 focus, plus ACTIVE badges in the Unified sessions list.
+
 ### Changed
 - Preferences/Updates: Added an `Auto-Update` checkbox in Settings → About (next to `Check for Updates...`) and enabled Sparkle auto-update by default for new installs while keeping user opt-out.
 
