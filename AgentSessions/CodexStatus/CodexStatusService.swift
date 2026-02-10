@@ -850,9 +850,8 @@ actor CodexStatusService {
             }
         }
 
-        // If we've never applied a log-derived source file, seed it once with a tiny scan.
-        // Important: do not set `lastAppliedSourceFileMTime` during seeding, otherwise we
-        // can skip parsing the seed file and never populate the menu snapshot until a new write.
+        // Resolve the current source file and allow lightweight reseeding when activity
+        // shifts to a different JSONL file while the app window is inactive.
         var sourceFile: URL? = nil
         if let path = lastAppliedSourceFilePath {
             let candidate = URL(fileURLWithPath: path)
@@ -864,16 +863,29 @@ actor CodexStatusService {
                 lastAppliedSourceFileMTime = nil
             }
         }
-        if sourceFile == nil {
-            guard let seed = newestCandidateFile(roots: roots, daysBack: 1, limit: 3) else { return }
-            lastAppliedSourceFilePath = seed.path
-            sourceFile = seed
+        if let newest = newestCandidateFile(roots: roots, daysBack: 1, limit: 3) {
+            if let current = sourceFile {
+                let currentMTime = fileModificationDate(current) ?? .distantPast
+                let newestMTime = fileModificationDate(newest) ?? .distantPast
+                if newest.path != current.path, newestMTime >= currentMTime {
+                    sourceFile = newest
+                    lastAppliedSourceFilePath = newest.path
+                    // Force one parse when switching files.
+                    lastAppliedSourceFileMTime = nil
+                }
+            } else {
+                lastAppliedSourceFilePath = newest.path
+                sourceFile = newest
+                // Do not seed mtime; we still need the first parse.
+                lastAppliedSourceFileMTime = nil
+            }
         }
         guard let sourceFile else { return }
 
         // Only parse when the file changes; otherwise rely on the cached snapshot.
         guard let mtime = fileModificationDate(sourceFile) else { return }
         if let lastAppliedSourceFileMTime,
+           sourceFile.path == lastAppliedSourceFilePath,
            mtime == lastAppliedSourceFileMTime,
            lastAppliedEventTimestamp != nil {
             return
@@ -900,6 +912,7 @@ actor CodexStatusService {
                 snapshot = s
                 updateHandler(snapshot)
             }
+            lastAppliedSourceFilePath = sourceFile.path
             lastAppliedSourceFileMTime = mtime
             lastAppliedEventTimestamp = summary.eventTimestamp
             lastParseWasStaleOrFailed = summary.stale

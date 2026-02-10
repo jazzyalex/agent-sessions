@@ -102,6 +102,18 @@ actor ClaudeStatusService {
     private var visible: Bool = false
     private var visibilityContext = VisibilityContext(menuVisible: false, stripVisible: false, appIsActive: false)
     private var visibilityMode: VisibilityMode { visibilityContext.mode }
+    private var autoPollingAllowed: Bool {
+        switch visibilityMode {
+        case .active:
+            // Active mode includes strip-visible state while app is foregrounded.
+            return visible
+        case .menuBackground:
+            // Background mode is valid only when the menu tracker for Claude is shown.
+            return visible && visibilityContext.menuVisible
+        case .hidden:
+            return false
+        }
+    }
     private var refresherTask: Task<Void, Never>?
     private var tmuxAvailable: Bool = false
     private var claudeAvailable: Bool = false
@@ -164,6 +176,7 @@ actor ClaudeStatusService {
     }
 
     func setVisibility(menuVisible: Bool, stripVisible: Bool, appIsActive: Bool) {
+        let previousContext = visibilityContext
         let previousMode = visibilityMode
         let wasVisible = visible
 
@@ -172,6 +185,7 @@ actor ClaudeStatusService {
         let mode = visibilityMode
         let becameActive = (previousMode != .active && mode == .active)
         let becameMenuBackground = (previousMode == .hidden && mode == .menuBackground)
+        let menuVisibilityChanged = (previousContext.menuVisible != visibilityContext.menuVisible)
 
         // Visibility-triggered refreshes are automatic, not user-initiated.
         if becameActive {
@@ -184,9 +198,10 @@ actor ClaudeStatusService {
             Task { [weak self] in
                 guard let self else { return }
                 await self.ensureMenuBarOrphanCleanupIfNeeded()
+                await self.refreshTick(userInitiated: false)
             }
         }
-        if wasVisible != visible || previousMode != mode {
+        if wasVisible != visible || previousMode != mode || menuVisibilityChanged {
             restartRefresherLoopIfNeeded()
         }
     }
@@ -220,10 +235,10 @@ actor ClaudeStatusService {
     private func refreshTick(userInitiated: Bool = false) async {
         guard tmuxAvailable && claudeAvailable else { return }
         if !userInitiated {
-            // Never auto-probe when the app is inactive; keep menu bar showing cached data.
-            // Probing can trigger network activity and can cost usage.
-            guard visibilityMode == .active else { return }
-            guard visible else { return }
+            // Auto-probe when a valid Claude usage surface is visible:
+            // - active app with strip/menu visibility, or
+            // - inactive app with Claude menu tracker visible.
+            guard autoPollingAllowed else { return }
             guard Self.onACPower() else { return }
         }
         guard beginProbe() else { return }
@@ -777,8 +792,8 @@ actor ClaudeStatusService {
         // Read Claude-specific polling interval (defaults to 900s = 15 min)
         let userInterval = UInt64(UserDefaults.standard.object(forKey: "ClaudePollingInterval") as? Int ?? 900)
 
-        // Strict hidden policy: no auto probing while hidden.
-        if visibilityMode != .active || !visible {
+        // Strict policy: auto polling is idle when no valid usage surface is visible.
+        if !autoPollingAllowed {
             return hiddenIdleIntervalNanoseconds
         }
 
@@ -837,8 +852,8 @@ actor ClaudeStatusService {
         refresherTask?.cancel()
         refresherTask = nil
 
-        // Auto probes only run while the app is active.
-        guard shouldRun, tmuxAvailable, claudeAvailable, visible, visibilityMode == .active else {
+        // Auto probes run only when polling is allowed for the current visibility state.
+        guard shouldRun, tmuxAvailable, claudeAvailable, autoPollingAllowed else {
             return
         }
 
