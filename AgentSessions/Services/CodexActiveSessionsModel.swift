@@ -504,9 +504,17 @@ final class CodexActiveSessionsModel: ObservableObject {
                 // Heuristic: tty device appears as fd 0/1/2, type CHR, name /dev/ttys* or /dev/pts/*
                 if info.tty == nil,
                    (currentFD == "0" || currentFD == "1" || currentFD == "2"),
-                   currentType == "CHR",
-                   (name.hasPrefix("/dev/ttys") || name.hasPrefix("/dev/pts/")) {
-                    info.tty = name
+                   currentType == "CHR" {
+                    let ttyName: String = {
+                        if name.hasPrefix("/dev/") { return name }
+                        if name.hasPrefix("dev/") { return "/" + name }
+                        return name
+                    }()
+                    if ttyName.hasPrefix("/dev/ttys") || ttyName.hasPrefix("/dev/pts/") {
+                        info.tty = ttyName
+                        infos[pid] = info
+                        continue
+                    }
                     infos[pid] = info
                     continue
                 }
