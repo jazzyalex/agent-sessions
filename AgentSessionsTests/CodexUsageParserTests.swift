@@ -270,4 +270,24 @@ final class CodexUsageParserTests: XCTestCase {
             }
         }
     }
+
+    @MainActor
+    func testCodexUsageModelStartupInitializationIsSafe() {
+        let model = CodexUsageModel()
+        model.setAppActive(false)
+        model.setMenuVisible(false)
+        model.setStripVisible(false)
+        XCTAssertNotNil(model)
+        XCTAssertNotNil(CodexUsageModel.shared)
+    }
+
+    @MainActor
+    func testClaudeUsageModelStartupInitializationIsSafe() {
+        let model = ClaudeUsageModel()
+        model.setAppActive(false)
+        model.setMenuVisible(false)
+        model.setStripVisible(false)
+        XCTAssertNotNil(model)
+        XCTAssertNotNil(ClaudeUsageModel.shared)
+    }
 }

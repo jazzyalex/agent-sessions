@@ -106,7 +106,10 @@ struct AgentSessionsApp: App {
                     LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
                     onboardingCoordinator.checkAndPresentIfNeeded()
                     unifiedIndexerHolder.unified?.refresh()
-                    unifiedIndexerHolder.unified?.setAppActive(NSApp.isActive)
+                    let isAppActive = NSApp?.isActive ?? true
+                    unifiedIndexerHolder.unified?.setAppActive(isAppActive)
+                    codexUsageModel.setAppActive(isAppActive)
+                    claudeUsageModel.setAppActive(isAppActive)
                     updateUsageModels()
                     setupAnalytics()
                 }

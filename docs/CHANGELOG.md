@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Startup stability: Prevented a launch-time crash by removing early `NSApp.isActive` reads during Codex/Claude usage model singleton initialization and syncing app-active state after UI startup.
+
 ### Changed
 - Preferences/Updates: Added an `Auto-Update` checkbox in Settings → About (next to `Check for Updates...`) and enabled Sparkle auto-update by default for new installs while keeping user opt-out.
 
