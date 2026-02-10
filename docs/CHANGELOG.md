@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.11.2] - 2026-02-09
+
 ### Fixed
 - Startup stability: Prevented a launch-time crash by removing early `NSApp.isActive` reads during Codex/Claude usage model singleton initialization and syncing app-active state after UI startup.
 
