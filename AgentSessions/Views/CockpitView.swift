@@ -16,6 +16,8 @@ struct CockpitView: View {
         let dateLabel: String
         let terminal: String
         let focusURL: URL?
+        let itermSessionId: String?
+        let tty: String?
         let focusHelp: String
         let sessionID: String?
         let logPath: String?
@@ -79,6 +81,8 @@ struct CockpitView: View {
                 dateLabel: dateLabel,
                 terminal: terminal,
                 focusURL: p.revealURL,
+                itermSessionId: p.terminal?.itermSessionId,
+                tty: p.tty,
                 focusHelp: focusHelp,
                 sessionID: p.sessionId,
                 logPath: p.sessionLogPath,
@@ -209,6 +213,9 @@ struct CockpitView: View {
 
     private func focus(_ row: Row) {
         guard let url = row.focusURL else { return }
+        if CodexActiveSessionsModel.tryFocusITerm2(itermSessionId: row.itermSessionId, tty: row.tty) {
+            return
+        }
         NSWorkspace.shared.open(url)
     }
 
