@@ -2,6 +2,12 @@ import Foundation
 import CryptoKit
 import SQLite3
 
+#if DEBUG
+enum SessionArchiveManagerTestHooks {
+    static var applicationSupportDirectoryProvider: (() -> URL?)?
+}
+#endif
+
 enum SessionArchiveStatus: String, Codable {
     case none
     case staging
@@ -63,6 +69,14 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         static let minAgeSeconds: TimeInterval = 24 * 60 * 60 // 24h
     }
 
+    private enum ArchiveRootError: LocalizedError {
+        case applicationSupportUnavailable
+
+        var errorDescription: String? {
+            "Application Support directory unavailable"
+        }
+    }
+
     // Pinning is a user action; keep the queue responsive.
     private let ioQueue = DispatchQueue(label: "AgentSessions.SessionArchiveManager.io", qos: .userInitiated)
     private var inFlightKeys: Set<String> = []
@@ -87,14 +101,14 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     }
 
     func archiveFolderURL(source: SessionSource, id: String) -> URL? {
-        let root = sessionRoot(source: source, id: id)
+        guard let root = sessionRoot(source: source, id: id) else { return nil }
         // This action is user-initiated; prefer creating the folder so Finder can reveal it.
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }
 
     func archivesRootURL() -> URL {
-        archivesRoot()
+        archivesRoot() ?? fallbackArchivesRootURL()
     }
 
     func pin(session: Session) {
@@ -177,7 +191,8 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
         for id in pinned where !existing.contains(id) {
             guard let info = loadInfoIfExists(source: source, id: id) else { continue }
-            let archivePath = archivedPrimaryPath(info: info).path
+            guard let archiveURL = archivedPrimaryPath(info: info) else { continue }
+            let archivePath = archiveURL.path
             guard FileManager.default.fileExists(atPath: archivePath) else { continue }
 
             let placeholder = Session(
@@ -203,52 +218,71 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     // MARK: - Paths
 
-    private func archivesRoot() -> URL {
-        let fm = FileManager.default
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+    private func resolveApplicationSupportDirectoryURL() -> URL? {
+#if DEBUG
+        if let provider = SessionArchiveManagerTestHooks.applicationSupportDirectoryProvider {
+            return provider()
+        }
+#endif
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    }
+
+    private func fallbackArchivesRootURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("AgentSessions", isDirectory: true)
+            .appendingPathComponent("Archives", isDirectory: true)
+    }
+
+    private func archivesRoot() -> URL? {
+        guard let appSupport = resolveApplicationSupportDirectoryURL() else { return nil }
         return appSupport.appendingPathComponent("AgentSessions", isDirectory: true)
             .appendingPathComponent("Archives", isDirectory: true)
     }
 
-    private func sourceRoot(_ source: SessionSource) -> URL {
-        archivesRoot().appendingPathComponent(source.rawValue, isDirectory: true)
+    private func sourceRoot(_ source: SessionSource) -> URL? {
+        archivesRoot()?.appendingPathComponent(source.rawValue, isDirectory: true)
     }
 
-    private func sessionRoot(source: SessionSource, id: String) -> URL {
-        sourceRoot(source).appendingPathComponent(id, isDirectory: true)
+    private func sessionRoot(source: SessionSource, id: String) -> URL? {
+        sourceRoot(source)?.appendingPathComponent(id, isDirectory: true)
     }
 
-    private func metaURL(source: SessionSource, id: String) -> URL {
-        sessionRoot(source: source, id: id).appendingPathComponent("meta.json", isDirectory: false)
+    private func metaURL(source: SessionSource, id: String) -> URL? {
+        sessionRoot(source: source, id: id)?.appendingPathComponent("meta.json", isDirectory: false)
     }
 
-    private func manifestURL(source: SessionSource, id: String) -> URL {
-        sessionRoot(source: source, id: id).appendingPathComponent("manifest.json", isDirectory: false)
+    private func manifestURL(source: SessionSource, id: String) -> URL? {
+        sessionRoot(source: source, id: id)?.appendingPathComponent("manifest.json", isDirectory: false)
     }
 
-    private func dataRootURL(source: SessionSource, id: String) -> URL {
-        sessionRoot(source: source, id: id).appendingPathComponent("data", isDirectory: true)
+    private func dataRootURL(source: SessionSource, id: String) -> URL? {
+        sessionRoot(source: source, id: id)?.appendingPathComponent("data", isDirectory: true)
     }
 
-    private func archivedPrimaryPath(info: SessionArchiveInfo) -> URL {
-        dataRootURL(source: info.source, id: info.sessionID).appendingPathComponent(info.primaryRelativePath, isDirectory: false)
+    private func archivedPrimaryPath(info: SessionArchiveInfo) -> URL? {
+        dataRootURL(source: info.source, id: info.sessionID)?.appendingPathComponent(info.primaryRelativePath, isDirectory: false)
     }
 
     // MARK: - Cache
 
     private func reloadCache() {
         let fm = FileManager.default
-        let root = archivesRoot()
+        guard let root = archivesRoot() else {
+            DispatchQueue.main.async { self.infoByKey = [:] }
+            return
+        }
         try? fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         var map: [String: SessionArchiveInfo] = [:]
         for source in SessionSource.allCases {
-            let src = sourceRoot(source)
+            guard let src = sourceRoot(source) else { continue }
             guard let dirs = try? fm.contentsOfDirectory(at: src, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else { continue }
             for dir in dirs {
                 guard (try? dir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
                 let id = dir.lastPathComponent
-                let url = metaURL(source: source, id: id)
+                guard let url = metaURL(source: source, id: id) else { continue }
                 guard let data = try? Data(contentsOf: url),
                       let info = try? JSONDecoder().decode(SessionArchiveInfo.self, from: data) else { continue }
                 map[key(source: source, id: id)] = info
@@ -259,7 +293,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     }
 
     private func loadInfoIfExists(source: SessionSource, id: String) -> SessionArchiveInfo? {
-        let url = metaURL(source: source, id: id)
+        guard let url = metaURL(source: source, id: id) else { return nil }
         guard let data = try? Data(contentsOf: url),
               let info = try? JSONDecoder().decode(SessionArchiveInfo.self, from: data) else { return nil }
         return info
@@ -267,18 +301,24 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     private func writeInfo(_ info: SessionArchiveInfo) throws {
         let fm = FileManager.default
-        let root = sessionRoot(source: info.source, id: info.sessionID)
+        guard let root = sessionRoot(source: info.source, id: info.sessionID),
+              let url = metaURL(source: info.source, id: info.sessionID) else {
+            throw ArchiveRootError.applicationSupportUnavailable
+        }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(info)
-        try data.write(to: metaURL(source: info.source, id: info.sessionID), options: [.atomic])
+        try data.write(to: url, options: [.atomic])
     }
 
     private func writeManifest(_ manifest: SessionArchiveManifest, source: SessionSource, id: String) throws {
         let fm = FileManager.default
-        let root = sessionRoot(source: source, id: id)
+        guard let root = sessionRoot(source: source, id: id),
+              let url = manifestURL(source: source, id: id) else {
+            throw ArchiveRootError.applicationSupportUnavailable
+        }
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(manifest)
-        try data.write(to: manifestURL(source: source, id: id), options: [.atomic])
+        try data.write(to: url, options: [.atomic])
     }
 
     // MARK: - Sync
@@ -523,9 +563,11 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         do {
             try writeInfo(info)
             log("pin placeholder written source=\(session.source.rawValue) id=\(session.id)")
-            log("pin meta path=\(metaURL(source: session.source, id: session.id).path)")
-            let metaExists = FileManager.default.fileExists(atPath: metaURL(source: session.source, id: session.id).path)
-            log("pin meta exists=\(metaExists) source=\(session.source.rawValue) id=\(session.id)")
+            if let metaURL = metaURL(source: session.source, id: session.id) {
+                log("pin meta path=\(metaURL.path)")
+                let metaExists = FileManager.default.fileExists(atPath: metaURL.path)
+                log("pin meta exists=\(metaExists) source=\(session.source.rawValue) id=\(session.id)")
+            }
         } catch {
             info.status = .error
             info.lastError = "Failed to initialize archive: \(error.localizedDescription)"
@@ -539,7 +581,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     private func resolveSessionFromIndexDB(source: SessionSource, sessionID: String) -> Session? {
         let fm = FileManager.default
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        guard let appSupport = resolveApplicationSupportDirectoryURL() else { return nil }
         let dbURL = appSupport
             .appendingPathComponent("AgentSessions", isDirectory: true)
             .appendingPathComponent("index.db", isDirectory: false)
@@ -613,16 +655,22 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     private func ensureSynced(info: inout SessionArchiveInfo, reason: String) throws {
         let fm = FileManager.default
+        guard let sourceRootURL = sourceRoot(info.source),
+              let sessionRootURL = sessionRoot(source: info.source, id: info.sessionID),
+              let manifestFileURL = manifestURL(source: info.source, id: info.sessionID),
+              let archivedPrimaryURL = archivedPrimaryPath(info: info) else {
+            throw ArchiveRootError.applicationSupportUnavailable
+        }
         let upstreamURL = URL(fileURLWithPath: info.upstreamPath)
         let upstreamExists = fm.fileExists(atPath: upstreamURL.path)
         info.lastUpstreamSeenAt = upstreamExists ? Date() : info.lastUpstreamSeenAt
         info.upstreamMissing = !upstreamExists
 
-        try fm.createDirectory(at: sourceRoot(info.source), withIntermediateDirectories: true)
+        try fm.createDirectory(at: sourceRootURL, withIntermediateDirectories: true)
 
         guard upstreamExists else {
             // Upstream missing: keep archive as-is and surface as final (safe).
-            if fm.fileExists(atPath: sessionRoot(source: info.source, id: info.sessionID).path) {
+            if fm.fileExists(atPath: sessionRootURL.path) {
                 info.status = .final
                 try writeInfo(info)
                 reloadCache()
@@ -633,8 +681,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
         // Decide whether to sync.
         let existingManifest: SessionArchiveManifest? = {
-            let url = manifestURL(source: info.source, id: info.sessionID)
-            guard let data = try? Data(contentsOf: url) else { return nil }
+            guard let data = try? Data(contentsOf: manifestFileURL) else { return nil }
             return try? JSONDecoder().decode(SessionArchiveManifest.self, from: data)
         }()
 
@@ -642,7 +689,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
         // Only surface the "Saving…" staging state when we actually need to copy.
         // Otherwise periodic sync checks can cause UI flicker even when nothing changes.
-        let hasArchivedPrimary = fm.fileExists(atPath: archivedPrimaryPath(info: info).path)
+        let hasArchivedPrimary = fm.fileExists(atPath: archivedPrimaryURL.path)
         let isNoop = (existingManifest != nil && existingManifest == snapshotBefore && hasArchivedPrimary)
         if !isNoop {
             info.status = .staging
@@ -699,8 +746,9 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                 try writeManifestTo(path: stagingSessionRoot.appendingPathComponent("manifest.json", isDirectory: false), manifest: snapshot)
 
                 try commitStaging(stagingSessionRoot, source: info.source, sessionID: info.sessionID)
-                let final = sessionRoot(source: info.source, id: info.sessionID)
-                log("sync commit final=\(final.path) exists=\(fm.fileExists(atPath: final.path))")
+                if let final = sessionRoot(source: info.source, id: info.sessionID) {
+                    log("sync commit final=\(final.path) exists=\(fm.fileExists(atPath: final.path))")
+                }
                 log("sync commit staging still exists=\(fm.fileExists(atPath: stagingSessionRoot.path))")
 
                 info = committedInfo
@@ -738,8 +786,9 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         try writeInfoTo(path: stagingSessionRoot.appendingPathComponent("meta.json", isDirectory: false), info: committedInfo)
         try writeManifestTo(path: stagingSessionRoot.appendingPathComponent("manifest.json", isDirectory: false), manifest: snapshot)
         try commitStaging(stagingSessionRoot, source: info.source, sessionID: info.sessionID)
-        let final = sessionRoot(source: info.source, id: info.sessionID)
-        log("sync commit final=\(final.path) exists=\(fm.fileExists(atPath: final.path))")
+        if let final = sessionRoot(source: info.source, id: info.sessionID) {
+            log("sync commit final=\(final.path) exists=\(fm.fileExists(atPath: final.path))")
+        }
         log("sync commit staging still exists=\(fm.fileExists(atPath: stagingSessionRoot.path))")
 
         info = committedInfo
@@ -800,7 +849,9 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     private func commitStaging(_ stagingSessionRoot: URL, source: SessionSource, sessionID: String) throws {
         let fm = FileManager.default
-        let final = sessionRoot(source: source, id: sessionID)
+        guard let final = sessionRoot(source: source, id: sessionID) else {
+            throw ArchiveRootError.applicationSupportUnavailable
+        }
         if fm.fileExists(atPath: final.path) {
             let parent = final.deletingLastPathComponent()
             let backupURL = parent.appendingPathComponent(".backup-\(sessionID)-\(UUID().uuidString)", isDirectory: true)
@@ -824,7 +875,9 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     private func makeStagingDir(source: SessionSource, sessionID: String) throws -> URL {
         let fm = FileManager.default
-        let parent = sourceRoot(source)
+        guard let parent = sourceRoot(source) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
         try fm.createDirectory(at: parent, withIntermediateDirectories: true)
         let staging = parent.appendingPathComponent(".staging-\(sessionID)-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
@@ -876,7 +929,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     private func deleteArchive(source: SessionSource, id: String) {
         let fm = FileManager.default
-        let root = sessionRoot(source: source, id: id)
+        guard let root = sessionRoot(source: source, id: id) else { return }
         log("delete archive source=\(source.rawValue) id=\(id) path=\(root.path)")
         // Prefer moving to Trash so the action is reversible.
         if (try? fm.trashItem(at: root, resultingItemURL: nil)) != nil {
@@ -887,7 +940,8 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     private func log(_ message: String) {
         let fm = FileManager.default
-        let logURL = archivesRoot().appendingPathComponent("archive.log", isDirectory: false)
+        guard let root = archivesRoot() else { return }
+        let logURL = root.appendingPathComponent("archive.log", isDirectory: false)
         rotateArchiveLogIfNeeded(logURL: logURL)
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -946,7 +1000,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     private func cleanupOrphanedTempDirs() {
         let fm = FileManager.default
-        let root = archivesRoot()
+        guard let root = archivesRoot() else { return }
         let cutoff = Date().addingTimeInterval(-TempCleanup.minAgeSeconds)
 
         // Ensure the root exists so enumeration is stable.
@@ -971,7 +1025,8 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
 
     private func logArchivesRootIfNeeded() {
         guard !didLogArchivesRoot else { return }
+        guard let root = archivesRoot() else { return }
         didLogArchivesRoot = true
-        log("archivesRoot=\(archivesRoot().path)")
+        log("archivesRoot=\(root.path)")
     }
 }

@@ -399,10 +399,44 @@ actor CodexStatusService {
     private static let probeLabelPrefix = "as-cx-"
     private static let probeLabelLength = 12
 
+    private static func makeRegex(
+        pattern: String,
+        options: NSRegularExpression.Options = [],
+        label: String
+    ) -> NSRegularExpression? {
+        if let regex = try? NSRegularExpression(pattern: pattern, options: options) {
+            return regex
+        }
+        print("[CodexStatus] Regex compile failed for \(label); using never-match fallback.")
+        return try? NSRegularExpression(pattern: "(?!)", options: [])
+    }
+
+#if DEBUG
+    nonisolated static func buildRegexForTesting(
+        pattern: String,
+        options: NSRegularExpression.Options = [],
+        label: String = "test"
+    ) -> NSRegularExpression? {
+        makeRegex(pattern: pattern, options: options, label: label)
+    }
+#endif
+
     // Regex helpers
-    private let percentRegex = try! NSRegularExpression(pattern: "(\\d{1,3})\\s*%\\b", options: [.caseInsensitive])
-    private let resetParenRegex = try! NSRegularExpression(pattern: #"\((?:reset|resets)\s+([^)]+)\)"#, options: [.caseInsensitive])
-    private let resetLineRegex = try! NSRegularExpression(pattern: #"(?:reset|resets)\s*:?\s*(?:at:?\s*)?(.+)$"#, options: [.caseInsensitive])
+    private let percentRegex = CodexStatusService.makeRegex(
+        pattern: "(\\d{1,3})\\s*%\\b",
+        options: [.caseInsensitive],
+        label: "percentRegex"
+    )
+    private let resetParenRegex = CodexStatusService.makeRegex(
+        pattern: #"\((?:reset|resets)\s+([^)]+)\)"#,
+        options: [.caseInsensitive],
+        label: "resetParenRegex"
+    )
+    private let resetLineRegex = CodexStatusService.makeRegex(
+        pattern: #"(?:reset|resets)\s*:?\s*(?:at:?\s*)?(.+)$"#,
+        options: [.caseInsensitive],
+        label: "resetLineRegex"
+    )
 
     private nonisolated let updateHandler: @Sendable (CodexUsageSnapshot) -> Void
     private nonisolated let availabilityHandler: @Sendable (Bool) -> Void
@@ -719,7 +753,7 @@ actor CodexStatusService {
 
     private func extractPercent(from line: String) -> Int? {
         let range = NSRange(location: 0, length: (line as NSString).length)
-        if let m = percentRegex.firstMatch(in: line, options: [], range: range), m.numberOfRanges >= 2 {
+        if let m = percentRegex?.firstMatch(in: line, options: [], range: range), m.numberOfRanges >= 2 {
             let str = (line as NSString).substring(with: m.range(at: 1))
             return Int(str)
         }
@@ -729,10 +763,10 @@ actor CodexStatusService {
     private func extractResetText(from line: String) -> String? {
         let ns = line as NSString
         let range = NSRange(location: 0, length: ns.length)
-        if let m = resetParenRegex.firstMatch(in: line, options: [], range: range), m.numberOfRanges >= 2 {
+        if let m = resetParenRegex?.firstMatch(in: line, options: [], range: range), m.numberOfRanges >= 2 {
             return ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
         }
-        if let m = resetLineRegex.firstMatch(in: line, options: [], range: range), m.numberOfRanges >= 2 {
+        if let m = resetLineRegex?.firstMatch(in: line, options: [], range: range), m.numberOfRanges >= 2 {
             return ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
         }
         return nil
