@@ -24,15 +24,41 @@ struct SessionTranscriptBuilder {
 
     /// New plain terminal transcript builder (no truncation, no styling)
     static func buildPlainTerminalTranscript(session: Session, filters: TranscriptFilters, mode: TranscriptRenderMode = .normal) -> String {
-        let opts = options(from: filters, mode: mode, source: session.source)
-        let blocks = coalesce(session: session, includeMeta: opts.showMeta)
+        buildPlainTerminalTranscript(events: session.events, source: session.source, filters: filters, mode: mode)
+    }
+
+    /// Incremental helper that renders only a subset of events (tail appends).
+    static func buildPlainTerminalTranscript(events: ArraySlice<SessionEvent>,
+                                             source: SessionSource,
+                                             filters: TranscriptFilters,
+                                             mode: TranscriptRenderMode = .normal) -> String {
+        buildPlainTerminalTranscript(events: Array(events), source: source, filters: filters, mode: mode)
+    }
+
+    /// Incremental helper that renders only a subset of events (tail appends).
+    static func buildPlainTerminalTranscript(events: [SessionEvent],
+                                             source: SessionSource,
+                                             filters: TranscriptFilters,
+                                             mode: TranscriptRenderMode = .normal) -> String {
+        let opts = options(from: filters, mode: mode, source: source)
+        let blocks = coalesce(events: events, source: source, includeMeta: opts.showMeta)
         var out = ""
-        // Intentionally omit session header and divider for a cleaner transcript view
+        // Intentionally omit session header and divider for a cleaner transcript view.
         for b in blocks {
             out += render(block: b, options: opts)
             out += "\n"
         }
         return out
+    }
+
+    /// Returns true when rendering a tail slice independently will preserve output shape.
+    ///
+    /// If two events can coalesce across the boundary, callers should fall back to
+    /// full transcript rebuild to avoid duplicated prefixes/markers.
+    static func isAppendBoundarySafe(previous: SessionEvent, next: SessionEvent) -> Bool {
+        let lhs = block(from: previous)
+        let rhs = block(from: next)
+        return !canMerge(lhs, rhs)
     }
 
     /// Terminal mode helper that also returns NSRanges for command lines and user text to enable styling in the UI.
@@ -435,14 +461,18 @@ struct SessionTranscriptBuilder {
     }
 
     private static func coalesce(session: Session, includeMeta: Bool) -> [LogicalBlock] {
+        coalesce(events: session.events, source: session.source, includeMeta: includeMeta)
+    }
+
+    private static func coalesce(events: [SessionEvent], source: SessionSource, includeMeta: Bool) -> [LogicalBlock] {
         var blocks: [LogicalBlock] = []
-        blocks.reserveCapacity(session.events.count)
-        for e in session.events {
+        blocks.reserveCapacity(events.count)
+        for e in events {
             if e.kind == .meta && !includeMeta { continue }
             let base = block(from: e)
             let expanded = expandUserEmbeddedNoticesIfNeeded(block: base)
             for var b in expanded {
-                if session.source == .codex {
+                if source == .codex {
                     b.text = normalizeCodexInlineImageMarkers(b.text)
                 }
                 if let last = blocks.last, canMerge(last, b) {

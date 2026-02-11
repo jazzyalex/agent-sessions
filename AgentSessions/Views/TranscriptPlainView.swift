@@ -173,6 +173,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var terminalCommandRangesCache: [String: [NSRange]] = [:]
     @State private var terminalUserRangesCache: [String: [NSRange]] = [:]
     @State private var lastBuildKey: String? = nil
+    @State private var lastRenderedSessionID: String? = nil
+    @State private var lastRenderedEventCount: Int = 0
+    @State private var lastRenderedTailEventID: String? = nil
+    @State private var lastRenderedTailEventSnapshot: SessionEvent? = nil
+    @State private var lastRenderedViewModeRaw: String = SessionViewMode.terminal.rawValue
+    @State private var lastRenderedAppendConfigKey: String? = nil
 
     private var shouldShowLoadingAnimation: Bool {
         guard let id = sessionID else { return false }
@@ -642,12 +648,26 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         rebuildTask = nil
 
         syncRenderModeWithViewMode()
+        let viewModeSnapshot = viewMode
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
-        let mode = viewMode.transcriptRenderMode
+        let mode = viewModeSnapshot.transcriptRenderMode
         let skipFlag = skipAgentsPreambleEnabled() ? 1 : 0
         let fileSizeToken = session.fileSizeBytes ?? -1
         let endTimeToken = Int((session.endTime ?? .distantPast).timeIntervalSince1970)
-        let buildKey = "\(session.id)|\(session.events.count)|\(session.eventCount)|\(fileSizeToken)|\(endTimeToken)|\(viewMode.rawValue)|\(showTimestamps ? 1 : 0)|\(skipFlag)"
+        let buildKey = "\(session.id)|\(session.events.count)|\(session.eventCount)|\(fileSizeToken)|\(endTimeToken)|\(viewModeSnapshot.rawValue)|\(showTimestamps ? 1 : 0)|\(skipFlag)"
+        let appendConfigKey = makeAppendConfigKey(viewMode: viewModeSnapshot,
+                                                  showTimestamps: showTimestamps,
+                                                  skipFlag: skipFlag)
+        if let appendConfigKey,
+           tryAppendTranscriptTail(session: session,
+                                   filters: filters,
+                                   mode: mode,
+                                   appendConfigKey: appendConfigKey,
+                                   buildKey: buildKey,
+                                   shouldCache: enableCaching) {
+            lastBuildKey = buildKey
+            return
+        }
 
         #if DEBUG
         print("🔨 REBUILD: mode=\(mode) shouldColorize=\(shouldColorize) enableCaching=\(enableCaching)")
@@ -660,13 +680,22 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             if lastBuildKey == key { return }
             // Try in-view memo cache first
             if let cached = transcriptCache[key] {
-                transcript = decorateTranscriptIfNeeded(cached, session: session)
-                if viewMode == .json {
+                setRenderedTranscript(decorateTranscriptIfNeeded(cached, session: session),
+                                      session: session,
+                                      renderedViewMode: viewModeSnapshot,
+                                      appendConfigKey: appendConfigKey)
+                if viewModeSnapshot == .json {
                     let hasToolCommands = session.events.contains { $0.kind == .tool_call }
-                    scheduleJSONBuild(session: session, key: key, shouldCache: true, hasCommands: hasToolCommands, cachedText: cached)
+                    scheduleJSONBuild(session: session,
+                                      key: key,
+                                      shouldCache: true,
+                                      hasCommands: hasToolCommands,
+                                      renderedViewMode: viewModeSnapshot,
+                                      renderedAppendConfigKey: appendConfigKey,
+                                      cachedText: cached)
                     return
                 }
-                if viewMode == .terminal && shouldColorize {
+                if viewModeSnapshot == .terminal && shouldColorize {
                     commandRanges = terminalCommandRangesCache[key] ?? []
                     userRanges = terminalUserRangesCache[key] ?? []
                     hasCommands = !(commandRanges.isEmpty)
@@ -687,9 +716,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
 
             // JSON mode: build pretty-printed JSON once and cache it; skip indexer caches.
-            if viewMode == .json {
+            if viewModeSnapshot == .json {
                 let hasToolCommands = session.events.contains { $0.kind == .tool_call }
-                scheduleJSONBuild(session: session, key: key, shouldCache: true, hasCommands: hasToolCommands)
+                scheduleJSONBuild(session: session,
+                                  key: key,
+                                  shouldCache: true,
+                                  hasCommands: hasToolCommands,
+                                  renderedViewMode: viewModeSnapshot,
+                                  renderedAppendConfigKey: appendConfigKey)
                 return
             }
 
@@ -697,7 +731,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             if FeatureFlags.offloadTranscriptBuildInView {
                 if let t = externalCachedTranscript(for: session.id) {
                     let decorated = decorateTranscriptIfNeeded(t, session: session)
-                    transcript = decorated
+                    setRenderedTranscript(decorated,
+                                          session: session,
+                                          renderedViewMode: viewModeSnapshot,
+                                          appendConfigKey: appendConfigKey)
                     commandRanges = []; userRanges = []; assistantRanges = []; outputRanges = []; errorRanges = []
                     hasCommands = session.events.contains { $0.kind == .tool_call }
                     computeNavigationRangesIfNeeded()
@@ -720,7 +757,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
                         await MainActor.run {
                             let decorated = self.decorateTranscriptIfNeeded(built.0, session: session)
-                            self.transcript = decorated
+                            self.setRenderedTranscript(decorated,
+                                                       session: session,
+                                                       renderedViewMode: viewModeSnapshot,
+                                                       appendConfigKey: appendConfigKey)
                             self.commandRanges = built.1
                             self.userRanges = built.2
                             self.assistantRanges = []
@@ -741,7 +781,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         let t = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal)
                         await MainActor.run {
                             let decorated = self.decorateTranscriptIfNeeded(t, session: session)
-                            self.transcript = decorated
+                            self.setRenderedTranscript(decorated,
+                                                       session: session,
+                                                       renderedViewMode: viewModeSnapshot,
+                                                       appendConfigKey: appendConfigKey)
                             self.commandRanges = []
                             self.userRanges = []
                             self.assistantRanges = []
@@ -766,7 +809,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             let sessionHasCommands = session.events.contains { $0.kind == .tool_call }
             if mode == .terminal && shouldColorize && sessionHasCommands {
                 let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
-                transcript = decorateTranscriptIfNeeded(built.0, session: session)
+                setRenderedTranscript(decorateTranscriptIfNeeded(built.0, session: session),
+                                      session: session,
+                                      renderedViewMode: viewModeSnapshot,
+                                      appendConfigKey: appendConfigKey)
                 commandRanges = built.1
                 userRanges = built.2
                 assistantRanges = []
@@ -778,7 +824,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 terminalUserRangesCache[key] = userRanges
                 lastBuildKey = key
             } else {
-                transcript = decorateTranscriptIfNeeded(SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal), session: session)
+                setRenderedTranscript(decorateTranscriptIfNeeded(SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal), session: session),
+                                      session: session,
+                                      renderedViewMode: viewModeSnapshot,
+                                      appendConfigKey: appendConfigKey)
                 commandRanges = []
                 userRanges = []
                 assistantRanges = []
@@ -791,8 +840,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         } else {
             // No caching (Claude)
             let sessionHasCommands2 = session.events.contains { $0.kind == .tool_call }
-            if viewMode == .json {
-                scheduleJSONBuild(session: session, key: buildKey, shouldCache: false, hasCommands: sessionHasCommands2)
+            if viewModeSnapshot == .json {
+                scheduleJSONBuild(session: session,
+                                  key: buildKey,
+                                  shouldCache: false,
+                                  hasCommands: sessionHasCommands2,
+                                  renderedViewMode: viewModeSnapshot,
+                                  renderedAppendConfigKey: appendConfigKey)
                 return
             }
 
@@ -809,7 +863,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         guard self.sessionID == sessionSnapshot.id else { return }
                         guard !Task.isCancelled else { return }
                         let decorated = self.decorateTranscriptIfNeeded(built.0, session: sessionSnapshot)
-                        self.transcript = decorated
+                        self.setRenderedTranscript(decorated,
+                                                   session: sessionSnapshot,
+                                                   renderedViewMode: viewModeSnapshot,
+                                                   appendConfigKey: appendConfigKey)
                         // In terminal mode, the UI uses SessionTerminalView; keep these empty to avoid extra scans.
                         self.commandRanges = []
                         self.userRanges = []
@@ -830,7 +887,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         guard self.sessionID == sessionSnapshot.id else { return }
                         guard !Task.isCancelled else { return }
                         let decorated = self.decorateTranscriptIfNeeded(t, session: sessionSnapshot)
-                        self.transcript = decorated
+                        self.setRenderedTranscript(decorated,
+                                                   session: sessionSnapshot,
+                                                   renderedViewMode: viewModeSnapshot,
+                                                   appendConfigKey: appendConfigKey)
                         self.commandRanges = []
                         self.userRanges = []
                         self.assistantRanges = []
@@ -859,6 +919,131 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	        applyAutoJumpIfReady(session: session)
 	        maybeAutoJumpToFirstPrompt(session: session)
 	    }
+
+    private func setRenderedTranscript(_ text: String,
+                                       session: Session,
+                                       renderedViewMode: SessionViewMode,
+                                       appendConfigKey: String? = nil) {
+        transcript = text
+        lastRenderedSessionID = session.id
+        lastRenderedEventCount = session.events.count
+        lastRenderedTailEventID = session.events.last?.id
+        lastRenderedTailEventSnapshot = session.events.last
+        lastRenderedViewModeRaw = renderedViewMode.rawValue
+        lastRenderedAppendConfigKey = appendConfigKey
+    }
+
+    private func makeAppendConfigKey(viewMode: SessionViewMode,
+                                     showTimestamps: Bool,
+                                     skipFlag: Int) -> String? {
+        guard viewMode == .transcript else { return nil }
+        return "\(viewMode.rawValue)|\(showTimestamps ? 1 : 0)|\(skipFlag)"
+    }
+
+    private func tryAppendTranscriptTail(session: Session,
+                                         filters: TranscriptFilters,
+                                         mode: TranscriptRenderMode,
+                                         appendConfigKey: String,
+                                         buildKey: String,
+                                         shouldCache: Bool) -> Bool {
+        guard viewMode == .transcript else { return false }
+        guard lastRenderedViewModeRaw == SessionViewMode.transcript.rawValue else { return false }
+        guard lastRenderedSessionID == session.id else { return false }
+        guard lastRenderedAppendConfigKey == appendConfigKey else { return false }
+        guard session.events.count > lastRenderedEventCount else { return false }
+        guard lastRenderedEventCount >= 0 else { return false }
+        guard lastRenderedEventCount <= session.events.count else { return false }
+        guard !transcript.isEmpty else { return false }
+
+        if lastRenderedEventCount > 0 {
+            guard let previousTailID = lastRenderedTailEventID,
+                  let previousTailSnapshot = lastRenderedTailEventSnapshot,
+                  session.events.indices.contains(lastRenderedEventCount - 1),
+                  session.events[lastRenderedEventCount - 1].id == previousTailID,
+                  session.events[lastRenderedEventCount - 1] == previousTailSnapshot else {
+                return false
+            }
+            let showMeta = filtersShowMeta(filters)
+            guard let previousRenderable = lastRenderableEvent(in: session,
+                                                               beforeRawIndex: lastRenderedEventCount,
+                                                               showMeta: showMeta),
+                  let nextRenderable = firstRenderableEvent(in: session,
+                                                            fromRawIndex: lastRenderedEventCount,
+                                                            showMeta: showMeta) else {
+                return false
+            }
+            guard SessionTranscriptBuilder.isAppendBoundarySafe(previous: previousRenderable, next: nextRenderable) else {
+                return false
+            }
+        }
+
+        let appended = SessionTranscriptBuilder.buildPlainTerminalTranscript(
+            events: session.events[lastRenderedEventCount..<session.events.count],
+            source: session.source,
+            filters: filters,
+            mode: mode
+        )
+        guard !appended.isEmpty else { return false }
+
+        let combined = decorateTranscriptIfNeeded(transcript + appended, session: session)
+        setRenderedTranscript(combined,
+                              session: session,
+                              renderedViewMode: .transcript,
+                              appendConfigKey: appendConfigKey)
+        if shouldCache {
+            transcriptCache[buildKey] = combined
+        }
+        commandRanges = []
+        userRanges = []
+        assistantRanges = []
+        outputRanges = []
+        errorRanges = []
+        hasCommands = session.events.contains { $0.kind == .tool_call }
+        computeNavigationRangesIfNeeded()
+        performUnifiedFind(resetIndex: true, shouldJump: false)
+        selectedNSRange = nil
+        resetJumpCursors()
+        applyAutoJumpIfReady(session: session)
+        maybeAutoJumpToFirstPrompt(session: session)
+        return true
+    }
+
+    private func filtersShowMeta(_ filters: TranscriptFilters) -> Bool {
+        switch filters {
+        case let .current(_, showMeta):
+            return showMeta
+        }
+    }
+
+    private func isRenderableEvent(_ event: SessionEvent, showMeta: Bool) -> Bool {
+        showMeta || event.kind != .meta
+    }
+
+    private func lastRenderableEvent(in session: Session,
+                                     beforeRawIndex: Int,
+                                     showMeta: Bool) -> SessionEvent? {
+        guard beforeRawIndex > 0 else { return nil }
+        for idx in stride(from: beforeRawIndex - 1, through: 0, by: -1) {
+            let event = session.events[idx]
+            if isRenderableEvent(event, showMeta: showMeta) {
+                return event
+            }
+        }
+        return nil
+    }
+
+    private func firstRenderableEvent(in session: Session,
+                                      fromRawIndex: Int,
+                                      showMeta: Bool) -> SessionEvent? {
+        guard fromRawIndex < session.events.count else { return nil }
+        for idx in fromRawIndex..<session.events.count {
+            let event = session.events[idx]
+            if isRenderableEvent(event, showMeta: showMeta) {
+                return event
+            }
+        }
+        return nil
+    }
 
     private func externalCachedTranscript(for id: String) -> String? {
         // Attempt to read from indexer-level caches (non-generating)
@@ -1332,14 +1517,23 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         return nil
     }
 
-    private func scheduleJSONBuild(session: Session, key: String, shouldCache: Bool, hasCommands: Bool, cachedText: String? = nil) {
+    private func scheduleJSONBuild(session: Session,
+                                   key: String,
+                                   shouldCache: Bool,
+                                   hasCommands: Bool,
+                                   renderedViewMode: SessionViewMode,
+                                   renderedAppendConfigKey: String? = nil,
+                                   cachedText: String? = nil) {
         let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
         isBuildingJSON = true
         Task.detached(priority: prio) {
             let pretty = cachedText ?? prettyJSONForSession(session)
             let (keyRanges, stringRanges, numberRanges, keywordRanges) = jsonSyntaxHighlightRanges(for: pretty)
             await MainActor.run {
-                self.transcript = pretty
+                self.setRenderedTranscript(pretty,
+                                           session: session,
+                                           renderedViewMode: renderedViewMode,
+                                           appendConfigKey: renderedAppendConfigKey)
                 self.commandRanges = keyRanges
                 self.userRanges = stringRanges
                 self.assistantRanges = keywordRanges

@@ -701,6 +701,9 @@ struct SessionTerminalView: View {
             await MainActor.run {
                 guard !Task.isCancelled else { return }
 
+                let priorLines = lines
+                let appendOnlyUpdate = Self.appendTailStartIndex(previous: priorLines, current: result.lines) != nil
+
                 lines = result.lines
                 visibleLines = roleFilteredLines(from: result.lines)
                 fullSnapshot = buildTextSnapshot(lines: result.lines)
@@ -720,25 +723,47 @@ struct SessionTerminalView: View {
                     pendingEventJumpID = nil
                 }
 
-                // Reset Unified Search + Find state when rebuilding.
-                unifiedMatchOccurrences = []
-                unifiedCurrentMatchLineID = nil
-                unifiedExternalMatchCount = 0
-                unifiedExternalTotalMatchCount = 0
-                unifiedExternalCurrentMatchIndex = 0
+                if appendOnlyUpdate {
+                    if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        recomputeUnifiedMatches(resetIndex: false, preserveCurrentLine: true)
+                    } else {
+                        unifiedMatchOccurrences = []
+                        unifiedCurrentMatchLineID = nil
+                        unifiedExternalMatchCount = 0
+                        unifiedExternalTotalMatchCount = 0
+                        unifiedExternalCurrentMatchIndex = 0
+                    }
 
-                findMatchOccurrences = []
-                findCurrentMatchLineID = nil
-                roleNavPositions = [:]
-                externalMatchCount = 0
-                externalTotalMatchCount = 0
-                externalCurrentMatchIndex = 0
+                    if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        recomputeFindMatches(resetIndex: false, preserveCurrentLine: true)
+                    } else {
+                        findMatchOccurrences = []
+                        findCurrentMatchLineID = nil
+                        externalMatchCount = 0
+                        externalTotalMatchCount = 0
+                        externalCurrentMatchIndex = 0
+                    }
+                } else {
+                    // Reset Unified Search + Find state when rebuilding from a non-append change.
+                    unifiedMatchOccurrences = []
+                    unifiedCurrentMatchLineID = nil
+                    unifiedExternalMatchCount = 0
+                    unifiedExternalTotalMatchCount = 0
+                    unifiedExternalCurrentMatchIndex = 0
 
-                if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    recomputeUnifiedMatches(resetIndex: true)
-                }
-                if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    recomputeFindMatches(resetIndex: true)
+                    findMatchOccurrences = []
+                    findCurrentMatchLineID = nil
+                    roleNavPositions = [:]
+                    externalMatchCount = 0
+                    externalTotalMatchCount = 0
+                    externalCurrentMatchIndex = 0
+
+                    if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        recomputeUnifiedMatches(resetIndex: true)
+                    }
+                    if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        recomputeFindMatches(resetIndex: true)
+                    }
                 }
 
                 if unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -886,6 +911,20 @@ struct SessionTerminalView: View {
             errorLineIndices: messageIDs { $0 == .error },
             eventIDToUserLineID: eventIDToUserLineID
         )
+    }
+
+    nonisolated private static func appendTailStartIndex(previous: [TerminalLine],
+                                                         current: [TerminalLine]) -> Int? {
+        guard !previous.isEmpty else { return nil }
+        guard current.count > previous.count else { return nil }
+        for idx in previous.indices {
+            let lhs = previous[idx]
+            let rhs = current[idx]
+            if lhs.id != rhs.id || lhs.role != rhs.role || lhs.text != rhs.text || lhs.blockIndex != rhs.blockIndex {
+                return nil
+            }
+        }
+        return previous.count
     }
 
     nonisolated private static func computePreambleUserBlockIndexes(session: Session) -> Set<Int> {
@@ -1128,7 +1167,9 @@ struct SessionTerminalView: View {
         recomputeFindMatches(resetIndex: findReset, direction: findDirection)
     }
 
-    private func recomputeUnifiedMatches(resetIndex: Bool, direction: Int = 1) {
+    private func recomputeUnifiedMatches(resetIndex: Bool,
+                                         direction: Int = 1,
+                                         preserveCurrentLine: Bool = false) {
         let query = unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             unifiedMatchOccurrences = []
@@ -1154,8 +1195,14 @@ struct SessionTerminalView: View {
         }
 
         // Determine which match to select.
-        if resetIndex {
+        if preserveCurrentLine,
+           let currentLineID = unifiedCurrentMatchLineID,
+           let preservedIndex = visibleOccurrences.firstIndex(where: { $0.lineID == currentLineID }) {
+            unifiedExternalCurrentMatchIndex = preservedIndex
+        } else if resetIndex {
             unifiedExternalCurrentMatchIndex = 0
+        } else if preserveCurrentLine {
+            unifiedExternalCurrentMatchIndex = min(max(unifiedExternalCurrentMatchIndex, 0), visibleOccurrences.count - 1)
         } else {
             var nextIndex = unifiedExternalCurrentMatchIndex + (direction >= 0 ? 1 : -1)
             if nextIndex < 0 {
@@ -1170,7 +1217,9 @@ struct SessionTerminalView: View {
         unifiedCurrentMatchLineID = visibleOccurrences[clampedIndex].lineID
     }
 
-    private func recomputeFindMatches(resetIndex: Bool, direction: Int = 1) {
+    private func recomputeFindMatches(resetIndex: Bool,
+                                      direction: Int = 1,
+                                      preserveCurrentLine: Bool = false) {
         let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             findMatchOccurrences = []
@@ -1195,8 +1244,14 @@ struct SessionTerminalView: View {
             return
         }
 
-        if resetIndex {
+        if preserveCurrentLine,
+           let currentLineID = findCurrentMatchLineID,
+           let preservedIndex = visibleOccurrences.firstIndex(where: { $0.lineID == currentLineID }) {
+            externalCurrentMatchIndex = preservedIndex
+        } else if resetIndex {
             externalCurrentMatchIndex = 0
+        } else if preserveCurrentLine {
+            externalCurrentMatchIndex = min(max(externalCurrentMatchIndex, 0), visibleOccurrences.count - 1)
         } else {
             var nextIndex = externalCurrentMatchIndex + (direction >= 0 ? 1 : -1)
             if nextIndex < 0 {
@@ -3365,9 +3420,22 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         let inlineChanged = context.coordinator.lastInlineImagesSignature != inlineImagesSignature
         let inlineEnabledChanged = context.coordinator.inlineImagesEnabled != inlineImagesEnabled
         let needsReload = lineSig != context.coordinator.lastLinesSignature || fontChanged || monochromeChanged || schemeChanged || inlineChanged || inlineEnabledChanged
+        let tailAppendStartIndex = appendTailStartIndex(previous: context.coordinator.lines, current: lines)
+        let canTailAppendReload =
+            lineSig != context.coordinator.lastLinesSignature &&
+            tailAppendStartIndex != nil &&
+            !fontChanged &&
+            !monochromeChanged &&
+            !schemeChanged &&
+            !inlineChanged &&
+            !inlineEnabledChanged
 
         if needsReload {
-            applyContent(to: tv, context: context)
+            if canTailAppendReload, let startIndex = tailAppendStartIndex {
+                appendTailContent(to: tv, context: context, startIndex: startIndex)
+            } else {
+                applyContent(to: tv, context: context)
+            }
             context.coordinator.lastLinesSignature = lineSig
             context.coordinator.lastFontSize = fontSize
             context.coordinator.lastMonochrome = monochrome
@@ -3497,6 +3565,96 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                                          query: findQuery,
                                          currentLineID: effectiveFindCurrentMatchLineID,
                                          ranges: ranges)
+        }
+
+        textView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
+    }
+
+    private func appendTailContent(to textView: NSTextView, context: Context, startIndex: Int) {
+        guard startIndex >= 0, startIndex < lines.count else {
+            applyContent(to: textView, context: context)
+            return
+        }
+        guard let storage = textView.textStorage else {
+            applyContent(to: textView, context: context)
+            return
+        }
+
+        let width = max(1, textView.enclosingScrollView?.contentSize.width ?? textView.bounds.width)
+        let previousBlockIndex = startIndex > 0 ? lines[startIndex - 1].blockIndex : nil
+        let tailLines = Array(lines[startIndex...])
+
+        if startIndex > 0, storage.length > 0, !storage.string.hasSuffix("\n") {
+            storage.append(NSAttributedString(string: "\n"))
+            let previousLineID = lines[startIndex - 1].id
+            if var previousRange = context.coordinator.lineRanges[previousLineID] {
+                previousRange.length += 1
+                context.coordinator.lineRanges[previousLineID] = previousRange
+                if let previousIndex = context.coordinator.orderedLineIDs.firstIndex(of: previousLineID),
+                   context.coordinator.orderedLineRanges.indices.contains(previousIndex) {
+                    context.coordinator.orderedLineRanges[previousIndex] = previousRange
+                }
+            }
+        }
+
+        let (tailAttr, tailRangesRelative) = buildAttributedString(
+            containerWidth: width,
+            renderedLines: tailLines,
+            previousBlockIndex: previousBlockIndex
+        )
+        let baseLocation = storage.length
+        storage.append(tailAttr)
+
+        var mergedRanges = context.coordinator.lineRanges
+        mergedRanges.reserveCapacity(lines.count)
+        var mergedOrderedRanges = context.coordinator.orderedLineRanges
+        mergedOrderedRanges.reserveCapacity(lines.count)
+        var mergedOrderedIDs = context.coordinator.orderedLineIDs
+        mergedOrderedIDs.reserveCapacity(lines.count)
+
+        for line in tailLines {
+            guard let relativeRange = tailRangesRelative[line.id] else { continue }
+            let shifted = NSRange(location: baseLocation + relativeRange.location, length: relativeRange.length)
+            mergedRanges[line.id] = shifted
+            mergedOrderedIDs.append(line.id)
+            mergedOrderedRanges.append(shifted)
+        }
+
+        context.coordinator.lineRanges = mergedRanges
+        context.coordinator.lineRoles = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0.role) })
+        context.coordinator.lines = lines
+        context.coordinator.orderedLineRanges = mergedOrderedRanges
+        context.coordinator.orderedLineIDs = mergedOrderedIDs
+        context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
+        context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
+        context.coordinator.lastUnifiedFindQuery = unifiedFindQuery
+        context.coordinator.lastFindQuery = findQuery
+        context.coordinator.lastFindCurrentMatchLineID = effectiveFindCurrentMatchLineID
+
+        if let tv = textView as? TerminalTextView {
+            context.coordinator.updateInlineImages(enabled: inlineImagesEnabled,
+                                                  imagesByUserBlockIndex: inlineImagesByUserBlockIndex,
+                                                  signature: inlineImagesSignature,
+                                                  textView: tv)
+        }
+
+        if let lm = (textView.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager {
+            lm.isDark = (colorScheme == .dark)
+            lm.agentBrandAccent = TranscriptColorSystem.agentBrandAccent(source: sessionSource)
+            lm.lineIndex = zip(lines.map(\.id), lines.compactMap { mergedRanges[$0.id] }).map {
+                TerminalLayoutManager.LineIndexEntry(id: $0.0, range: $0.1)
+            }
+            lm.blocks = buildBlockDecorations(ranges: mergedRanges)
+            updateLayoutManagerUnifiedFind(lm,
+                                           query: unifiedFindQuery,
+                                           occurrences: effectiveUnifiedMatchOccurrences,
+                                           currentLineID: effectiveUnifiedCurrentMatchLineID)
+            updateLayoutManagerLocalFind(lm,
+                                         query: findQuery,
+                                         currentLineID: effectiveFindCurrentMatchLineID,
+                                         ranges: mergedRanges)
+            textView.setNeedsDisplay(textView.bounds)
         }
 
         textView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
@@ -3694,9 +3852,15 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     }
 
     private func buildAttributedString(containerWidth: CGFloat) -> (NSAttributedString, [Int: NSRange]) {
+        buildAttributedString(containerWidth: containerWidth, renderedLines: lines, previousBlockIndex: nil)
+    }
+
+    private func buildAttributedString(containerWidth: CGFloat,
+                                       renderedLines: [TerminalLine],
+                                       previousBlockIndex: Int?) -> (NSAttributedString, [Int: NSRange]) {
         let attr = NSMutableAttributedString()
         var ranges: [Int: NSRange] = [:]
-        ranges.reserveCapacity(lines.count)
+        ranges.reserveCapacity(renderedLines.count)
 
         let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
         let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
@@ -3805,17 +3969,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-        var previousBlockIndex: Int? = nil
+        var priorBlockIndex: Int? = previousBlockIndex
 
-        for (idx, line) in lines.enumerated() {
+        for (idx, line) in renderedLines.enumerated() {
             let blockIndex = line.blockIndex
-            let isFirstLineOfBlock = idx == 0 || previousBlockIndex != blockIndex
-            let isNewBlock = idx > 0 && previousBlockIndex != blockIndex
-            previousBlockIndex = blockIndex
+            let isFirstLineOfBlock = priorBlockIndex != blockIndex
+            let isNewBlock = (idx > 0 || priorBlockIndex != nil) && priorBlockIndex != blockIndex
+            priorBlockIndex = blockIndex
 
             let isLastLineOfBlock: Bool = {
-                if idx == lines.count - 1 { return true }
-                return lines[idx + 1].blockIndex != blockIndex
+                if idx == renderedLines.count - 1 { return true }
+                return renderedLines[idx + 1].blockIndex != blockIndex
             }()
 
             let shouldAppendInlineImages: Bool = {
@@ -3848,7 +4012,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 return systemRegularFont
             }()
 
-            let needsTrailingNewline = (idx != lines.count - 1) || shouldAppendInlineImages
+            let needsTrailingNewline = (idx != renderedLines.count - 1) || shouldAppendInlineImages
             let lineString = line.text + (needsTrailingNewline ? "\n" : "")
 
             let start = attr.length
@@ -3867,6 +4031,19 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
 
         return (attr, ranges)
+    }
+
+    private func appendTailStartIndex(previous: [TerminalLine], current: [TerminalLine]) -> Int? {
+        guard !previous.isEmpty else { return nil }
+        guard current.count > previous.count else { return nil }
+        for idx in previous.indices {
+            let lhs = previous[idx]
+            let rhs = current[idx]
+            if lhs.id != rhs.id || lhs.role != rhs.role || lhs.text != rhs.text || lhs.blockIndex != rhs.blockIndex {
+                return nil
+            }
+        }
+        return previous.count
     }
 
     private func signature(for lines: [TerminalLine]) -> Int {

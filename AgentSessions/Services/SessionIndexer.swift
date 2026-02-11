@@ -387,13 +387,17 @@ final class SessionIndexer: ObservableObject {
             }
 
             let filename = existing.filePath.components(separatedBy: "/").last ?? "?"
+            let shouldSurfaceLoadingState = reason == .manualRefresh || !hasLoadedEvents
             DBG("🔄 Reloading session: \(filename) force=\(force) reason=\(reason.rawValue)")
             DBG("  📂 Path: \(existing.filePath)")
 
-            // Show loading state immediately for better responsiveness
-            DispatchQueue.main.async {
-                self.isLoadingSession = true
-                self.loadingSessionID = id
+            if shouldSurfaceLoadingState {
+                // Surface loading only for first-time/manual loads; background monitor refreshes
+                // should not overlay already visible transcript content.
+                DispatchQueue.main.async {
+                    self.isLoadingSession = true
+                    self.loadingSessionID = id
+                }
             }
 
             let startTime = Date()
@@ -454,11 +458,13 @@ final class SessionIndexer: ObservableObject {
                             cache.set(merged.id, transcript: transcript)
                         }
 
-                        // Clear loading state AFTER updating allSessions, with small delay for UI to render
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            if self.loadingSessionID == id {
-                                self.isLoadingSession = false
-                                self.loadingSessionID = nil
+                        if shouldSurfaceLoadingState {
+                            // Clear loading state AFTER updating allSessions, with small delay for UI to render.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                if self.loadingSessionID == id {
+                                    self.isLoadingSession = false
+                                    self.loadingSessionID = nil
+                                }
                             }
                         }
                     } else {
