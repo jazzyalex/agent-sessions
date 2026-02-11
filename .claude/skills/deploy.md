@@ -21,6 +21,7 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 - Update `README.md` with a short **TL;DR** and major highlights under “What’s New in X.Y”.
 - Ensure README feature copy matches current naming (for example, **Session view** instead of Color view) and agent list.
 - Update `docs/index.html` feature/hero copy to reflect major changes and avoid outdated references.
+- Do not add a versioned `What's New in X.Y` section to `docs/index.html` (GitHub Pages main page).
 - Keep detailed release notes in `docs/CHANGELOG.md` (README/GH Pages should stay concise).
 - For major feature/UI releases, update README/index narrative copy (not just the download link/version).
 - After pushing, verify GitHub Pages reflects the updated `docs/index.html`.

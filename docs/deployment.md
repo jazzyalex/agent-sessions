@@ -448,7 +448,7 @@ git status --porcelain
 
 ## Website/README Content Guidelines (Mandatory)
 - Do not add release notes to README or the website. Keep detailed changes in `docs/CHANGELOG.md`.
-- Keep features current. If a patch release (e.g., 2.3.1) has no new features, leave "What's New" at the latest minor (e.g., 2.3).
+- Keep features current. `README.md` may include a versioned "What's New" summary, but `docs/index.html` should not include a versioned "What's New" section.
 - Always update:
   - The download URL to `v{VERSION}/AgentSessions-{VERSION}.dmg`
   - The visible label to `Download Agent Sessions {VERSION}`
