@@ -22,6 +22,132 @@ private enum UnifiedSessionsStyle {
     static let toolbarFocusRingColor = Color(nsColor: .keyboardFocusIndicatorColor)
 }
 
+private struct WindowKeyObserver: NSViewRepresentable {
+    var onBecameKey: ((NSWindow) -> Void)?
+    var onResignedKey: ((NSWindow) -> Void)?
+    var onWillClose: ((NSWindow) -> Void)?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onBecameKey: onBecameKey,
+            onResignedKey: onResignedKey,
+            onWillClose: onWillClose
+        )
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { [weak view] in
+            context.coordinator.attach(to: view?.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.updateCallbacks(
+            onBecameKey: onBecameKey,
+            onResignedKey: onResignedKey,
+            onWillClose: onWillClose
+        )
+        DispatchQueue.main.async { [weak nsView] in
+            context.coordinator.attach(to: nsView?.window)
+        }
+    }
+
+    final class Coordinator {
+        private var onBecameKey: ((NSWindow) -> Void)?
+        private var onResignedKey: ((NSWindow) -> Void)?
+        private var onWillClose: ((NSWindow) -> Void)?
+        private var window: NSWindow?
+        private var becameKeyObserver: NSObjectProtocol?
+        private var resignedKeyObserver: NSObjectProtocol?
+        private var willCloseObserver: NSObjectProtocol?
+
+        init(
+            onBecameKey: ((NSWindow) -> Void)?,
+            onResignedKey: ((NSWindow) -> Void)?,
+            onWillClose: ((NSWindow) -> Void)?
+        ) {
+            self.onBecameKey = onBecameKey
+            self.onResignedKey = onResignedKey
+            self.onWillClose = onWillClose
+        }
+
+        deinit {
+            detach()
+        }
+
+        func updateCallbacks(
+            onBecameKey: ((NSWindow) -> Void)?,
+            onResignedKey: ((NSWindow) -> Void)?,
+            onWillClose: ((NSWindow) -> Void)?
+        ) {
+            self.onBecameKey = onBecameKey
+            self.onResignedKey = onResignedKey
+            self.onWillClose = onWillClose
+        }
+
+        func attach(to newWindow: NSWindow?) {
+            guard let newWindow else { return }
+            if window === newWindow { return }
+
+            detach()
+            window = newWindow
+
+            becameKeyObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: newWindow,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self, let window = self.window else { return }
+                self.onBecameKey?(window)
+            }
+
+            resignedKeyObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResignKeyNotification,
+                object: newWindow,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self, let window = self.window else { return }
+                self.onResignedKey?(window)
+            }
+
+            willCloseObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: newWindow,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self, let window = self.window else { return }
+                self.onWillClose?(window)
+                self.detach()
+            }
+
+            if newWindow.isKeyWindow {
+                DispatchQueue.main.async { [weak self, weak newWindow] in
+                    guard let self, let window = newWindow else { return }
+                    self.onBecameKey?(window)
+                }
+            }
+        }
+
+        private func detach() {
+            if let observer = becameKeyObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            if let observer = resignedKeyObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            if let observer = willCloseObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            becameKeyObserver = nil
+            resignedKeyObserver = nil
+            willCloseObserver = nil
+            window = nil
+        }
+    }
+}
+
 struct UnifiedSessionsView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     @ObservedObject var codexIndexer: SessionIndexer
@@ -69,6 +195,7 @@ struct UnifiedSessionsView: View {
     @State private var hasUserManuallySelected: Bool = false
     @State private var showAnalyticsWarmupNotice: Bool = false
     @State private var showAgentEnablementNotice: Bool = false
+    @State private var isWindowKey: Bool = false
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
     private enum SelectionChangeSource { case mouse }
@@ -169,6 +296,19 @@ struct UnifiedSessionsView: View {
 				.preferredColorScheme(preferredColorScheme)
 				.toolbar { toolbarContent }
 				.overlay(alignment: .topTrailing) { topTrailingNotices }
+				.background(
+					WindowKeyObserver(
+						onBecameKey: { _ in
+							handleWindowDidBecomeKey()
+						},
+						onResignedKey: { _ in
+							handleWindowDidResignKey()
+						},
+						onWillClose: { _ in
+							handleWindowWillClose()
+						}
+					)
+				)
 		)
 
 		let lifecycle = AnyView(
@@ -179,12 +319,10 @@ struct UnifiedSessionsView: View {
                     updateCachedRows()
                     updateSelectionBridge()
                     unified.setAppActive(NSApp.isActive)
-                    unified.setFocusedSession(selectedSession)
+                    updateFocusedSessionIfNeeded(selectedSession)
                     searchCoordinator.setAppActive(NSApp.isActive)
                 }
                 .onDisappear {
-                    unified.setFocusedSession(nil)
-                    unified.setAppActive(false)
                     codexUsageModel.setStripVisible(false)
                     claudeUsageModel.setStripVisible(false)
                 }
@@ -588,12 +726,12 @@ struct UnifiedSessionsView: View {
             autoSelectEnabled = false
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         }
-        .onChange(of: unified.sessions) { _, _ in
-            // Update cached rows first, then reconcile selection so auto-select uses fresh data.
-            updateCachedRows()
-            updateSelectionBridge()
-            unified.setFocusedSession(selectedSession)
-        }
+		.onChange(of: unified.sessions) { _, _ in
+			// Update cached rows first, then reconcile selection so auto-select uses fresh data.
+			updateCachedRows()
+			updateSelectionBridge()
+			updateFocusedSessionIfNeeded(selectedSession)
+		}
         .onChange(of: columnVisibility.changeToken) { _, _ in refreshColumnLayout() }
         .onChange(of: showSourceColumn) { _, _ in refreshColumnLayout() }
         .onChange(of: showSizeColumn) { _, _ in refreshColumnLayout() }
@@ -975,7 +1113,7 @@ struct UnifiedSessionsView: View {
     private func handleSelectionChange(_ id: String?) {
         guard let id, let s = cachedRows.first(where: { $0.id == id }) else {
             cancelAutoJump()
-            unified.setFocusedSession(nil)
+            updateFocusedSessionIfNeeded(nil)
             return
         }
         if !searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1013,7 +1151,25 @@ struct UnifiedSessionsView: View {
         }
 
         searchCoordinator.prewarmTranscriptIfNeeded(for: s)
-        unified.setFocusedSession(s)
+        updateFocusedSessionIfNeeded(s)
+    }
+
+    private func handleWindowDidBecomeKey() {
+        isWindowKey = true
+        updateFocusedSessionIfNeeded(selectedSession)
+    }
+
+    private func handleWindowDidResignKey() {
+        isWindowKey = false
+    }
+
+    private func handleWindowWillClose() {
+        isWindowKey = false
+    }
+
+    private func updateFocusedSessionIfNeeded(_ session: Session?) {
+        guard isWindowKey else { return }
+        unified.setFocusedSession(session)
     }
 
     private func updateCachedRows() {
