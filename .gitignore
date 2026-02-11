@@ -26,6 +26,8 @@ build.bundle/
 
 # Local capture outputs
 artifacts/
+.codex-review-artifacts/
+.codex-review-control.md
 
 # Local release env (excluded)
 tools/release/.env

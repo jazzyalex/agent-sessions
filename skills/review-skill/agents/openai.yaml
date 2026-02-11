@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review → Fix Loop"
+  short_description: "Runs codex review and auto-fixes until clean, with artifacts + control-file steering."
+  default_prompt: "Run the review→fix loop on my uncommitted changes."
