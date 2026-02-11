@@ -215,6 +215,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var lastMonitorRefreshBySource: [SessionSource: Date] = [:]
     private var pendingMonitorRefreshSignatureBySource: [SessionSource: FileSignature] = [:]
     private var pendingRefreshSourcesWhileInactive: Set<SessionSource> = []
+    private var pendingManualFocusedReloadSources: Set<SessionSource> = []
     private var hasInitializedNewSessionMonitorBaseline: Bool = false
     private var appIsActive: Bool = false
     private var lastFullReconcileBySource: [SessionSource: Date] = [:]
@@ -937,6 +938,11 @@ final class UnifiedSessionIndexer: ObservableObject {
     private func enqueueProviderRefresh(source: SessionSource,
                                         reason: String,
                                         trigger: IndexRefreshTrigger) async {
+        if source == .codex, trigger == .manual {
+            _ = await MainActor.run { [weak self] in
+                self?.pendingManualFocusedReloadSources.insert(.codex)
+            }
+        }
         let request = await providerRefreshCoordinator.request(source: source)
         switch request {
         case .queued:
@@ -1005,7 +1011,16 @@ final class UnifiedSessionIndexer: ObservableObject {
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
 
-        if source == .codex, trigger == .manual {
+        let shouldForceFocusedCodexReload = await MainActor.run { [weak self] () -> Bool in
+            guard let self, source == .codex else { return false }
+            let hasManualIntent = (trigger == .manual) || self.pendingManualFocusedReloadSources.contains(.codex)
+            if hasManualIntent {
+                self.pendingManualFocusedReloadSources.remove(.codex)
+            }
+            return hasManualIntent
+        }
+
+        if shouldForceFocusedCodexReload {
             await MainActor.run { [weak self] in
                 self?.refreshFocusedCodexSession(reason: .manualRefresh)
             }

@@ -31,6 +31,7 @@ struct AgentSessionsApp: App {
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
     @State private var statusItemController: StatusItemController? = nil
     @State private var analyticsToggleObserver: NSObjectProtocol?
+    @State private var mainWindowCloseObserver: NSObjectProtocol?
     @State private var didRunStartupTasks: Bool = false
     private let onboardingWindowPresenter = OnboardingWindowPresenter()
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
@@ -103,6 +104,7 @@ struct AgentSessionsApp: App {
                     if UpdaterController.shared == nil || UpdaterController.shared !== updaterController {
                         UpdaterController.shared = updaterController
                     }
+                    setupMainWindowCloseObserverIfNeeded()
 
                     if !didRunStartupTasks {
                         didRunStartupTasks = true
@@ -125,12 +127,6 @@ struct AgentSessionsApp: App {
                     codexUsageModel.setAppActive(isAppActive)
                     claudeUsageModel.setAppActive(isAppActive)
                     updateUsageModels()
-                }
-                .onDisappear {
-                    if let observer = analyticsToggleObserver {
-                        NotificationCenter.default.removeObserver(observer)
-                        analyticsToggleObserver = nil
-                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     unifiedIndexerHolder.unified?.setAppActive(true)
@@ -314,8 +310,38 @@ private struct OpenPinnedSessionsWindowButton: View {
 }
 
 extension AgentSessionsApp {
+    private static let mainUnifiedWindowTitle = "Agent Sessions"
+
     private static let crashSupportRecipient = "jazzyalex@gmail.com"
     private static let crashIssueURL = URL(string: "https://github.com/jazzyalex/agent-sessions/issues/new?title=Crash%20Report&body=Please%20attach%20the%20exported%20crash%20report%20JSON%20file%20and%20steps%20to%20reproduce.")!
+
+    private func setupMainWindowCloseObserverIfNeeded() {
+        guard !AppRuntime.isRunningTests else { return }
+        guard mainWindowCloseObserver == nil else { return }
+
+        let unifiedHolder = unifiedIndexerHolder
+        let isMainUnifiedWindow: (NSWindow) -> Bool = { window in
+            window.title == Self.mainUnifiedWindowTitle
+        }
+
+        mainWindowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: nil,
+            queue: .main
+        ) { note in
+            guard let closingWindow = note.object as? NSWindow else { return }
+            guard isMainUnifiedWindow(closingWindow) else { return }
+
+            DispatchQueue.main.async {
+                let hasRemainingMainWindow = NSApp.windows.contains { window in
+                    window !== closingWindow && isMainUnifiedWindow(window)
+                }
+                guard !hasRemainingMainWindow else { return }
+                unifiedHolder.unified?.setFocusedSession(nil)
+                unifiedHolder.unified?.setAppActive(false)
+            }
+        }
+    }
 
     private func handleAgentEnablementChange() {
         unifiedIndexerHolder.unified?.recomputeNow()
