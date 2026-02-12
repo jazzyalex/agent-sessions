@@ -66,6 +66,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     private var discovery: ClaudeSessionDiscovery
     private var lastSessionsRootOverride: String = ""
     private let progressThrottler = ProgressThrottler()
+    private let refreshStateLock = NSLock()
     private var cancellables = Set<AnyCancellable>()
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
     private var refreshToken = UUID()
@@ -176,7 +177,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         LaunchProfiler.log("Claude.refresh: start (mode=\(mode), trigger=\(trigger.rawValue))")
 
         let token = UUID()
-        refreshToken = token
+        setRefreshToken(token)
         refreshTask?.cancel()
         refreshTask = nil
         transcriptPrewarmTask?.cancel()
@@ -231,7 +232,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             #endif
 
             let deltaScope: SessionDeltaScope = (mode == .fullReconcile) ? .full : .recent
-            let delta = self.discovery.discoverDelta(previousByPath: self.lastKnownFileStatsByPath, scope: deltaScope)
+            let previousStats = self.knownFileStatsByPathSnapshot()
+            let delta = self.discovery.discoverDelta(previousByPath: previousStats, scope: deltaScope)
             let files: [URL] = {
                 if mode == .fullReconcile {
                     return delta.currentByPath.keys.map { URL(fileURLWithPath: $0) }
@@ -249,14 +251,14 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 parseLightweight: { ClaudeSessionParser.parseFile(at: $0) },
                 shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
                 throttler: self.progressThrottler,
-                shouldContinue: { self.refreshToken == token },
+                shouldContinue: { self.isRefreshTokenCurrent(token) },
                 shouldMergeArchives: false,
                 workerCount: executionProfile.workerCount,
                 sliceSize: executionProfile.sliceSize,
                 interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
                 onProgress: { processed, total in
                     self.publishAfterCurrentUpdate { [weak self] in
-                        guard let self, self.refreshToken == token else { return }
+                        guard let self, self.isRefreshTokenCurrent(token) else { return }
                         self.totalFiles = existingSessions.count + total
                         self.hasEmptyDirectory = existingSessions.isEmpty && total == 0
                         self.filesProcessed = existingSessions.count + processed
@@ -287,22 +289,13 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             let filtered = merged.filter { hideProbes ? !ClaudeProbeConfig.isProbeSession($0) : true }
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .claude)
-            if mode == .fullReconcile {
-                self.lastKnownFileStatsByPath = delta.currentByPath
-            } else {
-                for removed in delta.removedPaths {
-                    self.lastKnownFileStatsByPath.removeValue(forKey: removed)
-                }
-                for (path, stat) in delta.currentByPath {
-                    self.lastKnownFileStatsByPath[path] = stat
-                }
-            }
+            self.applyKnownFileStatsDelta(mode: mode, delta: delta)
             self.scheduleAnalyticsDelta(changedFiles: files,
                                         removedPaths: delta.removedPaths,
                                         executionProfile: executionProfile)
 
             self.publishAfterCurrentUpdate { [weak self] in
-                guard let self, self.refreshToken == token else { return }
+                guard let self, self.isRefreshTokenCurrent(token) else { return }
                 LaunchProfiler.log("Claude.refresh: sessions merged (total=\(mergedWithArchives.count))")
                 self.allSessions = mergedWithArchives
                 self.isIndexing = false
@@ -315,29 +308,26 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 	                    var out: [Session] = []
 	                    out.reserveCapacity(mergedWithArchives.count)
 	                    for s in mergedWithArchives {
-	                        if s.events.isEmpty { continue }
-	                        if s.messageCount <= 2 { continue }
-	                        if let sizeBytes = s.fileSizeBytes, sizeBytes > FeatureFlags.transcriptPrewarmMaxSessionBytes { continue }
-	                        let size = s.fileSizeBytes ?? 0
-	                        let sig = size ^ (s.eventCount << 16)
-	                        if self.lastPrewarmSignatureByID[s.id] == sig { continue }
-	                        self.lastPrewarmSignatureByID[s.id] = sig
-	                        out.append(s)
-	                        if out.count >= FeatureFlags.transcriptPrewarmMaxSessionsPerRefresh { break }
-	                    }
-	                    return out
-	                }()
+                        if s.events.isEmpty { continue }
+                        if s.messageCount <= 2 { continue }
+                        if let sizeBytes = s.fileSizeBytes, sizeBytes > FeatureFlags.transcriptPrewarmMaxSessionBytes { continue }
+                        if !self.shouldPrewarmSessionSignature(s) { continue }
+                        out.append(s)
+                        if out.count >= FeatureFlags.transcriptPrewarmMaxSessionsPerRefresh { break }
+                    }
+                    return out
+                }()
                 if !prewarmDelta.isEmpty && !executionProfile.deferNonCriticalWork {
                     self.isProcessingTranscripts = true
                     self.progressText = "Processing transcripts..."
                     self.launchPhase = .transcripts
                     let cache = self.transcriptCache
                     let finishPrewarm: @Sendable @MainActor () -> Void = { [weak self, token] in
-                        guard let self, self.refreshToken == token else { return }
+                        guard let self, self.isRefreshTokenCurrent(token) else { return }
                         LaunchProfiler.log("Claude.refresh: transcript prewarm complete")
                         self.transcriptPrewarmTask = nil
                         self.publishAfterCurrentUpdate { [weak self, token] in
-                            guard let self, self.refreshToken == token else { return }
+                            guard let self, self.isRefreshTokenCurrent(token) else { return }
                             self.isProcessingTranscripts = false
                             self.progressText = "Ready"
                             self.launchPhase = .ready
@@ -362,7 +352,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 
     @MainActor
     func cancelInFlightWork() {
-        refreshToken = UUID()
+        setRefreshToken(UUID())
         refreshTask?.cancel()
         refreshTask = nil
         transcriptPrewarmTask?.cancel()
@@ -376,7 +366,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     }
 
     private func seedKnownFileStatsIfNeeded() async {
-        if !lastKnownFileStatsByPath.isEmpty { return }
+        if hasKnownFileStats() { return }
         do {
             let db = try IndexDB()
             let indexed = try await db.fetchIndexedFiles(for: SessionSource.claude.rawValue)
@@ -385,10 +375,73 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             for row in indexed {
                 map[row.path] = SessionFileStat(mtime: row.mtime, size: row.size)
             }
-            lastKnownFileStatsByPath = map
+            initializeKnownFileStatsIfNeeded(map)
         } catch {
             // Non-fatal. Cache will be built from runtime deltas.
         }
+    }
+
+    private func setRefreshToken(_ token: UUID) {
+        refreshStateLock.lock()
+        refreshToken = token
+        refreshStateLock.unlock()
+    }
+
+    private func isRefreshTokenCurrent(_ token: UUID) -> Bool {
+        refreshStateLock.lock()
+        let isCurrent = refreshToken == token
+        refreshStateLock.unlock()
+        return isCurrent
+    }
+
+    private func hasKnownFileStats() -> Bool {
+        refreshStateLock.lock()
+        let hasStats = !lastKnownFileStatsByPath.isEmpty
+        refreshStateLock.unlock()
+        return hasStats
+    }
+
+    private func initializeKnownFileStatsIfNeeded(_ stats: [String: SessionFileStat]) {
+        refreshStateLock.lock()
+        if lastKnownFileStatsByPath.isEmpty {
+            lastKnownFileStatsByPath = stats
+        }
+        refreshStateLock.unlock()
+    }
+
+    private func knownFileStatsByPathSnapshot() -> [String: SessionFileStat] {
+        refreshStateLock.lock()
+        let snapshot = lastKnownFileStatsByPath
+        refreshStateLock.unlock()
+        return snapshot
+    }
+
+    private func applyKnownFileStatsDelta(mode: IndexRefreshMode, delta: SessionDiscoveryDelta) {
+        refreshStateLock.lock()
+        if mode == .fullReconcile {
+            lastKnownFileStatsByPath = delta.currentByPath
+            refreshStateLock.unlock()
+            return
+        }
+        for removed in delta.removedPaths {
+            lastKnownFileStatsByPath.removeValue(forKey: removed)
+        }
+        for (path, stat) in delta.currentByPath {
+            lastKnownFileStatsByPath[path] = stat
+        }
+        refreshStateLock.unlock()
+    }
+
+    private func shouldPrewarmSessionSignature(_ session: Session) -> Bool {
+        let size = session.fileSizeBytes ?? 0
+        let signature = size ^ (session.eventCount << 16)
+        refreshStateLock.lock()
+        let shouldPrewarm = (lastPrewarmSignatureByID[session.id] != signature)
+        if shouldPrewarm {
+            lastPrewarmSignatureByID[session.id] = signature
+        }
+        refreshStateLock.unlock()
+        return shouldPrewarm
     }
 
     private func scheduleAnalyticsDelta(changedFiles: [URL],

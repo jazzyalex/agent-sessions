@@ -1,6 +1,20 @@
 import SwiftUI
 import AppKit
 
+enum UnifiedSelectionPolicy {
+    static func shouldPreserveSelectionOnEmptyTableMutation(
+        oldSelection: Set<String>,
+        newSelection: Set<String>,
+        isProgrammaticUpdate: Bool,
+        isIndexing: Bool,
+        cachedRowCount: Int
+    ) -> Bool {
+        guard !isProgrammaticUpdate else { return false }
+        guard !oldSelection.isEmpty, newSelection.isEmpty else { return false }
+        return isIndexing || cachedRowCount == 0
+    }
+}
+
 private extension Notification.Name {
     static let collapseInlineSearchIfEmpty = Notification.Name("UnifiedSessionsCollapseInlineSearchIfEmpty")
 }
@@ -190,6 +204,7 @@ struct UnifiedSessionsView: View {
     @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = AgentEnablement.isAvailable(.openclaw)
     @State private var autoSelectEnabled: Bool = true
     @State private var programmaticSelectionUpdate: Bool = false
+    @State private var pendingTableSelection: Set<String>? = nil
     @State private var isAutoSelectingFromSearch: Bool = false
     @State private var hasEverHadSessions: Bool = false
     @State private var hasUserManuallySelected: Bool = false
@@ -364,14 +379,16 @@ struct UnifiedSessionsView: View {
 		let afterOpenClaw = afterDroid
 			.onChange(of: unified.includeOpenClaw) { _, _ in restartSearchIfRunning() }
 
-		let afterUsage = afterOpenClaw
-			.onChange(of: codexUsageEnabled) { _, _ in updateFooterUsageVisibility() }
-			.onChange(of: claudeUsageEnabled) { _, _ in updateFooterUsageVisibility() }
-			.onChange(of: searchState.query) { _, newValue in
-				if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-					cancelAutoJump()
+			let afterUsage = afterOpenClaw
+				.onChange(of: codexUsageEnabled) { _, _ in updateFooterUsageVisibility() }
+				.onChange(of: claudeUsageEnabled) { _, _ in updateFooterUsageVisibility() }
+				.onChange(of: searchState.query) { _, newValue in
+					if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+						cancelAutoJump()
+                        updateCachedRows()
+                        updateSelectionBridge()
+					}
 				}
-			}
 
 		let afterAgents = afterUsage
 			.onChange(of: codexAgentEnabled) { _, _ in
@@ -712,10 +729,23 @@ struct UnifiedSessionsView: View {
             updateCachedRows()
         }
         .onChange(of: tableSelection) { oldSel, newSel in
+            if programmaticSelectionUpdate {
+                selection = newSel.first
+                return
+            }
+
+            if UnifiedSelectionPolicy.shouldPreserveSelectionOnEmptyTableMutation(
+                oldSelection: oldSel,
+                newSelection: newSel,
+                isProgrammaticUpdate: programmaticSelectionUpdate,
+                isIndexing: unified.isIndexing,
+                cachedRowCount: cachedRows.count
+            ) {
+                return
+            }
+
             // Allow empty selection when user clicks whitespace; do not force reselection.
             selection = newSel.first
-
-            if programmaticSelectionUpdate { return }
 
             // SwiftUI Table sometimes emits an initial "empty selection" change during mount.
             // Do not treat that as user interaction or it disables initial auto-select.
@@ -726,29 +756,38 @@ struct UnifiedSessionsView: View {
             autoSelectEnabled = false
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         }
-		.onChange(of: unified.sessions) { _, _ in
-			// Update cached rows first, then reconcile selection so auto-select uses fresh data.
-			updateCachedRows()
-			updateSelectionBridge()
-			updateFocusedSessionIfNeeded(selectedSession)
-		}
+			.onChange(of: unified.sessions) { _, _ in
+				// Update cached rows first, then reconcile selection so auto-select uses fresh data.
+				updateCachedRows()
+				updateSelectionBridge()
+				updateFocusedSessionIfNeeded(selectedSession)
+			}
         .onChange(of: columnVisibility.changeToken) { _, _ in refreshColumnLayout() }
         .onChange(of: showSourceColumn) { _, _ in refreshColumnLayout() }
         .onChange(of: showSizeColumn) { _, _ in refreshColumnLayout() }
         .onChange(of: showStarColumn) { _, _ in refreshColumnLayout() }
+        .onChange(of: searchCoordinator.isRunning) { _, _ in
+            updateCachedRows()
+            let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if q.isEmpty {
+                updateSelectionBridge()
+            }
+        }
         .onChange(of: searchCoordinator.results) { _, _ in
             updateCachedRows()
+            let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !q.isEmpty, cachedRows.isEmpty {
+                selection = nil
+                scheduleTableSelectionUpdate([])
+                return
+            }
             // If we have search results but no valid selection (none selected or selected not in results),
             // auto-select the first match without stealing focus
             if selectedSession == nil, let first = cachedRows.first {
                 isAutoSelectingFromSearch = true
                 selection = first.id
                 let desired: Set<String> = [first.id]
-                if tableSelection != desired {
-                    programmaticSelectionUpdate = true
-                    tableSelection = desired
-                    DispatchQueue.main.async { programmaticSelectionUpdate = false }
-                }
+                scheduleTableSelectionUpdate(desired)
                 // Reset the flag on the next runloop to ensure onChange handlers have observed it
                 DispatchQueue.main.async { isAutoSelectingFromSearch = false }
             }
@@ -851,6 +890,7 @@ struct UnifiedSessionsView: View {
                 .environmentObject(focusCoordinator)
                 .environmentObject(searchState)
                 .id("transcript-host")
+                .transaction { txn in txn.disablesAnimations = true }
 
             if shouldShowLaunchOverlay {
                 launchBlockingTranscriptOverlay()
@@ -904,12 +944,13 @@ struct UnifiedSessionsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .textBackgroundColor))
                 }
-            } else {
+            } else if selection == nil {
                 Text("Select a session to view transcript")
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .transaction { txn in txn.disablesAnimations = true }
         .simultaneousGesture(TapGesture().onEnded {
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         })
@@ -1081,12 +1122,26 @@ struct UnifiedSessionsView: View {
         if !hasUserManuallySelected, let first = cachedRows.first, selection == nil {
             selection = first.id
         }
-        // Keep single-selection Set in sync with selection id
-        let desired: Set<String> = selection.map { [$0] } ?? []
-        if tableSelection != desired {
-            programmaticSelectionUpdate = true
-            tableSelection = desired
-            DispatchQueue.main.async { programmaticSelectionUpdate = false }
+        // Keep single-selection Set in sync with selection id when the selected row is visible.
+        let desired: Set<String>
+        if let selectedID = selection, cachedRows.contains(where: { $0.id == selectedID }) {
+            desired = [selectedID]
+        } else {
+            desired = []
+        }
+        scheduleTableSelectionUpdate(desired)
+    }
+
+    private func scheduleTableSelectionUpdate(_ desired: Set<String>) {
+        guard tableSelection != desired else { return }
+        programmaticSelectionUpdate = true
+        pendingTableSelection = desired
+        DispatchQueue.main.async {
+            if let pending = pendingTableSelection {
+                tableSelection = pending
+                pendingTableSelection = nil
+            }
+            programmaticSelectionUpdate = false
         }
     }
 
@@ -1116,6 +1171,7 @@ struct UnifiedSessionsView: View {
             updateFocusedSessionIfNeeded(nil)
             return
         }
+
         if !searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let immediate = consumeImmediateSelectionJump()
             scheduleAutoJump(for: id, immediate: immediate)
@@ -1179,15 +1235,11 @@ struct UnifiedSessionsView: View {
         } else {
             cachedRows = rows.sorted(using: sortOrder)
         }
-        // If current selection disappeared from list, auto-select first row
+        // If current selection disappeared from list, auto-select first row.
         if let sel = selection, !cachedRows.contains(where: { $0.id == sel }) {
             selection = cachedRows.first?.id
             let desired: Set<String> = selection.map { [$0] } ?? []
-            if tableSelection != desired {
-                programmaticSelectionUpdate = true
-                tableSelection = desired
-                DispatchQueue.main.async { programmaticSelectionUpdate = false }
-            }
+            scheduleTableSelectionUpdate(desired)
         }
     }
 
@@ -1694,7 +1746,8 @@ private struct UnifiedSearchFiltersView: View {
                                                                      else if searchFocus == .field { searchFocus = nil }
                                                                  }),
                                        focusRequestToken: focusRequestToken,
-                                       onCommit: { startSearchImmediate() })
+                                       onCommit: { startSearchImmediate() },
+                                       onEscape: { clearSearchFromField() })
                     .frame(minWidth: 220)
                     .help("Search sessions (⌥⌘F). Filters: repo:NAME, path:PATH. Use quotes for phrases; escape \\\" and \\\\. Press Return for full deep scan.")
 
@@ -1705,10 +1758,7 @@ private struct UnifiedSearchFiltersView: View {
                         .accessibilityHidden(true)
                 } else {
                     Button(action: {
-                        unified.queryDraft = ""
-                        unified.query = ""
-                        unified.recomputeNow()
-                        search.cancel()
+                        clearSearchFromField()
                         searchFocus = nil
                     }) {
                         Image(systemName: "xmark.circle.fill")
@@ -1717,7 +1767,6 @@ private struct UnifiedSearchFiltersView: View {
                     }
                     .focused($searchFocus, equals: .clear)
                     .buttonStyle(.plain)
-                    .keyboardShortcut(.escape)
                     .help("Clear search (⎋)")
                 }
             }
@@ -1845,6 +1894,13 @@ private struct UnifiedSearchFiltersView: View {
         let delay: TimeInterval = FeatureFlags.increaseDeepSearchDebounce ? 0.28 : 0.15
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
+
+    private func clearSearchFromField() {
+        unified.queryDraft = ""
+        unified.query = ""
+        unified.recomputeNow()
+        search.cancel()
+    }
 }
 
 private struct UnifiedProjectFilterBadgeView: View {
@@ -1892,6 +1948,7 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
     @Binding var isFirstResponder: Bool
     var focusRequestToken: Int
     var onCommit: () -> Void
+    var onEscape: () -> Void
 
     class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: ToolbarSearchTextField
@@ -1917,6 +1974,10 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
                 parent.onCommit()
                 return true
             }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                parent.onEscape()
+                return true
+            }
             return false
         }
     }
@@ -1937,6 +1998,7 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
     }
 
     func updateNSView(_ tf: NSTextField, context: Context) {
+        context.coordinator.parent = self
         if tf.stringValue != text { tf.stringValue = text }
         if tf.placeholderString != placeholder { tf.placeholderString = placeholder }
         if focusRequestToken != context.coordinator.lastFocusRequestToken {

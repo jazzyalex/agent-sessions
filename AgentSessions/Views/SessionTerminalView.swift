@@ -60,6 +60,7 @@ struct SessionTerminalView: View {
 
     @State private var lines: [TerminalLine] = []
     @State private var visibleLines: [TerminalLine] = []
+    @State private var visibleLinesSignature: Int = 0
     @State private var fullSnapshot: TextSnapshot = .empty
     @State private var visibleSnapshot: TextSnapshot = .empty
     @State private var rebuildTask: Task<Void, Never>?
@@ -175,6 +176,7 @@ struct SessionTerminalView: View {
         }
         .onChange(of: activeRoles) { _, _ in
             visibleLines = roleFilteredLines(from: lines)
+            visibleLinesSignature = Self.stableLineSignature(for: visibleLines)
             visibleSnapshot = buildTextSnapshot(lines: visibleLines)
             if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 recomputeUnifiedMatches(resetIndex: true)
@@ -238,6 +240,7 @@ struct SessionTerminalView: View {
             HStack(spacing: 8) {
                 TerminalTextScrollView(
                     lines: filteredLines,
+                    lineSignature: visibleLinesSignature,
                     fontSize: CGFloat(transcriptFontSize),
                     sessionSource: session.source,
                     inlineImagesEnabled: inlineSessionImageThumbnailsEnabled
@@ -247,11 +250,13 @@ struct SessionTerminalView: View {
                     inlineImagesByUserBlockIndex: inlineImagesByUserBlockIndex,
                     inlineImagesSignature: effectiveInlineImagesSignature,
                     unifiedFindQuery: unifiedQuery,
+                    unifiedFindToken: unifiedFindToken,
                     unifiedMatchOccurrences: unifiedMatchOccurrences,
                     unifiedCurrentMatchLineID: unifiedCurrentMatchLineID,
                     unifiedHighlightActive: !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     unifiedAllowMatchAutoScroll: unifiedAllowMatchAutoScroll,
                     findQuery: findQuery,
+                    findToken: findToken,
                     findCurrentMatchLineID: findCurrentMatchLineID,
                     findHighlightActive: !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     allowMatchAutoScroll: allowMatchAutoScroll,
@@ -702,10 +707,16 @@ struct SessionTerminalView: View {
                 guard !Task.isCancelled else { return }
 
                 let priorLines = lines
-                let appendOnlyUpdate = Self.appendTailStartIndex(previous: priorLines, current: result.lines) != nil
+                let appendOnlyUpdate: Bool = {
+                    if case .append = Self.tailPatchStrategy(previous: priorLines, current: result.lines) {
+                        return true
+                    }
+                    return false
+                }()
 
                 lines = result.lines
                 visibleLines = roleFilteredLines(from: result.lines)
+                visibleLinesSignature = Self.stableLineSignature(for: visibleLines)
                 fullSnapshot = buildTextSnapshot(lines: result.lines)
                 visibleSnapshot = buildTextSnapshot(lines: visibleLines)
                 conversationStartLineID = result.conversationStartLineID
@@ -913,18 +924,49 @@ struct SessionTerminalView: View {
         )
     }
 
-    nonisolated private static func appendTailStartIndex(previous: [TerminalLine],
-                                                         current: [TerminalLine]) -> Int? {
+    enum TailPatchStrategy: Equatable {
+        case append(startIndex: Int)
+        case replaceSuffix(startIndex: Int)
+    }
+
+    nonisolated static func tailPatchStrategy(previous: [TerminalLine],
+                                              current: [TerminalLine]) -> TailPatchStrategy? {
         guard !previous.isEmpty else { return nil }
-        guard current.count > previous.count else { return nil }
-        for idx in previous.indices {
-            let lhs = previous[idx]
-            let rhs = current[idx]
-            if lhs.id != rhs.id || lhs.role != rhs.role || lhs.text != rhs.text || lhs.blockIndex != rhs.blockIndex {
-                return nil
-            }
+        guard !current.isEmpty else { return nil }
+
+        let sharedCount = min(previous.count, current.count)
+        var prefixCount = 0
+        while prefixCount < sharedCount,
+              lineIdentityMatches(previous[prefixCount], current[prefixCount]) {
+            prefixCount += 1
         }
-        return previous.count
+
+        guard prefixCount > 0 else { return nil }
+
+        if prefixCount == previous.count, current.count > previous.count {
+            return .append(startIndex: previous.count)
+        }
+
+        return .replaceSuffix(startIndex: prefixCount)
+    }
+
+    nonisolated static func stableLineSignature(for lines: [TerminalLine]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(lines.count)
+        for line in lines {
+            hasher.combine(line.id)
+            hasher.combine(line.role.signatureToken)
+            hasher.combine(line.text)
+            hasher.combine(line.blockIndex ?? -1)
+        }
+        return hasher.finalize()
+    }
+
+    nonisolated private static func lineIdentityMatches(_ lhs: TerminalLine, _ rhs: TerminalLine) -> Bool {
+        lhs.id == rhs.id
+            && lhs.role == rhs.role
+            && lhs.text == rhs.text
+            && lhs.blockIndex == rhs.blockIndex
     }
 
     nonisolated private static func computePreambleUserBlockIndexes(session: Session) -> Set<Int> {
@@ -2180,17 +2222,20 @@ private extension TerminalLineRole {
 
 private struct TerminalTextScrollView: NSViewRepresentable {
     let lines: [TerminalLine]
+    let lineSignature: Int
     let fontSize: CGFloat
     let sessionSource: SessionSource
     let inlineImagesEnabled: Bool
     let inlineImagesByUserBlockIndex: [Int: [InlineSessionImage]]
     let inlineImagesSignature: Int
     let unifiedFindQuery: String
+    let unifiedFindToken: Int
     let unifiedMatchOccurrences: [MatchOccurrence]
     let unifiedCurrentMatchLineID: Int?
     let unifiedHighlightActive: Bool
     let unifiedAllowMatchAutoScroll: Bool
     let findQuery: String
+    let findToken: Int
     let findCurrentMatchLineID: Int?
     let findHighlightActive: Bool
     let allowMatchAutoScroll: Bool
@@ -2395,10 +2440,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastImageHighlightToken: Int = 0
 
         var lastUnifiedFindQuery: String = ""
+        var lastUnifiedAutoScrollToken: Int = 0
         var lastUnifiedMatchOccurrences: [MatchOccurrence] = []
         var lastUnifiedCurrentMatchLineID: Int? = nil
 
         var lastFindQuery: String = ""
+        var lastFindAutoScrollToken: Int = 0
         var lastFindCurrentMatchLineID: Int? = nil
 
         var lines: [TerminalLine] = []
@@ -3393,15 +3440,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.activeLayoutManager = layoutManager
         context.coordinator.installScrollObserver(scrollView: scroll, textView: textView)
         applyContent(to: textView, context: context)
-        context.coordinator.lastLinesSignature = signature(for: lines)
+        context.coordinator.lastLinesSignature = lineSignature
         context.coordinator.lastFontSize = fontSize
         context.coordinator.lastMonochrome = monochrome
         context.coordinator.lastColorScheme = colorScheme
         context.coordinator.lastInlineImagesSignature = inlineImagesSignature
         context.coordinator.lastUnifiedFindQuery = unifiedFindQuery
+        context.coordinator.lastUnifiedAutoScrollToken = unifiedFindToken
         context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
         context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
         context.coordinator.lastFindQuery = findQuery
+        context.coordinator.lastFindAutoScrollToken = findToken
         context.coordinator.lastFindCurrentMatchLineID = effectiveFindCurrentMatchLineID
         context.coordinator.lastRoleNavScrollToken = roleNavScrollToken
         context.coordinator.lastFocusRequestToken = focusRequestToken
@@ -3413,17 +3462,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         guard let tv = nsView.documentView as? TerminalTextView else { return }
         context.coordinator.installScrollObserver(scrollView: nsView, textView: tv)
 
-        let lineSig = signature(for: lines)
+        let lineSig = lineSignature
         let fontChanged = abs((context.coordinator.lastFontSize) - fontSize) > 0.1
         let monochromeChanged = context.coordinator.lastMonochrome != monochrome
         let schemeChanged = context.coordinator.lastColorScheme != colorScheme
         let inlineChanged = context.coordinator.lastInlineImagesSignature != inlineImagesSignature
         let inlineEnabledChanged = context.coordinator.inlineImagesEnabled != inlineImagesEnabled
         let needsReload = lineSig != context.coordinator.lastLinesSignature || fontChanged || monochromeChanged || schemeChanged || inlineChanged || inlineEnabledChanged
-        let tailAppendStartIndex = appendTailStartIndex(previous: context.coordinator.lines, current: lines)
-        let canTailAppendReload =
+        let patchStrategy = SessionTerminalView.tailPatchStrategy(previous: context.coordinator.lines, current: lines)
+        let canTailPatchReload =
             lineSig != context.coordinator.lastLinesSignature &&
-            tailAppendStartIndex != nil &&
+            patchStrategy != nil &&
             !fontChanged &&
             !monochromeChanged &&
             !schemeChanged &&
@@ -3431,8 +3480,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             !inlineEnabledChanged
 
         if needsReload {
-            if canTailAppendReload, let startIndex = tailAppendStartIndex {
-                appendTailContent(to: tv, context: context, startIndex: startIndex)
+            if canTailPatchReload, let patchStrategy {
+                switch patchStrategy {
+                case let .append(startIndex):
+                    appendTailContent(to: tv, context: context, startIndex: startIndex)
+                case let .replaceSuffix(startIndex):
+                    replaceTailContent(to: tv, context: context, startIndex: startIndex)
+                }
             } else {
                 applyContent(to: tv, context: context)
             }
@@ -3467,14 +3521,18 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         if allowMatchAutoScroll,
            findHighlightActive,
+           findToken != context.coordinator.lastFindAutoScrollToken,
            let target = effectiveFindCurrentMatchLineID,
            let range = context.coordinator.lineRanges[target] {
             tv.scrollRangeToVisible(range)
+            context.coordinator.lastFindAutoScrollToken = findToken
         } else if unifiedAllowMatchAutoScroll,
                   unifiedHighlightActive,
+                  unifiedFindToken != context.coordinator.lastUnifiedAutoScrollToken,
                   let target = effectiveUnifiedCurrentMatchLineID,
                   let range = context.coordinator.lineRanges[target] {
             tv.scrollRangeToVisible(range)
+            context.coordinator.lastUnifiedAutoScrollToken = unifiedFindToken
         }
 
         if scrollTargetToken != context.coordinator.lastScrollToken,
@@ -3616,6 +3674,112 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         for line in tailLines {
             guard let relativeRange = tailRangesRelative[line.id] else { continue }
             let shifted = NSRange(location: baseLocation + relativeRange.location, length: relativeRange.length)
+            mergedRanges[line.id] = shifted
+            mergedOrderedIDs.append(line.id)
+            mergedOrderedRanges.append(shifted)
+        }
+
+        context.coordinator.lineRanges = mergedRanges
+        context.coordinator.lineRoles = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0.role) })
+        context.coordinator.lines = lines
+        context.coordinator.orderedLineRanges = mergedOrderedRanges
+        context.coordinator.orderedLineIDs = mergedOrderedIDs
+        context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
+        context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
+        context.coordinator.lastUnifiedFindQuery = unifiedFindQuery
+        context.coordinator.lastFindQuery = findQuery
+        context.coordinator.lastFindCurrentMatchLineID = effectiveFindCurrentMatchLineID
+
+        if let tv = textView as? TerminalTextView {
+            context.coordinator.updateInlineImages(enabled: inlineImagesEnabled,
+                                                  imagesByUserBlockIndex: inlineImagesByUserBlockIndex,
+                                                  signature: inlineImagesSignature,
+                                                  textView: tv)
+        }
+
+        if let lm = (textView.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager {
+            lm.isDark = (colorScheme == .dark)
+            lm.agentBrandAccent = TranscriptColorSystem.agentBrandAccent(source: sessionSource)
+            lm.lineIndex = zip(lines.map(\.id), lines.compactMap { mergedRanges[$0.id] }).map {
+                TerminalLayoutManager.LineIndexEntry(id: $0.0, range: $0.1)
+            }
+            lm.blocks = buildBlockDecorations(ranges: mergedRanges)
+            updateLayoutManagerUnifiedFind(lm,
+                                           query: unifiedFindQuery,
+                                           occurrences: effectiveUnifiedMatchOccurrences,
+                                           currentLineID: effectiveUnifiedCurrentMatchLineID)
+            updateLayoutManagerLocalFind(lm,
+                                         query: findQuery,
+                                         currentLineID: effectiveFindCurrentMatchLineID,
+                                         ranges: mergedRanges)
+            textView.setNeedsDisplay(textView.bounds)
+        }
+
+        textView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
+    }
+
+    private func replaceTailContent(to textView: NSTextView, context: Context, startIndex: Int) {
+        guard startIndex >= 0, startIndex < lines.count else {
+            applyContent(to: textView, context: context)
+            return
+        }
+        guard let storage = textView.textStorage else {
+            applyContent(to: textView, context: context)
+            return
+        }
+
+        let width = max(1, textView.enclosingScrollView?.contentSize.width ?? textView.bounds.width)
+        let previousLineIDs = context.coordinator.orderedLineIDs
+        let replacementStart: Int
+        if startIndex < previousLineIDs.count,
+           let range = context.coordinator.lineRanges[previousLineIDs[startIndex]] {
+            replacementStart = range.location
+        } else if startIndex == previousLineIDs.count {
+            replacementStart = storage.length
+        } else {
+            applyContent(to: textView, context: context)
+            return
+        }
+
+        let previousBlockIndex = startIndex > 0 ? lines[startIndex - 1].blockIndex : nil
+        let replacementLines = Array(lines[startIndex...])
+        let (replacementAttr, replacementRangesRelative) = buildAttributedString(
+            containerWidth: width,
+            renderedLines: replacementLines,
+            previousBlockIndex: previousBlockIndex
+        )
+
+        storage.beginEditing()
+        storage.replaceCharacters(
+            in: NSRange(location: replacementStart, length: max(0, storage.length - replacementStart)),
+            with: replacementAttr
+        )
+        storage.endEditing()
+
+        var mergedRanges: [Int: NSRange] = [:]
+        mergedRanges.reserveCapacity(lines.count)
+        var mergedOrderedRanges: [NSRange] = []
+        mergedOrderedRanges.reserveCapacity(lines.count)
+        var mergedOrderedIDs: [Int] = []
+        mergedOrderedIDs.reserveCapacity(lines.count)
+
+        if startIndex > 0 {
+            for idx in 0..<startIndex {
+                let line = lines[idx]
+                guard let priorRange = context.coordinator.lineRanges[line.id] else {
+                    applyContent(to: textView, context: context)
+                    return
+                }
+                mergedRanges[line.id] = priorRange
+                mergedOrderedIDs.append(line.id)
+                mergedOrderedRanges.append(priorRange)
+            }
+        }
+
+        for line in replacementLines {
+            guard let relativeRange = replacementRangesRelative[line.id] else { continue }
+            let shifted = NSRange(location: replacementStart + relativeRange.location, length: relativeRange.length)
             mergedRanges[line.id] = shifted
             mergedOrderedIDs.append(line.id)
             mergedOrderedRanges.append(shifted)
@@ -4033,36 +4197,4 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         return (attr, ranges)
     }
 
-    private func appendTailStartIndex(previous: [TerminalLine], current: [TerminalLine]) -> Int? {
-        guard !previous.isEmpty else { return nil }
-        guard current.count > previous.count else { return nil }
-        for idx in previous.indices {
-            let lhs = previous[idx]
-            let rhs = current[idx]
-            if lhs.id != rhs.id || lhs.role != rhs.role || lhs.text != rhs.text || lhs.blockIndex != rhs.blockIndex {
-                return nil
-            }
-        }
-        return previous.count
-    }
-
-    private func signature(for lines: [TerminalLine]) -> Int {
-        var hasher = Hasher()
-        hasher.combine(lines.count)
-
-        func combine(_ line: TerminalLine) {
-            hasher.combine(line.id)
-            hasher.combine(line.role.signatureToken)
-            hasher.combine(line.text.count)
-        }
-
-        if let first = lines.first { combine(first) }
-        if let last = lines.last { combine(last) }
-        if lines.count >= 3 { combine(lines[lines.count / 2]) }
-        if lines.count >= 9 {
-            combine(lines[lines.count / 4])
-            combine(lines[(lines.count * 3) / 4])
-        }
-        return hasher.finalize()
-    }
 }
