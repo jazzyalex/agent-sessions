@@ -9,6 +9,19 @@ private enum TranscriptToolbarStyle {
     static let leadingPadding: CGFloat = 8
 }
 
+struct TranscriptRenderGenerationGate {
+    private(set) var generation: Int = 0
+
+    mutating func begin() -> Int {
+        generation &+= 1
+        return generation
+    }
+
+    func allowsApply(candidateGeneration: Int, activeSessionID: String?, expectedSessionID: String) -> Bool {
+        candidateGeneration == generation && activeSessionID == expectedSessionID
+    }
+}
+
 /// Codex transcript view - now a wrapper around UnifiedTranscriptView
 struct TranscriptPlainView: View {
     @EnvironmentObject var indexer: SessionIndexer
@@ -47,6 +60,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     // Text transcript buffer
     @State private var transcript: String = ""
     @State private var rebuildTask: Task<Void, Never>?
+    @State private var jsonBuildTask: Task<Void, Never>?
+    @State private var renderGate = TranscriptRenderGenerationGate()
 
     // Unified Search (⌥⌘F): window-level query used to filter sessions and navigate within transcript
     @State private var unifiedMatches: [NSRange] = []
@@ -172,6 +187,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var transcriptCache: [String: String] = [:]
     @State private var terminalCommandRangesCache: [String: [NSRange]] = [:]
     @State private var terminalUserRangesCache: [String: [NSRange]] = [:]
+    @State private var lastResolvedSession: Session? = nil
     @State private var lastBuildKey: String? = nil
     @State private var lastRenderedSessionID: String? = nil
     @State private var lastRenderedEventCount: Int = 0
@@ -186,7 +202,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     var body: some View {
-        if let id = sessionID, let session = indexer.allSessions.first(where: { $0.id == id }) {
+        let liveSession = sessionID.flatMap { id in
+            indexer.allSessions.first(where: { $0.id == id })
+        }
+        let displaySession = liveSession ?? lastResolvedSession.flatMap { cached in
+            guard cached.id == sessionID else { return nil }
+            return cached
+        }
+
+        if let id = sessionID, let session = displaySession {
             VStack(spacing: 0) {
                 toolbar(session: session)
                     .frame(maxWidth: .infinity)
@@ -247,8 +271,21 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     }
                 }
             }
-            .onAppear { rebuild(session: session) }
-            .onChange(of: id) { _, _ in rebuild(session: session) }
+            .onAppear {
+                lastResolvedSession = session
+                rebuild(session: session)
+            }
+            .onChange(of: id) { oldID, newID in
+                if oldID != newID, lastResolvedSession?.id != newID {
+                    lastResolvedSession = nil
+                }
+                let resolvedSession = indexer.allSessions.first(where: { $0.id == newID })
+                    ?? (lastResolvedSession?.id == newID ? lastResolvedSession : nil)
+                if let resolvedSession {
+                    lastResolvedSession = resolvedSession
+                    rebuild(session: resolvedSession)
+                }
+            }
             .onChange(of: viewModeRaw) { _, _ in
                 syncRenderModeWithViewMode()
                 rebuild(session: session)
@@ -535,6 +572,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .onSubmit {
                     performFind(resetIndex: false, direction: 1, shouldJump: true)
                 }
+                .onExitCommand {
+                    guard isFindFieldFocused else { return }
+                    handleFindFieldEscape()
+                }
 
             Spacer(minLength: 0)
 
@@ -571,7 +612,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
                 .buttonStyle(.plain)
                 .help(findQueryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Close Find (⎋)" : "Clear Find (⎋)")
-                .keyboardShortcut(.escape)
             }
         }
         .padding(.horizontal, 10)
@@ -643,9 +683,24 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .help("Unified Search matches (⌥⌘F, ⌘G, ⇧⌘G)")
     }
 
-    private func rebuild(session: Session) {
+    private func beginRenderGeneration() -> Int {
         rebuildTask?.cancel()
         rebuildTask = nil
+        jsonBuildTask?.cancel()
+        jsonBuildTask = nil
+        isBuildingJSON = false
+        return renderGate.begin()
+    }
+
+    private func canApplyRender(sessionID expectedSessionID: String, generation: Int) -> Bool {
+        renderGate.allowsApply(candidateGeneration: generation,
+                               activeSessionID: sessionID,
+                               expectedSessionID: expectedSessionID)
+    }
+
+    private func rebuild(session: Session) {
+        lastResolvedSession = session
+        let generation = beginRenderGeneration()
 
         syncRenderModeWithViewMode()
         let viewModeSnapshot = viewMode
@@ -692,7 +747,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                                       hasCommands: hasToolCommands,
                                       renderedViewMode: viewModeSnapshot,
                                       renderedAppendConfigKey: appendConfigKey,
-                                      cachedText: cached)
+                                      cachedText: cached,
+                                      generation: generation)
                     return
                 }
                 if viewModeSnapshot == .terminal && shouldColorize {
@@ -723,7 +779,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                                   shouldCache: true,
                                   hasCommands: hasToolCommands,
                                   renderedViewMode: viewModeSnapshot,
-                                  renderedAppendConfigKey: appendConfigKey)
+                                  renderedAppendConfigKey: appendConfigKey,
+                                  generation: generation)
                 return
             }
 
@@ -751,14 +808,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 // Build off-main to avoid UI stalls
                 let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
                 let shouldColorize = self.shouldColorize
-                Task.detached(priority: prio) {
-                    let sessionHasCommands = session.events.contains { $0.kind == .tool_call }
+                let sessionSnapshot = session
+                rebuildTask = Task.detached(priority: prio) { [filters] in
+                    let sessionHasCommands = sessionSnapshot.events.contains { $0.kind == .tool_call }
                     if mode == .terminal && shouldColorize && sessionHasCommands {
-                        let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: session, filters: filters)
+                        let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: sessionSnapshot, filters: filters)
                         await MainActor.run {
-                            let decorated = self.decorateTranscriptIfNeeded(built.0, session: session)
+                            guard !Task.isCancelled else { return }
+                            guard self.canApplyRender(sessionID: sessionSnapshot.id, generation: generation) else { return }
+                            let decorated = self.decorateTranscriptIfNeeded(built.0, session: sessionSnapshot)
                             self.setRenderedTranscript(decorated,
-                                                       session: session,
+                                                       session: sessionSnapshot,
                                                        renderedViewMode: viewModeSnapshot,
                                                        appendConfigKey: appendConfigKey)
                             self.commandRanges = built.1
@@ -772,17 +832,19 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.terminalCommandRangesCache[key] = built.1
                             self.terminalUserRangesCache[key] = built.2
                             self.lastBuildKey = key
-	                            self.performUnifiedFind(resetIndex: true, shouldJump: false)
+		                            self.performUnifiedFind(resetIndex: true, shouldJump: false)
                             self.selectedNSRange = nil
-                            self.applyAutoJumpIfReady(session: session)
-                            self.maybeAutoJumpToFirstPrompt(session: session)
+                            self.applyAutoJumpIfReady(session: sessionSnapshot)
+                            self.maybeAutoJumpToFirstPrompt(session: sessionSnapshot)
                         }
                     } else {
-                        let t = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: .normal)
+                        let t = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: sessionSnapshot, filters: filters, mode: .normal)
                         await MainActor.run {
-                            let decorated = self.decorateTranscriptIfNeeded(t, session: session)
+                            guard !Task.isCancelled else { return }
+                            guard self.canApplyRender(sessionID: sessionSnapshot.id, generation: generation) else { return }
+                            let decorated = self.decorateTranscriptIfNeeded(t, session: sessionSnapshot)
                             self.setRenderedTranscript(decorated,
-                                                       session: session,
+                                                       session: sessionSnapshot,
                                                        renderedViewMode: viewModeSnapshot,
                                                        appendConfigKey: appendConfigKey)
                             self.commandRanges = []
@@ -794,11 +856,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             self.computeNavigationRangesIfNeeded()
                             self.transcriptCache[key] = decorated
                             self.lastBuildKey = key
-	                            self.performUnifiedFind(resetIndex: true, shouldJump: false)
+		                            self.performUnifiedFind(resetIndex: true, shouldJump: false)
                             self.selectedNSRange = nil
                             self.resetJumpCursors()
-                            self.applyAutoJumpIfReady(session: session)
-                            self.maybeAutoJumpToFirstPrompt(session: session)
+                            self.applyAutoJumpIfReady(session: sessionSnapshot)
+                            self.maybeAutoJumpToFirstPrompt(session: sessionSnapshot)
                         }
                     }
                 }
@@ -846,7 +908,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                                   shouldCache: false,
                                   hasCommands: sessionHasCommands2,
                                   renderedViewMode: viewModeSnapshot,
-                                  renderedAppendConfigKey: appendConfigKey)
+                                  renderedAppendConfigKey: appendConfigKey,
+                                  generation: generation)
                 return
             }
 
@@ -860,8 +923,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 if modeSnapshot == .terminal && shouldColorizeSnapshot && sessionHasCommands2 {
                     let built = SessionTranscriptBuilder.buildTerminalPlainWithRanges(session: sessionSnapshot, filters: filters)
                     await MainActor.run {
-                        guard self.sessionID == sessionSnapshot.id else { return }
                         guard !Task.isCancelled else { return }
+                        guard self.canApplyRender(sessionID: sessionSnapshot.id, generation: generation) else { return }
                         let decorated = self.decorateTranscriptIfNeeded(built.0, session: sessionSnapshot)
                         self.setRenderedTranscript(decorated,
                                                    session: sessionSnapshot,
@@ -884,8 +947,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 } else {
                     let t = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: sessionSnapshot, filters: filters, mode: .normal)
                     await MainActor.run {
-                        guard self.sessionID == sessionSnapshot.id else { return }
                         guard !Task.isCancelled else { return }
+                        guard self.canApplyRender(sessionID: sessionSnapshot.id, generation: generation) else { return }
                         let decorated = self.decorateTranscriptIfNeeded(t, session: sessionSnapshot)
                         self.setRenderedTranscript(decorated,
                                                    session: sessionSnapshot,
@@ -1277,6 +1340,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	        focusCoordinator.perform(.closeAllSearch)
 	    }
 
+    private func handleFindFieldEscape() {
+        let trimmed = findQueryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        findQueryDraft = ""
+        performFind(resetIndex: true, shouldJump: false)
+    }
+
 	    private func navigateNextMatch(direction: Int) {
 	        if isFindBarVisible, !findQuery.isEmpty {
 	            performFind(resetIndex: false, direction: direction, shouldJump: true)
@@ -1523,15 +1593,27 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                                    hasCommands: Bool,
                                    renderedViewMode: SessionViewMode,
                                    renderedAppendConfigKey: String? = nil,
-                                   cachedText: String? = nil) {
+                                   cachedText: String? = nil,
+                                   generation: Int) {
         let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+        jsonBuildTask?.cancel()
+        let sessionSnapshot = session
         isBuildingJSON = true
-        Task.detached(priority: prio) {
-            let pretty = cachedText ?? prettyJSONForSession(session)
+        jsonBuildTask = Task.detached(priority: prio) {
+            defer {
+                Task { @MainActor in
+                    guard self.canApplyRender(sessionID: sessionSnapshot.id, generation: generation) else { return }
+                    self.isBuildingJSON = false
+                }
+            }
+            guard !Task.isCancelled else { return }
+            let pretty = cachedText ?? prettyJSONForSession(sessionSnapshot)
             let (keyRanges, stringRanges, numberRanges, keywordRanges) = jsonSyntaxHighlightRanges(for: pretty)
             await MainActor.run {
+                guard !Task.isCancelled else { return }
+                guard self.canApplyRender(sessionID: sessionSnapshot.id, generation: generation) else { return }
                 self.setRenderedTranscript(pretty,
-                                           session: session,
+                                           session: sessionSnapshot,
                                            renderedViewMode: renderedViewMode,
                                            appendConfigKey: renderedAppendConfigKey)
                 self.commandRanges = keyRanges
@@ -1546,8 +1628,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 self.lastBuildKey = key
                 self.performUnifiedFind(resetIndex: true, shouldJump: false)
                 self.selectedNSRange = nil
-                self.applyAutoJumpIfReady(session: session)
-                self.isBuildingJSON = false
+                self.applyAutoJumpIfReady(session: sessionSnapshot)
             }
         }
     }

@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Search fields (Unified global search + transcript Find): `Esc` now clears the active field directly when that field has focus, eliminating the system beep and making clear behavior consistent from the keyboard.
+- Session view (Unified): Removed the transient "Selected session is hidden by the current search/filter" notice and its `Show in List` / `Keep Hidden` actions.
 - Session view (Unified): Transcript tail-append now verifies the previous tail event content (not only ID), forcing a full rebuild when a live update rewrites the prior tail event in place.
 - Session view (Unified): Transcript view now rebuilds on `eventCount`, `fileSize`, and `endTime` metadata updates for loaded sessions, so in-place live parsing changes without `events.count` growth no longer leave stale text.
 - Session view (Unified): Transcript tail-append now writes appended output to the in-view build-key cache, preventing stale transcript regressions when switching modes during live updates.
@@ -15,6 +17,11 @@ All notable changes to this project will be documented in this file.
 - Session view (Unified): Async transcript/JSON renders now persist the originating view mode in render state, preventing transcript-tail append from attaching to buffers built for another mode after mode switches.
 - Sessions (Codex/Session view): Active-session transcript updates now append tail content in Session view instead of replacing the full rendered buffer on each monitor refresh, eliminating periodic flicker and preserving in-session reading/navigation context.
 - Sessions (Codex): Focused monitor/background refresh reloads no longer surface loading overlays when transcript content is already visible, avoiding repeated loading flashes during near-live tail updates.
+- Session view (Unified): Live transcript rendering now applies strict latest-generation gating across async rebuild paths, and Session mode now performs deterministic tail patching/signature checks to reduce stale or flickering text during rapid updates.
+- Session view (Unified/Session mode): Terminal find/unified-find auto-scroll now runs only for explicit navigation requests (token-driven) so passive live refreshes no longer yank scroll position; canceled JSON rebuild tasks now reliably clear loading state for the active generation.
+- Session view (Unified): Selected transcript content now keeps the last resolved session buffer during transient reindex gaps, and list-side programmatic selection updates are coalesced to avoid table reentrant delegate churn that could leave the transcript pane blank until reselection.
+- Session view (Unified): Table-driven transient empty-selection events (during indexing/list churn) now preserve the active session selection instead of treating them as user deselects, and transcript host source/type now stays pinned to the last resolved selected session to prevent blank placeholder fallbacks.
+- Stability: Hardened Claude indexing refresh state synchronization (refresh token, file-stat cache, prewarm signatures) and made progress throttling thread-safe to reduce intermittent `EXC_BAD_ACCESS` crashes during concurrent indexing tasks.
 - Usage tracking/menu bar: Codex and Claude polling now continues when usage is visible (including active in-app strip visibility), while inactive/background polling remains tied to that specific agent being shown in the menu bar; Codex menu-background polling also now re-seeds to newer JSONL session files instead of stalling on an older file.
 - Sessions (Codex): Active selected sessions now refresh tails faster (focused-file monitoring with adaptive 5s/15s cadence), and `Refresh Sessions` now forces a full reload of the selected Codex transcript so newest prompts/outputs appear without reselection.
 - Sessions (Codex): Fixed a forced-reload dedupe race for active-session monitoring so follow-up tail reloads are not skipped when JSONL files change during parsing.
