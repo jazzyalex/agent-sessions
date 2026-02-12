@@ -430,11 +430,7 @@ struct UnifiedSessionsView: View {
 					let userPromptIndex = n.userInfo?["userPromptIndex"] as? Int
 					selection = id
 					let desired: Set<String> = [id]
-					if tableSelection != desired {
-						programmaticSelectionUpdate = true
-						tableSelection = desired
-						DispatchQueue.main.async { programmaticSelectionUpdate = false }
-					}
+					scheduleTableSelectionUpdate(desired)
 					CodexImagesWindowController.shared.sendToBack()
 					NSApp.activate(ignoringOtherApps: true)
 					if let main = NSApp.windows.first(where: { $0.isVisible && $0.title == "Agent Sessions" }) ?? NSApp.mainWindow {
@@ -464,34 +460,30 @@ struct UnifiedSessionsView: View {
 
 				let afterShowImagesForInlineImage = afterShowImages
 					.onReceive(NotificationCenter.default.publisher(for: .showImagesForInlineImage)) { n in
-							guard let id = n.object as? String else { return }
-							let requestedItemID = n.userInfo?["selectedItemID"] as? String
+						guard let id = n.object as? String else { return }
+						let requestedItemID = n.userInfo?["selectedItemID"] as? String
 
-							selection = id
-							let desired: Set<String> = [id]
-							if tableSelection != desired {
-								programmaticSelectionUpdate = true
-								tableSelection = desired
-								DispatchQueue.main.async { programmaticSelectionUpdate = false }
-							}
+						selection = id
+						let desired: Set<String> = [id]
+						scheduleTableSelectionUpdate(desired)
 
-							guard let session = selectedSession else {
-								NSSound.beep()
-								return
-							}
-							let allSessions: [Session]
-							allSessions = unified.allSessions
-							CodexImagesWindowController.shared.show(session: session, allSessions: allSessions)
-
-							guard let requestedItemID else { return }
-							DispatchQueue.main.async {
-								NotificationCenter.default.post(
-									name: .selectImagesBrowserItem,
-									object: id,
-									userInfo: ["selectedItemID": requestedItemID, "forceScope": CodexImagesScope.singleSession.rawValue]
-								)
-							}
+						guard let session = selectedSession else {
+							NSSound.beep()
+							return
 						}
+						let allSessions: [Session]
+						allSessions = unified.allSessions
+						CodexImagesWindowController.shared.show(session: session, allSessions: allSessions)
+
+						guard let requestedItemID else { return }
+						DispatchQueue.main.async {
+							NotificationCenter.default.post(
+								name: .selectImagesBrowserItem,
+								object: id,
+								userInfo: ["selectedItemID": requestedItemID, "forceScope": CodexImagesScope.singleSession.rawValue]
+							)
+						}
+					}
 
 				return AnyView(afterShowImagesForInlineImage)
 			}
@@ -589,11 +581,7 @@ struct UnifiedSessionsView: View {
                         // Explicitly select the tapped row to avoid relying solely on Table's mouse handling.
                         selection = s.id
                         let desired: Set<String> = [s.id]
-                        if tableSelection != desired {
-                            programmaticSelectionUpdate = true
-                            tableSelection = desired
-                            DispatchQueue.main.async { programmaticSelectionUpdate = false }
-                        }
+                        scheduleTableSelectionUpdate(desired)
                         hasUserManuallySelected = true
                         autoSelectEnabled = false
                         NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
@@ -731,6 +719,7 @@ struct UnifiedSessionsView: View {
         .onChange(of: tableSelection) { oldSel, newSel in
             if programmaticSelectionUpdate {
                 selection = newSel.first
+                programmaticSelectionUpdate = false
                 return
             }
 
@@ -1133,15 +1122,22 @@ struct UnifiedSessionsView: View {
     }
 
     private func scheduleTableSelectionUpdate(_ desired: Set<String>) {
-        guard tableSelection != desired else { return }
+        if let pending = pendingTableSelection {
+            guard pending != desired else { return }
+        } else if tableSelection == desired {
+            return
+        }
         programmaticSelectionUpdate = true
         pendingTableSelection = desired
         DispatchQueue.main.async {
             if let pending = pendingTableSelection {
-                tableSelection = pending
+                if tableSelection != pending {
+                    tableSelection = pending
+                } else if programmaticSelectionUpdate {
+                    programmaticSelectionUpdate = false
+                }
                 pendingTableSelection = nil
             }
-            programmaticSelectionUpdate = false
         }
     }
 

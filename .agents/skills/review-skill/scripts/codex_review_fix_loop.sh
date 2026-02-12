@@ -291,7 +291,8 @@ print_phase() {
 preview_nonempty_lines() {
   local file="$1"
   local max_lines="${2:-12}"
-  awk 'NF{print} ' "$file" | head -n "$max_lines"
+  # Avoid SIGPIPE under `set -o pipefail` by limiting inside awk.
+  awk -v max="$max_lines" 'NF{print; c++; if (c>=max) exit}' "$file"
 }
 
 estimate_findings_count() {
@@ -304,6 +305,143 @@ estimate_findings_count() {
     /^[[:space:]]*([-*]|[0-9]+\.)[[:space:]]+/{c++}
     END{print c}
   ' "$file"
+}
+
+count_nonempty_lines() {
+  local file="$1"
+  awk 'NF{c++} END{print c+0}' "$file"
+}
+
+extract_review_findings() {
+  local in_file="$1"
+  local out_file="$2"
+  : > "$out_file"
+
+  if have_cmd python3; then
+    python3 - "$in_file" "$out_file" <<'PY'
+import json
+import re
+import sys
+
+in_file, out_file = sys.argv[1], sys.argv[2]
+text = open(in_file, "r", encoding="utf-8", errors="ignore").read()
+
+items = []
+seen = set()
+
+def add(raw: str) -> None:
+    s = raw.strip()
+    if not s:
+        return
+    if s in seen:
+        return
+    seen.add(s)
+    items.append(s)
+
+# JSON-shaped findings from codex outputs.
+for m in re.finditer(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', text):
+    raw = m.group(1)
+    try:
+        decoded = json.loads('"' + raw + '"')
+    except Exception:
+        decoded = raw
+    add(decoded)
+
+# Plain-text reviewer bullets with priority prefixes.
+for m in re.finditer(r'(?m)^[ \t]*[-*][ \t]+(\[[Pp]\d+\][^\n]+)$', text):
+    add(m.group(1))
+
+with open(out_file, "w", encoding="utf-8") as f:
+    for item in items:
+        f.write(item + "\n")
+PY
+  else
+    grep -E '^[[:space:]]*[-*][[:space:]]+\[[Pp][0-9]+\]' "$in_file" \
+      | sed -E 's/^[[:space:]]*[-*][[:space:]]+//' > "$out_file" || true
+  fi
+}
+
+print_indented_list() {
+  local file="$1"
+  local indent="${2:-  - }"
+  awk -v ind="$indent" 'NF{print ind $0}' "$file"
+}
+
+compare_finding_sets() {
+  local prev_file="$1"
+  local curr_file="$2"
+  local resolved_file="$3"
+  local remaining_file="$4"
+  local new_file="$5"
+
+  local prev_sorted curr_sorted
+  prev_sorted="$(mktemp "${TMPDIR:-/tmp}/codex-prev-findings.XXXXXX")"
+  curr_sorted="$(mktemp "${TMPDIR:-/tmp}/codex-curr-findings.XXXXXX")"
+
+  if [[ -f "$prev_file" ]]; then
+    LC_ALL=C sort -u "$prev_file" > "$prev_sorted"
+  else
+    : > "$prev_sorted"
+  fi
+  if [[ -f "$curr_file" ]]; then
+    LC_ALL=C sort -u "$curr_file" > "$curr_sorted"
+  else
+    : > "$curr_sorted"
+  fi
+
+  LC_ALL=C comm -23 "$prev_sorted" "$curr_sorted" > "$resolved_file"
+  LC_ALL=C comm -12 "$prev_sorted" "$curr_sorted" > "$remaining_file"
+  LC_ALL=C comm -13 "$prev_sorted" "$curr_sorted" > "$new_file"
+
+  rm -f "$prev_sorted" "$curr_sorted"
+}
+
+extract_fix_touched_files() {
+  local in_file="$1"
+  local out_file="$2"
+  : > "$out_file"
+
+  if have_cmd python3; then
+    python3 - "$in_file" "$out_file" "$PWD" <<'PY'
+import os
+import re
+import sys
+
+in_file, out_file, repo_root = sys.argv[1], sys.argv[2], sys.argv[3]
+lines = open(in_file, "r", encoding="utf-8", errors="ignore").read().splitlines()
+
+items = []
+seen = set()
+
+def add(path: str) -> None:
+    p = path.strip()
+    if not p:
+        return
+    if p.startswith(repo_root + os.sep):
+        p = os.path.relpath(p, repo_root)
+    if p in seen:
+        return
+    seen.add(p)
+    items.append(p)
+
+for line in lines:
+    m = re.match(r'^diff --git a/([^ ]+) b/[^ ]+$', line)
+    if m:
+        add(m.group(1))
+        continue
+    m = re.match(r'^M\s+(/.+)$', line)
+    if m:
+        add(m.group(1))
+
+with open(out_file, "w", encoding="utf-8") as f:
+    for item in items:
+        f.write(item + "\n")
+PY
+  else
+    grep -E '^diff --git a/' "$in_file" \
+      | sed -E 's#^diff --git a/([^ ]+) b/[^ ]+$#\1#' \
+      | sort -u > "$out_file" || true
+  fi
 }
 
 count_exec_events() {
@@ -947,6 +1085,8 @@ fi
 # Run summary state
 CLEAN="false"
 ROUNDS_RUN=0
+PREV_FINDINGS_FILE=""
+PREV_FINDINGS_ROUND=""
 
 for ((round=1; round<=MAX_ROUNDS; round++)); do
   ROUNDS_RUN=$round
@@ -1005,16 +1145,59 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     CLEAN="false"
   fi
 
+  findings_file="$RUN_DIR/round-${round}-findings.txt"
+  extract_review_findings "$review_file" "$findings_file"
+  findings_parsed="$(count_nonempty_lines "$findings_file")"
+
   findings_est="$(estimate_findings_count "$review_file")"
   if [[ "$CLEAN" == "true" ]]; then
     echo "[${round}/${MAX_ROUNDS}] ✅ CLEAN (findings≈0)"
+    if [[ -n "$PREV_FINDINGS_FILE" && -f "$PREV_FINDINGS_FILE" ]]; then
+      resolved_file="$RUN_DIR/round-${round}-resolved-findings.txt"
+      remaining_file="$RUN_DIR/round-${round}-remaining-findings.txt"
+      new_file="$RUN_DIR/round-${round}-new-findings.txt"
+      compare_finding_sets "$PREV_FINDINGS_FILE" "$findings_file" "$resolved_file" "$remaining_file" "$new_file"
+      resolved_count="$(count_nonempty_lines "$resolved_file")"
+      if [[ "$resolved_count" -gt 0 ]]; then
+        echo "Resolved since round ${PREV_FINDINGS_ROUND}:"
+        print_indented_list "$resolved_file"
+      fi
+    fi
     write_meta_json "$meta_file" "$round" "$scope_desc" "$review_model_id" "$review_effort" "$fix_model_id" "$fix_effort" "$review_ec" 0 true 0
     break
   fi
 
-  echo "[${round}/${MAX_ROUNDS}] ❌ NOT CLEAN (findings≈${findings_est})"
-  echo "Findings preview:"
-  preview_nonempty_lines "$review_file" 12 | sed 's/^/  /'
+  echo "[${round}/${MAX_ROUNDS}] ❌ NOT CLEAN (findings≈${findings_est}, parsed=${findings_parsed})"
+  if [[ "$findings_parsed" -gt 0 ]]; then
+    echo "Review findings:"
+    print_indented_list "$findings_file"
+  else
+    echo "Findings preview:"
+    preview_nonempty_lines "$review_file" 12 | sed 's/^/  /'
+  fi
+
+  if [[ -n "$PREV_FINDINGS_FILE" && -f "$PREV_FINDINGS_FILE" ]]; then
+    resolved_file="$RUN_DIR/round-${round}-resolved-findings.txt"
+    remaining_file="$RUN_DIR/round-${round}-remaining-findings.txt"
+    new_file="$RUN_DIR/round-${round}-new-findings.txt"
+    compare_finding_sets "$PREV_FINDINGS_FILE" "$findings_file" "$resolved_file" "$remaining_file" "$new_file"
+    resolved_count="$(count_nonempty_lines "$resolved_file")"
+    remaining_count="$(count_nonempty_lines "$remaining_file")"
+    new_count="$(count_nonempty_lines "$new_file")"
+    echo "Finding delta vs round ${PREV_FINDINGS_ROUND}: resolved=${resolved_count}, remaining=${remaining_count}, new=${new_count}"
+    if [[ "$resolved_count" -gt 0 ]]; then
+      echo "Resolved:"
+      print_indented_list "$resolved_file"
+    fi
+    if [[ "$remaining_count" -gt 0 ]]; then
+      echo "Still open:"
+      print_indented_list "$remaining_file"
+    fi
+    if [[ "$new_count" -gt 0 ]]; then
+      echo "New:"
+      print_indented_list "$new_file"
+    fi
+  fi
 
   # Build fix prompt (includes full review output)
   fix_prompt="$(build_fix_prompt "$review_file" "$CF_APPEND_CONTEXT")"
@@ -1034,9 +1217,22 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
   fi
 
   echo "[${round}/${MAX_ROUNDS}] fix done (exit=${fix_ec})."
+  fix_touched_file="$RUN_DIR/round-${round}-fix-touched-files.txt"
+  extract_fix_touched_files "$fix_file" "$fix_touched_file"
+  fix_touched_count="$(count_nonempty_lines "$fix_touched_file")"
+  if [[ "$fix_touched_count" -gt 0 ]]; then
+    echo "What I changed:"
+    print_indented_list "$fix_touched_file"
+  fi
+  if [[ "$findings_parsed" -gt 0 ]]; then
+    echo "Findings targeted in this fix:"
+    print_indented_list "$findings_file"
+  fi
 
   append_len="$(printf "%s" "$CF_APPEND_CONTEXT" | wc -c | tr -d ' ')"
   write_meta_json "$meta_file" "$round" "$scope_desc" "$review_model_id" "$review_effort" "$fix_model_id" "$fix_effort" "$review_ec" "$fix_ec" false "$append_len"
+  PREV_FINDINGS_FILE="$findings_file"
+  PREV_FINDINGS_ROUND="$round"
 done
 
 # Write summary.json

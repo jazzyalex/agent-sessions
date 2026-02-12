@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Search fields (Unified global search + transcript Find): `Esc` now clears the active field directly when that field has focus, eliminating the system beep and making clear behavior consistent from the keyboard.
+- Transcript Find (`Esc`): pressing `Esc` with an empty Find field now closes the Find bar again (`Close Find (⎋)`), restoring keyboard-only close behavior.
+- Session view (Unified): table selection synchronization now keeps programmatic updates out of manual-selection handling, preventing auto-selection from being disabled by internal selection coalescing.
 - Session view (Unified): Removed the transient "Selected session is hidden by the current search/filter" notice and its `Show in List` / `Keep Hidden` actions.
 - Session view (Unified): Transcript tail-append now verifies the previous tail event content (not only ID), forcing a full rebuild when a live update rewrites the prior tail event in place.
 - Session view (Unified): Transcript view now rebuilds on `eventCount`, `fileSize`, and `endTime` metadata updates for loaded sessions, so in-place live parsing changes without `events.count` growth no longer leave stale text.

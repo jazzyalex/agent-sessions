@@ -1342,7 +1342,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func handleFindFieldEscape() {
         let trimmed = findQueryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            closeFind()
+            return
+        }
         findQueryDraft = ""
         performFind(resetIndex: true, shouldJump: false)
     }
