@@ -52,6 +52,8 @@ SCOPE_COMMIT_SHA=""
 # CLI-only knobs
 DRY_RUN="0"
 HEARTBEAT_SECONDS="${HEARTBEAT_SECONDS:-60}"
+FINDINGS_FUZZY="${FINDINGS_FUZZY:-1}"
+FINDINGS_FUZZY_THRESHOLD="${FINDINGS_FUZZY_THRESHOLD:-0.86}"
 
 # Control-file overrides (loaded between rounds)
 CF_STATUS="resume"           # pause|resume|stop
@@ -64,6 +66,10 @@ CF_SCOPE_OVERRIDE=""         # uncommitted | base:<branch> | commit:<sha>
 RUN_TS="$(date +%Y%m%d-%H%M%S)"
 RUN_DIR=""
 LAST_CONTROL_HASH=""
+LAST_EFFECTIVE_REVIEW_EFFORT=""
+LAST_EFFECTIVE_FIX_EFFORT=""
+LAUNCH_CHILD_PID=""
+LAUNCH_ISOLATED="0"
 
 # ----------------------------- Helpers ---------------------------------------
 
@@ -103,6 +109,8 @@ Notes:
   - To specify both model and effort, use "gpt-5.3-codex@xhigh" format.
   - --fix-model is a convenience override that pins both early+late fix selectors.
   - Heartbeat lines print periodic in-progress summaries during review/fix commands.
+  - Finding deltas use exact matching + optional fuzzy reworded reconciliation
+    (env: FINDINGS_FUZZY=1, FINDINGS_FUZZY_THRESHOLD=0.86).
 USAGE
 }
 
@@ -367,12 +375,98 @@ print_indented_list() {
   awk -v ind="$indent" 'NF{print ind $0}' "$file"
 }
 
+fuzzy_reconcile_reworded_findings() {
+  local resolved_file="$1"
+  local new_file="$2"
+  local out_resolved_file="$3"
+  local out_new_file="$4"
+  local out_reworded_file="$5"
+  local threshold="${6:-0.86}"
+
+  : > "$out_reworded_file"
+
+  if ! have_cmd python3; then
+    cp -f "$resolved_file" "$out_resolved_file"
+    cp -f "$new_file" "$out_new_file"
+    return 0
+  fi
+
+  python3 - "$resolved_file" "$new_file" "$out_resolved_file" "$out_new_file" "$out_reworded_file" "$threshold" <<'PY'
+import re
+import sys
+from difflib import SequenceMatcher
+
+resolved_path, new_path, out_resolved, out_new, out_pairs, thr_s = sys.argv[1:]
+threshold = float(thr_s)
+
+def read_lines(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            return [ln.strip() for ln in f.read().splitlines() if ln.strip()]
+    except FileNotFoundError:
+        return []
+
+def normalize(text: str) -> str:
+    t = text.lower()
+    t = re.sub(r'\[[pP]\d+\]', ' ', t)
+    t = re.sub(r'[^a-z0-9]+', ' ', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+def priority_tag(text: str) -> str:
+    m = re.search(r'\[([pP]\d+)\]', text)
+    return m.group(1).lower() if m else ""
+
+resolved = sorted(read_lines(resolved_path))
+new = sorted(read_lines(new_path))
+
+new_meta = [(n, normalize(n), priority_tag(n)) for n in new]
+used_new = set()
+pairs = []
+
+for prev in resolved:
+    prev_norm = normalize(prev)
+    prev_pri = priority_tag(prev)
+    best = None  # (score, new_item)
+    for curr, curr_norm, curr_pri in new_meta:
+        if curr in used_new:
+            continue
+        # If both findings carry explicit priority tags, require match.
+        if prev_pri and curr_pri and prev_pri != curr_pri:
+            continue
+        score = SequenceMatcher(None, prev_norm, curr_norm).ratio()
+        if best is None or score > best[0]:
+            best = (score, curr)
+    if best and best[0] >= threshold:
+        score, curr = best
+        used_new.add(curr)
+        pairs.append((prev, curr, score))
+
+pair_prev = {p[0] for p in pairs}
+resolved_remaining = [p for p in resolved if p not in pair_prev]
+new_remaining = [n for n in new if n not in used_new]
+
+with open(out_resolved, "w", encoding="utf-8") as f:
+    for item in resolved_remaining:
+        f.write(item + "\n")
+
+with open(out_new, "w", encoding="utf-8") as f:
+    for item in new_remaining:
+        f.write(item + "\n")
+
+with open(out_pairs, "w", encoding="utf-8") as f:
+    for prev, curr, score in sorted(pairs, key=lambda x: (-x[2], x[0], x[1])):
+        f.write(f"{score:.2f} | PREV: {prev} | CURR: {curr}\n")
+PY
+}
+
 compare_finding_sets() {
   local prev_file="$1"
   local curr_file="$2"
   local resolved_file="$3"
   local remaining_file="$4"
   local new_file="$5"
+  local reworded_file="${6:-}"
 
   local prev_sorted curr_sorted
   prev_sorted="$(mktemp "${TMPDIR:-/tmp}/codex-prev-findings.XXXXXX")"
@@ -392,6 +486,33 @@ compare_finding_sets() {
   LC_ALL=C comm -23 "$prev_sorted" "$curr_sorted" > "$resolved_file"
   LC_ALL=C comm -12 "$prev_sorted" "$curr_sorted" > "$remaining_file"
   LC_ALL=C comm -13 "$prev_sorted" "$curr_sorted" > "$new_file"
+
+  if [[ -n "$reworded_file" ]]; then
+    : > "$reworded_file"
+  fi
+
+  if [[ "$FINDINGS_FUZZY" == "1" ]]; then
+    local thr resolved_tmp new_tmp reworded_tmp
+    thr="$FINDINGS_FUZZY_THRESHOLD"
+    resolved_tmp="$(mktemp "${TMPDIR:-/tmp}/codex-resolved2.XXXXXX")"
+    new_tmp="$(mktemp "${TMPDIR:-/tmp}/codex-new2.XXXXXX")"
+
+    if [[ -n "$reworded_file" ]]; then
+      reworded_tmp="$reworded_file"
+    else
+      reworded_tmp="$(mktemp "${TMPDIR:-/tmp}/codex-reworded.XXXXXX")"
+    fi
+
+    fuzzy_reconcile_reworded_findings "$resolved_file" "$new_file" \
+      "$resolved_tmp" "$new_tmp" "$reworded_tmp" "$thr"
+
+    mv -f "$resolved_tmp" "$resolved_file"
+    mv -f "$new_tmp" "$new_file"
+
+    if [[ -z "$reworded_file" ]]; then
+      rm -f "$reworded_tmp"
+    fi
+  fi
 
   rm -f "$prev_sorted" "$curr_sorted"
 }
@@ -499,6 +620,176 @@ file_mentions_from_output() {
   printf "%s" "$n"
 }
 
+is_effort_unsupported_error() {
+  local file="$1"
+  grep -Eqi '(model_reasoning_effort|reasoning effort).*(supported values|must be one of|invalid|unsupported|not supported|expected)' "$file"
+}
+
+launch_in_new_process_group() {
+  local out_file="$1"
+  local stdin_file="$2"
+  shift 2
+
+  if have_cmd setsid; then
+    if [[ -n "$stdin_file" ]]; then
+      setsid "$@" <"$stdin_file" >"$out_file" 2>&1 &
+    else
+      setsid "$@" >"$out_file" 2>&1 &
+    fi
+    LAUNCH_CHILD_PID="$!"
+    LAUNCH_ISOLATED="1"
+    return 0
+  fi
+
+  if have_cmd python3; then
+    if [[ -n "$stdin_file" ]]; then
+      python3 -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@" \
+        <"$stdin_file" >"$out_file" 2>&1 &
+    else
+      python3 -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@" \
+        >"$out_file" 2>&1 &
+    fi
+    LAUNCH_CHILD_PID="$!"
+    LAUNCH_ISOLATED="1"
+    return 0
+  fi
+
+  # Fallback: no process-group isolation available.
+  if [[ -n "$stdin_file" ]]; then
+    "$@" <"$stdin_file" >"$out_file" 2>&1 &
+  else
+    "$@" >"$out_file" 2>&1 &
+  fi
+  LAUNCH_CHILD_PID="$!"
+  LAUNCH_ISOLATED="0"
+}
+
+kill_pid_or_group() {
+  local pid="$1"
+  local pgid="$2"
+
+  if [[ -n "$pgid" ]]; then
+    kill -TERM "-$pgid" >/dev/null 2>&1 || true
+    sleep 1
+    kill -KILL "-$pgid" >/dev/null 2>&1 || true
+  else
+    kill "$pid" >/dev/null 2>&1 || true
+    sleep 1
+    kill -KILL "$pid" >/dev/null 2>&1 || true
+  fi
+}
+
+list_changed_files() {
+  if ! have_cmd git; then
+    return 0
+  fi
+  {
+    git diff --name-only 2>/dev/null || true
+    git diff --cached --name-only 2>/dev/null || true
+    git ls-files --others --exclude-standard 2>/dev/null || true
+  } | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u
+}
+
+capture_changed_file_hashes() {
+  local out_file="$1"
+  : > "$out_file"
+  if ! have_cmd git; then
+    return 0
+  fi
+
+  local files_tmp
+  files_tmp="$(mktemp "${TMPDIR:-/tmp}/codex-changed-files.XXXXXX")"
+  list_changed_files > "$files_tmp"
+
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    local digest
+    if [[ -e "$path" ]]; then
+      digest="$(hash_file "$path")"
+    else
+      digest="__MISSING__"
+    fi
+    printf "%s\t%s\n" "$path" "$digest" >> "$out_file"
+  done < "$files_tmp"
+
+  rm -f "$files_tmp"
+}
+
+compute_touched_files_from_snapshots() {
+  local before_file="$1"
+  local after_file="$2"
+  local out_file="$3"
+  : > "$out_file"
+
+  if ! have_cmd python3; then
+    return 1
+  fi
+
+  python3 - "$before_file" "$after_file" "$out_file" <<'PY'
+import sys
+
+before_path, after_path, out_path = sys.argv[1:]
+
+def load(path):
+    data = {}
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.rstrip("\n")
+                if not line:
+                    continue
+                if "\t" in line:
+                    p, h = line.split("\t", 1)
+                else:
+                    p, h = line, ""
+                data[p] = h
+    except FileNotFoundError:
+        pass
+    return data
+
+before = load(before_path)
+after = load(after_path)
+paths = sorted(set(before) | set(after))
+touched = [p for p in paths if before.get(p) != after.get(p)]
+
+with open(out_path, "w", encoding="utf-8") as f:
+    for p in touched:
+        f.write(p + "\n")
+PY
+}
+
+compute_scope_allowed_files() {
+  local scope_mode="$1"
+  local scope_base="$2"
+  local scope_sha="$3"
+  local out_file="$4"
+  : > "$out_file"
+
+  if ! have_cmd git; then
+    return 0
+  fi
+
+  case "$scope_mode" in
+    uncommitted)
+      {
+        git diff --name-only 2>/dev/null || true
+        git diff --cached --name-only 2>/dev/null || true
+      } | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u > "$out_file"
+      ;;
+    base)
+      git diff --name-only "${scope_base}...HEAD" 2>/dev/null | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u > "$out_file" || true
+      ;;
+    commit)
+      git diff-tree --no-commit-id --name-only -r "$scope_sha" 2>/dev/null | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u > "$out_file" || true
+      if [[ ! -s "$out_file" ]]; then
+        git show --name-only --pretty=format: "$scope_sha" 2>/dev/null | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u > "$out_file" || true
+      fi
+      ;;
+    *)
+      ;;
+  esac
+}
+
 format_elapsed_clock() {
   local elapsed="$1"
   printf "%02d:%02d" "$((elapsed / 60))" "$((elapsed % 60))"
@@ -575,12 +866,17 @@ run_with_heartbeat() {
   : > "$out_file"
 
   set +e
-  if [[ -n "$stdin_file" ]]; then
-    "$@" <"$stdin_file" >"$out_file" 2>&1 &
-  else
-    "$@" >"$out_file" 2>&1 &
+  local child_pid launch_isolated
+  LAUNCH_CHILD_PID=""
+  LAUNCH_ISOLATED="0"
+  launch_in_new_process_group "$out_file" "$stdin_file" "$@"
+  child_pid="$LAUNCH_CHILD_PID"
+  launch_isolated="$LAUNCH_ISOLATED"
+  [[ -n "$child_pid" ]] || die "Failed to launch command for phase '$phase'"
+  local pgid=""
+  if [[ "$launch_isolated" == "1" ]]; then
+    pgid="$(ps -o pgid= "$child_pid" 2>/dev/null | tr -d '[:space:]' || true)"
   fi
-  local child_pid=$!
   set -e
 
   local elapsed=0
@@ -609,7 +905,7 @@ run_with_heartbeat() {
     read_control_file
     if [[ "$CF_STATUS" == "stop" ]]; then
       warn "Control requested stop during ${phase}; terminating active command."
-      kill "$child_pid" >/dev/null 2>&1 || true
+      kill_pid_or_group "$child_pid" "$pgid"
       wait "$child_pid" >/dev/null 2>&1 || true
       return 130
     fi
@@ -625,10 +921,12 @@ run_with_heartbeat() {
 is_review_clean_output() {
   local file="$1"
   local review_ec="$2"
-  local trimmed
+  local findings_count="$3"
+  local trimmed nonempty_count
   trimmed="$(trim "$(cat "$file")")"
+  nonempty_count="$(count_nonempty_lines "$file")"
 
-  # Preferred deterministic sentinel when prompt mode is supported.
+  # Preferred deterministic sentinel.
   if [[ "$trimmed" == "REVIEW_CLEAN" ]]; then
     return 0
   fi
@@ -638,13 +936,28 @@ is_review_clean_output() {
     return 1
   fi
 
-  # Common clean-language fallbacks from headless review output.
-  if grep -Eqi '(no issues found|no issues identified|no findings|looks good|lgtm)' "$file"; then
+  # Parsed findings are the primary signal.
+  if [[ "$findings_count" -gt 0 ]]; then
+    return 1
+  fi
+
+  # Any explicit errors means not clean.
+  if grep -Eqi '(^|[[:space:]])(ERROR:|error:)' "$file"; then
+    return 1
+  fi
+
+  # Strict anchored clean lines in the tail section.
+  if tail -n 60 "$file" | grep -Eiq '^[[:space:]]*(REVIEW_CLEAN|No issues found\.?|No issues identified\.?|No findings\.?)\s*$'; then
     return 0
   fi
 
-  # Last-resort heuristic for CLI variants that do not accept custom prompts.
-  if [[ "$(estimate_findings_count "$file")" -eq 0 ]] && ! grep -Eqi '^[[:space:]]*error:' "$file"; then
+  # Fuzzy clean phrases are only accepted for short outputs with no findings/errors.
+  if [[ "$nonempty_count" -le 40 ]] && tail -n 60 "$file" | grep -Eiq '^[[:space:]]*(Looks good\.?|LGTM\.?)\s*$'; then
+    return 0
+  fi
+
+  # If extraction found nothing, only treat very short outputs as clean.
+  if [[ "$findings_count" -eq 0 && "$nonempty_count" -le 12 ]]; then
     return 0
   fi
 
@@ -697,8 +1010,8 @@ read_control_file() {
   #   append_context: one line
   # or:
   #   append_context: |
-  #     multi line
-  # Stops when hitting a new top-level "<key>:" line.
+  #     indented multi line
+  # Multi-line block now requires indentation; first non-indented line ends the block.
   local ac_line
   ac_line="$(grep -nE '^[[:space:]]*append_context[[:space:]]*:' "$CONTROL_FILE" | head -n1 || true)"
   if [[ -n "$ac_line" ]]; then
@@ -708,16 +1021,16 @@ read_control_file() {
     rhs="$(echo "$ac_line" | cut -d: -f2- | sed -E 's/^[[:space:]]*append_context[[:space:]]*:[[:space:]]*//')"
     rhs="$(trim "$rhs")"
 
-    if [[ "$rhs" == "|" || -z "$rhs" ]]; then
-      # Read from next line forward until next key:
+    if [[ "$rhs" == "|" || "$rhs" == "|-" || "$rhs" == "|+" || -z "$rhs" ]]; then
+      # Read indented lines only; stop at first non-indented line.
       CF_APPEND_CONTEXT="$(awk -v start="$ln" '
         NR <= start {next}
-        # stop at the next non-indented key: value line (top-level)
-        /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*:/ {exit}
-        {print}
+        # blank lines within a block are allowed
+        /^[[:space:]]*$/ {print ""; next}
+        # block content must be indented
+        /^[^[:space:]]/ {exit}
+        { sub(/^[[:space:]]/, "", $0); print }
       ' "$CONTROL_FILE")"
-      # If user used YAML-style indentation, strip one leading space consistently
-      CF_APPEND_CONTEXT="$(echo "$CF_APPEND_CONTEXT" | sed -E 's/^[ ]{1}//')"
     else
       CF_APPEND_CONTEXT="$rhs"
     fi
@@ -822,6 +1135,7 @@ EOF
 build_fix_prompt() {
   local review_file="$1"
   local append_context="$2"
+  local allowed_files_file="$3"
 
   local review_text
   review_text="$(cat "$review_file")"
@@ -841,6 +1155,25 @@ $review_text
 ------------------------
 
 EOF
+
+  if [[ -f "$allowed_files_file" ]]; then
+    local allowed_count
+    allowed_count="$(count_nonempty_lines "$allowed_files_file")"
+    if [[ "$allowed_count" -gt 0 ]]; then
+      cat <<EOF
+Allowed edit scope:
+- Keep edits within the current review scope file set unless strictly required.
+- You may also update adjacent tests/docs directly related to these files.
+
+Scope files:
+EOF
+      awk 'NF{print "- " $0; c++; if (c>=300) exit}' "$allowed_files_file"
+      if [[ "$allowed_count" -gt 300 ]]; then
+        echo "- ... (${allowed_count} total files; truncated to first 300)"
+      fi
+      echo ""
+    fi
+  fi
 
   if [[ -n "$(trim "$append_context")" ]]; then
     cat <<EOF
@@ -871,51 +1204,80 @@ run_review() {
   local review_effort="$6"
   local out_file="$7"
 
-  local args=()
+  local args_base=()
   case "$scope_mode" in
-    uncommitted) args+=(--uncommitted) ;;
-    base)        args+=(--base "$scope_base") ;;
-    commit)      args+=(--commit "$scope_sha") ;;
+    uncommitted) args_base+=(--uncommitted) ;;
+    base)        args_base+=(--base "$scope_base") ;;
+    commit)      args_base+=(--commit "$scope_sha") ;;
     *) die "internal: unknown scope_mode '$scope_mode'" ;;
   esac
 
   # Title helps identify runs in Codex history (optional)
-  args+=(--title "review-fix-loop round ${round}")
+  args_base+=(--title "review-fix-loop round ${round}")
 
   # Config overrides:
   # - review_model: sets the model for /review; used here as a best-effort override for codex review too
-  # - model_reasoning_effort: sets effort
   if [[ -n "$review_model_id" ]]; then
-    args+=(--config "review_model=$review_model_id")
+    args_base+=(--config "review_model=$review_model_id")
   fi
+
+  local -a effort_candidates=()
   if [[ -n "$review_effort" ]]; then
-    args+=(--config "model_reasoning_effort=$review_effort")
+    effort_candidates+=("$review_effort")
+    [[ "$review_effort" != "high" ]] && effort_candidates+=("high")
+    [[ "$review_effort" != "medium" ]] && effort_candidates+=("medium")
+  else
+    effort_candidates+=("")
   fi
 
-  # Default to plain mode because current codex review commonly rejects prompt
-  # with --uncommitted/--base/--commit.
-  if [[ "$REVIEW_PROMPT_MODE" == "plain" ]]; then
-    run_with_heartbeat "review" "$round" "$out_file" "" codex review "${args[@]}"
-    return $?
-  fi
+  local ec=0
+  local effort_try
+  for effort_try in "${effort_candidates[@]}"; do
+    local args=("${args_base[@]}")
+    if [[ -n "$effort_try" ]]; then
+      args+=(--config "model_reasoning_effort=$effort_try")
+    fi
 
-  local prompt
-  prompt="$(build_review_prompt)"
-  local review_prompt_file="${RUN_DIR}/round-${round}-review-prompt.txt"
-  printf "%s" "$prompt" > "$review_prompt_file"
-
-  run_with_heartbeat "review" "$round" "$out_file" "$review_prompt_file" codex review "${args[@]}" -
-  local ec=$?
-  if [[ "$ec" -ne 0 ]] && grep -q "cannot be used with '\\[PROMPT\\]'" "$out_file"; then
-    if [[ "$REVIEW_PROMPT_MODE" == "auto" ]]; then
-      warn "codex review prompt input is not supported for this scope on this CLI; retrying without prompt."
+    # Default to plain mode because current codex review commonly rejects prompt
+    # with --uncommitted/--base/--commit.
+    if [[ "$REVIEW_PROMPT_MODE" == "plain" ]]; then
       run_with_heartbeat "review" "$round" "$out_file" "" codex review "${args[@]}"
       ec=$?
     else
-      warn "codex review prompt mode requested, but this CLI/scope combination does not support prompt input."
+      local prompt
+      prompt="$(build_review_prompt)"
+      local review_prompt_file="${RUN_DIR}/round-${round}-review-prompt.txt"
+      printf "%s" "$prompt" > "$review_prompt_file"
+
+      run_with_heartbeat "review" "$round" "$out_file" "$review_prompt_file" codex review "${args[@]}" -
+      ec=$?
+      if [[ "$ec" -ne 0 ]] && grep -q "cannot be used with '\\[PROMPT\\]'" "$out_file"; then
+        if [[ "$REVIEW_PROMPT_MODE" == "auto" ]]; then
+          warn "codex review prompt input is not supported for this scope on this CLI; retrying without prompt."
+          run_with_heartbeat "review" "$round" "$out_file" "" codex review "${args[@]}"
+          ec=$?
+        else
+          warn "codex review prompt mode requested, but this CLI/scope combination does not support prompt input."
+        fi
+      fi
     fi
-  fi
-  return $ec
+
+    if [[ "$ec" -eq 0 ]]; then
+      LAST_EFFECTIVE_REVIEW_EFFORT="$effort_try"
+      return 0
+    fi
+
+    if [[ -n "$effort_try" ]] && is_effort_unsupported_error "$out_file"; then
+      warn "Review effort '$effort_try' was rejected by model/CLI; retrying with fallback effort."
+      continue
+    fi
+
+    LAST_EFFECTIVE_REVIEW_EFFORT="$effort_try"
+    return "$ec"
+  done
+
+  LAST_EFFECTIVE_REVIEW_EFFORT="$review_effort"
+  return "$ec"
 }
 
 run_fix() {
@@ -925,21 +1287,51 @@ run_fix() {
   local fix_prompt_file="$4"
   local out_file="$5"
 
-  local args=()
+  local args_base=()
 
   # Force headless execution with sandboxed automatic command handling.
-  args+=(--full-auto)
-  args+=(--sandbox workspace-write)
+  args_base+=(--full-auto)
+  args_base+=(--sandbox workspace-write)
 
   if [[ -n "$fix_model_id" ]]; then
-    args+=(--model "$fix_model_id")
-  fi
-  if [[ -n "$fix_effort" ]]; then
-    args+=(--config "model_reasoning_effort=$fix_effort")
+    args_base+=(--model "$fix_model_id")
   fi
 
-  run_with_heartbeat "fix" "$round" "$out_file" "$fix_prompt_file" codex exec "${args[@]}" -
-  return $?
+  local -a effort_candidates=()
+  if [[ -n "$fix_effort" ]]; then
+    effort_candidates+=("$fix_effort")
+    [[ "$fix_effort" != "high" ]] && effort_candidates+=("high")
+    [[ "$fix_effort" != "medium" ]] && effort_candidates+=("medium")
+  else
+    effort_candidates+=("")
+  fi
+
+  local ec=0
+  local effort_try
+  for effort_try in "${effort_candidates[@]}"; do
+    local args=("${args_base[@]}")
+    if [[ -n "$effort_try" ]]; then
+      args+=(--config "model_reasoning_effort=$effort_try")
+    fi
+
+    run_with_heartbeat "fix" "$round" "$out_file" "$fix_prompt_file" codex exec "${args[@]}" -
+    ec=$?
+    if [[ "$ec" -eq 0 ]]; then
+      LAST_EFFECTIVE_FIX_EFFORT="$effort_try"
+      return 0
+    fi
+
+    if [[ -n "$effort_try" ]] && is_effort_unsupported_error "$out_file"; then
+      warn "Fix effort '$effort_try' was rejected by model/CLI; retrying with fallback effort."
+      continue
+    fi
+
+    LAST_EFFECTIVE_FIX_EFFORT="$effort_try"
+    return "$ec"
+  done
+
+  LAST_EFFECTIVE_FIX_EFFORT="$fix_effort"
+  return "$ec"
 }
 
 on_interrupt() {
@@ -1078,6 +1470,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo "- Heartbeat seconds:     $HEARTBEAT_SECONDS"
   echo "- Review model id override: ${REVIEW_MODEL_ID:-<none>}"
   echo "- Fix model id override:    ${FIX_MODEL_ID:-<none>}"
+  echo "- Finding fuzzy reconcile:  ${FINDINGS_FUZZY}"
+  echo "- Finding fuzzy threshold:  ${FINDINGS_FUZZY_THRESHOLD}"
   echo "- Control file: $CONTROL_FILE"
   exit 0
 fi
@@ -1127,6 +1521,7 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
 
   print_phase "[${round}/${MAX_ROUNDS}] review (scope=${scope_desc} model_id=${review_model_id:-<default>} effort=${review_effort:-<default>})"
   review_ec=0
+  LAST_EFFECTIVE_REVIEW_EFFORT=""
   if run_review "$round" "$scope_mode" "$scope_base" "$scope_sha" "$review_model_id" "$review_effort" "$review_file"; then
     review_ec=0
   else
@@ -1138,16 +1533,18 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     warn "Review command exited non-zero (exit=$review_ec). Continuing."
   fi
 
-  # Determine clean
-  if is_review_clean_output "$review_file" "$review_ec"; then
-    CLEAN="true"
-  else
-    CLEAN="false"
-  fi
+  review_effort_used="${LAST_EFFECTIVE_REVIEW_EFFORT:-$review_effort}"
 
   findings_file="$RUN_DIR/round-${round}-findings.txt"
   extract_review_findings "$review_file" "$findings_file"
   findings_parsed="$(count_nonempty_lines "$findings_file")"
+
+  # Determine clean (parsed findings are primary; sentinel/strict anchors are fallback).
+  if is_review_clean_output "$review_file" "$review_ec" "$findings_parsed"; then
+    CLEAN="true"
+  else
+    CLEAN="false"
+  fi
 
   findings_est="$(estimate_findings_count "$review_file")"
   if [[ "$CLEAN" == "true" ]]; then
@@ -1156,14 +1553,15 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
       resolved_file="$RUN_DIR/round-${round}-resolved-findings.txt"
       remaining_file="$RUN_DIR/round-${round}-remaining-findings.txt"
       new_file="$RUN_DIR/round-${round}-new-findings.txt"
-      compare_finding_sets "$PREV_FINDINGS_FILE" "$findings_file" "$resolved_file" "$remaining_file" "$new_file"
+      reworded_file="$RUN_DIR/round-${round}-likely-reworded-findings.txt"
+      compare_finding_sets "$PREV_FINDINGS_FILE" "$findings_file" "$resolved_file" "$remaining_file" "$new_file" "$reworded_file"
       resolved_count="$(count_nonempty_lines "$resolved_file")"
       if [[ "$resolved_count" -gt 0 ]]; then
         echo "Resolved since round ${PREV_FINDINGS_ROUND}:"
         print_indented_list "$resolved_file"
       fi
     fi
-    write_meta_json "$meta_file" "$round" "$scope_desc" "$review_model_id" "$review_effort" "$fix_model_id" "$fix_effort" "$review_ec" 0 true 0
+    write_meta_json "$meta_file" "$round" "$scope_desc" "$review_model_id" "$review_effort_used" "$fix_model_id" "$fix_effort" "$review_ec" 0 true 0
     break
   fi
 
@@ -1180,11 +1578,13 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     resolved_file="$RUN_DIR/round-${round}-resolved-findings.txt"
     remaining_file="$RUN_DIR/round-${round}-remaining-findings.txt"
     new_file="$RUN_DIR/round-${round}-new-findings.txt"
-    compare_finding_sets "$PREV_FINDINGS_FILE" "$findings_file" "$resolved_file" "$remaining_file" "$new_file"
+    reworded_file="$RUN_DIR/round-${round}-likely-reworded-findings.txt"
+    compare_finding_sets "$PREV_FINDINGS_FILE" "$findings_file" "$resolved_file" "$remaining_file" "$new_file" "$reworded_file"
     resolved_count="$(count_nonempty_lines "$resolved_file")"
     remaining_count="$(count_nonempty_lines "$remaining_file")"
     new_count="$(count_nonempty_lines "$new_file")"
-    echo "Finding delta vs round ${PREV_FINDINGS_ROUND}: resolved=${resolved_count}, remaining=${remaining_count}, new=${new_count}"
+    reworded_count="$(count_nonempty_lines "$reworded_file")"
+    echo "Finding delta vs round ${PREV_FINDINGS_ROUND}: resolved=${resolved_count}, remaining=${remaining_count}, likely_reworded=${reworded_count}, new=${new_count}"
     if [[ "$resolved_count" -gt 0 ]]; then
       echo "Resolved:"
       print_indented_list "$resolved_file"
@@ -1193,6 +1593,10 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
       echo "Still open:"
       print_indented_list "$remaining_file"
     fi
+    if [[ "$reworded_count" -gt 0 ]]; then
+      echo "Likely remaining (reworded):"
+      print_indented_list "$reworded_file"
+    fi
     if [[ "$new_count" -gt 0 ]]; then
       echo "New:"
       print_indented_list "$new_file"
@@ -1200,11 +1604,17 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
   fi
 
   # Build fix prompt (includes full review output)
-  fix_prompt="$(build_fix_prompt "$review_file" "$CF_APPEND_CONTEXT")"
+  allowed_files_file="$RUN_DIR/round-${round}-allowed-files.txt"
+  compute_scope_allowed_files "$scope_mode" "$scope_base" "$scope_sha" "$allowed_files_file"
+  fix_prompt="$(build_fix_prompt "$review_file" "$CF_APPEND_CONTEXT" "$allowed_files_file")"
   printf "%s" "$fix_prompt" > "$fix_prompt_file"
 
   print_phase "[${round}/${MAX_ROUNDS}] fix (model_id=${fix_model_id:-<default>} effort=${fix_effort:-<default>})"
   fix_ec=0
+  LAST_EFFECTIVE_FIX_EFFORT=""
+  pre_fix_hashes="$RUN_DIR/round-${round}-pre-fix-hashes.tsv"
+  post_fix_hashes="$RUN_DIR/round-${round}-post-fix-hashes.tsv"
+  capture_changed_file_hashes "$pre_fix_hashes"
   if run_fix "$round" "$fix_model_id" "$fix_effort" "$fix_prompt_file" "$fix_file"; then
     fix_ec=0
   else
@@ -1216,9 +1626,17 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     warn "Fix command exited non-zero (exit=$fix_ec). Continuing to next round."
   fi
 
+  fix_effort_used="${LAST_EFFECTIVE_FIX_EFFORT:-$fix_effort}"
   echo "[${round}/${MAX_ROUNDS}] fix done (exit=${fix_ec})."
   fix_touched_file="$RUN_DIR/round-${round}-fix-touched-files.txt"
-  extract_fix_touched_files "$fix_file" "$fix_touched_file"
+  capture_changed_file_hashes "$post_fix_hashes"
+  if ! compute_touched_files_from_snapshots "$pre_fix_hashes" "$post_fix_hashes" "$fix_touched_file"; then
+    extract_fix_touched_files "$fix_file" "$fix_touched_file"
+  fi
+  if [[ "$(count_nonempty_lines "$fix_touched_file")" -eq 0 ]]; then
+    # Fallback for environments where git snapshots could not infer touched paths.
+    extract_fix_touched_files "$fix_file" "$fix_touched_file"
+  fi
   fix_touched_count="$(count_nonempty_lines "$fix_touched_file")"
   if [[ "$fix_touched_count" -gt 0 ]]; then
     echo "What I changed:"
@@ -1230,7 +1648,7 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
   fi
 
   append_len="$(printf "%s" "$CF_APPEND_CONTEXT" | wc -c | tr -d ' ')"
-  write_meta_json "$meta_file" "$round" "$scope_desc" "$review_model_id" "$review_effort" "$fix_model_id" "$fix_effort" "$review_ec" "$fix_ec" false "$append_len"
+  write_meta_json "$meta_file" "$round" "$scope_desc" "$review_model_id" "$review_effort_used" "$fix_model_id" "$fix_effort_used" "$review_ec" "$fix_ec" false "$append_len"
   PREV_FINDINGS_FILE="$findings_file"
   PREV_FINDINGS_ROUND="$round"
 done

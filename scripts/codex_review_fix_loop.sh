@@ -8,4 +8,4 @@ else
   REPO_ROOT="$(pwd)"
 fi
 
-exec "${REPO_ROOT}/.agents/skills/review-skill/scripts/codex_review_fix_loop.sh" "$@"
+exec "${REPO_ROOT}/skills/review-skill/scripts/codex_review_fix_loop.sh" "$@"
