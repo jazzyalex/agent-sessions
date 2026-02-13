@@ -52,6 +52,10 @@ SCOPE_COMMIT_SHA=""
 # CLI-only knobs
 DRY_RUN="0"
 HEARTBEAT_SECONDS="${HEARTBEAT_SECONDS:-60}"
+ERROR_SCAN_TAIL_LINES="${ERROR_SCAN_TAIL_LINES:-200}"
+REVIEW_TIMEOUT_SECONDS="${REVIEW_TIMEOUT_SECONDS:-900}"
+FIX_TIMEOUT_SECONDS="${FIX_TIMEOUT_SECONDS:-900}"
+REVIEW_TIMEOUT_RETRIES="${REVIEW_TIMEOUT_RETRIES:-1}"
 FINDINGS_FUZZY="${FINDINGS_FUZZY:-1}"
 FINDINGS_FUZZY_THRESHOLD="${FINDINGS_FUZZY_THRESHOLD:-0.86}"
 
@@ -70,6 +74,7 @@ LAST_EFFECTIVE_REVIEW_EFFORT=""
 LAST_EFFECTIVE_FIX_EFFORT=""
 LAUNCH_CHILD_PID=""
 LAUNCH_ISOLATED="0"
+LAUNCH_CHILD_PGID=""
 
 # ----------------------------- Helpers ---------------------------------------
 
@@ -88,6 +93,10 @@ Usage:
                            [--review-prompt-mode <plain|prompt|auto>]
                            [--review-prompt-file <path>]
                            [--heartbeat-seconds <n>]
+                           [--review-timeout-seconds <n>]
+                           [--fix-timeout-seconds <n>]
+                           [--review-timeout-retries <n>]
+                           [--error-scan-tail-lines <n>]
                            [--control-file <path>]
                            [--artifacts-dir <path>]
                            [--dry-run]
@@ -101,6 +110,10 @@ Defaults:
   --fix-model-late     xhigh
   --review-prompt-mode plain
   --heartbeat-seconds  60
+  --review-timeout-seconds 900
+  --fix-timeout-seconds    900
+  --review-timeout-retries 1
+  --error-scan-tail-lines  200
   --control-file       .codex-review-control.md
   --artifacts-dir      .codex-review-artifacts
 
@@ -109,6 +122,9 @@ Notes:
   - To specify both model and effort, use "gpt-5.3-codex@xhigh" format.
   - --fix-model is a convenience override that pins both early+late fix selectors.
   - Heartbeat lines print periodic in-progress summaries during review/fix commands.
+  - Review/fix phases are killed when timeout is exceeded (>0 seconds).
+  - Review phase retries once on timeout by default (configurable).
+  - Review error parsing ignores known benign internal rollout-log noise.
   - Finding deltas use exact matching + optional fuzzy reworded reconciliation
     (env: FINDINGS_FUZZY=1, FINDINGS_FUZZY_THRESHOLD=0.86).
 USAGE
@@ -574,20 +590,41 @@ count_exec_events() {
   printf "%s" "$n"
 }
 
+is_benign_review_error_line() {
+  local line="$1"
+  if printf "%s" "$line" | grep -Eqi 'codex_core::rollout::list: state db missing rollout path'; then
+    return 0
+  fi
+  return 1
+}
+
 count_error_events() {
-  local file="$1"
-  local n
-  n="$(grep -Eci '(^|[[:space:]])(ERROR:|error:)' "$file" 2>/dev/null || true)"
-  n="$(printf "%s" "$n" | head -n1 | tr -d '[:space:]')"
-  [[ -z "$n" ]] && n=0
+  local phase="$1"
+  local file="$2"
+  local tail_buf n line
+  tail_buf="$(tail -n "$ERROR_SCAN_TAIL_LINES" "$file" 2>/dev/null || true)"
+  n=0
+
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if ! printf "%s" "$line" | grep -Eqi '(^|[[:space:]])(ERROR:|error:|fatal:)'; then
+      continue
+    fi
+    if [[ "$phase" == "review" ]] && is_benign_review_error_line "$line"; then
+      continue
+    fi
+    n=$((n + 1))
+  done <<< "$tail_buf"
+
   printf "%s" "$n"
 }
 
 phase_hint_from_output() {
-  local file="$1"
+  local phase="$1"
+  local file="$2"
   local tail_buf
   tail_buf="$(tail -n 120 "$file" 2>/dev/null || true)"
-  if printf "%s" "$tail_buf" | grep -Eqi '(^|[[:space:]])(ERROR:|error:)'; then
+  if [[ "$(count_error_events "$phase" "$file")" -gt 0 ]]; then
     printf "error"
   elif printf "%s" "$tail_buf" | grep -Eqi '(^exec$|succeeded in [0-9]+ms|in_progress)'; then
     printf "executing"
@@ -667,14 +704,22 @@ launch_in_new_process_group() {
 kill_pid_or_group() {
   local pid="$1"
   local pgid="$2"
+  local self_pgid=""
+  self_pgid="$(ps -o pgid= "$$" 2>/dev/null | tr -d '[:space:]' || true)"
 
-  if [[ -n "$pgid" ]]; then
+  if [[ -n "$pgid" && "$pgid" != "$self_pgid" ]]; then
     kill -TERM "-$pgid" >/dev/null 2>&1 || true
     sleep 1
     kill -KILL "-$pgid" >/dev/null 2>&1 || true
   else
+    if have_cmd pkill; then
+      pkill -TERM -P "$pid" >/dev/null 2>&1 || true
+    fi
     kill "$pid" >/dev/null 2>&1 || true
     sleep 1
+    if have_cmd pkill; then
+      pkill -KILL -P "$pid" >/dev/null 2>&1 || true
+    fi
     kill -KILL "$pid" >/dev/null 2>&1 || true
   fi
 }
@@ -774,6 +819,7 @@ compute_scope_allowed_files() {
       {
         git diff --name-only 2>/dev/null || true
         git diff --cached --name-only 2>/dev/null || true
+        git ls-files --others --exclude-standard 2>/dev/null || true
       } | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u > "$out_file"
       ;;
     base)
@@ -805,8 +851,8 @@ print_heartbeat() {
   local action message phase_label clock alert_detail
 
   cmds="$(count_exec_events "$out_file")"
-  errs="$(count_error_events "$out_file")"
-  phase_hint="$(phase_hint_from_output "$out_file")"
+  errs="$(count_error_events "$phase" "$out_file")"
+  phase_hint="$(phase_hint_from_output "$phase" "$out_file")"
   clock="$(format_elapsed_clock "$elapsed")"
 
   if [[ "$phase" == "review" ]]; then
@@ -866,9 +912,10 @@ run_with_heartbeat() {
   : > "$out_file"
 
   set +e
-  local child_pid launch_isolated
+  local child_pid launch_isolated phase_timeout
   LAUNCH_CHILD_PID=""
   LAUNCH_ISOLATED="0"
+  LAUNCH_CHILD_PGID=""
   launch_in_new_process_group "$out_file" "$stdin_file" "$@"
   child_pid="$LAUNCH_CHILD_PID"
   launch_isolated="$LAUNCH_ISOLATED"
@@ -877,7 +924,15 @@ run_with_heartbeat() {
   if [[ "$launch_isolated" == "1" ]]; then
     pgid="$(ps -o pgid= "$child_pid" 2>/dev/null | tr -d '[:space:]' || true)"
   fi
+  LAUNCH_CHILD_PGID="$pgid"
   set -e
+
+  phase_timeout=0
+  if [[ "$phase" == "review" ]]; then
+    phase_timeout="$REVIEW_TIMEOUT_SECONDS"
+  elif [[ "$phase" == "fix" ]]; then
+    phase_timeout="$FIX_TIMEOUT_SECONDS"
+  fi
 
   local elapsed=0
   local last_action=""
@@ -899,6 +954,16 @@ run_with_heartbeat() {
     fi
     last_action="$HEARTBEAT_ACTION"
 
+    if [[ "$phase_timeout" -gt 0 && "$elapsed" -ge "$phase_timeout" ]]; then
+      warn "${phase} timed out after ${phase_timeout}s in round ${round}; terminating active command."
+      kill_pid_or_group "$child_pid" "$pgid"
+      wait "$child_pid" >/dev/null 2>&1 || true
+      LAUNCH_CHILD_PID=""
+      LAUNCH_ISOLATED="0"
+      LAUNCH_CHILD_PGID=""
+      return 124
+    fi
+
     # Steering during in-flight command:
     # - stop is applied immediately
     # - other control updates are applied between rounds
@@ -907,6 +972,9 @@ run_with_heartbeat() {
       warn "Control requested stop during ${phase}; terminating active command."
       kill_pid_or_group "$child_pid" "$pgid"
       wait "$child_pid" >/dev/null 2>&1 || true
+      LAUNCH_CHILD_PID=""
+      LAUNCH_ISOLATED="0"
+      LAUNCH_CHILD_PGID=""
       return 130
     fi
   done
@@ -915,7 +983,32 @@ run_with_heartbeat() {
   wait "$child_pid"
   local ec=$?
   set -e
+  LAUNCH_CHILD_PID=""
+  LAUNCH_ISOLATED="0"
+  LAUNCH_CHILD_PGID=""
   return $ec
+}
+
+run_with_timeout_retry() {
+  local phase="$1"
+  local round="$2"
+  local out_file="$3"
+  local stdin_file="$4"
+  local retries="$5"
+  shift 5
+
+  local ec=0
+  local retry_count=0
+  while true; do
+    run_with_heartbeat "$phase" "$round" "$out_file" "$stdin_file" "$@"
+    ec=$?
+    if [[ "$ec" -eq 124 && "$phase" == "review" && "$retry_count" -lt "$retries" ]]; then
+      retry_count=$((retry_count + 1))
+      warn "Review timed out; retrying (${retry_count}/${retries})."
+      continue
+    fi
+    return "$ec"
+  done
 }
 
 is_review_clean_output() {
@@ -941,8 +1034,8 @@ is_review_clean_output() {
     return 1
   fi
 
-  # Any explicit errors means not clean.
-  if grep -Eqi '(^|[[:space:]])(ERROR:|error:)' "$file"; then
+  # Fatal review errors in the recent tail region mean not clean.
+  if [[ "$(count_error_events "review" "$file")" -gt 0 ]]; then
     return 1
   fi
 
@@ -1241,7 +1334,7 @@ run_review() {
     # Default to plain mode because current codex review commonly rejects prompt
     # with --uncommitted/--base/--commit.
     if [[ "$REVIEW_PROMPT_MODE" == "plain" ]]; then
-      run_with_heartbeat "review" "$round" "$out_file" "" codex review "${args[@]}"
+      run_with_timeout_retry "review" "$round" "$out_file" "" "$REVIEW_TIMEOUT_RETRIES" codex review "${args[@]}"
       ec=$?
     else
       local prompt
@@ -1249,12 +1342,12 @@ run_review() {
       local review_prompt_file="${RUN_DIR}/round-${round}-review-prompt.txt"
       printf "%s" "$prompt" > "$review_prompt_file"
 
-      run_with_heartbeat "review" "$round" "$out_file" "$review_prompt_file" codex review "${args[@]}" -
+      run_with_timeout_retry "review" "$round" "$out_file" "$review_prompt_file" "$REVIEW_TIMEOUT_RETRIES" codex review "${args[@]}" -
       ec=$?
       if [[ "$ec" -ne 0 ]] && grep -q "cannot be used with '\\[PROMPT\\]'" "$out_file"; then
         if [[ "$REVIEW_PROMPT_MODE" == "auto" ]]; then
           warn "codex review prompt input is not supported for this scope on this CLI; retrying without prompt."
-          run_with_heartbeat "review" "$round" "$out_file" "" codex review "${args[@]}"
+          run_with_timeout_retry "review" "$round" "$out_file" "" "$REVIEW_TIMEOUT_RETRIES" codex review "${args[@]}"
           ec=$?
         else
           warn "codex review prompt mode requested, but this CLI/scope combination does not support prompt input."
@@ -1336,7 +1429,21 @@ run_fix() {
 
 on_interrupt() {
   echo ""
-  warn "Interrupted. Exiting gracefully (artifacts kept at $RUN_DIR)."
+  if [[ -n "$LAUNCH_CHILD_PID" ]]; then
+    local pgid="$LAUNCH_CHILD_PGID"
+    if [[ -z "$pgid" && "$LAUNCH_ISOLATED" == "1" ]]; then
+      pgid="$(ps -o pgid= "$LAUNCH_CHILD_PID" 2>/dev/null | tr -d '[:space:]' || true)"
+    fi
+    warn "Interrupted. Terminating active command (pid=$LAUNCH_CHILD_PID)."
+    kill_pid_or_group "$LAUNCH_CHILD_PID" "$pgid"
+    set +e
+    wait "$LAUNCH_CHILD_PID" >/dev/null 2>&1
+    set -e
+    LAUNCH_CHILD_PID=""
+    LAUNCH_ISOLATED="0"
+    LAUNCH_CHILD_PGID=""
+  fi
+  warn "Interrupted. Exiting gracefully (artifacts kept at ${RUN_DIR:-<not-created>})."
   exit 130
 }
 
@@ -1414,6 +1521,26 @@ while [[ $# -gt 0 ]]; do
       HEARTBEAT_SECONDS="$2"
       shift 2
       ;;
+    --review-timeout-seconds)
+      [[ $# -ge 2 ]] || die "--review-timeout-seconds requires <n>"
+      REVIEW_TIMEOUT_SECONDS="$2"
+      shift 2
+      ;;
+    --fix-timeout-seconds)
+      [[ $# -ge 2 ]] || die "--fix-timeout-seconds requires <n>"
+      FIX_TIMEOUT_SECONDS="$2"
+      shift 2
+      ;;
+    --review-timeout-retries)
+      [[ $# -ge 2 ]] || die "--review-timeout-retries requires <n>"
+      REVIEW_TIMEOUT_RETRIES="$2"
+      shift 2
+      ;;
+    --error-scan-tail-lines)
+      [[ $# -ge 2 ]] || die "--error-scan-tail-lines requires <n>"
+      ERROR_SCAN_TAIL_LINES="$2"
+      shift 2
+      ;;
     --control-file)
       [[ $# -ge 2 ]] || die "--control-file requires <path>"
       CONTROL_FILE="$2"
@@ -1443,6 +1570,11 @@ done
 [[ "$MAX_ROUNDS" =~ ^[0-9]+$ ]] || die "--max-rounds must be an integer"
 [[ "$HEARTBEAT_SECONDS" =~ ^[0-9]+$ ]] || die "--heartbeat-seconds must be an integer"
 [[ "$HEARTBEAT_SECONDS" -gt 0 ]] || die "--heartbeat-seconds must be > 0"
+[[ "$REVIEW_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || die "--review-timeout-seconds must be an integer"
+[[ "$FIX_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || die "--fix-timeout-seconds must be an integer"
+[[ "$REVIEW_TIMEOUT_RETRIES" =~ ^[0-9]+$ ]] || die "--review-timeout-retries must be an integer"
+[[ "$ERROR_SCAN_TAIL_LINES" =~ ^[0-9]+$ ]] || die "--error-scan-tail-lines must be an integer"
+[[ "$ERROR_SCAN_TAIL_LINES" -gt 0 ]] || die "--error-scan-tail-lines must be > 0"
 case "$REVIEW_PROMPT_MODE" in
   plain|prompt|auto) ;;
   *) die "--review-prompt-mode must be one of: plain|prompt|auto" ;;
@@ -1468,6 +1600,10 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo "- Fix selector late:     $FIX_MODEL_LATE"
   echo "- Review prompt mode:    $REVIEW_PROMPT_MODE"
   echo "- Heartbeat seconds:     $HEARTBEAT_SECONDS"
+  echo "- Review timeout sec:    $REVIEW_TIMEOUT_SECONDS"
+  echo "- Fix timeout sec:       $FIX_TIMEOUT_SECONDS"
+  echo "- Review timeout retries:$REVIEW_TIMEOUT_RETRIES"
+  echo "- Error scan tail lines: $ERROR_SCAN_TAIL_LINES"
   echo "- Review model id override: ${REVIEW_MODEL_ID:-<none>}"
   echo "- Fix model id override:    ${FIX_MODEL_ID:-<none>}"
   echo "- Finding fuzzy reconcile:  ${FINDINGS_FUZZY}"
@@ -1534,6 +1670,11 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
   fi
 
   review_effort_used="${LAST_EFFECTIVE_REVIEW_EFFORT:-$review_effort}"
+  if [[ "$review_ec" -eq 124 ]]; then
+    echo "[${round}/${MAX_ROUNDS}] review timed out after retries; skipping fix and continuing."
+    write_meta_json "$meta_file" "$round" "$scope_desc" "$review_model_id" "$review_effort_used" "$fix_model_id" "$fix_effort" "$review_ec" 124 false 0
+    continue
+  fi
 
   findings_file="$RUN_DIR/round-${round}-findings.txt"
   extract_review_findings "$review_file" "$findings_file"
