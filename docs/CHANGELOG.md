@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Session view (Unified): Active session selection now stays sticky during background refresh/search churn, preventing transient table-selection clears from detaching the transcript pane and showing the empty placeholder while the session still exists.
 - Search fields (Unified global search + transcript Find): `Esc` now clears the active field directly when that field has focus, eliminating the system beep and making clear behavior consistent from the keyboard.
 - Transcript Find (`Esc`): pressing `Esc` with an empty Find field now closes the Find bar again (`Close Find (⎋)`), restoring keyboard-only close behavior.
 - Session view (Unified): table selection synchronization now keeps programmatic updates out of manual-selection handling, preventing auto-selection from being disabled by internal selection coalescing.
