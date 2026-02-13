@@ -184,6 +184,7 @@ struct UnifiedSessionsView: View {
 
     @State private var selection: String?
     @State private var tableSelection: Set<String> = []
+    @State private var lastSelectedSource: SessionSource = .codex
 	@State private var sortOrder: [KeyPathComparator<Session>] = []
 	@State private var cachedRows: [Session] = []
 	@State private var columnLayoutID: UUID = UUID()
@@ -335,6 +336,9 @@ struct UnifiedSessionsView: View {
                     updateSelectionBridge()
                     unified.setAppActive(NSApp.isActive)
                     updateFocusedSessionIfNeeded(selectedSession)
+                    if let session = selectedSession {
+                        lastSelectedSource = session.source
+                    }
                     searchCoordinator.setAppActive(NSApp.isActive)
                 }
                 .onDisappear {
@@ -733,7 +737,6 @@ struct UnifiedSessionsView: View {
                 return
             }
 
-            // Allow empty selection when user clicks whitespace; do not force reselection.
             selection = newSel.first
 
             // SwiftUI Table sometimes emits an initial "empty selection" change during mount.
@@ -745,11 +748,22 @@ struct UnifiedSessionsView: View {
             autoSelectEnabled = false
             NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
         }
+			.onChange(of: unified.isIndexing) { wasIndexing, isIndexing in
+				// When indexing finishes, reconcile selection in case a deferred
+				// clear was skipped (the guard in updateCachedRows).
+				if wasIndexing, !isIndexing {
+					updateCachedRows()
+					updateSelectionBridge()
+				}
+			}
 			.onChange(of: unified.sessions) { _, _ in
 				// Update cached rows first, then reconcile selection so auto-select uses fresh data.
 				updateCachedRows()
 				updateSelectionBridge()
 				updateFocusedSessionIfNeeded(selectedSession)
+                if let session = selectedSession {
+                    lastSelectedSource = session.source
+                }
 			}
         .onChange(of: columnVisibility.changeToken) { _, _ in refreshColumnLayout() }
         .onChange(of: showSourceColumn) { _, _ in refreshColumnLayout() }
@@ -766,7 +780,6 @@ struct UnifiedSessionsView: View {
             updateCachedRows()
             let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
             if !q.isEmpty, cachedRows.isEmpty {
-                selection = nil
                 scheduleTableSelectionUpdate([])
                 return
             }
@@ -867,7 +880,7 @@ struct UnifiedSessionsView: View {
     private var transcriptPane: some View {
         ZStack {
             // Base host is always mounted to keep a stable split subview identity
-            TranscriptHostView(kind: selectedSession?.source ?? .codex,
+            TranscriptHostView(kind: selectedSession?.source ?? lastSelectedSource,
                                selection: selection,
                                codexIndexer: codexIndexer,
                                claudeIndexer: claudeIndexer,
@@ -1167,6 +1180,7 @@ struct UnifiedSessionsView: View {
             updateFocusedSessionIfNeeded(nil)
             return
         }
+        lastSelectedSource = s.source
 
         if !searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let immediate = consumeImmediateSelectionJump()
@@ -1225,14 +1239,31 @@ struct UnifiedSessionsView: View {
     }
 
     private func updateCachedRows() {
+        let nextRows: [Session]
         if FeatureFlags.coalesceListResort {
             // unified.sessions is already sorted by the view model's descriptor
-            cachedRows = rows
+            nextRows = rows
         } else {
-            cachedRows = rows.sorted(using: sortOrder)
+            nextRows = rows.sorted(using: sortOrder)
         }
+
+        let query = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shouldHoldRowsDuringRunningSearch =
+            !query.isEmpty
+            && searchCoordinator.isRunning
+            && nextRows.isEmpty
+            && !cachedRows.isEmpty
+
+        if !shouldHoldRowsDuringRunningSearch {
+            cachedRows = nextRows
+        }
+
         // If current selection disappeared from list, auto-select first row.
-        if let sel = selection, !cachedRows.contains(where: { $0.id == sel }) {
+        // Don't clear during transient indexing gaps — the session may reappear momentarily.
+        if let sel = selection,
+           !cachedRows.contains(where: { $0.id == sel }),
+           !unified.isIndexing,
+           !searchCoordinator.isRunning {
             selection = cachedRows.first?.id
             let desired: Set<String> = selection.map { [$0] } ?? []
             scheduleTableSelectionUpdate(desired)

@@ -89,4 +89,16 @@ final class UnifiedSelectionPolicyTests: XCTestCase {
             )
         )
     }
+
+    func testDoesNotPreserveProgrammaticSelectionMutation() {
+        XCTAssertFalse(
+            UnifiedSelectionPolicy.shouldPreserveSelectionOnEmptyTableMutation(
+                oldSelection: ["session-1"],
+                newSelection: [],
+                isProgrammaticUpdate: true,
+                isIndexing: false,
+                cachedRowCount: 5
+            )
+        )
+    }
 }
