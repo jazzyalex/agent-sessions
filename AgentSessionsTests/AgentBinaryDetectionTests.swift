@@ -53,3 +53,69 @@ final class AgentBinaryDetectionTests: XCTestCase {
         XCTAssertTrue(AgentEnablement.binaryDetectedInPATH(binURL.path, pathOverride: nil))
     }
 }
+
+final class FocusedSessionRefreshIntervalsTests: XCTestCase {
+    func testCodexIntervalMatrix() {
+        XCTAssertEqual(
+            UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .codex, appIsActive: true, onAC: true),
+            1
+        )
+        XCTAssertEqual(
+            UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .codex, appIsActive: true, onAC: false),
+            3
+        )
+        XCTAssertEqual(
+            UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .codex, appIsActive: false, onAC: true),
+            10
+        )
+        XCTAssertEqual(
+            UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .codex, appIsActive: false, onAC: false),
+            60
+        )
+    }
+
+    func testClaudeIntervalMatrix() {
+        XCTAssertEqual(
+            UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .claude, appIsActive: true, onAC: true),
+            2
+        )
+        XCTAssertEqual(
+            UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .claude, appIsActive: true, onAC: false),
+            5
+        )
+        XCTAssertEqual(
+            UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .claude, appIsActive: false, onAC: true),
+            15
+        )
+        XCTAssertEqual(
+            UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .claude, appIsActive: false, onAC: false),
+            60
+        )
+    }
+
+    func testEveryAgentSourceHasResolvableIntervalsForFutureFocusedMonitoring() {
+        for source in SessionSource.allCases {
+            let activeAC = UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(
+                for: source,
+                appIsActive: true,
+                onAC: true
+            )
+            let inactiveBattery = UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(
+                for: source,
+                appIsActive: false,
+                onAC: false
+            )
+            XCTAssertGreaterThan(activeAC, 0, "Expected active AC interval for \(source.rawValue)")
+            XCTAssertGreaterThan(inactiveBattery, 0, "Expected inactive battery interval for \(source.rawValue)")
+        }
+    }
+
+    func testFocusedMonitoringCapabilityEnabledForAllSources() {
+        for source in SessionSource.allCases {
+            XCTAssertTrue(
+                UnifiedSessionIndexer.focusedSessionMonitoringSupported(for: source),
+                "Expected focused monitor capability for \(source.rawValue)"
+            )
+        }
+    }
+}

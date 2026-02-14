@@ -1261,6 +1261,7 @@ struct UnifiedSessionsView: View {
 
     private func handleWindowWillClose() {
         isWindowKey = false
+        unified.setFocusedSession(nil)
     }
 
     private func updateFocusedSessionIfNeeded(_ session: Session?) {

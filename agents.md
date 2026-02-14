@@ -54,6 +54,12 @@ Suggested build steps
 - Xcode: Product → Build (active scheme).
 - CLI: `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build` (or use your configured build task).
 
+### Stable XCTest Invocation (avoid intermittent macOS code-sign flakes)
+- Prefer the stable test wrapper: `./scripts/xcode_test_stable.sh`.
+- Equivalent direct command:
+  - `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath "$PWD/.deriveddata-tests" -parallel-testing-enabled NO clean test`
+- Rationale: isolates test artifacts/signing state from shared `DerivedData`, which avoids intermittent `AgentSessionsTests.xctest` nested-signature failures.
+
 ## Conventional Commits and Trailers
 - Use Conventional Commits for every commit (feat, fix, docs, chore, etc.).
 - Include trailers in the commit body:
@@ -137,6 +143,10 @@ If you modify `AgentSessions.xcodeproj/project.pbxproj` directly (NOT using the 
 ## Safety & Execution
 - Avoid shelling out when a safe `Process` + argument list is possible. Use timeouts and clear, inline error messages for failures.
 - Never run network operations without an explicit user action and clear UX affordances.
+
+## Feature Flags Policy
+- Do not add feature flags, rollout flags, kill switches, or behavior gates unless the user explicitly asks for feature flags in the current request.
+- When uncertain, implement the behavior directly without flags and call out any risks in the summary.
 
 
 ## Pattern Search & Deletion Safety (General)

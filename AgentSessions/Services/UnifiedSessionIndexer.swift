@@ -5,8 +5,40 @@ import SwiftUI
 import IOKit.ps
 #endif
 
-/// Aggregates Codex and Claude sessions into a single list with unified filters and search.
+/// Aggregates all agent sessions into a single list with unified filters and search.
 final class UnifiedSessionIndexer: ObservableObject {
+    struct FocusedSessionRefreshIntervals {
+        let activeOnAC: TimeInterval
+        let activeOnBattery: TimeInterval
+        let inactiveOnAC: TimeInterval
+        let inactiveOnBattery: TimeInterval
+    }
+
+    private static let defaultFocusedSessionRefreshIntervals = FocusedSessionRefreshIntervals(
+        activeOnAC: 5,
+        activeOnBattery: 8,
+        inactiveOnAC: 15,
+        inactiveOnBattery: 60
+    )
+    private static let focusedSessionRefreshIntervalsBySource: [SessionSource: FocusedSessionRefreshIntervals] = [
+        .codex: FocusedSessionRefreshIntervals(
+            activeOnAC: 1,
+            activeOnBattery: 3,
+            inactiveOnAC: 10,
+            inactiveOnBattery: 60
+        ),
+        .claude: FocusedSessionRefreshIntervals(
+            activeOnAC: 2,
+            activeOnBattery: 5,
+            inactiveOnAC: 15,
+            inactiveOnBattery: 60
+        ),
+        .gemini: defaultFocusedSessionRefreshIntervals,
+        .opencode: defaultFocusedSessionRefreshIntervals,
+        .copilot: defaultFocusedSessionRefreshIntervals,
+        .droid: defaultFocusedSessionRefreshIntervals,
+        .openclaw: defaultFocusedSessionRefreshIntervals
+    ]
     private struct FileSignature: Equatable {
         let path: String
         let modifiedAt: Date
@@ -17,6 +49,160 @@ final class UnifiedSessionIndexer: ObservableObject {
         let sessionID: String
         let filePath: String
     }
+
+    private enum FocusedReloadTrigger {
+        case selection
+        case monitor
+        case manual
+    }
+
+    private struct FocusedMonitorCapability {
+        let supportsFocusedMonitoring: () -> Bool
+        let signatureSource: @MainActor (UnifiedSessionIndexer, FocusedSessionContext) -> String?
+        let reloadFocusedSession: @MainActor (UnifiedSessionIndexer, FocusedSessionContext, FocusedReloadTrigger) -> Void
+    }
+
+    private static let focusedMonitorCapabilityBySource: [SessionSource: FocusedMonitorCapability] = [
+        .codex: FocusedMonitorCapability(
+            supportsFocusedMonitoring: { true },
+            signatureSource: { indexer, context in
+                indexer.sourceAwareFocusedSignaturePath(for: context)
+            },
+            reloadFocusedSession: { indexer, context, trigger in
+                guard indexer.codexAgentEnabled else { return }
+                let reason: SessionIndexer.ReloadReason
+                switch trigger {
+                case .selection:
+                    reason = .selection
+                case .monitor:
+                    reason = .focusedSessionMonitor
+                case .manual:
+                    reason = .manualRefresh
+                }
+                indexer.codex.reloadSession(id: context.sessionID, force: true, reason: reason)
+            }
+        ),
+        .claude: FocusedMonitorCapability(
+            supportsFocusedMonitoring: { true },
+            signatureSource: { indexer, context in
+                indexer.sourceAwareFocusedSignaturePath(for: context)
+            },
+            reloadFocusedSession: { indexer, context, trigger in
+                guard indexer.claudeAgentEnabled else { return }
+                let force = (trigger != .selection)
+                let reason: ClaudeSessionIndexer.ReloadReason
+                switch trigger {
+                case .selection:
+                    reason = .selection
+                case .monitor:
+                    reason = .focusedSessionMonitor
+                case .manual:
+                    reason = .manualRefresh
+                }
+                indexer.claude.reloadSession(id: context.sessionID, force: force, reason: reason)
+            }
+        ),
+        .gemini: FocusedMonitorCapability(
+            supportsFocusedMonitoring: { true },
+            signatureSource: { indexer, context in
+                indexer.sourceAwareFocusedSignaturePath(for: context)
+            },
+            reloadFocusedSession: { indexer, context, trigger in
+                guard indexer.geminiAgentEnabled else { return }
+                let force = (trigger != .selection)
+                let reason: GeminiSessionIndexer.ReloadReason
+                switch trigger {
+                case .selection:
+                    reason = .selection
+                case .monitor:
+                    reason = .focusedSessionMonitor
+                case .manual:
+                    reason = .manualRefresh
+                }
+                indexer.gemini.reloadSession(id: context.sessionID, force: force, reason: reason)
+            }
+        ),
+        .opencode: FocusedMonitorCapability(
+            supportsFocusedMonitoring: { true },
+            signatureSource: { indexer, context in
+                indexer.sourceAwareFocusedSignaturePath(for: context)
+            },
+            reloadFocusedSession: { indexer, context, trigger in
+                guard indexer.openCodeAgentEnabled else { return }
+                let force = (trigger != .selection)
+                let reason: OpenCodeSessionIndexer.ReloadReason
+                switch trigger {
+                case .selection:
+                    reason = .selection
+                case .monitor:
+                    reason = .focusedSessionMonitor
+                case .manual:
+                    reason = .manualRefresh
+                }
+                indexer.opencode.reloadSession(id: context.sessionID, force: force, reason: reason)
+            }
+        ),
+        .copilot: FocusedMonitorCapability(
+            supportsFocusedMonitoring: { true },
+            signatureSource: { indexer, context in
+                indexer.sourceAwareFocusedSignaturePath(for: context)
+            },
+            reloadFocusedSession: { indexer, context, trigger in
+                guard indexer.copilotAgentEnabled else { return }
+                let force = (trigger != .selection)
+                let reason: CopilotSessionIndexer.ReloadReason
+                switch trigger {
+                case .selection:
+                    reason = .selection
+                case .monitor:
+                    reason = .focusedSessionMonitor
+                case .manual:
+                    reason = .manualRefresh
+                }
+                indexer.copilot.reloadSession(id: context.sessionID, force: force, reason: reason)
+            }
+        ),
+        .droid: FocusedMonitorCapability(
+            supportsFocusedMonitoring: { true },
+            signatureSource: { indexer, context in
+                indexer.sourceAwareFocusedSignaturePath(for: context)
+            },
+            reloadFocusedSession: { indexer, context, trigger in
+                guard indexer.droidAgentEnabled else { return }
+                let force = (trigger != .selection)
+                let reason: DroidSessionIndexer.ReloadReason
+                switch trigger {
+                case .selection:
+                    reason = .selection
+                case .monitor:
+                    reason = .focusedSessionMonitor
+                case .manual:
+                    reason = .manualRefresh
+                }
+                indexer.droid.reloadSession(id: context.sessionID, force: force, reason: reason)
+            }
+        ),
+        .openclaw: FocusedMonitorCapability(
+            supportsFocusedMonitoring: { true },
+            signatureSource: { indexer, context in
+                indexer.sourceAwareFocusedSignaturePath(for: context)
+            },
+            reloadFocusedSession: { indexer, context, trigger in
+                guard indexer.openClawAgentEnabled else { return }
+                let force = (trigger != .selection)
+                let reason: OpenClawSessionIndexer.ReloadReason
+                switch trigger {
+                case .selection:
+                    reason = .selection
+                case .monitor:
+                    reason = .focusedSessionMonitor
+                case .manual:
+                    reason = .manualRefresh
+                }
+                indexer.openclaw.reloadSession(id: context.sessionID, force: force, reason: reason)
+            }
+        )
+    ]
 
     private actor ProviderRefreshCoordinator {
         enum RequestResult {
@@ -211,8 +397,8 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var lastSeenCodexSignature: FileSignature? = nil
     private var lastSeenClaudeSignature: FileSignature? = nil
     private var focusedSessionContext: FocusedSessionContext? = nil
-    private var lastFocusedCodexSignature: FileSignature? = nil
-    private var lastFocusedClaudeSignature: FileSignature? = nil
+    private var lastFocusedSignatureBySource: [SessionSource: FileSignature] = [:]
+    private var consecutiveMissingFocusedSignatureCountBySource: [SessionSource: Int] = [:]
     private var lastMonitorRefreshBySource: [SessionSource: Date] = [:]
     private var pendingMonitorRefreshSignatureBySource: [SessionSource: FileSignature] = [:]
     private var pendingRefreshSourcesWhileInactive: Set<SessionSource> = []
@@ -620,26 +806,20 @@ final class UnifiedSessionIndexer: ObservableObject {
         focusedSessionMonitorTask = nil
 
         guard let context = newContext else {
-            lastFocusedCodexSignature = nil
-            lastFocusedClaudeSignature = nil
+            lastFocusedSignatureBySource.removeAll()
+            consecutiveMissingFocusedSignatureCountBySource.removeAll()
             return
         }
         guard Self.supportsFocusedSessionMonitoring(source: context.source) else {
+            lastFocusedSignatureBySource.removeAll()
+            consecutiveMissingFocusedSignatureCountBySource.removeAll()
             return
         }
 
-        switch context.source {
-        case .codex:
-            lastFocusedCodexSignature = fileSignature(atPath: context.filePath)
-            lastFocusedClaudeSignature = nil
-            refreshFocusedCodexSession(reason: .selection)
-        case .claude:
-            lastFocusedClaudeSignature = fileSignature(atPath: context.filePath)
-            lastFocusedCodexSignature = nil
-            refreshFocusedClaudeSession(force: false)
-        default:
-            return
-        }
+        let initialSignature = focusedFileSignature(for: context)
+        updateFocusedSignatureBaseline(for: context.source, signature: initialSignature)
+        refreshFocusedSession(context: context, trigger: .selection)
+
         focusedSessionMonitorTask = Task.detached(priority: .utility) { [weak self, context] in
             await self?.runFocusedSessionMonitorLoop(context: context)
         }
@@ -663,6 +843,11 @@ final class UnifiedSessionIndexer: ObservableObject {
                 for source in pending {
                     requestProviderRefresh(source: source, reason: "deferred-foreground", trigger: .monitor)
                 }
+            }
+
+            if let context = focusedSessionContext,
+               Self.supportsFocusedSessionMonitoring(source: context.source) {
+                scheduleImmediateFocusedSessionCheck(context: context, trigger: .monitor)
             }
         } else {
             newSessionMonitorTask?.cancel()
@@ -692,46 +877,17 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private func runFocusedSessionMonitorLoop(context: FocusedSessionContext) async {
         while !Task.isCancelled {
-            let currentContext = await MainActor.run { [weak self] in
-                self?.focusedSessionContext
+            let shouldContinue = await MainActor.run { [weak self] in
+                guard let self, let currentContext = self.focusedSessionContext else { return false }
+                return currentContext == context && Self.supportsFocusedSessionMonitoring(source: currentContext.source)
             }
-            guard let currentContext, currentContext == context, Self.supportsFocusedSessionMonitoring(source: currentContext.source) else { return }
+            guard shouldContinue else { return }
 
-            let signature = fileSignature(atPath: currentContext.filePath)
-            let shouldReload = await MainActor.run { [weak self] () -> Bool in
-                guard let self else { return false }
-                switch currentContext.source {
-                case .codex:
-                    if signature != self.lastFocusedCodexSignature {
-                        self.lastFocusedCodexSignature = signature
-                        return signature != nil
-                    }
-                case .claude:
-                    if signature != self.lastFocusedClaudeSignature {
-                        self.lastFocusedClaudeSignature = signature
-                        return signature != nil
-                    }
-                default:
-                    return false
-                }
-                return false
-            }
-            if shouldReload {
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    switch currentContext.source {
-                    case .codex:
-                        self.refreshFocusedCodexSession(reason: .focusedSessionMonitor)
-                    case .claude:
-                        self.refreshFocusedClaudeSession(force: true)
-                    default:
-                        break
-                    }
-                }
-            }
+            await performFocusedSessionCheck(context: context, trigger: .monitor)
 
             let intervalSeconds = await MainActor.run { [weak self] in
-                self?.focusedSessionRefreshIntervalSeconds() ?? 15
+                self?.focusedSessionMonitorSleepSeconds(for: context.source)
+                    ?? Self.focusedSessionRefreshIntervalSeconds(for: context.source, appIsActive: false, onAC: false)
             }
             try? await Task.sleep(nanoseconds: UInt64(intervalSeconds * 1_000_000_000))
         }
@@ -967,7 +1123,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private func enqueueProviderRefresh(source: SessionSource,
                                         reason: String,
                                         trigger: IndexRefreshTrigger) async {
-        if (source == .codex || source == .claude), trigger == .manual {
+        if trigger == .manual, Self.supportsFocusedSessionMonitoring(source: source) {
             _ = await MainActor.run { [weak self] in
                 self?.pendingManualFocusedReloadSources.insert(source)
             }
@@ -1041,7 +1197,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
 
         let shouldForceFocusedReload = await MainActor.run { [weak self] () -> Bool in
-            guard let self, source == .codex || source == .claude else { return false }
+            guard let self else { return false }
             let hasManualIntent = (trigger == .manual) || self.pendingManualFocusedReloadSources.contains(source)
             if hasManualIntent {
                 self.pendingManualFocusedReloadSources.remove(source)
@@ -1052,11 +1208,11 @@ final class UnifiedSessionIndexer: ObservableObject {
         if shouldForceFocusedReload {
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if source == .codex {
-                    self.refreshFocusedCodexSession(reason: .manualRefresh)
-                } else if source == .claude {
-                    self.refreshFocusedClaudeSession(force: true)
+                guard let context = self.focusedSessionContext,
+                      context.source == source else {
+                    return
                 }
+                self.refreshFocusedSession(context: context, trigger: .manual)
             }
         }
 
@@ -1151,27 +1307,151 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     @MainActor
-    private func focusedSessionRefreshIntervalSeconds() -> TimeInterval {
-        let onAC = Self.onACPower()
-        return (appIsActive && onAC) ? 5 : 15
+    private func focusedSessionRefreshIntervalSeconds(for source: SessionSource) -> TimeInterval {
+        Self.focusedSessionRefreshIntervalSeconds(for: source,
+                                                  appIsActive: appIsActive,
+                                                  onAC: Self.onACPower())
+    }
+
+    static func focusedSessionRefreshIntervalSeconds(for source: SessionSource,
+                                                     appIsActive: Bool,
+                                                     onAC: Bool) -> TimeInterval {
+        let intervals = focusedSessionRefreshIntervalsBySource[source] ?? defaultFocusedSessionRefreshIntervals
+        if appIsActive && onAC { return intervals.activeOnAC }
+        if appIsActive && !onAC { return intervals.activeOnBattery }
+        if !appIsActive && onAC { return intervals.inactiveOnAC }
+        return intervals.inactiveOnBattery
     }
 
     @MainActor
-    private func refreshFocusedCodexSession(reason: SessionIndexer.ReloadReason) {
-        guard codexAgentEnabled else { return }
-        guard let context = focusedSessionContext, context.source == .codex else { return }
-        codex.reloadSession(id: context.sessionID, force: true, reason: reason)
+    private func focusedSessionMonitorSleepSeconds(for source: SessionSource) -> TimeInterval {
+        let base = focusedSessionRefreshIntervalSeconds(for: source)
+        let missingCount = consecutiveMissingFocusedSignatureCountBySource[source] ?? 0
+        guard missingCount > 0 else { return base }
+        let multiplier = pow(2.0, Double(min(max(0, missingCount - 1), 3)))
+        return min(120, max(10, base * multiplier))
     }
 
     @MainActor
-    private func refreshFocusedClaudeSession(force: Bool) {
-        guard claudeAgentEnabled else { return }
-        guard let context = focusedSessionContext, context.source == .claude else { return }
-        claude.reloadSession(id: context.sessionID, force: force)
+    private func focusedMonitorCapability(for source: SessionSource) -> FocusedMonitorCapability? {
+        Self.focusedMonitorCapabilityBySource[source]
+    }
+
+    @MainActor
+    private func refreshFocusedSession(context: FocusedSessionContext, trigger: FocusedReloadTrigger) {
+        guard focusedSessionContext == context else { return }
+        guard let capability = focusedMonitorCapability(for: context.source),
+              capability.supportsFocusedMonitoring() else {
+            return
+        }
+        capability.reloadFocusedSession(self, context, trigger)
+    }
+
+    @MainActor
+    private func focusedFileSignature(for context: FocusedSessionContext) -> FileSignature? {
+        guard let capability = focusedMonitorCapability(for: context.source),
+              capability.supportsFocusedMonitoring(),
+              let path = capability.signatureSource(self, context) else {
+            return nil
+        }
+        return fileSignature(atPath: path)
+    }
+
+    @MainActor
+    private func sourceAwareFocusedSignaturePath(for context: FocusedSessionContext) -> String? {
+        let livePath: String?
+        switch context.source {
+        case .codex:
+            livePath = codex.allSessions.first(where: { $0.id == context.sessionID })?.filePath
+        case .claude:
+            livePath = claude.allSessions.first(where: { $0.id == context.sessionID })?.filePath
+        case .gemini:
+            livePath = gemini.allSessions.first(where: { $0.id == context.sessionID })?.filePath
+        case .opencode:
+            livePath = opencode.allSessions.first(where: { $0.id == context.sessionID })?.filePath
+        case .copilot:
+            livePath = copilot.allSessions.first(where: { $0.id == context.sessionID })?.filePath
+        case .droid:
+            livePath = droid.allSessions.first(where: { $0.id == context.sessionID })?.filePath
+        case .openclaw:
+            livePath = openclaw.allSessions.first(where: { $0.id == context.sessionID })?.filePath
+        }
+        if let livePath, !livePath.isEmpty { return livePath }
+        return context.filePath
+    }
+
+    @MainActor
+    private func updateFocusedSignatureBaseline(for source: SessionSource, signature: FileSignature?) {
+        lastFocusedSignatureBySource.removeAll()
+        consecutiveMissingFocusedSignatureCountBySource.removeAll()
+        if let signature {
+            lastFocusedSignatureBySource[source] = signature
+            consecutiveMissingFocusedSignatureCountBySource[source] = 0
+        } else {
+            consecutiveMissingFocusedSignatureCountBySource[source] = 1
+        }
+    }
+
+    @MainActor
+    private func registerFocusedSignatureObservation(context: FocusedSessionContext,
+                                                     signature: FileSignature?) -> Bool {
+        guard focusedSessionContext == context else { return false }
+        let source = context.source
+        let previous = lastFocusedSignatureBySource[source]
+        if previous != signature {
+            if let signature {
+                lastFocusedSignatureBySource[source] = signature
+                consecutiveMissingFocusedSignatureCountBySource[source] = 0
+                return true
+            }
+            lastFocusedSignatureBySource.removeValue(forKey: source)
+            let next = (consecutiveMissingFocusedSignatureCountBySource[source] ?? 0) + 1
+            consecutiveMissingFocusedSignatureCountBySource[source] = next
+            return false
+        }
+        if signature == nil {
+            let next = (consecutiveMissingFocusedSignatureCountBySource[source] ?? 0) + 1
+            consecutiveMissingFocusedSignatureCountBySource[source] = next
+        } else {
+            consecutiveMissingFocusedSignatureCountBySource[source] = 0
+        }
+        return false
+    }
+
+    @MainActor
+    private func scheduleImmediateFocusedSessionCheck(context: FocusedSessionContext,
+                                                      trigger: FocusedReloadTrigger) {
+        Task.detached(priority: .utility) { [weak self] in
+            await self?.performFocusedSessionCheck(context: context, trigger: trigger)
+        }
+    }
+
+    private func performFocusedSessionCheck(context: FocusedSessionContext,
+                                            trigger: FocusedReloadTrigger) async {
+        let signature = await MainActor.run { [weak self] () -> FileSignature? in
+            guard let self else { return nil }
+            return self.focusedFileSignature(for: context)
+        }
+
+        let shouldReload = await MainActor.run { [weak self] () -> Bool in
+            guard let self else { return false }
+            return self.registerFocusedSignatureObservation(context: context, signature: signature)
+        }
+        guard shouldReload else { return }
+
+        await MainActor.run { [weak self] in
+            guard let self else { return }
+            self.refreshFocusedSession(context: context, trigger: trigger)
+        }
+    }
+
+    static func focusedSessionMonitoringSupported(for source: SessionSource) -> Bool {
+        guard let capability = focusedMonitorCapabilityBySource[source] else { return false }
+        return capability.supportsFocusedMonitoring()
     }
 
     private static func supportsFocusedSessionMonitoring(source: SessionSource) -> Bool {
-        source == .codex || source == .claude
+        focusedSessionMonitoringSupported(for: source)
     }
 
     @MainActor

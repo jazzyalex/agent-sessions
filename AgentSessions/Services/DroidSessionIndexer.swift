@@ -47,6 +47,9 @@ final class DroidSessionIndexer: ObservableObject, SessionIndexerProtocol, @unch
     private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
     private var refreshToken = UUID()
+    private var reloadingSessionIDs: Set<String> = []
+    private let reloadLock = NSLock()
+    private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
 
     init() {
         let sessions = UserDefaults.standard.string(forKey: PreferencesKey.Paths.droidSessionsRootOverride) ?? ""
@@ -201,43 +204,131 @@ final class DroidSessionIndexer: ObservableObject, SessionIndexerProtocol, @unch
         transcriptCache.set(updated.id, transcript: transcript)
     }
 
-    func reloadSession(id: String) {
-        guard let existing = allSessions.first(where: { $0.id == id }) else { return }
-        let url = URL(fileURLWithPath: existing.filePath)
-        isLoadingSession = true
-	        loadingSessionID = id
-	        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
-	        ioQueue.async {
-	            let parsed = DroidSessionParser.parseFileFull(at: url, forcedID: id) ?? existing
-	            Task { @MainActor [weak self] in
-	                guard let self else { return }
-	                if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
-	                    let current = self.allSessions[idx]
-	                    let merged = Session(
-	                        id: parsed.id,
-	                        source: parsed.source,
-	                        startTime: parsed.startTime ?? current.startTime,
-	                        endTime: parsed.endTime ?? current.endTime,
-	                        model: parsed.model ?? current.model,
-	                        filePath: parsed.filePath,
-	                        fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
-	                        eventCount: max(current.eventCount, parsed.nonMetaCount),
-	                        events: parsed.events,
-	                        cwd: current.lightweightCwd ?? parsed.cwd,
-	                        repoName: current.repoName,
-	                        lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
-	                        lightweightCommands: current.lightweightCommands ?? parsed.lightweightCommands
-	                    )
-	                    self.allSessions[idx] = merged
+    enum ReloadReason: String {
+        case selection
+        case focusedSessionMonitor
+        case manualRefresh
+    }
 
-	                    let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
-	                    let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: merged, filters: filters, mode: .normal)
-	                    self.transcriptCache.set(merged.id, transcript: transcript)
-	                }
-	                self.recomputeNow()
-	                self.isLoadingSession = false
-	                self.loadingSessionID = nil
-	            }
-	        }
-	    }
+    func reloadSession(id: String,
+                       force: Bool = false,
+                       reason: ReloadReason = .selection) {
+        reloadLock.lock()
+        if reloadingSessionIDs.contains(id) {
+            reloadLock.unlock()
+            return
+        }
+        reloadingSessionIDs.insert(id)
+        reloadLock.unlock()
+
+        let existingSnapshot: Session? = {
+            if Thread.isMainThread {
+                return self.allSessions.first(where: { $0.id == id })
+            }
+            var session: Session?
+            DispatchQueue.main.sync {
+                session = self.allSessions.first(where: { $0.id == id })
+            }
+            return session
+        }()
+
+        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        ioQueue.async {
+            defer {
+                self.reloadLock.lock()
+                self.reloadingSessionIDs.remove(id)
+                self.reloadLock.unlock()
+            }
+
+            guard let existing = existingSnapshot,
+                  FileManager.default.fileExists(atPath: existing.filePath) else {
+                return
+            }
+
+            let hasLoadedEvents = !existing.events.isEmpty
+            if hasLoadedEvents && !force { return }
+
+            let url = URL(fileURLWithPath: existing.filePath)
+            let preParseStat = Self.fileStat(for: url)
+            self.reloadLock.lock()
+            let lastReloadStat = self.lastFullReloadFileStatsBySessionID[id]
+            self.reloadLock.unlock()
+
+            if force,
+               reason != .manualRefresh,
+               hasLoadedEvents,
+               let preParseStat,
+               let lastReloadStat,
+               preParseStat == lastReloadStat {
+                return
+            }
+
+            let shouldSurfaceLoadingState = reason == .manualRefresh || !hasLoadedEvents
+            if shouldSurfaceLoadingState {
+                Task { @MainActor [weak self] in
+                    self?.isLoadingSession = true
+                    self?.loadingSessionID = id
+                }
+            }
+
+            let parsed = DroidSessionParser.parseFileFull(at: url, forcedID: id) ?? existing
+            let postParseStat = Self.fileStat(for: url)
+            self.reloadLock.lock()
+            if let preParseStat {
+                self.lastFullReloadFileStatsBySessionID[id] = preParseStat
+            } else {
+                self.lastFullReloadFileStatsBySessionID.removeValue(forKey: id)
+            }
+            self.reloadLock.unlock()
+            if preParseStat != postParseStat {
+                #if DEBUG
+                print("ℹ️ Droid file changed during reload; next monitor tick will retry")
+                #endif
+            }
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer {
+                    if shouldSurfaceLoadingState, self.loadingSessionID == id {
+                        self.isLoadingSession = false
+                        self.loadingSessionID = nil
+                    }
+                }
+
+                if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+                    let current = self.allSessions[idx]
+                    let merged = Session(
+                        id: parsed.id,
+                        source: parsed.source,
+                        startTime: parsed.startTime ?? current.startTime,
+                        endTime: parsed.endTime ?? current.endTime,
+                        model: parsed.model ?? current.model,
+                        filePath: parsed.filePath,
+                        fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
+                        eventCount: max(current.eventCount, parsed.nonMetaCount),
+                        events: parsed.events,
+                        cwd: current.lightweightCwd ?? parsed.cwd,
+                        repoName: current.repoName,
+                        lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
+                        lightweightCommands: current.lightweightCommands ?? parsed.lightweightCommands
+                    )
+                    self.allSessions[idx] = merged
+
+                    let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
+                    let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: merged, filters: filters, mode: .normal)
+                    self.transcriptCache.set(merged.id, transcript: transcript)
+                }
+                self.recomputeNow()
+            }
+        }
+    }
+
+    private static func fileStat(for url: URL) -> SessionFileStat? {
+        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+              let modified = values.contentModificationDate else {
+            return nil
+        }
+        let size = Int64(values.fileSize ?? 0)
+        return SessionFileStat(mtime: Int64(modified.timeIntervalSince1970), size: size)
+    }
 }

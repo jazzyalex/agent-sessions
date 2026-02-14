@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Sessions (Unified): Key-window resign no longer clears focused session state, preventing missed active-transcript updates after returning to the app/window.
+- Sessions (Unified): Focused active-session monitoring is now capability-driven per source, with one key-window-selected session monitored at high cadence and deterministic stop/start behavior across window/app activation changes.
+- Sessions (Gemini/OpenCode/Copilot/Droid/OpenClaw): Focused-session reloads now use in-flight dedupe, unchanged-file fast-skip, and monitor-safe reload behavior that avoids loading-overlay flicker for already-rendered transcripts.
 - Session view (Unified): Replaced the table-selection bridge with canonical ID-driven selection so transient row churn no longer clears active transcript selection, and transcript host routing now stays pinned to canonical source resolution.
 - Session view (Unified): Active session selection now stays sticky during background refresh/search churn, preventing transient table-selection clears from detaching the transcript pane and showing the empty placeholder while the session still exists.
 - Search fields (Unified global search + transcript Find): `Esc` now clears the active field directly when that field has focus, eliminating the system beep and making clear behavior consistent from the keyboard.
@@ -32,6 +35,7 @@ All notable changes to this project will be documented in this file.
 - Usage tracking/menu bar: Codex and Claude polling now continues when usage is visible (including active in-app strip visibility), while inactive/background polling remains tied to that specific agent being shown in the menu bar; Codex menu-background polling also now re-seeds to newer JSONL session files instead of stalling on an older file.
 - Sessions (Codex): Active selected sessions now refresh tails faster (focused-file monitoring with adaptive 5s/15s cadence), and `Refresh Sessions` now forces a full reload of the selected Codex transcript so newest prompts/outputs appear without reselection.
 - Sessions (Claude): Focused selected sessions now use the same focused-file monitor path as Codex, forcing selected-session reloads when the active JSONL changes so live Claude output keeps the transcript pane populated.
+- Sessions (Unified/Codex/Claude): Focused-session monitor cadence is now source-aware (Codex faster than Claude) with distinct active/inactive and AC/battery intervals, and monitor interval policy is now defined for every agent source to simplify future focused-monitor support expansion.
 - Sessions (Codex): Fixed a forced-reload dedupe race for active-session monitoring so follow-up tail reloads are not skipped when JSONL files change during parsing.
 - Startup stability: Hardened launch-time observer/task lifecycle for analytics/onboarding and made updater-controller startup ownership explicit to reduce intermittent launch EXC_BAD_ACCESS crashes.
 - Analytics: Kept the analytics-toggle observer active across main-window close/reopen so menu/shortcut toggles continue working for the full app session.
