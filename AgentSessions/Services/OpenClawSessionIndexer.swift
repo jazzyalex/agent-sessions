@@ -41,6 +41,9 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
     private var cancellables = Set<AnyCancellable>()
     private var previewMTimeByID: [String: Date] = [:]
     private var refreshToken = UUID()
+    private var reloadingSessionIDs: Set<String> = []
+    private let reloadLock = NSLock()
+    private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
 
     init() {
         let customRoot = UserDefaults.standard.string(forKey: PreferencesKey.Paths.openClawSessionsRootOverride) ?? ""
@@ -232,27 +235,96 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
         }
     }
 
-    func reloadSession(id: String) {
-        guard let existing = allSessions.first(where: { $0.id == id }),
-              FileManager.default.fileExists(atPath: existing.filePath) else {
+    enum ReloadReason: String {
+        case selection
+        case focusedSessionMonitor
+        case manualRefresh
+    }
+
+    func reloadSession(id: String,
+                       force: Bool = false,
+                       reason: ReloadReason = .selection) {
+        reloadLock.lock()
+        if reloadingSessionIDs.contains(id) {
+            reloadLock.unlock()
             return
         }
-        let url = URL(fileURLWithPath: existing.filePath)
+        reloadingSessionIDs.insert(id)
+        reloadLock.unlock()
 
-        isLoadingSession = true
-        loadingSessionID = id
+        let existingSnapshot: Session? = {
+            if Thread.isMainThread {
+                return self.allSessions.first(where: { $0.id == id })
+            }
+            var session: Session?
+            DispatchQueue.main.sync {
+                session = self.allSessions.first(where: { $0.id == id })
+            }
+            return session
+        }()
 
         let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
         bgQueue.async {
-            let start = Date()
+            defer {
+                self.reloadLock.lock()
+                self.reloadingSessionIDs.remove(id)
+                self.reloadLock.unlock()
+            }
+
+            guard let existing = existingSnapshot,
+                  FileManager.default.fileExists(atPath: existing.filePath) else {
+                return
+            }
+
+            let hasLoadedEvents = !existing.events.isEmpty
+            if hasLoadedEvents && !force { return }
+
+            let url = URL(fileURLWithPath: existing.filePath)
+            let preParseStat = Self.fileStat(for: url)
+            self.reloadLock.lock()
+            let lastReloadStat = self.lastFullReloadFileStatsBySessionID[id]
+            self.reloadLock.unlock()
+
+            if force,
+               reason != .manualRefresh,
+               hasLoadedEvents,
+               let preParseStat,
+               let lastReloadStat,
+               preParseStat == lastReloadStat {
+                return
+            }
+
+            let shouldSurfaceLoadingState = reason == .manualRefresh || !hasLoadedEvents
+            if shouldSurfaceLoadingState {
+                Task { @MainActor [weak self] in
+                    self?.isLoadingSession = true
+                    self?.loadingSessionID = id
+                }
+            }
+
             let full = OpenClawSessionParser.parseFileFull(at: url)
-            let elapsed = Date().timeIntervalSince(start)
-            #if DEBUG
-            print("  ⏱️ OpenClaw parse took \(String(format: "%.1f", elapsed))s - events=\(full?.events.count ?? 0)")
-            #endif
+            let postParseStat = Self.fileStat(for: url)
+            self.reloadLock.lock()
+            if let preParseStat {
+                self.lastFullReloadFileStatsBySessionID[id] = preParseStat
+            } else {
+                self.lastFullReloadFileStatsBySessionID.removeValue(forKey: id)
+            }
+            self.reloadLock.unlock()
+            if preParseStat != postParseStat {
+                #if DEBUG
+                print("ℹ️ OpenClaw file changed during reload; next monitor tick will retry")
+                #endif
+            }
 
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                defer {
+                    if shouldSurfaceLoadingState, self.loadingSessionID == id {
+                        self.isLoadingSession = false
+                        self.loadingSessionID = nil
+                    }
+                }
                 if let full, let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                     let current = self.allSessions[idx]
                     let merged = Session(
@@ -277,12 +349,20 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                        let m = rv.contentModificationDate {
                         self.previewMTimeByID[id] = m
                     }
+                } else if full == nil {
+                    self.unreadableSessionIDs.insert(id)
                 }
-                self.isLoadingSession = false
-                self.loadingSessionID = nil
-                if full == nil { self.unreadableSessionIDs.insert(id) }
             }
         }
+    }
+
+    private static func fileStat(for url: URL) -> SessionFileStat? {
+        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+              let modified = values.contentModificationDate else {
+            return nil
+        }
+        let size = Int64(values.fileSize ?? 0)
+        return SessionFileStat(mtime: Int64(modified.timeIntervalSince1970), size: size)
     }
 
     func isPreviewStale(id: String) -> Bool {
