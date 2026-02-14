@@ -90,6 +90,9 @@ actor ClaudeStatusService {
     private static let probeSessionName = "usage"
     private static let probeLabelPrefix = "as-cc-"
     private static let probeLabelLength = 12
+    private static let defaultScriptBootTimeoutSeconds = 10
+    private static let scriptRuntimeBufferSeconds = 18
+    private static let minimumScriptRuntimeTimeoutSeconds = 30
 
     private nonisolated let updateHandler: @Sendable (ClaudeUsageSnapshot) -> Void
     private nonisolated let availabilityHandler: @Sendable (ClaudeServiceAvailability) -> Void
@@ -318,7 +321,7 @@ actor ClaudeStatusService {
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
         env["WORKDIR"] = workDir
         env["MODEL"] = "sonnet"
-        env["TIMEOUT_SECS"] = "10"
+        env["TIMEOUT_SECS"] = env["TIMEOUT_SECS"] ?? String(Self.defaultScriptBootTimeoutSeconds)
         env["SLEEP_BOOT"] = "0.4"
         env["SLEEP_AFTER_USAGE"] = "2.0"
 
@@ -333,6 +336,8 @@ actor ClaudeStatusService {
         defer { activeProbeLabel = nil }
 
         process.environment = env
+        let timeoutValue = Int(env["TIMEOUT_SECS"] ?? "") ?? Self.defaultScriptBootTimeoutSeconds
+        let scriptTimeoutSeconds = max(Self.minimumScriptRuntimeTimeoutSeconds, timeoutValue + Self.scriptRuntimeBufferSeconds)
         let out = Pipe(); let err = Pipe()
         process.standardOutput = out; process.standardError = err
         do {
@@ -340,7 +345,7 @@ actor ClaudeStatusService {
         } catch {
             return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: "", stderr: error.localizedDescription)
         }
-        let didExit = await waitForProcessExit(process, timeoutSeconds: 20, label: probeLabel, session: Self.probeSessionName)
+        let didExit = await waitForProcessExit(process, timeoutSeconds: scriptTimeoutSeconds, label: probeLabel, session: Self.probeSessionName)
         let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         if !didExit {
@@ -380,7 +385,7 @@ actor ClaudeStatusService {
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
         env["WORKDIR"] = workDir
         env["MODEL"] = "sonnet"
-        env["TIMEOUT_SECS"] = "10"
+        env["TIMEOUT_SECS"] = env["TIMEOUT_SECS"] ?? String(Self.defaultScriptBootTimeoutSeconds)
         env["SLEEP_BOOT"] = "0.4"
         env["SLEEP_AFTER_USAGE"] = "2.0"
 
@@ -405,6 +410,8 @@ actor ClaudeStatusService {
         print("ClaudeStatusService: Executing script with WORKDIR=\(workDir), CLAUDE_BIN=\(env["CLAUDE_BIN"] ?? "not set"), TMUX_BIN=\(env["TMUX_BIN"] ?? "not set")")
 
         process.environment = env
+        let timeoutValue = Int(env["TIMEOUT_SECS"] ?? "") ?? Self.defaultScriptBootTimeoutSeconds
+        let scriptTimeoutSeconds = max(Self.minimumScriptRuntimeTimeoutSeconds, timeoutValue + Self.scriptRuntimeBufferSeconds)
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -413,9 +420,9 @@ actor ClaudeStatusService {
 
         try process.run()
 
-        let didExit = await waitForProcessExit(process, timeoutSeconds: 20, label: probeLabel, session: Self.probeSessionName)
+        let didExit = await waitForProcessExit(process, timeoutSeconds: scriptTimeoutSeconds, label: probeLabel, session: Self.probeSessionName)
         if !didExit {
-            print("ClaudeStatusService: Script timed out after 20s, terminating")
+            print("ClaudeStatusService: Script timed out after \(scriptTimeoutSeconds)s, terminating")
             throw ClaudeServiceError.scriptFailed(exitCode: 124, output: "Script timed out")
         }
 

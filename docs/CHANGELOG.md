@@ -5,13 +5,17 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Session view (Unified): Replaced the table-selection bridge with canonical ID-driven selection so transient row churn no longer clears active transcript selection, and transcript host routing now stays pinned to canonical source resolution.
 - Session view (Unified): Active session selection now stays sticky during background refresh/search churn, preventing transient table-selection clears from detaching the transcript pane and showing the empty placeholder while the session still exists.
 - Search fields (Unified global search + transcript Find): `Esc` now clears the active field directly when that field has focus, eliminating the system beep and making clear behavior consistent from the keyboard.
 - Transcript Find (`Esc`): pressing `Esc` with an empty Find field now closes the Find bar again (`Close Find (⎋)`), restoring keyboard-only close behavior.
+- Claude Usage: tmux `/usage` probes now use a larger runtime timeout envelope (derived from script boot timeout) so successful but slower probes no longer fail with premature `Script timed out` (`exitCode 124`) errors.
 - Session view (Unified): table selection synchronization now keeps programmatic updates out of manual-selection handling, preventing auto-selection from being disabled by internal selection coalescing.
 - Session view (Unified): Removed the transient "Selected session is hidden by the current search/filter" notice and its `Show in List` / `Keep Hidden` actions.
 - Session view (Unified): Transcript tail-append now verifies the previous tail event content (not only ID), forcing a full rebuild when a live update rewrites the prior tail event in place.
 - Session view (Unified): Transcript view now rebuilds on `eventCount`, `fileSize`, and `endTime` metadata updates for loaded sessions, so in-place live parsing changes without `events.count` growth no longer leave stale text.
+- Session view (Unified): Transcript rebuild triggering is now keyed off a stable session render signature (`id`, `eventCount`, `events.count`, `fileSize`, `endTime`, `isFavorite`) so same-ID live updates and favorite toggles always re-evaluate rendering.
+- Session view (Unified): Transcript rendering now keeps the last non-empty resolved session snapshot when refresh briefly republishes the same session ID as lightweight/empty, preventing transient blank transcript drops during live refresh.
 - Session view (Unified): Transcript tail-append now writes appended output to the in-view build-key cache, preventing stale transcript regressions when switching modes during live updates.
 - Session view (Unified): Active transcript tail-append updates now keep readiness state in sync with the current build key, so Unified Search auto-jump still triggers after append-only live updates.
 - Session view (Unified): Transcript tail-append now requires render-option parity with the previously rendered buffer, so toggles like `Skip preamble` force a full rebuild instead of appending into stale formatting.
