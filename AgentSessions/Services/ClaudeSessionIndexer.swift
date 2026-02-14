@@ -545,10 +545,11 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         }
     }
 
-    // Reload a specific lightweight session with full parse
-    func reloadSession(id: String) {
+    // Reload a specific session with full parse.
+    // When force is true, reload even if events are already present.
+    func reloadSession(id: String, force: Bool = false) {
         guard let existing = allSessions.first(where: { $0.id == id }),
-              existing.events.isEmpty,
+              (force || existing.events.isEmpty),
               FileManager.default.fileExists(atPath: existing.filePath) else {
             return
         }

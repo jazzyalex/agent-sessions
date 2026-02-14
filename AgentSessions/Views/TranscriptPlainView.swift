@@ -22,6 +22,30 @@ struct TranscriptRenderGenerationGate {
     }
 }
 
+enum TranscriptSessionRenderKey {
+    static func build(for session: Session) -> String {
+        "\(session.id)|\(session.eventCount)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(session.endTime?.timeIntervalSince1970 ?? 0)|\(session.isFavorite ? 1 : 0)"
+    }
+}
+
+enum TranscriptSessionResolutionPolicy {
+    static func preferredSession(live: Session?, cached: Session?, sessionID: String) -> Session? {
+        if let live {
+            if live.events.isEmpty,
+               let cached,
+               cached.id == sessionID,
+               !cached.events.isEmpty {
+                return cached
+            }
+            return live
+        }
+        if let cached, cached.id == sessionID {
+            return cached
+        }
+        return nil
+    }
+}
+
 /// Codex transcript view - now a wrapper around UnifiedTranscriptView
 struct TranscriptPlainView: View {
     @EnvironmentObject var indexer: SessionIndexer
@@ -196,21 +220,59 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var lastRenderedViewModeRaw: String = SessionViewMode.terminal.rawValue
     @State private var lastRenderedAppendConfigKey: String? = nil
 
+    private var transcriptTraceEnabled: Bool {
+        ProcessInfo.processInfo.environment["AGENTSESSIONS_TRACE_TRANSCRIPT"] == "1"
+            || UserDefaults.standard.bool(forKey: "DebugTraceTranscript")
+    }
+
+    private func transcriptTrace(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        guard transcriptTraceEnabled else { return }
+        print("🧭[Transcript] \(message())")
+        #endif
+    }
+
     private var shouldShowLoadingAnimation: Bool {
         guard let id = sessionID else { return false }
         return indexer.isLoadingSession && indexer.loadingSessionID == id
     }
 
-    var body: some View {
-        let liveSession = sessionID.flatMap { id in
-            indexer.allSessions.first(where: { $0.id == id })
-        }
-        let displaySession = liveSession ?? lastResolvedSession.flatMap { cached in
-            guard cached.id == sessionID else { return nil }
-            return cached
-        }
+    private func sessionBuildKey(_ session: Session) -> String {
+        TranscriptSessionRenderKey.build(for: session)
+    }
 
-        if let id = sessionID, let session = displaySession {
+    private var renderKey: String {
+        guard let id = sessionID else { return "none" }
+
+        if let session = resolvedSessionForRender(id: id) {
+            return sessionBuildKey(session)
+        }
+        return "unresolved:\(id)"
+    }
+
+    private func resolvedSessionForRender(id: String) -> Session? {
+        let live = indexer.allSessions.first(where: { $0.id == id })
+        let preferred = TranscriptSessionResolutionPolicy.preferredSession(
+            live: live,
+            cached: lastResolvedSession,
+            sessionID: id
+        )
+        let liveCount = live?.events.count ?? -1
+        let cachedCount = (lastResolvedSession?.id == id ? lastResolvedSession?.events.count : nil) ?? -1
+        let preferredCount = preferred?.events.count ?? -1
+        transcriptTrace(
+            "resolve id=\(id) liveEvents=\(liveCount) cachedEvents=\(cachedCount) preferredEvents=\(preferredCount) loading=\(indexer.isLoadingSession ? 1 : 0) loadingID=\(indexer.loadingSessionID ?? "nil")"
+        )
+        if let live, live.events.isEmpty, let cached = lastResolvedSession, cached.id == id, !cached.events.isEmpty {
+            transcriptTrace("prefer-cached-non-empty id=\(id) cachedEvents=\(cached.events.count)")
+        }
+        return preferred
+    }
+
+    var body: some View {
+        let displaySession = sessionID.flatMap { id in resolvedSessionForRender(id: id) }
+
+        if sessionID != nil, let session = displaySession {
             VStack(spacing: 0) {
                 toolbar(session: session)
                     .frame(maxWidth: .infinity)
@@ -271,29 +333,20 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     }
                 }
             }
-            .onAppear {
-                lastResolvedSession = session
-                rebuild(session: session)
+            .onChange(of: renderKey) { oldValue, newValue in
+                transcriptTrace("renderKey changed id=\(sessionID ?? "nil") old=\(oldValue) new=\(newValue)")
             }
-            .onChange(of: id) { oldID, newID in
-                if oldID != newID, lastResolvedSession?.id != newID {
-                    lastResolvedSession = nil
-                }
-                let resolvedSession = indexer.allSessions.first(where: { $0.id == newID })
-                    ?? (lastResolvedSession?.id == newID ? lastResolvedSession : nil)
-                if let resolvedSession {
-                    lastResolvedSession = resolvedSession
-                    rebuild(session: resolvedSession)
-                }
+            .task(id: renderKey) {
+                guard let id = sessionID else { return }
+
+                guard let resolvedSession = resolvedSessionForRender(id: id) else { return }
+                transcriptTrace("task rebuild id=\(id) events=\(resolvedSession.events.count) eventCount=\(resolvedSession.eventCount)")
+                rebuild(session: resolvedSession)
             }
             .onChange(of: viewModeRaw) { _, _ in
                 syncRenderModeWithViewMode()
                 rebuild(session: session)
             }
-            .onChange(of: session.events.count) { _, _ in rebuild(session: session) }
-            .onChange(of: session.eventCount) { _, _ in rebuild(session: session) }
-            .onChange(of: session.fileSizeBytes) { _, _ in rebuild(session: session) }
-            .onChange(of: session.endTime) { _, _ in rebuild(session: session) }
             .onChange(of: searchState.query) { _, newValue in
                 unifiedSearchJumpWorkItem?.cancel()
                 unifiedSearchJumpWorkItem = nil
@@ -342,6 +395,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             Text("Select a session to view transcript")
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    transcriptTrace(
+                        "placeholder visible sessionID=\(sessionID ?? "nil") lastResolvedID=\(lastResolvedSession?.id ?? "nil") lastResolvedEvents=\(lastResolvedSession?.events.count ?? -1)"
+                    )
+                }
         }
     }
 
@@ -699,6 +757,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func rebuild(session: Session) {
+        transcriptTrace("rebuild start id=\(session.id) events=\(session.events.count) eventCount=\(session.eventCount) viewMode=\(viewModeRaw)")
         lastResolvedSession = session
         let generation = beginRenderGeneration()
 
@@ -707,9 +766,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
         let mode = viewModeSnapshot.transcriptRenderMode
         let skipFlag = skipAgentsPreambleEnabled() ? 1 : 0
-        let fileSizeToken = session.fileSizeBytes ?? -1
-        let endTimeToken = Int((session.endTime ?? .distantPast).timeIntervalSince1970)
-        let buildKey = "\(session.id)|\(session.events.count)|\(session.eventCount)|\(fileSizeToken)|\(endTimeToken)|\(viewModeSnapshot.rawValue)|\(showTimestamps ? 1 : 0)|\(skipFlag)"
+        let sessionKey = sessionBuildKey(session)
+        let buildKey = "\(sessionKey)|\(viewModeSnapshot.rawValue)|\(showTimestamps ? 1 : 0)|\(skipFlag)"
         let appendConfigKey = makeAppendConfigKey(viewMode: viewModeSnapshot,
                                                   showTimestamps: showTimestamps,
                                                   skipFlag: skipFlag)
