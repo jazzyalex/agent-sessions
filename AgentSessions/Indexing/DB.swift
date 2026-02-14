@@ -100,7 +100,12 @@ actor IndexDB {
         // Best-effort migration for existing installs.
         // Guard the ALTER with schema introspection to avoid duplicate-column warnings.
         if !tableHasColumn(db, table: "session_meta", column: "is_housekeeping") {
-            try exec(db, "ALTER TABLE session_meta ADD COLUMN is_housekeeping INTEGER NOT NULL DEFAULT 0;")
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN is_housekeeping INTEGER NOT NULL DEFAULT 0;")
+            } catch {
+                // Another process/instance can win the race after our precheck.
+                if !isDuplicateColumnError(error) { throw error }
+            }
         }
 
         // Create this index only after the column exists (older installs won't have it yet).
@@ -173,7 +178,12 @@ actor IndexDB {
         // Best-effort migration for existing installs.
         // Guard the ALTER with schema introspection to avoid duplicate-column warnings.
         if !tableHasColumn(db, table: "session_search", column: "format_version") {
-            try exec(db, "ALTER TABLE session_search ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1;")
+            do {
+                try exec(db, "ALTER TABLE session_search ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1;")
+            } catch {
+                // Another process/instance can win the race after our precheck.
+                if !isDuplicateColumnError(error) { throw error }
+            }
         }
 
         // Full-text search (FTS5) over per-session searchable text.
@@ -265,6 +275,11 @@ actor IndexDB {
             if String(cString: name) == column { return true }
         }
         return false
+    }
+
+    private static func isDuplicateColumnError(_ error: Error) -> Bool {
+        guard case let DBError.execFailed(message) = error else { return false }
+        return message.localizedCaseInsensitiveContains("duplicate column name")
     }
 
     private static func exec(_ db: OpaquePointer?, _ sql: String) throws {
