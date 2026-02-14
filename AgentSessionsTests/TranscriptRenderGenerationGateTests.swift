@@ -158,10 +158,44 @@ final class TranscriptSessionResolutionPolicyTests: XCTestCase {
         let preferred = TranscriptSessionResolutionPolicy.preferredSession(
             live: live,
             cached: cached,
-            sessionID: "session-1"
+            sessionID: "session-1",
+            isLoadingSession: true,
+            loadingSessionID: "session-1"
         )
 
         XCTAssertEqual(preferred?.events.count, 1)
+        XCTAssertEqual(preferred?.id, "session-1")
+    }
+
+    func testPrefersLiveEmptyWhenNotLoading() {
+        let live = makeSession(id: "session-1", events: [])
+        let cached = makeSession(id: "session-1", events: [makeEvent(id: "e1")])
+
+        let preferred = TranscriptSessionResolutionPolicy.preferredSession(
+            live: live,
+            cached: cached,
+            sessionID: "session-1",
+            isLoadingSession: false,
+            loadingSessionID: nil
+        )
+
+        XCTAssertEqual(preferred?.events.count, 0)
+        XCTAssertEqual(preferred?.id, "session-1")
+    }
+
+    func testPrefersLiveEmptyWhenDifferentSessionIsLoading() {
+        let live = makeSession(id: "session-1", events: [])
+        let cached = makeSession(id: "session-1", events: [makeEvent(id: "e1")])
+
+        let preferred = TranscriptSessionResolutionPolicy.preferredSession(
+            live: live,
+            cached: cached,
+            sessionID: "session-1",
+            isLoadingSession: true,
+            loadingSessionID: "session-2"
+        )
+
+        XCTAssertEqual(preferred?.events.count, 0)
         XCTAssertEqual(preferred?.id, "session-1")
     }
 
@@ -172,7 +206,9 @@ final class TranscriptSessionResolutionPolicyTests: XCTestCase {
         let preferred = TranscriptSessionResolutionPolicy.preferredSession(
             live: live,
             cached: cached,
-            sessionID: "session-1"
+            sessionID: "session-1",
+            isLoadingSession: true,
+            loadingSessionID: "session-1"
         )
 
         XCTAssertEqual(preferred?.events.first?.id, "e-live")
@@ -184,7 +220,9 @@ final class TranscriptSessionResolutionPolicyTests: XCTestCase {
         let preferred = TranscriptSessionResolutionPolicy.preferredSession(
             live: nil,
             cached: cached,
-            sessionID: "session-1"
+            sessionID: "session-1",
+            isLoadingSession: false,
+            loadingSessionID: nil
         )
 
         XCTAssertEqual(preferred?.events.count, 1)

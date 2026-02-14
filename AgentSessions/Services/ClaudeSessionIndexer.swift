@@ -70,6 +70,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     private var cancellables = Set<AnyCancellable>()
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
     private var refreshToken = UUID()
+    private var reloadingSessionIDs: Set<String> = []
+    private let reloadLock = NSLock()
     private var lastPrewarmSignatureByID: [String: Int] = [:]
     private var lastKnownFileStatsByPath: [String: SessionFileStat] = [:]
     @Published private var filterEpoch: Int = 0
@@ -553,6 +555,18 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
               FileManager.default.fileExists(atPath: existing.filePath) else {
             return
         }
+
+        // Prevent overlapping full parses for the same session.
+        reloadLock.lock()
+        if reloadingSessionIDs.contains(id) {
+            reloadLock.unlock()
+            #if DEBUG
+            print("⏭️ Skip reload: Claude session \(id.prefix(8)) already reloading")
+            #endif
+            return
+        }
+        reloadingSessionIDs.insert(id)
+        reloadLock.unlock()
         let url = URL(fileURLWithPath: existing.filePath)
 
         let filename = existing.filePath.components(separatedBy: "/").last ?? "?"
@@ -565,6 +579,11 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 
         let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
         bgQueue.async {
+            defer {
+                self.reloadLock.lock()
+                self.reloadingSessionIDs.remove(id)
+                self.reloadLock.unlock()
+            }
             let startTime = Date()
 
             if let fullSession = ClaudeSessionParser.parseFileFull(at: url, forcedID: id) {
