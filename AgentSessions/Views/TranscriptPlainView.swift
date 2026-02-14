@@ -29,9 +29,26 @@ enum TranscriptSessionRenderKey {
 }
 
 enum TranscriptSessionResolutionPolicy {
+    // Backward-compatible overload to avoid stale call sites during incremental test bundles.
     static func preferredSession(live: Session?, cached: Session?, sessionID: String) -> Session? {
+        preferredSession(
+            live: live,
+            cached: cached,
+            sessionID: sessionID,
+            isLoadingSession: true,
+            loadingSessionID: sessionID
+        )
+    }
+
+    static func preferredSession(live: Session?,
+                                 cached: Session?,
+                                 sessionID: String,
+                                 isLoadingSession: Bool,
+                                 loadingSessionID: String?) -> Session? {
         if let live {
+            let isTransientlyReloadingSameSession = isLoadingSession && loadingSessionID == sessionID
             if live.events.isEmpty,
+               isTransientlyReloadingSameSession,
                let cached,
                cached.id == sessionID,
                !cached.events.isEmpty {
@@ -255,7 +272,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         let preferred = TranscriptSessionResolutionPolicy.preferredSession(
             live: live,
             cached: lastResolvedSession,
-            sessionID: id
+            sessionID: id,
+            isLoadingSession: indexer.isLoadingSession,
+            loadingSessionID: indexer.loadingSessionID
         )
         let liveCount = live?.events.count ?? -1
         let cachedCount = (lastResolvedSession?.id == id ? lastResolvedSession?.events.count : nil) ?? -1
