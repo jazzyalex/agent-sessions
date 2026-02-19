@@ -85,3 +85,11 @@ append_context: |
   Keep changes minimal.
   If a change affects behavior, add/adjust tests accordingly.
 ```
+
+## Auth-related behavior (not control-file driven)
+
+The loop now performs auth preflight and fail-fast detection for auth errors like
+`refresh_token_reused`. This is configured via environment variables, not control-file keys:
+
+- `AUTH_FAILURE_RETRIES` (default `1`)
+- `AUTH_SCAN_TAIL_LINES` (default `200`)
