@@ -153,12 +153,12 @@ booted=false
 
 	while [ $iterations -lt $max_iterations ]; do
 	    sleep "$SLEEP_BOOT"
-	    ((iterations++))
+	    iterations=$((iterations + 1))
 
     output=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p 2>/dev/null || echo "")
 
     # Check for trust prompt first (handle before boot check)
-	    if echo "$output" | grep -q "Do you trust the files in this folder?"; then
+	    if echo "$output" | grep -qE "(Do you trust the files in this folder|trust this folder|Yes, I trust this folder)"; then
 	        "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter
 	        sleep 1.0
 	        continue  # Re-check in next iteration
