@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Session view (Unified): The floating jump-to-latest control now uses a smaller compact circle and now appears immediately after session selection whenever the transcript is not at the tail (no initial scroll required).
+- Session view (Unified): Clicking the floating jump-to-latest control now hides it immediately after programmatic scroll-to-end, without requiring additional manual up/down scrolling.
 - Session view (Unified/Codex): When new output arrives while reading away from the tail, a floating down-arrow now appears in Session/Text modes to jump to the latest transcript output and resume sticky follow-to-bottom behavior.
 - Sessions (Unified): Key-window resign no longer clears focused session state, preventing missed active-transcript updates after returning to the app/window.
 - Sessions (Unified): Focused active-session monitoring is now capability-driven per source, with one key-window-selected session monitored at high cadence and deterministic stop/start behavior across window/app activation changes.
