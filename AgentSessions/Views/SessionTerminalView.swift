@@ -241,6 +241,7 @@ struct SessionTerminalView: View {
         GeometryReader { outerGeo in
             HStack(spacing: 8) {
                 TerminalTextScrollView(
+                    proximityContextID: session.id,
                     lines: filteredLines,
                     lineSignature: visibleLinesSignature,
                     fontSize: CGFloat(transcriptFontSize),
@@ -2225,6 +2226,7 @@ private extension TerminalLineRole {
 }
 
 private struct TerminalTextScrollView: NSViewRepresentable {
+    let proximityContextID: String
     let lines: [TerminalLine]
     let lineSignature: Int
     let fontSize: CGFloat
@@ -2442,6 +2444,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastInlineImagesSignature: Int = 0
         var lastScrollToBottomToken: Int = 0
         var lastNearBottom: Bool? = nil
+        var lastProximityContextID: String = ""
         var lastScrollToken: Int = 0
         var lastRoleNavScrollToken: Int = 0
         var lastFocusRequestToken: Int = 0
@@ -2486,6 +2489,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         private var inlineContextImageID: String? = nil
         private var scrollIdleWorkItem: DispatchWorkItem? = nil
         private var scrollObserver: NSObjectProtocol? = nil
+        private weak var observedDocumentView: NSView? = nil
+        private var documentFrameObserver: NSObjectProtocol? = nil
 
         private static let nearBottomThreshold: CGFloat = 48
 
@@ -2664,30 +2669,63 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 }
             }
 
+            if observedDocumentView !== scrollView.documentView {
+                if let token = documentFrameObserver {
+                    NotificationCenter.default.removeObserver(token)
+                    documentFrameObserver = nil
+                }
+                observedDocumentView = scrollView.documentView
+                if let documentView = scrollView.documentView {
+                    documentView.postsFrameChangedNotifications = true
+                    documentFrameObserver = NotificationCenter.default.addObserver(
+                        forName: NSView.frameDidChangeNotification,
+                        object: documentView,
+                        queue: .main
+                    ) { [weak self] _ in
+                        self?.emitBottomProximityIfNeeded()
+                    }
+                }
+            }
+
             // Initial load after first render.
             scheduleIdleThumbnailLoad(delay: 0.05)
             emitBottomProximityIfNeeded()
+            scheduleBottomProximityUpdate()
         }
 
         private func removeScrollObserver() {
-            guard let scrollObserver else { return }
-            let token = scrollObserver
-            self.scrollObserver = nil
-
-            if Thread.isMainThread {
-                NotificationCenter.default.removeObserver(token)
-            } else {
-                DispatchQueue.main.async {
+            if let token = scrollObserver {
+                self.scrollObserver = nil
+                if Thread.isMainThread {
                     NotificationCenter.default.removeObserver(token)
+                } else {
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.removeObserver(token)
+                    }
                 }
             }
+
+            if let token = documentFrameObserver {
+                documentFrameObserver = nil
+                if Thread.isMainThread {
+                    NotificationCenter.default.removeObserver(token)
+                } else {
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.removeObserver(token)
+                    }
+                }
+            }
+
+            observedDocumentView = nil
         }
 
         func emitBottomProximityIfNeeded() {
             guard let scrollView = activeScrollView else { return }
             let visibleRect = scrollView.contentView.documentVisibleRect
-            let contentHeight = max(scrollView.documentView?.bounds.height ?? 0, visibleRect.height)
-            let distanceToBottom = max(0, contentHeight - visibleRect.maxY)
+            let contentHeight = measuredContentHeight(for: scrollView)
+            let maxOffset = max(0, contentHeight - visibleRect.height)
+            let currentOffset = max(0, min(visibleRect.origin.y, maxOffset))
+            let distanceToBottom = max(0, maxOffset - currentOffset)
             let nearBottom = distanceToBottom <= Self.nearBottomThreshold
             guard lastNearBottom != nearBottom else { return }
             lastNearBottom = nearBottom
@@ -2695,9 +2733,26 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
 
         func scheduleBottomProximityUpdate() {
-            DispatchQueue.main.async { [weak self] in
-                self?.emitBottomProximityIfNeeded()
+            for delay in [0.0, 0.05, 0.2] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.emitBottomProximityIfNeeded()
+                }
             }
+        }
+
+        private func measuredContentHeight(for scrollView: NSScrollView) -> CGFloat {
+            let visibleHeight = scrollView.contentView.documentVisibleRect.height
+            guard let documentView = scrollView.documentView else { return visibleHeight }
+
+            var contentHeight = max(documentView.bounds.height, documentView.frame.height, visibleHeight)
+            if let textView = documentView as? NSTextView,
+               let layoutManager = textView.layoutManager,
+               let textContainer = textView.textContainer {
+                layoutManager.ensureLayout(for: textContainer)
+                let usedHeight = layoutManager.usedRect(for: textContainer).height + (textView.textContainerInset.height * 2)
+                contentHeight = max(contentHeight, usedHeight)
+            }
+            return contentHeight
         }
 
         func updateInlineImages(enabled: Bool, imagesByUserBlockIndex: [Int: [InlineSessionImage]], signature: Int, textView: TerminalTextView) {
@@ -3488,6 +3543,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastFocusRequestToken = focusRequestToken
         context.coordinator.lastImageHighlightToken = imageHighlightToken
         context.coordinator.lastScrollToBottomToken = scrollToBottomToken
+        context.coordinator.lastProximityContextID = proximityContextID
         context.coordinator.emitBottomProximityIfNeeded()
         context.coordinator.scheduleBottomProximityUpdate()
         return scroll
@@ -3497,6 +3553,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         guard let tv = nsView.documentView as? TerminalTextView else { return }
         context.coordinator.onBottomProximityChange = onBottomProximityChange
         context.coordinator.installScrollObserver(scrollView: nsView, textView: tv)
+
+        let proximityContextChanged = context.coordinator.lastProximityContextID != proximityContextID
+        if proximityContextChanged {
+            context.coordinator.lastProximityContextID = proximityContextID
+            context.coordinator.lastNearBottom = nil
+        }
+        var needsBottomProximityRefresh = proximityContextChanged
 
         let lineSig = lineSignature
         let fontChanged = abs((context.coordinator.lastFontSize) - fontSize) > 0.1
@@ -3531,7 +3594,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             context.coordinator.lastMonochrome = monochrome
             context.coordinator.lastColorScheme = colorScheme
             context.coordinator.lastInlineImagesSignature = inlineImagesSignature
-            context.coordinator.scheduleBottomProximityUpdate()
+            needsBottomProximityRefresh = true
         } else {
             let unifiedChanged =
                 context.coordinator.lastUnifiedMatchOccurrences != effectiveUnifiedMatchOccurrences ||
@@ -3589,6 +3652,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         if scrollToBottomToken != context.coordinator.lastScrollToBottomToken {
             scrollToBottom(tv)
             context.coordinator.lastScrollToBottomToken = scrollToBottomToken
+            needsBottomProximityRefresh = true
         }
 
         if context.coordinator.lastImageHighlightToken != imageHighlightToken {
@@ -3607,6 +3671,9 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
 
         context.coordinator.emitBottomProximityIfNeeded()
+        if needsBottomProximityRefresh {
+            context.coordinator.scheduleBottomProximityUpdate()
+        }
     }
 
     private func scrollToBottom(_ tv: NSTextView) {

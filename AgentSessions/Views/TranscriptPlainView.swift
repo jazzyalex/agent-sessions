@@ -29,23 +29,33 @@ enum TranscriptSessionRenderKey {
 }
 
 struct TranscriptTailUpdateState: Equatable {
+    enum BottomProximity: Equatable {
+        case unknown
+        case nearBottom
+        case awayFromBottom
+    }
+
     private(set) var sessionID: String? = nil
     private(set) var lastContentVersion: Int = 0
-    private(set) var isNearBottom: Bool = true
+    private(set) var bottomProximity: BottomProximity = .unknown
     private(set) var hasUnseenUpdates: Bool = false
     private(set) var stickyFollowEnabled: Bool = true
     private(set) var scrollToBottomToken: Int = 0
 
+    var shouldShowJumpToLatestButton: Bool {
+        bottomProximity != .nearBottom
+    }
+
     mutating func reset(sessionID: String, contentVersion: Int) {
         self.sessionID = sessionID
         self.lastContentVersion = contentVersion
-        self.isNearBottom = true
+        self.bottomProximity = .unknown
         self.hasUnseenUpdates = false
         self.stickyFollowEnabled = true
     }
 
     mutating func viewportChanged(isNearBottom: Bool) {
-        self.isNearBottom = isNearBottom
+        self.bottomProximity = isNearBottom ? .nearBottom : .awayFromBottom
         if isNearBottom {
             hasUnseenUpdates = false
             stickyFollowEnabled = true
@@ -62,7 +72,7 @@ struct TranscriptTailUpdateState: Equatable {
         guard contentVersion != lastContentVersion else { return }
 
         lastContentVersion = contentVersion
-        if isNearBottom || stickyFollowEnabled {
+        if bottomProximity != .awayFromBottom || stickyFollowEnabled {
             hasUnseenUpdates = false
             scrollToBottomToken &+= 1
         } else {
@@ -71,6 +81,7 @@ struct TranscriptTailUpdateState: Equatable {
     }
 
     mutating func jumpToLatest() {
+        bottomProximity = .nearBottom
         hasUnseenUpdates = false
         stickyFollowEnabled = true
         scrollToBottomToken &+= 1
@@ -351,7 +362,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     if viewMode == .terminal {
                         terminalTranscriptView(session: session)
                     } else {
-                        plainTranscriptView()
+                        plainTranscriptView(session: session)
                     }
 
                     // Show animation during lazy load OR full refresh
@@ -362,7 +373,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         )
                     }
 
-                    if shouldShowJumpToLatestButton(for: session) {
+                    if shouldShowJumpToLatestButton {
                         jumpToLatestButton
                     }
                 }
@@ -465,8 +476,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         return hasher.finalize()
     }
 
-    private func shouldShowJumpToLatestButton(for session: Session) -> Bool {
-        !tailUpdateState.isNearBottom
+    private var shouldShowJumpToLatestButton: Bool {
+        tailUpdateState.shouldShowJumpToLatestButton
     }
 
     private var jumpToLatestButton: some View {
@@ -479,11 +490,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 Circle()
                     .stroke(Color.black.opacity(0.18), lineWidth: 1)
                 Image(systemName: "arrow.down")
-                    .font(.system(size: 26, weight: .regular))
+                    .font(.system(size: 13, weight: .regular))
                     .symbolRenderingMode(.monochrome)
                     .foregroundStyle(Color.black)
             }
-            .frame(width: 64, height: 64)
+            .frame(width: 32, height: 32)
         }
         .buttonStyle(.plain)
         .help("Jump to latest output")
@@ -525,9 +536,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         )
     }
 
-    private func plainTranscriptView() -> some View {
+    private func plainTranscriptView(session: Session) -> some View {
         let roleRangesEnabled = shouldColorize || isJSONMode
         return PlainTextScrollView(
+            proximityContextID: session.id,
             text: transcript,
             selection: selectedNSRange,
             selectionScrollMode: selectionScrollMode,
@@ -2555,6 +2567,7 @@ private func jsonSyntaxHighlightRanges(for text: String) -> ([NSRange], [NSRange
 }
 
 private struct PlainTextScrollView: NSViewRepresentable {
+    let proximityContextID: String
     let text: String
     let selection: NSRange?
     let selectionScrollMode: SelectionScrollMode
@@ -2586,7 +2599,10 @@ private struct PlainTextScrollView: NSViewRepresentable {
         var lastColorSignature: (Int, Int, Int, Int, Int) = (0, 0, 0, 0, 0)
         var scrollView: NSScrollView?
         var scrollObserver: NSObjectProtocol?
+        weak var observedDocumentView: NSView?
+        var documentFrameObserver: NSObjectProtocol?
         var lastNearBottom: Bool? = nil
+        var lastProximityContextID: String = ""
         var onBottomProximityChange: ((Bool) -> Void)?
         var lastScrollToBottomToken: Int = 0
 
@@ -2594,6 +2610,10 @@ private struct PlainTextScrollView: NSViewRepresentable {
             if let scrollObserver {
                 NotificationCenter.default.removeObserver(scrollObserver)
                 self.scrollObserver = nil
+            }
+            if let documentFrameObserver {
+                NotificationCenter.default.removeObserver(documentFrameObserver)
+                self.documentFrameObserver = nil
             }
         }
     }
@@ -2660,6 +2680,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         context.coordinator.lastColorScheme = colorScheme
         context.coordinator.lastFindRange = findCurrentRange
         context.coordinator.onBottomProximityChange = onBottomProximityChange
+        context.coordinator.lastProximityContextID = proximityContextID
 
         // Set background with proper dark mode support
         let isDark = (textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
@@ -2696,105 +2717,112 @@ private struct PlainTextScrollView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
-        if let tv = nsView.documentView as? NSTextView {
-            context.coordinator.onBottomProximityChange = onBottomProximityChange
-            installScrollObserverIfNeeded(scrollView: nsView, coordinator: context.coordinator)
+        guard let tv = nsView.documentView as? NSTextView else { return }
 
-            let textChanged = tv.string != text
-            let appearanceChanged = context.coordinator.lastAppearanceRaw != appAppearanceRaw
-            let schemeChanged = context.coordinator.lastColorScheme != colorScheme
-            let modeChanged = context.coordinator.lastIsJSONMode != isJSONMode
-            let monochromeChanged = context.coordinator.lastMonochrome != monochrome
-            let findRangeChanged = context.coordinator.lastFindRange != findCurrentRange
-            let colorSignature = (
-                commandRanges.count,
-                userRanges.count,
-                assistantRanges.count,
-                outputRanges.count,
-                errorRanges.count
-            )
-            let colorsChanged = colorSignature != context.coordinator.lastColorSignature
+        context.coordinator.onBottomProximityChange = onBottomProximityChange
+        installScrollObserverIfNeeded(scrollView: nsView, coordinator: context.coordinator)
 
-            // Explicitly set NSView appearance when app appearance changes
-            if appearanceChanged {
-                let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
-                switch appAppearance {
-                case .light:
-                    nsView.appearance = NSAppearance(named: .aqua)
-                    tv.appearance = NSAppearance(named: .aqua)
-                case .dark:
-                    nsView.appearance = NSAppearance(named: .darkAqua)
-                    tv.appearance = NSAppearance(named: .darkAqua)
-                case .system:
-                    nsView.appearance = nil
-                    tv.appearance = nil
-                }
-                context.coordinator.lastAppearanceRaw = appAppearanceRaw
+        let proximityContextChanged = context.coordinator.lastProximityContextID != proximityContextID
+        if proximityContextChanged {
+            context.coordinator.lastProximityContextID = proximityContextID
+            context.coordinator.lastNearBottom = nil
+        }
+
+        let textChanged = tv.string != text
+        let appearanceChanged = context.coordinator.lastAppearanceRaw != appAppearanceRaw
+        let schemeChanged = context.coordinator.lastColorScheme != colorScheme
+        let modeChanged = context.coordinator.lastIsJSONMode != isJSONMode
+        let monochromeChanged = context.coordinator.lastMonochrome != monochrome
+        let findRangeChanged = context.coordinator.lastFindRange != findCurrentRange
+        let colorSignature = (
+            commandRanges.count,
+            userRanges.count,
+            assistantRanges.count,
+            outputRanges.count,
+            errorRanges.count
+        )
+        let colorsChanged = colorSignature != context.coordinator.lastColorSignature
+
+        // Explicitly set NSView appearance when app appearance changes
+        if appearanceChanged {
+            let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
+            switch appAppearance {
+            case .light:
+                nsView.appearance = NSAppearance(named: .aqua)
+                tv.appearance = NSAppearance(named: .aqua)
+            case .dark:
+                nsView.appearance = NSAppearance(named: .darkAqua)
+                tv.appearance = NSAppearance(named: .darkAqua)
+            case .system:
+                nsView.appearance = nil
+                tv.appearance = nil
             }
+            context.coordinator.lastAppearanceRaw = appAppearanceRaw
+        }
 
-            if textChanged {
-                tv.string = text
-                context.coordinator.lastPaintedHighlights = []
-            }
+        if textChanged {
+            tv.string = text
+            context.coordinator.lastPaintedHighlights = []
+        }
 
-            // Reapply colors when text, appearance, mode, monochrome, or ranges change
-            if textChanged || appearanceChanged || schemeChanged || modeChanged || monochromeChanged || colorsChanged {
-                applySyntaxColors(tv)
-            }
+        // Reapply colors when text, appearance, mode, monochrome, or ranges change
+        if textChanged || appearanceChanged || schemeChanged || modeChanged || monochromeChanged || colorsChanged {
+            applySyntaxColors(tv)
+        }
 
-            if let font = tv.font, abs(font.pointSize - fontSize) > 0.5 {
-                tv.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-            }
+        if let font = tv.font, abs(font.pointSize - fontSize) > 0.5 {
+            tv.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        }
 
-            // Set background with proper dark mode support
-            let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-            let baseBackground: NSColor = isDark ? NSColor(white: 0.15, alpha: 1.0) : NSColor.textBackgroundColor
+        // Set background with proper dark mode support
+        let isDark = (tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+        let baseBackground: NSColor = isDark ? NSColor(white: 0.15, alpha: 1.0) : NSColor.textBackgroundColor
 
-            // Apply/remove dimming effect based on Find state (like Apple Notes)
-            if !highlights.isEmpty {
-                tv.backgroundColor = isDark ? NSColor(white: 0.12, alpha: 1.0) : NSColor.black.withAlphaComponent(0.08)
-            } else {
-                tv.backgroundColor = baseBackground
-            }
+        // Apply/remove dimming effect based on Find state (like Apple Notes)
+        if !highlights.isEmpty {
+            tv.backgroundColor = isDark ? NSColor(white: 0.12, alpha: 1.0) : NSColor.black.withAlphaComponent(0.08)
+        } else {
+            tv.backgroundColor = baseBackground
+        }
 
-            let width = max(1, nsView.contentSize.width)
-            tv.textContainer?.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-            tv.setFrameSize(NSSize(width: width, height: tv.frame.size.height))
+        let width = max(1, nsView.contentSize.width)
+        tv.textContainer?.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        tv.setFrameSize(NSSize(width: width, height: tv.frame.size.height))
 
-            // Scroll to current match if any
-            if let sel = selection {
-                scrollSelection(tv, range: sel, mode: selectionScrollMode)
-                // Clear selection immediately to avoid blue highlight - we use yellow/white backgrounds instead
-                tv.setSelectedRange(NSRange(location: 0, length: 0))
-            }
+        // Scroll to current match if any
+        if let sel = selection {
+            scrollSelection(tv, range: sel, mode: selectionScrollMode)
+            // Clear selection immediately to avoid blue highlight - we use yellow/white backgrounds instead
+            tv.setSelectedRange(NSRange(location: 0, length: 0))
+        }
 
-            if scrollToBottomToken != context.coordinator.lastScrollToBottomToken {
-                scrollToBottom(scrollView: nsView, textView: tv)
-                context.coordinator.lastScrollToBottomToken = scrollToBottomToken
-            }
+        if scrollToBottomToken != context.coordinator.lastScrollToBottomToken {
+            scrollToBottom(scrollView: nsView, textView: tv)
+            context.coordinator.lastScrollToBottomToken = scrollToBottomToken
+            scheduleBottomProximityUpdate(scrollView: nsView, coordinator: context.coordinator)
+        }
 
-            applyFindHighlights(tv, coordinator: context.coordinator)
+        applyFindHighlights(tv, coordinator: context.coordinator)
 
-            // Update local Find overlay (blue outline) via the custom layout manager
-            if findRangeChanged, let lm = tv.layoutManager as? PlainFindLayoutManager {
-                lm.findRange = findCurrentRange
-                lm.isDark = isDark
-                tv.setNeedsDisplay(tv.visibleRect)
-                context.coordinator.lastFindRange = findCurrentRange
-            } else if let lm = tv.layoutManager as? PlainFindLayoutManager {
-                lm.isDark = isDark
-            }
+        // Update local Find overlay (blue outline) via the custom layout manager
+        if findRangeChanged, let lm = tv.layoutManager as? PlainFindLayoutManager {
+            lm.findRange = findCurrentRange
+            lm.isDark = isDark
+            tv.setNeedsDisplay(tv.visibleRect)
+            context.coordinator.lastFindRange = findCurrentRange
+        } else if let lm = tv.layoutManager as? PlainFindLayoutManager {
+            lm.isDark = isDark
+        }
 
-            // Update last seen scheme at the end of the pass
-            context.coordinator.lastColorScheme = colorScheme
-            context.coordinator.lastIsJSONMode = isJSONMode
+        // Update last seen scheme at the end of the pass
+        context.coordinator.lastColorScheme = colorScheme
+        context.coordinator.lastIsJSONMode = isJSONMode
         context.coordinator.lastMonochrome = monochrome
         context.coordinator.lastColorSignature = colorSignature
         emitBottomProximityIfNeeded(scrollView: nsView, coordinator: context.coordinator)
-        if textChanged {
+        if textChanged || proximityContextChanged {
             scheduleBottomProximityUpdate(scrollView: nsView, coordinator: context.coordinator)
         }
-    }
     }
 
     private func installScrollObserverIfNeeded(scrollView: NSScrollView, coordinator: Coordinator) {
@@ -2803,19 +2831,45 @@ private struct PlainTextScrollView: NSViewRepresentable {
                 NotificationCenter.default.removeObserver(existing)
                 coordinator.scrollObserver = nil
             }
+            if let existing = coordinator.documentFrameObserver {
+                NotificationCenter.default.removeObserver(existing)
+                coordinator.documentFrameObserver = nil
+            }
+            coordinator.observedDocumentView = nil
             coordinator.scrollView = scrollView
             coordinator.lastNearBottom = nil
         }
 
-        guard coordinator.scrollObserver == nil else { return }
-        scrollView.contentView.postsBoundsChangedNotifications = true
-        coordinator.scrollObserver = NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView,
-            queue: .main
-        ) { [weak coordinator, weak scrollView] _ in
-            guard let coordinator, let scrollView else { return }
-            emitBottomProximityIfNeeded(scrollView: scrollView, coordinator: coordinator)
+        if coordinator.scrollObserver == nil {
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            coordinator.scrollObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView,
+                queue: .main
+            ) { [weak coordinator, weak scrollView] _ in
+                guard let coordinator, let scrollView else { return }
+                emitBottomProximityIfNeeded(scrollView: scrollView, coordinator: coordinator)
+            }
+        }
+
+        if coordinator.observedDocumentView !== scrollView.documentView {
+            if let existing = coordinator.documentFrameObserver {
+                NotificationCenter.default.removeObserver(existing)
+                coordinator.documentFrameObserver = nil
+            }
+
+            coordinator.observedDocumentView = scrollView.documentView
+            if let documentView = scrollView.documentView {
+                documentView.postsFrameChangedNotifications = true
+                coordinator.documentFrameObserver = NotificationCenter.default.addObserver(
+                    forName: NSView.frameDidChangeNotification,
+                    object: documentView,
+                    queue: .main
+                ) { [weak coordinator, weak scrollView] _ in
+                    guard let coordinator, let scrollView else { return }
+                    emitBottomProximityIfNeeded(scrollView: scrollView, coordinator: coordinator)
+                }
+            }
         }
     }
 
@@ -2827,18 +2881,36 @@ private struct PlainTextScrollView: NSViewRepresentable {
     }
 
     private func scheduleBottomProximityUpdate(scrollView: NSScrollView, coordinator: Coordinator) {
-        DispatchQueue.main.async { [weak coordinator, weak scrollView] in
-            guard let coordinator, let scrollView else { return }
-            emitBottomProximityIfNeeded(scrollView: scrollView, coordinator: coordinator)
+        for delay in [0.0, 0.05, 0.2] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak coordinator, weak scrollView] in
+                guard let coordinator, let scrollView else { return }
+                emitBottomProximityIfNeeded(scrollView: scrollView, coordinator: coordinator)
+            }
         }
     }
 
     private func isNearBottom(scrollView: NSScrollView) -> Bool {
-        guard let documentView = scrollView.documentView else { return true }
         let visibleRect = scrollView.contentView.documentVisibleRect
-        let contentHeight = max(documentView.bounds.height, visibleRect.height)
-        let distanceToBottom = max(0, contentHeight - visibleRect.maxY)
+        let contentHeight = measuredContentHeight(scrollView: scrollView)
+        let maxOffset = max(0, contentHeight - visibleRect.height)
+        let currentOffset = max(0, min(visibleRect.origin.y, maxOffset))
+        let distanceToBottom = max(0, maxOffset - currentOffset)
         return distanceToBottom <= 48
+    }
+
+    private func measuredContentHeight(scrollView: NSScrollView) -> CGFloat {
+        let visibleHeight = scrollView.contentView.documentVisibleRect.height
+        guard let documentView = scrollView.documentView else { return visibleHeight }
+
+        var contentHeight = max(documentView.bounds.height, documentView.frame.height, visibleHeight)
+        if let textView = documentView as? NSTextView,
+           let layoutManager = textView.layoutManager,
+           let textContainer = textView.textContainer {
+            layoutManager.ensureLayout(for: textContainer)
+            let usedHeight = layoutManager.usedRect(for: textContainer).height + (textView.textContainerInset.height * 2)
+            contentHeight = max(contentHeight, usedHeight)
+        }
+        return contentHeight
     }
 
     private func scrollToBottom(scrollView: NSScrollView, textView: NSTextView) {
