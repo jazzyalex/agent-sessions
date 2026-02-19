@@ -56,8 +56,11 @@ ERROR_SCAN_TAIL_LINES="${ERROR_SCAN_TAIL_LINES:-200}"
 REVIEW_TIMEOUT_SECONDS="${REVIEW_TIMEOUT_SECONDS:-900}"
 FIX_TIMEOUT_SECONDS="${FIX_TIMEOUT_SECONDS:-900}"
 REVIEW_TIMEOUT_RETRIES="${REVIEW_TIMEOUT_RETRIES:-1}"
+AUTH_FAILURE_RETRIES="${AUTH_FAILURE_RETRIES:-1}"
+AUTH_SCAN_TAIL_LINES="${AUTH_SCAN_TAIL_LINES:-200}"
 FINDINGS_FUZZY="${FINDINGS_FUZZY:-1}"
 FINDINGS_FUZZY_THRESHOLD="${FINDINGS_FUZZY_THRESHOLD:-0.86}"
+AUTH_ERROR_EXIT_CODE=66
 
 # Control-file overrides (loaded between rounds)
 CF_STATUS="resume"           # pause|resume|stop
@@ -75,6 +78,8 @@ LAST_EFFECTIVE_FIX_EFFORT=""
 LAUNCH_CHILD_PID=""
 LAUNCH_ISOLATED="0"
 LAUNCH_CHILD_PGID=""
+HEARTBEAT_AUTH_FAILURE="0"
+HEARTBEAT_AUTH_DETAIL=""
 
 # ----------------------------- Helpers ---------------------------------------
 
@@ -96,6 +101,8 @@ Usage:
                            [--review-timeout-seconds <n>]
                            [--fix-timeout-seconds <n>]
                            [--review-timeout-retries <n>]
+                           [--auth-failure-retries <n>]
+                           [--auth-scan-tail-lines <n>]
                            [--error-scan-tail-lines <n>]
                            [--control-file <path>]
                            [--artifacts-dir <path>]
@@ -113,6 +120,8 @@ Defaults:
   --review-timeout-seconds 900
   --fix-timeout-seconds    900
   --review-timeout-retries 1
+  --auth-failure-retries   1
+  --auth-scan-tail-lines   200
   --error-scan-tail-lines  200
   --control-file       .codex-review-control.md
   --artifacts-dir      .codex-review-artifacts
@@ -124,6 +133,8 @@ Notes:
   - Heartbeat lines print periodic in-progress summaries during review/fix commands.
   - Review/fix phases are killed when timeout is exceeded (>0 seconds).
   - Review phase retries once on timeout by default (configurable).
+  - Auth failures (for example `refresh_token_reused`) are detected and fail
+    fast instead of stalling until timeout.
   - Review error parsing ignores known benign internal rollout-log noise.
   - Finding deltas use exact matching + optional fuzzy reworded reconciliation
     (env: FINDINGS_FUZZY=1, FINDINGS_FUZZY_THRESHOLD=0.86).
@@ -282,6 +293,27 @@ ensure_git_repo() {
     return 0
   fi
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not inside a git repo (git rev-parse failed)."
+}
+
+ensure_codex_login_healthy() {
+  local out_file="$1"
+  if ! codex_login_status_is_healthy "$out_file"; then
+    warn "Codex login status is unhealthy; review loop will not start."
+    warn "Run 'codex logout' then 'codex login' and retry."
+    warn "login status output:"
+    sed 's/^/  /' "$out_file" >&2 || true
+    return 1
+  fi
+  if grep -Eqi 'login status unsupported; preflight skipped' "$out_file"; then
+    warn "Codex CLI does not support 'codex login status'; auth preflight skipped."
+    return 0
+  fi
+  if grep -Eqi 'logged in using chatgpt' "$out_file"; then
+    warn "Codex login is using ChatGPT session auth."
+    warn "For maximum loop reliability, prefer API-key login in automation:"
+    warn "  printenv OPENAI_API_KEY | codex login --with-api-key"
+  fi
+  return 0
 }
 
 mk_run_dir() {
@@ -598,6 +630,93 @@ is_benign_review_error_line() {
   return 1
 }
 
+is_auth_error_line() {
+  local line="$1"
+  # Keep this matcher strict: it is used to fail-fast long-running child
+  # processes, so broad phrases can cause false-positive aborts.
+  # Ignore diff-like output lines where auth phrases may appear in content.
+  if printf "%s" "$line" | grep -Eq '^[[:space:]]*(\+\+\+|---|@@|\+|-)'; then
+    return 1
+  fi
+  # Match real Codex auth refresh failures emitted by the CLI/runtime.
+  if printf "%s" "$line" | grep -Eqi '^([0-9]{4}-[0-9]{2}-[0-9]{2}T[^[:space:]]+[[:space:]]+)?ERROR[[:space:]]+codex_core::auth:[[:space:]]+Failed to refresh token:'; then
+    return 0
+  fi
+  return 1
+}
+
+auth_error_summary() {
+  local file="$1"
+  local tail_buf line
+  tail_buf="$(tail -n "$AUTH_SCAN_TAIL_LINES" "$file" 2>/dev/null || true)"
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if is_auth_error_line "$line"; then
+      printf "%s" "$line" | cut -c1-240
+      return 0
+    fi
+  done <<< "$tail_buf"
+  return 1
+}
+
+is_login_status_unsupported_output() {
+  local text="$1"
+  if printf "%s" "$text" | grep -Eqi '(unknown|unrecognized|unsupported|invalid|unexpected)[[:space:][:punct:]]*(subcommand|command|argument)[^[:cntrl:]]*status'; then
+    return 0
+  fi
+  if printf "%s" "$text" | grep -Eqi '(unknown|unrecognized|unsupported|invalid|unexpected)[[:space:][:punct:]]*(subcommand|command|argument|option|choice)[^[:cntrl:]]*status'; then
+    return 0
+  fi
+  if printf "%s" "$text" | grep -Eqi '(subcommand|command|argument|option|choice)[^[:cntrl:]]*status[^[:cntrl:]]*(unknown|unrecognized|unsupported|invalid|unexpected|not[[:space:]]+supported|not[[:space:]]+recognized|not[[:space:]]+found|wasn'\''t expected)'; then
+    return 0
+  fi
+  if printf "%s" "$text" | grep -Eqi 'no[[:space:]]+such[[:space:]]+(subcommand|command|option)[^[:cntrl:]]*status'; then
+    return 0
+  fi
+  if printf "%s" "$text" | grep -Eqi 'found[[:space:]]+argument[^[:cntrl:]]*status[^[:cntrl:]]*(wasn'\''t expected|unexpected)'; then
+    return 0
+  fi
+  return 1
+}
+
+codex_login_status_is_healthy() {
+  local out_file="$1"
+  local out_text
+  set +e
+  out_text="$(codex login status 2>&1)"
+  local ec=$?
+  set -e
+  printf "%s\n" "$out_text" >"$out_file"
+
+  if [[ "$ec" -ne 0 ]]; then
+    if is_login_status_unsupported_output "$out_text"; then
+      printf "%s\n" "login status unsupported; preflight skipped." >> "$out_file"
+      return 0
+    fi
+    return 1
+  fi
+
+  if auth_error_summary "$out_file" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if grep -Eqi 'not[[:space:]]+logged[[:space:]]+in|login[[:space:]]+required' "$out_file"; then
+    return 1
+  fi
+
+  if grep -Eqi '^logged[[:space:]]+in( using| as)?' "$out_file"; then
+    return 0
+  fi
+
+  # Fallback for minor output format variations while still avoiding
+  # "Not logged in" false-positives.
+  if grep -Eqi 'logged[[:space:]]+in' "$out_file"; then
+    return 0
+  fi
+
+  return 1
+}
+
 count_error_events() {
   local phase="$1"
   local file="$2"
@@ -624,7 +743,9 @@ phase_hint_from_output() {
   local file="$2"
   local tail_buf
   tail_buf="$(tail -n 120 "$file" 2>/dev/null || true)"
-  if [[ "$(count_error_events "$phase" "$file")" -gt 0 ]]; then
+  if auth_error_summary "$file" >/dev/null 2>&1; then
+    printf "auth-error"
+  elif [[ "$(count_error_events "$phase" "$file")" -gt 0 ]]; then
     printf "error"
   elif printf "%s" "$tail_buf" | grep -Eqi '(^exec$|succeeded in [0-9]+ms|in_progress)'; then
     printf "executing"
@@ -639,7 +760,7 @@ phase_hint_from_output() {
 
 clean_signal_from_output() {
   local file="$1"
-  if grep -Eqi '(REVIEW_CLEAN|no issues found|no issues identified|no findings|looks good|lgtm)' "$file"; then
+  if grep -Eqi '(REVIEW_CLEAN|no issues found|no issues identified|no findings|looks good|lgtm|did not identify any (actionable )?(discrete )?(defects|issues)|did not find any actionable defects|no actionable defects)' "$file"; then
     printf "possible"
   else
     printf "none"
@@ -749,7 +870,9 @@ capture_changed_file_hashes() {
   while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     local digest
-    if [[ -e "$path" ]]; then
+    if [[ -d "$path" ]]; then
+      digest="__DIR__"
+    elif [[ -e "$path" ]]; then
       digest="$(hash_file "$path")"
     else
       digest="__MISSING__"
@@ -848,18 +971,29 @@ print_heartbeat() {
   local elapsed="$4"
 
   local findings cmds errs phase_hint clean_signal file_refs
-  local action message phase_label clock alert_detail
+  local action message phase_label clock alert_detail auth_detail
 
   cmds="$(count_exec_events "$out_file")"
   errs="$(count_error_events "$phase" "$out_file")"
   phase_hint="$(phase_hint_from_output "$phase" "$out_file")"
   clock="$(format_elapsed_clock "$elapsed")"
+  HEARTBEAT_AUTH_FAILURE="0"
+  HEARTBEAT_AUTH_DETAIL=""
+  auth_detail="$(auth_error_summary "$out_file" || true)"
+  if [[ -n "$auth_detail" ]]; then
+    HEARTBEAT_AUTH_FAILURE="1"
+    HEARTBEAT_AUTH_DETAIL="$auth_detail"
+  fi
 
   if [[ "$phase" == "review" ]]; then
     phase_label="review"
     findings="$(estimate_findings_count "$out_file")"
     clean_signal="$(clean_signal_from_output "$out_file")"
-    if [[ "$errs" -gt 0 ]]; then
+    if [[ "$HEARTBEAT_AUTH_FAILURE" == "1" ]]; then
+      action="stop"
+      message="auth failure detected; stopping review"
+      alert_detail="$auth_detail"
+    elif [[ "$errs" -gt 0 ]]; then
       action="stop"
       message="error detected (${errs}); review may be blocked"
       alert_detail="${errs} error(s) detected while reviewing"
@@ -880,7 +1014,11 @@ print_heartbeat() {
   else
     phase_label="fix"
     file_refs="$(file_mentions_from_output "$out_file")"
-    if [[ "$errs" -gt 0 ]]; then
+    if [[ "$HEARTBEAT_AUTH_FAILURE" == "1" ]]; then
+      action="stop"
+      message="auth failure detected; stopping fix"
+      alert_detail="$auth_detail"
+    elif [[ "$errs" -gt 0 ]]; then
       action="stop"
       message="error detected (${errs}); fix may be blocked"
       alert_detail="${errs} error(s) detected while fixing"
@@ -954,6 +1092,16 @@ run_with_heartbeat() {
     fi
     last_action="$HEARTBEAT_ACTION"
 
+    if [[ "$HEARTBEAT_AUTH_FAILURE" == "1" ]]; then
+      warn "Authentication failure detected during ${phase}: ${HEARTBEAT_AUTH_DETAIL}"
+      kill_pid_or_group "$child_pid" "$pgid"
+      wait "$child_pid" >/dev/null 2>&1 || true
+      LAUNCH_CHILD_PID=""
+      LAUNCH_ISOLATED="0"
+      LAUNCH_CHILD_PGID=""
+      return "$AUTH_ERROR_EXIT_CODE"
+    fi
+
     if [[ "$phase_timeout" -gt 0 && "$elapsed" -ge "$phase_timeout" ]]; then
       warn "${phase} timed out after ${phase_timeout}s in round ${round}; terminating active command."
       kill_pid_or_group "$child_pid" "$pgid"
@@ -986,6 +1134,9 @@ run_with_heartbeat() {
   LAUNCH_CHILD_PID=""
   LAUNCH_ISOLATED="0"
   LAUNCH_CHILD_PGID=""
+  if [[ "$ec" -ne 0 ]] && auth_error_summary "$out_file" >/dev/null 2>&1; then
+    return "$AUTH_ERROR_EXIT_CODE"
+  fi
   return $ec
 }
 
@@ -999,6 +1150,7 @@ run_with_timeout_retry() {
 
   local ec=0
   local retry_count=0
+  local auth_retry_count=0
   while true; do
     run_with_heartbeat "$phase" "$round" "$out_file" "$stdin_file" "$@"
     ec=$?
@@ -1006,6 +1158,17 @@ run_with_timeout_retry() {
       retry_count=$((retry_count + 1))
       warn "Review timed out; retrying (${retry_count}/${retries})."
       continue
+    fi
+    if [[ "$ec" -eq "$AUTH_ERROR_EXIT_CODE" ]] \
+      && auth_error_summary "$out_file" >/dev/null 2>&1 \
+      && [[ "$auth_retry_count" -lt "$AUTH_FAILURE_RETRIES" ]]; then
+      auth_retry_count=$((auth_retry_count + 1))
+      local auth_status_file="${RUN_DIR}/round-${round}-${phase}-auth-retry-${auth_retry_count}.txt"
+      if codex_login_status_is_healthy "$auth_status_file"; then
+        warn "Auth failure looked transient; retrying ${phase} (${auth_retry_count}/${AUTH_FAILURE_RETRIES})."
+        sleep 2
+        continue
+      fi
     fi
     return "$ec"
   done
@@ -1040,12 +1203,17 @@ is_review_clean_output() {
   fi
 
   # Strict anchored clean lines in the tail section.
-  if tail -n 60 "$file" | grep -Eiq '^[[:space:]]*(REVIEW_CLEAN|No issues found\.?|No issues identified\.?|No findings\.?)\s*$'; then
+  if tail -n 120 "$file" | grep -Eiq '^[[:space:]]*(REVIEW_CLEAN|No issues found\.?|No issues identified\.?|No findings\.?)\s*$'; then
     return 0
   fi
 
-  # Fuzzy clean phrases are only accepted for short outputs with no findings/errors.
-  if [[ "$nonempty_count" -le 40 ]] && tail -n 60 "$file" | grep -Eiq '^[[:space:]]*(Looks good\.?|LGTM\.?)\s*$'; then
+  # Common reviewer "clean" prose, still guarded by zero findings/errors above.
+  if tail -n 120 "$file" | grep -Eiq '(I did not identify any (actionable )?(discrete )?(defects|issues)|I did not find any actionable defects|no actionable defects)'; then
+    return 0
+  fi
+
+  # Fuzzy clean phrases are accepted for short outputs with no findings/errors.
+  if [[ "$nonempty_count" -le 80 ]] && tail -n 120 "$file" | grep -Eiq '^[[:space:]]*(Looks good\.?|LGTM\.?)\s*$'; then
     return 0
   fi
 
@@ -1407,7 +1575,7 @@ run_fix() {
       args+=(--config "model_reasoning_effort=$effort_try")
     fi
 
-    run_with_heartbeat "fix" "$round" "$out_file" "$fix_prompt_file" codex exec "${args[@]}" -
+    run_with_timeout_retry "fix" "$round" "$out_file" "$fix_prompt_file" 0 codex exec "${args[@]}" -
     ec=$?
     if [[ "$ec" -eq 0 ]]; then
       LAST_EFFECTIVE_FIX_EFFORT="$effort_try"
@@ -1536,6 +1704,16 @@ while [[ $# -gt 0 ]]; do
       REVIEW_TIMEOUT_RETRIES="$2"
       shift 2
       ;;
+    --auth-failure-retries)
+      [[ $# -ge 2 ]] || die "--auth-failure-retries requires <n>"
+      AUTH_FAILURE_RETRIES="$2"
+      shift 2
+      ;;
+    --auth-scan-tail-lines)
+      [[ $# -ge 2 ]] || die "--auth-scan-tail-lines requires <n>"
+      AUTH_SCAN_TAIL_LINES="$2"
+      shift 2
+      ;;
     --error-scan-tail-lines)
       [[ $# -ge 2 ]] || die "--error-scan-tail-lines requires <n>"
       ERROR_SCAN_TAIL_LINES="$2"
@@ -1573,6 +1751,9 @@ done
 [[ "$REVIEW_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || die "--review-timeout-seconds must be an integer"
 [[ "$FIX_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || die "--fix-timeout-seconds must be an integer"
 [[ "$REVIEW_TIMEOUT_RETRIES" =~ ^[0-9]+$ ]] || die "--review-timeout-retries must be an integer"
+[[ "$AUTH_FAILURE_RETRIES" =~ ^[0-9]+$ ]] || die "--auth-failure-retries must be an integer"
+[[ "$AUTH_SCAN_TAIL_LINES" =~ ^[0-9]+$ ]] || die "--auth-scan-tail-lines must be an integer"
+[[ "$AUTH_SCAN_TAIL_LINES" -gt 0 ]] || die "--auth-scan-tail-lines must be > 0"
 [[ "$ERROR_SCAN_TAIL_LINES" =~ ^[0-9]+$ ]] || die "--error-scan-tail-lines must be an integer"
 [[ "$ERROR_SCAN_TAIL_LINES" -gt 0 ]] || die "--error-scan-tail-lines must be > 0"
 case "$REVIEW_PROMPT_MODE" in
@@ -1603,6 +1784,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo "- Review timeout sec:    $REVIEW_TIMEOUT_SECONDS"
   echo "- Fix timeout sec:       $FIX_TIMEOUT_SECONDS"
   echo "- Review timeout retries:$REVIEW_TIMEOUT_RETRIES"
+  echo "- Auth failure retries:  $AUTH_FAILURE_RETRIES"
+  echo "- Auth scan tail lines:  $AUTH_SCAN_TAIL_LINES"
   echo "- Error scan tail lines: $ERROR_SCAN_TAIL_LINES"
   echo "- Review model id override: ${REVIEW_MODEL_ID:-<none>}"
   echo "- Fix model id override:    ${FIX_MODEL_ID:-<none>}"
@@ -1610,6 +1793,12 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo "- Finding fuzzy threshold:  ${FINDINGS_FUZZY_THRESHOLD}"
   echo "- Control file: $CONTROL_FILE"
   exit 0
+fi
+
+login_status_file="${RUN_DIR}/login-status-preflight.txt"
+if ! ensure_codex_login_healthy "$login_status_file"; then
+  print_phase "❌ Codex authentication preflight failed. Artifacts at $RUN_DIR"
+  exit 2
 fi
 
 # Run summary state
@@ -1665,6 +1854,12 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     if [[ "$review_ec" -eq 130 ]]; then
       print_phase "Stopped during review (artifacts kept at $RUN_DIR)."
       exit 130
+    fi
+    if [[ "$review_ec" -eq "$AUTH_ERROR_EXIT_CODE" ]] && auth_error_summary "$review_file" >/dev/null 2>&1; then
+      warn "Authentication failed during review; aborting loop."
+      warn "Run 'codex logout' then 'codex login', then re-run this skill."
+      print_phase "❌ Review stopped due to authentication failure. Artifacts at $RUN_DIR"
+      exit 2
     fi
     warn "Review command exited non-zero (exit=$review_ec). Continuing."
   fi
@@ -1763,6 +1958,12 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     if [[ "$fix_ec" -eq 130 ]]; then
       print_phase "Stopped during fix (artifacts kept at $RUN_DIR)."
       exit 130
+    fi
+    if [[ "$fix_ec" -eq "$AUTH_ERROR_EXIT_CODE" ]] && auth_error_summary "$fix_file" >/dev/null 2>&1; then
+      warn "Authentication failed during fix; aborting loop."
+      warn "Run 'codex logout' then 'codex login', then re-run this skill."
+      print_phase "❌ Fix stopped due to authentication failure. Artifacts at $RUN_DIR"
+      exit 2
     fi
     warn "Fix command exited non-zero (exit=$fix_ec). Continuing to next round."
   fi

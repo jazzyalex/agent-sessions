@@ -17,6 +17,20 @@
     - Search sees updates from actively-writing sessions without requiring cold restart.
     - Reproduction steps and validation notes captured in `CX-AS-Note/06-qa-notes.md`.
 
+- [ ] [2026-02-13] [Design Decision] Hybrid refresh cadence for active + non-focused sessions
+  - Goal:
+    - Preserve focused session fast updates while preventing stale list states for other recently active sessions.
+  - Inputs:
+    - User feedback on expected visibility while reading one transcript and monitoring others.
+  - Dependencies:
+    - `UnifiedSessionIndexer.runNewSessionMonitorLoop()`
+    - `UnifiedSessionIndexer.runFocusedSessionMonitorLoop()`
+    - `SessionIndexer.refresh` mode/trigger behavior.
+  - Definition of done:
+    - Focused Codex/Claude session remains high-frequency update target.
+    - Recent/visible non-focused sessions are refreshed on a lower frequency cadence.
+    - List freshness improves for active sessions without regressing battery/CPU budget.
+
 - [ ] [DATE] Name — Status: Not started
   - Goal:
   - Inputs:

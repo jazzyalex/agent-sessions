@@ -50,6 +50,13 @@ Review prompt behavior:
 - Heartbeats print plain-language one-line summaries (default every 60s; configurable via `--heartbeat-seconds`).
 - When recommendation changes to a non-routine action (for example `steer` or `stop`), the loop prints an `ALERT` line immediately.
 
+Authentication resilience:
+- The loop runs a `codex login status` preflight before round 1.
+- Auth failures (for example `refresh_token_reused`) are detected from live output and fail fast instead of waiting for timeout.
+- The loop retries auth failures a bounded number of times (`AUTH_FAILURE_RETRIES`, default `1`) and then exits with artifacts + remediation text.
+- If this keeps happening, run `codex logout` then `codex login` before starting the loop.
+- For CI/automation reliability, prefer API-key auth (`printenv OPENAI_API_KEY | codex login --with-api-key`).
+
 ## Safety
 
 - Fix runs use `--full-auto` with `--sandbox workspace-write` (headless with sandboxed automation).

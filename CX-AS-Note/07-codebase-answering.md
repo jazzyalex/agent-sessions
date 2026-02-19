@@ -5,6 +5,19 @@
   - Important nuance:
   - Reusable response snippet:
 
+- [2026-02-13] Topic: Refresh policy for active vs non-focused sessions
+  - Key path/command:
+    - `UnifiedSessionIndexer.refreshFocusedCodexSession(reason:)`
+    - `UnifiedSessionIndexer.refreshMode(for:trigger:)`
+    - `UnifiedSessionIndexer.checkForNewSessions(establishBaselineIfNeeded:)`
+    - `SessionIndexer.refresh(mode:trigger:executionProfile:)`
+  - Important nuance:
+    - Current design appears to optimize for focused-session freshness and background polling elsewhere.
+    - The approved direction is a hybrid: keep focused transcript at high-frequency while adding periodic updates for recent/visible non-focused sessions.
+    - This balances responsiveness for the session being read with acceptable freshness in the list.
+  - Reusable response snippet:
+    - "The user experience should be hybrid: focused sessions stay on a fast monitor path, and non-focused sessions get a slower refresh path so the list can still feel live. This avoids the “single-session only” staleness problem while preserving resource predictability."
+
 - [2026-02-13] Topic: Codex session list/search stale until app relaunch
   - Key path/command:
     - `SessionIndexer.refresh(mode:trigger:executionProfile:)`
