@@ -260,3 +260,66 @@ final class TranscriptSessionResolutionPolicyTests: XCTestCase {
         )
     }
 }
+
+final class TranscriptTailUpdateStateTests: XCTestCase {
+    func testContentUpdateAtBottomRequestsAutoScroll() {
+        var state = TranscriptTailUpdateState()
+        state.reset(sessionID: "s1", contentVersion: 10)
+
+        state.contentVersionChanged(sessionID: "s1", contentVersion: 11)
+
+        XCTAssertEqual(state.scrollToBottomToken, 1)
+        XCTAssertFalse(state.hasUnseenUpdates)
+        XCTAssertTrue(state.stickyFollowEnabled)
+    }
+
+    func testContentUpdateWhileDetachedShowsUnseenIndicator() {
+        var state = TranscriptTailUpdateState()
+        state.reset(sessionID: "s1", contentVersion: 10)
+        state.viewportChanged(isNearBottom: false)
+
+        state.contentVersionChanged(sessionID: "s1", contentVersion: 11)
+
+        XCTAssertEqual(state.scrollToBottomToken, 0)
+        XCTAssertTrue(state.hasUnseenUpdates)
+        XCTAssertFalse(state.stickyFollowEnabled)
+    }
+
+    func testJumpToLatestClearsUnseenAndRequestsScroll() {
+        var state = TranscriptTailUpdateState()
+        state.reset(sessionID: "s1", contentVersion: 10)
+        state.viewportChanged(isNearBottom: false)
+        state.contentVersionChanged(sessionID: "s1", contentVersion: 11)
+
+        state.jumpToLatest()
+
+        XCTAssertEqual(state.scrollToBottomToken, 1)
+        XCTAssertFalse(state.hasUnseenUpdates)
+        XCTAssertTrue(state.stickyFollowEnabled)
+    }
+
+    func testReturningToBottomClearsUnseenAndRestoresFollow() {
+        var state = TranscriptTailUpdateState()
+        state.reset(sessionID: "s1", contentVersion: 10)
+        state.viewportChanged(isNearBottom: false)
+        state.contentVersionChanged(sessionID: "s1", contentVersion: 11)
+
+        state.viewportChanged(isNearBottom: true)
+
+        XCTAssertFalse(state.hasUnseenUpdates)
+        XCTAssertTrue(state.stickyFollowEnabled)
+        XCTAssertTrue(state.isNearBottom)
+    }
+
+    func testDifferentSessionResetsWithoutScrollRequest() {
+        var state = TranscriptTailUpdateState()
+        state.reset(sessionID: "s1", contentVersion: 10)
+
+        state.contentVersionChanged(sessionID: "s2", contentVersion: 1)
+
+        XCTAssertEqual(state.sessionID, "s2")
+        XCTAssertEqual(state.lastContentVersion, 1)
+        XCTAssertEqual(state.scrollToBottomToken, 0)
+        XCTAssertFalse(state.hasUnseenUpdates)
+    }
+}
