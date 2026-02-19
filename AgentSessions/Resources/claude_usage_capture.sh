@@ -87,6 +87,9 @@ trap cleanup EXIT INT TERM HUP
 # Dependency checks
 # ============================================================================
 
+# Ensure tmux socket lives in a writable, short path to avoid UNIX socket path limits
+if [[ -z "${TMUX_TMPDIR:-}" ]]; then export TMUX_TMPDIR="/tmp"; fi
+
 # Check tmux
 TMUX_CMD="${TMUX_BIN:-tmux}"
 if [[ -n "${TMUX_BIN:-}" ]]; then
@@ -128,8 +131,22 @@ fi
 # ============================================================================
 
 # Launch Claude in temp directory (prevents project scanning)
+set +e
 "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" \
     "cd '$WORKDIR' && env TERM=xterm-256color '$CLAUDE_CMD' --model $MODEL"
+rc=$?
+if [[ $rc -ne 0 ]]; then
+    # Retry once after a short delay in case tmux server was still initializing
+    sleep 0.3
+    "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" \
+        "cd '$WORKDIR' && env TERM=xterm-256color '$CLAUDE_CMD' --model $MODEL"
+    rc=$?
+fi
+set -e
+if [[ $rc -ne 0 ]]; then
+    echo "$(error_json tmux_start_failed "Failed to start tmux session (rc=$rc). TMUX_TMPDIR=$TMUX_TMPDIR")"
+    exit 1
+fi
 
 # Mark this tmux server as an Agent Sessions probe.
 "$TMUX_CMD" -L "$LABEL" set-environment -g AS_PROBE "1" 2>/dev/null || true
