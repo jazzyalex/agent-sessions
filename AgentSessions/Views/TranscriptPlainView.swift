@@ -28,6 +28,55 @@ enum TranscriptSessionRenderKey {
     }
 }
 
+struct TranscriptTailUpdateState: Equatable {
+    private(set) var sessionID: String? = nil
+    private(set) var lastContentVersion: Int = 0
+    private(set) var isNearBottom: Bool = true
+    private(set) var hasUnseenUpdates: Bool = false
+    private(set) var stickyFollowEnabled: Bool = true
+    private(set) var scrollToBottomToken: Int = 0
+
+    mutating func reset(sessionID: String, contentVersion: Int) {
+        self.sessionID = sessionID
+        self.lastContentVersion = contentVersion
+        self.isNearBottom = true
+        self.hasUnseenUpdates = false
+        self.stickyFollowEnabled = true
+    }
+
+    mutating func viewportChanged(isNearBottom: Bool) {
+        self.isNearBottom = isNearBottom
+        if isNearBottom {
+            hasUnseenUpdates = false
+            stickyFollowEnabled = true
+        } else {
+            stickyFollowEnabled = false
+        }
+    }
+
+    mutating func contentVersionChanged(sessionID: String, contentVersion: Int) {
+        guard self.sessionID == sessionID else {
+            reset(sessionID: sessionID, contentVersion: contentVersion)
+            return
+        }
+        guard contentVersion != lastContentVersion else { return }
+
+        lastContentVersion = contentVersion
+        if isNearBottom || stickyFollowEnabled {
+            hasUnseenUpdates = false
+            scrollToBottomToken &+= 1
+        } else {
+            hasUnseenUpdates = true
+        }
+    }
+
+    mutating func jumpToLatest() {
+        hasUnseenUpdates = false
+        stickyFollowEnabled = true
+        scrollToBottomToken &+= 1
+    }
+}
+
 enum TranscriptSessionResolutionPolicy {
     // Backward-compatible overload to avoid stale call sites during incremental test bundles.
     static func preferredSession(live: Session?, cached: Session?, sessionID: String) -> Session? {
@@ -210,6 +259,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     // Selection for auto-scroll to find matches
     @State private var selectedNSRange: NSRange? = nil
     @State private var selectionScrollMode: SelectionScrollMode = .ensureVisible
+    @State private var tailUpdateState = TranscriptTailUpdateState()
     // Ephemeral copy confirmation (popover)
     @State private var showIDCopiedPopover: Bool = false
     // Terminal-only jump trigger (Session view uses SessionTerminalView, not NSTextView selection)
@@ -297,50 +347,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .frame(maxWidth: .infinity)
                     .background(Color(NSColor.controlBackgroundColor))
                 Divider()
-	                ZStack {
-	                    if viewMode == .terminal {
-	                        SessionTerminalView(
-	                            session: session,
-	                            unifiedQuery: unifiedFreeText,
-	                            unifiedFindToken: terminalUnifiedFindToken,
-	                            unifiedFindDirection: terminalUnifiedFindDirection,
-	                            unifiedFindReset: terminalUnifiedFindResetFlag,
-	                            unifiedAllowMatchAutoScroll: terminalUnifiedAllowMatchAutoScroll,
-	                            unifiedExternalMatchCount: $terminalUnifiedMatchesCount,
-	                            unifiedExternalTotalMatchCount: $terminalUnifiedTotalMatchesCount,
-	                            unifiedExternalCurrentMatchIndex: $terminalUnifiedCurrentIndex,
-	                            findQuery: findQuery,
-	                            findToken: terminalFindToken,
-	                            findDirection: terminalFindDirection,
-	                            findReset: terminalFindResetFlag,
-	                            allowMatchAutoScroll: terminalAllowMatchAutoScroll,
-	                            jumpToken: terminalJumpToken,
-	                            roleNavToken: terminalRoleNavToken,
-	                            roleNavRole: terminalRoleNavRole,
-	                            roleNavDirection: terminalRoleNavDirection,
-	                            externalMatchCount: $terminalFindMatchesCount,
-	                            externalTotalMatchCount: $terminalFindTotalMatchesCount,
-	                            externalCurrentMatchIndex: $terminalFindCurrentIndex
-	                        )
-	                    } else {
-	                        PlainTextScrollView(
-	                            text: transcript,
-	                            selection: selectedNSRange,
-	                            selectionScrollMode: selectionScrollMode,
-	                            fontSize: CGFloat(transcriptFontSize),
-	                            highlights: unifiedHighlightRanges,
-	                            currentIndex: unifiedCurrentMatchIndex,
-	                            findCurrentRange: findCurrentRange,
-	                            commandRanges: (shouldColorize || isJSONMode) ? commandRanges : [],
-	                            userRanges: (shouldColorize || isJSONMode) ? userRanges : [],
-	                            assistantRanges: (shouldColorize || isJSONMode) ? assistantRanges : [],
-	                            outputRanges: (shouldColorize || isJSONMode) ? outputRanges : [],
-                            errorRanges: (shouldColorize || isJSONMode) ? errorRanges : [],
-                            isJSONMode: isJSONMode,
-                            appAppearanceRaw: appAppearanceRaw,
-                            colorScheme: colorScheme,
-                            monochrome: stripMonochrome
-                        )
+                ZStack(alignment: .bottom) {
+                    if viewMode == .terminal {
+                        terminalTranscriptView(session: session)
+                    } else {
+                        plainTranscriptView()
                     }
 
                     // Show animation during lazy load OR full refresh
@@ -350,10 +361,32 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                             claudeColor: Color.agentClaude
                         )
                     }
+
+                    if shouldShowJumpToLatestButton(for: session) {
+                        jumpToLatestButton
+                    }
                 }
+            }
+            .onAppear {
+                tailUpdateState.reset(
+                    sessionID: session.id,
+                    contentVersion: transcriptContentVersion(for: session)
+                )
+            }
+            .onChange(of: session.id) { _, _ in
+                tailUpdateState.reset(
+                    sessionID: session.id,
+                    contentVersion: transcriptContentVersion(for: session)
+                )
             }
             .onChange(of: renderKey) { oldValue, newValue in
                 transcriptTrace("renderKey changed id=\(sessionID ?? "nil") old=\(oldValue) new=\(newValue)")
+            }
+            .onChange(of: transcriptContentVersion(for: session)) { _, newValue in
+                tailUpdateState.contentVersionChanged(
+                    sessionID: session.id,
+                    contentVersion: newValue
+                )
             }
             .task(id: renderKey) {
                 guard let id = sessionID else { return }
@@ -420,6 +453,100 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     )
                 }
         }
+    }
+
+    private func transcriptContentVersion(for session: Session) -> Int {
+        var hasher = Hasher()
+        hasher.combine(session.id)
+        hasher.combine(session.eventCount)
+        hasher.combine(session.events.count)
+        hasher.combine(session.events.last?.id ?? "")
+        hasher.combine(session.endTime?.timeIntervalSince1970 ?? 0)
+        return hasher.finalize()
+    }
+
+    private func shouldShowJumpToLatestButton(for session: Session) -> Bool {
+        !tailUpdateState.isNearBottom
+    }
+
+    private var jumpToLatestButton: some View {
+        Button(action: {
+            tailUpdateState.jumpToLatest()
+        }) {
+            ZStack {
+                Circle()
+                    .fill(Color.white)
+                Circle()
+                    .stroke(Color.black.opacity(0.18), lineWidth: 1)
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 26, weight: .regular))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(Color.black)
+            }
+            .frame(width: 64, height: 64)
+        }
+        .buttonStyle(.plain)
+        .help("Jump to latest output")
+        .accessibilityLabel("Jump to latest output")
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, 12)
+        .zIndex(4)
+    }
+
+    private func updateBottomProximity(_ isNearBottom: Bool) {
+        tailUpdateState.viewportChanged(isNearBottom: isNearBottom)
+    }
+
+    private func terminalTranscriptView(session: Session) -> some View {
+        SessionTerminalView(
+            session: session,
+            unifiedQuery: unifiedFreeText,
+            unifiedFindToken: terminalUnifiedFindToken,
+            unifiedFindDirection: terminalUnifiedFindDirection,
+            unifiedFindReset: terminalUnifiedFindResetFlag,
+            unifiedAllowMatchAutoScroll: terminalUnifiedAllowMatchAutoScroll,
+            unifiedExternalMatchCount: $terminalUnifiedMatchesCount,
+            unifiedExternalTotalMatchCount: $terminalUnifiedTotalMatchesCount,
+            unifiedExternalCurrentMatchIndex: $terminalUnifiedCurrentIndex,
+            findQuery: findQuery,
+            findToken: terminalFindToken,
+            findDirection: terminalFindDirection,
+            findReset: terminalFindResetFlag,
+            allowMatchAutoScroll: terminalAllowMatchAutoScroll,
+            scrollToBottomToken: tailUpdateState.scrollToBottomToken,
+            onBottomProximityChange: updateBottomProximity,
+            jumpToken: terminalJumpToken,
+            roleNavToken: terminalRoleNavToken,
+            roleNavRole: terminalRoleNavRole,
+            roleNavDirection: terminalRoleNavDirection,
+            externalMatchCount: $terminalFindMatchesCount,
+            externalTotalMatchCount: $terminalFindTotalMatchesCount,
+            externalCurrentMatchIndex: $terminalFindCurrentIndex
+        )
+    }
+
+    private func plainTranscriptView() -> some View {
+        let roleRangesEnabled = shouldColorize || isJSONMode
+        return PlainTextScrollView(
+            text: transcript,
+            selection: selectedNSRange,
+            selectionScrollMode: selectionScrollMode,
+            fontSize: CGFloat(transcriptFontSize),
+            highlights: unifiedHighlightRanges,
+            currentIndex: unifiedCurrentMatchIndex,
+            findCurrentRange: findCurrentRange,
+            scrollToBottomToken: tailUpdateState.scrollToBottomToken,
+            onBottomProximityChange: updateBottomProximity,
+            commandRanges: roleRangesEnabled ? commandRanges : [],
+            userRanges: roleRangesEnabled ? userRanges : [],
+            assistantRanges: roleRangesEnabled ? assistantRanges : [],
+            outputRanges: roleRangesEnabled ? outputRanges : [],
+            errorRanges: roleRangesEnabled ? errorRanges : [],
+            isJSONMode: isJSONMode,
+            appAppearanceRaw: appAppearanceRaw,
+            colorScheme: colorScheme,
+            monochrome: stripMonochrome
+        )
     }
 
     private func toolbar(session: Session) -> some View {
@@ -2435,6 +2562,8 @@ private struct PlainTextScrollView: NSViewRepresentable {
     let highlights: [NSRange]
     let currentIndex: Int
     let findCurrentRange: NSRange?
+    let scrollToBottomToken: Int
+    let onBottomProximityChange: (Bool) -> Void
     let commandRanges: [NSRange]
     let userRanges: [NSRange]
     let assistantRanges: [NSRange]
@@ -2455,6 +2584,18 @@ private struct PlainTextScrollView: NSViewRepresentable {
         var lastIsJSONMode: Bool = false
         var lastMonochrome: Bool = false
         var lastColorSignature: (Int, Int, Int, Int, Int) = (0, 0, 0, 0, 0)
+        var scrollView: NSScrollView?
+        var scrollObserver: NSObjectProtocol?
+        var lastNearBottom: Bool? = nil
+        var onBottomProximityChange: ((Bool) -> Void)?
+        var lastScrollToBottomToken: Int = 0
+
+        deinit {
+            if let scrollObserver {
+                NotificationCenter.default.removeObserver(scrollObserver)
+                self.scrollObserver = nil
+            }
+        }
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -2518,6 +2659,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         context.coordinator.lastAppearanceRaw = appAppearanceRaw
         context.coordinator.lastColorScheme = colorScheme
         context.coordinator.lastFindRange = findCurrentRange
+        context.coordinator.onBottomProximityChange = onBottomProximityChange
 
         // Set background with proper dark mode support
         let isDark = (textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
@@ -2536,16 +2678,28 @@ private struct PlainTextScrollView: NSViewRepresentable {
         applyFindHighlights(textView, coordinator: context.coordinator)
 
         scroll.documentView = textView
+        installScrollObserverIfNeeded(scrollView: scroll, coordinator: context.coordinator)
+
         if let sel = selection {
             scrollSelection(textView, range: sel, mode: selectionScrollMode)
             // Clear selection immediately to avoid blue highlight - we use yellow/white backgrounds instead
             textView.setSelectedRange(NSRange(location: 0, length: 0))
         }
+
+        if scrollToBottomToken != context.coordinator.lastScrollToBottomToken {
+            scrollToBottom(scrollView: scroll, textView: textView)
+            context.coordinator.lastScrollToBottomToken = scrollToBottomToken
+        }
+        emitBottomProximityIfNeeded(scrollView: scroll, coordinator: context.coordinator)
+        scheduleBottomProximityUpdate(scrollView: scroll, coordinator: context.coordinator)
         return scroll
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         if let tv = nsView.documentView as? NSTextView {
+            context.coordinator.onBottomProximityChange = onBottomProximityChange
+            installScrollObserverIfNeeded(scrollView: nsView, coordinator: context.coordinator)
+
             let textChanged = tv.string != text
             let appearanceChanged = context.coordinator.lastAppearanceRaw != appAppearanceRaw
             let schemeChanged = context.coordinator.lastColorScheme != colorScheme
@@ -2614,6 +2768,11 @@ private struct PlainTextScrollView: NSViewRepresentable {
                 tv.setSelectedRange(NSRange(location: 0, length: 0))
             }
 
+            if scrollToBottomToken != context.coordinator.lastScrollToBottomToken {
+                scrollToBottom(scrollView: nsView, textView: tv)
+                context.coordinator.lastScrollToBottomToken = scrollToBottomToken
+            }
+
             applyFindHighlights(tv, coordinator: context.coordinator)
 
             // Update local Find overlay (blue outline) via the custom layout manager
@@ -2629,9 +2788,69 @@ private struct PlainTextScrollView: NSViewRepresentable {
             // Update last seen scheme at the end of the pass
             context.coordinator.lastColorScheme = colorScheme
             context.coordinator.lastIsJSONMode = isJSONMode
-            context.coordinator.lastMonochrome = monochrome
-            context.coordinator.lastColorSignature = colorSignature
+        context.coordinator.lastMonochrome = monochrome
+        context.coordinator.lastColorSignature = colorSignature
+        emitBottomProximityIfNeeded(scrollView: nsView, coordinator: context.coordinator)
+        if textChanged {
+            scheduleBottomProximityUpdate(scrollView: nsView, coordinator: context.coordinator)
         }
+    }
+    }
+
+    private func installScrollObserverIfNeeded(scrollView: NSScrollView, coordinator: Coordinator) {
+        if coordinator.scrollView !== scrollView {
+            if let existing = coordinator.scrollObserver {
+                NotificationCenter.default.removeObserver(existing)
+                coordinator.scrollObserver = nil
+            }
+            coordinator.scrollView = scrollView
+            coordinator.lastNearBottom = nil
+        }
+
+        guard coordinator.scrollObserver == nil else { return }
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        coordinator.scrollObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { [weak coordinator, weak scrollView] _ in
+            guard let coordinator, let scrollView else { return }
+            emitBottomProximityIfNeeded(scrollView: scrollView, coordinator: coordinator)
+        }
+    }
+
+    private func emitBottomProximityIfNeeded(scrollView: NSScrollView, coordinator: Coordinator) {
+        let nearBottom = isNearBottom(scrollView: scrollView)
+        guard coordinator.lastNearBottom != nearBottom else { return }
+        coordinator.lastNearBottom = nearBottom
+        coordinator.onBottomProximityChange?(nearBottom)
+    }
+
+    private func scheduleBottomProximityUpdate(scrollView: NSScrollView, coordinator: Coordinator) {
+        DispatchQueue.main.async { [weak coordinator, weak scrollView] in
+            guard let coordinator, let scrollView else { return }
+            emitBottomProximityIfNeeded(scrollView: scrollView, coordinator: coordinator)
+        }
+    }
+
+    private func isNearBottom(scrollView: NSScrollView) -> Bool {
+        guard let documentView = scrollView.documentView else { return true }
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let contentHeight = max(documentView.bounds.height, visibleRect.height)
+        let distanceToBottom = max(0, contentHeight - visibleRect.maxY)
+        return distanceToBottom <= 48
+    }
+
+    private func scrollToBottom(scrollView: NSScrollView, textView: NSTextView) {
+        if textView.string.isEmpty {
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: 0))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            return
+        }
+
+        let length = (textView.string as NSString).length
+        textView.scrollRangeToVisible(NSRange(location: max(0, length - 1), length: 1))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private final class PlainFindLayoutManager: NSLayoutManager {
