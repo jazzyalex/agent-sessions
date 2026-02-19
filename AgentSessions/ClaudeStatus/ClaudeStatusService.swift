@@ -320,7 +320,7 @@ actor ClaudeStatusService {
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
         env["WORKDIR"] = workDir
         env["MODEL"] = "sonnet"
-        env["TIMEOUT_SECS"] = "10"
+        env["TIMEOUT_SECS"] = "14"
         env["SLEEP_BOOT"] = "0.4"
         env["SLEEP_AFTER_USAGE"] = "2.0"
 
@@ -343,7 +343,7 @@ actor ClaudeStatusService {
         } catch {
             return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: "", stderr: error.localizedDescription)
         }
-        let didExit = await waitForProcessExit(process, timeoutSeconds: 20, label: probeLabel, session: Self.probeSessionName)
+        let didExit = await waitForProcessExit(process, timeoutSeconds: 30, label: probeLabel, session: Self.probeSessionName)
         let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         if !didExit {
@@ -385,7 +385,7 @@ actor ClaudeStatusService {
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
         env["WORKDIR"] = workDir
         env["MODEL"] = "sonnet"
-        env["TIMEOUT_SECS"] = "10"
+        env["TIMEOUT_SECS"] = "14"
         env["SLEEP_BOOT"] = "0.4"
         env["SLEEP_AFTER_USAGE"] = "2.0"
 
@@ -419,9 +419,9 @@ actor ClaudeStatusService {
 
         try process.run()
 
-        let didExit = await waitForProcessExit(process, timeoutSeconds: 20, label: probeLabel, session: Self.probeSessionName)
+        let didExit = await waitForProcessExit(process, timeoutSeconds: 30, label: probeLabel, session: Self.probeSessionName)
         if !didExit {
-            print("ClaudeStatusService: Script timed out after 20s, terminating")
+            print("ClaudeStatusService: Script timed out after 30s, terminating")
             throw ClaudeServiceError.scriptFailed(exitCode: 124, output: "Script timed out")
         }
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
