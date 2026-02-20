@@ -46,6 +46,10 @@ struct TranscriptTailUpdateState: Equatable {
         bottomProximity != .nearBottom
     }
 
+    var isNearBottom: Bool {
+        bottomProximity == .nearBottom
+    }
+
     mutating func reset(sessionID: String, contentVersion: Int) {
         self.sessionID = sessionID
         self.lastContentVersion = contentVersion
@@ -279,6 +283,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var terminalRoleNavToken: Int = 0
     @State private var terminalRoleNavRole: SessionTerminalView.RoleToggle = .user
     @State private var terminalRoleNavDirection: Int = 1
+    @State private var pendingFirstRenderSessionID: String? = nil
 
     // Text view navigation cursors (used for keyboard jumps)
     @State private var lastUserJumpLocation: Int? = nil
@@ -308,11 +313,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         guard transcriptTraceEnabled else { return }
         print("🧭[Transcript] \(message())")
         #endif
-    }
-
-    private var shouldShowLoadingAnimation: Bool {
-        guard let id = sessionID else { return false }
-        return indexer.isLoadingSession && indexer.loadingSessionID == id
     }
 
     private func sessionBuildKey(_ session: Session) -> String {
@@ -365,26 +365,24 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         plainTranscriptView(session: session)
                     }
 
-                    // Show animation during lazy load OR full refresh
-                    if shouldShowLoadingAnimation {
-                        LoadingAnimationView(
-                            codexColor: Color.agentCodex,
-                            claudeColor: Color.agentClaude
-                        )
-                    }
-
                     if shouldShowJumpToLatestButton {
                         jumpToLatestButton
                     }
                 }
             }
             .onAppear {
+                if lastRenderedSessionID != session.id || transcript.isEmpty {
+                    pendingFirstRenderSessionID = session.id
+                }
                 tailUpdateState.reset(
                     sessionID: session.id,
                     contentVersion: transcriptContentVersion(for: session)
                 )
             }
             .onChange(of: session.id) { _, _ in
+                if lastRenderedSessionID != session.id || transcript.isEmpty {
+                    pendingFirstRenderSessionID = session.id
+                }
                 tailUpdateState.reset(
                     sessionID: session.id,
                     contentVersion: transcriptContentVersion(for: session)
@@ -459,6 +457,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear {
+                    pendingFirstRenderSessionID = nil
                     transcriptTrace(
                         "placeholder visible sessionID=\(sessionID ?? "nil") lastResolvedID=\(lastResolvedSession?.id ?? "nil") lastResolvedEvents=\(lastResolvedSession?.events.count ?? -1)"
                     )
@@ -526,6 +525,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             allowMatchAutoScroll: terminalAllowMatchAutoScroll,
             scrollToBottomToken: tailUpdateState.scrollToBottomToken,
             onBottomProximityChange: updateBottomProximity,
+            onRenderComplete: { id in
+                if pendingFirstRenderSessionID == id {
+                    pendingFirstRenderSessionID = nil
+                }
+            },
             jumpToken: terminalJumpToken,
             roleNavToken: terminalRoleNavToken,
             roleNavRole: terminalRoleNavRole,
@@ -1210,6 +1214,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         lastRenderedTailEventSnapshot = session.events.last
         lastRenderedViewModeRaw = renderedViewMode.rawValue
         lastRenderedAppendConfigKey = appendConfigKey
+        if pendingFirstRenderSessionID == session.id, renderedViewMode != .terminal {
+            pendingFirstRenderSessionID = nil
+        }
     }
 
     private func makeAppendConfigKey(viewMode: SessionViewMode,
@@ -2711,7 +2718,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             scrollToBottom(scrollView: scroll, textView: textView)
             context.coordinator.lastScrollToBottomToken = scrollToBottomToken
         }
-        emitBottomProximityIfNeeded(scrollView: scroll, coordinator: context.coordinator)
+        emitBottomProximityIfNeeded(scrollView: scroll, coordinator: context.coordinator, force: true)
         scheduleBottomProximityUpdate(scrollView: scroll, coordinator: context.coordinator)
         return scroll
     }
@@ -2726,6 +2733,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         if proximityContextChanged {
             context.coordinator.lastProximityContextID = proximityContextID
             context.coordinator.lastNearBottom = nil
+            emitBottomProximityIfNeeded(scrollView: nsView, coordinator: context.coordinator, force: true)
         }
 
         let textChanged = tv.string != text
@@ -2799,6 +2807,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         if scrollToBottomToken != context.coordinator.lastScrollToBottomToken {
             scrollToBottom(scrollView: nsView, textView: tv)
             context.coordinator.lastScrollToBottomToken = scrollToBottomToken
+            emitBottomProximityIfNeeded(scrollView: nsView, coordinator: context.coordinator, force: true)
             scheduleBottomProximityUpdate(scrollView: nsView, coordinator: context.coordinator)
         }
 
@@ -2873,9 +2882,11 @@ private struct PlainTextScrollView: NSViewRepresentable {
         }
     }
 
-    private func emitBottomProximityIfNeeded(scrollView: NSScrollView, coordinator: Coordinator) {
+    private func emitBottomProximityIfNeeded(scrollView: NSScrollView,
+                                             coordinator: Coordinator,
+                                             force: Bool = false) {
         let nearBottom = isNearBottom(scrollView: scrollView)
-        guard coordinator.lastNearBottom != nearBottom else { return }
+        guard force || coordinator.lastNearBottom != nearBottom else { return }
         coordinator.lastNearBottom = nearBottom
         coordinator.onBottomProximityChange?(nearBottom)
     }

@@ -285,7 +285,33 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 mergedByPath.removeValue(forKey: removed)
             }
             for session in changedSessions {
-                mergedByPath[session.filePath] = session
+                if let existing = mergedByPath[session.filePath],
+                   !existing.events.isEmpty,
+                   session.events.isEmpty {
+                    #if DEBUG
+                    let filename = session.filePath.components(separatedBy: "/").last ?? "?"
+                    print("⚠️ Preserve full events during refresh: \(filename)")
+                    #endif
+                    let merged = Session(
+                        id: existing.id,
+                        source: existing.source,
+                        startTime: existing.startTime ?? session.startTime,
+                        endTime: session.endTime ?? existing.endTime,
+                        model: session.model ?? existing.model,
+                        filePath: existing.filePath,
+                        fileSizeBytes: session.fileSizeBytes ?? existing.fileSizeBytes,
+                        eventCount: max(existing.eventCount, session.eventCount),
+                        events: existing.events,
+                        cwd: session.lightweightCwd ?? existing.lightweightCwd,
+                        repoName: nil,
+                        lightweightTitle: session.lightweightTitle ?? existing.lightweightTitle,
+                        lightweightCommands: session.lightweightCommands ?? existing.lightweightCommands,
+                        isHousekeeping: existing.isHousekeeping
+                    )
+                    mergedByPath[session.filePath] = merged
+                } else {
+                    mergedByPath[session.filePath] = session
+                }
             }
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
             let merged = Array(mergedByPath.values).filter(exists)

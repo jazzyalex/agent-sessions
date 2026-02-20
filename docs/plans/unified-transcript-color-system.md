@@ -3,6 +3,9 @@
 ## Summary
 Create a single, consistent transcript color system across the app so the Color transcript cards and the transcript toolbar legend communicate the same semantics: who is speaking, what is a tool call, and what is tool output (success vs error). Agent narrative blocks should use a light brand tint plus a brand strip (chat-like), without confusing green-branded agents (for example Droid) with successful tool output.
 
+Reference table: `docs/transcript-color-reference.md`
+Canonical source note: if another historical spec describes transcript tool colors differently, this plan (and the reference table above) is authoritative.
+
 ## Problem
 The app currently has multiple “sources of truth” for transcript colors:
 - Toolbar legend dots use one mapping (role palette).

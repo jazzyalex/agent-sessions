@@ -48,6 +48,7 @@ struct SessionTerminalView: View {
     let allowMatchAutoScroll: Bool
     let scrollToBottomToken: Int
     let onBottomProximityChange: (Bool) -> Void
+    let onRenderComplete: (String) -> Void
     let jumpToken: Int
     let roleNavToken: Int
     let roleNavRole: RoleToggle
@@ -111,6 +112,7 @@ struct SessionTerminalView: View {
     @State private var roleNavScrollToken: Int = 0
     @State private var preambleUserBlockIndexes: Set<Int> = []
     @State private var autoScrollSessionID: String? = nil
+    @State private var lastReportedRenderSessionID: String? = nil
 
     // Derived agent label for legend chips (Codex / Claude / Gemini)
     private var agentLegendLabel: String {
@@ -165,6 +167,7 @@ struct SessionTerminalView: View {
             autoScrollSessionID = nil
             imageHighlightLineID = nil
             selectedInlineImageUserBlockIndex = nil
+            lastReportedRenderSessionID = nil
             rebuildLines(priority: .userInitiated)
             refreshInlineImages()
         }
@@ -737,6 +740,13 @@ struct SessionTerminalView: View {
                 }
                 if let pending = pendingEventJumpID, jumpToEventID(pending) {
                     pendingEventJumpID = nil
+                }
+
+                if lastReportedRenderSessionID != sessionSnapshot.id {
+                    lastReportedRenderSessionID = sessionSnapshot.id
+                    DispatchQueue.main.async {
+                        onRenderComplete(sessionSnapshot.id)
+                    }
                 }
 
                 if appendOnlyUpdate {
@@ -2719,7 +2729,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             observedDocumentView = nil
         }
 
-        func emitBottomProximityIfNeeded() {
+        func emitBottomProximityIfNeeded(force: Bool = false) {
             guard let scrollView = activeScrollView else { return }
             let visibleRect = scrollView.contentView.documentVisibleRect
             let contentHeight = measuredContentHeight(for: scrollView)
@@ -2727,9 +2737,11 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let currentOffset = max(0, min(visibleRect.origin.y, maxOffset))
             let distanceToBottom = max(0, maxOffset - currentOffset)
             let nearBottom = distanceToBottom <= Self.nearBottomThreshold
-            guard lastNearBottom != nearBottom else { return }
+            guard force || lastNearBottom != nearBottom else { return }
             lastNearBottom = nearBottom
-            onBottomProximityChange?(nearBottom)
+            DispatchQueue.main.async { [weak self] in
+                self?.onBottomProximityChange?(nearBottom)
+            }
         }
 
         func scheduleBottomProximityUpdate() {
@@ -3544,7 +3556,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastImageHighlightToken = imageHighlightToken
         context.coordinator.lastScrollToBottomToken = scrollToBottomToken
         context.coordinator.lastProximityContextID = proximityContextID
-        context.coordinator.emitBottomProximityIfNeeded()
+        context.coordinator.emitBottomProximityIfNeeded(force: true)
         context.coordinator.scheduleBottomProximityUpdate()
         return scroll
     }
@@ -3558,6 +3570,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         if proximityContextChanged {
             context.coordinator.lastProximityContextID = proximityContextID
             context.coordinator.lastNearBottom = nil
+            context.coordinator.emitBottomProximityIfNeeded(force: true)
         }
         var needsBottomProximityRefresh = proximityContextChanged
 
@@ -3652,6 +3665,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         if scrollToBottomToken != context.coordinator.lastScrollToBottomToken {
             scrollToBottom(tv)
             context.coordinator.lastScrollToBottomToken = scrollToBottomToken
+            context.coordinator.emitBottomProximityIfNeeded(force: true)
             needsBottomProximityRefresh = true
         }
 
