@@ -262,6 +262,41 @@ final class TranscriptSessionResolutionPolicyTests: XCTestCase {
 }
 
 final class TranscriptTailUpdateStateTests: XCTestCase {
+    func testJumpArrowVisibleBeforeViewportMeasurement() {
+        var state = TranscriptTailUpdateState()
+        state.reset(sessionID: "s1", contentVersion: 10)
+
+        XCTAssertTrue(state.shouldShowJumpToLatestButton)
+    }
+
+    func testJumpArrowHiddenAtBottom() {
+        var state = TranscriptTailUpdateState()
+        state.reset(sessionID: "s1", contentVersion: 10)
+
+        state.viewportChanged(isNearBottom: true)
+
+        XCTAssertFalse(state.shouldShowJumpToLatestButton)
+    }
+
+    func testJumpArrowVisibleAwayFromBottom() {
+        var state = TranscriptTailUpdateState()
+        state.reset(sessionID: "s1", contentVersion: 10)
+
+        state.viewportChanged(isNearBottom: false)
+
+        XCTAssertTrue(state.shouldShowJumpToLatestButton)
+    }
+
+    func testDetachedContentUpdateKeepsJumpArrowVisible() {
+        var state = TranscriptTailUpdateState()
+        state.reset(sessionID: "s1", contentVersion: 10)
+        state.viewportChanged(isNearBottom: false)
+
+        state.contentVersionChanged(sessionID: "s1", contentVersion: 11)
+
+        XCTAssertTrue(state.shouldShowJumpToLatestButton)
+    }
+
     func testContentUpdateAtBottomRequestsAutoScroll() {
         var state = TranscriptTailUpdateState()
         state.reset(sessionID: "s1", contentVersion: 10)

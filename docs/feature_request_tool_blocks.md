@@ -13,6 +13,11 @@ We want the transcript to read like a clean log of **what was executed/requested
 
 ## What we’re trying to achieve
 
+Status note (2026-02): content-first tool normalization from this request is implemented.
+Color semantics now follow `docs/plans/unified-transcript-color-system.md`:
+- Tool call uses the tool-call semantic treatment.
+- Tool output uses the tool-output semantic treatment.
+
 ### Primary goal
 **Significantly improve readability** of tool calls and tool outputs by stripping wrappers and showing the actual content in clean text blocks.
 
@@ -31,7 +36,7 @@ We want the transcript to read like a clean log of **what was executed/requested
 
 ## UX spec (text-only blocks)
 
-Transcript remains “normal text divided into blocks.” Tool call and tool output are separate blocks but share the same background style/color.
+Transcript remains “normal text divided into blocks.” Tool call and tool output are separate blocks and use consistent block geometry, but different semantic accents/colors.
 
 ### Examples (Unicode mockups)
 
@@ -192,7 +197,7 @@ No UI controls implies no dynamic expansion; nevertheless:
 - Tool call blocks show **commands/paths/prompts/checklists**, not JSON envelopes.
 - Tool output blocks show **stdout/stderr content**, not wrapper JSON.
 - Empty stdout/stderr shows **`(no output)`**, not `{ "stdout": "" ... }`.
-- Tool calls and outputs appear as separate blocks with same styling.
+- Tool calls and outputs appear as separate blocks with consistent geometry and semantic-distinct accents/colors.
 - Global search still finds terms inside tool calls and tool outputs (at least as well as before).
 - No noticeable scroll lag on large sessions.
 
@@ -207,7 +212,7 @@ You are working in the AgentSessions macOS app. Implement a readability overhaul
 
 Key product decisions (must follow)
 - Transcript remains “normal text divided into blocks”. No inline controls, no buttons, no expand/raw toggles.
-- Tool CALL and Tool OUTPUT are rendered as separate blocks (same background color style).
+- Tool CALL and Tool OUTPUT are rendered as separate blocks with semantic-distinct accents/colors.
 - Main goal: improve readability by stripping JSON wrappers and showing the actual content.
 - Global search must keep working exactly as it does now across tool call and tool output text.
 

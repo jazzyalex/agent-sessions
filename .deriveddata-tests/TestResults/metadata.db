@@ -895,27 +895,27 @@
 				<key>testGateAllowsCurrentGenerationAndSession</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00070297718048095703</real>
+					<real>0.001110076904296875</real>
 				</dict>
 				<key>testGateRejectsPreviousGenerationAfterNewBegin</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00056993961334228516</real>
+					<real>0.00045800209045410156</real>
 				</dict>
 				<key>testGateRejectsSessionMismatch</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00054597854614257812</real>
+					<real>0.00041103363037109375</real>
 				</dict>
 				<key>testGateRejectsStaleGeneration</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00073194503784179688</real>
+					<real>0.00046002864837646484</real>
 				</dict>
 				<key>testGateRejectsWhenActiveSessionIsNil</key>
 				<dict>
 					<key>mrnet</key>
-					<real>0.00060296058654785156</real>
+					<real>0.00045597553253173828</real>
 				</dict>
 			</dict>
 			<key>TranscriptSessionRenderKeyTests</key>
@@ -962,6 +962,54 @@
 				<dict>
 					<key>mrnet</key>
 					<real>0.00054001808166503906</real>
+				</dict>
+			</dict>
+			<key>TranscriptTailUpdateStateTests</key>
+			<dict>
+				<key>testContentUpdateAtBottomRequestsAutoScroll</key>
+				<dict>
+					<key>mrnet</key>
+					<real>0.00089001655578613281</real>
+				</dict>
+				<key>testContentUpdateWhileDetachedShowsUnseenIndicator</key>
+				<dict>
+					<key>mrnet</key>
+					<real>0.00060200691223144531</real>
+				</dict>
+				<key>testDetachedContentUpdateKeepsJumpArrowVisible</key>
+				<dict>
+					<key>mrnet</key>
+					<real>0.00055694580078125</real>
+				</dict>
+				<key>testDifferentSessionResetsWithoutScrollRequest</key>
+				<dict>
+					<key>mrnet</key>
+					<real>0.00056207180023193359</real>
+				</dict>
+				<key>testJumpArrowHiddenAtBottom</key>
+				<dict>
+					<key>mrnet</key>
+					<real>0.00057995319366455078</real>
+				</dict>
+				<key>testJumpArrowVisibleAwayFromBottom</key>
+				<dict>
+					<key>mrnet</key>
+					<real>0.000514984130859375</real>
+				</dict>
+				<key>testJumpArrowVisibleBeforeViewportMeasurement</key>
+				<dict>
+					<key>mrnet</key>
+					<real>0.00046789646148681641</real>
+				</dict>
+				<key>testJumpToLatestClearsUnseenAndRequestsScroll</key>
+				<dict>
+					<key>mrnet</key>
+					<real>0.00057303905487060547</real>
+				</dict>
+				<key>testReturningToBottomClearsUnseenAndRestoresFollow</key>
+				<dict>
+					<key>mrnet</key>
+					<real>0.00046503543853759766</real>
 				</dict>
 			</dict>
 			<key>UnifiedTableSelectionPolicyTests</key>

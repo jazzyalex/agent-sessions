@@ -1355,7 +1355,7 @@ struct UnifiedSessionsView: View {
     }
 
     private var shouldShowLaunchOverlay: Bool {
-        unified.sessions.isEmpty && !hasEverHadSessions
+        false
     }
 
     private var launchAnimationView: some View {

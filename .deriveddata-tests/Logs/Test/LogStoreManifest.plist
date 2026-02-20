@@ -6,10 +6,10 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>54CA2C7F-3803-49D0-9B47-069756312600</key>
+		<key>0A7EDAC7-4670-4FD6-B13A-C48EC71F266F</key>
 		<dict>
 			<key>auxiliaryLogUniqueIdentifier</key>
-			<string>6BEDC354-177B-4837-B516-F65A96D4ED3F</string>
+			<string>B15EAAF8-8DAC-45AD-9C39-B2638DAC20B7</string>
 			<key>auxiliaryObservable</key>
 			<dict>
 				<key>highLevelStatus</key>
@@ -30,7 +30,7 @@
 			<key>domainType</key>
 			<string>com.apple.dt.unit.cocoaUnitTest</string>
 			<key>fileName</key>
-			<string>Run-AgentSessions-2026.02.13_21-07-52--0800.xcresult</string>
+			<string>Run-AgentSessions-2026.02.18_21-37-49--0800.xcresult</string>
 			<key>hasAuxiliaryLog</key>
 			<true/>
 			<key>hasPrimaryLog</key>
@@ -57,18 +57,18 @@
 			<key>signature</key>
 			<string>Run AgentSessions</string>
 			<key>timeStartedRecording</key>
-			<real>792738472.91814303</real>
+			<real>793172269.39677501</real>
 			<key>timeStoppedRecording</key>
-			<real>792738473.41528797</real>
+			<real>793172269.731462</real>
 			<key>title</key>
 			<string>Run AgentSessions</string>
 			<key>uniqueIdentifier</key>
-			<string>54CA2C7F-3803-49D0-9B47-069756312600</string>
+			<string>0A7EDAC7-4670-4FD6-B13A-C48EC71F266F</string>
 		</dict>
-		<key>6EBCB3F3-9752-4C45-A030-6BD469ACAE79</key>
+		<key>4BD3DEFB-2745-4137-A25D-11C20CE82953</key>
 		<dict>
 			<key>auxiliaryLogUniqueIdentifier</key>
-			<string>25117D6E-DD2D-4EB1-A92F-DA8E8BF2D8EE</string>
+			<string>04A18FAA-D80D-4544-B97F-89A21C337C24</string>
 			<key>auxiliaryObservable</key>
 			<dict>
 				<key>highLevelStatus</key>
@@ -89,7 +89,7 @@
 			<key>domainType</key>
 			<string>com.apple.dt.unit.cocoaUnitTest</string>
 			<key>fileName</key>
-			<string>Run-AgentSessions-2026.02.13_21-15-29--0800.xcresult</string>
+			<string>Run-AgentSessions-2026.02.18_21-37-24--0800.xcresult</string>
 			<key>hasAuxiliaryLog</key>
 			<true/>
 			<key>hasPrimaryLog</key>
@@ -97,15 +97,15 @@
 			<key>primaryObservable</key>
 			<dict>
 				<key>highLevelStatus</key>
-				<string>W</string>
+				<string>E</string>
 				<key>totalNumberOfAnalyzerIssues</key>
 				<integer>0</integer>
 				<key>totalNumberOfErrors</key>
-				<integer>0</integer>
+				<integer>2</integer>
 				<key>totalNumberOfTestFailures</key>
 				<integer>0</integer>
 				<key>totalNumberOfWarnings</key>
-				<integer>4</integer>
+				<integer>3</integer>
 			</dict>
 			<key>schemeIdentifier-containerName</key>
 			<string>AgentSessions project</string>
@@ -116,13 +116,72 @@
 			<key>signature</key>
 			<string>Run AgentSessions</string>
 			<key>timeStartedRecording</key>
-			<real>792738929.96067798</real>
+			<real>793172244.638991</real>
 			<key>timeStoppedRecording</key>
-			<real>792738930.45868897</real>
+			<real>793172245.04581702</real>
 			<key>title</key>
 			<string>Run AgentSessions</string>
 			<key>uniqueIdentifier</key>
-			<string>6EBCB3F3-9752-4C45-A030-6BD469ACAE79</string>
+			<string>4BD3DEFB-2745-4137-A25D-11C20CE82953</string>
+		</dict>
+		<key>9CA1780F-6B35-4B6A-8BC1-2A00DB25F132</key>
+		<dict>
+			<key>auxiliaryLogUniqueIdentifier</key>
+			<string>9DE88EE8-EBE8-473F-A1A9-DFC25EFD0A61</string>
+			<key>auxiliaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>S</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>0</integer>
+			</dict>
+			<key>className</key>
+			<string>IDESchemeActionsInvocationRecord</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>com.apple.dt.unit.cocoaUnitTest</string>
+			<key>fileName</key>
+			<string>Test-AgentSessions-2026.02.18_21-38-21--0800.xcresult</string>
+			<key>hasAuxiliaryLog</key>
+			<true/>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>S</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>0</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>AgentSessions project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>AgentSessions</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Test AgentSessions</string>
+			<key>timeStartedRecording</key>
+			<real>793172301.25733602</real>
+			<key>timeStoppedRecording</key>
+			<real>793172304.02247906</real>
+			<key>title</key>
+			<string>Test AgentSessions</string>
+			<key>uniqueIdentifier</key>
+			<string>9CA1780F-6B35-4B6A-8BC1-2A00DB25F132</string>
 		</dict>
 	</dict>
 </dict>
