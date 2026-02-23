@@ -9,7 +9,9 @@ struct IDEOpener {
     }
 
     static var cliLaunchTimeout: TimeInterval = 3.0
-    static var cliLaunchQueue: DispatchQueue = DispatchQueue(label: "com.triada.AgentSessions.ide-opener", qos: .utility)
+    static var cliLaunchQueue: DispatchQueue = DispatchQueue(label: "com.triada.AgentSessions.ide-opener",
+                                                             qos: .utility,
+                                                             attributes: .concurrent)
     static var openURLHandler: (URL) -> Void = { url in
         NSWorkspace.shared.open(url)
     }
@@ -53,7 +55,9 @@ struct IDEOpener {
 
     static func resetTestingHooks() {
         cliLaunchTimeout = 3.0
-        cliLaunchQueue = DispatchQueue(label: "com.triada.AgentSessions.ide-opener", qos: .utility)
+        cliLaunchQueue = DispatchQueue(label: "com.triada.AgentSessions.ide-opener",
+                                       qos: .utility,
+                                       attributes: .concurrent)
         openURLHandler = { url in
             NSWorkspace.shared.open(url)
         }
