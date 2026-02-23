@@ -50,11 +50,14 @@ struct InternalPayloadFormatter {
             }
 
             guard requiredKeys.isSubset(of: Set(dict.keys)) else { continue }
+            var hasDisallowedExtraKey = false
             for key in dict.keys where !requiredKeys.contains(key) {
                 if key.hasPrefix("_") { continue }
                 if allowlistedExtraKeys.contains(key) { continue }
-                return nil
+                hasDisallowedExtraKey = true
+                break
             }
+            if hasDisallowedExtraKey { continue }
 
             let correctness = stringValue(dict["overall_correctness"])
             let explanation = stringValue(dict["overall_explanation"])

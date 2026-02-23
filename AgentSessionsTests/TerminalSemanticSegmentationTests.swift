@@ -71,6 +71,38 @@ final class TerminalSemanticSegmentationTests: XCTestCase {
         XCTAssertTrue(lines.contains(where: { $0.text == "Correctness: correct" }))
     }
 
+    func testReviewCardParserSkipsInvalidCandidateAndUsesLaterValidCandidate() {
+        let payload = """
+        ```json
+        {
+          "findings": [],
+          "overall_correctness": "incorrect",
+          "overall_explanation": "invalid candidate",
+          "overall_confidence_score": 0.10,
+          "extra_key": "not-allowlisted"
+        }
+        ```
+
+        ```json
+        {
+          "findings": [],
+          "overall_correctness": "correct",
+          "overall_explanation": "valid candidate",
+          "overall_confidence_score": 0.93
+        }
+        ```
+        """
+
+        guard let review = InternalPayloadFormatter.parseReviewCard(rawText: payload, source: .codex) else {
+            XCTFail("Expected valid review candidate to be parsed")
+            return
+        }
+
+        XCTAssertEqual(review.correctness, "correct")
+        XCTAssertEqual(review.explanation, "valid candidate")
+        XCTAssertEqual(review.confidenceScore, 0.93, accuracy: 0.0001)
+    }
+
     func testReviewCardToggleDisabledPreservesRawReviewPayload() {
         let reviewPayload = """
         <user_action>
@@ -156,6 +188,23 @@ final class TerminalSemanticSegmentationTests: XCTestCase {
         let lines = TerminalBuilder.buildLines(for: session, showMeta: false)
         XCTAssertTrue(lines.contains(where: { $0.semanticKind == .code && $0.text.contains("print(marker)") }))
         XCTAssertTrue(lines.contains(where: { $0.semanticKind == nil && $0.text.contains("trailing text") }))
+    }
+
+    func testCodeFenceParserIgnoresInlineBackticksForOpeningFence() {
+        let text = """
+        Use ```foo``` here before a real fenced block.
+        ```swift
+        print("hello")
+        ```
+        """
+
+        guard let fenced = CodeFenceParser.firstFence(in: text, from: text.startIndex) else {
+            XCTFail("Expected fenced code block")
+            return
+        }
+
+        XCTAssertEqual(fenced.model.language, "swift")
+        XCTAssertEqual(fenced.model.body.trimmingCharacters(in: .whitespacesAndNewlines), #"print("hello")"#)
     }
 
     func testTranscriptLinkifierFindsCommonPatterns() {
