@@ -14,6 +14,11 @@ From repo root:
 ./scripts/codex_review_fix_loop.sh
 ```
 
+Default loop mode is `conservative`:
+- scope uses tracked uncommitted files only
+- fix output is checked for forbidden build/test/package commands
+- out-of-scope touched files fail the run
+
 Default review mode is plain (no injected review prompt) for CLI compatibility.
 If you want prompt-injection behavior, pass:
 
@@ -27,6 +32,12 @@ To change interval:
 
 ```bash
 ./scripts/codex_review_fix_loop.sh --heartbeat-seconds 10
+```
+
+If you intentionally want broader fix freedom (includes untracked scope, warns instead of failing on policy violations):
+
+```bash
+./scripts/codex_review_fix_loop.sh --loop-mode balanced
 ```
 
 Artifacts are written to:
