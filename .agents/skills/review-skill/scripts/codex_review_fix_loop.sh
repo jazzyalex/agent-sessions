@@ -1024,7 +1024,11 @@ compute_scope_violations() {
   : > "$out_file"
 
   [[ -s "$touched_file" ]] || return 0
-  [[ -s "$allowed_file" ]] || return 0
+  # Empty allowed scope means every touched file is out-of-scope.
+  if [[ ! -s "$allowed_file" ]]; then
+    awk 'NF{print}' "$touched_file" | LC_ALL=C sort -u > "$out_file"
+    return 0
+  fi
 
   if have_cmd python3; then
     python3 - "$touched_file" "$allowed_file" "$out_file" <<'PY'
@@ -1114,35 +1118,372 @@ extract_forbidden_commands_from_output() {
 
   if have_cmd python3; then
     python3 - "$in_file" "$out_file" <<'PY'
+import os
 import re
+import shlex
 import sys
 
 in_path, out_path = sys.argv[1], sys.argv[2]
 lines = open(in_path, "r", encoding="utf-8", errors="ignore").read().splitlines()
 
-cmd_line_re = re.compile(r"^[^ \t].*\s-lc\s+")
-forbidden_re = re.compile(
-    r"\b(xcodebuild|xcpretty)\b|"
-    r"\bswift\s+(build|test|package)\b|"
-    r"\bnpm\s+(install|test|run)\b|"
-    r"\bpnpm\b|"
-    r"\byarn\b|"
-    r"\bbundle\s+exec\b|"
-    r"\bpod\s+install\b|"
-    r"\bcargo\s+(build|test)\b|"
-    r"\bgo\s+test\b|"
-    r"\bpytest\b|"
-    r"\bcmake\b|"
-    r"(?:^|[;&| \t])make(?:[ \t]|$)",
-    re.IGNORECASE,
-)
+ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+SHELL_SEPARATORS = {";", "&&", "||", "|", "&", "(", ")"}
+SHELL_WRAPPERS = {"command", "builtin", "env", "nohup", "time", "sudo"}
+NESTED_SHELLS = {"sh", "bash", "zsh", "ksh", "dash"}
+CONTROL_KEYWORDS = {
+    "if", "then", "else", "elif", "fi",
+    "for", "while", "until", "do", "done",
+    "case", "esac", "select", "function", "{", "}",
+}
+
+
+def shell_payload_from_exec_line(line):
+    try:
+        tokens = shlex.split(line, posix=True)
+    except ValueError:
+        return None
+    try:
+        i = tokens.index("-lc")
+    except ValueError:
+        return None
+    if i + 1 >= len(tokens):
+        return None
+    return tokens[i + 1]
+
+
+def tokenize_shell_command(command):
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()")
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    return list(lexer)
+
+
+def normalize_cmd_name(token):
+    cmd = os.path.basename(token).lower()
+    if cmd.endswith(".exe"):
+        cmd = cmd[:-4]
+    return cmd
+
+
+def consume_wrapper(tokens, idx):
+    wrapper = os.path.basename(tokens[idx]).lower()
+    j = idx + 1
+
+    if wrapper in {"command", "builtin", "time", "nohup"}:
+        while j < len(tokens):
+            token = tokens[j]
+            if token == "--":
+                j += 1
+                break
+            if token.startswith("-"):
+                j += 1
+                continue
+            break
+        return j
+
+    if wrapper == "env":
+        while j < len(tokens):
+            token = tokens[j]
+            if token == "--":
+                j += 1
+                break
+            if token.startswith("-"):
+                j += 1
+                continue
+            if ASSIGNMENT_RE.match(token):
+                j += 1
+                continue
+            break
+        return j
+
+    if wrapper == "sudo":
+        short_with_arg = {"-u", "-g", "-h", "-p", "-r", "-t", "-C", "-c", "-U", "-D"}
+        long_with_arg = {
+            "--user", "--group", "--host", "--prompt", "--role", "--type",
+            "--close-from", "--chdir", "--other-user",
+        }
+        while j < len(tokens):
+            token = tokens[j]
+            if token == "--":
+                j += 1
+                break
+            if ASSIGNMENT_RE.match(token):
+                j += 1
+                continue
+            if not token.startswith("-"):
+                break
+            if token in short_with_arg:
+                j += 1
+                if j < len(tokens):
+                    j += 1
+                continue
+            if any(token == opt or token.startswith(opt + "=") for opt in long_with_arg):
+                j += 1
+                if token in long_with_arg and j < len(tokens):
+                    j += 1
+                continue
+            if re.match(r"^-[ughprtCcUD].+", token):
+                j += 1
+                continue
+            j += 1
+        return j
+
+    return idx + 1
+
+
+def is_forbidden_invocation(tokens, idx):
+    cmd = normalize_cmd_name(tokens[idx])
+    next1 = tokens[idx + 1].lower() if idx + 1 < len(tokens) else ""
+    next2 = tokens[idx + 2].lower() if idx + 2 < len(tokens) else ""
+
+    if cmd in {"xcodebuild", "xcpretty", "pnpm", "yarn", "pytest", "cmake", "make"}:
+        return True
+    if cmd == "swift" and next1 in {"build", "test", "package"}:
+        return True
+    if cmd == "npm" and next1 in {"install", "test", "run"}:
+        return True
+    if cmd == "bundle" and next1 == "exec":
+        return True
+    if cmd == "pod" and next1 == "install":
+        return True
+    if cmd == "cargo" and next1 in {"build", "test"}:
+        return True
+    if cmd == "go" and next1 == "test":
+        return True
+    if re.match(r"^python([0-9]+([.][0-9]+)*)?$", cmd) and next1 == "-m" and next2 == "pytest":
+        return True
+    return False
+
+
+def extract_nested_shell_payload(tokens, idx):
+    cmd = normalize_cmd_name(tokens[idx])
+    if cmd not in NESTED_SHELLS:
+        return None
+
+    long_opts_with_arg = {"--rcfile", "--init-file"}
+    j = idx + 1
+    while j < len(tokens):
+        token = tokens[j]
+        if token == "--":
+            j += 1
+            continue
+        if token in {"-c", "-lc"}:
+            if j + 1 < len(tokens):
+                return tokens[j + 1]
+            return None
+        if token.startswith("--"):
+            if "=" in token:
+                j += 1
+                continue
+            if token in long_opts_with_arg:
+                j += 1
+                if j < len(tokens):
+                    j += 1
+                continue
+            j += 1
+            continue
+        if token.startswith("-"):
+            # Combined shell flags like -lc, -ic, -cl.
+            short_flags = token[1:]
+            if short_flags.isalpha() and "c" in short_flags:
+                if j + 1 < len(tokens):
+                    return tokens[j + 1]
+                return None
+            j += 1
+            continue
+        break
+    return None
+
+
+def extract_backtick_segments(command):
+    segments = []
+    in_single = False
+    in_double = False
+    in_backtick = False
+    escaped = False
+    buf = []
+
+    for ch in command:
+        if escaped:
+            if in_backtick:
+                buf.append(ch)
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            if in_backtick:
+                buf.append(ch)
+            continue
+        if in_backtick:
+            if ch == "`":
+                segments.append("".join(buf))
+                buf = []
+                in_backtick = False
+            else:
+                buf.append(ch)
+            continue
+
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if ch == "`" and not in_single:
+            in_backtick = True
+            buf = []
+            continue
+
+    return segments
+
+
+def extract_dollar_paren_segments(command):
+    segments = []
+    i = 0
+    n = len(command)
+    in_single = False
+    in_double = False
+    escaped = False
+
+    while i < n:
+        ch = command[i]
+
+        if escaped:
+            escaped = False
+            i += 1
+            continue
+
+        if ch == "\\":
+            escaped = True
+            i += 1
+            continue
+
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            i += 1
+            continue
+
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            i += 1
+            continue
+
+        if not in_single and ch == "$" and i + 1 < n and command[i + 1] == "(":
+            depth = 1
+            j = i + 2
+            sub_in_single = False
+            sub_in_double = False
+            sub_escaped = False
+
+            while j < n:
+                c = command[j]
+                if sub_escaped:
+                    sub_escaped = False
+                    j += 1
+                    continue
+
+                if c == "\\":
+                    sub_escaped = True
+                    j += 1
+                    continue
+
+                if c == "'" and not sub_in_double:
+                    sub_in_single = not sub_in_single
+                    j += 1
+                    continue
+
+                if c == '"' and not sub_in_single:
+                    sub_in_double = not sub_in_double
+                    j += 1
+                    continue
+
+                if not sub_in_single:
+                    if c == "$" and j + 1 < n and command[j + 1] == "(":
+                        depth += 1
+                        j += 2
+                        continue
+                    if c == ")":
+                        depth -= 1
+                        if depth == 0:
+                            segments.append(command[i + 2:j])
+                            i = j + 1
+                            break
+
+                j += 1
+
+            if depth == 0:
+                continue
+
+        i += 1
+
+    return segments
+
+
+def contains_forbidden_command(command, depth=0):
+    if depth < 3:
+        for segment in extract_backtick_segments(command):
+            if contains_forbidden_command(segment, depth + 1):
+                return True
+        for segment in extract_dollar_paren_segments(command):
+            if contains_forbidden_command(segment, depth + 1):
+                return True
+
+    try:
+        tokens = tokenize_shell_command(command)
+    except ValueError:
+        return False
+    if not tokens:
+        return False
+
+    command_start = True
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        lower = token.lower()
+        cmd_name = normalize_cmd_name(token)
+
+        if token in SHELL_SEPARATORS:
+            command_start = True
+            i += 1
+            continue
+
+        if not command_start:
+            i += 1
+            continue
+
+        if ASSIGNMENT_RE.match(token):
+            i += 1
+            continue
+
+        if cmd_name in SHELL_WRAPPERS:
+            i = consume_wrapper(tokens, i)
+            continue
+
+        if lower in CONTROL_KEYWORDS:
+            i += 1
+            command_start = True
+            continue
+
+        if depth < 4:
+            nested_payload = extract_nested_shell_payload(tokens, i)
+            if nested_payload is not None and contains_forbidden_command(nested_payload, depth + 1):
+                return True
+
+        if is_forbidden_invocation(tokens, i):
+            return True
+
+        command_start = False
+        i += 1
+
+    return False
 
 seen = set()
 items = []
 for line in lines:
-    if not cmd_line_re.search(line):
+    payload = shell_payload_from_exec_line(line)
+    if payload is None:
         continue
-    if not forbidden_re.search(line):
+    if not contains_forbidden_command(payload):
         continue
     if line in seen:
         continue
@@ -1154,7 +1495,7 @@ with open(out_path, "w", encoding="utf-8") as f:
         f.write(item + "\n")
 PY
   else
-    grep -Ei ' -lc .*([[:<:]]xcodebuild[[:>:]]|[[:<:]]xcpretty[[:>:]]|[[:<:]]swift[[:space:]]+(build|test|package)[[:>:]]|[[:<:]]npm[[:space:]]+(install|test|run)[[:>:]]|[[:<:]]pnpm[[:>:]]|[[:<:]]yarn[[:>:]]|[[:<:]]bundle[[:space:]]+exec[[:>:]]|[[:<:]]pod[[:space:]]+install[[:>:]]|[[:<:]]cargo[[:space:]]+(build|test)[[:>:]]|[[:<:]]go[[:space:]]+test[[:>:]]|[[:<:]]pytest[[:>:]]|[[:<:]]cmake[[:>:]]|(^|[;&|[:space:]])make([[:space:]]|$))' "$in_file" > "$out_file" || true
+    grep -Ei "^[^[:space:]].*[[:space:]]-lc[[:space:]]([\\\"']?[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+|((sudo|env|time|command|builtin|nohup)([[:space:]]+-[^[:space:]]+)*[[:space:]]+))*(xcodebuild|xcpretty|pnpm|yarn|pytest|cmake|make|swift[[:space:]]+(build|test|package)|npm[[:space:]]+(install|test|run)|bundle[[:space:]]+exec|pod[[:space:]]+install|cargo[[:space:]]+(build|test)|go[[:space:]]+test|python([0-9]+([.][0-9]+)*)?[[:space:]]+-m[[:space:]]+pytest)\\b|[\\\"']?.*[;&|]{1,2}[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+|((sudo|env|time|command|builtin|nohup)([[:space:]]+-[^[:space:]]+)*[[:space:]]+))*(xcodebuild|xcpretty|pnpm|yarn|pytest|cmake|make|swift[[:space:]]+(build|test|package)|npm[[:space:]]+(install|test|run)|bundle[[:space:]]+exec|pod[[:space:]]+install|cargo[[:space:]]+(build|test)|go[[:space:]]+test|python([0-9]+([.][0-9]+)*)?[[:space:]]+-m[[:space:]]+pytest)\\b)" "$in_file" > "$out_file" || true
   fi
 }
 
