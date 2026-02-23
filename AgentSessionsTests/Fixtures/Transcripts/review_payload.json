@@ -1,0 +1,11 @@
+{
+  "findings": [
+    {
+      "severity": "low",
+      "title": "Minor"
+    }
+  ],
+  "overall_correctness": "correct",
+  "overall_explanation": "Looks good.",
+  "overall_confidence_score": 0.92
+}

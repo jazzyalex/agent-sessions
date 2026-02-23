@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - Session view (Unified): User-triggered manual refreshes now always show loading feedback for the selected session, even when transcript text is already visible.
 - Session view (Unified): Loading animation now stays visible when the selected session is still loading but the on-screen transcript buffer belongs to a different session, preventing stale-content flashes without feedback.
 - Session view (Unified/Terminal): Loading overlay now remains until the first terminal render completes, preventing brief blank panes and 0/0 navigation states on large sessions.
+- Session view (Unified/Terminal): Transcript toolbar semantic navigation now detects code/diff content inside tool-output blocks, and semantic counter totals no longer collapse to `0/0` from semantic-filter state alone.
 - Session view (Unified): Removed loading spinners from the transcript UI to avoid spinner-on-empty states while sessions load.
 - Session view (Unified): Async transcript/JSON renders now persist the originating view mode in render state, preventing transcript-tail append from attaching to buffers built for another mode after mode switches.
 - Sessions (Codex/Session view): Active-session transcript updates now append tail content in Session view instead of replacing the full rendered buffer on each monitor refresh, eliminating periodic flicker and preserving in-session reading/navigation context.
@@ -56,6 +57,9 @@ All notable changes to this project will be documented in this file.
 - Crash reporting reliability: Seen-ID persistence now happens only after pending clear succeeds; failed/partial clear attempts no longer suppress future crash prompts.
 
 ### Changed
+- Transcript (Session view): Added semantic transcript rendering for plans, code blocks, diffs, and Codex review summaries, including distinct block accents and improved block grouping boundaries.
+- Transcript (Session view): Added clickable local file references (for example `Foo.swift:56`, `Foo.swift#L56`) with configurable editor open behavior (System default, Cursor, VS Code) and optional CLI path override.
+- Preferences (Unified Window): Added Rich Transcript controls for review cards, file linkification, code/diff line numbers, and preferred editor target.
 - Preferences/About: Added a new Diagnostics section for crash reporting with local pending queue controls (`Email Crash Report`, `Export Report`, `Clear Pending`) and a direct support email link.
 - Crash reporting: Crash diagnostics are queued locally on launch and shared only through an explicit pre-filled email draft action; no automatic startup/background upload occurs.
 - Crash reporting UX: Crash capture is always on (toggle removed), and when a new crash report is detected at launch the app now prompts to either `Email Crash Report` or `Export + Open GitHub Issue`.

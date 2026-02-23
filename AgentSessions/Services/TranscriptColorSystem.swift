@@ -17,6 +17,10 @@ enum TranscriptColorSystem {
         case toolOutputSuccess
         case toolOutputError
         case error
+        case plan
+        case code
+        case diff
+        case reviewSummary
     }
 
     static func semanticAccent(_ role: SemanticRole) -> NSColor {
@@ -29,6 +33,14 @@ enum TranscriptColorSystem {
             return NSColor.systemGreen
         case .toolOutputError, .error:
             return NSColor.systemRed
+        case .plan:
+            return NSColor.systemTeal
+        case .code:
+            return NSColor.systemIndigo
+        case .diff:
+            return NSColor.systemOrange
+        case .reviewSummary:
+            return NSColor.systemCyan
         }
     }
 

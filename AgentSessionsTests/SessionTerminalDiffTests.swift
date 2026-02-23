@@ -72,6 +72,8 @@ final class SessionTerminalDiffTests: XCTestCase {
                      text: text,
                      role: role,
                      eventIndex: nil,
-                     blockIndex: blockIndex)
+                     blockIndex: blockIndex,
+                     decorationGroupID: blockIndex ?? id,
+                     semanticKind: nil)
     }
 }
