@@ -9,6 +9,17 @@ final class CodexUsageParserTests: XCTestCase {
         return bundle.url(forResource: name, withExtension: "jsonl")!
     }
 
+    private func writeTempJSONL(_ objects: [[String: Any]]) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex_usage_dual_limit_\(UUID().uuidString).jsonl")
+        let lines = try objects.map { obj -> String in
+            let data = try JSONSerialization.data(withJSONObject: obj, options: [])
+            return String(decoding: data, as: UTF8.self)
+        }
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
     // MARK: - Legacy Format (0.50)
 
     func testParsesLegacyTokenCountFormat() throws {
@@ -209,6 +220,65 @@ final class CodexUsageParserTests: XCTestCase {
         }
 
         XCTAssertTrue(foundAccountUpdate, "Should find rate limit update notification")
+    }
+
+    func testPrefersCodexLimitIDWhenDualLimitBucketsExist() async throws {
+        let now = Date()
+        let olderTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-6))
+        let newerTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-2))
+        let resetAt = Int(now.addingTimeInterval(3600).timeIntervalSince1970)
+
+        let codexLine: [String: Any] = [
+            "timestamp": olderTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex",
+                    "primary": [
+                        "used_percent": 20.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 15.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let bengalfoxLine: [String: Any] = [
+            "timestamp": newerTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex_bengalfox",
+                    "primary": [
+                        "used_percent": 0.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 0.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let url = try writeTempJSONL([codexLine, bengalfoxLine])
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        let summary = await service.parseTokenCountTailForTesting(url: url)
+
+        XCTAssertNotNil(summary, "Parser should extract a rate-limit summary")
+        XCTAssertEqual(summary?.fiveHour.remainingPercent, 80, "Should prioritize the codex account bucket over spark bucket")
+        XCTAssertEqual(summary?.weekly.remainingPercent, 85, "Should keep secondary remaining percentage from codex bucket")
     }
 
     // MARK: - Integration Tests
