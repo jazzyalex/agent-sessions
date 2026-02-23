@@ -216,6 +216,15 @@ final class TerminalSemanticSegmentationTests: XCTestCase {
         XCTAssertTrue(matches.contains(where: { $0.path == "lib/A.swift" && $0.line == 3 }))
     }
 
+    func testTranscriptLinkifierPathLineColumnDoesNotCreateLineOnlyDuplicate() {
+        let input = "See Foo.swift:10:3"
+        let matches = TranscriptLinkifier.matches(in: input)
+        let fooMatches = matches.filter { $0.path == "Foo.swift" && $0.line == 10 }
+
+        XCTAssertEqual(fooMatches.count, 1)
+        XCTAssertEqual(fooMatches.first?.column, 3)
+    }
+
     func testTranscriptLinkifierSupportsSpacedAndExtensionlessNames() {
         let input = "See My File.swift:10 and README:4"
         let matches = TranscriptLinkifier.matches(in: input)
@@ -234,6 +243,46 @@ final class TerminalSemanticSegmentationTests: XCTestCase {
 
         let resolved = TranscriptLinkifier.resolve(path: "Foo.swift", sessionCwd: tempRoot.path, repoRoot: nil)
         XCTAssertEqual(resolved, fileURL.path)
+    }
+
+    func testIDEOpenerCursorCallReturnsQuicklyWhenCLIIsSlow() {
+        IDEOpener.resetTestingHooks()
+        defer { IDEOpener.resetTestingHooks() }
+
+        let fallbackOpen = expectation(description: "System fallback should not open on CLI success")
+        fallbackOpen.isInverted = true
+
+        IDEOpener.cliLaunchQueue = DispatchQueue(label: "IDEOpenerTests.slowCLI")
+        IDEOpener.openURLHandler = { _ in
+            fallbackOpen.fulfill()
+        }
+        IDEOpener.cliRunner = { _, _, _ in
+            Thread.sleep(forTimeInterval: 0.15)
+            return true
+        }
+
+        let start = CFAbsoluteTimeGetCurrent()
+        IDEOpener.open(path: "/tmp/Foo.swift", line: 10, column: 3, target: .cursor)
+        let elapsed = CFAbsoluteTimeGetCurrent() - start
+
+        XCTAssertLessThan(elapsed, 0.10)
+        wait(for: [fallbackOpen], timeout: 0.05)
+    }
+
+    func testIDEOpenerFallsBackToSystemDefaultWhenCLIFails() {
+        IDEOpener.resetTestingHooks()
+        defer { IDEOpener.resetTestingHooks() }
+
+        let fallbackOpen = expectation(description: "System fallback should open")
+        IDEOpener.cliLaunchQueue = DispatchQueue(label: "IDEOpenerTests.failCLI")
+        IDEOpener.cliRunner = { _, _, _ in false }
+        IDEOpener.openURLHandler = { url in
+            XCTAssertEqual(url.path, "/tmp/Foo.swift")
+            fallbackOpen.fulfill()
+        }
+
+        IDEOpener.open(path: "/tmp/Foo.swift", line: 10, column: 3, target: .vscode)
+        wait(for: [fallbackOpen], timeout: 1.0)
     }
 
     private func makeSession(source: SessionSource, events: [SessionEvent]) -> Session {

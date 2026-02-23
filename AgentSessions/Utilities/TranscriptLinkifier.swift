@@ -23,7 +23,7 @@ struct TranscriptLinkifier {
     private static let patterns: [NSRegularExpression] = [
         try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9_./\-\(\)])([A-Za-z0-9_./\-\(\) +]+) \(line (\d+)\)"#),
         try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9_./\-\(\)])([A-Za-z0-9_./\-\(\) +]+):(\d+):(\d+)\b"#),
-        try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9_./\-\(\)])([A-Za-z0-9_./\-\(\) +]+):(\d+)\b"#),
+        try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9_./\-\(\)])([A-Za-z0-9_./\-\(\) +]+):(\d+)(?!:\d)\b"#),
         try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9_./\-\(\)])([A-Za-z0-9_./\-\(\) +]+)#L(\d+)(?:-L?(\d+))?\b"#)
     ]
 
