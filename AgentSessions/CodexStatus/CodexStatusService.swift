@@ -1555,7 +1555,7 @@ actor CodexStatusService {
             if let rate = (payload["rate_limits"] as? [String: Any]) ?? (obj["rate_limits"] as? [String: Any]) {
                 guard let summary = makeRateLimitSummary(rate: rate, createdAt: createdAt, sourceFile: url) else { continue }
                 let limitID = normalizeLimitID(rate["limit_id"])
-                if limitID == "codex" {
+                if limitID == "codex" || limitID == nil {
                     return summary
                 }
                 if fallbackSummary == nil {
