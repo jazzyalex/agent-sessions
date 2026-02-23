@@ -285,6 +285,45 @@ final class TerminalSemanticSegmentationTests: XCTestCase {
         wait(for: [fallbackOpen], timeout: 1.0)
     }
 
+    func testIDEOpenerRunsMultipleCLILaunchesConcurrently() {
+        IDEOpener.resetTestingHooks()
+        defer { IDEOpener.resetTestingHooks() }
+
+        let noFallbackOpen = expectation(description: "System fallback should not open")
+        noFallbackOpen.isInverted = true
+        IDEOpener.openURLHandler = { _ in
+            noFallbackOpen.fulfill()
+        }
+
+        let runnerCalled = expectation(description: "Runner should be called for each open")
+        runnerCalled.expectedFulfillmentCount = 4
+        let lock = NSLock()
+        var activeRuns = 0
+        var maxConcurrentRuns = 0
+
+        IDEOpener.cliRunner = { _, _, _ in
+            lock.lock()
+            activeRuns += 1
+            maxConcurrentRuns = max(maxConcurrentRuns, activeRuns)
+            lock.unlock()
+
+            Thread.sleep(forTimeInterval: 0.15)
+
+            lock.lock()
+            activeRuns -= 1
+            lock.unlock()
+            runnerCalled.fulfill()
+            return true
+        }
+
+        for i in 1...4 {
+            IDEOpener.open(path: "/tmp/Foo\(i).swift", line: i, column: i, target: .cursor)
+        }
+
+        wait(for: [runnerCalled, noFallbackOpen], timeout: 2.0)
+        XCTAssertGreaterThan(maxConcurrentRuns, 1)
+    }
+
     private func makeSession(source: SessionSource, events: [SessionEvent]) -> Session {
         Session(id: "s-semantic",
                 source: source,
