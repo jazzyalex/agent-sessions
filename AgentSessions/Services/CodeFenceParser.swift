@@ -12,14 +12,26 @@ struct CodeFenceParser {
         let model: CodeBlockModel
     }
 
+    private static let openingFenceRegex = try! NSRegularExpression(pattern: #"(?m)^[ \t]*```([^\n`]*)$"#)
     private static let closingFenceRegex = try! NSRegularExpression(pattern: #"(?m)^[ \t]*```[ \t]*$"#)
 
     static func firstFence(in text: String, from start: String.Index) -> CodeFenceRange? {
-        guard let fenceStart = text.range(of: "```", range: start..<text.endIndex) else { return nil }
-        let languageLineStart = fenceStart.upperBound
-        let lineEnd = text[languageLineStart...].firstIndex(of: "\n") ?? text.endIndex
-        let languageRaw = String(text[languageLineStart..<lineEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let contentStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : lineEnd
+        let openingSearchRange = NSRange(start..<text.endIndex, in: text)
+        guard let openingMatch = openingFenceRegex.firstMatch(in: text, options: [], range: openingSearchRange),
+              let fenceStart = Range(openingMatch.range, in: text) else {
+            return nil
+        }
+        let languageRaw: String = {
+            guard let languageRange = Range(openingMatch.range(at: 1), in: text) else { return "" }
+            return String(text[languageRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }()
+        var contentStart = fenceStart.upperBound
+        if contentStart < text.endIndex, text[contentStart] == "\r" {
+            contentStart = text.index(after: contentStart)
+        }
+        if contentStart < text.endIndex, text[contentStart] == "\n" {
+            contentStart = text.index(after: contentStart)
+        }
 
         let searchRange = NSRange(contentStart..<text.endIndex, in: text)
         guard let closingMatch = closingFenceRegex.firstMatch(in: text, options: [], range: searchRange),
