@@ -419,6 +419,10 @@ actor CodexStatusService {
     ) -> NSRegularExpression? {
         makeRegex(pattern: pattern, options: options, label: label)
     }
+
+    func parseTokenCountTailForTesting(url: URL) -> RateLimitSummary? {
+        parseTokenCountTail(url: url)
+    }
 #endif
 
     // Regex helpers
@@ -1525,6 +1529,8 @@ actor CodexStatusService {
 
     private func parseTokenCountTail(url: URL) -> RateLimitSummary? {
         guard let lines = tailLines(url: url, maxBytes: logTailReadMaxBytes) else { return nil }
+        var fallbackSummary: RateLimitSummary? = nil
+        var searchingPreferredLimit = false
         // Walk most-recent → older. Be permissive about shape; Codex logs can vary.
         for raw in lines.reversed() {
             guard let data = raw.data(using: .utf8) else { continue }
@@ -1541,37 +1547,40 @@ actor CodexStatusService {
                             Date()
 
             // Surface usage tokens if present (new or legacy forms)
-            extractUsageIfPresent(from: payload, createdAt: createdAt)
+            if !searchingPreferredLimit {
+                extractUsageIfPresent(from: payload, createdAt: createdAt)
+            }
 
             // Rate limits may appear at payload.rate_limits or (legacy) at top-level
             if let rate = (payload["rate_limits"] as? [String: Any]) ?? (obj["rate_limits"] as? [String: Any]) {
-                let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? createdAt
-                if capturedAt > Date() { continue }
-                let primary = rate["primary"] as? [String: Any]
-                let secondary = rate["secondary"] as? [String: Any]
-                let five = decodeWindow(primary, created: createdAt, capturedAt: capturedAt)
-                let week = decodeWindow(secondary, created: createdAt, capturedAt: capturedAt)
-                let base = capturedAt
-                let stale = Date().timeIntervalSince(base) > 3 * 60
-                return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
+                guard let summary = makeRateLimitSummary(rate: rate, createdAt: createdAt, sourceFile: url) else { continue }
+                let limitID = normalizeLimitID(rate["limit_id"])
+                if limitID == "codex" {
+                    return summary
+                }
+                if fallbackSummary == nil {
+                    fallbackSummary = summary
+                }
+                searchingPreferredLimit = true
+                continue
             }
 
             // Legacy: token_count style where rate_limits nested under payload.info
             if let kind = payload["type"] as? String, kind.lowercased() == "token_count" {
                 if let info = payload["info"] as? [String: Any], let rate = info["rate_limits"] as? [String: Any] {
-                    let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? createdAt
-                    if capturedAt > Date() { continue }
-                    let primary = rate["primary"] as? [String: Any]
-                    let secondary = rate["secondary"] as? [String: Any]
-                    let five = decodeWindow(primary, created: createdAt, capturedAt: capturedAt)
-                    let week = decodeWindow(secondary, created: createdAt, capturedAt: capturedAt)
-                    let base = capturedAt
-                    let stale = Date().timeIntervalSince(base) > 3 * 60
-                    return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: base, stale: stale, sourceFile: url)
+                    guard let summary = makeRateLimitSummary(rate: rate, createdAt: createdAt, sourceFile: url) else { continue }
+                    let limitID = normalizeLimitID(rate["limit_id"])
+                    if limitID == "codex" || limitID == nil {
+                        return summary
+                    }
+                    if fallbackSummary == nil {
+                        fallbackSummary = summary
+                    }
+                    searchingPreferredLimit = true
                 }
             }
         }
-        return nil
+        return fallbackSummary
     }
 
     // MARK: - Usage extraction (new + legacy)
@@ -1621,6 +1630,24 @@ actor CodexStatusService {
         if let n = any as? NSNumber { return n.intValue }
         if let s = any as? String, let v = Double(s) { return Int(v.rounded()) }
         return nil
+    }
+
+    private func makeRateLimitSummary(rate: [String: Any], createdAt: Date, sourceFile: URL) -> RateLimitSummary? {
+        let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? createdAt
+        if capturedAt > Date() { return nil }
+        let primary = rate["primary"] as? [String: Any]
+        let secondary = rate["secondary"] as? [String: Any]
+        let five = decodeWindow(primary, created: createdAt, capturedAt: capturedAt)
+        let week = decodeWindow(secondary, created: createdAt, capturedAt: capturedAt)
+        let stale = Date().timeIntervalSince(capturedAt) > 3 * 60
+        return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: capturedAt, stale: stale, sourceFile: sourceFile)
+    }
+
+    private func normalizeLimitID(_ any: Any?) -> String? {
+        guard let raw = any as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.lowercased()
     }
 
     // MARK: - Flexible date decoding for Codex logs
