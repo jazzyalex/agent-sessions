@@ -281,6 +281,64 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(summary?.weekly.remainingPercent, 85, "Should keep secondary remaining percentage from codex bucket")
     }
 
+    func testPrefersMissingLimitIDBucketOverNonCodexLimitID() async throws {
+        let now = Date()
+        let olderTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-6))
+        let newerTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-2))
+        let resetAt = Int(now.addingTimeInterval(3600).timeIntervalSince1970)
+
+        let unlabeledCodexLine: [String: Any] = [
+            "timestamp": olderTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "primary": [
+                        "used_percent": 35.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 25.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let bengalfoxLine: [String: Any] = [
+            "timestamp": newerTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex_bengalfox",
+                    "primary": [
+                        "used_percent": 0.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 0.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let url = try writeTempJSONL([unlabeledCodexLine, bengalfoxLine])
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        let summary = await service.parseTokenCountTailForTesting(url: url)
+
+        XCTAssertNotNil(summary, "Parser should extract a rate-limit summary")
+        XCTAssertEqual(summary?.fiveHour.remainingPercent, 65, "Should treat missing limit_id in primary rate_limits as preferred codex stream")
+        XCTAssertEqual(summary?.weekly.remainingPercent, 75, "Should keep secondary remaining percentage from unlabeled codex stream")
+    }
+
     // MARK: - Integration Tests
 
     func testComputesNonCachedInputTokens() throws {
