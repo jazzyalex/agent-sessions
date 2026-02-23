@@ -25,9 +25,18 @@ From repo root:
 Defaults:
 - Scope: uncommitted changes
 - Max rounds: 6
+- Loop mode: `conservative`
 - Review effort: high for rounds 1-2, xhigh for rounds 3+
 - Fix effort: high for rounds 1-4, xhigh for rounds 5+
 - Artifacts: `.codex-review-artifacts/<timestamp>/`
+
+`conservative` mode defaults:
+- excludes untracked files from allowed scope (unless explicitly enabled)
+- fails when fix output runs build/test/package-manager commands
+- fails when fix touches files outside computed scope
+- attempts safe cleanup of new untracked out-of-scope files before abort
+
+If you want broader behavior, use `--loop-mode balanced`.
 
 ## Live steering
 
@@ -61,6 +70,7 @@ Authentication resilience:
 
 - Fix runs use `--full-auto` with `--sandbox workspace-write` (headless with sandboxed automation).
 - Avoid `--yolo` unless you are already inside a hardened sandbox VM.
+- In conservative mode, fixes should stay in-file and avoid invoking heavy build/test/package commands.
 
 ## Outputs
 

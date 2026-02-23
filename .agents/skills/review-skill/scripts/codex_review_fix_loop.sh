@@ -48,6 +48,12 @@ REVIEW_PROMPT_MODE="${REVIEW_PROMPT_MODE:-plain}"
 SCOPE_MODE="uncommitted"  # uncommitted|base|commit
 SCOPE_BASE_BRANCH=""
 SCOPE_COMMIT_SHA=""
+REVIEW_LOOP_MODE="${REVIEW_LOOP_MODE:-conservative}"  # conservative|balanced
+SCOPE_INCLUDE_UNTRACKED="${SCOPE_INCLUDE_UNTRACKED:-}"
+SCOPE_ALLOWLIST_FILE="${SCOPE_ALLOWLIST_FILE:-}"
+FAIL_ON_SCOPE_VIOLATION="${FAIL_ON_SCOPE_VIOLATION:-}"
+REVERT_SCOPE_VIOLATION_UNTRACKED="${REVERT_SCOPE_VIOLATION_UNTRACKED:-}"
+FAIL_ON_FORBIDDEN_COMMANDS="${FAIL_ON_FORBIDDEN_COMMANDS:-}"
 
 # CLI-only knobs
 DRY_RUN="0"
@@ -88,6 +94,12 @@ usage() {
 Usage:
   codex_review_fix_loop.sh [--uncommitted] [--base <branch>] [--commit <sha>]
                            [--max-rounds <n>]
+                           [--loop-mode <conservative|balanced>]
+                           [--scope-include-untracked|--scope-ignore-untracked]
+                           [--scope-allowlist-file <path>]
+                           [--fail-on-scope-violation <0|1>]
+                           [--revert-scope-violation-untracked <0|1>]
+                           [--fail-on-forbidden-commands <0|1>]
                            [--review-model-early <id|effort|model@effort>]
                            [--review-model-late  <id|effort|model@effort>]
                            [--fix-model-early <id|effort|model@effort>]
@@ -111,6 +123,11 @@ Usage:
 Defaults:
   --uncommitted
   --max-rounds 6
+  --loop-mode conservative
+  --scope-ignore-untracked (for uncommitted scope)
+  --fail-on-scope-violation 1
+  --revert-scope-violation-untracked 1
+  --fail-on-forbidden-commands 1
   --review-model-early high
   --review-model-late  xhigh
   --fix-model-early    high
@@ -138,6 +155,8 @@ Notes:
   - Review error parsing ignores known benign internal rollout-log noise.
   - Finding deltas use exact matching + optional fuzzy reworded reconciliation
     (env: FINDINGS_FUZZY=1, FINDINGS_FUZZY_THRESHOLD=0.86).
+  - Conservative mode blocks build/test/package-manager command execution in
+    fix output and fails on post-fix edits outside the computed scope.
 USAGE
 }
 
@@ -152,6 +171,32 @@ trim() {
   # shellcheck disable=SC2001
   s="$(echo "$s" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
   printf "%s" "$s"
+}
+
+validate_toggle_01() {
+  local flag_name="$1"
+  local value="$2"
+  [[ "$value" =~ ^[01]$ ]] || die "${flag_name} must be 0 or 1"
+}
+
+apply_mode_defaults() {
+  case "$REVIEW_LOOP_MODE" in
+    conservative)
+      if [[ -z "$SCOPE_INCLUDE_UNTRACKED" ]]; then SCOPE_INCLUDE_UNTRACKED="0"; fi
+      if [[ -z "$FAIL_ON_SCOPE_VIOLATION" ]]; then FAIL_ON_SCOPE_VIOLATION="1"; fi
+      if [[ -z "$REVERT_SCOPE_VIOLATION_UNTRACKED" ]]; then REVERT_SCOPE_VIOLATION_UNTRACKED="1"; fi
+      if [[ -z "$FAIL_ON_FORBIDDEN_COMMANDS" ]]; then FAIL_ON_FORBIDDEN_COMMANDS="1"; fi
+      ;;
+    balanced)
+      if [[ -z "$SCOPE_INCLUDE_UNTRACKED" ]]; then SCOPE_INCLUDE_UNTRACKED="1"; fi
+      if [[ -z "$FAIL_ON_SCOPE_VIOLATION" ]]; then FAIL_ON_SCOPE_VIOLATION="0"; fi
+      if [[ -z "$REVERT_SCOPE_VIOLATION_UNTRACKED" ]]; then REVERT_SCOPE_VIOLATION_UNTRACKED="0"; fi
+      if [[ -z "$FAIL_ON_FORBIDDEN_COMMANDS" ]]; then FAIL_ON_FORBIDDEN_COMMANDS="0"; fi
+      ;;
+    *)
+      die "--loop-mode must be one of: conservative|balanced"
+      ;;
+  esac
 }
 
 is_effort() {
@@ -937,26 +982,180 @@ compute_scope_allowed_files() {
     return 0
   fi
 
+  local tmp_file
+  tmp_file="$(mktemp "${TMPDIR:-/tmp}/codex-scope-allowed.XXXXXX")"
+  : > "$tmp_file"
+
   case "$scope_mode" in
     uncommitted)
       {
         git diff --name-only 2>/dev/null || true
         git diff --cached --name-only 2>/dev/null || true
-        git ls-files --others --exclude-standard 2>/dev/null || true
-      } | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u > "$out_file"
+        if [[ "$SCOPE_INCLUDE_UNTRACKED" == "1" ]]; then
+          git ls-files --others --exclude-standard 2>/dev/null || true
+        fi
+      } >> "$tmp_file"
       ;;
     base)
-      git diff --name-only "${scope_base}...HEAD" 2>/dev/null | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u > "$out_file" || true
+      git diff --name-only "${scope_base}...HEAD" 2>/dev/null >> "$tmp_file" || true
       ;;
     commit)
-      git diff-tree --no-commit-id --name-only -r "$scope_sha" 2>/dev/null | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u > "$out_file" || true
-      if [[ ! -s "$out_file" ]]; then
-        git show --name-only --pretty=format: "$scope_sha" 2>/dev/null | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u > "$out_file" || true
+      git diff-tree --no-commit-id --name-only -r "$scope_sha" 2>/dev/null >> "$tmp_file" || true
+      if [[ ! -s "$tmp_file" ]]; then
+        git show --name-only --pretty=format: "$scope_sha" 2>/dev/null >> "$tmp_file" || true
       fi
       ;;
     *)
       ;;
   esac
+
+  if [[ -n "$SCOPE_ALLOWLIST_FILE" && -f "$SCOPE_ALLOWLIST_FILE" ]]; then
+    awk 'NF && $0 !~ /^[[:space:]]*#/{print}' "$SCOPE_ALLOWLIST_FILE" >> "$tmp_file"
+  fi
+
+  sed '/^[[:space:]]*$/d' "$tmp_file" | LC_ALL=C sort -u > "$out_file"
+  rm -f "$tmp_file"
+}
+
+compute_scope_violations() {
+  local touched_file="$1"
+  local allowed_file="$2"
+  local out_file="$3"
+  : > "$out_file"
+
+  [[ -s "$touched_file" ]] || return 0
+  [[ -s "$allowed_file" ]] || return 0
+
+  if have_cmd python3; then
+    python3 - "$touched_file" "$allowed_file" "$out_file" <<'PY'
+import sys
+
+touched_path, allowed_path, out_path = sys.argv[1:]
+
+def load(path):
+    values = []
+    seen = set()
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        for raw in f:
+            item = raw.strip()
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            values.append(item)
+    return values
+
+touched = load(touched_path)
+allowed = set(load(allowed_path))
+violations = [p for p in touched if p not in allowed]
+
+with open(out_path, "w", encoding="utf-8") as f:
+    for p in violations:
+        f.write(p + "\n")
+PY
+  else
+    while IFS= read -r path; do
+      [[ -z "$path" ]] && continue
+      if ! grep -Fxq -- "$path" "$allowed_file"; then
+        echo "$path" >> "$out_file"
+      fi
+    done < "$touched_file"
+  fi
+}
+
+is_safe_repo_relative_path() {
+  local path="$1"
+  [[ -n "$path" ]] || return 1
+  [[ "$path" != /* ]] || return 1
+  [[ "$path" != "." ]] || return 1
+  [[ "$path" != ".." ]] || return 1
+  [[ "$path" != ../* ]] || return 1
+  [[ "$path" != */../* ]] || return 1
+  [[ "$path" != */.. ]] || return 1
+  [[ "$path" != *$'\n'* ]] || return 1
+  return 0
+}
+
+lookup_snapshot_digest() {
+  local snapshot_file="$1"
+  local path="$2"
+  local digest
+  digest="$(awk -F'\t' -v target="$path" '$1 == target { print $2; found=1; exit } END { if (!found) print "__MISSING__" }' "$snapshot_file")"
+  printf "%s" "$digest"
+}
+
+revert_new_untracked_scope_violations() {
+  local before_snapshot="$1"
+  local violations_file="$2"
+  local reverted_file="$3"
+  : > "$reverted_file"
+
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if ! is_safe_repo_relative_path "$path"; then
+      warn "Skipping unsafe scope-violation path: '$path'"
+      continue
+    fi
+    local before_digest
+    before_digest="$(lookup_snapshot_digest "$before_snapshot" "$path")"
+    [[ "$before_digest" == "__MISSING__" ]] || continue
+    [[ -e "$path" || -L "$path" ]] || continue
+    if have_cmd git && git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+      continue
+    fi
+    rm -rf -- "$path"
+    echo "$path" >> "$reverted_file"
+  done < "$violations_file"
+}
+
+extract_forbidden_commands_from_output() {
+  local in_file="$1"
+  local out_file="$2"
+  : > "$out_file"
+
+  if have_cmd python3; then
+    python3 - "$in_file" "$out_file" <<'PY'
+import re
+import sys
+
+in_path, out_path = sys.argv[1], sys.argv[2]
+lines = open(in_path, "r", encoding="utf-8", errors="ignore").read().splitlines()
+
+cmd_line_re = re.compile(r"^[^ \t].*\s-lc\s+")
+forbidden_re = re.compile(
+    r"\b(xcodebuild|xcpretty)\b|"
+    r"\bswift\s+(build|test|package)\b|"
+    r"\bnpm\s+(install|test|run)\b|"
+    r"\bpnpm\b|"
+    r"\byarn\b|"
+    r"\bbundle\s+exec\b|"
+    r"\bpod\s+install\b|"
+    r"\bcargo\s+(build|test)\b|"
+    r"\bgo\s+test\b|"
+    r"\bpytest\b|"
+    r"\bcmake\b|"
+    r"(?:^|[;&| \t])make(?:[ \t]|$)",
+    re.IGNORECASE,
+)
+
+seen = set()
+items = []
+for line in lines:
+    if not cmd_line_re.search(line):
+        continue
+    if not forbidden_re.search(line):
+        continue
+    if line in seen:
+        continue
+    seen.add(line)
+    items.append(line)
+
+with open(out_path, "w", encoding="utf-8") as f:
+    for item in items:
+        f.write(item + "\n")
+PY
+  else
+    grep -Ei ' -lc .*([[:<:]]xcodebuild[[:>:]]|[[:<:]]xcpretty[[:>:]]|[[:<:]]swift[[:space:]]+(build|test|package)[[:>:]]|[[:<:]]npm[[:space:]]+(install|test|run)[[:>:]]|[[:<:]]pnpm[[:>:]]|[[:<:]]yarn[[:>:]]|[[:<:]]bundle[[:space:]]+exec[[:>:]]|[[:<:]]pod[[:space:]]+install[[:>:]]|[[:<:]]cargo[[:space:]]+(build|test)[[:>:]]|[[:<:]]go[[:space:]]+test[[:>:]]|[[:<:]]pytest[[:>:]]|[[:<:]]cmake[[:>:]]|(^|[;&|[:space:]])make([[:space:]]|$))' "$in_file" > "$out_file" || true
+  fi
 }
 
 format_elapsed_clock() {
@@ -1212,13 +1411,8 @@ is_review_clean_output() {
     return 0
   fi
 
-  # Fuzzy clean phrases are accepted for short outputs with no findings/errors.
+  # Fuzzy clean phrases are accepted when strongly anchored.
   if [[ "$nonempty_count" -le 80 ]] && tail -n 120 "$file" | grep -Eiq '^[[:space:]]*(Looks good\.?|LGTM\.?)\s*$'; then
-    return 0
-  fi
-
-  # If extraction found nothing, only treat very short outputs as clean.
-  if [[ "$findings_count" -eq 0 && "$nonempty_count" -le 12 ]]; then
     return 0
   fi
 
@@ -1408,7 +1602,8 @@ Goal:
 - Fix the issues described in the review output below.
 - Keep changes minimal and directly tied to the findings.
 - Do not introduce unrelated refactors.
-- If tests exist and are fast, run them. If lint exists and is fast, run it.
+- Do not run build/test/lint/package-install commands in this fix pass.
+- Focus on source edits only; validation happens in a separate step.
 
 Review output (verbatim):
 ------------------------
@@ -1423,8 +1618,8 @@ EOF
     if [[ "$allowed_count" -gt 0 ]]; then
       cat <<EOF
 Allowed edit scope:
-- Keep edits within the current review scope file set unless strictly required.
-- You may also update adjacent tests/docs directly related to these files.
+- Keep edits strictly within the scope files listed below.
+- If a required fix is outside this list, stop and explain exactly which path is needed.
 
 Scope files:
 EOF
@@ -1451,6 +1646,7 @@ Deliverable:
 - Apply fixes in the repository.
 - Summarize what you changed and why.
 - List any commands you ran and their results.
+- Allowed commands should be read/edit/git introspection only.
 
 Do NOT run anything destructive.
 EOF
@@ -1638,6 +1834,39 @@ while [[ $# -gt 0 ]]; do
       MAX_ROUNDS="$2"
       shift 2
       ;;
+    --loop-mode)
+      [[ $# -ge 2 ]] || die "--loop-mode requires <conservative|balanced>"
+      REVIEW_LOOP_MODE="$2"
+      shift 2
+      ;;
+    --scope-include-untracked)
+      SCOPE_INCLUDE_UNTRACKED="1"
+      shift
+      ;;
+    --scope-ignore-untracked)
+      SCOPE_INCLUDE_UNTRACKED="0"
+      shift
+      ;;
+    --scope-allowlist-file)
+      [[ $# -ge 2 ]] || die "--scope-allowlist-file requires <path>"
+      SCOPE_ALLOWLIST_FILE="$2"
+      shift 2
+      ;;
+    --fail-on-scope-violation)
+      [[ $# -ge 2 ]] || die "--fail-on-scope-violation requires <0|1>"
+      FAIL_ON_SCOPE_VIOLATION="$2"
+      shift 2
+      ;;
+    --revert-scope-violation-untracked)
+      [[ $# -ge 2 ]] || die "--revert-scope-violation-untracked requires <0|1>"
+      REVERT_SCOPE_VIOLATION_UNTRACKED="$2"
+      shift 2
+      ;;
+    --fail-on-forbidden-commands)
+      [[ $# -ge 2 ]] || die "--fail-on-forbidden-commands requires <0|1>"
+      FAIL_ON_FORBIDDEN_COMMANDS="$2"
+      shift 2
+      ;;
     --review-model-early)
       [[ $# -ge 2 ]] || die "--review-model-early requires <id|effort|model@effort>"
       REVIEW_MODEL_EARLY="$2"
@@ -1745,6 +1974,7 @@ done
 
 # Validate scope exclusivity implicitly by parsing: only one mode is active
 # Validate rounds integer
+apply_mode_defaults
 [[ "$MAX_ROUNDS" =~ ^[0-9]+$ ]] || die "--max-rounds must be an integer"
 [[ "$HEARTBEAT_SECONDS" =~ ^[0-9]+$ ]] || die "--heartbeat-seconds must be an integer"
 [[ "$HEARTBEAT_SECONDS" -gt 0 ]] || die "--heartbeat-seconds must be > 0"
@@ -1756,6 +1986,13 @@ done
 [[ "$AUTH_SCAN_TAIL_LINES" -gt 0 ]] || die "--auth-scan-tail-lines must be > 0"
 [[ "$ERROR_SCAN_TAIL_LINES" =~ ^[0-9]+$ ]] || die "--error-scan-tail-lines must be an integer"
 [[ "$ERROR_SCAN_TAIL_LINES" -gt 0 ]] || die "--error-scan-tail-lines must be > 0"
+validate_toggle_01 "--scope-include-untracked/--scope-ignore-untracked" "$SCOPE_INCLUDE_UNTRACKED"
+validate_toggle_01 "--fail-on-scope-violation" "$FAIL_ON_SCOPE_VIOLATION"
+validate_toggle_01 "--revert-scope-violation-untracked" "$REVERT_SCOPE_VIOLATION_UNTRACKED"
+validate_toggle_01 "--fail-on-forbidden-commands" "$FAIL_ON_FORBIDDEN_COMMANDS"
+if [[ -n "$SCOPE_ALLOWLIST_FILE" && ! -f "$SCOPE_ALLOWLIST_FILE" ]]; then
+  die "--scope-allowlist-file not found: $SCOPE_ALLOWLIST_FILE"
+fi
 case "$REVIEW_PROMPT_MODE" in
   plain|prompt|auto) ;;
   *) die "--review-prompt-mode must be one of: plain|prompt|auto" ;;
@@ -1774,6 +2011,12 @@ print_phase "Artifacts: $RUN_DIR"
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "Planned:"
   echo "- Scope default: $SCOPE_MODE"
+  echo "- Loop mode: $REVIEW_LOOP_MODE"
+  echo "- Scope include untracked: $SCOPE_INCLUDE_UNTRACKED"
+  echo "- Scope allowlist file: ${SCOPE_ALLOWLIST_FILE:-<none>}"
+  echo "- Fail on scope violation: $FAIL_ON_SCOPE_VIOLATION"
+  echo "- Revert untracked scope violations: $REVERT_SCOPE_VIOLATION_UNTRACKED"
+  echo "- Fail on forbidden commands: $FAIL_ON_FORBIDDEN_COMMANDS"
   echo "- Max rounds: $MAX_ROUNDS"
   echo "- Review selector early: $REVIEW_MODEL_EARLY"
   echo "- Review selector late:  $REVIEW_MODEL_LATE"
@@ -1942,6 +2185,13 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
   # Build fix prompt (includes full review output)
   allowed_files_file="$RUN_DIR/round-${round}-allowed-files.txt"
   compute_scope_allowed_files "$scope_mode" "$scope_base" "$scope_sha" "$allowed_files_file"
+  allowed_scope_count="$(count_nonempty_lines "$allowed_files_file")"
+  if [[ "$allowed_scope_count" -eq 0 ]]; then
+    warn "Computed allowed scope is empty for round ${round} (scope=${scope_desc})."
+    if [[ "$FAIL_ON_SCOPE_VIOLATION" == "1" ]]; then
+      warn "Scope-violation hard-fail is enabled; consider --scope-include-untracked or --scope-allowlist-file."
+    fi
+  fi
   fix_prompt="$(build_fix_prompt "$review_file" "$CF_APPEND_CONTEXT" "$allowed_files_file")"
   printf "%s" "$fix_prompt" > "$fix_prompt_file"
 
@@ -1984,6 +2234,42 @@ for ((round=1; round<=MAX_ROUNDS; round++)); do
     echo "What I changed:"
     print_indented_list "$fix_touched_file"
   fi
+
+  forbidden_cmds_file="$RUN_DIR/round-${round}-forbidden-commands.txt"
+  extract_forbidden_commands_from_output "$fix_file" "$forbidden_cmds_file"
+  forbidden_cmds_count="$(count_nonempty_lines "$forbidden_cmds_file")"
+  if [[ "$forbidden_cmds_count" -gt 0 ]]; then
+    warn "Fix output includes ${forbidden_cmds_count} forbidden build/test/package command(s)."
+    echo "Forbidden commands detected:"
+    print_indented_list "$forbidden_cmds_file"
+    if [[ "$FAIL_ON_FORBIDDEN_COMMANDS" == "1" ]]; then
+      print_phase "❌ Forbidden command policy violated in round ${round}. Aborting."
+      exit 3
+    fi
+  fi
+
+  scope_violations_file="$RUN_DIR/round-${round}-scope-violations.txt"
+  compute_scope_violations "$fix_touched_file" "$allowed_files_file" "$scope_violations_file"
+  scope_violations_count="$(count_nonempty_lines "$scope_violations_file")"
+  if [[ "$scope_violations_count" -gt 0 ]]; then
+    warn "Detected ${scope_violations_count} out-of-scope touched file(s)."
+    echo "Out-of-scope touched files:"
+    print_indented_list "$scope_violations_file"
+    if [[ "$REVERT_SCOPE_VIOLATION_UNTRACKED" == "1" ]]; then
+      reverted_scope_file="$RUN_DIR/round-${round}-scope-violations-reverted-untracked.txt"
+      revert_new_untracked_scope_violations "$pre_fix_hashes" "$scope_violations_file" "$reverted_scope_file"
+      reverted_scope_count="$(count_nonempty_lines "$reverted_scope_file")"
+      if [[ "$reverted_scope_count" -gt 0 ]]; then
+        echo "Reverted new untracked out-of-scope files:"
+        print_indented_list "$reverted_scope_file"
+      fi
+    fi
+    if [[ "$FAIL_ON_SCOPE_VIOLATION" == "1" ]]; then
+      print_phase "❌ Scope policy violated in round ${round}. Aborting."
+      exit 4
+    fi
+  fi
+
   if [[ "$findings_parsed" -gt 0 ]]; then
     echo "Findings targeted in this fix:"
     print_indented_list "$findings_file"
