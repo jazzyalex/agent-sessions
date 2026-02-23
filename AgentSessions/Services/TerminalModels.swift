@@ -10,6 +10,13 @@ enum TerminalLineRole: Sendable {
     case meta          // timestamps, labels, misc meta
 }
 
+enum SemanticKind: Sendable, Hashable {
+    case reviewSummary
+    case plan
+    case code
+    case diff
+}
+
 /// Line-level representation of the terminal log.
 ///
 /// - `id` is a stable, incremental index (0…N-1) used for scrolling and identity.
@@ -23,6 +30,8 @@ struct TerminalLine: Identifiable, Sendable {
 
     let eventIndex: Int?
     let blockIndex: Int?
+    let decorationGroupID: Int
+    let semanticKind: SemanticKind?
 }
 
 /// Coarser-grained grouping of contiguous terminal lines with the same role.
@@ -56,7 +65,9 @@ struct TerminalBuilder {
     ///
     /// The text is intentionally free of CLI prefixes like `[out]`, `[error]`,
     /// or `> `. Those are applied in the view layer.
-    static func buildLines(for session: Session, showMeta: Bool = false) -> [TerminalLine] {
+    static func buildLines(for session: Session,
+                           showMeta: Bool = false,
+                           enableReviewCards: Bool = true) -> [TerminalLine] {
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: showMeta)
         var lines: [TerminalLine] = []
         lines.reserveCapacity(blocks.count * 2)
@@ -95,6 +106,7 @@ struct TerminalBuilder {
                                         rawText: rawText,
                                         blockIndex: blockIndex,
                                         source: session.source,
+                                        enableReviewCards: enableReviewCards,
                                         syntheticIndex: &syntheticBlockIndex)
 
             for segment in segments {
@@ -118,7 +130,9 @@ struct TerminalBuilder {
                         text: lineText,
                         role: segment.role,
                         eventIndex: nil,
-                        blockIndex: segment.blockIndex
+                        blockIndex: segment.blockIndex,
+                        decorationGroupID: segment.decorationGroupID,
+                        semanticKind: segment.semanticKind
                     )
                     lines.append(line)
                     nextID += 1
@@ -133,7 +147,9 @@ struct TerminalBuilder {
     ///
     /// This is currently unused by the UI but kept for future navigation
     /// features that may want block-level grouping.
-    static func buildLinesAndBlocks(for session: Session, showMeta: Bool = false) -> ([TerminalLine], [TerminalBlock]) {
+    static func buildLinesAndBlocks(for session: Session,
+                                    showMeta: Bool = false,
+                                    enableReviewCards: Bool = true) -> ([TerminalLine], [TerminalBlock]) {
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: showMeta)
         var lines: [TerminalLine] = []
         var terminalBlocks: [TerminalBlock] = []
@@ -172,6 +188,7 @@ struct TerminalBuilder {
                                         rawText: rawText,
                                         blockIndex: blockIndex,
                                         source: session.source,
+                                        enableReviewCards: enableReviewCards,
                                         syntheticIndex: &syntheticBlockIndex)
 
             for segment in segments {
@@ -189,7 +206,9 @@ struct TerminalBuilder {
                         text: "",
                         role: segment.role,
                         eventIndex: nil,
-                        blockIndex: segment.blockIndex
+                        blockIndex: segment.blockIndex,
+                        decorationGroupID: segment.decorationGroupID,
+                        semanticKind: segment.semanticKind
                     )
                     lines.append(line)
                     nextID += 1
@@ -204,7 +223,9 @@ struct TerminalBuilder {
                         text: lineText,
                         role: segment.role,
                         eventIndex: nil,
-                        blockIndex: segment.blockIndex
+                        blockIndex: segment.blockIndex,
+                        decorationGroupID: segment.decorationGroupID,
+                        semanticKind: segment.semanticKind
                     )
                     lines.append(line)
                     nextID += 1
@@ -222,6 +243,15 @@ struct TerminalBuilder {
         let role: TerminalLineRole
         let text: String
         let blockIndex: Int?
+        let decorationGroupID: Int
+        let semanticKind: SemanticKind?
+    }
+
+    private struct SegmentSeed {
+        let role: TerminalLineRole
+        let text: String
+        let blockIndex: Int?
+        let semanticKind: SemanticKind?
     }
 
     private static func lineSegments(for block: SessionTranscriptBuilder.LogicalBlock,
@@ -229,31 +259,249 @@ struct TerminalBuilder {
                                      rawText: String,
                                      blockIndex: Int,
                                      source: SessionSource,
+                                     enableReviewCards: Bool,
                                      syntheticIndex: inout Int) -> [LineSegment] {
-        if let reviewText = reviewDisplayTextIfNeeded(block: block, source: source) {
-            return [LineSegment(role: .meta, text: reviewText, blockIndex: blockIndex)]
-        }
-        if baseRole == .user, isUserInterruptMarker(rawText) {
+        let seeds: [SegmentSeed]
+        if enableReviewCards,
+           let reviewText = reviewDisplayTextIfNeeded(block: block, source: source) {
+            seeds = [SegmentSeed(role: .meta, text: reviewText, blockIndex: blockIndex, semanticKind: .reviewSummary)]
+        } else if baseRole == .user, isUserInterruptMarker(rawText) {
             let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
             let text = trimmed.isEmpty ? rawText : trimmed
-            let segment = LineSegment(role: .meta, text: text, blockIndex: syntheticIndex)
+            let segment = SegmentSeed(role: .meta, text: text, blockIndex: syntheticIndex, semanticKind: nil)
             syntheticIndex -= 1
-            return [segment]
+            seeds = [segment]
+        } else if baseRole == .user,
+                  source == .claude,
+                  let split = splitClaudeLocalCommandSegments(from: rawText,
+                                                              userBlockIndex: blockIndex,
+                                                              syntheticIndex: &syntheticIndex) {
+            seeds = split
+        } else if baseRole == .user,
+                  let split = splitSystemReminderSegments(from: rawText,
+                                                          userBlockIndex: blockIndex,
+                                                          syntheticIndex: &syntheticIndex) {
+            seeds = split
+        } else if baseRole == .assistant {
+            seeds = assistantSemanticSegments(from: rawText,
+                                             source: source,
+                                             enableReviewCards: enableReviewCards).map {
+                SegmentSeed(role: .assistant, text: $0.text, blockIndex: blockIndex, semanticKind: $0.semanticKind)
+            }
+        } else if baseRole == .toolOutput || baseRole == .error {
+            seeds = toolOutputSemanticSegments(from: rawText,
+                                               toolName: block.toolName,
+                                               source: source).map {
+                SegmentSeed(role: baseRole, text: $0.text, blockIndex: blockIndex, semanticKind: $0.semanticKind)
+            }
+        } else {
+            seeds = [SegmentSeed(role: baseRole, text: rawText, blockIndex: blockIndex, semanticKind: nil)]
         }
-        if baseRole == .user,
-           source == .claude,
-           let split = splitClaudeLocalCommandSegments(from: rawText,
-                                                       userBlockIndex: blockIndex,
-                                                       syntheticIndex: &syntheticIndex) {
-            return split
+
+        return seeds.enumerated().map { idx, seed in
+            let effectiveBlockIndex = seed.blockIndex ?? blockIndex
+            return LineSegment(role: seed.role,
+                               text: seed.text,
+                               blockIndex: seed.blockIndex,
+                               decorationGroupID: decorationGroupID(blockIndex: effectiveBlockIndex, segmentOrdinal: idx),
+                               semanticKind: seed.semanticKind)
         }
-        if baseRole == .user,
-           let split = splitSystemReminderSegments(from: rawText,
-                                                   userBlockIndex: blockIndex,
-                                                   syntheticIndex: &syntheticIndex) {
-            return split
+    }
+
+    private struct SemanticTextSegment {
+        let text: String
+        let semanticKind: SemanticKind?
+    }
+
+    private static func assistantSemanticSegments(from text: String,
+                                                  source: SessionSource,
+                                                  enableReviewCards: Bool) -> [SemanticTextSegment] {
+        semanticSegments(from: text,
+                         source: source,
+                         enableReviewCards: enableReviewCards,
+                         includePlanBlocks: true,
+                         includeReviewCards: true)
+    }
+
+    private static func toolOutputSemanticSegments(from text: String,
+                                                   toolName: String?,
+                                                   source: SessionSource) -> [SemanticTextSegment] {
+        let parsed = semanticSegments(from: text,
+                                      source: source,
+                                      enableReviewCards: false,
+                                      includePlanBlocks: false,
+                                      includeReviewCards: false).map { segment -> SemanticTextSegment in
+            switch segment.semanticKind {
+            case .code, .diff, nil:
+                return segment
+            case .reviewSummary, .plan:
+                return SemanticTextSegment(text: segment.text, semanticKind: nil)
+            }
         }
-        return [LineSegment(role: baseRole, text: rawText, blockIndex: blockIndex)]
+        if parsed.contains(where: { $0.semanticKind == .code || $0.semanticKind == .diff }) {
+            return parsed
+        }
+        if shouldTreatToolOutputAsCode(toolName: toolName, text: text) {
+            return [SemanticTextSegment(text: text, semanticKind: .code)]
+        }
+        return parsed
+    }
+
+    private static func semanticSegments(from text: String,
+                                         source: SessionSource,
+                                         enableReviewCards: Bool,
+                                         includePlanBlocks: Bool,
+                                         includeReviewCards: Bool) -> [SemanticTextSegment] {
+        if includeReviewCards, enableReviewCards,
+           let review = InternalPayloadFormatter.parseReviewCard(rawText: text, source: source) {
+            return [SemanticTextSegment(text: review.summaryText, semanticKind: .reviewSummary)]
+        }
+
+        var segments: [SemanticTextSegment] = []
+        var cursor = text.startIndex
+
+        while cursor < text.endIndex {
+            let planMatch = includePlanBlocks ? nextPlanBlockRange(in: text, from: cursor) : nil
+            let fenceMatch = CodeFenceParser.firstFence(in: text, from: cursor)
+
+            let nextMatchStart: String.Index? = {
+                switch (planMatch?.fullRange.lowerBound, fenceMatch?.range.lowerBound) {
+                case let (p?, f?):
+                    return min(p, f)
+                case let (p?, nil):
+                    return p
+                case let (nil, f?):
+                    return f
+                case (nil, nil):
+                    return nil
+                }
+            }()
+
+            guard let start = nextMatchStart else {
+                let remainder = String(text[cursor..<text.endIndex])
+                if !remainder.isEmpty {
+                    segments.append(.init(text: remainder, semanticKind: nil))
+                }
+                break
+            }
+
+            if cursor < start {
+                let leading = String(text[cursor..<start])
+                if !leading.isEmpty {
+                    segments.append(.init(text: leading, semanticKind: nil))
+                }
+            }
+
+            if let planMatch, planMatch.fullRange.lowerBound == start {
+                let formatted = formattedPlanText(innerText: planMatch.innerText)
+                segments.append(.init(text: formatted, semanticKind: .plan))
+                cursor = planMatch.fullRange.upperBound
+                continue
+            }
+
+            if let fenceMatch, fenceMatch.range.lowerBound == start {
+                let isDiffFence = fenceMatch.model.language == "diff"
+                if isDiffFence {
+                    segments.append(.init(text: formattedDiffText(rawText: fenceMatch.model.body), semanticKind: .diff))
+                } else {
+                    segments.append(.init(text: formattedCodeText(block: fenceMatch.model), semanticKind: .code))
+                }
+                cursor = fenceMatch.range.upperBound
+                continue
+            }
+        }
+
+        if segments.isEmpty {
+            return [SemanticTextSegment(text: text, semanticKind: nil)]
+        }
+
+        return segments.map {
+            guard $0.semanticKind == nil, UnifiedDiffParser.looksLikeUnifiedDiff($0.text) else { return $0 }
+            return SemanticTextSegment(text: formattedDiffText(rawText: $0.text), semanticKind: .diff)
+        }
+    }
+
+    private static func shouldTreatToolOutputAsCode(toolName: String?, text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "(no output)" else { return false }
+        guard !UnifiedDiffParser.looksLikeUnifiedDiff(trimmed) else { return false }
+        if looksLikeLineNumberedSourceDump(trimmed) {
+            return true
+        }
+        guard isReadLikeToolName(toolName) else { return false }
+        return trimmed.contains("\n")
+    }
+
+    private static func isReadLikeToolName(_ toolName: String?) -> Bool {
+        guard let toolName = toolName?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !toolName.isEmpty else { return false }
+        if toolName == "cat" { return true }
+
+        let patterns = [
+            "read",
+            "read_file",
+            "fileread",
+            "get_file",
+            "open_file",
+            "view_file"
+        ]
+        return patterns.contains(where: { toolName.contains($0) })
+    }
+
+    private static func looksLikeLineNumberedSourceDump(_ text: String) -> Bool {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var matches = 0
+        for raw in lines {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+            if line.range(of: "^\\d+\\s*(\\u{2192}|\\||:)\\s", options: .regularExpression) != nil {
+                matches += 1
+                if matches >= 2 { return true }
+            }
+        }
+        return false
+    }
+
+    private static func formattedPlanText(innerText: String) -> String {
+        let wrapped = "<proposed_plan>\n\(innerText)\n</proposed_plan>"
+        guard let parsed = PlanParser.parse(from: wrapped) else { return innerText }
+        return parsed.body
+    }
+
+    private static func formattedCodeText(block: CodeFenceParser.CodeBlockModel) -> String {
+        let header: String
+        if let language = block.language, !language.isEmpty {
+            header = "Code (\(language))"
+        } else {
+            header = "Code"
+        }
+        let trimmedBody = block.body.trimmingCharacters(in: .newlines)
+        if trimmedBody.isEmpty {
+            return header
+        }
+        return header + "\n" + trimmedBody
+    }
+
+    private static func formattedDiffText(rawText: String) -> String {
+        guard let parsed = UnifiedDiffParser.parse(rawText) else { return rawText }
+        if parsed.files.isEmpty {
+            return parsed.rawText
+        }
+        return "Diff\n" + parsed.rawText
+    }
+
+    private static func nextPlanBlockRange(in text: String,
+                                           from start: String.Index) -> (fullRange: Range<String.Index>, innerText: String)? {
+        guard let open = text.range(of: "<proposed_plan>", range: start..<text.endIndex),
+              let close = text.range(of: "</proposed_plan>", range: open.upperBound..<text.endIndex) else {
+            return nil
+        }
+        let inner = String(text[open.upperBound..<close.lowerBound])
+        return (fullRange: open.lowerBound..<close.upperBound, innerText: inner)
+    }
+
+    private static func decorationGroupID(blockIndex: Int, segmentOrdinal: Int) -> Int {
+        (blockIndex &* 1000) &+ segmentOrdinal
     }
 
     private static func reviewDisplayTextIfNeeded(block: SessionTranscriptBuilder.LogicalBlock,
@@ -272,9 +520,9 @@ struct TerminalBuilder {
 
     private static func splitSystemReminderSegments(from text: String,
                                                     userBlockIndex: Int,
-                                                    syntheticIndex: inout Int) -> [LineSegment]? {
+                                                    syntheticIndex: inout Int) -> [SegmentSeed]? {
         guard text.contains("<system-reminder>") else { return nil }
-        var segments: [LineSegment] = []
+        var segments: [SegmentSeed] = []
         var remainder: Substring = text[...]
         var found = false
 
@@ -282,13 +530,13 @@ struct TerminalBuilder {
             found = true
             let before = String(remainder[..<start.lowerBound])
             if !before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                segments.append(LineSegment(role: .user, text: before, blockIndex: userBlockIndex))
+                segments.append(SegmentSeed(role: .user, text: before, blockIndex: userBlockIndex, semanticKind: nil))
             }
             let afterStart = start.upperBound
             guard let end = remainder.range(of: "</system-reminder>", range: afterStart..<remainder.endIndex) else {
                 let rest = String(remainder)
                 if !rest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    segments.append(LineSegment(role: .user, text: rest, blockIndex: userBlockIndex))
+                    segments.append(SegmentSeed(role: .user, text: rest, blockIndex: userBlockIndex, semanticKind: nil))
                 }
                 remainder = remainder[remainder.endIndex...]
                 break
@@ -297,7 +545,7 @@ struct TerminalBuilder {
             let trimmed = inner.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 let metaText = "System Reminder\n" + trimmed
-                segments.append(LineSegment(role: .meta, text: metaText, blockIndex: syntheticIndex))
+                segments.append(SegmentSeed(role: .meta, text: metaText, blockIndex: syntheticIndex, semanticKind: nil))
                 syntheticIndex -= 1
             }
             remainder = remainder[end.upperBound...]
@@ -305,7 +553,7 @@ struct TerminalBuilder {
 
         let tail = String(remainder)
         if !tail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            segments.append(LineSegment(role: .user, text: tail, blockIndex: userBlockIndex))
+            segments.append(SegmentSeed(role: .user, text: tail, blockIndex: userBlockIndex, semanticKind: nil))
         }
 
         return found ? segments : nil
@@ -352,7 +600,7 @@ struct TerminalBuilder {
 
     private static func splitClaudeLocalCommandSegments(from text: String,
                                                         userBlockIndex: Int,
-                                                        syntheticIndex: inout Int) -> [LineSegment]? {
+                                                        syntheticIndex: inout Int) -> [SegmentSeed]? {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         guard let firstNonEmpty = lines.firstIndex(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
             return nil
@@ -385,24 +633,24 @@ struct TerminalBuilder {
             break
         }
 
-        var segments: [LineSegment] = []
+        var segments: [SegmentSeed] = []
         let leading = lines[..<firstNonEmpty].joined(separator: "\n")
         if !leading.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            segments.append(LineSegment(role: .user, text: leading, blockIndex: userBlockIndex))
+            segments.append(SegmentSeed(role: .user, text: leading, blockIndex: userBlockIndex, semanticKind: nil))
         }
 
         let preamble = lines[firstNonEmpty...endIndex].joined(separator: "\n")
         let trimmedPreamble = preamble.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedPreamble.isEmpty {
             let metaText = "Local Command\n" + trimmedPreamble
-            segments.append(LineSegment(role: .meta, text: metaText, blockIndex: syntheticIndex))
+            segments.append(SegmentSeed(role: .meta, text: metaText, blockIndex: syntheticIndex, semanticKind: nil))
             syntheticIndex -= 1
         }
 
         if endIndex + 1 < lines.count {
             let tail = lines[(endIndex + 1)...].joined(separator: "\n")
             if !tail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                segments.append(LineSegment(role: .user, text: tail, blockIndex: userBlockIndex))
+                segments.append(SegmentSeed(role: .user, text: tail, blockIndex: userBlockIndex, semanticKind: nil))
             }
         }
 

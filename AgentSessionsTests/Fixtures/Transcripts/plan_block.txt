@@ -1,0 +1,9 @@
+<proposed_plan>
+# Execution Plan
+## Foundation
+- Add segmentation seam
+- Keep blockIndex stable
+## Rendering
+1. Map semantic kinds
+2. Add visual accents
+</proposed_plan>

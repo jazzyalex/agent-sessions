@@ -27,6 +27,48 @@ private struct InlineSessionImage: Identifiable, Hashable, Sendable {
     var id: String { "\(sessionID)-\(payload.stableID)" }
 }
 
+private func renderedTranscriptLineText(_ line: TerminalLine,
+                                        showCodeDiffLineNumbers: Bool,
+                                        isFirstLineOfBlock: Bool,
+                                        semanticLineNumberCounters: inout [Int: Int]) -> (text: String, linkOffset: Int) {
+    guard showCodeDiffLineNumbers,
+          let semanticKind = line.semanticKind,
+          semanticKind == .code || semanticKind == .diff else {
+        return (line.text, 0)
+    }
+
+    let isHeaderLine = isSyntheticSemanticHeader(line.text,
+                                                 semanticKind: semanticKind,
+                                                 isFirstLineOfBlock: isFirstLineOfBlock)
+    if isHeaderLine {
+        semanticLineNumberCounters[line.decorationGroupID] = 0
+        return (line.text, 0)
+    }
+
+    let nextLineNumber = (semanticLineNumberCounters[line.decorationGroupID] ?? 0) + 1
+    semanticLineNumberCounters[line.decorationGroupID] = nextLineNumber
+    let prefix = String(format: "%4d | ", nextLineNumber)
+    return (prefix + line.text, prefix.utf16.count)
+}
+
+private func isSyntheticSemanticHeader(_ text: String,
+                                       semanticKind: SemanticKind,
+                                       isFirstLineOfBlock: Bool) -> Bool {
+    guard isFirstLineOfBlock else { return false }
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    switch semanticKind {
+    case .code:
+        let lower = trimmed.lowercased()
+        if lower == "code" { return true }
+        return lower.hasPrefix("code (") && lower.hasSuffix(")")
+    case .diff:
+        return trimmed.caseInsensitiveCompare("Diff") == .orderedSame
+    case .plan, .reviewSummary:
+        return false
+    }
+}
+
 /// Terminal-style session view with filters, optional gutter, and legend toggles.
 struct SessionTerminalView: View {
     let session: Session
@@ -59,6 +101,11 @@ struct SessionTerminalView: View {
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @AppStorage("InlineSessionImageThumbnailsEnabled") private var inlineSessionImageThumbnailsEnabled: Bool = true
+    @AppStorage(PreferencesKey.Transcript.enableReviewCards) private var transcriptReviewCardsEnabled: Bool = true
+    @AppStorage(PreferencesKey.Transcript.enableCodeDiffLineNumbers) private var transcriptCodeDiffLineNumbersEnabled: Bool = true
+    @AppStorage(PreferencesKey.Transcript.enableLinkification) private var transcriptLinkificationEnabled: Bool = true
+    @AppStorage(PreferencesKey.Transcript.preferredIDETarget) private var transcriptPreferredIDETargetRaw: String = IDEOpener.Target.systemDefault.rawValue
+    @AppStorage(PreferencesKey.Transcript.ideBinaryOverridePath) private var transcriptIDEBinaryOverridePath: String = ""
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var lines: [TerminalLine] = []
@@ -75,8 +122,12 @@ struct SessionTerminalView: View {
         case errors
     }
 
+    private static let allSemanticKinds: Set<SemanticKind> = [.plan, .code, .diff, .reviewSummary]
+
     @AppStorage("TerminalRoleToggles") private var roleToggleRaw: String = "user,assistant,tools,errors"
     @State private var activeRoles: Set<RoleToggle> = Set(RoleToggle.allCases)
+    @AppStorage("TerminalSemanticToggles") private var semanticToggleRaw: String = "plan,code,diff,review"
+    @State private var activeSemanticKinds: Set<SemanticKind> = Self.allSemanticKinds
 
     // Line identifiers for navigation
     @State private var userLineIndices: [Int] = []
@@ -90,6 +141,7 @@ struct SessionTerminalView: View {
     @State private var imageHighlightLineID: Int? = nil
     @State private var imageHighlightToken: Int = 0
     @State private var roleNavPositions: [RoleToggle: Int] = [:]
+    @State private var semanticNavPositions: [SemanticKind: Int] = [:]
 
     @State private var inlineImagesByUserBlockIndex: [Int: [InlineSessionImage]] = [:]
     @State private var inlineImagesSignature: Int = 0
@@ -138,6 +190,14 @@ struct SessionTerminalView: View {
         return hasher.finalize()
     }
 
+    private var transcriptPreferredIDETarget: IDEOpener.Target {
+        IDEOpener.Target(rawValue: transcriptPreferredIDETargetRaw) ?? .systemDefault
+    }
+
+    private var sessionRepoRootPath: String? {
+        Self.repoRootPath(from: session.cwd)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -151,6 +211,7 @@ struct SessionTerminalView: View {
         }
         .onAppear {
             loadRoleToggles()
+            loadSemanticToggles()
             rebuildLines(priority: .userInitiated)
             refreshInlineImages()
         }
@@ -179,16 +240,18 @@ struct SessionTerminalView: View {
             refreshInlineImages()
             rebuildLines(priority: .userInitiated)
         }
+        .onChange(of: transcriptReviewCardsEnabled) { _, _ in
+            rebuildLines(priority: .userInitiated)
+        }
+        .onChange(of: transcriptCodeDiffLineNumbersEnabled) { _, _ in
+            fullSnapshot = buildTextSnapshot(lines: lines)
+            refreshVisibleLinesAndMatches()
+        }
         .onChange(of: activeRoles) { _, _ in
-            visibleLines = roleFilteredLines(from: lines)
-            visibleLinesSignature = Self.stableLineSignature(for: visibleLines)
-            visibleSnapshot = buildTextSnapshot(lines: visibleLines)
-            if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                recomputeUnifiedMatches(resetIndex: true)
-            }
-            if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                recomputeFindMatches(resetIndex: true)
-            }
+            refreshVisibleLinesAndMatches()
+        }
+        .onChange(of: activeSemanticKinds) { _, _ in
+            refreshVisibleLinesAndMatches()
         }
         .onChange(of: roleNavToken) { _, _ in
             // Keyboard navigation should reveal the target role even if the user filtered it off.
@@ -230,6 +293,12 @@ struct SessionTerminalView: View {
                 legendToggle(label: "Tools", role: .tools)
                 legendToggle(label: "Errors", role: .errors)
                 imagesPill()
+                Divider()
+                    .frame(height: 18)
+                semanticToggle(label: "Plans", kind: .plan)
+                semanticToggle(label: "Code", kind: .code)
+                semanticToggle(label: "Diffs", kind: .diff)
+                semanticToggle(label: "Reviews", kind: .reviewSummary)
             }
             .foregroundStyle(.secondary)
 
@@ -277,7 +346,13 @@ struct SessionTerminalView: View {
                     onBottomProximityChange: onBottomProximityChange,
                     focusRequestToken: transcriptFocusToken,
                     colorScheme: colorScheme,
-                    monochrome: stripMonochrome
+                    monochrome: stripMonochrome,
+                    showCodeDiffLineNumbers: transcriptCodeDiffLineNumbersEnabled,
+                    linkificationEnabled: transcriptLinkificationEnabled,
+                    sessionCwd: session.cwd,
+                    repoRootPath: sessionRepoRootPath,
+                    ideTarget: transcriptPreferredIDETarget,
+                    ideBinaryOverridePath: transcriptIDEBinaryOverridePath
                 )
                 .onChange(of: unifiedFindToken) { _, _ in handleUnifiedFindRequest() }
                 .onChange(of: findToken) { _, _ in handleFindRequest() }
@@ -701,14 +776,17 @@ struct SessionTerminalView: View {
 
         let sessionSnapshot = session
         let skipAgentsPreamble = skipAgentsPreambleEnabled()
+        let reviewCardsEnabled = transcriptReviewCardsEnabled
 
-        rebuildTask = Task.detached(priority: priority) { [sessionSnapshot, skipAgentsPreamble, debounceNanoseconds] in
+        rebuildTask = Task.detached(priority: priority) { [sessionSnapshot, skipAgentsPreamble, reviewCardsEnabled, debounceNanoseconds] in
             if debounceNanoseconds > 0 {
                 try? await Task.sleep(nanoseconds: debounceNanoseconds)
             }
             guard !Task.isCancelled else { return }
 
-            let result = Self.buildRebuildResult(session: sessionSnapshot, skipAgentsPreamble: skipAgentsPreamble)
+            let result = Self.buildRebuildResult(session: sessionSnapshot,
+                                                 skipAgentsPreamble: skipAgentsPreamble,
+                                                 enableReviewCards: reviewCardsEnabled)
             guard !Task.isCancelled else { return }
 
             await MainActor.run {
@@ -723,7 +801,7 @@ struct SessionTerminalView: View {
                 }()
 
                 lines = result.lines
-                visibleLines = roleFilteredLines(from: result.lines)
+                visibleLines = applyLineFilters(result.lines)
                 visibleLinesSignature = Self.stableLineSignature(for: visibleLines)
                 fullSnapshot = buildTextSnapshot(lines: result.lines)
                 visibleSnapshot = buildTextSnapshot(lines: visibleLines)
@@ -780,6 +858,7 @@ struct SessionTerminalView: View {
                     findMatchOccurrences = []
                     findCurrentMatchLineID = nil
                     roleNavPositions = [:]
+                    semanticNavPositions = [:]
                     externalMatchCount = 0
                     externalTotalMatchCount = 0
                     externalCurrentMatchIndex = 0
@@ -800,6 +879,24 @@ struct SessionTerminalView: View {
         }
     }
 
+    private func refreshVisibleLinesAndMatches() {
+        visibleLines = applyLineFilters(lines)
+        visibleLinesSignature = Self.stableLineSignature(for: visibleLines)
+        visibleSnapshot = buildTextSnapshot(lines: visibleLines)
+        roleNavPositions = [:]
+        semanticNavPositions = [:]
+        if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            recomputeUnifiedMatches(resetIndex: true)
+        }
+        if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            recomputeFindMatches(resetIndex: true)
+        }
+    }
+
+    private func applyLineFilters(_ source: [TerminalLine]) -> [TerminalLine] {
+        semanticFilteredLines(from: roleFilteredLines(from: source))
+    }
+
     private func roleFilteredLines(from lines: [TerminalLine]) -> [TerminalLine] {
         guard !activeRoles.isEmpty else { return lines }
         return lines.filter { line in
@@ -818,9 +915,19 @@ struct SessionTerminalView: View {
         }
     }
 
-    nonisolated private static func buildRebuildResult(session: Session, skipAgentsPreamble: Bool) -> RebuildResult {
+    private func semanticFilteredLines(from source: [TerminalLine]) -> [TerminalLine] {
+        guard activeSemanticKinds != Self.allSemanticKinds else { return source }
+        return source.filter { line in
+            guard let semanticKind = line.semanticKind else { return true }
+            return activeSemanticKinds.contains(semanticKind)
+        }
+    }
+
+    nonisolated private static func buildRebuildResult(session: Session,
+                                                       skipAgentsPreamble: Bool,
+                                                       enableReviewCards: Bool) -> RebuildResult {
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
-        let built = TerminalBuilder.buildLines(for: session, showMeta: false)
+        let built = TerminalBuilder.buildLines(for: session, showMeta: false, enableReviewCards: enableReviewCards)
         let startLineID = conversationStartLineIDIfNeeded(session: session, lines: built, enabled: skipAgentsPreamble)
         let preambleUserBlockIndexes = computePreambleUserBlockIndexes(session: session)
 
@@ -973,6 +1080,8 @@ struct SessionTerminalView: View {
             hasher.combine(line.role.signatureToken)
             hasher.combine(line.text)
             hasher.combine(line.blockIndex ?? -1)
+            hasher.combine(line.decorationGroupID)
+            hasher.combine(semanticSignatureToken(for: line.semanticKind))
         }
         return hasher.finalize()
     }
@@ -982,6 +1091,18 @@ struct SessionTerminalView: View {
             && lhs.role == rhs.role
             && lhs.text == rhs.text
             && lhs.blockIndex == rhs.blockIndex
+            && lhs.decorationGroupID == rhs.decorationGroupID
+            && lhs.semanticKind == rhs.semanticKind
+    }
+
+    nonisolated private static func semanticSignatureToken(for semanticKind: SemanticKind?) -> Int {
+        guard let semanticKind else { return 0 }
+        switch semanticKind {
+        case .reviewSummary: return 1
+        case .plan: return 2
+        case .code: return 3
+        case .diff: return 4
+        }
     }
 
     nonisolated private static func computePreambleUserBlockIndexes(session: Session) -> Set<Int> {
@@ -1000,6 +1121,23 @@ struct SessionTerminalView: View {
         return out
     }
 
+    nonisolated private static func repoRootPath(from cwd: String?) -> String? {
+        guard let cwd, !cwd.isEmpty else { return nil }
+        let fm = FileManager.default
+        var url = URL(fileURLWithPath: cwd)
+
+        for _ in 0..<12 {
+            let dotGitURL = url.appendingPathComponent(".git", isDirectory: false)
+            if fm.fileExists(atPath: dotGitURL.path) {
+                return url.path
+            }
+            let parent = url.deletingLastPathComponent()
+            if parent.path == url.path { break }
+            url = parent
+        }
+        return nil
+    }
+
     private func loadRoleToggles() {
         let parts = roleToggleRaw.split(separator: ",").map { String($0) }
         var roles: Set<RoleToggle> = []
@@ -1016,6 +1154,24 @@ struct SessionTerminalView: View {
         activeRoles = roles
     }
 
+    private func loadSemanticToggles() {
+        let parts = semanticToggleRaw.split(separator: ",").map { String($0) }
+        var kinds: Set<SemanticKind> = []
+        for part in parts {
+            switch part {
+            case "plan": kinds.insert(.plan)
+            case "code": kinds.insert(.code)
+            case "diff": kinds.insert(.diff)
+            case "review": kinds.insert(.reviewSummary)
+            default: break
+            }
+        }
+        if kinds.isEmpty {
+            kinds = Self.allSemanticKinds
+        }
+        activeSemanticKinds = kinds
+    }
+
     private func persistRoleToggles() {
         let parts = activeRoles.map { role -> String in
             switch role {
@@ -1028,11 +1184,25 @@ struct SessionTerminalView: View {
         roleToggleRaw = parts.joined(separator: ",")
     }
 
+    private func persistSemanticToggles() {
+        let parts = activeSemanticKinds.map { kind -> String in
+            switch kind {
+            case .plan: return "plan"
+            case .code: return "code"
+            case .diff: return "diff"
+            case .reviewSummary: return "review"
+            }
+        }
+        semanticToggleRaw = parts.joined(separator: ",")
+    }
+
     private func allFilterButton() -> some View {
-        let isActive = activeRoles.count == RoleToggle.allCases.count
+        let isActive = activeRoles.count == RoleToggle.allCases.count && activeSemanticKinds == Self.allSemanticKinds
         return Button(action: {
             activeRoles = Set(RoleToggle.allCases)
+            activeSemanticKinds = Self.allSemanticKinds
             persistRoleToggles()
+            persistSemanticToggles()
         }) {
             Text("All")
                 .font(.system(size: 13, weight: .regular))
@@ -1119,6 +1289,71 @@ struct SessionTerminalView: View {
         }
     }
 
+    private func semanticToggle(label: String, kind: SemanticKind) -> some View {
+        let isOn = activeSemanticKinds.contains(kind)
+        let accent = Color(nsColor: TranscriptColorSystem.semanticAccent(accentRole(for: kind)))
+        let semanticCountSourceLines = roleFilteredLines(from: lines)
+        let indices = semanticLineIndices(kind, in: semanticCountSourceLines)
+        let hasLines = !indices.isEmpty
+        let navDisabled = !isOn || !hasLines
+        let status = semanticNavigationStatus(for: kind, in: semanticCountSourceLines)
+        let countText = "\(formattedCount(status.current))/\(formattedCount(status.total))"
+
+        return HStack(spacing: 6) {
+            Button(action: {
+                if isOn {
+                    activeSemanticKinds.remove(kind)
+                } else {
+                    activeSemanticKinds.insert(kind)
+                }
+                persistSemanticToggles()
+            }) {
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(accent.opacity(isOn ? 1.0 : 0.35))
+                        .frame(width: 9, height: 9)
+                    Text(label)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(isOn ? .primary : .secondary)
+                    Text(countText)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(Color.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .buttonStyle(.plain)
+            .help(semanticToggleHelpText(for: kind))
+
+            HStack(spacing: 4) {
+                ZStack {
+                    Button(action: { navigateSemantic(kind, direction: -1) }) {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(navDisabled ? Color.secondary.opacity(0.35) : Color.secondary)
+                    .disabled(navDisabled)
+                }
+                .help(previousSemanticHelpText(for: kind))
+
+                ZStack {
+                    Button(action: { navigateSemantic(kind, direction: 1) }) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(navDisabled ? Color.secondary.opacity(0.35) : Color.secondary)
+                    .disabled(navDisabled)
+                }
+                .help(nextSemanticHelpText(for: kind))
+            }
+        }
+    }
+
     private func formattedCount(_ count: Int) -> String {
         let clamped = min(max(count, 0), 999_999)
         let base = clamped.formatted(.number.grouping(.automatic))
@@ -1145,16 +1380,55 @@ struct SessionTerminalView: View {
         return (0, total)
     }
 
+    private func semanticNavigationStatus(for kind: SemanticKind, in source: [TerminalLine]) -> (current: Int, total: Int) {
+        let ids = semanticLineIndices(kind, in: source)
+        let total = ids.count
+        guard total > 0 else { return (0, 0) }
+        let sorted = ids.sorted()
+
+        if let stored = semanticNavPositions[kind], stored >= 0, stored < total {
+            return (stored + 1, total)
+        }
+
+        if let currentID = unifiedCurrentMatchLineID, let pos = sorted.firstIndex(of: currentID) {
+            return (pos + 1, total)
+        }
+
+        return (0, total)
+    }
+
+    private func semanticLineIndices(_ kind: SemanticKind, in source: [TerminalLine]) -> [Int] {
+        var seenGroups: Set<Int> = []
+        var out: [Int] = []
+        for line in source {
+            guard line.semanticKind == kind else { continue }
+            if seenGroups.insert(line.decorationGroupID).inserted {
+                out.append(line.id)
+            }
+        }
+        return out.sorted()
+    }
+
+    private func accentRole(for kind: SemanticKind) -> TranscriptColorSystem.SemanticRole {
+        switch kind {
+        case .plan: return .plan
+        case .code: return .code
+        case .diff: return .diff
+        case .reviewSummary: return .reviewSummary
+        }
+    }
+
     private func indicesForRole(_ role: RoleToggle) -> [Int] {
+        let visibleLineIDs = Set(visibleLines.map(\.id))
         switch role {
         case .user:
-            return userLineIndices
+            return userLineIndices.filter { visibleLineIDs.contains($0) }
         case .assistant:
-            return assistantLineIndices
+            return assistantLineIndices.filter { visibleLineIDs.contains($0) }
         case .tools:
-            return toolLineIndices
+            return toolLineIndices.filter { visibleLineIDs.contains($0) }
         case .errors:
-            return errorLineIndices
+            return errorLineIndices.filter { visibleLineIDs.contains($0) }
         }
     }
 
@@ -1185,6 +1459,27 @@ struct SessionTerminalView: View {
         }
     }
 
+    private func semanticLabel(for kind: SemanticKind) -> String {
+        switch kind {
+        case .plan: return "plans"
+        case .code: return "code blocks"
+        case .diff: return "diff blocks"
+        case .reviewSummary: return "review cards"
+        }
+    }
+
+    private func semanticToggleHelpText(for kind: SemanticKind) -> String {
+        "Show/hide \(semanticLabel(for: kind))"
+    }
+
+    private func previousSemanticHelpText(for kind: SemanticKind) -> String {
+        "Previous \(semanticLabel(for: kind))"
+    }
+
+    private func nextSemanticHelpText(for kind: SemanticKind) -> String {
+        "Next \(semanticLabel(for: kind))"
+    }
+
     private func navigateRole(_ role: RoleToggle, direction: Int) {
         guard activeRoles.contains(role) else { return }
         let ids = indicesForRole(role)
@@ -1209,6 +1504,35 @@ struct SessionTerminalView: View {
 
         let nextIndex = wrapIndex(startIndex + step)
         roleNavPositions[role] = nextIndex
+        unifiedCurrentMatchLineID = sorted[nextIndex]
+        roleNavScrollTargetLineID = sorted[nextIndex]
+        roleNavScrollToken &+= 1
+    }
+
+    private func navigateSemantic(_ kind: SemanticKind, direction: Int) {
+        guard activeSemanticKinds.contains(kind) else { return }
+        let ids = semanticLineIndices(kind, in: visibleLines)
+        guard !ids.isEmpty else { return }
+
+        let sorted = ids.sorted()
+        let step = direction >= 0 ? 1 : -1
+        let count = sorted.count
+
+        func wrapIndex(_ value: Int) -> Int {
+            (value % count + count) % count
+        }
+
+        let startIndex: Int
+        if let stored = semanticNavPositions[kind], stored >= 0, stored < count {
+            startIndex = stored
+        } else if let currentID = unifiedCurrentMatchLineID, let pos = sorted.firstIndex(of: currentID) {
+            startIndex = pos
+        } else {
+            startIndex = direction >= 0 ? 0 : (count - 1)
+        }
+
+        let nextIndex = wrapIndex(startIndex + step)
+        semanticNavPositions[kind] = nextIndex
         unifiedCurrentMatchLineID = sorted[nextIndex]
         roleNavScrollTargetLineID = sorted[nextIndex]
         roleNavScrollToken &+= 1
@@ -1335,8 +1659,16 @@ struct SessionTerminalView: View {
         orderedLineIDs.reserveCapacity(lines.count)
 
         var location = 0
+        var semanticLineNumberCounters: [Int: Int] = [:]
+        semanticLineNumberCounters.reserveCapacity(32)
         for (idx, line) in lines.enumerated() {
-            let lineString = idx == lines.count - 1 ? line.text : line.text + "\n"
+            let previousDecorationGroupID = idx > 0 ? lines[idx - 1].decorationGroupID : nil
+            let isFirstLineOfBlock = previousDecorationGroupID != line.decorationGroupID
+            let renderedText = renderedTranscriptLineText(line,
+                                                          showCodeDiffLineNumbers: transcriptCodeDiffLineNumbersEnabled,
+                                                          isFirstLineOfBlock: isFirstLineOfBlock,
+                                                          semanticLineNumberCounters: &semanticLineNumberCounters).text
+            let lineString = idx == lines.count - 1 ? renderedText : renderedText + "\n"
             let length = lineString.utf16.count
             let range = NSRange(location: location, length: length)
             text.append(lineString)
@@ -1807,6 +2139,10 @@ private extension TerminalLineRole {
             case userInterrupt
             case systemNotice
             case agent
+            case plan
+            case code
+            case diff
+            case reviewSummary
             case toolCall
             case toolOutput
             case error
@@ -1890,13 +2226,45 @@ private extension TerminalLineRole {
 	                accentWidth: 4,
 	                paddingY: 8
 	            )
-	        case .agent:
-	            let base = agentBrandAccent
-	            return BlockStyle(
-	                fill: rgba(base, alpha: dark ? 0.06 : 0.012),
+        case .agent:
+            let base = agentBrandAccent
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.06 : 0.012),
                 accent: rgba(base, alpha: dark ? 0.60 : 0.42),
                 accentWidth: 4,
                 paddingY: 6
+            )
+        case .plan:
+            let base: NSColor = TranscriptColorSystem.semanticAccent(.plan)
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.11 : 0.035),
+                accent: rgba(base, alpha: dark ? 0.80 : 0.62),
+                accentWidth: 4,
+                paddingY: 8
+            )
+        case .code:
+            let base: NSColor = TranscriptColorSystem.semanticAccent(.code)
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
+                accent: rgba(base, alpha: dark ? 0.80 : 0.62),
+                accentWidth: 4,
+                paddingY: 8
+            )
+        case .diff:
+            let base: NSColor = TranscriptColorSystem.semanticAccent(.diff)
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
+                accent: rgba(base, alpha: dark ? 0.80 : 0.62),
+                accentWidth: 4,
+                paddingY: 8
+            )
+        case .reviewSummary:
+            let base: NSColor = TranscriptColorSystem.semanticAccent(.reviewSummary)
+            return BlockStyle(
+                fill: rgba(base, alpha: dark ? 0.10 : 0.03),
+                accent: rgba(base, alpha: dark ? 0.80 : 0.62),
+                accentWidth: 4,
+                paddingY: 8
             )
         case .localCommand:
             let base: NSColor = TranscriptColorSystem.semanticAccent(.user)
@@ -2267,6 +2635,12 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let focusRequestToken: Int
     let colorScheme: ColorScheme
     let monochrome: Bool
+    let showCodeDiffLineNumbers: Bool
+    let linkificationEnabled: Bool
+    let sessionCwd: String?
+    let repoRootPath: String?
+    let ideTarget: IDEOpener.Target
+    let ideBinaryOverridePath: String
 
     private final class InlineImageAttachment: NSTextAttachment {
         let imageID: String
@@ -2452,6 +2826,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastMonochrome: Bool = false
         var lastColorScheme: ColorScheme = .light
         var lastInlineImagesSignature: Int = 0
+        var lastShowCodeDiffLineNumbers: Bool = true
+        var lastLinkificationEnabled: Bool = true
         var lastScrollToBottomToken: Int = 0
         var lastNearBottom: Bool? = nil
         var lastProximityContextID: String = ""
@@ -2473,6 +2849,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lines: [TerminalLine] = []
         var orderedLineRanges: [NSRange] = []
         var orderedLineIDs: [Int] = []
+        var ideTarget: IDEOpener.Target = .systemDefault
+        var ideBinaryOverridePath: String = ""
 
         private weak var activeTextView: NSTextView?
         private weak var activeScrollView: NSScrollView?
@@ -2588,6 +2966,25 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             out.addItem(stop)
 
             return out
+        }
+
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            let payload: String? = {
+                if let value = link as? String { return value }
+                if let value = link as? URL { return value.absoluteString }
+                return nil
+            }()
+            guard let payload,
+                  let decoded = TranscriptLinkifier.decodePayload(payload) else {
+                return false
+            }
+
+            IDEOpener.open(path: decoded.path,
+                           line: decoded.line,
+                           column: decoded.column,
+                           target: ideTarget,
+                           binaryOverride: ideBinaryOverridePath)
+            return true
         }
 
         @objc private func copySelectionOnly(_ sender: Any?) {
@@ -3273,14 +3670,14 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         private func blockText(at charIndex: Int) -> String? {
             guard !lines.isEmpty else { return nil }
             guard let lineIndex = lineIndex(at: charIndex) else { return nil }
-            let block = lines[lineIndex].blockIndex
+            let block = lines[lineIndex].decorationGroupID
 
             var start = lineIndex
-            while start > 0, lines[start - 1].blockIndex == block {
+            while start > 0, lines[start - 1].decorationGroupID == block {
                 start -= 1
             }
             var end = lineIndex
-            while end + 1 < lines.count, lines[end + 1].blockIndex == block {
+            while end + 1 < lines.count, lines[end + 1].decorationGroupID == block {
                 end += 1
             }
 
@@ -3532,10 +3929,16 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.layoutManager?.allowsNonContiguousLayout = true
         textView.backgroundColor = NSColor.textBackgroundColor
+        textView.linkTextAttributes = [
+            .foregroundColor: NSColor.linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
 
         scroll.documentView = textView
 
         context.coordinator.activeLayoutManager = layoutManager
+        context.coordinator.ideTarget = ideTarget
+        context.coordinator.ideBinaryOverridePath = ideBinaryOverridePath
         context.coordinator.onBottomProximityChange = onBottomProximityChange
         context.coordinator.installScrollObserver(scrollView: scroll, textView: textView)
         applyContent(to: textView, context: context)
@@ -3544,6 +3947,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastMonochrome = monochrome
         context.coordinator.lastColorScheme = colorScheme
         context.coordinator.lastInlineImagesSignature = inlineImagesSignature
+        context.coordinator.lastShowCodeDiffLineNumbers = showCodeDiffLineNumbers
+        context.coordinator.lastLinkificationEnabled = linkificationEnabled
         context.coordinator.lastUnifiedFindQuery = unifiedFindQuery
         context.coordinator.lastUnifiedAutoScrollToken = unifiedFindToken
         context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
@@ -3563,6 +3968,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let tv = nsView.documentView as? TerminalTextView else { return }
+        context.coordinator.ideTarget = ideTarget
+        context.coordinator.ideBinaryOverridePath = ideBinaryOverridePath
         context.coordinator.onBottomProximityChange = onBottomProximityChange
         context.coordinator.installScrollObserver(scrollView: nsView, textView: tv)
 
@@ -3580,7 +3987,9 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         let schemeChanged = context.coordinator.lastColorScheme != colorScheme
         let inlineChanged = context.coordinator.lastInlineImagesSignature != inlineImagesSignature
         let inlineEnabledChanged = context.coordinator.inlineImagesEnabled != inlineImagesEnabled
-        let needsReload = lineSig != context.coordinator.lastLinesSignature || fontChanged || monochromeChanged || schemeChanged || inlineChanged || inlineEnabledChanged
+        let showCodeDiffLineNumbersChanged = context.coordinator.lastShowCodeDiffLineNumbers != showCodeDiffLineNumbers
+        let linkificationChanged = context.coordinator.lastLinkificationEnabled != linkificationEnabled
+        let needsReload = lineSig != context.coordinator.lastLinesSignature || fontChanged || monochromeChanged || schemeChanged || inlineChanged || inlineEnabledChanged || showCodeDiffLineNumbersChanged || linkificationChanged
         let patchStrategy = SessionTerminalView.tailPatchStrategy(previous: context.coordinator.lines, current: lines)
         let canTailPatchReload =
             lineSig != context.coordinator.lastLinesSignature &&
@@ -3589,7 +3998,9 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             !monochromeChanged &&
             !schemeChanged &&
             !inlineChanged &&
-            !inlineEnabledChanged
+            !inlineEnabledChanged &&
+            !showCodeDiffLineNumbersChanged &&
+            !linkificationChanged
 
         if needsReload {
             if canTailPatchReload, let patchStrategy {
@@ -3607,6 +4018,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             context.coordinator.lastMonochrome = monochrome
             context.coordinator.lastColorScheme = colorScheme
             context.coordinator.lastInlineImagesSignature = inlineImagesSignature
+            context.coordinator.lastShowCodeDiffLineNumbers = showCodeDiffLineNumbers
+            context.coordinator.lastLinkificationEnabled = linkificationEnabled
             needsBottomProximityRefresh = true
         } else {
             let unifiedChanged =
@@ -3766,6 +4179,24 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
     }
 
+    private func semanticLineNumberCounters(before endIndex: Int) -> [Int: Int] {
+        guard showCodeDiffLineNumbers, endIndex > 0 else { return [:] }
+        let prefixLines = lines.prefix(endIndex)
+        guard !prefixLines.isEmpty else { return [:] }
+
+        var counters: [Int: Int] = [:]
+        counters.reserveCapacity(32)
+        for (idx, line) in prefixLines.enumerated() {
+            let previousDecorationGroupID = idx > 0 ? lines[idx - 1].decorationGroupID : nil
+            let isFirstLineOfBlock = previousDecorationGroupID != line.decorationGroupID
+            _ = renderedTranscriptLineText(line,
+                                           showCodeDiffLineNumbers: showCodeDiffLineNumbers,
+                                           isFirstLineOfBlock: isFirstLineOfBlock,
+                                           semanticLineNumberCounters: &counters)
+        }
+        return counters
+    }
+
     private func appendTailContent(to textView: NSTextView, context: Context, startIndex: Int) {
         guard startIndex >= 0, startIndex < lines.count else {
             applyContent(to: textView, context: context)
@@ -3777,8 +4208,9 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
 
         let width = max(1, textView.enclosingScrollView?.contentSize.width ?? textView.bounds.width)
-        let previousBlockIndex = startIndex > 0 ? lines[startIndex - 1].blockIndex : nil
+        let previousDecorationGroupID = startIndex > 0 ? lines[startIndex - 1].decorationGroupID : nil
         let tailLines = Array(lines[startIndex...])
+        let initialSemanticLineNumberCounters = semanticLineNumberCounters(before: startIndex)
 
         if startIndex > 0, storage.length > 0, !storage.string.hasSuffix("\n") {
             storage.append(NSAttributedString(string: "\n"))
@@ -3796,7 +4228,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         let (tailAttr, tailRangesRelative) = buildAttributedString(
             containerWidth: width,
             renderedLines: tailLines,
-            previousBlockIndex: previousBlockIndex
+            previousDecorationGroupID: previousDecorationGroupID,
+            initialSemanticLineNumberCounters: initialSemanticLineNumberCounters
         )
         let baseLocation = storage.length
         storage.append(tailAttr)
@@ -3879,12 +4312,14 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             return
         }
 
-        let previousBlockIndex = startIndex > 0 ? lines[startIndex - 1].blockIndex : nil
+        let previousDecorationGroupID = startIndex > 0 ? lines[startIndex - 1].decorationGroupID : nil
         let replacementLines = Array(lines[startIndex...])
+        let initialSemanticLineNumberCounters = semanticLineNumberCounters(before: startIndex)
         let (replacementAttr, replacementRangesRelative) = buildAttributedString(
             containerWidth: width,
             renderedLines: replacementLines,
-            previousBlockIndex: previousBlockIndex
+            previousDecorationGroupID: previousDecorationGroupID,
+            initialSemanticLineNumberCounters: initialSemanticLineNumberCounters
         )
 
         storage.beginEditing()
@@ -3990,7 +4425,9 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         var startIdx: Int? = nil
         var currentBlock: Int? = nil
+        var currentDecorationGroup: Int? = nil
         var rolesInBlock: Set<TerminalLineRole> = []
+        var semanticKindsInBlock: Set<SemanticKind> = []
 
         func isLocalCommandMetaBlock(start: Int, end: Int) -> Bool {
             guard start <= end else { return false }
@@ -4022,9 +4459,17 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	            return false
 	        }
 
+        func semanticBlockKind(from kinds: Set<SemanticKind>) -> TerminalLayoutManager.BlockKind? {
+            if kinds.contains(.reviewSummary) { return .reviewSummary }
+            if kinds.contains(.plan) { return .plan }
+            if kinds.contains(.diff) { return .diff }
+            if kinds.contains(.code) { return .code }
+            return nil
+        }
+
 	        func finishBlock(endIdx: Int, blockIndex: Int?) {
 	            guard let s = startIdx else { return }
-	            guard currentBlock != nil else { return }
+            guard currentDecorationGroup != nil else { return }
 	            guard let startRange = ranges[lines[s].id] else { return }
             guard let endRange = ranges[lines[endIdx].id] else { return }
 
@@ -4037,12 +4482,14 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	                if rolesInBlock.count == 1, rolesInBlock.contains(.meta) {
 	                    if isUserInterruptMetaBlock(start: s, end: endIdx) { return .userInterrupt }
 	                    if isTurnAbortedMetaBlock(start: s, end: endIdx) { return .systemNotice }
+                    if let semanticKind = semanticBlockKind(from: semanticKindsInBlock) { return semanticKind }
 	                    return isLocalCommandMetaBlock(start: s, end: endIdx) ? .localCommand : nil
 	                }
 	                if rolesInBlock.contains(.error) { return .error }
 	                if rolesInBlock.contains(.toolInput) { return .toolCall }
                 if rolesInBlock.contains(.toolOutput) { return .toolOutput }
                 if rolesInBlock.contains(.user) { return isPreambleUserBlock ? .userPreamble : .user }
+                if let semanticKind = semanticBlockKind(from: semanticKindsInBlock) { return semanticKind }
                 return .agent
             }()
 
@@ -4058,30 +4505,51 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                     finishBlock(endIdx: idx - 1, blockIndex: currentBlock)
                     startIdx = nil
                     currentBlock = nil
+                    currentDecorationGroup = nil
                     rolesInBlock = []
+                    semanticKindsInBlock = []
                 }
                 if line.role != .meta, let r = ranges[line.id], r.length > 0 {
-                    out.append(.init(range: r, kind: line.role == .user ? .user : .agent))
+                    let kind: TerminalLayoutManager.BlockKind = {
+                        if line.role == .user { return .user }
+                        if let semantic = line.semanticKind {
+                            switch semantic {
+                            case .plan: return .plan
+                            case .code: return .code
+                            case .diff: return .diff
+                            case .reviewSummary: return .reviewSummary
+                            }
+                        }
+                        return .agent
+                    }()
+                    out.append(.init(range: r, kind: kind))
                 }
                 continue
             }
 
-            if currentBlock == nil {
+            if currentDecorationGroup == nil {
                 currentBlock = blockIndex
+                currentDecorationGroup = line.decorationGroupID
                 startIdx = idx
                 rolesInBlock = [line.role]
+                semanticKindsInBlock = line.semanticKind.map { [$0] } ?? []
                 continue
             }
 
-            if currentBlock != blockIndex {
+            if currentDecorationGroup != line.decorationGroupID {
                 finishBlock(endIdx: idx - 1, blockIndex: currentBlock)
                 currentBlock = blockIndex
+                currentDecorationGroup = line.decorationGroupID
                 startIdx = idx
                 rolesInBlock = [line.role]
+                semanticKindsInBlock = line.semanticKind.map { [$0] } ?? []
                 continue
             }
 
             rolesInBlock.insert(line.role)
+            if let semantic = line.semanticKind {
+                semanticKindsInBlock.insert(semantic)
+            }
         }
 
         if startIdx != nil {
@@ -4136,7 +4604,31 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             return
         }
 
-        let text = line.text as NSString
+        let renderedText: String = {
+            guard showCodeDiffLineNumbers,
+                  line.semanticKind == .code || line.semanticKind == .diff,
+                  let currentLineIndex = lines.firstIndex(where: { $0.id == currentLineID }) else {
+                return line.text
+            }
+
+            var semanticLineNumberCounters: [Int: Int] = [:]
+            semanticLineNumberCounters.reserveCapacity(32)
+            for idx in 0...currentLineIndex {
+                let lineAtIndex = lines[idx]
+                let previousDecorationGroupID = idx > 0 ? lines[idx - 1].decorationGroupID : nil
+                let isFirstLineOfBlock = previousDecorationGroupID != lineAtIndex.decorationGroupID
+                let rendered = renderedTranscriptLineText(lineAtIndex,
+                                                         showCodeDiffLineNumbers: showCodeDiffLineNumbers,
+                                                         isFirstLineOfBlock: isFirstLineOfBlock,
+                                                         semanticLineNumberCounters: &semanticLineNumberCounters)
+                if lineAtIndex.id == currentLineID {
+                    return rendered.text
+                }
+            }
+            return line.text
+        }()
+
+        let text = renderedText as NSString
         var out: [NSRange] = []
         out.reserveCapacity(4)
         var search = NSRange(location: 0, length: text.length)
@@ -4153,17 +4645,19 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     }
 
     private func buildAttributedString(containerWidth: CGFloat) -> (NSAttributedString, [Int: NSRange]) {
-        buildAttributedString(containerWidth: containerWidth, renderedLines: lines, previousBlockIndex: nil)
+        buildAttributedString(containerWidth: containerWidth, renderedLines: lines, previousDecorationGroupID: nil)
     }
 
     private func buildAttributedString(containerWidth: CGFloat,
                                        renderedLines: [TerminalLine],
-                                       previousBlockIndex: Int?) -> (NSAttributedString, [Int: NSRange]) {
+                                       previousDecorationGroupID: Int?,
+                                       initialSemanticLineNumberCounters: [Int: Int] = [:]) -> (NSAttributedString, [Int: NSRange]) {
         let attr = NSMutableAttributedString()
         var ranges: [Int: NSRange] = [:]
         ranges.reserveCapacity(renderedLines.count)
 
         let systemRegularFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+        let systemSemiboldFont = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
         let monoRegularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         let monoSemiboldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .semibold)
 
@@ -4182,6 +4676,30 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             case .toolOutput: return toolOutputSwatch
             case .error: return errorSwatch
             case .meta: return metaSwatch
+            }
+        }
+
+        func semanticForegroundColor(for line: TerminalLine, fallback: NSColor) -> NSColor {
+            guard let semantic = line.semanticKind else { return fallback }
+            switch semantic {
+            case .plan:
+                return TranscriptColorSystem.semanticAccent(.plan)
+            case .code:
+                return TranscriptColorSystem.semanticAccent(.code)
+            case .reviewSummary:
+                return TranscriptColorSystem.semanticAccent(.reviewSummary)
+            case .diff:
+                let trimmed = line.text.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("+"), !trimmed.hasPrefix("+++") {
+                    return TranscriptColorSystem.semanticAccent(.toolOutputSuccess)
+                }
+                if trimmed.hasPrefix("-"), !trimmed.hasPrefix("---") {
+                    return TranscriptColorSystem.semanticAccent(.error)
+                }
+                if trimmed.hasPrefix("@@") || trimmed.hasPrefix("diff --git") || trimmed.hasPrefix("--- ") || trimmed.hasPrefix("+++ ") {
+                    return TranscriptColorSystem.semanticAccent(.diff)
+                }
+                return fallback
             }
         }
 
@@ -4270,17 +4788,20 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-        var priorBlockIndex: Int? = previousBlockIndex
+        var priorDecorationGroupID: Int? = previousDecorationGroupID
+        var semanticLineNumberCounters = initialSemanticLineNumberCounters
+        semanticLineNumberCounters.reserveCapacity(max(32, semanticLineNumberCounters.count))
 
         for (idx, line) in renderedLines.enumerated() {
             let blockIndex = line.blockIndex
-            let isFirstLineOfBlock = priorBlockIndex != blockIndex
-            let isNewBlock = (idx > 0 || priorBlockIndex != nil) && priorBlockIndex != blockIndex
-            priorBlockIndex = blockIndex
+            let decorationGroupID = line.decorationGroupID
+            let isFirstLineOfBlock = priorDecorationGroupID != decorationGroupID
+            let isNewBlock = (idx > 0 || priorDecorationGroupID != nil) && priorDecorationGroupID != decorationGroupID
+            priorDecorationGroupID = decorationGroupID
 
             let isLastLineOfBlock: Bool = {
                 if idx == renderedLines.count - 1 { return true }
-                return renderedLines[idx + 1].blockIndex != blockIndex
+                return renderedLines[idx + 1].decorationGroupID != decorationGroupID
             }()
 
             let shouldAppendInlineImages: Bool = {
@@ -4304,6 +4825,18 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
             let lineSwatch = (isPreambleUserLine ? assistantSwatch : swatch(for: line.role))
             let baseFont: NSFont = {
+                if line.semanticKind == .code || line.semanticKind == .diff {
+                    return monoRegularFont
+                }
+                if line.semanticKind == .plan {
+                    let trimmed = line.text.trimmingCharacters(in: .whitespaces)
+                    if trimmed.hasPrefix("#") || trimmed.hasPrefix("-") || trimmed.hasPrefix("*") {
+                        return systemSemiboldFont
+                    }
+                }
+                if line.semanticKind == .reviewSummary {
+                    return isFirstLineOfBlock ? systemSemiboldFont : systemRegularFont
+                }
                 if line.role == .toolInput {
                     return isFirstLineOfBlock ? monoSemiboldFont : monoRegularFont
                 }
@@ -4313,16 +4846,40 @@ private struct TerminalTextScrollView: NSViewRepresentable {
                 return systemRegularFont
             }()
 
+            let lineTextWithPrefix: (text: String, linkOffset: Int) = {
+                renderedTranscriptLineText(line,
+                                           showCodeDiffLineNumbers: showCodeDiffLineNumbers,
+                                           isFirstLineOfBlock: isFirstLineOfBlock,
+                                           semanticLineNumberCounters: &semanticLineNumberCounters)
+            }()
+
             let needsTrailingNewline = (idx != renderedLines.count - 1) || shouldAppendInlineImages
-            let lineString = line.text + (needsTrailingNewline ? "\n" : "")
+            let lineString = lineTextWithPrefix.text + (needsTrailingNewline ? "\n" : "")
 
             let start = attr.length
+            let foregroundColor = semanticForegroundColor(for: line, fallback: lineSwatch.foreground)
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: baseFont,
-                .foregroundColor: lineSwatch.foreground,
+                .foregroundColor: foregroundColor,
                 .paragraphStyle: paragraphStyle
             ]
             attr.append(NSAttributedString(string: lineString, attributes: attributes))
+
+            if linkificationEnabled {
+                let localMatches = TranscriptLinkifier.matches(in: line.text)
+                for match in localMatches {
+                    guard let resolved = TranscriptLinkifier.resolve(path: match.path,
+                                                                     sessionCwd: sessionCwd,
+                                                                     repoRoot: repoRootPath) else { continue }
+                    let payload = TranscriptLinkifier.linkPayload(path: resolved, line: match.line, column: match.column)
+                    let absoluteRange = NSRange(location: start + lineTextWithPrefix.linkOffset + match.range.location,
+                                                length: match.range.length)
+                    attr.addAttributes([
+                        .link: payload,
+                        .underlineStyle: NSUnderlineStyle.single.rawValue
+                    ], range: absoluteRange)
+                }
+            }
 
             if shouldAppendInlineImages, let blockIndex, let images = inlineImagesByUserBlockIndex[blockIndex] {
                 appendInlineThumbnails(images)

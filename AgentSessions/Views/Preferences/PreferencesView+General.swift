@@ -207,6 +207,33 @@ extension PreferencesView {
                 Toggle("Show inline image thumbnails in Session view", isOn: $inlineSessionImageThumbnailsEnabled)
                     .help("Show small image thumbnails inline in Session view. Thumbnails load after scrolling stops to reduce CPU and I/O during fast scroll.")
 
+                sectionHeader("Rich Transcript")
+                Toggle("Enable review cards for Codex internal review JSON", isOn: $transcriptEnableReviewCards)
+                    .help("When enabled, recognized Codex internal review payloads render as summary cards instead of raw JSON.")
+                Toggle("Enable file-link click targets in transcript", isOn: $transcriptEnableLinkification)
+                    .help("Turn file path references like Foo.swift:56 into clickable links that open in your editor.")
+                Toggle("Show line numbers for code and diff blocks", isOn: $transcriptEnableCodeDiffLineNumbers)
+                    .help("Show per-block line numbers for semantic code and diff transcript blocks.")
+                labeledRow("Preferred Editor") {
+                    Picker("", selection: Binding(
+                        get: { IDEOpener.Target(rawValue: transcriptPreferredIDETargetRaw) ?? .systemDefault },
+                        set: { transcriptPreferredIDETargetRaw = $0.rawValue }
+                    )) {
+                        Text("System Default").tag(IDEOpener.Target.systemDefault)
+                        Text("Cursor").tag(IDEOpener.Target.cursor)
+                        Text("VS Code").tag(IDEOpener.Target.vscode)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 340)
+                    .help("Choose which app receives transcript file links.")
+                }
+                labeledRow("Editor CLI Override") {
+                    TextField("Optional binary path (for Cursor/VS Code)", text: $transcriptIDEBinaryOverridePath)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 420)
+                        .help("Optional override for the editor CLI binary used for line-targeted opens.")
+                }
+
                 // Columns section
                 sectionHeader("Columns")
                 // First row: three columns to reduce height
