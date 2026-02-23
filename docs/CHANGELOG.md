@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Transcript (Session view): Code-fence opening detection now requires line-start fences, preventing inline triple-backtick snippets from consuming later fenced blocks and misclassifying narrative text as code.
 - Transcript (Session view): Codex review-card parsing now skips malformed fenced JSON candidates and continues scanning later candidates, so one invalid payload block no longer suppresses a valid review summary.
+- Transcript (Session view): `path:line:column` file references now preserve their column target when linkified, avoiding overlap with `path:line` parsing that could drop column navigation.
+- Transcript (Session view): Opening file links in Cursor/VS Code no longer blocks transcript interaction while the editor CLI starts; CLI launches now run asynchronously with fallback behavior preserved.
 - Session view (Unified): Jump-to-latest arrow visibility is now driven by transcript position for every agent/session type, so it appears whenever the viewport is away from the end (including immediately after switching sessions) and no longer depends on active-session refresh paths.
 - Session view (Unified): The floating jump-to-latest control now uses a smaller compact circle and now appears immediately after session selection whenever the transcript is not at the tail (no initial scroll required).
 - Session view (Unified): Clicking the floating jump-to-latest control now hides it immediately after programmatic scroll-to-end, without requiring additional manual up/down scrolling.
