@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Codex usage tracking: JSONL backward scans now continue extracting token-usage fields while searching for the preferred `codex` rate-limit stream, preventing stale token values when newer non-codex limit buckets are present.
 - Sessions (OpenClaw): Tool format scanning now recognizes underscore/case variants for tool-call and tool-result blocks, and `is_error` tool-result flags are now classified as errors in transcript events.
 - Transcript (Session view): Code-fence opening detection now requires line-start fences, preventing inline triple-backtick snippets from consuming later fenced blocks and misclassifying narrative text as code.
 - Transcript (Session view): Codex review-card parsing now skips malformed fenced JSON candidates and continues scanning later candidates, so one invalid payload block no longer suppresses a valid review summary.
@@ -36,6 +37,8 @@ All notable changes to this project will be documented in this file.
 - Session view (Unified): Loading animation now stays visible when the selected session is still loading but the on-screen transcript buffer belongs to a different session, preventing stale-content flashes without feedback.
 - Session view (Unified/Terminal): Loading overlay now remains until the first terminal render completes, preventing brief blank panes and 0/0 navigation states on large sessions.
 - Session view (Unified/Terminal): Transcript toolbar semantic navigation now detects code/diff content inside tool-output blocks, and semantic counter totals no longer collapse to `0/0` from semantic-filter state alone.
+- Session view (Unified/Terminal): Transcript toolbar now hides navigation chips with no matching items (errors/images/code/diffs/reviews), uses compact marker+count chips when labels cannot fit, and on very narrow widths moves extra chips into a chevron overflow menu.
+- Session view (Unified/Terminal): Toolbar fit mode now re-evaluates on width/layout transitions, preventing stale compact/overflow rendering after switching split layouts.
 - Session view (Unified): Removed loading spinners from the transcript UI to avoid spinner-on-empty states while sessions load.
 - Session view (Unified): Async transcript/JSON renders now persist the originating view mode in render state, preventing transcript-tail append from attaching to buffers built for another mode after mode switches.
 - Sessions (Codex/Session view): Active-session transcript updates now append tail content in Session view instead of replacing the full rendered buffer on each monitor refresh, eliminating periodic flicker and preserving in-session reading/navigation context.
