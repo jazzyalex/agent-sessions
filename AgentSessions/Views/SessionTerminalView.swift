@@ -1516,7 +1516,7 @@ struct SessionTerminalView: View {
         let accent = Color(nsColor: TranscriptColorSystem.semanticAccent(accentRole(for: kind)))
         let semanticVisibleLines = semanticLineIndices(kind, in: visibleLines)
         let navDisabled = !isOn || semanticVisibleLines.isEmpty
-        let status = semanticNavigationStatus(for: kind, in: lines)
+        let status = semanticNavigationStatus(for: kind, in: visibleLines)
         let countText = "\(formattedCount(status.current))/\(formattedCount(status.total))"
         let helpText = "\(label) \(countText). " + semanticToggleHelpText(for: kind)
 
@@ -1596,7 +1596,7 @@ struct SessionTerminalView: View {
     }
 
     private func navigationStatus(for role: RoleToggle) -> (current: Int, total: Int) {
-        let ids = allIndicesForRole(role)
+        let ids = indicesForRole(role)
         let total = ids.count
         guard total > 0 else { return (0, 0) }
         let sorted = ids.sorted()
@@ -1723,7 +1723,7 @@ struct SessionTerminalView: View {
     }
 
     private func semanticCountText(_ kind: SemanticKind) -> String {
-        let status = semanticNavigationStatus(for: kind, in: lines)
+        let status = semanticNavigationStatus(for: kind, in: visibleLines)
         return "\(formattedCount(status.current))/\(formattedCount(status.total))"
     }
 
