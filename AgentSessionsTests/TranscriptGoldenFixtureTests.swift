@@ -49,11 +49,15 @@ final class TranscriptGoldenFixtureTests: XCTestCase {
         XCTAssertTrue(matches.contains(where: { $0.path == "Foo.swift" && $0.line == 56 && $0.column == nil }))
         XCTAssertTrue(matches.contains(where: { $0.path == "path/to/Foo.swift" && $0.line == 56 && $0.column == nil }))
         XCTAssertTrue(matches.contains(where: { $0.path == "path/to/Foo.swift" && $0.line == 56 && $0.column == 12 }))
-        XCTAssertTrue(matches.contains(where: { nsText.substring(with: $0.range).contains("#L56-L80") }))
-        let rangeMatch = try XCTUnwrap(matches.first(where: { nsText.substring(with: $0.range).contains("#L56-L80") }))
-        XCTAssertEqual(rangeMatch.path, "Foo.swift")
-        XCTAssertEqual(rangeMatch.line, 56)
-        XCTAssertNil(rangeMatch.column)
+        let hashLinkMatch = try XCTUnwrap(matches.first(where: { match in
+            guard match.path == "Foo.swift", match.line == 56, match.column == nil else { return false }
+            let suffixStart = match.range.location + match.range.length
+            guard suffixStart < nsText.length else { return false }
+            let suffixLength = min(8, nsText.length - suffixStart)
+            let suffix = nsText.substring(with: NSRange(location: suffixStart, length: suffixLength))
+            return suffix == "#L56-L80"
+        }))
+        XCTAssertEqual(nsText.substring(with: hashLinkMatch.range), "Foo.swift")
     }
 
     private func buildAssistantLines(text: String) -> [TerminalLine] {
