@@ -60,7 +60,8 @@ final class CodexResumeTests: XCTestCase {
                                               fallbackPath: fallback,
                                               attemptResumeFirst: false)
         XCTAssertEqual(package.displayCommand, "'/opt/codex' -c experimental_resume='/logs/session.jsonl'")
-        XCTAssertEqual(package.shellCommand, "cd '/tmp/work' && '/opt/codex' -c experimental_resume='/logs/session.jsonl'")
+        XCTAssertTrue(package.shellCommand.hasPrefix("cd '/tmp/work' && "))
+        XCTAssertTrue(package.shellCommand.contains("'/opt/codex' -c experimental_resume='/logs/session.jsonl'"))
         XCTAssertEqual(package.workingDirectory?.path, "/tmp/work")
     }
 

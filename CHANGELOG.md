@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Cockpit active-session detection now expands `codexActiveRegistryRootOverride` before launching shim commands, so `~`-based overrides point to the same path used by active-session discovery and active badges/focus remain accurate.
+- Cockpit process probing now respects the configured probe cooldown even when registry snapshots are empty, preventing unnecessary process probes on idle systems.
+
 ## [2.6] - 2025-11-14
 
 ### Added
