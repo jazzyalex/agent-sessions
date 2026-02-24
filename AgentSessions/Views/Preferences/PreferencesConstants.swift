@@ -106,6 +106,11 @@ enum PreferencesKey {
         static let enableCodeDiffLineNumbers = "TranscriptEnableCodeDiffLineNumbers"
         static let enableLinkification = "TranscriptEnableLinkification"
     }
+
+    enum Cockpit {
+        static let codexActiveSessionsEnabled = "CockpitCodexActiveSessionsEnabled"
+        static let codexActiveRegistryRootOverride = "CockpitCodexActiveRegistryRootOverride"
+    }
 }
 
 enum SessionViewAutoScrollTarget: String, CaseIterable, Identifiable {
