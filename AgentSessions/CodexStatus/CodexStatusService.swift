@@ -1530,6 +1530,7 @@ actor CodexStatusService {
     private func parseTokenCountTail(url: URL) -> RateLimitSummary? {
         guard let lines = tailLines(url: url, maxBytes: logTailReadMaxBytes) else { return nil }
         var fallbackSummary: RateLimitSummary? = nil
+        var didCaptureNewestUsage = false
         // Walk most-recent → older. Be permissive about shape; Codex logs can vary.
         for raw in lines.reversed() {
             guard let data = raw.data(using: .utf8) else { continue }
@@ -1546,7 +1547,9 @@ actor CodexStatusService {
                             Date()
 
             // Surface usage tokens if present (new or legacy forms)
-            extractUsageIfPresent(from: payload, createdAt: createdAt)
+            if !didCaptureNewestUsage {
+                didCaptureNewestUsage = extractUsageIfPresent(from: payload, createdAt: createdAt)
+            }
 
             // Rate limits may appear at payload.rate_limits or (legacy) at top-level
             if let rate = (payload["rate_limits"] as? [String: Any]) ?? (obj["rate_limits"] as? [String: Any]) {
@@ -1580,7 +1583,8 @@ actor CodexStatusService {
 
     // MARK: - Usage extraction (new + legacy)
 
-    private func extractUsageIfPresent(from payload: [String: Any], createdAt: Date) {
+    @discardableResult
+    private func extractUsageIfPresent(from payload: [String: Any], createdAt: Date) -> Bool {
         // New model: turn.completed with usage {...}
         if let kind = (payload["type"] as? String)?.lowercased(), kind == "turn.completed" || kind == "turn_completed" || kind == "turn-completed" {
             if let usage = payload["usage"] as? [String: Any] ?? (payload["data"] as? [String: Any])?["usage"] as? [String: Any] {
@@ -1597,7 +1601,7 @@ actor CodexStatusService {
                 snapshot = s
                 updateHandler(snapshot)
                 // Usage sampling for cap ETA disabled; analytics will compute on demand.
-                return
+                return true
             }
         }
         // Legacy path: token_count.info.last_token_usage {...}
@@ -1613,9 +1617,11 @@ actor CodexStatusService {
                     snapshot = s
                     updateHandler(snapshot)
                     // Usage sampling for cap ETA disabled; analytics will compute on demand.
+                    return true
                 }
             }
         }
+        return false
     }
 
     private func intValue(_ any: Any?) -> Int? {

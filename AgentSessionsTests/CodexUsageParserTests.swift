@@ -435,6 +435,120 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(usageSnapshot?.lastTotalTokens, 1500)
     }
 
+    func testKeepsNewestUsageWhenScanningBackToPreferredCodexLimit() async throws {
+        let now = Date()
+        let codexTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-20))
+        let olderUsageTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-12))
+        let newerUsageTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-8))
+        let nonCodexTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-2))
+        let resetAt = Int(now.addingTimeInterval(3600).timeIntervalSince1970)
+
+        let codexLine: [String: Any] = [
+            "timestamp": codexTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex",
+                    "primary": [
+                        "used_percent": 42.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 31.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let olderLegacyUsageLine: [String: Any] = [
+            "timestamp": olderUsageTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "info": [
+                    "last_token_usage": [
+                        "input_tokens": 900,
+                        "cached_input_tokens": 100,
+                        "output_tokens": 120,
+                        "reasoning_output_tokens": 20,
+                        "total_tokens": 1020
+                    ]
+                ]
+            ]
+        ]
+
+        let newerTurnUsageLine: [String: Any] = [
+            "timestamp": newerUsageTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "turn.completed",
+                "usage": [
+                    "input_tokens": 2400,
+                    "cached_input_tokens": 400,
+                    "output_tokens": 360,
+                    "reasoning_output_tokens": 80,
+                    "total_tokens": 2760
+                ]
+            ]
+        ]
+
+        let nonCodexNewestLine: [String: Any] = [
+            "timestamp": nonCodexTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex_bengalfox",
+                    "primary": [
+                        "used_percent": 5.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 1.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let url = try writeTempJSONL([codexLine, olderLegacyUsageLine, newerTurnUsageLine, nonCodexNewestLine])
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let lock = NSLock()
+        var snapshots: [CodexUsageSnapshot] = []
+
+        let service = CodexStatusService(
+            updateHandler: { snapshot in
+                lock.lock()
+                snapshots.append(snapshot)
+                lock.unlock()
+            },
+            availabilityHandler: { _ in }
+        )
+        let summary = await service.parseTokenCountTailForTesting(url: url)
+
+        XCTAssertNotNil(summary, "Parser should still resolve the preferred codex rate-limit summary")
+        XCTAssertEqual(summary?.fiveHour.remainingPercent, 58)
+        XCTAssertEqual(summary?.weekly.remainingPercent, 69)
+
+        lock.lock()
+        let usageSnapshot = snapshots.last
+        lock.unlock()
+
+        XCTAssertNotNil(usageSnapshot, "Parser should emit usage updates during the scan")
+        XCTAssertEqual(usageSnapshot?.lastInputTokens, 2400, "Older usage rows must not overwrite the newest usage seen during the same scan")
+        XCTAssertEqual(usageSnapshot?.lastCachedInputTokens, 400)
+        XCTAssertEqual(usageSnapshot?.lastOutputTokens, 360)
+        XCTAssertEqual(usageSnapshot?.lastReasoningOutputTokens, 80)
+        XCTAssertEqual(usageSnapshot?.lastTotalTokens, 2760)
+    }
+
     // MARK: - Integration Tests
 
     func testComputesNonCachedInputTokens() throws {
