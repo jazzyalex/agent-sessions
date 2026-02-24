@@ -339,6 +339,102 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(summary?.weekly.remainingPercent, 75, "Should keep secondary remaining percentage from unlabeled codex stream")
     }
 
+    func testUsageParsingContinuesWhileSearchingForCodexLimitID() async throws {
+        let now = Date()
+        let olderTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-10))
+        let midTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-6))
+        let newerTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-2))
+        let resetAt = Int(now.addingTimeInterval(3600).timeIntervalSince1970)
+
+        let codexLine: [String: Any] = [
+            "timestamp": olderTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex",
+                    "primary": [
+                        "used_percent": 40.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 30.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let usageLine: [String: Any] = [
+            "timestamp": midTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "turn.completed",
+                "usage": [
+                    "input_tokens": 1200,
+                    "cached_input_tokens": 200,
+                    "output_tokens": 300,
+                    "reasoning_output_tokens": 75,
+                    "total_tokens": 1500
+                ]
+            ]
+        ]
+
+        let nonCodexNewestLine: [String: Any] = [
+            "timestamp": newerTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex_bengalfox",
+                    "primary": [
+                        "used_percent": 0.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 0.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let url = try writeTempJSONL([codexLine, usageLine, nonCodexNewestLine])
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let lock = NSLock()
+        var snapshots: [CodexUsageSnapshot] = []
+
+        let service = CodexStatusService(
+            updateHandler: { snapshot in
+                lock.lock()
+                snapshots.append(snapshot)
+                lock.unlock()
+            },
+            availabilityHandler: { _ in }
+        )
+        let summary = await service.parseTokenCountTailForTesting(url: url)
+
+        XCTAssertNotNil(summary, "Parser should still return a preferred codex rate-limit summary")
+        XCTAssertEqual(summary?.fiveHour.remainingPercent, 60, "Should return codex primary remaining percent")
+        XCTAssertEqual(summary?.weekly.remainingPercent, 70, "Should return codex secondary remaining percent")
+
+        lock.lock()
+        let usageSnapshot = snapshots.last
+        lock.unlock()
+
+        XCTAssertNotNil(usageSnapshot, "Parser should emit at least one usage snapshot update")
+        XCTAssertEqual(usageSnapshot?.lastInputTokens, 1200, "Usage extraction should stay active while searching for codex limit_id")
+        XCTAssertEqual(usageSnapshot?.lastCachedInputTokens, 200)
+        XCTAssertEqual(usageSnapshot?.lastOutputTokens, 300)
+        XCTAssertEqual(usageSnapshot?.lastReasoningOutputTokens, 75)
+        XCTAssertEqual(usageSnapshot?.lastTotalTokens, 1500)
+    }
+
     // MARK: - Integration Tests
 
     func testComputesNonCachedInputTokens() throws {

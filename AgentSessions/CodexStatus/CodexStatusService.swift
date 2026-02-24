@@ -1530,7 +1530,6 @@ actor CodexStatusService {
     private func parseTokenCountTail(url: URL) -> RateLimitSummary? {
         guard let lines = tailLines(url: url, maxBytes: logTailReadMaxBytes) else { return nil }
         var fallbackSummary: RateLimitSummary? = nil
-        var searchingPreferredLimit = false
         // Walk most-recent → older. Be permissive about shape; Codex logs can vary.
         for raw in lines.reversed() {
             guard let data = raw.data(using: .utf8) else { continue }
@@ -1547,9 +1546,7 @@ actor CodexStatusService {
                             Date()
 
             // Surface usage tokens if present (new or legacy forms)
-            if !searchingPreferredLimit {
-                extractUsageIfPresent(from: payload, createdAt: createdAt)
-            }
+            extractUsageIfPresent(from: payload, createdAt: createdAt)
 
             // Rate limits may appear at payload.rate_limits or (legacy) at top-level
             if let rate = (payload["rate_limits"] as? [String: Any]) ?? (obj["rate_limits"] as? [String: Any]) {
@@ -1561,7 +1558,6 @@ actor CodexStatusService {
                 if fallbackSummary == nil {
                     fallbackSummary = summary
                 }
-                searchingPreferredLimit = true
                 continue
             }
 
@@ -1576,7 +1572,6 @@ actor CodexStatusService {
                     if fallbackSummary == nil {
                         fallbackSummary = summary
                     }
-                    searchingPreferredLimit = true
                 }
             }
         }
