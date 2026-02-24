@@ -549,6 +549,118 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(usageSnapshot?.lastTotalTokens, 2760)
     }
 
+    func testFallsBackToOlderUsageWhenNewestUsageIsUnparseable() async throws {
+        let now = Date()
+        let codexTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-20))
+        let validUsageTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-12))
+        let malformedUsageTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-8))
+        let nonCodexTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-2))
+        let resetAt = Int(now.addingTimeInterval(3600).timeIntervalSince1970)
+
+        let codexLine: [String: Any] = [
+            "timestamp": codexTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex",
+                    "primary": [
+                        "used_percent": 22.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 10.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let validOlderUsageLine: [String: Any] = [
+            "timestamp": validUsageTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "turn.completed",
+                "usage": [
+                    "input_tokens": 1700,
+                    "cached_input_tokens": 250,
+                    "output_tokens": 280,
+                    "reasoning_output_tokens": 70,
+                    "total_tokens": 1980
+                ]
+            ]
+        ]
+
+        let malformedNewerUsageLine: [String: Any] = [
+            "timestamp": malformedUsageTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "turn.completed",
+                "usage": [
+                    "input_tokens": "not-a-number",
+                    "cached_input_tokens": "??",
+                    "output_tokens": "n/a",
+                    "reasoning_output_tokens": ["invalid"],
+                    "total_tokens": NSNull()
+                ]
+            ]
+        ]
+
+        let nonCodexNewestLine: [String: Any] = [
+            "timestamp": nonCodexTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex_bengalfox",
+                    "primary": [
+                        "used_percent": 0.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 0.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let url = try writeTempJSONL([codexLine, validOlderUsageLine, malformedNewerUsageLine, nonCodexNewestLine])
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let lock = NSLock()
+        var snapshots: [CodexUsageSnapshot] = []
+
+        let service = CodexStatusService(
+            updateHandler: { snapshot in
+                lock.lock()
+                snapshots.append(snapshot)
+                lock.unlock()
+            },
+            availabilityHandler: { _ in }
+        )
+        let summary = await service.parseTokenCountTailForTesting(url: url)
+
+        XCTAssertNotNil(summary, "Parser should still resolve preferred codex rate limits")
+        XCTAssertEqual(summary?.fiveHour.remainingPercent, 78)
+        XCTAssertEqual(summary?.weekly.remainingPercent, 90)
+
+        lock.lock()
+        let usageSnapshot = snapshots.last
+        lock.unlock()
+
+        XCTAssertNotNil(usageSnapshot, "Parser should still publish decoded usage from older valid rows")
+        XCTAssertEqual(usageSnapshot?.lastInputTokens, 1700)
+        XCTAssertEqual(usageSnapshot?.lastCachedInputTokens, 250)
+        XCTAssertEqual(usageSnapshot?.lastOutputTokens, 280)
+        XCTAssertEqual(usageSnapshot?.lastReasoningOutputTokens, 70)
+        XCTAssertEqual(usageSnapshot?.lastTotalTokens, 1980)
+    }
+
     // MARK: - Integration Tests
 
     func testComputesNonCachedInputTokens() throws {
