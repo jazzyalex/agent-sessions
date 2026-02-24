@@ -4,6 +4,7 @@ extension UserDefaults {
     private enum OnboardingKeys {
         static let lastActionMajorMinor = "OnboardingLastActionMajorMinor"
         static let fullTourCompleted = "OnboardingFullTourCompleted"
+        static let lastSeenAppMajorMinor = "OnboardingLastSeenAppMajorMinor"
     }
 
     /// The last major.minor version for which the onboarding flow was either completed or skipped.
@@ -18,5 +19,13 @@ extension UserDefaults {
     var onboardingFullTourCompleted: Bool {
         get { bool(forKey: OnboardingKeys.fullTourCompleted) }
         set { set(newValue, forKey: OnboardingKeys.fullTourCompleted) }
+    }
+
+    /// The app major.minor seen on the previous launch.
+    ///
+    /// This is used to gate update onboarding for specific upgrade paths.
+    var onboardingLastSeenAppMajorMinor: String? {
+        get { string(forKey: OnboardingKeys.lastSeenAppMajorMinor) }
+        set { set(newValue, forKey: OnboardingKeys.lastSeenAppMajorMinor) }
     }
 }

@@ -52,6 +52,49 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(result.kind, .updateTour)
     }
 
+    func testCheckAndPresentIfNeededSkipsUpdateTourWhenUpgradingFromTwoEleven() async {
+        let suite = "OnboardingCoordinatorTests.skip211"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defaults.onboardingLastActionMajorMinor = "2.11"
+
+        let result = await MainActor.run { () -> (isPresented: Bool, kind: OnboardingContent.Kind?) in
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "2.12" },
+                isFreshInstallProvider: { false }
+            )
+            coordinator.checkAndPresentIfNeeded()
+            return (coordinator.isPresented, coordinator.content?.kind)
+        }
+
+        XCTAssertFalse(result.isPresented)
+        XCTAssertNil(result.kind)
+        XCTAssertEqual(defaults.onboardingLastSeenAppMajorMinor, "2.12")
+    }
+
+    func testCheckAndPresentIfNeededStillShowsUpdateTourWhenUpgradingFromOlderVersions() async {
+        let suite = "OnboardingCoordinatorTests.oldUpgrade"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defaults.onboardingLastActionMajorMinor = "2.10"
+        defaults.onboardingLastSeenAppMajorMinor = "2.10"
+
+        let result = await MainActor.run { () -> (isPresented: Bool, kind: OnboardingContent.Kind?) in
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "2.12" },
+                isFreshInstallProvider: { false }
+            )
+            coordinator.checkAndPresentIfNeeded()
+            return (coordinator.isPresented, coordinator.content?.kind)
+        }
+
+        XCTAssertTrue(result.isPresented)
+        XCTAssertEqual(result.kind, .updateTour)
+        XCTAssertEqual(defaults.onboardingLastSeenAppMajorMinor, "2.12")
+    }
+
     func testSkipRecordsVersionAndDismisses() async {
         let suite = "OnboardingCoordinatorTests.skip"
         let defaults = UserDefaults(suiteName: suite)!
