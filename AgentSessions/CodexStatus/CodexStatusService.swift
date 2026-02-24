@@ -1588,16 +1588,40 @@ actor CodexStatusService {
         // New model: turn.completed with usage {...}
         if let kind = (payload["type"] as? String)?.lowercased(), kind == "turn.completed" || kind == "turn_completed" || kind == "turn-completed" {
             if let usage = payload["usage"] as? [String: Any] ?? (payload["data"] as? [String: Any])?["usage"] as? [String: Any] {
+                let parsedInput = intValue(usage["input_tokens"])
+                let parsedCachedInput = intValue(usage["cached_input_tokens"])
+                let parsedOutput = intValue(usage["output_tokens"])
+                let parsedReasoning = intValue(usage["reasoning_output_tokens"])
+                let parsedTotal = intValue(usage["total_tokens"])
                 var s = snapshot
-                s.lastInputTokens = intValue(usage["input_tokens"]) ?? s.lastInputTokens
-                s.lastCachedInputTokens = intValue(usage["cached_input_tokens"]) ?? s.lastCachedInputTokens
-                s.lastOutputTokens = intValue(usage["output_tokens"]) ?? s.lastOutputTokens
-                s.lastReasoningOutputTokens = intValue(usage["reasoning_output_tokens"]) ?? s.lastReasoningOutputTokens
-                if let i = s.lastInputTokens, let o = s.lastOutputTokens {
-                    s.lastTotalTokens = i + o
-                } else {
-                    s.lastTotalTokens = intValue(usage["total_tokens"]) ?? s.lastTotalTokens
+                var decodedAnyField = false
+                if let parsedInput {
+                    s.lastInputTokens = parsedInput
+                    decodedAnyField = true
                 }
+                if let parsedCachedInput {
+                    s.lastCachedInputTokens = parsedCachedInput
+                    decodedAnyField = true
+                }
+                if let parsedOutput {
+                    s.lastOutputTokens = parsedOutput
+                    decodedAnyField = true
+                }
+                if let parsedReasoning {
+                    s.lastReasoningOutputTokens = parsedReasoning
+                    decodedAnyField = true
+                }
+                if let parsedTotal {
+                    s.lastTotalTokens = parsedTotal
+                    decodedAnyField = true
+                } else if (parsedInput != nil || parsedOutput != nil),
+                          let i = s.lastInputTokens,
+                          let o = s.lastOutputTokens {
+                    s.lastTotalTokens = i + o
+                    decodedAnyField = true
+                }
+
+                guard decodedAnyField else { return false }
                 snapshot = s
                 updateHandler(snapshot)
                 // Usage sampling for cap ETA disabled; analytics will compute on demand.
@@ -1608,12 +1632,40 @@ actor CodexStatusService {
         if let kind = (payload["type"] as? String)?.lowercased(), kind == "token_count" {
             if let info = payload["info"] as? [String: Any] {
                 if let last = info["last_token_usage"] as? [String: Any] {
+                    let parsedInput = intValue(last["input_tokens"])
+                    let parsedCachedInput = intValue(last["cached_input_tokens"])
+                    let parsedOutput = intValue(last["output_tokens"])
+                    let parsedReasoning = intValue(last["reasoning_output_tokens"])
+                    let parsedTotal = intValue(last["total_tokens"])
                     var s = snapshot
-                    s.lastInputTokens = intValue(last["input_tokens"]) ?? s.lastInputTokens
-                    s.lastCachedInputTokens = intValue(last["cached_input_tokens"]) ?? s.lastCachedInputTokens
-                    s.lastOutputTokens = intValue(last["output_tokens"]) ?? s.lastOutputTokens
-                    s.lastReasoningOutputTokens = intValue(last["reasoning_output_tokens"]) ?? s.lastReasoningOutputTokens
-                    s.lastTotalTokens = intValue(last["total_tokens"]) ?? ((s.lastInputTokens ?? 0) + (s.lastOutputTokens ?? 0))
+                    var decodedAnyField = false
+                    if let parsedInput {
+                        s.lastInputTokens = parsedInput
+                        decodedAnyField = true
+                    }
+                    if let parsedCachedInput {
+                        s.lastCachedInputTokens = parsedCachedInput
+                        decodedAnyField = true
+                    }
+                    if let parsedOutput {
+                        s.lastOutputTokens = parsedOutput
+                        decodedAnyField = true
+                    }
+                    if let parsedReasoning {
+                        s.lastReasoningOutputTokens = parsedReasoning
+                        decodedAnyField = true
+                    }
+                    if let parsedTotal {
+                        s.lastTotalTokens = parsedTotal
+                        decodedAnyField = true
+                    } else if (parsedInput != nil || parsedOutput != nil),
+                              let i = s.lastInputTokens,
+                              let o = s.lastOutputTokens {
+                        s.lastTotalTokens = i + o
+                        decodedAnyField = true
+                    }
+
+                    guard decodedAnyField else { return false }
                     snapshot = s
                     updateHandler(snapshot)
                     // Usage sampling for cap ETA disabled; analytics will compute on demand.
