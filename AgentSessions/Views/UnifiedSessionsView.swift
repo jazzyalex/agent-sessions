@@ -190,6 +190,7 @@ struct UnifiedSessionsView: View {
 	@AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
 	@AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
 	@AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
+    @AppStorage("UnifiedShowActiveSessionsOnly") private var showActiveSessionsOnly: Bool = false
 	@AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 	@AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
 	@AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
@@ -220,13 +221,17 @@ struct UnifiedSessionsView: View {
     @State private var selectionChangeSource: SelectionChangeSource? = nil
     @State private var autoJumpWorkItem: DispatchWorkItem? = nil
     private var rows: [Session] {
+        let baseRows: [Session]
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty || searchCoordinator.isRunning {
             // Apply current UI filters and sort to search results
-            return unified.applyFiltersAndSort(to: searchCoordinator.results)
+            baseRows = unified.applyFiltersAndSort(to: searchCoordinator.results)
         } else {
-            return unified.sessions
+            baseRows = unified.sessions
         }
+
+        guard showActiveSessionsOnly else { return baseRows }
+        return baseRows.filter { isSessionActive($0) }
     }
 
     init(unified: UnifiedSessionIndexer,
@@ -379,7 +384,15 @@ struct UnifiedSessionsView: View {
 		let afterOpenClaw = afterDroid
 			.onChange(of: unified.includeOpenClaw) { _, _ in restartSearchIfRunning() }
 
-			let afterUsage = afterOpenClaw
+        let afterActiveOnly = afterOpenClaw
+            .onChange(of: showActiveSessionsOnly) { _, _ in
+                updateCachedRows()
+                ensureDefaultSelectionIfNeeded()
+                refreshSelectionSourceFromCachedRows()
+                updateFocusedSessionIfNeeded(selectedSession)
+            }
+
+			let afterUsage = afterActiveOnly
 				.onChange(of: codexUsageEnabled) { _, _ in updateFooterUsageVisibility() }
 				.onChange(of: claudeUsageEnabled) { _, _ in updateFooterUsageVisibility() }
 					.onChange(of: searchState.query) { _, newValue in
@@ -457,7 +470,7 @@ struct UnifiedSessionsView: View {
 						showImagesForSelectedSession(showNoSelectionAlert: true)
 					}
 
-					let afterShowImagesForInlineImage = afterShowImages
+				let afterShowImagesForInlineImage = afterShowImages
 						.onReceive(NotificationCenter.default.publisher(for: .showImagesForInlineImage)) { n in
 							guard let id = n.object as? String else { return }
 							let requestedItemID = n.userInfo?["selectedItemID"] as? String
@@ -482,6 +495,13 @@ struct UnifiedSessionsView: View {
 							)
 						}
 					}
+                    .onReceive(activeCodexSessions.$activeMembershipVersion) { _ in
+                        guard showActiveSessionsOnly else { return }
+                        updateCachedRows()
+                        ensureDefaultSelectionIfNeeded()
+                        refreshSelectionSourceFromCachedRows()
+                        updateFocusedSessionIfNeeded(selectedSession)
+                    }
 
 				return AnyView(afterShowImagesForInlineImage)
 			}
@@ -572,7 +592,7 @@ struct UnifiedSessionsView: View {
                        max: showSourceColumn ? 120 : 0)
 
 	            TableColumn("Session", value: \Session.title) { s in
-	                SessionTitleCell(session: s, geminiIndexer: geminiIndexer, activeCodexSessions: activeCodexSessions)
+	                SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
 	                    .contentShape(Rectangle())
 	                    .onTapGesture {
 	                        selectionChangeSource = .mouse
@@ -949,6 +969,9 @@ struct UnifiedSessionsView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             HStack(spacing: 12) {
+                ActiveSessionsOnlyToggle(isOn: $showActiveSessionsOnly)
+                    .help("Show only active sessions in the list")
+
                 if codexAgentEnabled {
                     AgentTabToggle(title: "Codex", color: Color.agentCodex, isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
                         .help("Show or hide Codex sessions in the list (⌘1)")
@@ -1308,11 +1331,21 @@ struct UnifiedSessionsView: View {
             !query.isEmpty
             && searchCoordinator.isRunning
             && nextRows.isEmpty
+            && !showActiveSessionsOnly
             && !cachedRows.isEmpty
 
 	        if !shouldHoldRowsDuringRunningSearch {
 	            cachedRows = nextRows
 	        }
+
+        if let selectedID = selection,
+           !cachedRows.contains(where: { $0.id == selectedID }) {
+            if let first = cachedRows.first {
+                setActiveSelection(first.id, source: first.source, userInitiated: false)
+            } else {
+                setActiveSelection(nil, userInitiated: false)
+            }
+        }
 
 	        ensureDefaultSelectionIfNeeded()
 	        refreshSelectionSourceFromCachedRows()
@@ -1408,6 +1441,16 @@ struct UnifiedSessionsView: View {
 
     private func cellSource(for session: Session) -> some View {
         let label: String
+        let isSelected = selection == session.id
+        let isSessionActive = session.source == .codex && activeCodexSessions.isActive(session)
+        let rowTextColor: Color = {
+            if isSelected { return .white }
+            return !stripMonochrome ? sourceAccent(session) : .secondary
+        }()
+        let rowDotColor: Color = {
+            if isSelected { return .white.opacity(0.95) }
+            return !stripMonochrome ? sourceAccent(session) : .primary
+        }()
         switch session.source {
         case .codex: label = "Codex"
         case .claude: label = "Claude"
@@ -1420,7 +1463,13 @@ struct UnifiedSessionsView: View {
         return HStack(spacing: 6) {
             Text(label)
                 .font(.system(size: 12, weight: .regular, design: .monospaced))
-                .foregroundStyle(!stripMonochrome ? sourceAccent(session) : .secondary)
+                .foregroundStyle(rowTextColor)
+            if isSessionActive {
+                Circle()
+                    .fill(rowDotColor)
+                    .frame(width: 6, height: 6)
+                    .accessibilityLabel(Text("\(label) active session"))
+            }
             Spacer(minLength: 4)
         }
     }
@@ -1556,6 +1605,11 @@ struct UnifiedSessionsView: View {
         }
     }
 
+    private func isSessionActive(_ session: Session) -> Bool {
+        guard session.source == .codex else { return false }
+        return activeCodexSessions.isActive(session)
+    }
+
 	    private func progressLineText(_ p: SearchCoordinator.Progress) -> String {
 	        switch p.phase {
 	        case .idle:
@@ -1597,17 +1651,14 @@ private struct AgentTabToggle: View {
     @Binding var isOn: Bool
 
     private var activeColor: Color { isMonochrome ? .primary : color }
-    private var dotColor: Color { isOn ? activeColor : activeColor.opacity(0.35) }
-    private var textColor: Color { isOn ? activeColor : .primary }
+    private var textColor: Color {
+        if isOn { return activeColor }
+        return isMonochrome ? .secondary : .primary
+    }
 
     var body: some View {
         Button(action: { isOn.toggle() }) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: UnifiedSessionsStyle.agentDotSize, height: UnifiedSessionsStyle.agentDotSize)
-                Text(title)
-            }
+            Text(title)
             .font(UnifiedSessionsStyle.agentTabFont)
             .foregroundStyle(textColor)
             .padding(.horizontal, 10)
@@ -1624,6 +1675,40 @@ private struct AgentTabToggle: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(isOn ? "On" : "Off"))
+    }
+}
+
+private struct ActiveSessionsOnlyToggle: View {
+    @Binding var isOn: Bool
+
+    private let dotSize: CGFloat = 7.8
+
+    private var dotColor: Color {
+        isOn ? UnifiedSessionsStyle.selectionAccent : Color.secondary.opacity(0.5)
+    }
+
+    var body: some View {
+        Button(action: { isOn.toggle() }) {
+            HStack(spacing: 0) {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: dotSize, height: dotSize)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(UnifiedSessionsStyle.agentPillFill)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Active sessions only"))
         .accessibilityValue(Text(isOn ? "On" : "Off"))
     }
 }
@@ -1759,7 +1844,6 @@ private struct TranscriptHostView: View {
 		private struct SessionTitleCell: View {
 		    let session: Session
 		    @ObservedObject var geminiIndexer: GeminiSessionIndexer
-	        @ObservedObject var activeCodexSessions: CodexActiveSessionsModel
 		    @State private var hover: Bool = false
 
 	    var body: some View {
@@ -1770,20 +1854,6 @@ private struct TranscriptHostView: View {
 	                .truncationMode(.tail)
 	                .background(Color.clear)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                if session.source == .codex, activeCodexSessions.isActive(session) {
-                    Text("ACTIVE")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(UnifiedSessionsStyle.agentPillFill)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
-                        )
-                        .cornerRadius(6)
-                        .help("A live terminal tab is present for this session.")
-                }
 
 	            if session.source == .gemini, geminiIndexer.isPreviewStale(id: session.id) {
 	                Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {

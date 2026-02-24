@@ -5,14 +5,20 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- Cockpit: Added a Cockpit window for active Codex sessions with iTerm2 focus, plus ACTIVE badges in the Unified sessions list.
+- Cockpit: Added a Cockpit window for active Codex sessions with iTerm2 focus, plus active-session indicators in the Unified sessions list.
+- Sessions (Unified): Added a small active-status dot in the `CLI Agent` column for live Codex sessions.
+- Sessions (Unified): Added a blue-dot toolbar filter toggle (dot-only control) before the agent toggles to show only active sessions in the list.
 
 ### Fixed
 - Claude usage probe: Login-shell path and `PATH` resolution now strips injected OSC escape sequences (for example from iTerm2 shell integration), respects custom Claude binary overrides, and hardens tmux startup/trust-prompt handling to avoid false `tmux_not_found` and premature probe failures.
+- Cockpit/Sessions (Unified): Active Codex sessions are now joined by Codex internal `session_id` when log-path metadata is unavailable, restoring active indicators and Focus-in-iTerm2 availability.
+- Sessions (Unified): `Active-only` filtering now immediately applies during in-flight searches and re-seats selection when the previously selected row drops out of the filtered list.
+- Sessions (Unified): Agent toolbar filter pills now show a clear enabled/disabled state in monochrome mode.
 
 ### Changed
 - Preferences (Unified Window): Reordered sections so `Columns` and `Filters` appear before `Rich Transcript`.
 - Preferences (OpenClaw): Moved `Include deleted OpenClaw sessions` from Advanced to the OpenClaw pane as a standalone checkbox.
+- Sessions (Unified): Removed the leading dot from agent pill toggles in the main toolbar.
 
 ## [2.12] - 2026-02-24
 

@@ -632,18 +632,22 @@ final class SessionIndexer: ObservableObject {
             } catch {
                 // Ignore DB errors here; fallback to filesystem-only scan.
             }
-            if indexed.isEmpty {
-                try? await Task.sleep(nanoseconds: 250_000_000) // 250ms
-                do {
-                    if let retry = try await self.hydrateFromIndexDBIfAvailable(), !retry.isEmpty {
-                        indexed = retry
-                    }
-                } catch {
-                    // Still no DB hydrate; fall through to filesystem.
-                }
-            }
+	            if indexed.isEmpty {
+	                try? await Task.sleep(nanoseconds: 250_000_000) // 250ms
+	                do {
+	                    if let retry = try await self.hydrateFromIndexDBIfAvailable(), !retry.isEmpty {
+	                        indexed = retry
+	                    }
+	                } catch {
+	                    // Still no DB hydrate; fall through to filesystem.
+	                }
+	            }
 
-            await self.seedKnownFileStatsIfNeeded()
+	            if !indexed.isEmpty {
+	                indexed = await Self.backfillCodexInternalSessionIDsHint(in: indexed, limit: 60)
+	            }
+
+	            await self.seedKnownFileStatsIfNeeded()
 
             // Even if we have indexed sessions, scan for NEW/CHANGED files and parse them.
             // If DB hydration succeeded, publish those sessions immediately so the UI is usable
@@ -957,17 +961,76 @@ final class SessionIndexer: ObservableObject {
         }
     }
 
-    private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {
-        // Try to hydrate directly from session_meta. Do not gate on rollups presence.
-        // This avoids a cold-start full scan when the DB has meta rows but rollups are still empty.
-        let db = try IndexDB()
-        let repo = SessionMetaRepository(db: db)
-        let list = try await repo.fetchSessions(for: .codex)
-        guard !list.isEmpty else { return nil }
-        return list.sorted { $0.modifiedAt > $1.modifiedAt }
-    }
+	    private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {
+	        // Try to hydrate directly from session_meta. Do not gate on rollups presence.
+	        // This avoids a cold-start full scan when the DB has meta rows but rollups are still empty.
+	        let db = try IndexDB()
+	        let repo = SessionMetaRepository(db: db)
+	        let list = try await repo.fetchSessions(for: .codex)
+	        guard !list.isEmpty else { return nil }
+	        return list.sorted { $0.modifiedAt > $1.modifiedAt }
+	    }
 
-    // MARK: - Parsing
+	    /// Best-effort backfill for installs that predate `session_meta.codex_internal_session_id`.
+	    /// Keep the scan bounded (recent sessions only) so DB hydration stays fast.
+	    private static func backfillCodexInternalSessionIDsHint(in sessions: [Session], limit: Int) async -> [Session] {
+	        let candidates = sessions.prefix(limit).filter {
+	            $0.source == .codex && $0.events.isEmpty && ($0.codexInternalSessionIDHint?.isEmpty ?? true)
+	        }
+	        guard !candidates.isEmpty else { return sessions }
+
+	        var updatesByID: [String: String] = [:]
+	        updatesByID.reserveCapacity(candidates.count)
+
+	        for s in candidates {
+	            let attrs = (try? FileManager.default.attributesOfItem(atPath: s.filePath)) ?? [:]
+	            let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
+	            let mtime = (attrs[.modificationDate] as? Date) ?? Date()
+	            let url = URL(fileURLWithPath: s.filePath)
+	            guard let parsed = Self.lightweightSession(from: url, size: size, mtime: mtime),
+	                  let internalID = parsed.codexInternalSessionID,
+	                  !internalID.isEmpty else { continue }
+	            updatesByID[s.id] = internalID
+	        }
+
+	        guard !updatesByID.isEmpty else { return sessions }
+
+	        if let db = try? IndexDB() {
+	            for (sessionID, internalID) in updatesByID {
+	                try? await db.updateSessionMetaCodexInternalSessionID(
+	                    sessionID: sessionID,
+	                    source: SessionSource.codex.rawValue,
+	                    codexInternalSessionID: internalID
+	                )
+	            }
+	        }
+
+	        return sessions.map { s in
+	            guard let internalID = updatesByID[s.id] else { return s }
+	            let rebuilt = Session(
+	                id: s.id,
+	                source: s.source,
+	                startTime: s.startTime,
+	                endTime: s.endTime,
+	                model: s.model,
+	                filePath: s.filePath,
+	                fileSizeBytes: s.fileSizeBytes,
+	                eventCount: s.eventCount,
+	                events: s.events,
+	                cwd: s.lightweightCwd,
+	                repoName: nil,
+	                lightweightTitle: s.lightweightTitle,
+	                lightweightCommands: s.lightweightCommands,
+	                isHousekeeping: s.isHousekeeping,
+	                codexInternalSessionIDHint: internalID
+	            )
+	            var out = rebuilt
+	            out.isFavorite = s.isFavorite
+	            return out
+	        }
+	    }
+
+	    // MARK: - Parsing
 
     func parseFile(at url: URL) -> Session? {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
@@ -1026,6 +1089,7 @@ final class SessionIndexer: ObservableObject {
         let id = forcedID ?? Self.hash(path: url.path)
         let nonMetaCount = events.filter { $0.kind != .meta }.count
         let isHousekeeping = Session.computeIsHousekeeping(source: .codex, events: events)
+        let internalSessionIDHint = Session.deriveCodexInternalSessionID(from: events)
         let session = Session(id: id,
                               source: .codex,
                               startTime: start,
@@ -1035,7 +1099,8 @@ final class SessionIndexer: ObservableObject {
                               fileSizeBytes: size >= 0 ? size : nil,
                               eventCount: nonMetaCount,
                               events: events,
-                              isHousekeeping: isHousekeeping)
+                              isHousekeeping: isHousekeeping,
+                              codexInternalSessionIDHint: internalSessionIDHint)
 
         if size > 5_000_000 {  // Log full parse of files >5MB
             DBG("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
@@ -1164,6 +1229,7 @@ final class SessionIndexer: ObservableObject {
         DBG("  📊 Lightweight estimation: headBytes=\(headBytesRead) newlines=\(newlineCount) avgLineLen=\(avgLineLen) estEvents=\(estEvents)")
 
         let id = Self.hash(path: url.path)
+        let internalSessionIDHint = Session.deriveCodexInternalSessionID(from: sampleEvents)
         // Use sample events for title/cwd extraction, then create lightweight session
         let tempIsHousekeeping = Session.computeIsHousekeeping(source: .codex, events: sampleEvents)
         let tempSession = Session(id: id,
@@ -1175,7 +1241,8 @@ final class SessionIndexer: ObservableObject {
                                   fileSizeBytes: fileSize,
                                   eventCount: estEvents,
                                   events: sampleEvents,
-                                  isHousekeeping: tempIsHousekeeping)
+                                  isHousekeeping: tempIsHousekeeping,
+                                  codexInternalSessionIDHint: internalSessionIDHint)
 
         // Extract title from sample events using existing logic
         let title = tempSession.codexPreviewTitle ?? tempSession.title
@@ -1193,7 +1260,8 @@ final class SessionIndexer: ObservableObject {
                               cwd: cwd,
                               repoName: nil,  // Will be computed from cwd
                               lightweightTitle: title,
-                              isHousekeeping: tempIsHousekeeping || title == "No prompt")
+                              isHousekeeping: tempIsHousekeeping || title == "No prompt",
+                              codexInternalSessionIDHint: internalSessionIDHint)
         return session
     }
 

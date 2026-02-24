@@ -57,8 +57,15 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated private static let processProbeTimeout: TimeInterval = 0.75
     nonisolated private static let processProbeMinInterval: TimeInterval = 6
 
+    /// Changes only when the active membership (or stable presence metadata) changes.
+    /// Used by views that want to refresh the sessions list only when active state changes,
+    /// not on every heartbeat.
+    @Published private(set) var activeMembershipVersion: UInt64 = 0
+
     @Published private(set) var presences: [CodexActivePresence] = []
-    @Published private(set) var lastRefreshAt: Date? = nil
+    private(set) var lastRefreshAt: Date? = nil
+
+    private var lastPublishedPresenceSignatures: [String: String] = [:]
 
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled)
     private var enabled: Bool = true {
@@ -93,7 +100,11 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func isActive(_ session: Session) -> Bool {
-        presence(for: session) != nil
+        guard session.source == .codex else { return false }
+        if byLogPath[Self.normalizePath(session.filePath)] != nil { return true }
+        if let id = session.codexInternalSessionID, bySessionID[id] != nil { return true }
+        if let id = session.codexFilenameUUID, bySessionID[id] != nil { return true }
+        return false
     }
 
     func presence(for session: Session) -> CodexActivePresence? {
@@ -144,6 +155,9 @@ final class CodexActiveSessionsModel: ObservableObject {
             byLogPath = [:]
             cachedProcessPresences = []
             lastProcessProbeAt = nil
+            lastPublishedPresenceSignatures = [:]
+            lastRefreshAt = nil
+            activeMembershipVersion &+= 1
         }
     }
 
@@ -163,6 +177,8 @@ final class CodexActiveSessionsModel: ObservableObject {
         let ttl = Self.defaultStaleTTL
         let rootPaths = registryRoots().map(\.path)
         let sessionsRoots = codexSessionsRoots().map(\.path)
+        let previousLogKeys = Set(byLogPath.keys)
+        let previousSessionKeys = Set(bySessionID.keys)
         let shouldProbeProcesses: Bool = {
             guard let last = lastProcessProbeAt else { return true }
             return now.timeIntervalSince(last) >= Self.processProbeMinInterval
@@ -219,10 +235,25 @@ final class CodexActiveSessionsModel: ObservableObject {
             if let log = p.sessionLogPath, !log.isEmpty, logMap[Self.normalizePath(log)] != nil { continue }
             ui.append(p)
         }
-        presences = ui.sorted(by: { ($0.lastSeenAt ?? .distantPast) > ($1.lastSeenAt ?? .distantPast) })
+
+        // Always keep lookup maps current, but avoid publishing UI changes on every heartbeat.
         bySessionID = sessionMap
         byLogPath = logMap
         lastRefreshAt = now
+
+        let nextLogKeys = Set(logMap.keys)
+        let nextSessionKeys = Set(sessionMap.keys)
+        let membershipChanged = (nextLogKeys != previousLogKeys) || (nextSessionKeys != previousSessionKeys)
+
+        // Ignore lastSeenAt-only churn; only publish when stable fields that affect UI change.
+        let nextSignatures = Self.stablePresenceSignatures(for: ui)
+        let metadataChanged = nextSignatures != lastPublishedPresenceSignatures
+
+        if membershipChanged || metadataChanged {
+            presences = ui.sorted(by: { ($0.lastSeenAt ?? .distantPast) > ($1.lastSeenAt ?? .distantPast) })
+            lastPublishedPresenceSignatures = nextSignatures
+            activeMembershipVersion &+= 1
+        }
     }
 
     // MARK: - Registry Root Discovery
@@ -364,6 +395,45 @@ final class CodexActiveSessionsModel: ObservableObject {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 timestamp: \(raw)")
         }
         return d
+    }
+
+    nonisolated private static func stablePresenceSignatures(for presences: [CodexActivePresence]) -> [String: String] {
+        // Key by normalized log path when available, else by session id / source path / pid.
+        // Excludes lastSeenAt so heartbeats do not trigger UI churn.
+        var out: [String: String] = [:]
+        out.reserveCapacity(presences.count)
+        for p in presences {
+            let normalizedLogPath: String? = {
+                guard let log = p.sessionLogPath, !log.isEmpty else { return nil }
+                return normalizePath(log)
+            }()
+            let key: String = {
+                if let v = normalizedLogPath, !v.isEmpty { return v }
+                if let id = p.sessionId, !id.isEmpty { return "sid:\(id)" }
+                if let src = p.sourceFilePath, !src.isEmpty { return "src:\(src)" }
+                if let pid = p.pid { return "pid:\(pid)" }
+                if let tty = p.tty, !tty.isEmpty { return "tty:\(tty)" }
+                return "unknown"
+            }()
+
+            var parts: [String] = []
+            parts.reserveCapacity(13)
+            parts.append(p.publisher ?? "")
+            parts.append(p.kind ?? "")
+            parts.append(p.sessionId ?? "")
+            parts.append(normalizedLogPath ?? "")
+            parts.append(p.workspaceRoot ?? "")
+            parts.append(p.pid.map(String.init) ?? "")
+            parts.append(p.tty ?? "")
+            parts.append(p.startedAt.map { String($0.timeIntervalSince1970) } ?? "")
+            parts.append(p.terminal?.termProgram ?? "")
+            parts.append(p.terminal?.itermSessionId ?? "")
+            parts.append(p.terminal?.revealUrl ?? "")
+            parts.append(p.sourceFilePath ?? "")
+
+            out[key] = parts.joined(separator: "|")
+        }
+        return out
     }
 
     // MARK: - iTerm2 Focus
