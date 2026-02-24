@@ -148,6 +148,13 @@ If you modify `AgentSessions.xcodeproj/project.pbxproj` directly (NOT using the 
 - Do not add feature flags, rollout flags, kill switches, or behavior gates unless the user explicitly asks for feature flags in the current request.
 - When uncertain, implement the behavior directly without flags and call out any risks in the summary.
 
+### Remote Doc/Header Fetch Guardrails
+- For remote documentation, header, or API inspection tasks, delegate the fetch to a sub-agent first so the main agent remains responsive.
+- Use a hard timeout of 20 seconds per delegated fetch attempt.
+- If no useful output is returned within 20 seconds, cancel the attempt and immediately switch to a fallback source.
+- Fallback order is: local repository docs/files, then a narrower targeted remote source.
+- Do not run repeated unbounded retries; after fallback failure, report the limitation promptly and continue with best-effort local reasoning.
+
 
 ## Pattern Search & Deletion Safety (General)
 
