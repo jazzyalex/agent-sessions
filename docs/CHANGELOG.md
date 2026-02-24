@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.12] - 2026-02-24
+
 ### Fixed
 - Codex usage tracking: JSONL backward scans now continue extracting token-usage fields while searching for the preferred `codex` rate-limit stream, preventing stale token values when newer non-codex limit buckets are present.
 - Sessions (OpenClaw): Tool format scanning now recognizes underscore/case variants for tool-call and tool-result blocks, and `is_error` tool-result flags are now classified as errors in transcript events.
