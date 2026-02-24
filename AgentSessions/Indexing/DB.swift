@@ -87,6 +87,7 @@ actor IndexDB {
               cwd TEXT,
               repo TEXT,
               title TEXT,
+              codex_internal_session_id TEXT,
               is_housekeeping INTEGER NOT NULL DEFAULT 0,
               messages INTEGER DEFAULT 0,
               commands INTEGER DEFAULT 0
@@ -102,6 +103,15 @@ actor IndexDB {
         if !tableHasColumn(db, table: "session_meta", column: "is_housekeeping") {
             do {
                 try exec(db, "ALTER TABLE session_meta ADD COLUMN is_housekeeping INTEGER NOT NULL DEFAULT 0;")
+            } catch {
+                // Another process/instance can win the race after our precheck.
+                if !isDuplicateColumnError(error) { throw error }
+            }
+        }
+
+        if !tableHasColumn(db, table: "session_meta", column: "codex_internal_session_id") {
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN codex_internal_session_id TEXT;")
             } catch {
                 // Another process/instance can win the race after our precheck.
                 if !isDuplicateColumnError(error) { throw error }
@@ -407,7 +417,7 @@ actor IndexDB {
     func fetchSessionMeta(for source: String) throws -> [SessionMetaRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         let sql = """
-        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, is_housekeeping, messages, commands
+        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands
         FROM session_meta
         WHERE source = ?
         ORDER BY COALESCE(end_ts, mtime) DESC
@@ -433,9 +443,10 @@ actor IndexDB {
                 cwd: sqlite3_column_type(stmt, 8) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 8)),
                 repo: sqlite3_column_type(stmt, 9) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 9)),
                 title: sqlite3_column_type(stmt, 10) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 10)),
-                isHousekeeping: sqlite3_column_int64(stmt, 11) != 0,
-                messages: Int(sqlite3_column_int64(stmt, 12)),
-                commands: Int(sqlite3_column_int64(stmt, 13))
+                codexInternalSessionID: sqlite3_column_type(stmt, 11) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 11)),
+                isHousekeeping: sqlite3_column_int64(stmt, 12) != 0,
+                messages: Int(sqlite3_column_int64(stmt, 13)),
+                commands: Int(sqlite3_column_int64(stmt, 14))
             )
             out.append(row)
         }
@@ -1076,12 +1087,13 @@ actor IndexDB {
 
     func upsertSessionMeta(_ m: SessionMetaRow) throws {
         let sql = """
-        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, is_housekeeping, messages, commands)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
-          repo=excluded.repo, title=excluded.title, is_housekeeping=excluded.is_housekeeping, messages=excluded.messages, commands=excluded.commands;
+          repo=excluded.repo, title=excluded.title, codex_internal_session_id=excluded.codex_internal_session_id,
+          is_housekeeping=excluded.is_housekeeping, messages=excluded.messages, commands=excluded.commands;
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -1096,9 +1108,10 @@ actor IndexDB {
         if let cwd = m.cwd { sqlite3_bind_text(stmt, 9, cwd, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 9) }
         if let repo = m.repo { sqlite3_bind_text(stmt, 10, repo, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 10) }
         if let title = m.title { sqlite3_bind_text(stmt, 11, title, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 11) }
-        sqlite3_bind_int64(stmt, 12, m.isHousekeeping ? 1 : 0)
-        sqlite3_bind_int64(stmt, 13, Int64(m.messages))
-        sqlite3_bind_int64(stmt, 14, Int64(m.commands))
+        if let codexInternal = m.codexInternalSessionID { sqlite3_bind_text(stmt, 12, codexInternal, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 12) }
+        sqlite3_bind_int64(stmt, 13, m.isHousekeeping ? 1 : 0)
+        sqlite3_bind_int64(stmt, 14, Int64(m.messages))
+        sqlite3_bind_int64(stmt, 15, Int64(m.commands))
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
@@ -1472,6 +1485,20 @@ actor IndexDB {
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("update session_meta title") }
     }
 
+    func updateSessionMetaCodexInternalSessionID(sessionID: String, source: String, codexInternalSessionID: String?) throws {
+        let sql = "UPDATE session_meta SET codex_internal_session_id=? WHERE session_id=? AND source=?;"
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        if let codexInternalSessionID, !codexInternalSessionID.isEmpty {
+            sqlite3_bind_text(stmt, 1, codexInternalSessionID, -1, SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(stmt, 1)
+        }
+        sqlite3_bind_text(stmt, 2, sessionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 3, source, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("update session_meta codex_internal_session_id") }
+    }
+
     func deleteSessionDays(sessionID: String, source: String) throws {
         let sql = "DELETE FROM session_days WHERE session_id=? AND source=?;"
         let stmt = try prepare(sql)
@@ -1536,6 +1563,7 @@ struct SessionMetaRow {
     let cwd: String?
     let repo: String?
     let title: String?
+    let codexInternalSessionID: String?
     let isHousekeeping: Bool
     let messages: Int
     let commands: Int

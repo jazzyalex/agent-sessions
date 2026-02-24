@@ -19,6 +19,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // Lightweight session metadata (when events is empty)
     public let lightweightCwd: String?
     public let lightweightTitle: String?
+    public let codexInternalSessionIDHint: String?
 
     // Runtime UI state (not persisted in session files)
     public var isFavorite: Bool = false
@@ -33,7 +34,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 fileSizeBytes: Int? = nil,
                 eventCount: Int,
                 events: [SessionEvent],
-                isHousekeeping: Bool = false) {
+                isHousekeeping: Bool = false,
+                codexInternalSessionIDHint: String? = nil) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -46,6 +48,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.isHousekeeping = isHousekeeping
         self.lightweightCwd = nil
         self.lightweightTitle = nil
+        self.codexInternalSessionIDHint = codexInternalSessionIDHint
         self.lightweightCommands = nil
         self.isFavorite = false
     }
@@ -64,7 +67,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 repoName: String?,
                 lightweightTitle: String?,
                 lightweightCommands: Int? = nil,
-                isHousekeeping: Bool = false) {
+                isHousekeeping: Bool = false,
+                codexInternalSessionIDHint: String? = nil) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -77,6 +81,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.isHousekeeping = isHousekeeping
         self.lightweightCwd = cwd
         self.lightweightTitle = lightweightTitle
+        self.codexInternalSessionIDHint = codexInternalSessionIDHint
         self.lightweightCommands = lightweightCommands
         self.isFavorite = false
     }
@@ -94,6 +99,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case lightweightCwd
         case lightweightTitle
         case lightweightCommands
+        case codexInternalSessionIDHint
         // isFavorite intentionally excluded (runtime only)
         // isHousekeeping intentionally excluded (derived at parse/index time)
     }
@@ -331,6 +337,11 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // Prefer the internal session_id embedded in JSONL (more authoritative than filename UUID for some builds)
     public var codexInternalSessionID: String? {
         guard source == .codex else { return nil }
+        if let cached = codexInternalSessionIDHint, !cached.isEmpty { return cached }
+        return Self.deriveCodexInternalSessionID(from: events)
+    }
+
+    static func deriveCodexInternalSessionID(from events: [SessionEvent]) -> String? {
         // Scan a larger head slice to improve hit rate on older logs
         let limit = min(events.count, 2000)
         for e in events.prefix(limit) {

@@ -35,7 +35,8 @@ actor SessionMetaRepository {
                 cwd: r.cwd,
                 repoName: r.repo,
                 lightweightTitle: r.title,
-                isHousekeeping: r.isHousekeeping || (r.title == "No prompt" && (source == .codex || source == .claude))
+                isHousekeeping: r.isHousekeeping || (r.title == "No prompt" && (source == .codex || source == .claude)),
+                codexInternalSessionIDHint: r.codexInternalSessionID
             )
             // Augment with commands count from DB for lightweight filtering
             var enriched = session
@@ -51,7 +52,8 @@ actor SessionMetaRepository {
                                events: session.events,
                                cwd: session.lightweightCwd,
                                repoName: r.repo,
-                               lightweightTitle: session.lightweightTitle)
+                               lightweightTitle: session.lightweightTitle,
+                               codexInternalSessionIDHint: session.codexInternalSessionIDHint)
             // Reconstruct with lightweightCommands via Codable? Simpler: extend Session with helper? Keep minimal by using a factory below.
             out.append(Session(id: enriched.id,
                                source: enriched.source,
@@ -66,7 +68,8 @@ actor SessionMetaRepository {
                                repoName: r.repo,
                                lightweightTitle: enriched.lightweightTitle,
                                lightweightCommands: r.commands,
-                               isHousekeeping: r.isHousekeeping || (r.title == "No prompt" && (source == .codex || source == .claude))))
+                               isHousekeeping: r.isHousekeeping || (r.title == "No prompt" && (source == .codex || source == .claude)),
+                               codexInternalSessionIDHint: enriched.codexInternalSessionIDHint))
         }
         return out
     }
