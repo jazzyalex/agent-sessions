@@ -175,7 +175,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             for path in rootPaths {
                 out.append(contentsOf: Self.loadPresences(from: URL(fileURLWithPath: path), decoder: decoder, now: now, ttl: ttl))
             }
-            let needsProbe = shouldProbeProcesses || out.isEmpty
+            let needsProbe = shouldProbeProcesses
             if needsProbe {
                 // Periodic fallback probe keeps mixed registry/non-registry environments complete.
                 out.append(contentsOf: Self.discoverPresencesFromRunningCodexProcesses(
