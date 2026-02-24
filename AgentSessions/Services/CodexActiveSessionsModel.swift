@@ -623,9 +623,15 @@ final class CodexActiveSessionsModel: ObservableObject {
                     continue
                 }
 
-                // Heuristic: tty device appears as fd 0/1/2, type CHR, name /dev/ttys* or /dev/pts/*
+                // Heuristic: tty device appears on stdio fd 0/1/2 (often reported as 0u/1w/2r), type CHR.
+                let isStdioFD: Bool = {
+                    guard let fd = currentFD else { return false }
+                    let leadingDigits = fd.prefix { $0.isNumber }
+                    guard !leadingDigits.isEmpty, let value = Int(leadingDigits) else { return false }
+                    return (0...2).contains(value)
+                }()
                 if info.tty == nil,
-                   (currentFD == "0" || currentFD == "1" || currentFD == "2"),
+                   isStdioFD,
                    currentType == "CHR" {
                     let ttyName: String = {
                         if name.hasPrefix("/dev/") { return name }
