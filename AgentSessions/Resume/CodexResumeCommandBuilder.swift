@@ -49,7 +49,9 @@ struct CodexResumeCommandBuilder {
             if let v = d.object(forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled) as? Bool { return v }
             return true
         }()
-        let registryRootOverride = UserDefaults.standard.string(forKey: PreferencesKey.Cockpit.codexActiveRegistryRootOverride)
+        let registryRootOverride = UserDefaults.standard.string(
+            forKey: PreferencesKey.Cockpit.codexActiveRegistryRootOverride
+        )
         let maybeWrappedCommand: String = {
             guard shouldWritePresence else { return command }
             guard settings.launchMode != .embedded else { return command }
@@ -82,6 +84,12 @@ struct CodexResumeCommandBuilder {
         return "'\(escaped)'"
     }
 
+    private func expandedPath(_ path: String?) -> String? {
+        guard let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return (trimmed as NSString).expandingTildeInPath
+    }
+
     private func wrapWithActivePresence(command: String,
                                         sessionID: String,
                                         sessionLogPath: String,
@@ -90,7 +98,8 @@ struct CodexResumeCommandBuilder {
         let sid = shellQuote(sessionID)
         let log = shellQuote(sessionLogPath)
         let work = shellQuote(workspaceRoot ?? "")
-        let override = shellQuote(registryRootOverride ?? "")
+        let expandedRegistryRootOverride = expandedPath(registryRootOverride)
+        let override = shellQuote(expandedRegistryRootOverride ?? "")
 
         // One-line, zsh-compatible wrapper that:
         // 1) writes a local presence file under CODEX_HOME/active (or override)
