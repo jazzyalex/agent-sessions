@@ -89,11 +89,11 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
             }
 
-		            sectionHeader("Search")
-		            VStack(alignment: .leading, spacing: 12) {
-	                    Toggle("Index full tool I/O for recent sessions", isOn: Binding(
-	                        get: {
-	                            UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil
+            sectionHeader("Search")
+            VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Index full tool I/O for recent sessions", isOn: Binding(
+                        get: {
+                            UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil
 	                                ? true
                                 : UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
                         },
@@ -111,20 +111,7 @@ extension PreferencesView {
 	                ))
 	                .help("When enabled, global search continues scanning large tool outputs in the background after showing indexed results. This can be noticeably slower on large histories.")
 
-	                Text("This finds additional matches inside large tool outputs that may not appear in Instant search. Leaving this off keeps search more responsive.")
-	                    .font(.caption)
-	                    .foregroundStyle(.secondary)
-	            }
-
-            sectionHeader("OpenClaw")
-            VStack(alignment: .leading, spacing: 12) {
-                Toggle("Include deleted OpenClaw sessions", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions) },
-                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions) }
-                ))
-                .help("Show OpenClaw/Clawdbot transcripts ending in .jsonl.deleted.<timestamp>. Hidden by default.")
-
-                Text("Deleted sessions are usually backups or tombstones. Keeping them hidden reduces noise.")
+                Text("This finds additional matches inside large tool outputs that may not appear in Instant search. Leaving this off keeps search more responsive.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -207,33 +194,6 @@ extension PreferencesView {
                 Toggle("Show inline image thumbnails in Session view", isOn: $inlineSessionImageThumbnailsEnabled)
                     .help("Show small image thumbnails inline in Session view. Thumbnails load after scrolling stops to reduce CPU and I/O during fast scroll.")
 
-                sectionHeader("Rich Transcript")
-                Toggle("Enable review cards for Codex internal review JSON", isOn: $transcriptEnableReviewCards)
-                    .help("When enabled, recognized Codex internal review payloads render as summary cards instead of raw JSON.")
-                Toggle("Enable file-link click targets in transcript", isOn: $transcriptEnableLinkification)
-                    .help("Turn file path references like Foo.swift:56 into clickable links that open in your editor.")
-                Toggle("Show line numbers for code and diff blocks", isOn: $transcriptEnableCodeDiffLineNumbers)
-                    .help("Show per-block line numbers for semantic code and diff transcript blocks.")
-                labeledRow("Preferred Editor") {
-                    Picker("", selection: Binding(
-                        get: { IDEOpener.Target(rawValue: transcriptPreferredIDETargetRaw) ?? .systemDefault },
-                        set: { transcriptPreferredIDETargetRaw = $0.rawValue }
-                    )) {
-                        Text("System Default").tag(IDEOpener.Target.systemDefault)
-                        Text("Cursor").tag(IDEOpener.Target.cursor)
-                        Text("VS Code").tag(IDEOpener.Target.vscode)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 340)
-                    .help("Choose which app receives transcript file links.")
-                }
-                labeledRow("Editor CLI Override") {
-                    TextField("Optional binary path (for Cursor/VS Code)", text: $transcriptIDEBinaryOverridePath)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 420)
-                        .help("Optional override for the editor CLI binary used for line-targeted opens.")
-                }
-
                 // Columns section
                 sectionHeader("Columns")
                 // First row: three columns to reduce height
@@ -299,6 +259,33 @@ extension PreferencesView {
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.skipAgentsPreamble); indexer.recomputeNow() }
                 ))
                 .help("Ignore Codex Agents.md instructions and Claude local-command caveats when deriving titles and jumping to the first prompt (content remains visible)")
+
+                sectionHeader("Rich Transcript")
+                Toggle("Enable review cards for Codex internal review JSON", isOn: $transcriptEnableReviewCards)
+                    .help("When enabled, recognized Codex internal review payloads render as summary cards instead of raw JSON.")
+                Toggle("Enable file-link click targets in transcript", isOn: $transcriptEnableLinkification)
+                    .help("Turn file path references like Foo.swift:56 into clickable links that open in your editor.")
+                Toggle("Show line numbers for code and diff blocks", isOn: $transcriptEnableCodeDiffLineNumbers)
+                    .help("Show per-block line numbers for semantic code and diff transcript blocks.")
+                labeledRow("Preferred Editor") {
+                    Picker("", selection: Binding(
+                        get: { IDEOpener.Target(rawValue: transcriptPreferredIDETargetRaw) ?? .systemDefault },
+                        set: { transcriptPreferredIDETargetRaw = $0.rawValue }
+                    )) {
+                        Text("System Default").tag(IDEOpener.Target.systemDefault)
+                        Text("Cursor").tag(IDEOpener.Target.cursor)
+                        Text("VS Code").tag(IDEOpener.Target.vscode)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 340)
+                    .help("Choose which app receives transcript file links.")
+                }
+                labeledRow("Editor CLI Override") {
+                    TextField("Optional binary path (for Cursor/VS Code)", text: $transcriptIDEBinaryOverridePath)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 420)
+                        .help("Optional override for the editor CLI binary used for line-targeted opens.")
+                }
             }
 
             // Usage Tracking moved to General pane

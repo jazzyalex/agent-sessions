@@ -209,6 +209,12 @@ extension PreferencesView {
             }
 
             Group {
+                Toggle("Include deleted OpenClaw sessions", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions) },
+                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions) }
+                ))
+                .help("Show OpenClaw/Clawdbot transcripts ending in .jsonl.deleted.<timestamp>. Hidden by default.")
+
                 sectionHeader("OpenClaw CLI Binary")
                 VStack(alignment: .leading, spacing: 10) {
                     labeledRow("Binary Source") {

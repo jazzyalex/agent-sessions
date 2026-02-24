@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Preferences (Unified Window): Reordered sections so `Columns` and `Filters` appear before `Rich Transcript`.
+- Preferences (OpenClaw): Moved `Include deleted OpenClaw sessions` from Advanced to the OpenClaw pane as a standalone checkbox.
+
 ## [2.12] - 2026-02-24
 
 ### Fixed
