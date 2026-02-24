@@ -29,6 +29,8 @@ Record every upstream check, even if no changes are needed.
 - 2026-01-16: OpenCode 1.1.23; bumped stage0 v2 session fixture versions and verified version record. Evidence: `Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json`, `Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json`, `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`.
 - 2026-01-16: Copilot sessions; weekly drift baseline now includes `assistant.turn_start/end` and `session.truncation` envelope types to avoid false-positive schema drift. Evidence: `Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl`.
 - 2026-01-24: Weekly monitoring run; Codex CLI 0.89.0 and Claude Code 2.1.19 verified via local schema comparison. Updated stage0 fixtures and bumped verified versions; extended weekly drift monitoring to compute schema diffs for Gemini and OpenCode sessions. Evidence: `scripts/probe_scan_output/agent_watch/20260124-001944Z/report.json`, `Resources/Fixtures/stage0/agents/codex/small.jsonl`, `Resources/Fixtures/stage0/agents/claude/small.jsonl`, `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`, `docs/agent-support/agent-watch-config.json`, `scripts/agent_watch.py`.
+- 2026-02-24: OpenClaw format coverage refreshed; added stage0 fixtures and parser validation to keep `session` and `message` log variants under local schema watch. Evidence: `Resources/Fixtures/stage0/agents/openclaw/small.jsonl`, `Resources/Fixtures/stage0/agents/openclaw/large.jsonl`, `Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl`, `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`, `docs/agent-support/agent-watch-config.json`, `scripts/agent_watch.py`, `scripts/scan_tool_formats.py`, `scripts/capture_latest_agent_sessions.py`.
+- 2026-02-24: Weekly monitor with active usage probes; bumped verified versions for low-risk agents: Codex CLI `0.104.0`, Claude Code `2.1.51`, Gemini CLI `0.28.0`, and Copilot CLI `0.0.411`. Claude usage probe succeeded (`session_5h=98%`, `week_all_models=100%`). OpenCode and Droid were not bumped from this run (`medium`/`high` recommendations). Evidence: `scripts/probe_scan_output/agent_watch/20260224-020414Z/report.json`, `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`.
 
 ## Known Format Changes (From Docs)
 - 2025-12 summary: Claude sessions split embedded thinking/tool blocks into separate events.
@@ -107,6 +109,24 @@ Record every upstream check, even if no changes are needed.
 - Fixtures:
   - `Resources/Fixtures/stage0/agents/opencode/storage_v2/...`
   - `Resources/Fixtures/stage0/agents/opencode/storage_legacy/...`
+
+### OpenClaw
+- Session roots:
+  - `~/.openclaw/agents/<agentId>/sessions/*.jsonl`
+  - `~/.clawdbot/agents/<agentId>/sessions/*.jsonl`
+  - `$OPENCLAW_STATE_DIR/agents/<agentId>/sessions/*.jsonl`
+- Format notes:
+  - JSONL events with top-level `type` + nested `message`.
+  - `type=message` supports `message.role` values: `user`, `assistant` (with `toolCall` blocks), and `toolResult`.
+  - Optional meta events include `model_change` and `thinking_level_change`.
+  - Housekeeping prompts may appear as `user` text and are filtered as lightweight metadata.
+- Recent changes:
+  - Stage0 fixtures and parse coverage added for small/large/schema-drift variants (2026-02-24).
+- Parser entry points:
+  - `AgentSessions/Services/OpenClawSessionParser.swift`
+  - `AgentSessions/Services/OpenClawSessionDiscovery.swift`
+- Fixtures:
+  - `Resources/Fixtures/stage0/agents/openclaw/{small,large,schema_drift}.jsonl`
 
 ### GitHub Copilot CLI
 - Session roots: `~/.copilot/session-state/<sessionId>.jsonl`

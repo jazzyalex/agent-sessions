@@ -43,6 +43,60 @@ final class DroidSessionParser {
     )
     private static let dateFormatter = LockedISO8601DateFormatter(formatOptions: [.withInternetDateTime])
 
+    private static func normalizedType(_ raw: String?) -> String {
+        guard let raw else { return "" }
+        return raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+    }
+
+    private static func normalizedRole(_ raw: Any?) -> String {
+        guard let raw = raw as? String else { return "" }
+        return raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func canonicalPartType(_ raw: Any?) -> String {
+        guard let raw = raw as? String else { return "" }
+        return raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+    }
+
+    private static func stringValue(_ object: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = object[key] as? String, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func sessionIDField(_ obj: [String: Any]) -> String? {
+        return stringValue(obj, keys: ["session_id", "sessionId"])
+            ?? stringValue(obj, keys: ["session"])
+    }
+
+    private static func messageText(_ obj: [String: Any]) -> String? {
+        return stringValue(obj, keys: ["text", "content"])
+    }
+
+    private static func boolValue(_ any: Any?) -> Bool? {
+        guard let any else { return nil }
+        if let boolValue = any as? Bool { return boolValue }
+        if let stringValue = any as? String {
+            let lower = stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if lower == "true" || lower == "1" { return true }
+            if lower == "false" || lower == "0" { return false }
+        }
+        return nil
+    }
+
     // MARK: - Public
 
     static func looksLikeStreamJSONFile(url: URL) -> Bool {
@@ -55,20 +109,23 @@ final class DroidSessionParser {
 
         for line in lines {
             guard let obj = decodeObject(line),
-                  let type = (obj["type"] as? String)?.lowercased() else { continue }
+                  let typeRaw = obj["type"] as? String else { continue }
+            let type = normalizedType(typeRaw)
 
             switch type {
-            case "system", "message", "tool_call", "tool_result", "completion":
+            case "system", "message", "toolcall", "toolresult", "completion":
                 recognized += 1
             default:
                 break
             }
 
-            if obj["session_id"] != nil || obj["sessionId"] != nil {
+            if sessionIDField(obj) != nil {
                 sawSessionID = true
             }
-            if type == "message", obj["role"] != nil, obj["text"] != nil { sawPrimary = true }
-            if type == "tool_call", obj["toolName"] != nil { sawPrimary = true }
+            if type == "message", normalizedRole(obj["role"]) == "user", messageText(obj) != nil {
+                sawPrimary = true
+            }
+            if type == "toolcall", stringValue(obj, keys: ["toolName", "tool_name", "name"]) != nil { sawPrimary = true }
             if type == "completion", obj["finalText"] != nil { sawPrimary = true }
         }
 
@@ -116,8 +173,9 @@ final class DroidSessionParser {
         let lines = readFirstLines(url: url, maxBytes: 256 * 1024, maxLines: 5)
         for line in lines {
             guard let obj = decodeObject(line),
-                  let type = (obj["type"] as? String)?.lowercased() else { continue }
-            if type == "session_start" { return .sessionStore }
+                  let typeRaw = obj["type"] as? String else { continue }
+            let type = normalizedType(typeRaw)
+            if type == "sessionstart" { return .sessionStore }
             if type == "message", obj["message"] is [String: Any] { return .sessionStore }
         }
         return nil
@@ -146,14 +204,14 @@ final class DroidSessionParser {
                 guard let obj = decodeObject(rawLine),
                       let type = obj["type"] as? String else { return true }
 
-                if type == "session_start" {
+                if normalizedType(type) == "sessionstart" {
                     if sessionID == nil { sessionID = obj["id"] as? String }
                     if title == nil { title = obj["title"] as? String }
                     if cwd == nil { cwd = obj["cwd"] as? String }
                     return true
                 }
 
-                guard type == "message" else { return true }
+                if normalizedType(type) != "message" { return true }
 
                 if let ts = decodeDate(obj["timestamp"]) {
                     if tmin == nil || ts < tmin! { tmin = ts }
@@ -161,12 +219,12 @@ final class DroidSessionParser {
                 }
 
                 guard let msg = obj["message"] as? [String: Any],
-                      let role = (msg["role"] as? String)?.lowercased(),
                       let parts = msg["content"] as? [[String: Any]] else { return true }
+                let role = normalizedRole(msg["role"])
 
                 // Title fallback: first user text block that isn't empty.
                 if title == nil, role == "user" {
-                    if let first = parts.first(where: { ($0["type"] as? String) == "text" }),
+                    if let first = parts.first(where: { canonicalPartType($0["type"]) == "text" }),
                        let text = first["text"] as? String {
                         let extracted = extractUserPromptFromSystemReminder(text)
                         let trimmed = extracted.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -176,14 +234,14 @@ final class DroidSessionParser {
 
                 var hasText = false
                 for p in parts {
-                    guard let pt = p["type"] as? String else { continue }
+                    let pt = canonicalPartType(p["type"])
                     if pt == "text", let text = p["text"] as? String,
                        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         hasText = true
-                    } else if pt == "tool_use" {
+                    } else if pt == "tooluse" {
                         estimatedCommands += 1
                         estimatedEvents += 1
-                    } else if pt == "tool_result" {
+                    } else if pt == "toolresult" {
                         estimatedEvents += 1
                     }
                 }
@@ -234,13 +292,13 @@ final class DroidSessionParser {
                 guard let obj = decodeObject(rawLine),
                       let type = obj["type"] as? String else { return }
 
-                if type == "session_start" {
+                if normalizedType(type) == "sessionstart" {
                     if sessionID == nil { sessionID = obj["id"] as? String }
                     if cwd == nil { cwd = obj["cwd"] as? String }
                     return
                 }
 
-                guard type == "message" else { return }
+                if normalizedType(type) != "message" { return }
                 let ts = decodeDate(obj["timestamp"])
                 if let ts {
                     if tmin == nil || ts < tmin! { tmin = ts }
@@ -249,10 +307,10 @@ final class DroidSessionParser {
 
                 let envelopeID = obj["id"] as? String
                 guard let msg = obj["message"] as? [String: Any],
-                      let roleRaw = (msg["role"] as? String)?.lowercased(),
                       let parts = msg["content"] as? [[String: Any]] else {
                     return
                 }
+                let roleRaw = normalizedRole(msg["role"])
 
                 var textParts: [String] = []
                 var seq = 0
@@ -282,7 +340,7 @@ final class DroidSessionParser {
                                 toolInput: nil,
                                 toolOutput: nil,
                                 messageID: envelopeID,
-                                parentID: obj["parentId"] as? String,
+                                parentID: stringValue(obj, keys: ["parentId", "parent_id"]),
                                 isDelta: false,
                                 rawJSON: rawJSONBase64(sanitizeLargeStrings(in: ["type": "system_reminder", "content": reminderText]))
                             ))
@@ -300,7 +358,7 @@ final class DroidSessionParser {
                                 toolInput: nil,
                                 toolOutput: nil,
                                 messageID: envelopeID,
-                                parentID: obj["parentId"] as? String,
+                                parentID: stringValue(obj, keys: ["parentId", "parent_id"]),
                                 isDelta: false,
                                 rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
                             ))
@@ -318,7 +376,7 @@ final class DroidSessionParser {
                         toolInput: nil,
                         toolOutput: nil,
                         messageID: envelopeID,
-                        parentID: obj["parentId"] as? String,
+                        parentID: stringValue(obj, keys: ["parentId", "parent_id"]),
                         isDelta: false,
                         rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
                     ))
@@ -326,7 +384,7 @@ final class DroidSessionParser {
 
                 var toolSeq = 0
                 for p in parts {
-                    guard let pt = p["type"] as? String else { continue }
+                    let pt = canonicalPartType(p["type"])
                     if pt == "text" {
                         if let text = p["text"] as? String { textParts.append(text) }
                         continue
@@ -335,10 +393,10 @@ final class DroidSessionParser {
                     // Non-text blocks should preserve ordering relative to surrounding text.
                     flushTextIfNeeded()
 
-                    if pt == "tool_use" {
+                    if pt == "tooluse" {
                         toolSeq += 1
-                        let toolID = p["id"] as? String
-                        let toolName = p["name"] as? String
+                        let toolID = stringValue(p, keys: ["id", "toolId"])
+                        let toolName = stringValue(p, keys: ["name", "tool_name"])
                         let input = p["input"]
                         if let toolID, !toolID.isEmpty {
                             toolUseByID[toolID] = (name: toolName, input: input)
@@ -357,9 +415,9 @@ final class DroidSessionParser {
                             isDelta: false,
                             rawJSON: rawJSONBase64(["type": "tool_use", "part": sanitizeLargeStrings(in: p)])
                         ))
-                    } else if pt == "tool_result" {
+                    } else if pt == "toolresult" {
                         toolSeq += 1
-                        let toolUseID = p["tool_use_id"] as? String
+                        let toolUseID = stringValue(p, keys: ["tool_use_id", "toolUseId", "tool_use"])
                         let output = p["content"] as? String
 
                         let toolMeta = toolUseID.flatMap { toolUseByID[$0] }
@@ -449,10 +507,11 @@ final class DroidSessionParser {
                 idx += 1
                 guard idx <= previewScanLimit else { return false }
                 guard let obj = decodeObject(rawLine),
-                      let type = (obj["type"] as? String)?.lowercased() else { return true }
+                      let typeRaw = obj["type"] as? String else { return true }
+                let type = normalizedType(typeRaw)
 
                 if sessionID == nil {
-                    sessionID = (obj["session_id"] as? String) ?? (obj["sessionId"] as? String)
+                    sessionID = sessionIDField(obj)
                 }
                 if let ts = decodeDate(obj["timestamp"]) {
                     if tmin == nil || ts < tmin! { tmin = ts }
@@ -461,24 +520,26 @@ final class DroidSessionParser {
 
                 switch type {
                 case "system":
-                    if model == nil { model = obj["model"] as? String }
-                    if cwd == nil { cwd = obj["cwd"] as? String }
+                    if model == nil { model = stringValue(obj, keys: ["model", "modelId", "model_name"]) }
+                    if cwd == nil { cwd = stringValue(obj, keys: ["cwd", "workingDirectory", "working_directory"]) }
                 case "message":
                     estimatedEvents += 1
+                    let text = messageText(obj)
                     if title == nil,
-                       (obj["role"] as? String)?.lowercased() == "user",
-                       let text = obj["text"] as? String {
+                       normalizedRole(obj["role"]) == "user",
+                       let text {
                         let extracted = extractUserPromptFromSystemReminder(text)
                         let trimmed = extracted.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !trimmed.isEmpty { title = trimmed }
                     }
-                case "tool_call":
+                case "toolcall":
                     estimatedCommands += 1
                     estimatedEvents += 1
-                case "tool_result":
+                case "toolresult":
                     estimatedEvents += 1
                 case "completion":
-                    if let final = obj["finalText"] as? String,
+                    let final = (obj["finalText"] as? String) ?? messageText(obj) ?? (obj["final"] as? String)
+                    if let final,
                        !final.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         estimatedEvents += 1
                     }
@@ -529,10 +590,10 @@ final class DroidSessionParser {
                 idx += 1
                 guard let obj = decodeObject(rawLine),
                       let typeRaw = obj["type"] as? String else { return }
-                let type = typeRaw.lowercased()
+                let type = normalizedType(typeRaw)
 
                 if sessionID == nil {
-                    sessionID = (obj["session_id"] as? String) ?? (obj["sessionId"] as? String)
+                    sessionID = sessionIDField(obj)
                 }
                 let ts = decodeDate(obj["timestamp"])
                 if let ts {
@@ -544,8 +605,8 @@ final class DroidSessionParser {
 
                 switch type {
                 case "system":
-                    if model == nil { model = obj["model"] as? String }
-                    if cwd == nil { cwd = obj["cwd"] as? String }
+                    if model == nil { model = stringValue(obj, keys: ["model", "modelId", "model_name"]) }
+                    if cwd == nil { cwd = stringValue(obj, keys: ["cwd", "workingDirectory", "working_directory"]) }
                     events.append(SessionEvent(
                         id: baseID,
                         timestamp: ts,
@@ -562,8 +623,8 @@ final class DroidSessionParser {
                     ))
 
                 case "message":
-                    let role = (obj["role"] as? String)?.lowercased()
-                    let text = obj["text"] as? String
+                    let role = normalizedRole(obj["role"])
+                    let text = messageText(obj)
                     let kind: SessionEventKind = (role == "user") ? .user : .assistant
                     if kind == .user, let text {
                         let extracted = extractUserPromptFromSystemReminder(text)
@@ -573,21 +634,21 @@ final class DroidSessionParser {
 
                         let canSplit = (reminderTrimmed?.isEmpty == false) && !promptText.isEmpty && promptText != originalTrimmed
                         if canSplit, let reminderText = reminderTrimmed {
-                            events.append(SessionEvent(
-                                id: baseID + "-pre",
-                                timestamp: ts,
-                                kind: .user,
-                                role: "user",
+                        events.append(SessionEvent(
+                            id: baseID + "-pre",
+                            timestamp: ts,
+                            kind: .user,
+                            role: "user",
                                 text: reminderText,
                                 toolName: nil,
-                                toolInput: nil,
-                                toolOutput: nil,
-                                messageID: obj["id"] as? String,
-                                parentID: obj["parentId"] as? String,
-                                isDelta: false,
-                                rawJSON: rawJSONBase64(sanitizeLargeStrings(in: ["type": "system_reminder", "content": reminderText]))
-                            ))
-                        }
+                            toolInput: nil,
+                            toolOutput: nil,
+                            messageID: obj["id"] as? String,
+                            parentID: stringValue(obj, keys: ["parentId", "parent_id"]),
+                            isDelta: false,
+                            rawJSON: rawJSONBase64(sanitizeLargeStrings(in: ["type": "system_reminder", "content": reminderText]))
+                        ))
+                    }
 
                         let finalText = canSplit ? promptText : originalTrimmed
                         events.append(SessionEvent(
@@ -600,7 +661,7 @@ final class DroidSessionParser {
                             toolInput: nil,
                             toolOutput: nil,
                             messageID: obj["id"] as? String,
-                            parentID: obj["parentId"] as? String,
+                            parentID: stringValue(obj, keys: ["parentId", "parent_id"]),
                             isDelta: (obj["subtype"] as? String)?.lowercased() == "delta",
                             rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
                         ))
@@ -617,15 +678,16 @@ final class DroidSessionParser {
                         toolInput: nil,
                         toolOutput: nil,
                         messageID: obj["id"] as? String,
-                        parentID: obj["parentId"] as? String,
+                        parentID: stringValue(obj, keys: ["parentId", "parent_id"]),
                         isDelta: (obj["subtype"] as? String)?.lowercased() == "delta",
                         rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
                     ))
 
-                case "tool_call":
-                    let callID = (obj["toolCallId"] as? String) ?? (obj["id"] as? String)
-                    let name = obj["toolName"] as? String
-                    let params = obj["parameters"]
+                case "toolcall":
+                    let callID = stringValue(obj, keys: ["toolCallId", "tool_call_id", "toolCallID"])
+                        ?? stringValue(obj, keys: ["id"])
+                    let name = stringValue(obj, keys: ["toolName", "tool_name", "name"])
+                    let params = obj["parameters"] ?? obj["input"]
                     if let callID, !callID.isEmpty {
                         toolByCallID[callID] = (name: name, params: params)
                     }
@@ -639,20 +701,24 @@ final class DroidSessionParser {
                         toolInput: stringifyJSON(params),
                         toolOutput: nil,
                         messageID: callID,
-                        parentID: obj["messageId"] as? String,
+                        parentID: stringValue(obj, keys: ["messageId", "message_id"]),
                         isDelta: false,
                         rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
                     ))
 
-                case "tool_result":
-                    let callID = (obj["toolCallId"] as? String) ?? (obj["id"] as? String)
-                    let name = (obj["toolName"] as? String) ?? callID.flatMap { toolByCallID[$0]?.name }
+                case "toolresult":
+                    let callID = stringValue(obj, keys: ["toolCallId", "tool_call_id", "toolCallID"])
+                        ?? stringValue(obj, keys: ["id"])
+                    let name = stringValue(obj, keys: ["toolName", "tool_name", "name"]) ?? callID.flatMap { toolByCallID[$0]?.name }
                     let value = obj["value"]
                     let output = stringifyJSON(value)
-                    let isErrorFlag = (obj["isError"] as? Bool) ?? false
+                    let isErrorFlag = boolValue(obj["isError"])
+                        ?? boolValue(obj["is_error"])
+                        ?? false
                     let exitCode: Int? = {
                         guard let dict = value as? [String: Any] else { return nil }
                         let any = dict["exitCode"] ?? dict["exit_code"] ?? dict["status"]
+                            ?? obj["exitCode"] ?? obj["exit_code"]
                         if let i = any as? Int { return i }
                         if let d = any as? Double { return Int(d) }
                         if let s = any as? String { return Int(s.trimmingCharacters(in: .whitespacesAndNewlines)) }
@@ -676,13 +742,14 @@ final class DroidSessionParser {
                         toolInput: callID.flatMap { stringifyJSON(toolByCallID[$0]?.params) },
                         toolOutput: output,
                         messageID: callID,
-                        parentID: obj["messageId"] as? String,
+                        parentID: stringValue(obj, keys: ["messageId", "message_id"]),
                         isDelta: false,
                         rawJSON: rawJSONBase64(sanitizeLargeStrings(in: sanitized))
                     ))
 
                 case "completion":
-                    if let final = obj["finalText"] as? String,
+                    let final = (obj["finalText"] as? String) ?? (obj["final"] as? String) ?? messageText(obj)
+                    if let final,
                        !final.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         events.append(SessionEvent(
                             id: baseID + "-final",

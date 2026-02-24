@@ -99,4 +99,35 @@ final class DroidSessionParserTests: XCTestCase {
         XCTAssertEqual(errors.count, 1)
         XCTAssertTrue((errors.first?.text ?? "").contains("ls: /nope"))
     }
+
+    func testStreamJSONSupportsCamelAndSnakeFieldVariants() throws {
+        let lines = [
+            #"{"type":"system","subtype":"start","sessionId":"sid3","timestamp":"2025-12-26T00:00:00.000Z","model_name":"droid-camel","working_directory":"/tmp"}"#,
+            #"{"type":"message","sessionId":"sid3","timestamp":"2025-12-26T00:00:01.000Z","role":"USER","content":"Do thing"}"#,
+            #"{"type":"toolCall","sessionId":"sid3","timestamp":"2025-12-26T00:00:02.000Z","tool_call_id":"call-3","name":"Shell","input":{"command":"echo hi"}}"#,
+            #"{"type":"tool_result","sessionId":"sid3","timestamp":"2025-12-26T00:00:03.000Z","tool_call_id":"call-3","value":"done","is_error":"false"}"#,
+            #"{"type":"completion","sessionId":"sid3","timestamp":"2025-12-26T00:00:04.000Z","final":"all done"}"#
+        ]
+        let url = try writeTempJSONL(lines)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        guard let session = DroidSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        XCTAssertEqual(session.source, .droid)
+        XCTAssertEqual(session.id, "sid3")
+        XCTAssertEqual(session.model, "droid-camel")
+        XCTAssertEqual(session.cwd, "/tmp")
+
+        XCTAssertEqual(session.events.filter { $0.kind == .user }.count, 1)
+        XCTAssertEqual(session.events.filter { $0.kind == .tool_call }.count, 1)
+        XCTAssertEqual(session.events.filter { $0.kind == .tool_result }.count, 1)
+
+        let call = session.events.first(where: { $0.kind == .tool_call })
+        XCTAssertEqual(call?.toolName, "Shell")
+        XCTAssertTrue((call?.toolInput ?? "").contains("\"echo hi\"") || (call?.toolInput ?? "").contains("echo hi"))
+
+        let result = session.events.first(where: { $0.kind == .tool_result })
+        XCTAssertEqual(result?.toolName, "Shell")
+        XCTAssertEqual(result?.toolOutput, "done")
+        XCTAssertEqual(session.events.filter { $0.kind == .assistant }.last?.text, "all done")
+    }
 }

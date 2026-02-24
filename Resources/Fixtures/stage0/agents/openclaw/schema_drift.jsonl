@@ -1,0 +1,7 @@
+{"type":"session","id":"openclaw-stage0-drift","version":3,"timestamp":"2026-02-24T11:00:00Z","cwd":"/tmp/drift"}
+{"type":"custom","id":"c1","customType":"ui_state","data":{"phase":"diagnostic"},"parentId":"openclaw-stage0-drift","timestamp":"2026-02-24T11:00:00Z"}
+{"type":"message","id":"m1","parentId":"openclaw-stage0-drift","timestamp":"2026-02-24T11:00:01Z","message":{"role":"user","content":[{"type":"text","text":"Need a quick diagnostic"}]}}
+{"type":"message","id":"m2","parentId":"m1","timestamp":"2026-02-24T11:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"I am running diagnostics."},{"type":"toolCall","id":"tc-diagnose","name":"diagnostic_tool","arguments":{"check":"health"}}]}}
+{"type":"message","id":"m3","parentId":"tc-diagnose","timestamp":"2026-02-24T11:00:03Z","message":{"toolCallId":"tc-diagnose","toolName":"diagnostic_tool","role":"toolResult","content":"PASS\n","isError":false}}
+{"type":"message","id":"m4","parentId":"m3","timestamp":"2026-02-24T11:00:04Z","message":{"role":"system","content":[{"type":"text","text":"diagnostic summary updated"}]}}
+{"type":"compact","id":"unknown-1","parentId":"m4","timestamp":"2026-02-24T11:00:05Z","note":"legacy event for drift coverage","agent":"openclaw"}

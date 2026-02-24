@@ -22,8 +22,8 @@ detect upstream session format changes that could break JSON or JSONL parsing.
 2. Read the update checklist.
    - Use `docs/agent-support/update-checklist.md` to gate the work.
 3. Run monitoring (preferred).
-   - Daily: release watch for `codex`, `claude`, `opencode`, `droid`.
-   - Weekly: release watch + probes for all agents.
+   - Daily: release watch for `codex`, `claude`, `opencode`, `droid`, `openclaw`.
+   - Weekly: release watch + probes for all seven agents.
    - See `docs/agent-support/monitoring.md`.
 4. Collect upstream agent versions (manual fallback).
    - Record the latest available versions in a scratch note; do not update the matrix yet.
@@ -40,6 +40,7 @@ detect upstream session format changes that could break JSON or JSONL parsing.
    - Capture a minimal session log for the new agent version.
    - Add or update fixtures and ensure parser tests pass.
    - Auto capture helper (Gemini/OpenCode): `./scripts/capture_latest_agent_sessions.py` writes the newest local session artifacts to `scripts/agent_captures/` for quick diffing and fixture updates.
+   - Auto capture helper (OpenClaw): `./scripts/capture_latest_agent_sessions.py --agent openclaw` writes the latest local OpenClaw JSONL session to `scripts/agent_captures/` for quick diffing and fixture updates.
    - Auto capture helper (Droid): `./scripts/droid_stream_schema_probe.py` runs `droid exec --output-format stream-json` and writes stream logs plus a schema report to `scripts/agent_captures/`.
 9. Update documentation.
    - Update `docs/agent-json-tracking.md` with the change and evidence.
