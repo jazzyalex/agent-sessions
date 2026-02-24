@@ -21,7 +21,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.11.2/AgentSessions-2.11.2.dmg"><b>Download Agent Sessions 2.11.2 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.12/AgentSessions-2.12.dmg"><b>Download Agent Sessions 2.12 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -62,7 +62,7 @@ Agent Sessions helps you search across large session histories, quickly find the
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.11.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.11.2/AgentSessions-2.11.2.dmg)
+1. [Download AgentSessions-2.12.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.12/AgentSessions-2.12.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
@@ -101,15 +101,15 @@ open "/Applications/Agent Sessions.app"
 
 ---
 
-## What's New in 2.11
+## What's New in 2.12
 
 Short version:
-- Major update: Added OpenClaw (clawdbot) session support, with Advanced visibility for deleted sessions.
-- Major update: Expanded Images workflows with inline thumbnails in Session view and a faster, richer Image Browser.
-- Major bug fix: Search coverage for some sessions is now more complete via incremental backfill and changed-file indexing.
-- Major bug fix: Reduced Energy Warning spikes by replacing always-on idle work with activation/event-driven refresh and power-aware indexing/probing.
-- OpenClaw transcript handling is cleaner, including better media-hint suppression and improved tool output formatting.
-- Image Browser now includes Project/Agent filters, cached indexing, and richer image actions.
+- Major update: Transcript rendering now recognizes semantic plans/code/diffs/review cards and improves file-link behavior for faster navigation.
+- Major update: Added crash diagnostics controls in Preferences with local queueing plus explicit email/export reporting workflows.
+- Major bug fix: Live transcript refresh/render paths are more stable during rapid updates, mode switches, and table/list churn.
+- Major bug fix: Focused-session monitoring is now consistent across supported agents with source-aware cadence and better window-focus handling.
+- Codex usage tracking now keeps token usage fresher by continuing JSONL parsing while selecting preferred rate-limit streams.
+- OpenClaw parsing is more resilient with normalized tool-call/result variants and improved tool-result error classification.
 
 Details: `docs/CHANGELOG.md` and `docs/summaries/`.
 
