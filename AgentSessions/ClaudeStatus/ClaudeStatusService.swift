@@ -318,6 +318,8 @@ actor ClaudeStatusService {
         process.arguments = [scriptURL.path]
 
         var env = ProcessInfo.processInfo.environment
+        // Replace minimal GUI PATH with the user's login shell PATH.
+        if let terminalPATH = resolveTerminalPATH() { env["PATH"] = terminalPATH }
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
         env["WORKDIR"] = workDir
         env["MODEL"] = "sonnet"
@@ -326,7 +328,8 @@ actor ClaudeStatusService {
         env["SLEEP_AFTER_USAGE"] = "2.0"
 
         let claudeEnv = ClaudeCLIEnvironment()
-        let claudeBin = claudeEnv.resolveBinary(customPath: nil)?.path
+        let claudeOverride = UserDefaults.standard.string(forKey: ClaudeResumeSettings.Keys.binaryPath)
+        let claudeBin = claudeEnv.resolveBinary(customPath: claudeOverride)?.path
         if let claudeBin { env["CLAUDE_BIN"] = claudeBin }
         let tmuxBin = resolveTmuxPath()
         if let tmuxBin { env["TMUX_BIN"] = tmuxBin }
@@ -380,6 +383,8 @@ actor ClaudeStatusService {
 
         // Set environment for script
         var env = ProcessInfo.processInfo.environment
+        // Replace minimal GUI PATH with the user's login shell PATH.
+        if let terminalPATH = resolveTerminalPATH() { env["PATH"] = terminalPATH }
         // Use stable probe working directory so Claude maps all probes to one project
         let workDir = ClaudeProbeConfig.probeWorkingDirectory()
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
@@ -394,7 +399,8 @@ actor ClaudeStatusService {
 
         // Pass resolved Claude binary path (same logic as resume)
         let claudeEnv = ClaudeCLIEnvironment()
-        if let claudeBin = claudeEnv.resolveBinary(customPath: nil) {
+        let claudeOverride = UserDefaults.standard.string(forKey: ClaudeResumeSettings.Keys.binaryPath)
+        if let claudeBin = claudeEnv.resolveBinary(customPath: claudeOverride) {
             env["CLAUDE_BIN"] = claudeBin.path
         }
 
@@ -890,7 +896,9 @@ actor ClaudeStatusService {
         do {
             try process.run()
             process.waitUntilExit()
-            let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            var output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            // Strip OSC escapes injected by terminal shell integrations.
+            output = output.replacingOccurrences(of: "\u{1b}\\][^\u{07}]*\u{07}", with: "", options: .regularExpression)
             return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         } catch {
             return false
@@ -900,7 +908,8 @@ actor ClaudeStatusService {
     private func checkClaudeAvailable() -> Bool {
         // Use same resolution logic as resume functionality
         let env = ClaudeCLIEnvironment()
-        return env.resolveBinary(customPath: nil) != nil
+        let claudeOverride = UserDefaults.standard.string(forKey: ClaudeResumeSettings.Keys.binaryPath)
+        return env.resolveBinary(customPath: claudeOverride) != nil
     }
 
     private func resolveTmuxPath() -> String? {
@@ -917,8 +926,41 @@ actor ClaudeStatusService {
         do {
             try process.run()
             process.waitUntilExit()
-            let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            var output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            // Strip OSC escapes injected by terminal shell integrations.
+            output = output.replacingOccurrences(of: "\u{1b}\\][^\u{07}]*\u{07}", with: "", options: .regularExpression)
             let path = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            return path.isEmpty ? nil : path
+        } catch {
+            return nil
+        }
+    }
+
+    private func resolveTerminalPATH() -> String? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let startMarker = "__AS_PATH_BEGIN__"
+        let endMarker = "__AS_PATH_END__"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        // Use markers so startup noise on stdout cannot corrupt extracted PATH.
+        process.arguments = ["-lic", "printf '\(startMarker)%s\(endMarker)' \"$PATH\""]
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            var output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            // Strip OSC escapes injected by terminal shell integrations.
+            output = output.replacingOccurrences(of: "\u{1b}\\][^\u{07}]*\u{07}", with: "", options: .regularExpression)
+            guard let startRange = output.range(of: startMarker),
+                  let endRange = output.range(of: endMarker, range: startRange.upperBound..<output.endIndex)
+            else {
+                return nil
+            }
+            let path = output[startRange.upperBound..<endRange.lowerBound]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             return path.isEmpty ? nil : path
         } catch {
             return nil

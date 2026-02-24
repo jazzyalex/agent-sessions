@@ -87,6 +87,9 @@ trap cleanup EXIT INT TERM HUP
 # Dependency checks
 # ============================================================================
 
+# Ensure tmux sockets use a short, writable directory.
+if [[ -z "${TMUX_TMPDIR:-}" ]]; then export TMUX_TMPDIR="/tmp"; fi
+
 # Check tmux
 TMUX_CMD="${TMUX_BIN:-tmux}"
 if [[ -n "${TMUX_BIN:-}" ]]; then
@@ -128,8 +131,22 @@ fi
 # ============================================================================
 
 # Launch Claude in temp directory (prevents project scanning)
+set +e
 "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" \
     "cd '$WORKDIR' && env TERM=xterm-256color '$CLAUDE_CMD' --model $MODEL"
+rc=$?
+if [[ $rc -ne 0 ]]; then
+    # Retry once in case the tmux server is still initializing.
+    sleep 0.3
+    "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" \
+        "cd '$WORKDIR' && env TERM=xterm-256color '$CLAUDE_CMD' --model $MODEL"
+    rc=$?
+fi
+set -e
+if [[ $rc -ne 0 ]]; then
+    echo "$(error_json tmux_start_failed "Failed to start tmux session (rc=$rc). TMUX_TMPDIR=$TMUX_TMPDIR")"
+    exit 1
+fi
 
 # Mark this tmux server as an Agent Sessions probe.
 "$TMUX_CMD" -L "$LABEL" set-environment -g AS_PROBE "1" 2>/dev/null || true
@@ -153,12 +170,12 @@ booted=false
 
 	while [ $iterations -lt $max_iterations ]; do
 	    sleep "$SLEEP_BOOT"
-	    ((iterations++))
+	    iterations=$((iterations + 1))
 
     output=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p 2>/dev/null || echo "")
 
     # Check for trust prompt first (handle before boot check)
-	    if echo "$output" | grep -q "Do you trust the files in this folder?"; then
+	    if echo "$output" | grep -qE "(Do you trust the files in this folder|trust this folder|Yes, I trust this folder)"; then
 	        "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter
 	        sleep 1.0
 	        continue  # Re-check in next iteration

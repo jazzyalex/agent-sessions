@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Cockpit: Added a Cockpit window for active Codex sessions with iTerm2 focus, plus ACTIVE badges in the Unified sessions list.
 
+### Fixed
+- Claude usage probe: Login-shell path and `PATH` resolution now strips injected OSC escape sequences (for example from iTerm2 shell integration), respects custom Claude binary overrides, and hardens tmux startup/trust-prompt handling to avoid false `tmux_not_found` and premature probe failures.
+
 ### Changed
 - Preferences (Unified Window): Reordered sections so `Columns` and `Filters` appear before `Rich Transcript`.
 - Preferences (OpenClaw): Moved `Include deleted OpenClaw sessions` from Advanced to the OpenClaw pane as a standalone checkbox.
