@@ -1,0 +1,5 @@
+{"type":"session","id":"openclaw-stage0-small","version":3,"timestamp":"2026-02-24T09:00:00Z","cwd":"/tmp/repo"}
+{"type":"model_change","id":"mc1","modelId":"openclaw-small","provider":"openclaw-model","timestamp":"2026-02-24T09:00:01Z"}
+{"type":"message","id":"m1","timestamp":"2026-02-24T09:00:02Z","message":{"role":"user","content":[{"type":"text","text":"List files"}]}}
+{"type":"message","id":"m2","timestamp":"2026-02-24T09:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"Running ls now."},{"type":"toolCall","id":"tc1","name":"shell_exec","arguments":{"command":"ls"}}]}}
+{"type":"message","id":"m3","timestamp":"2026-02-24T09:00:04Z","message":{"role":"toolResult","toolCallId":"tc1","toolName":"shell_exec","content":"main.swift\nResources\n","isError":false}}

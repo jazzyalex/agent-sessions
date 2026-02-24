@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Capture the most recently modified Gemini/OpenCode session artifacts into a repo-local folder.
+Capture the most recently modified local agent session artifacts into a repo-local folder.
 
 This is intended for "auto mode" evidence collection when upstream session formats drift:
 - Gemini: copy the newest `session-*.json` from `~/.gemini/tmp/**/(chats/)?`.
 - OpenCode: copy the newest `ses_*.json` plus the referenced message/part trees from
   `~/.local/share/opencode/storage/**`.
+- OpenClaw: copy the newest `*.jsonl` under OpenClaw/clawdbot session roots:
+  `$OPENCLAW_STATE_DIR/agents/*/sessions/` (or `~/.openclaw` / `~/.clawdbot`).
 
 It does not modify or delete any source files.
 """
@@ -144,13 +146,75 @@ def capture_opencode(dest_root: Path) -> list[CaptureResult]:
     return results
 
 
+def _openclaw_root_candidates() -> list[Path]:
+    candidates: list[Path] = []
+
+    env_root = os.getenv("OPENCLAW_STATE_DIR")
+    if env_root:
+        candidates.append(Path(env_root).expanduser())
+
+    home = Path.home()
+    candidates.append(home / ".openclaw")
+    candidates.append(home / ".clawdbot")
+    return candidates
+
+
+def _iter_openclaw_session_files() -> list[Path]:
+    out: list[Path] = []
+    for candidate in _openclaw_root_candidates():
+        if not candidate.exists():
+            continue
+
+        agent_root = candidate / "agents"
+        scan_roots = [agent_root] if agent_root.exists() else [candidate]
+        for scan_root in scan_roots:
+            if not scan_root.exists():
+                continue
+            for p in scan_root.rglob("*.jsonl"):
+                if p.name.endswith(".jsonl.lock"):
+                    continue
+                if ".jsonl.deleted." in p.name:
+                    continue
+                if p.suffix != ".jsonl":
+                    continue
+                if "sessions" not in p.parts:
+                    continue
+                out.append(p)
+    return sorted(out, key=lambda p: p.stat().st_mtime if p.exists() else 0.0, reverse=True)
+
+
+def capture_openclaw(dest_root: Path) -> list[CaptureResult]:
+    candidates = _iter_openclaw_session_files()
+    if not candidates:
+        return []
+
+    src = _newest(candidates)
+    if src is None:
+        return []
+
+    # Preserve relative `agents/<agentId>/sessions/...` paths when possible.
+    rel = Path(src.name)
+    if "agents" in src.parts:
+        parts = list(src.parts)
+        try:
+            idx = parts.index("agents")
+            if idx + 1 < len(parts):
+                rel = Path(*parts[idx:])
+        except ValueError:
+            rel = Path(src.name)
+
+    dst = dest_root / "openclaw" / rel
+    _safe_copy(src, dst)
+    return [CaptureResult(agent="openclaw", source=src, destination=dst)]
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--agent",
         action="append",
-        choices=["gemini", "opencode"],
-        help="Agent(s) to capture (default: both).",
+        choices=["gemini", "opencode", "openclaw"],
+        help="Agent(s) to capture (default: all supported local agents).",
     )
     parser.add_argument(
         "--out",
@@ -159,7 +223,7 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    agents = args.agent or ["gemini", "opencode"]
+    agents = args.agent or ["gemini", "opencode", "openclaw"]
     out = Path(args.out) if args.out else Path("scripts") / "agent_captures" / _now_utc_slug()
     out.mkdir(parents=True, exist_ok=True)
 
@@ -167,6 +231,7 @@ def main(argv: list[str]) -> int:
     versions = {
         "gemini": _try_version(["gemini", "--version"]) or _try_version(["gemini", "-v"]),
         "opencode": _try_version(["opencode", "--version"]) or _try_version(["opencode", "-v"]),
+        "openclaw": _try_version(["openclaw", "--version"]) or _try_version(["openclaw", "-v"]),
     }
     (out / "versions.json").write_text(json.dumps(versions, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -175,6 +240,8 @@ def main(argv: list[str]) -> int:
         captured.extend(capture_gemini(out))
     if "opencode" in agents:
         captured.extend(capture_opencode(out))
+    if "openclaw" in agents:
+        captured.extend(capture_openclaw(out))
 
     if not captured:
         print("No sessions captured (no matching files found).", file=sys.stderr)
@@ -188,4 +255,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-

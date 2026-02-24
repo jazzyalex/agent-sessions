@@ -46,7 +46,8 @@ final class OpenClawSessionParser {
                 idx += 1
                 guard idx <= previewScanLimit else { return false }
                 guard let obj = decodeObject(rawLine) else { return true }
-                guard let type = obj["type"] as? String else { return true }
+                let type = normalizedType(obj["type"])
+                if type.isEmpty { return true }
 
                 if let ts = parseTimestamp(obj["timestamp"] ?? (obj["message"] as? [String: Any])?["timestamp"]) {
                     if tmin == nil || ts < tmin! { tmin = ts }
@@ -58,12 +59,12 @@ final class OpenClawSessionParser {
                     if sessionID == nil, let id = obj["id"] as? String, !id.isEmpty { sessionID = id }
                     if cwd == nil, let c = obj["cwd"] as? String, !c.isEmpty { cwd = c }
 
-                case "model_change":
+                case "modelchange":
                     if let m = obj["modelId"] as? String, !m.isEmpty { model = m }
 
                 case "message":
                     guard let msg = obj["message"] as? [String: Any] else { return true }
-                    let role = (msg["role"] as? String) ?? ""
+                    let role = normalizedRole(msg["role"])
                     if role == "user" {
                         if let userText = extractText(fromContent: msg["content"]) {
                             let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -85,11 +86,13 @@ final class OpenClawSessionParser {
                         if let content = msg["content"] as? [Any] {
                             for block in content {
                                 guard let b = block as? [String: Any], let btype = b["type"] as? String else { continue }
-                                switch btype {
-                                case "toolCall":
+                                switch canonicalBlockType(btype) {
+                                case "toolcall":
                                     estimatedEvents += 1
                                     estimatedCommands += 1
-                                    if firstToolName == nil { firstToolName = b["name"] as? String }
+                                    if firstToolName == nil {
+                                        firstToolName = stringValue(from: b, keys: ["name", "tool_name"])
+                                    }
                                 case "text":
                                     if let t = b["text"] as? String, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                         estimatedEvents += 1
@@ -100,10 +103,12 @@ final class OpenClawSessionParser {
                             }
                         }
                         if model == nil, let m = msg["model"] as? String, !m.isEmpty { model = m }
-                    } else if role == "toolResult" {
+                    } else if role == "toolresult" {
                         estimatedEvents += 1
                         estimatedCommands += 1
-                        if firstToolName == nil { firstToolName = msg["toolName"] as? String }
+                        if firstToolName == nil {
+                            firstToolName = stringValue(from: msg, keys: ["toolName", "tool_name"])
+                        }
                     } else {
                         // Other roles -> meta; ignore for preview counts.
                     }
@@ -113,9 +118,9 @@ final class OpenClawSessionParser {
                 }
                 return true
             }
-        } catch {
-            return nil
-        }
+            } catch {
+                return nil
+            }
 
         let agentID = agentIDFromPath(url)
         let pathBaseID = url.deletingPathExtension().lastPathComponent
@@ -169,11 +174,12 @@ final class OpenClawSessionParser {
         var sawHeartbeatPrompt = false
         var idx = 0
 
-        do {
+            do {
             try reader.forEachLine { rawLine in
                 idx += 1
                 guard let obj = decodeObject(rawLine) else { return }
-                guard let type = obj["type"] as? String else { return }
+                let type = normalizedType(obj["type"])
+                if type.isEmpty { return }
 
                 let baseID = eventID(for: url, index: idx)
                 let ts = parseTimestamp(obj["timestamp"] ?? (obj["message"] as? [String: Any])?["timestamp"])
@@ -203,7 +209,7 @@ final class OpenClawSessionParser {
                         rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
                     ))
 
-                case "model_change":
+                case "modelchange":
                     if let m = obj["modelId"] as? String, !m.isEmpty { model = m }
                     let provider = obj["provider"] as? String
                     let mid = obj["modelId"] as? String
@@ -223,7 +229,7 @@ final class OpenClawSessionParser {
                         rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
                     ))
 
-                case "thinking_level_change":
+                case "thinkinglevelchange":
                     let level = obj["thinkingLevel"] as? String
                     events.append(SessionEvent(
                         id: baseID,
@@ -242,7 +248,7 @@ final class OpenClawSessionParser {
 
                 case "message":
                     guard let msg = obj["message"] as? [String: Any] else { return }
-                    let role = (msg["role"] as? String) ?? ""
+                    let role = normalizedRole(msg["role"])
                     let messageID = obj["id"] as? String
                     let parentID = obj["parentId"] as? String
 
@@ -277,7 +283,7 @@ final class OpenClawSessionParser {
                             for anyBlock in content {
                                 blockIndex += 1
                                 guard let block = anyBlock as? [String: Any], let btype = block["type"] as? String else { continue }
-                                switch btype {
+                                switch canonicalBlockType(btype) {
                                 case "text":
                                     guard let t = block["text"] as? String else { continue }
                                     let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -296,9 +302,9 @@ final class OpenClawSessionParser {
                                         isDelta: false,
                                         rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
                                     ))
-                                case "toolCall":
-                                    let toolCallId = block["id"] as? String
-                                    let toolName = block["name"] as? String
+                                case "toolcall":
+                                    let toolCallId = stringValue(from: block, keys: ["id", "toolCallId", "tool_call_id", "toolCallID"])
+                                    let toolName = stringValue(from: block, keys: ["name", "tool_name"])
                                     let args = block["arguments"]
                                     events.append(SessionEvent(
                                         id: baseID + String(format: "-t%02d", blockIndex),
@@ -334,14 +340,15 @@ final class OpenClawSessionParser {
                             }
                         }
 
-                    } else if role == "toolResult" {
-                        let toolCallId = msg["toolCallId"] as? String
-                        let toolName = msg["toolName"] as? String
+                    } else if role == "toolresult" {
+                        let toolCallId = stringValue(from: msg, keys: ["toolCallId", "tool_call_id", "toolCallID"])
+                        let toolName = stringValue(from: msg, keys: ["toolName", "tool_name"])
                         let output = extractText(fromContent: msg["content"])
+                        let isError = ((msg["isError"] as? Bool) ?? (msg["is_error"] as? Bool) ?? false)
                         events.append(SessionEvent(
                             id: baseID,
                             timestamp: ts,
-                            kind: ((msg["isError"] as? Bool) ?? false) ? .error : .tool_result,
+                            kind: isError ? .error : .tool_result,
                             role: "tool",
                             text: nil,
                             toolName: toolName,
@@ -495,6 +502,41 @@ final class OpenClawSessionParser {
     private static func isNewSessionScaffold(_ text: String) -> Bool {
         let lower = text.lowercased()
         return lower.contains("a new session was started via /new") || lower.contains("via /new or /reset")
+    }
+
+    private static func normalizedRole(_ value: Any?) -> String {
+        guard let raw = value as? String else { return "" }
+        return raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: " ", with: "")
+    }
+
+    private static func normalizedType(_ value: Any?) -> String {
+        guard let raw = value as? String else { return "" }
+        return raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: " ", with: "")
+    }
+
+    private static func canonicalBlockType(_ value: Any?) -> String {
+        guard let raw = value as? String else { return "" }
+        let lowered = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return lowered.replacingOccurrences(of: "_", with: "")
+    }
+
+    private static func stringValue(from object: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = object[key] as? String, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
     }
 
     // MARK: - Content extraction

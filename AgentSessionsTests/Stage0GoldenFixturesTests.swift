@@ -157,5 +157,57 @@ final class Stage0GoldenFixturesTests: XCTestCase {
             XCTAssertFalse(full.events.isEmpty)
         }
     }
-}
 
+    func testOpenClawFixturesParse() throws {
+        let smallURL = FixturePaths.stage0FixtureURL("agents/openclaw/small.jsonl")
+        guard let smallPreview = OpenClawSessionParser.parseFile(at: smallURL) else { return XCTFail("preview parse returned nil") }
+        XCTAssertEqual(smallPreview.source, .openclaw)
+        XCTAssertTrue(smallPreview.events.isEmpty)
+        XCTAssertGreaterThan(smallPreview.eventCount, 0)
+        XCTAssertEqual(smallPreview.model, "openclaw-small")
+
+        guard let smallFull = OpenClawSessionParser.parseFileFull(at: smallURL) else { return XCTFail("full parse returned nil") }
+        XCTAssertEqual(smallFull.source, .openclaw)
+        XCTAssertFalse(smallFull.events.isEmpty)
+        XCTAssertTrue(smallFull.events.contains(where: { $0.kind == .tool_call }))
+        XCTAssertTrue(smallFull.events.contains(where: { $0.kind == .tool_result }))
+
+        for name in ["agents/openclaw/large.jsonl", "agents/openclaw/schema_drift.jsonl"] {
+            let url = FixturePaths.stage0FixtureURL(name)
+            guard let preview = OpenClawSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil: \(name)") }
+            XCTAssertEqual(preview.source, .openclaw)
+            XCTAssertTrue(preview.events.isEmpty)
+            XCTAssertGreaterThan(preview.eventCount, 0)
+
+            guard let full = OpenClawSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil: \(name)") }
+            XCTAssertEqual(full.source, .openclaw)
+            XCTAssertFalse(full.events.isEmpty)
+            XCTAssertTrue(full.events.contains { $0.kind == .tool_call || $0.kind == .assistant })
+        }
+    }
+
+    func testOpenClawParserHandlesCaseAndSnakeCaseVariants() throws {
+        let jsonl = """
+        {"type":"session","id":"openclaw-variant","version":3,"timestamp":"2026-02-24T13:00:00Z","cwd":"/tmp"}
+        {"type":"message","id":"m1","timestamp":"2026-02-24T13:00:01Z","message":{"role":"user","content":[{"type":"text","text":"Run shell status"}]}}
+        {"type":"message","id":"m2","timestamp":"2026-02-24T13:00:02Z","message":{"role":"assistant","content":[{"type":"TOOL_CALL","id":"tc1","name":"shell","arguments":{"command":"pwd"}}]}}
+        {"type":"message","id":"m3","timestamp":"2026-02-24T13:00:03Z","message":{"role":"tool_result","tool_call_id":"tc1","tool_name":"shell","content":"ok","isError":false}}
+        {"type":"message","id":"m4","timestamp":"2026-02-24T13:00:04Z","message":{"role":"tool_result","tool_call_id":"tc2","tool_name":"shell","content":"failed","is_error":true}}
+        """
+
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl")
+        try (jsonl + "\n").write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        guard let full = OpenClawSessionParser.parseFileFull(at: url) else { return XCTFail("openclaw variant parse nil") }
+        let toolCalls = full.events.filter { $0.kind == .tool_call }
+        let toolResults = full.events.filter { $0.kind == .tool_result }
+        let errors = full.events.filter { $0.kind == .error }
+        XCTAssertEqual(toolCalls.count, 1)
+        XCTAssertEqual(toolResults.count, 1)
+        XCTAssertEqual(errors.count, 1)
+        XCTAssertEqual(toolCalls.first?.toolName, "shell")
+        XCTAssertEqual(toolResults.first?.toolName, "shell")
+        XCTAssertEqual(errors.first?.toolName, "shell")
+    }
+}

@@ -11,11 +11,12 @@ final class Stage0PerfHarnessTests: XCTestCase {
         let opencodeURL = FixturePaths.stage0FixtureURL("agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json")
         let copilotURL = FixturePaths.stage0FixtureURL("agents/copilot/large.jsonl")
         let droidURL = FixturePaths.stage0FixtureURL("agents/droid/stream_json_large.jsonl")
+        let openclawURL = FixturePaths.stage0FixtureURL("agents/openclaw/large.jsonl")
 
         let clock = ContinuousClock()
 
         var sessions: [Session] = []
-        sessions.reserveCapacity(6)
+        sessions.reserveCapacity(7)
 
         let parseStart = clock.now
         do {
@@ -26,6 +27,7 @@ final class Stage0PerfHarnessTests: XCTestCase {
             if let s = OpenCodeSessionParser.parseFileFull(at: opencodeURL) { sessions.append(s) }
             if let s = CopilotSessionParser.parseFileFull(at: copilotURL) { sessions.append(s) }
             if let s = DroidSessionParser.parseFileFull(at: droidURL) { sessions.append(s) }
+            if let s = OpenClawSessionParser.parseFileFull(at: openclawURL) { sessions.append(s) }
         }
         let parseElapsed = clock.now - parseStart
         XCTAssertGreaterThan(sessions.count, 0)

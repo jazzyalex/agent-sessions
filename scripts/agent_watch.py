@@ -578,6 +578,13 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
             bp = Path(p)
             if bp.exists():
                 fps.append(_opencode_fixture_file_schema_fingerprint(bp))
+    elif agent_name == "openclaw":
+        for p in filtered:
+            if not p.endswith(".jsonl"):
+                continue
+            bp = Path(p)
+            if bp.exists():
+                fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
 
     return _merge_type_keys(fps)
 
@@ -790,6 +797,7 @@ def main(argv: list[str]) -> int:
         "droid": matrix_versions.get("droid"),
         "gemini": matrix_versions.get("gemini_cli"),
         "copilot": matrix_versions.get("copilot_cli"),
+        "openclaw": matrix_versions.get("openclaw"),
     }
 
     # Extract evidence fixtures from matrix YAML (minimal parser for `agents.*.evidence_fixtures:` lists).
@@ -899,7 +907,6 @@ def main(argv: list[str]) -> int:
                 kind = local_schema_cfg.get("kind")
                 roots = list(local_schema_cfg.get("roots") or [])
                 glob = str(local_schema_cfg.get("glob") or "**/*")
-
                 matrix_key = {
                     "codex": "codex_cli",
                     "claude": "claude_code",
@@ -907,6 +914,7 @@ def main(argv: list[str]) -> int:
                     "droid": "droid",
                     "gemini": "gemini_cli",
                     "opencode": "opencode",
+                    "openclaw": "openclaw",
                 }.get(agent_name)
                 baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
                 baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)

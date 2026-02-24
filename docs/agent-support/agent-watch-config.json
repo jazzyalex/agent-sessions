@@ -99,7 +99,7 @@
       }
     },
     "droid": {
-      "cadence": { "daily": false, "weekly": false },
+      "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["droid", "--version"],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.droid.max_verified_version",
       "upstream": [
@@ -170,6 +170,38 @@
           "glob": "*.jsonl",
           "max_lines": 2500
         }
+      }
+    },
+    "openclaw": {
+      "cadence": { "daily": true, "weekly": true },
+      "installed_version_cmd": ["openclaw", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.openclaw.max_verified_version",
+      "upstream": [],
+      "risk_keywords": {
+        "schema": ["session", "jsonl", "transcript", "storage", "format", "schema", "model", "tool"],
+        "usage": ["token", "quota", "limit"]
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "jsonl_newest",
+          "roots": [
+            "$OPENCLAW_STATE_DIR",
+            "~/.openclaw",
+            "~/.clawdbot"
+          ],
+          "glob": "**/*.jsonl",
+          "required_types": ["session", "message"],
+          "max_lines": 2500
+        },
+        "probes": [
+          {
+            "kind": "script",
+            "label": "openclaw_capture",
+            "argv": ["./scripts/capture_latest_agent_sessions.py", "--agent", "openclaw"],
+            "timeout_seconds": 60,
+            "parse": "capture_latest_sessions"
+          }
+        ]
       }
     }
   }

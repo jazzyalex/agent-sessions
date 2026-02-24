@@ -15,8 +15,8 @@ This is intentionally **non-destructive**:
 - Include Claude + Codex **usage/limit tracking** in monitoring (these can drift independently of sessions).
 
 ## Cadence
-- Daily: `codex`, `claude`, `opencode`, `droid` (release watch only; quiet unless there is actionable change).
-- Weekly: all agents including `gemini`, `copilot` (release watch + minimal probes + schema fingerprints).
+- Daily: `codex`, `claude`, `opencode`, `droid`, `openclaw` (release watch only; quiet unless there is actionable change).
+- Weekly: all 7 agents including `gemini`, `copilot`, and `openclaw` (release watch + minimal probes + schema fingerprints).
 
 ## Sources of Truth
 - Current snapshot (latest): `docs/agent-support/agent-support-matrix.yml`

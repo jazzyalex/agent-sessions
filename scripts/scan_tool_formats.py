@@ -636,6 +636,55 @@ def droid_tool_blocks(obj: Dict[str, Any], raw_event: str) -> List[Tuple[str, st
     return blocks
 
 
+def openclaw_tool_blocks(obj: Dict[str, Any], raw_event: str) -> List[Tuple[str, str, Any, str, List[str], Optional[str]]]:
+    blocks: List[Tuple[str, str, Any, str, List[str], Optional[str]]] = []
+    if (obj.get("type") or "").lower() != "message":
+        return blocks
+
+    msg = obj.get("message")
+    if not isinstance(msg, dict):
+        return blocks
+
+    role = normalize_token(str(msg.get("role") or "")).replace("_", "")
+
+    if role == "assistant":
+        content = msg.get("content")
+        if not isinstance(content, list):
+            return blocks
+
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            btype = normalize_token(str(block.get("type") or "")).replace("_", "")
+            if btype == "toolcall":
+                blocks.append((
+                    "input",
+                    block.get("name") if isinstance(block.get("name"), str) else None,
+                    block.get("arguments"),
+                    "jsonl:message.role=assistant:toolCall",
+                    list(block.keys()),
+                    "message.content",
+                ))
+            else:
+                # Ignore non-tool blocks; transcript parser handles user-facing text separately.
+                continue
+
+    elif role == "toolresult":
+        tool_name = msg.get("toolName")
+        if not isinstance(tool_name, str):
+            tool_name = None
+        blocks.append((
+            "output",
+            tool_name,
+            msg.get("content"),
+            "jsonl:message.role=toolResult",
+            list(msg.keys()),
+            "message",
+        ))
+
+    return blocks
+
+
 def opencode_tool_blocks(obj: Dict[str, Any], raw_event: str) -> List[Tuple[str, str, Any, str, List[str], Optional[str]]]:
     blocks: List[Tuple[str, str, Any, str, List[str], Optional[str]]] = []
     if (obj.get("type") or "").lower() != "tool":
@@ -757,6 +806,31 @@ def discover_opencode_sessions() -> List[Path]:
     return [p for p in root.rglob("ses_*.json")]
 
 
+def discover_openclaw_sessions() -> List[Path]:
+    roots: List[Path] = []
+    if os.getenv("OPENCLAW_STATE_DIR"):
+        roots.append(Path(os.getenv("OPENCLAW_STATE_DIR", "")).expanduser())
+    roots.append(Path.home() / ".openclaw")
+    roots.append(Path.home() / ".clawdbot")
+
+    out: List[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+
+        agents_root = root / "agents"
+        scan_root = agents_root if agents_root.exists() else root
+        if not scan_root.exists():
+            continue
+        for p in scan_root.rglob("*.jsonl"):
+            if p.name.endswith(".jsonl.lock") or ".jsonl.deleted." in p.name:
+                continue
+            if "sessions" not in p.parts:
+                continue
+            out.append(p)
+    return out
+
+
 def droid_looks_like_stream_json(path: Path) -> bool:
     try:
         with path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -819,7 +893,7 @@ def discover_fixture_sessions(fixtures_root: Path) -> Dict[str, List[Path]]:
     if not fixtures_root.exists():
         return out
     for path in fixtures_root.rglob("*"):
-        if path.suffix.lower() not in {".jsonl", ".ndjson"}:
+        if path.suffix.lower() not in {".jsonl", ".ndjson", ".json"}:
             continue
         parts = list(path.parts)
         agent = "codex"
@@ -857,6 +931,8 @@ def scan_jsonl_file(
             blocks = copilot_tool_blocks(obj, raw)
         elif agent == "droid":
             blocks = droid_tool_blocks(obj, raw)
+        elif agent == "openclaw":
+            blocks = openclaw_tool_blocks(obj, raw)
 
         for direction, tool_name, payload, shape, fields, field_path in blocks:
             raw_payload, parsed_payload, parse_error, payload_fields = parse_payload(payload)
@@ -1187,7 +1263,7 @@ def render_report(
         render_json(
             {
                 "id": "string",
-                "agent_family": "codex|claude|copilot|droid|opencode|gemini|other",
+                "agent_family": "codex|claude|copilot|droid|opencode|gemini|openclaw|other",
                 "session_id": "string",
                 "timestamp": "string|number|null",
                 "direction": "input|output|unknown",
@@ -1259,6 +1335,7 @@ def main() -> int:
         sources["droid"] = discover_droid_sessions()
         sources["gemini"] = discover_gemini_sessions()
         sources["opencode"] = discover_opencode_sessions()
+        sources["openclaw"] = discover_openclaw_sessions()
 
     if args.include_fixtures or args.fixtures_only:
         fixtures = discover_fixture_sessions(REPO_ROOT / "Resources" / "Fixtures")
