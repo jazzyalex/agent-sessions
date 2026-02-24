@@ -3,14 +3,31 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.11.2</title>
-            <pubDate>Mon, 09 Feb 2026 19:42:57 -0800</pubDate>
+            <title>2.12</title>
+            <pubDate>Mon, 23 Feb 2026 21:24:08 -0800</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 2.11.2</h2>
+<h2>What&#x27;s New in 2.12</h2>
 <h3>Highlights</h3>
 <ul>
-<li>Startup stability: Prevented a launch-time crash by removing early `NSApp.isActive` reads during Codex/Claude usage model singleton initialization and syncing app-active state after UI startup.</li>
-<li>Preferences/Updates: Added an `Auto-Update` checkbox in Settings → About (next to `Check for Updates...`) and enabled Sparkle auto-update by default for new installs while keeping user opt-out.</li>
+<li>Onboarding (updates): Auto-onboarding is now suppressed for upgrades from `2.11.x` to `2.12`; update onboarding continues for users upgrading from older major/minor versions.</li>
+<li>Codex usage tracking: JSONL backward scans now continue extracting token-usage fields while searching for the preferred `codex` rate-limit stream, preventing stale token values when newer non-codex limit buckets are present.</li>
+<li>Sessions (OpenClaw): Tool format scanning now recognizes underscore/case variants for tool-call and tool-result blocks, and `is_error` tool-result flags are now classified as errors in transcript events.</li>
+<li>Transcript (Session view): Added semantic transcript rendering for plans, code blocks, diffs, and Codex review summaries, including distinct block accents and improved block grouping boundaries.</li>
+<li>Transcript (Session view): Added clickable local file references (for example `Foo.swift:56`, `Foo.swift#L56`) with configurable editor open behavior (System default, Cursor, VS Code) and optional CLI path override.</li>
+<li>Preferences (Unified Window): Added Rich Transcript controls for review cards, file linkification, code/diff line numbers, and preferred editor target.</li>
+</ul>
+<h3>Other Changes</h3>
+<ul>
+<li>Preferences/About: Added a new Diagnostics section for crash reporting with local pending queue controls (`Email Crash Report`, `Export Report`, `Clear Pending`) and a direct support email link.</li>
+<li>Crash reporting: Crash diagnostics are queued locally on launch and shared only through an explicit pre-filled email draft action; no automatic startup/background upload occurs.</li>
+<li>Crash reporting UX: Crash capture is always on (toggle removed), and when a new crash report is detected at launch the app now prompts to either `Email Crash Report` or `Export + Open GitHub Issue`.</li>
+<li>Transcript (Session view): Code-fence opening detection now requires line-start fences, preventing inline triple-backtick snippets from consuming later fenced blocks and misclassifying narrative text as code.</li>
+<li>Transcript (Session view): Codex review-card parsing now skips malformed fenced JSON candidates and continues scanning later candidates, so one invalid payload block no longer suppresses a valid review summary.</li>
+<li>Transcript (Session view): `path:line:column` file references now preserve their column target when linkified, avoiding overlap with `path:line` parsing that could drop column navigation.</li>
+<li>Transcript (Session view): Opening file links in Cursor/VS Code no longer blocks transcript interaction while the editor CLI starts; CLI launches now run asynchronously with fallback behavior preserved.</li>
+<li>Transcript (Session view): Multiple Cursor/VS Code file-link opens now run concurrently, so slow/unavailable editor CLIs no longer serialize later clicks behind earlier timeout waits.</li>
+<li>Session view (Unified): Jump-to-latest arrow visibility is now driven by transcript position for every agent/session type, so it appears whenever the viewport is away from the end (including immediately after switching sessions) and no longer depends on active-session refresh paths.</li>
+<li>Session view (Unified): The floating jump-to-latest control now uses a smaller compact circle and now appears immediately after session selection whenever the transcript is not at the tail (no initial scroll required).</li>
 </ul>
 <h3>Reminder: What You Got in 2.11</h3>
 <ul>
@@ -19,12 +36,12 @@
 <li>Search completeness: Reduced missing/incomplete search results for some sessions with incremental changed-file indexing, search backfill paths, and stale-row cleanup.</li>
 <li>Energy spikes: Reduced Energy Warning spikes by replacing always-on idle refresh with app-activation/event-driven behavior and power-aware probing/indexing cadence.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v2.11.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v2.11.2</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v2.12">https://github.com/jazzyalex/agent-sessions/releases/tag/v2.12</a></p>
             ]]></description>
-            <sparkle:version>21</sparkle:version>
-            <sparkle:shortVersionString>2.11.2</sparkle:shortVersionString>
+            <sparkle:version>22</sparkle:version>
+            <sparkle:shortVersionString>2.12</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.11.2/AgentSessions-2.11.2.dmg" length="11495118" type="application/octet-stream" sparkle:edSignature="4th6wsBBi1/mocYNYyMRyAWrwbg6csNHHLHyKFxmt+lNGHJT4i2hdDDm6vZ7oU18x3CDYKUCKeu41ooYkxrQDQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.12/AgentSessions-2.12.dmg" length="12268846" type="application/octet-stream" sparkle:edSignature="JN+pHHLEt8nTsAFdyR8ZHmg9mK1HRBwCbBzNjZkcrTtVj0chwcP6QFvXMscXIVQpSGll9yXAhn2zSLYs07A4AQ=="/>
         </item>
     </channel>
 </rss>
