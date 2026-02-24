@@ -122,6 +122,26 @@ struct SessionTerminalView: View {
         case errors
     }
 
+    private enum ToolbarNavItem: Hashable, Identifiable {
+        case role(RoleToggle)
+        case images
+        case semantic(SemanticKind)
+
+        var id: String {
+            switch self {
+            case .role(.user): return "role-user"
+            case .role(.assistant): return "role-assistant"
+            case .role(.tools): return "role-tools"
+            case .role(.errors): return "role-errors"
+            case .images: return "images"
+            case .semantic(.plan): return "semantic-plan"
+            case .semantic(.code): return "semantic-code"
+            case .semantic(.diff): return "semantic-diff"
+            case .semantic(.reviewSummary): return "semantic-review"
+            }
+        }
+    }
+
     private static let allSemanticKinds: Set<SemanticKind> = [.plan, .code, .diff, .reviewSummary]
 
     @AppStorage("TerminalRoleToggles") private var roleToggleRaw: String = "user,assistant,tools,errors"
@@ -149,6 +169,7 @@ struct SessionTerminalView: View {
     @State private var inlineImagesVisibleInSession: Bool = true
     @State private var inlineImagesTask: Task<Void, Never>?
     @State private var selectedInlineImageUserBlockIndex: Int? = nil
+    @State private var toolbarWidthBucket: Int = 0
 
     // Unified Search navigation/highlight state
     @State private var unifiedMatchOccurrences: [MatchOccurrence] = []
@@ -285,28 +306,211 @@ struct SessionTerminalView: View {
 
     private var toolbar: some View {
         HStack {
-            // Left: All + role toggles (legend chips act as toggles)
-            HStack(spacing: 16) {
-                allFilterButton()
-                legendToggle(label: "User", role: .user)
-                legendToggle(label: agentLegendLabel, role: .assistant)
-                legendToggle(label: "Tools", role: .tools)
-                legendToggle(label: "Errors", role: .errors)
-                imagesPill()
-                Divider()
-                    .frame(height: 18)
-                semanticToggle(label: "Plans", kind: .plan)
-                semanticToggle(label: "Code", kind: .code)
-                semanticToggle(label: "Diffs", kind: .diff)
-                semanticToggle(label: "Reviews", kind: .reviewSummary)
+            ViewThatFits(in: .horizontal) {
+                toolbarNavigationRow(compact: false)
+                    .fixedSize(horizontal: true, vertical: false)
+                toolbarNavigationRow(compact: true)
+                    .fixedSize(horizontal: true, vertical: false)
+                toolbarNavigationRow(compact: true, maxInlineItems: 8)
+                    .fixedSize(horizontal: true, vertical: false)
+                toolbarNavigationRow(compact: true, maxInlineItems: 7)
+                    .fixedSize(horizontal: true, vertical: false)
+                toolbarNavigationRow(compact: true, maxInlineItems: 6)
+                    .fixedSize(horizontal: true, vertical: false)
+                toolbarNavigationRow(compact: true, maxInlineItems: 5)
+                    .fixedSize(horizontal: true, vertical: false)
+                toolbarNavigationRow(compact: true, maxInlineItems: 4)
+                    .fixedSize(horizontal: true, vertical: false)
+                toolbarNavigationRow(compact: true, maxInlineItems: 3)
+                    .fixedSize(horizontal: true, vertical: false)
+                toolbarNavigationRow(compact: true, maxInlineItems: 2)
+                    .fixedSize(horizontal: true, vertical: false)
+                toolbarNavigationRow(compact: true, maxInlineItems: 1)
+                    .fixedSize(horizontal: true, vertical: false)
+                toolbarNavigationRow(compact: true, maxInlineItems: 0)
+                    .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundStyle(.secondary)
-
-            Spacer()
+            .id(toolbarLayoutCacheKey)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(Color(NSColor.controlBackgroundColor))
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear {
+                        updateToolbarWidthBucket(geo.size.width)
+                    }
+                    .onChange(of: geo.size.width) { _, newValue in
+                        updateToolbarWidthBucket(newValue)
+                    }
+            }
+        }
+    }
+
+    private func toolbarNavigationRow(compact: Bool, maxInlineItems: Int? = nil) -> some View {
+        let items = availableToolbarItems()
+        let split = toolbarItemSplit(items, maxInlineItems: maxInlineItems)
+
+        return HStack(spacing: compact ? 12 : 16) {
+            allFilterButton()
+            ForEach(Array(split.inline.enumerated()), id: \.element.id) { index, item in
+                if index > 0,
+                   needsGroupDivider(before: item, previous: split.inline[index - 1]) {
+                    Divider()
+                        .frame(height: 18)
+                }
+                toolbarItemView(item, compact: compact)
+            }
+            if !split.overflow.isEmpty {
+                toolbarOverflowMenu(items: split.overflow)
+            }
+        }
+        .foregroundStyle(.secondary)
+    }
+
+    private var toolbarLayoutCacheKey: String {
+        let itemCount = availableToolbarItems().count
+        return "\(toolbarWidthBucket)-\(itemCount)"
+    }
+
+    private func updateToolbarWidthBucket(_ width: CGFloat) {
+        let clamped = max(0, width)
+        let bucket = Int((clamped / 8.0).rounded(.down))
+        if toolbarWidthBucket != bucket {
+            toolbarWidthBucket = bucket
+        }
+    }
+
+    private func availableToolbarItems() -> [ToolbarNavItem] {
+        var items: [ToolbarNavItem] = []
+        if hasRoleItems(.user) { items.append(.role(.user)) }
+        if hasRoleItems(.assistant) { items.append(.role(.assistant)) }
+        if hasRoleItems(.tools) { items.append(.role(.tools)) }
+        if hasRoleItems(.errors) { items.append(.role(.errors)) }
+        if !sortedInlineImageUserBlockIndices().isEmpty { items.append(.images) }
+
+        if hasSemanticItems(.plan) { items.append(.semantic(.plan)) }
+        if hasSemanticItems(.code) { items.append(.semantic(.code)) }
+        if hasSemanticItems(.diff) { items.append(.semantic(.diff)) }
+        if hasSemanticItems(.reviewSummary) { items.append(.semantic(.reviewSummary)) }
+        return items
+    }
+
+    private func toolbarItemSplit(_ items: [ToolbarNavItem], maxInlineItems: Int?) -> (inline: [ToolbarNavItem], overflow: [ToolbarNavItem]) {
+        guard let maxInlineItems else { return (items, []) }
+        let maxValue = max(0, maxInlineItems)
+        guard maxValue < items.count else { return (items, []) }
+        return (Array(items.prefix(maxValue)), Array(items.dropFirst(maxValue)))
+    }
+
+    private func needsGroupDivider(before item: ToolbarNavItem, previous: ToolbarNavItem) -> Bool {
+        !isSemanticItem(previous) && isSemanticItem(item)
+    }
+
+    private func isSemanticItem(_ item: ToolbarNavItem) -> Bool {
+        if case .semantic = item { return true }
+        return false
+    }
+
+    @ViewBuilder
+    private func toolbarItemView(_ item: ToolbarNavItem, compact: Bool) -> some View {
+        switch item {
+        case .role(let role):
+            legendToggle(label: roleLabel(for: role), role: role, compact: compact)
+        case .images:
+            imagesPill(compact: compact)
+        case .semantic(let kind):
+            semanticToggle(label: semanticDisplayLabel(for: kind), kind: kind, compact: compact)
+        }
+    }
+
+    private func toolbarOverflowMenu(items: [ToolbarNavItem]) -> some View {
+        Menu {
+            ForEach(items) { item in
+                overflowMenuSection(for: item)
+            }
+        } label: {
+            Image(systemName: "chevron.down.circle")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: true, vertical: false)
+        .help("Show hidden toolbar controls")
+    }
+
+    @ViewBuilder
+    private func overflowMenuSection(for item: ToolbarNavItem) -> some View {
+        switch item {
+        case .role(let role):
+            let label = roleLabel(for: role)
+            let isOn = activeRoles.contains(role)
+            let ids = indicesForRole(role)
+            let navDisabled = !isOn || ids.isEmpty
+            let countText = roleCountText(role)
+            Section("\(label) \(countText)") {
+                Button(isOn ? "Hide \(label)" : "Show \(label)") {
+                    if isOn {
+                        activeRoles.remove(role)
+                    } else {
+                        activeRoles.insert(role)
+                    }
+                    persistRoleToggles()
+                }
+                Button(previousHelpText(for: role)) {
+                    navigateRole(role, direction: -1)
+                }
+                .disabled(navDisabled)
+                Button(nextHelpText(for: role)) {
+                    navigateRole(role, direction: 1)
+                }
+                .disabled(navDisabled)
+            }
+        case .images:
+            let isOn = inlineImagesVisibleInSession
+            let hasImages = !sortedInlineImageUserBlockIndices().isEmpty
+            let countText = imagesCountText()
+            Section("Images \(countText)") {
+                Button(isOn ? "Hide Images" : "Show Images") {
+                    inlineImagesVisibleInSession.toggle()
+                }
+                .disabled(!hasImages)
+                Button("Previous image prompt") {
+                    navigateInlineImages(direction: -1)
+                }
+                .disabled(!hasImages)
+                Button("Next image prompt") {
+                    navigateInlineImages(direction: 1)
+                }
+                .disabled(!hasImages)
+            }
+        case .semantic(let kind):
+            let label = semanticDisplayLabel(for: kind)
+            let isOn = activeSemanticKinds.contains(kind)
+            let ids = semanticLineIndices(kind, in: visibleLines)
+            let navDisabled = !isOn || ids.isEmpty
+            let countText = semanticCountText(kind)
+            Section("\(label) \(countText)") {
+                Button(isOn ? "Hide \(label)" : "Show \(label)") {
+                    if isOn {
+                        activeSemanticKinds.remove(kind)
+                    } else {
+                        activeSemanticKinds.insert(kind)
+                    }
+                    persistSemanticToggles()
+                }
+                Button(previousSemanticHelpText(for: kind)) {
+                    navigateSemantic(kind, direction: -1)
+                }
+                .disabled(navDisabled)
+                Button(nextSemanticHelpText(for: kind)) {
+                    navigateSemantic(kind, direction: 1)
+                }
+                .disabled(navDisabled)
+            }
+        }
     }
 
     private var content: some View {
@@ -623,13 +827,16 @@ struct SessionTerminalView: View {
         }
     }
 
-    private func imagesPill() -> some View {
+    private func imagesPill(compact: Bool = false) -> some View {
         let isOn = inlineImagesVisibleInSession
         let imageBlockIndices = sortedInlineImageUserBlockIndices()
         let hasImages = !imageBlockIndices.isEmpty
         let navDisabled = imageBlockIndices.isEmpty
         let status = inlineImageNavigationStatus()
         let countText = "\(formattedCount(status.current))/\(formattedCount(status.total))"
+        let toggleHelpText = hasImages
+            ? "Images \(countText). " + (isOn ? "Hide inline images in this view" : "Show inline images in this view")
+            : "Images 0/0. No images found in this session"
 
         return HStack(spacing: 6) {
             Button(action: {
@@ -643,17 +850,25 @@ struct SessionTerminalView: View {
                                 ? (isOn ? Color.secondary : Color.secondary.opacity(0.55))
                                 : Color.secondary.opacity(0.35)
                         )
-                    Text(countText)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(hasImages ? Color.secondary : Color.secondary.opacity(0.45))
-                        .monospacedDigit()
+                    if compact {
+                        Text(countText)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(hasImages ? Color.secondary : Color.secondary.opacity(0.45))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    } else {
+                        Text(countText)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(hasImages ? Color.secondary : Color.secondary.opacity(0.45))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    }
                 }
             }
             .buttonStyle(.plain)
             .disabled(!hasImages)
-            .help(hasImages
-                ? (isOn ? "Hide inline images in this view" : "Show inline images in this view")
-                : "No images found in this session")
+            .help(toggleHelpText)
+            .accessibilityLabel("Images \(countText)")
 
             HStack(spacing: 4) {
                 ZStack {
@@ -1217,7 +1432,7 @@ struct SessionTerminalView: View {
         .buttonStyle(.plain)
     }
 
-    private func legendToggle(label: String, role: RoleToggle) -> some View {
+    private func legendToggle(label: String, role: RoleToggle, compact: Bool = false) -> some View {
         let isOn = activeRoles.contains(role)
         let swatch = TerminalRolePalette.swiftUI(
             role: TerminalRolePalette.role(for: role),
@@ -1225,12 +1440,10 @@ struct SessionTerminalView: View {
             scheme: colorScheme,
             monochrome: stripMonochrome
         )
-        let indices = indicesForRole(role)
-        let hasLines = !indices.isEmpty
-        let navDisabled = !isOn || !hasLines
-        let showCount = true
+        let navDisabled = !isOn || indicesForRole(role).isEmpty
         let status = navigationStatus(for: role)
         let countText = "\(formattedCount(status.current))/\(formattedCount(status.total))"
+        let helpText = "\(label) \(countText). " + toggleHelpText(for: role)
 
         return HStack(spacing: 6) {
             Button(action: {
@@ -1245,19 +1458,28 @@ struct SessionTerminalView: View {
                     Circle()
                         .fill(swatch.accent.opacity(isOn ? 1.0 : 0.35))
                         .frame(width: 9, height: 9)
-                    Text(label)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(isOn ? .primary : .secondary)
-                    if showCount {
+                    if compact {
                         Text(countText)
                             .font(.system(size: 13, weight: .regular))
                             .foregroundStyle(Color.secondary)
                             .monospacedDigit()
+                            .lineLimit(1)
+                    } else {
+                        Text(label)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(isOn ? .primary : .secondary)
+                            .lineLimit(1)
+                        Text(countText)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Color.secondary)
+                            .monospacedDigit()
+                            .lineLimit(1)
                     }
                 }
             }
             .buttonStyle(.plain)
-            .help(toggleHelpText(for: role))
+            .help(helpText)
+            .accessibilityLabel("\(label) \(countText)")
 
             HStack(spacing: 4) {
                 ZStack {
@@ -1289,15 +1511,14 @@ struct SessionTerminalView: View {
         }
     }
 
-    private func semanticToggle(label: String, kind: SemanticKind) -> some View {
+    private func semanticToggle(label: String, kind: SemanticKind, compact: Bool = false) -> some View {
         let isOn = activeSemanticKinds.contains(kind)
         let accent = Color(nsColor: TranscriptColorSystem.semanticAccent(accentRole(for: kind)))
-        let semanticCountSourceLines = roleFilteredLines(from: lines)
-        let indices = semanticLineIndices(kind, in: semanticCountSourceLines)
-        let hasLines = !indices.isEmpty
-        let navDisabled = !isOn || !hasLines
-        let status = semanticNavigationStatus(for: kind, in: semanticCountSourceLines)
+        let semanticVisibleLines = semanticLineIndices(kind, in: visibleLines)
+        let navDisabled = !isOn || semanticVisibleLines.isEmpty
+        let status = semanticNavigationStatus(for: kind, in: lines)
         let countText = "\(formattedCount(status.current))/\(formattedCount(status.total))"
+        let helpText = "\(label) \(countText). " + semanticToggleHelpText(for: kind)
 
         return HStack(spacing: 6) {
             Button(action: {
@@ -1312,17 +1533,28 @@ struct SessionTerminalView: View {
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
                         .fill(accent.opacity(isOn ? 1.0 : 0.35))
                         .frame(width: 9, height: 9)
-                    Text(label)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(isOn ? .primary : .secondary)
-                    Text(countText)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Color.secondary)
-                        .monospacedDigit()
+                    if compact {
+                        Text(countText)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Color.secondary)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    } else {
+                        Text(label)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(isOn ? .primary : .secondary)
+                            .lineLimit(1)
+                        Text(countText)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Color.secondary)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    }
                 }
             }
             .buttonStyle(.plain)
-            .help(semanticToggleHelpText(for: kind))
+            .help(helpText)
+            .accessibilityLabel("\(label) \(countText)")
 
             HStack(spacing: 4) {
                 ZStack {
@@ -1364,7 +1596,7 @@ struct SessionTerminalView: View {
     }
 
     private func navigationStatus(for role: RoleToggle) -> (current: Int, total: Int) {
-        let ids = indicesForRole(role)
+        let ids = allIndicesForRole(role)
         let total = ids.count
         guard total > 0 else { return (0, 0) }
         let sorted = ids.sorted()
@@ -1420,16 +1652,24 @@ struct SessionTerminalView: View {
 
     private func indicesForRole(_ role: RoleToggle) -> [Int] {
         let visibleLineIDs = Set(visibleLines.map(\.id))
+        return allIndicesForRole(role).filter { visibleLineIDs.contains($0) }
+    }
+
+    private func allIndicesForRole(_ role: RoleToggle) -> [Int] {
         switch role {
-        case .user:
-            return userLineIndices.filter { visibleLineIDs.contains($0) }
-        case .assistant:
-            return assistantLineIndices.filter { visibleLineIDs.contains($0) }
-        case .tools:
-            return toolLineIndices.filter { visibleLineIDs.contains($0) }
-        case .errors:
-            return errorLineIndices.filter { visibleLineIDs.contains($0) }
+        case .user: return userLineIndices
+        case .assistant: return assistantLineIndices
+        case .tools: return toolLineIndices
+        case .errors: return errorLineIndices
         }
+    }
+
+    private func hasRoleItems(_ role: RoleToggle) -> Bool {
+        !allIndicesForRole(role).isEmpty
+    }
+
+    private func hasSemanticItems(_ kind: SemanticKind) -> Bool {
+        !semanticLineIndices(kind, in: lines).isEmpty
     }
 
     private func previousHelpText(for role: RoleToggle) -> String {
@@ -1457,6 +1697,39 @@ struct SessionTerminalView: View {
         case .tools: return "Next tool call/output (⌥⌘→)"
         case .errors: return "Next error (⌥⌘⇧↓)"
         }
+    }
+
+    private func roleLabel(for role: RoleToggle) -> String {
+        switch role {
+        case .user: return "User"
+        case .assistant: return agentLegendLabel
+        case .tools: return "Tools"
+        case .errors: return "Errors"
+        }
+    }
+
+    private func roleCountText(_ role: RoleToggle) -> String {
+        let status = navigationStatus(for: role)
+        return "\(formattedCount(status.current))/\(formattedCount(status.total))"
+    }
+
+    private func semanticDisplayLabel(for kind: SemanticKind) -> String {
+        switch kind {
+        case .plan: return "Plans"
+        case .code: return "Code"
+        case .diff: return "Diffs"
+        case .reviewSummary: return "Reviews"
+        }
+    }
+
+    private func semanticCountText(_ kind: SemanticKind) -> String {
+        let status = semanticNavigationStatus(for: kind, in: lines)
+        return "\(formattedCount(status.current))/\(formattedCount(status.total))"
+    }
+
+    private func imagesCountText() -> String {
+        let status = inlineImageNavigationStatus()
+        return "\(formattedCount(status.current))/\(formattedCount(status.total))"
     }
 
     private func semanticLabel(for kind: SemanticKind) -> String {
