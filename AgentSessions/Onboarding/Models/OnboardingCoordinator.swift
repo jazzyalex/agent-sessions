@@ -25,7 +25,10 @@ final class OnboardingCoordinator: ObservableObject {
         hasChecked = true
 
         guard let majorMinor = currentMajorMinorProvider() else { return }
-        guard let kind = determineAutoTourKind(for: majorMinor) else { return }
+        let previousMajorMinor = defaults.onboardingLastSeenAppMajorMinor ?? defaults.onboardingLastActionMajorMinor
+        defaults.onboardingLastSeenAppMajorMinor = majorMinor
+
+        guard let kind = determineAutoTourKind(for: majorMinor, previousMajorMinor: previousMajorMinor) else { return }
 
         present(kind: kind, majorMinor: majorMinor)
     }
@@ -43,9 +46,13 @@ final class OnboardingCoordinator: ObservableObject {
         recordActionAndDismiss()
     }
 
-    private func determineAutoTourKind(for majorMinor: String) -> OnboardingContent.Kind? {
+    private func determineAutoTourKind(for majorMinor: String, previousMajorMinor: String?) -> OnboardingContent.Kind? {
         if isFreshInstallProvider(), !defaults.onboardingFullTourCompleted {
             return .fullTour
+        }
+
+        if shouldSuppressUpdateTour(currentMajorMinor: majorMinor, previousMajorMinor: previousMajorMinor) {
+            return nil
         }
 
         if defaults.onboardingLastActionMajorMinor != majorMinor {
@@ -53,6 +60,10 @@ final class OnboardingCoordinator: ObservableObject {
         }
 
         return nil
+    }
+
+    private func shouldSuppressUpdateTour(currentMajorMinor: String, previousMajorMinor: String?) -> Bool {
+        currentMajorMinor == "2.12" && previousMajorMinor == "2.11"
     }
 
     private func present(kind: OnboardingContent.Kind, majorMinor: String) {
