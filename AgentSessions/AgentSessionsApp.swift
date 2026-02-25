@@ -126,18 +126,21 @@ struct AgentSessionsApp: App {
 
                     let isAppActive = NSApp?.isActive ?? true
                     unifiedIndexerHolder.unified?.setAppActive(isAppActive)
+                    activeCodexSessions.setAppActive(isAppActive)
                     codexUsageModel.setAppActive(isAppActive)
                     claudeUsageModel.setAppActive(isAppActive)
                     updateUsageModels()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     unifiedIndexerHolder.unified?.setAppActive(true)
+                    activeCodexSessions.setAppActive(true)
                     codexUsageModel.setAppActive(true)
                     claudeUsageModel.setAppActive(true)
                     archiveManager.syncPinnedSessionsNow()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
                     unifiedIndexerHolder.unified?.setAppActive(false)
+                    activeCodexSessions.setAppActive(false)
                     codexUsageModel.setAppActive(false)
                     claudeUsageModel.setAppActive(false)
                 }

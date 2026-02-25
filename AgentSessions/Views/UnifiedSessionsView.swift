@@ -211,6 +211,7 @@ struct UnifiedSessionsView: View {
     @State private var showAnalyticsWarmupNotice: Bool = false
     @State private var showAgentEnablementNotice: Bool = false
     @State private var isWindowKey: Bool = false
+    @State private var activeConsumerID = UUID()
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
     private enum SelectionChangeSource { case mouse }
@@ -330,22 +331,24 @@ struct UnifiedSessionsView: View {
 				)
 		)
 
-		let lifecycle = AnyView(
-			base
-	                .onAppear {
-	                    updateFooterUsageVisibility()
-	                    if sortOrder.isEmpty { sortOrder = [KeyPathComparator(\Session.modifiedAt, order: .reverse)] }
-	                    updateCachedRows()
-	                    ensureDefaultSelectionIfNeeded()
-	                    unified.setAppActive(NSApp.isActive)
-	                    updateFocusedSessionIfNeeded(selectedSession)
-	                    refreshSelectionSourceFromCachedRows()
-	                    searchCoordinator.setAppActive(NSApp.isActive)
-	                }
-                .onDisappear {
-                    codexUsageModel.setStripVisible(false)
-                    claudeUsageModel.setStripVisible(false)
-                }
+			let lifecycle = AnyView(
+				base
+			                .onAppear {
+			                    activeCodexSessions.setUnifiedConsumerVisible(true, consumerID: activeConsumerID)
+			                    updateFooterUsageVisibility()
+			                    if sortOrder.isEmpty { sortOrder = [KeyPathComparator(\Session.modifiedAt, order: .reverse)] }
+			                    updateCachedRows()
+			                    ensureDefaultSelectionIfNeeded()
+			                    unified.setAppActive(NSApp.isActive)
+		                    updateFocusedSessionIfNeeded(selectedSession)
+		                    refreshSelectionSourceFromCachedRows()
+		                    searchCoordinator.setAppActive(NSApp.isActive)
+			                }
+			                .onDisappear {
+			                    activeCodexSessions.setUnifiedConsumerVisible(false, consumerID: activeConsumerID)
+			                    codexUsageModel.setStripVisible(false)
+			                    claudeUsageModel.setStripVisible(false)
+			                }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     unified.setAppActive(true)
                     searchCoordinator.setAppActive(true)
