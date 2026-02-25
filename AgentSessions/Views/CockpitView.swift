@@ -7,6 +7,7 @@ struct CockpitView: View {
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
     @State private var selection: Set<String> = []
+    @State private var activeConsumerID = UUID()
 
     private struct Row: Identifiable {
         let id: String
@@ -33,11 +34,11 @@ struct CockpitView: View {
 
         var sessionsByLogPath: [String: Session] = [:]
         for s in codexIndexer.allSessions where s.source == .codex {
-            sessionsByLogPath[normalizePath(s.filePath)] = s
+            sessionsByLogPath[CodexActiveSessionsModel.normalizePath(s.filePath)] = s
         }
 
         let mapped: [Row] = activeCodex.presences.map { p in
-            let logNorm = p.sessionLogPath.map(normalizePath)
+            let logNorm = p.sessionLogPath.map(CodexActiveSessionsModel.normalizePath)
             let session = logNorm.flatMap { sessionsByLogPath[$0] } ?? resolveBySessionID(p.sessionId)
 
             let title = session?.title
@@ -113,6 +114,12 @@ struct CockpitView: View {
             case .dark: content.preferredColorScheme(.dark)
             case .system: content
             }
+        }
+        .onAppear {
+            activeCodex.setCockpitConsumerVisible(true, consumerID: activeConsumerID)
+        }
+        .onDisappear {
+            activeCodex.setCockpitConsumerVisible(false, consumerID: activeConsumerID)
         }
     }
 
@@ -247,11 +254,6 @@ struct CockpitView: View {
         return codexIndexer.allSessions.first(where: { s in
             s.source == .codex && (s.codexInternalSessionID == id || s.codexFilenameUUID == id)
         })
-    }
-
-    private func normalizePath(_ raw: String) -> String {
-        let expanded = (raw as NSString).expandingTildeInPath
-        return URL(fileURLWithPath: expanded).standardizedFileURL.path
     }
 
     private func canFocus(_ row: Row) -> Bool {

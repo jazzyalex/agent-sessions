@@ -54,8 +54,13 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
 final class CodexActiveSessionsModel: ObservableObject {
     static let defaultPollInterval: TimeInterval = 2
     static let defaultStaleTTL: TimeInterval = 10
+    static let backgroundPollInterval: TimeInterval = 15
     nonisolated private static let processProbeTimeout: TimeInterval = 0.75
-    nonisolated private static let processProbeMinInterval: TimeInterval = 6
+    nonisolated private static let processProbeMinIntervalRegistryEmptyForeground: TimeInterval = 6
+    nonisolated private static let processProbeMinIntervalRegistryEmptyBackground: TimeInterval = 45
+    nonisolated private static let processProbeMinIntervalRegistryPresentForeground: TimeInterval = 30
+    nonisolated private static let processProbeMinIntervalRegistryPresentBackground: TimeInterval = 120
+    nonisolated(unsafe) private static let normalizedPathCache = NSCache<NSString, NSString>()
 
     /// Changes only when the active membership (or stable presence metadata) changes.
     /// Used by views that want to refresh the sessions list only when active state changes,
@@ -87,6 +92,19 @@ final class CodexActiveSessionsModel: ObservableObject {
     private var byLogPath: [String: CodexActivePresence] = [:]
     private var cachedProcessPresences: [CodexActivePresence] = []
     private var lastProcessProbeAt: Date? = nil
+    private var unifiedVisibleConsumerIDs: Set<UUID> = []
+    private var cockpitVisibleConsumerIDs: Set<UUID> = []
+    private var appIsActive: Bool = true
+
+    private struct SessionLookupCacheEntry {
+        var rawFilePath: String
+        var normalizedLogPath: String
+        var internalSessionID: String?
+        var internalSessionIDHint: String?
+        var loadedEventsCount: Int
+        var filenameUUID: String?
+    }
+    private var sessionLookupCacheByID: [String: SessionLookupCacheEntry] = [:]
 
     init() {
         // Avoid background activity under `xcodebuild test`.
@@ -100,26 +118,49 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func isActive(_ session: Session) -> Bool {
-        guard session.source == .codex else { return false }
-        if byLogPath[Self.normalizePath(session.filePath)] != nil { return true }
-        if let id = session.codexInternalSessionID, bySessionID[id] != nil { return true }
-        if let id = session.codexFilenameUUID, bySessionID[id] != nil { return true }
+        guard enabled, session.source == .codex else { return false }
+        let lookup = lookupCacheEntry(for: session)
+        if byLogPath[lookup.normalizedLogPath] != nil { return true }
+        if presenceForSessionIDLookup(lookup) != nil { return true }
         return false
     }
 
     func presence(for session: Session) -> CodexActivePresence? {
         guard session.source == .codex else { return nil }
-
-        let filePath = Self.normalizePath(session.filePath)
-        if let p = byLogPath[filePath] { return p }
-
-        if let id = session.codexInternalSessionID, let p = bySessionID[id] { return p }
-        if let id = session.codexFilenameUUID, let p = bySessionID[id] { return p }
+        let lookup = lookupCacheEntry(for: session)
+        if let p = byLogPath[lookup.normalizedLogPath] { return p }
+        if let p = presenceForSessionIDLookup(lookup) { return p }
         return nil
     }
 
     func revealURL(for session: Session) -> URL? {
         presence(for: session)?.revealURL
+    }
+
+    func setUnifiedConsumerVisible(_ visible: Bool, consumerID: UUID) {
+        let hadVisibleConsumer = hasVisibleConsumer
+        if visible { unifiedVisibleConsumerIDs.insert(consumerID) }
+        else { unifiedVisibleConsumerIDs.remove(consumerID) }
+        guard hasVisibleConsumer != hadVisibleConsumer else { return }
+        refreshSoon()
+    }
+
+    func setCockpitConsumerVisible(_ visible: Bool, consumerID: UUID) {
+        let hadVisibleConsumer = hasVisibleConsumer
+        if visible { cockpitVisibleConsumerIDs.insert(consumerID) }
+        else { cockpitVisibleConsumerIDs.remove(consumerID) }
+        guard hasVisibleConsumer != hadVisibleConsumer else { return }
+        refreshSoon()
+    }
+
+    func setAppActive(_ active: Bool) {
+        guard appIsActive != active else { return }
+        appIsActive = active
+        refreshSoon()
+    }
+
+    private var hasVisibleConsumer: Bool {
+        !unifiedVisibleConsumerIDs.isEmpty || !cockpitVisibleConsumerIDs.isEmpty
     }
 
     func refreshNow() {
@@ -139,7 +180,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             guard let self else { return }
             while !Task.isCancelled {
                 await self.refreshOnce()
-                try? await Task.sleep(nanoseconds: UInt64(Self.defaultPollInterval * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64(self.pollIntervalSeconds() * 1_000_000_000))
             }
         }
     }
@@ -156,6 +197,9 @@ final class CodexActiveSessionsModel: ObservableObject {
             cachedProcessPresences = []
             lastProcessProbeAt = nil
             lastPublishedPresenceSignatures = [:]
+            // Preserve visible-consumer registrations across disable/enable toggles so
+            // open windows immediately restore foreground cadence without requiring re-appear.
+            sessionLookupCacheByID = [:]
             lastRefreshAt = nil
             activeMembershipVersion &+= 1
         }
@@ -179,11 +223,10 @@ final class CodexActiveSessionsModel: ObservableObject {
         let sessionsRoots = codexSessionsRoots().map(\.path)
         let previousLogKeys = Set(byLogPath.keys)
         let previousSessionKeys = Set(bySessionID.keys)
-        let shouldProbeProcesses: Bool = {
-            guard let last = lastProcessProbeAt else { return true }
-            return now.timeIntervalSince(last) >= Self.processProbeMinInterval
-        }()
+        let lastProbeAt = lastProcessProbeAt
         let cachedProbeSnapshot = cachedProcessPresences
+        let hasVisibleConsumerSnapshot = hasVisibleConsumer
+        let appIsActiveSnapshot = appIsActive
 
         let probeResult: (loaded: [CodexActivePresence], didProbe: Bool) = await Task.detached(priority: .utility) {
             var out: [CodexActivePresence] = []
@@ -191,8 +234,17 @@ final class CodexActiveSessionsModel: ObservableObject {
             for path in rootPaths {
                 out.append(contentsOf: Self.loadPresences(from: URL(fileURLWithPath: path), decoder: decoder, now: now, ttl: ttl))
             }
-            let needsProbe = shouldProbeProcesses
-            if needsProbe {
+            let registryHasPresences = !out.isEmpty
+            let processProbeMinInterval = Self.processProbeMinIntervalSeconds(
+                registryHasPresences: registryHasPresences,
+                hasVisibleConsumer: hasVisibleConsumerSnapshot,
+                appIsActive: appIsActiveSnapshot
+            )
+            let shouldProbeProcesses: Bool = {
+                guard let last = lastProbeAt else { return true }
+                return now.timeIntervalSince(last) >= processProbeMinInterval
+            }()
+            if shouldProbeProcesses {
                 // Periodic fallback probe keeps mixed registry/non-registry environments complete.
                 out.append(contentsOf: Self.discoverPresencesFromRunningCodexProcesses(
                     now: now,
@@ -380,9 +432,82 @@ final class CodexActiveSessionsModel: ObservableObject {
         return URL(fileURLWithPath: expanded)
     }
 
-    nonisolated private static func normalizePath(_ raw: String) -> String {
-        let expanded = (raw as NSString).expandingTildeInPath
-        return URL(fileURLWithPath: expanded).standardizedFileURL.path
+    nonisolated static func normalizePath(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let key = trimmed as NSString
+        if let cached = normalizedPathCache.object(forKey: key) {
+            return cached as String
+        }
+
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        // Preserve symlink-aware canonicalization so registry/session paths join even when roots differ
+        // (for example /var/... vs /private/var/...).
+        let normalized = URL(fileURLWithPath: expanded, isDirectory: false).standardizedFileURL.path
+        normalizedPathCache.setObject(normalized as NSString, forKey: key)
+        return normalized
+    }
+
+    private func lookupCacheEntry(for session: Session) -> SessionLookupCacheEntry {
+        let internalSessionIDHint = Self.nonEmptySessionID(session.codexInternalSessionIDHint)
+        if let cached = sessionLookupCacheByID[session.id], cached.rawFilePath == session.filePath {
+            let hintChanged = cached.internalSessionIDHint != internalSessionIDHint
+            // Retry ID derivation when previously unavailable and hydrated events arrive.
+            let needsRetryFromHydratedEvents = cached.internalSessionID == nil &&
+                cached.loadedEventsCount != session.events.count
+            if !hintChanged && !needsRetryFromHydratedEvents {
+                return cached
+            }
+        }
+        let resolvedInternalSessionID: String? = {
+            if let hint = internalSessionIDHint { return hint }
+            guard !session.events.isEmpty else { return nil }
+            return Self.nonEmptySessionID(session.codexInternalSessionID)
+        }()
+        let fresh = SessionLookupCacheEntry(
+            rawFilePath: session.filePath,
+            normalizedLogPath: Self.normalizePath(session.filePath),
+            internalSessionID: resolvedInternalSessionID,
+            internalSessionIDHint: internalSessionIDHint,
+            loadedEventsCount: session.events.count,
+            filenameUUID: session.codexFilenameUUID
+        )
+        sessionLookupCacheByID[session.id] = fresh
+        return fresh
+    }
+
+    private static func nonEmptySessionID(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func presenceForSessionIDLookup(_ lookup: SessionLookupCacheEntry) -> CodexActivePresence? {
+        if let id = lookup.internalSessionID, let p = bySessionID[id] { return p }
+        if let id = lookup.filenameUUID, id != lookup.internalSessionID, let p = bySessionID[id] { return p }
+        return nil
+    }
+
+    private func pollIntervalSeconds() -> TimeInterval {
+        guard appIsActive else { return Self.backgroundPollInterval }
+        return hasVisibleConsumer ? Self.defaultPollInterval : Self.backgroundPollInterval
+    }
+
+    nonisolated private static func processProbeMinIntervalSeconds(registryHasPresences: Bool,
+                                                                   hasVisibleConsumer: Bool,
+                                                                   appIsActive: Bool) -> TimeInterval {
+        if registryHasPresences {
+            return appIsActive
+                ? Self.processProbeMinIntervalRegistryPresentForeground
+                : Self.processProbeMinIntervalRegistryPresentBackground
+        }
+        if appIsActive {
+            return hasVisibleConsumer
+                ? Self.processProbeMinIntervalRegistryEmptyForeground
+                : Self.processProbeMinIntervalRegistryEmptyBackground
+        }
+        return Self.processProbeMinIntervalRegistryEmptyBackground
     }
 
     nonisolated static func makeDecoder() -> JSONDecoder {

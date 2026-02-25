@@ -14,6 +14,9 @@ All notable changes to this project will be documented in this file.
 - Cockpit/Sessions (Unified): Active Codex sessions are now joined by Codex internal `session_id` when log-path metadata is unavailable, restoring active indicators and Focus-in-iTerm2 availability.
 - Sessions (Unified): `Active-only` filtering now immediately applies during in-flight searches and re-seats selection when the previously selected row drops out of the filtered list.
 - Sessions (Unified): Agent toolbar filter pills now show a clear enabled/disabled state in monochrome mode.
+- Sessions (Codex active indicators): Active-session path normalization now uses cached canonical (symlink-aware) paths so equivalent roots (for example `/var/...` and `/private/var/...`) still join correctly, process fallback probing now shifts to slower completeness sweeps when registry data is already present, and background polling/probing now backs off while the app is inactive.
+- Sessions (Codex active indicators): Active-session polling visibility now tracks Unified/Cockpit consumers per window instance, so closing one of multiple open windows no longer drops refresh cadence for the windows that remain visible.
+- Sessions (Codex active indicators): Re-enabling active-session detection now preserves existing visible-window consumer registrations, so polling/probing immediately returns to foreground cadence without requiring window reopen.
 
 ### Changed
 - Preferences (Unified Window): Reordered sections so `Columns` and `Filters` appear before `Rich Transcript`.

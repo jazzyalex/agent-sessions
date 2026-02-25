@@ -111,4 +111,32 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out[66606]?.termProgram, "iTerm.app")
         XCTAssertEqual(out[66606]?.itermSessionId, "w0t0p0:ABCDEF")
     }
+
+    func testNormalizePath_trimsAndStandardizesPath() {
+        let path = "  ~/tmp/./sessions/../rollout.jsonl  "
+        let normalized = CodexActiveSessionsModel.normalizePath(path)
+        let expected = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("tmp/rollout.jsonl")
+            .standardizedFileURL
+            .path
+        XCTAssertEqual(normalized, expected)
+
+        // Second call should return the same normalized value.
+        XCTAssertEqual(CodexActiveSessionsModel.normalizePath(path), expected)
+    }
+
+    func testNormalizePath_resolvesKnownSymlinkedRoots() throws {
+        let symlinkedPath = "/var/tmp"
+        let lexical = URL(fileURLWithPath: symlinkedPath, isDirectory: true).standardized.path
+        let canonical = URL(fileURLWithPath: symlinkedPath, isDirectory: true).standardizedFileURL.path
+        guard lexical != canonical else {
+            throw XCTSkip("No symlink canonicalization difference for /var/tmp on this runtime.")
+        }
+        XCTAssertEqual(CodexActiveSessionsModel.normalizePath(symlinkedPath), canonical)
+    }
+
+    func testNormalizePath_emptyInputReturnsEmptyString() {
+        XCTAssertEqual(CodexActiveSessionsModel.normalizePath(""), "")
+        XCTAssertEqual(CodexActiveSessionsModel.normalizePath("   \n\t "), "")
+    }
 }
