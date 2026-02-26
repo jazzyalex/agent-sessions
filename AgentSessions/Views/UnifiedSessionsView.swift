@@ -13,6 +13,40 @@ enum UnifiedTableSelectionPolicy {
     }
 }
 
+enum UnifiedRowsStabilityPolicy {
+    static func shouldHoldRowsDuringRunningSearch(
+        isSearchRunning: Bool,
+        nextRowsEmpty: Bool,
+        showActiveSessionsOnly: Bool,
+        cachedRowsEmpty: Bool
+    ) -> Bool {
+        guard isSearchRunning else { return false }
+        guard nextRowsEmpty else { return false }
+        guard !showActiveSessionsOnly else { return false }
+        guard !cachedRowsEmpty else { return false }
+        return true
+    }
+
+    static func shouldHoldRowsDuringTransientEmptyRefresh(
+        query: String,
+        isSearchRunning: Bool,
+        isDatasetChurning: Bool,
+        isIndexing: Bool,
+        nextRowsEmpty: Bool,
+        showActiveSessionsOnly: Bool,
+        cachedRowsEmpty: Bool,
+        hasSelection: Bool
+    ) -> Bool {
+        guard query.isEmpty else { return false }
+        guard !isSearchRunning else { return false }
+        guard nextRowsEmpty else { return false }
+        guard !showActiveSessionsOnly else { return false }
+        guard !cachedRowsEmpty else { return false }
+        guard hasSelection else { return false }
+        return isDatasetChurning || isIndexing
+    }
+}
+
 private extension Notification.Name {
     static let collapseInlineSearchIfEmpty = Notification.Name("UnifiedSessionsCollapseInlineSearchIfEmpty")
 }
@@ -783,6 +817,11 @@ struct UnifiedSessionsView: View {
 					updateFocusedSessionIfNeeded(selectedSession)
 					DispatchQueue.main.async {
 						isDatasetChurning = false
+						// Reconcile once churn flag drops so true empty transitions clear stale held rows.
+						updateCachedRows()
+						ensureDefaultSelectionIfNeeded()
+						refreshSelectionSourceFromCachedRows()
+						updateFocusedSessionIfNeeded(selectedSession)
 						selectionTrace("sessions changed end selection=\(selection ?? "nil") cachedRows=\(cachedRows.count)")
 					}
 				}
@@ -1364,16 +1403,26 @@ struct UnifiedSessionsView: View {
         }
 
         let query = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let shouldHoldRowsDuringRunningSearch =
-            !query.isEmpty
-            && searchCoordinator.isRunning
-            && nextRows.isEmpty
-            && !showActiveSessionsOnly
-            && !cachedRows.isEmpty
+        let shouldHoldRowsDuringRunningSearch = UnifiedRowsStabilityPolicy.shouldHoldRowsDuringRunningSearch(
+            isSearchRunning: searchCoordinator.isRunning,
+            nextRowsEmpty: nextRows.isEmpty,
+            showActiveSessionsOnly: showActiveSessionsOnly,
+            cachedRowsEmpty: cachedRows.isEmpty
+        )
+        let shouldHoldRowsDuringTransientEmptyRefresh = UnifiedRowsStabilityPolicy.shouldHoldRowsDuringTransientEmptyRefresh(
+            query: query,
+            isSearchRunning: searchCoordinator.isRunning,
+            isDatasetChurning: isDatasetChurning,
+            isIndexing: unified.isIndexing,
+            nextRowsEmpty: nextRows.isEmpty,
+            showActiveSessionsOnly: showActiveSessionsOnly,
+            cachedRowsEmpty: cachedRows.isEmpty,
+            hasSelection: selection != nil
+        )
 
-	        if !shouldHoldRowsDuringRunningSearch {
-	            cachedRows = nextRows
-	        }
+        if !(shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh) {
+            cachedRows = nextRows
+        }
 
         if let selectedID = selection,
            !cachedRows.contains(where: { $0.id == selectedID }) {

@@ -85,6 +85,75 @@ final class UnifiedTableSelectionPolicyTests: XCTestCase {
     }
 }
 
+final class UnifiedRowsStabilityPolicyTests: XCTestCase {
+    func testHoldsRowsDuringRunningSearchWhenResultsTransientlyEmpty() {
+        XCTAssertTrue(
+            UnifiedRowsStabilityPolicy.shouldHoldRowsDuringRunningSearch(
+                isSearchRunning: true,
+                nextRowsEmpty: true,
+                showActiveSessionsOnly: false,
+                cachedRowsEmpty: false
+            )
+        )
+    }
+
+    func testDoesNotHoldRowsDuringRunningSearchWhenCacheIsEmpty() {
+        XCTAssertFalse(
+            UnifiedRowsStabilityPolicy.shouldHoldRowsDuringRunningSearch(
+                isSearchRunning: true,
+                nextRowsEmpty: true,
+                showActiveSessionsOnly: false,
+                cachedRowsEmpty: true
+            )
+        )
+    }
+
+    func testHoldsRowsDuringTransientBusyRefreshWhenSelectionExists() {
+        XCTAssertTrue(
+            UnifiedRowsStabilityPolicy.shouldHoldRowsDuringTransientEmptyRefresh(
+                query: "",
+                isSearchRunning: false,
+                isDatasetChurning: true,
+                isIndexing: false,
+                nextRowsEmpty: true,
+                showActiveSessionsOnly: false,
+                cachedRowsEmpty: false,
+                hasSelection: true
+            )
+        )
+    }
+
+    func testHoldsRowsDuringIndexingWhenSelectionExists() {
+        XCTAssertTrue(
+            UnifiedRowsStabilityPolicy.shouldHoldRowsDuringTransientEmptyRefresh(
+                query: "",
+                isSearchRunning: false,
+                isDatasetChurning: false,
+                isIndexing: true,
+                nextRowsEmpty: true,
+                showActiveSessionsOnly: false,
+                cachedRowsEmpty: false,
+                hasSelection: true
+            )
+        )
+    }
+
+    func testDoesNotHoldRowsForStableTrueEmptyDataset() {
+        XCTAssertFalse(
+            UnifiedRowsStabilityPolicy.shouldHoldRowsDuringTransientEmptyRefresh(
+                query: "",
+                isSearchRunning: false,
+                isDatasetChurning: false,
+                isIndexing: false,
+                nextRowsEmpty: true,
+                showActiveSessionsOnly: false,
+                cachedRowsEmpty: false,
+                hasSelection: true
+            )
+        )
+    }
+}
+
 final class TranscriptSessionRenderKeyTests: XCTestCase {
     func testRenderKeyChangesWhenEventCountChanges() {
         let base = makeSession(eventCount: 10, events: [makeEvent(id: "e1")], isFavorite: false)
