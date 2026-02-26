@@ -306,7 +306,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                         repoName: nil,
                         lightweightTitle: session.lightweightTitle ?? existing.lightweightTitle,
                         lightweightCommands: session.lightweightCommands ?? existing.lightweightCommands,
-                        isHousekeeping: existing.isHousekeeping
+                        isHousekeeping: existing.isHousekeeping,
+                        codexInternalSessionIDHint: session.codexInternalSessionIDHint ?? existing.codexInternalSessionIDHint
                     )
                     mergedByPath[session.filePath] = merged
                 } else {
@@ -534,7 +535,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 cwd: current.lightweightCwd,
                 repoName: nil,
                 lightweightTitle: newTitle,
-                lightweightCommands: current.lightweightCommands
+                lightweightCommands: current.lightweightCommands,
+                codexInternalSessionIDHint: current.codexInternalSessionIDHint
             )
 
             do {
@@ -698,7 +700,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                     cwd: current.lightweightCwd ?? fullSession.cwd,
                     repoName: current.repoName,
                     lightweightTitle: current.lightweightTitle ?? fullSession.lightweightTitle,
-                    lightweightCommands: current.lightweightCommands
+                    lightweightCommands: current.lightweightCommands,
+                    codexInternalSessionIDHint: fullSession.codexInternalSessionIDHint ?? current.codexInternalSessionIDHint
                 )
                 self.allSessions[idx] = merged
 

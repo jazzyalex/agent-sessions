@@ -131,6 +131,182 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out[66606]?.itermSessionId, "w0t0p0:ABCDEF")
     }
 
+    func testParsePSCommandListOutput_parsesPIDTTYAndCommand() {
+        let text = """
+         4880 ttys013  claude
+        46371 ??       /Applications/Claude.app/Contents/MacOS/Claude
+         1707 ttys006  node /Users/alexm/.npm-global/bin/codex --yolo
+        """
+
+        let out = CodexActiveSessionsModel.parsePSCommandListOutput(text)
+        XCTAssertEqual(out.count, 3)
+        XCTAssertEqual(out[0].pid, 4880)
+        XCTAssertEqual(out[0].tty, "ttys013")
+        XCTAssertEqual(out[0].command, "claude")
+        XCTAssertEqual(out[1].pid, 46371)
+        XCTAssertNil(out[1].tty)
+        XCTAssertEqual(out[2].pid, 1707)
+        XCTAssertEqual(out[2].tty, "ttys006")
+        XCTAssertEqual(out[2].command, "node /Users/alexm/.npm-global/bin/codex --yolo")
+    }
+
+    func testCommandContainsNeedle_matchesExecutableTokensOnly() {
+        XCTAssertTrue(CodexActiveSessionsModel.commandContainsNeedle(
+            "node /Users/alexm/.local/bin/claude --verbose",
+            needles: ["claude"]
+        ))
+        XCTAssertTrue(CodexActiveSessionsModel.commandContainsNeedle(
+            "opencode --project .",
+            needles: ["opencode"]
+        ))
+        XCTAssertFalse(CodexActiveSessionsModel.commandContainsNeedle(
+            "/Applications/Claude.app/Contents/MacOS/Claude",
+            needles: ["opencode"]
+        ))
+        XCTAssertFalse(CodexActiveSessionsModel.commandContainsNeedle(
+            "python -m http.server",
+            needles: ["claude"]
+        ))
+        XCTAssertFalse(CodexActiveSessionsModel.commandContainsNeedle(
+            "vim opencode",
+            needles: ["opencode"]
+        ))
+        XCTAssertFalse(CodexActiveSessionsModel.commandContainsNeedle(
+            "zsh -lc \"vim claude_notes.md\"",
+            needles: ["claude"]
+        ))
+        XCTAssertTrue(CodexActiveSessionsModel.commandContainsNeedle(
+            "zsh -lc \"claude --resume 123\"",
+            needles: ["claude"]
+        ))
+        XCTAssertTrue(CodexActiveSessionsModel.commandContainsNeedle(
+            "env TERM_PROGRAM=iTerm.app /opt/homebrew/bin/opencode --continue",
+            needles: ["opencode"]
+        ))
+        XCTAssertTrue(CodexActiveSessionsModel.commandContainsNeedle(
+            "pnpm dlx opencode --continue",
+            needles: ["opencode"]
+        ))
+        XCTAssertTrue(CodexActiveSessionsModel.commandContainsNeedle(
+            "npm exec claude -- --resume abc",
+            needles: ["claude"]
+        ))
+        XCTAssertTrue(CodexActiveSessionsModel.commandContainsNeedle(
+            "yarn dlx opencode --project .",
+            needles: ["opencode"]
+        ))
+    }
+
+    func testUnifiedFallbackClaimedPresence_assignsByPresenceCountForSameWorkspaceSessions() {
+        let cwd = "/Users/alexm/Repository/Codex-History"
+        let now = Date()
+        let sessions = [
+            makeFallbackSession(id: "oldest", source: .claude, cwd: cwd, modifiedAt: now.addingTimeInterval(-120)),
+            makeFallbackSession(id: "older", source: .claude, cwd: cwd, modifiedAt: now.addingTimeInterval(-60)),
+            makeFallbackSession(id: "newest", source: .claude, cwd: cwd, modifiedAt: now)
+        ]
+        let fallbackPresences = [
+            makeFallbackPresence(source: .claude, lastSeenAt: now, workspaceRoot: cwd, tty: "/dev/ttys010", pid: 1010),
+            makeFallbackPresence(source: .claude, lastSeenAt: now.addingTimeInterval(-5), workspaceRoot: cwd, tty: "/dev/ttys011", pid: 1011)
+        ]
+
+        XCTAssertNotNil(UnifiedSessionsView.fallbackClaimedPresence(for: sessions[2], among: sessions, using: fallbackPresences))
+        XCTAssertNotNil(UnifiedSessionsView.fallbackClaimedPresence(for: sessions[1], among: sessions, using: fallbackPresences))
+        XCTAssertNil(UnifiedSessionsView.fallbackClaimedPresence(for: sessions[0], among: sessions, using: fallbackPresences))
+    }
+
+    func testUnifiedFallbackClaimedPresence_supportsMultipleUnresolvedPresences() {
+        let now = Date()
+        let sessions = [
+            makeFallbackSession(id: "oldest", source: .opencode, cwd: nil, modifiedAt: now.addingTimeInterval(-200)),
+            makeFallbackSession(id: "older", source: .opencode, cwd: nil, modifiedAt: now.addingTimeInterval(-100)),
+            makeFallbackSession(id: "newest", source: .opencode, cwd: nil, modifiedAt: now)
+        ]
+        let unresolved = [
+            makeFallbackPresence(source: .opencode, lastSeenAt: now, workspaceRoot: nil, tty: "/dev/ttys020", pid: 2020),
+            makeFallbackPresence(source: .opencode, lastSeenAt: now.addingTimeInterval(-10), workspaceRoot: nil, tty: "/dev/ttys021", pid: 2021)
+        ]
+
+        XCTAssertNotNil(UnifiedSessionsView.fallbackClaimedPresence(for: sessions[2], among: sessions, using: unresolved))
+        XCTAssertNotNil(UnifiedSessionsView.fallbackClaimedPresence(for: sessions[1], among: sessions, using: unresolved))
+        XCTAssertNil(UnifiedSessionsView.fallbackClaimedPresence(for: sessions[0], among: sessions, using: unresolved))
+    }
+
+    func testUnifiedFallbackEligibleSessions_excludesDirectJoinRowsFromRankMatching() {
+        let now = Date()
+        let direct = makeFallbackSession(id: "direct", source: .claude, cwd: nil, modifiedAt: now)
+        let unresolved = makeFallbackSession(id: "unresolved", source: .claude, cwd: nil, modifiedAt: now.addingTimeInterval(-60))
+        let sessions = [direct, unresolved]
+        let presence = makeFallbackPresence(
+            source: .claude,
+            lastSeenAt: now,
+            workspaceRoot: nil,
+            tty: "/dev/ttys022",
+            pid: 2022
+        )
+
+        XCTAssertNil(UnifiedSessionsView.fallbackClaimedPresence(for: unresolved, among: sessions, using: [presence]))
+
+        let eligible = UnifiedSessionsView.fallbackEligibleSessions(from: sessions) { session in
+            session.id == "direct"
+        }
+        XCTAssertEqual(eligible.map(\.id), ["unresolved"])
+        XCTAssertNotNil(UnifiedSessionsView.fallbackClaimedPresence(for: unresolved, among: eligible, using: [presence]))
+    }
+
+    func testParseLsofMachineOutput_matchesClaudeSessionFilesAndSkipsHistory() {
+        let root = "/Users/alexm/.claude"
+        let text = """
+        p777
+        fcwd
+        tDIR
+        n/Users/alexm/Repository/Codex-History
+        f0
+        tCHR
+        n/dev/ttys021
+        f31w
+        tREG
+        n/Users/alexm/.claude/history.jsonl
+        f32w
+        tREG
+        n/Users/alexm/.claude/projects/-Users-alexm-Repository-Codex-History/90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a.jsonl
+        """
+
+        let out = CodexActiveSessionsModel.parseLsofMachineOutput(text, sessionsRoots: [root], source: .claude)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[777]?.tty, "/dev/ttys021")
+        XCTAssertEqual(
+            out[777]?.sessionLogPath,
+            "/Users/alexm/.claude/projects/-Users-alexm-Repository-Codex-History/90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a.jsonl"
+        )
+        XCTAssertEqual(out[777]?.sessionID, "90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a")
+    }
+
+    func testParseLsofMachineOutput_extractsOpenCodeSessionIDFromSessionPath() {
+        let root = "/Users/alexm/.local/share/opencode/storage/session"
+        let text = """
+        p888
+        fcwd
+        tDIR
+        n/Users/alexm/Repository/Codex-History
+        f0
+        tCHR
+        n/dev/ttys031
+        f27w
+        tREG
+        n/Users/alexm/.local/share/opencode/storage/session/proj_test/ses_s_stage0_small.json
+        """
+
+        let out = CodexActiveSessionsModel.parseLsofMachineOutput(text, sessionsRoots: [root], source: .opencode)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[888]?.tty, "/dev/ttys031")
+        XCTAssertEqual(out[888]?.sessionID, "s_stage0_small")
+        XCTAssertEqual(
+            out[888]?.sessionLogPath,
+            "/Users/alexm/.local/share/opencode/storage/session/proj_test/ses_s_stage0_small.json"
+        )
+    }
+
     func testParseITermSessionListOutput_parsesSessionRows() {
         let text = """
         349331C2-4268-4AEB-BD48-83342A767CF2\t/dev/ttys006\tAS-CX II (codex)
@@ -155,6 +331,54 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("AS-CX II (codex)"))
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyCodexITermSessionName("-zsh"))
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyCodexITermSessionName("Codex-History"))
+    }
+
+    func testIsLikelyITermSessionName_matchesClaudeAndOpenCodeNames() {
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("Claude", source: .claude))
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("opencode", source: .opencode))
+        XCTAssertFalse(CodexActiveSessionsModel.isLikelyITermSessionName("zsh", source: .claude))
+        XCTAssertFalse(CodexActiveSessionsModel.isLikelyITermSessionName("workspace shell", source: .opencode))
+    }
+
+    func testLiveSessionIDCandidates_extractsClaudeRuntimeUUIDFromPath() {
+        let session = Session(
+            id: "hashed-path-id",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/alexm/.claude/projects/proj/90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: nil,
+            repoName: nil,
+            lightweightTitle: nil
+        )
+
+        let ids = CodexActiveSessionsModel.liveSessionIDCandidates(for: session)
+        XCTAssertEqual(ids, ["90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a"])
+    }
+
+    func testLiveSessionIDCandidates_prefersClaudeRuntimeHintOverPathHashID() {
+        let session = Session(
+            id: "hashed-path-id",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/alexm/.claude/projects/proj/90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: nil,
+            repoName: nil,
+            lightweightTitle: nil,
+            codexInternalSessionIDHint: "live-uuid-from-log"
+        )
+
+        let ids = CodexActiveSessionsModel.liveSessionIDCandidates(for: session)
+        XCTAssertEqual(ids.first, "live-uuid-from-log")
+        XCTAssertTrue(ids.contains("90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a"))
+        XCTAssertFalse(ids.contains("hashed-path-id"))
     }
 
     func testNormalizePath_trimsAndStandardizesPath() {
@@ -377,5 +601,38 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             ),
             .openIdle
         )
+    }
+
+    private func makeFallbackSession(id: String,
+                                     source: SessionSource,
+                                     cwd: String?,
+                                     modifiedAt: Date) -> Session {
+        Session(
+            id: id,
+            source: source,
+            startTime: modifiedAt.addingTimeInterval(-10),
+            endTime: modifiedAt,
+            model: nil,
+            filePath: "/tmp/\(id).jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: cwd,
+            repoName: nil,
+            lightweightTitle: nil
+        )
+    }
+
+    private func makeFallbackPresence(source: SessionSource,
+                                      lastSeenAt: Date,
+                                      workspaceRoot: String?,
+                                      tty: String?,
+                                      pid: Int?) -> CodexActivePresence {
+        var p = CodexActivePresence()
+        p.source = source
+        p.lastSeenAt = lastSeenAt
+        p.workspaceRoot = workspaceRoot
+        p.tty = tty
+        p.pid = pid
+        return p
     }
 }
