@@ -59,9 +59,12 @@ struct CockpitView: View {
             sessionsByLogPath[CodexActiveSessionsModel.normalizePath(s.filePath)] = s
         }
 
-        let mapped: [Row] = activeCodex.presences.map { p in
+        let mapped: [Row] = activeCodex.presences.compactMap { p in
             let logNorm = p.sessionLogPath.map(CodexActiveSessionsModel.normalizePath)
             let session = logNorm.flatMap { sessionsByLogPath[$0] } ?? resolveBySessionID(p.sessionId)
+            if shouldHideUnresolvedPresencePlaceholder(p, resolvedSession: session) {
+                return nil
+            }
 
             let title = session?.title
                 ?? p.sessionId.map { "Session \($0.prefix(8))" }
@@ -315,6 +318,21 @@ struct CockpitView: View {
             tty: row.tty,
             termProgram: row.termProgram
         ) || row.focusURL != nil
+    }
+
+    private func shouldHideUnresolvedPresencePlaceholder(_ presence: CodexActivePresence,
+                                                         resolvedSession: Session?) -> Bool {
+        // Keep unresolved fallback presences when they carry concrete fallback identity signals
+        // (for example tty/pid/source/workspace). Hide only low-confidence placeholders.
+        guard resolvedSession == nil else { return false }
+        let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        if hasSessionID || hasLogPath { return false }
+        let hasTTY = presence.tty?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasSourcePath = presence.sourceFilePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasWorkspaceRoot = presence.workspaceRoot?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasPID = presence.pid != nil
+        return !hasTTY && !hasSourcePath && !hasWorkspaceRoot && !hasPID
     }
 
     private func parseRolloutTimestamp(from path: String?) -> Date? {
