@@ -197,6 +197,11 @@ final class SessionIndexer: ObservableObject {
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
     private var refreshToken = UUID()
     private var lastKnownFileStatsByPath: [String: SessionFileStat] = [:]
+    private var codexInternalIDBackfillTask: Task<Void, Never>? = nil
+    private static let codexInternalIDBackfillCursorKey = "CodexInternalIDBackfillCursor"
+    private static let codexInternalIDBackfillLastRunAtKey = "CodexInternalIDBackfillLastRunAt"
+    private static let codexInternalIDBackfillBatchSize = 50
+    private static let codexInternalIDBackfillMinInterval: TimeInterval = 15
 
     init(columnVisibility: ColumnVisibilityStore = ColumnVisibilityStore()) {
         self.columnVisibility = columnVisibility
@@ -643,10 +648,6 @@ final class SessionIndexer: ObservableObject {
 	                }
 	            }
 
-	            if !indexed.isEmpty {
-	                indexed = await Self.backfillCodexInternalSessionIDsHint(in: indexed, limit: 60)
-	            }
-
 	            await self.seedKnownFileStatsIfNeeded()
 
             // Even if we have indexed sessions, scan for NEW/CHANGED files and parse them.
@@ -658,6 +659,7 @@ final class SessionIndexer: ObservableObject {
                 await MainActor.run {
                     guard self.refreshToken == token else { return }
                     self.allSessions = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: existingSessions, source: .codex)
+                    self.scheduleCodexInternalSessionIDBackfillIfNeeded(in: self.allSessions)
                     self.totalFiles = existingSessions.count
                     self.filesProcessed = existingSessions.count
                     self.isIndexing = false
@@ -808,7 +810,34 @@ final class SessionIndexer: ObservableObject {
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 LaunchProfiler.log("Codex.refresh: sessions merged (total=\(mergedWithArchives.count))")
+
+                // Preserve in-memory backfilled codex internal IDs if this merged snapshot
+                // was assembled from an older session snapshot.
+                var priorCodexHintsByID: [String: String] = [:]
+                priorCodexHintsByID.reserveCapacity(self.allSessions.count)
+                for session in self.allSessions {
+                    guard session.source == .codex,
+                          let hint = session.codexInternalSessionIDHint,
+                          !hint.isEmpty else { continue }
+                    priorCodexHintsByID[session.id] = hint
+                }
+
+                var missingHintUpdates: [String: String] = [:]
+                if !priorCodexHintsByID.isEmpty {
+                    missingHintUpdates.reserveCapacity(mergedWithArchives.count)
+                    for session in mergedWithArchives {
+                        guard session.source == .codex,
+                              (session.codexInternalSessionIDHint?.isEmpty ?? true),
+                              let hint = priorCodexHintsByID[session.id] else { continue }
+                        missingHintUpdates[session.id] = hint
+                    }
+                }
+
                 self.allSessions = mergedWithArchives
+                if !missingHintUpdates.isEmpty {
+                    self.applyCodexInternalSessionIDHintUpdates(missingHintUpdates)
+                }
+                self.scheduleCodexInternalSessionIDBackfillIfNeeded(in: self.allSessions)
                 self.isIndexing = false
                 let lightCount = changedSessions.filter { $0.events.isEmpty }.count
                 let heavyCount = changedSessions.count - lightCount
@@ -906,6 +935,8 @@ final class SessionIndexer: ObservableObject {
         refreshToken = UUID()
         refreshTask?.cancel()
         refreshTask = nil
+        codexInternalIDBackfillTask?.cancel()
+        codexInternalIDBackfillTask = nil
         transcriptPrewarmTask?.cancel()
         transcriptPrewarmTask = nil
         isIndexing = false
@@ -971,64 +1002,122 @@ final class SessionIndexer: ObservableObject {
 	        return list.sorted { $0.modifiedAt > $1.modifiedAt }
 	    }
 
-	    /// Best-effort backfill for installs that predate `session_meta.codex_internal_session_id`.
-	    /// Keep the scan bounded (recent sessions only) so DB hydration stays fast.
-	    private static func backfillCodexInternalSessionIDsHint(in sessions: [Session], limit: Int) async -> [Session] {
-	        let candidates = sessions.prefix(limit).filter {
-	            $0.source == .codex && $0.events.isEmpty && ($0.codexInternalSessionIDHint?.isEmpty ?? true)
-	        }
-	        guard !candidates.isEmpty else { return sessions }
+    /// Incremental hint backfill for installs that predate `session_meta.codex_internal_session_id`.
+    /// Runs in small rotating batches so launch/refresh stays responsive while coverage converges.
+    @MainActor
+    private func scheduleCodexInternalSessionIDBackfillIfNeeded(in sessions: [Session]) {
+        guard !sessions.isEmpty else { return }
+        if let task = codexInternalIDBackfillTask, !task.isCancelled { return }
 
-	        var updatesByID: [String: String] = [:]
-	        updatesByID.reserveCapacity(candidates.count)
+        let defaults = UserDefaults.standard
+        let now = Date()
+        if let lastRun = defaults.object(forKey: Self.codexInternalIDBackfillLastRunAtKey) as? Date,
+           now.timeIntervalSince(lastRun) < Self.codexInternalIDBackfillMinInterval {
+            return
+        }
 
-	        for s in candidates {
-	            let attrs = (try? FileManager.default.attributesOfItem(atPath: s.filePath)) ?? [:]
-	            let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
-	            let mtime = (attrs[.modificationDate] as? Date) ?? Date()
-	            let url = URL(fileURLWithPath: s.filePath)
-	            guard let parsed = Self.lightweightSession(from: url, size: size, mtime: mtime),
-	                  let internalID = parsed.codexInternalSessionID,
-	                  !internalID.isEmpty else { continue }
-	            updatesByID[s.id] = internalID
-	        }
+        let missing = sessions.filter {
+            $0.source == .codex && $0.events.isEmpty && ($0.codexInternalSessionIDHint?.isEmpty ?? true)
+        }
+        guard !missing.isEmpty else {
+            defaults.set(0, forKey: Self.codexInternalIDBackfillCursorKey)
+            defaults.removeObject(forKey: Self.codexInternalIDBackfillLastRunAtKey)
+            return
+        }
 
-	        guard !updatesByID.isEmpty else { return sessions }
+        let startIndex = max(0, defaults.integer(forKey: Self.codexInternalIDBackfillCursorKey))
+        let selection = Self.selectCodexInternalIDBackfillBatch(from: missing,
+                                                                startIndex: startIndex,
+                                                                batchSize: Self.codexInternalIDBackfillBatchSize)
+        guard !selection.sessions.isEmpty else { return }
+        defaults.set(selection.nextIndex, forKey: Self.codexInternalIDBackfillCursorKey)
+        defaults.set(now, forKey: Self.codexInternalIDBackfillLastRunAtKey)
 
-	        if let db = try? IndexDB() {
-	            for (sessionID, internalID) in updatesByID {
-	                try? await db.updateSessionMetaCodexInternalSessionID(
-	                    sessionID: sessionID,
-	                    source: SessionSource.codex.rawValue,
-	                    codexInternalSessionID: internalID
-	                )
-	            }
-	        }
+        let batch = selection.sessions
+        codexInternalIDBackfillTask = Task.detached(priority: .utility) { [weak self] in
+            let updatesByID = Self.computeCodexInternalSessionIDHintUpdates(for: batch)
+            if !updatesByID.isEmpty, let db = try? IndexDB() {
+                for (sessionID, internalID) in updatesByID {
+                    try? await db.updateSessionMetaCodexInternalSessionID(
+                        sessionID: sessionID,
+                        source: SessionSource.codex.rawValue,
+                        codexInternalSessionID: internalID
+                    )
+                }
+            }
 
-	        return sessions.map { s in
-	            guard let internalID = updatesByID[s.id] else { return s }
-	            let rebuilt = Session(
-	                id: s.id,
-	                source: s.source,
-	                startTime: s.startTime,
-	                endTime: s.endTime,
-	                model: s.model,
-	                filePath: s.filePath,
-	                fileSizeBytes: s.fileSizeBytes,
-	                eventCount: s.eventCount,
-	                events: s.events,
-	                cwd: s.lightweightCwd,
-	                repoName: nil,
-	                lightweightTitle: s.lightweightTitle,
-	                lightweightCommands: s.lightweightCommands,
-	                isHousekeeping: s.isHousekeeping,
-	                codexInternalSessionIDHint: internalID
-	            )
-	            var out = rebuilt
-	            out.isFavorite = s.isFavorite
-	            return out
-	        }
-	    }
+            let model = self
+            await MainActor.run {
+                guard let model else { return }
+                if !updatesByID.isEmpty {
+                    model.applyCodexInternalSessionIDHintUpdates(updatesByID)
+                }
+                model.codexInternalIDBackfillTask = nil
+            }
+        }
+    }
+
+    private static func selectCodexInternalIDBackfillBatch(from missing: [Session],
+                                                           startIndex: Int,
+                                                           batchSize: Int) -> (sessions: [Session], nextIndex: Int) {
+        guard !missing.isEmpty, batchSize > 0 else { return ([], 0) }
+        let safeStart = min(startIndex, max(0, missing.count - 1))
+        let count = min(batchSize, missing.count)
+        var selected: [Session] = []
+        selected.reserveCapacity(count)
+        for offset in 0..<count {
+            let idx = (safeStart + offset) % missing.count
+            selected.append(missing[idx])
+        }
+        let nextIndex = (safeStart + count) % missing.count
+        return (selected, nextIndex)
+    }
+
+    private static func computeCodexInternalSessionIDHintUpdates(for sessions: [Session]) -> [String: String] {
+        guard !sessions.isEmpty else { return [:] }
+        var updatesByID: [String: String] = [:]
+        updatesByID.reserveCapacity(sessions.count)
+
+        for session in sessions {
+            let attrs = (try? FileManager.default.attributesOfItem(atPath: session.filePath)) ?? [:]
+            let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
+            let mtime = (attrs[.modificationDate] as? Date) ?? Date()
+            let url = URL(fileURLWithPath: session.filePath)
+            guard let parsed = Self.lightweightSession(from: url, size: size, mtime: mtime),
+                  let internalID = parsed.codexInternalSessionIDHint ?? parsed.codexInternalSessionID,
+                  !internalID.isEmpty else { continue }
+            updatesByID[session.id] = internalID
+        }
+        return updatesByID
+    }
+
+    @MainActor
+    private func applyCodexInternalSessionIDHintUpdates(_ updatesByID: [String: String]) {
+        guard !updatesByID.isEmpty else { return }
+        allSessions = allSessions.map { session in
+            guard let internalID = updatesByID[session.id] else { return session }
+            let rebuilt = Session(
+                id: session.id,
+                source: session.source,
+                startTime: session.startTime,
+                endTime: session.endTime,
+                model: session.model,
+                filePath: session.filePath,
+                fileSizeBytes: session.fileSizeBytes,
+                eventCount: session.eventCount,
+                events: session.events,
+                cwd: session.lightweightCwd,
+                repoName: nil,
+                lightweightTitle: session.lightweightTitle,
+                lightweightCommands: session.lightweightCommands,
+                isHousekeeping: session.isHousekeeping,
+                codexInternalSessionIDHint: internalID
+            )
+            var enriched = rebuilt
+            enriched.isFavorite = session.isFavorite
+            return enriched
+        }
+    }
 
 	    // MARK: - Parsing
 

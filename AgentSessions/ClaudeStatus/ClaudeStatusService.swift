@@ -90,6 +90,8 @@ actor ClaudeStatusService {
     private static let probeSessionName = "usage"
     private static let probeLabelPrefix = "as-cc-"
     private static let probeLabelLength = 12
+    private static let tmuxCleanupMaxLabelsPerPass = 25
+    private static let tmuxCleanupFollowUpDelayNanoseconds: UInt64 = 2_000_000_000
     private static let defaultScriptBootTimeoutSeconds = 10
     private static let scriptRuntimeBufferSeconds = 18
     private static let minimumScriptRuntimeTimeoutSeconds = 30
@@ -127,6 +129,9 @@ actor ClaudeStatusService {
     private let batteryRecheckIntervalNanoseconds: UInt64 = 30 * 60 * 1_000_000_000
     private var didRunOrphanCleanup: Bool = false
     private var didRunMenuBarOrphanCleanup: Bool = false
+    private var tmuxCleanupInProgress: Bool = false
+    private var tmuxCleanupFollowUpTask: Task<Void, Never>?
+    private var tmuxCleanupResumeAfterLabel: String?
 
     init(updateHandler: @escaping @Sendable (ClaudeUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (ClaudeServiceAvailability) -> Void) {
@@ -543,11 +548,17 @@ actor ClaudeStatusService {
             }
         }
         labels.formUnion(scanTmuxLabels(prefix: Self.probeLabelPrefix))
-        for label in labels {
-            if await tmuxServerLooksLikeProbe(label: label,
-                                              session: Self.probeSessionName,
-                                              expectedCommandToken: "claude") {
-                await cleanupTmuxProbe(label: label, session: Self.probeSessionName)
+        if tmuxCleanupInProgress {
+            scheduleDeferredTmuxCleanupPass()
+        } else {
+            tmuxCleanupInProgress = true
+            let hasMoreLabels = await cleanupTmuxLabels(labels)
+            tmuxCleanupInProgress = false
+            if hasMoreLabels {
+                scheduleDeferredTmuxCleanupPass()
+            } else {
+                tmuxCleanupFollowUpTask?.cancel()
+                tmuxCleanupFollowUpTask = nil
             }
         }
         for pid in pids {
@@ -556,13 +567,17 @@ actor ClaudeStatusService {
     }
 
     private func cleanupOrphanedTmuxLabels() async {
+        guard !tmuxCleanupInProgress else { return }
+        tmuxCleanupInProgress = true
+        defer { tmuxCleanupInProgress = false }
+
         let labels = scanTmuxLabels(prefix: Self.probeLabelPrefix)
-        for label in labels {
-            if await tmuxServerLooksLikeProbe(label: label,
-                                              session: Self.probeSessionName,
-                                              expectedCommandToken: "claude") {
-                await cleanupTmuxProbe(label: label, session: Self.probeSessionName)
-            }
+        let hasMoreLabels = await cleanupTmuxLabels(labels)
+        if hasMoreLabels {
+            scheduleDeferredTmuxCleanupPass()
+        } else {
+            tmuxCleanupFollowUpTask?.cancel()
+            tmuxCleanupFollowUpTask = nil
         }
     }
 
@@ -573,8 +588,55 @@ actor ClaudeStatusService {
         let value = String(after[..<end])
         let socketPath = value.split(separator: ",", maxSplits: 1, omittingEmptySubsequences: false).first
         guard let socketPath else { return nil }
-        let label = URL(fileURLWithPath: String(socketPath)).lastPathComponent
+        let label = (String(socketPath) as NSString).lastPathComponent
         return label.hasPrefix(expectedPrefix) ? label : nil
+    }
+
+    private func cleanupTmuxLabels(_ labels: Set<String>) async -> Bool {
+        guard !labels.isEmpty else {
+            tmuxCleanupResumeAfterLabel = nil
+            return false
+        }
+        let activeLabelAtStart = activeProbeLabel
+        let sortedLabels = labels.filter { $0 != activeLabelAtStart }.sorted()
+        guard !sortedLabels.isEmpty else {
+            tmuxCleanupResumeAfterLabel = nil
+            return false
+        }
+        let startIndex: Int
+        if let resumeLabel = tmuxCleanupResumeAfterLabel,
+           let resumeIndex = sortedLabels.firstIndex(of: resumeLabel) {
+            let nextIndex = resumeIndex + 1
+            startIndex = nextIndex < sortedLabels.count ? nextIndex : 0
+        } else {
+            startIndex = 0
+        }
+        let endIndex = min(startIndex + Self.tmuxCleanupMaxLabelsPerPass, sortedLabels.count)
+        let batch = sortedLabels[startIndex..<endIndex]
+        for label in batch {
+            if label == activeProbeLabel { continue }
+            if await tmuxServerLooksLikeProbe(label: label,
+                                              session: Self.probeSessionName,
+                                              expectedCommandToken: "claude") {
+                if label == activeProbeLabel { continue }
+                await cleanupTmuxProbe(label: label, session: Self.probeSessionName)
+            }
+        }
+        let hasMore = endIndex < sortedLabels.count
+        if hasMore {
+            tmuxCleanupResumeAfterLabel = batch.last
+        } else {
+            tmuxCleanupResumeAfterLabel = nil
+        }
+        return hasMore
+    }
+
+    private func scheduleDeferredTmuxCleanupPass() {
+        tmuxCleanupFollowUpTask?.cancel()
+        tmuxCleanupFollowUpTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.tmuxCleanupFollowUpDelayNanoseconds)
+            await self?.cleanupOrphanedTmuxLabels()
+        }
     }
 
     private func workDirMarkers(_ workDir: String) -> [String] {
