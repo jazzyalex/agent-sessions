@@ -20,6 +20,8 @@ All notable changes to this project will be documented in this file.
 - Sessions (Codex active indicators): Active-session polling visibility now tracks Unified/Cockpit consumers per window instance, so closing one of multiple open windows no longer drops refresh cadence for the windows that remain visible.
 - Sessions (Codex active indicators): Re-enabling active-session detection now preserves existing visible-window consumer registrations, so polling/probing immediately returns to foreground cadence without requiring window reopen.
 - Sessions (Codex active indicators): Active lookups now avoid event-derived session-id fallback on row render paths, codex internal-id hint backfill now progresses in rotating background batches (instead of a fixed small cap), and active-only list rendering skips redundant per-row active checks.
+- Sessions (Codex active indicators): iTerm tail classification now ignores stale historical `Worked for` output and only treats near-tail live markers as active; transient iTerm tail-capture failures now default to `open` instead of promoting sessions to false-active via mtime fallback.
+- Sessions (Codex active indicators): Cockpit/Unified now reconcile tty-only iTerm fallback presences with existing keyed presences by TTY before publishing rows, preventing duplicate live-session rows in mixed registry/process + iTerm discovery flows.
 - Claude usage probe cleanup: orphaned `as-cc-*` tmux label cleanup is now processed in bounded batches with delayed follow-up passes to avoid large single-pass CPU spikes, and cleanup now excludes the currently active probe label.
 
 ### Changed
