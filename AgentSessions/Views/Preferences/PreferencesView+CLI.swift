@@ -164,9 +164,9 @@ extension PreferencesView {
 
                 sectionHeader("Active Sessions")
                 VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Enable active session detection (Cockpit)", isOn: $codexActiveSessionsEnabled)
+                    Toggle("Enable live session detection (Cockpit)", isOn: $codexActiveSessionsEnabled)
                         .toggleStyle(.switch)
-                        .help("Mark live Codex sessions as ACTIVE and enable focusing existing iTerm2 tabs from Cockpit and session lists.")
+                        .help("Mark live Codex, Claude, and OpenCode sessions as active/open and enable focusing iTerm2 tabs from Cockpit and session lists.")
 
                     HStack(spacing: 12) {
                         TextField("Active registry directory (optional)", text: $codexActiveRegistryRootOverride)

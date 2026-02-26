@@ -258,7 +258,11 @@ struct AgentSessionsApp: App {
         }
 
         WindowGroup("Cockpit", id: "Cockpit") {
-            CockpitView(codexIndexer: indexer)
+            CockpitView(
+                codexIndexer: indexer,
+                claudeIndexer: claudeIndexer,
+                opencodeIndexer: opencodeIndexer
+            )
                 .environmentObject(activeCodexSessions)
                 .background(WindowAutosave(name: "CockpitWindow"))
         }

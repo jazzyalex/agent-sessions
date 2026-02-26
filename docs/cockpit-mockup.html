@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cockpit — UI Mockup</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #2a2a2e;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    color: #e8e8ed;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 32px;
+    gap: 64px;
+    min-height: 100vh;
+  }
+
+  h2 {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #636366;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  /* ─── FULL WINDOW ─────────────────────────────────────────────────────────── */
+
+  .window {
+    width: 900px;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.1),
+      0 32px 80px rgba(0,0,0,0.7),
+      0 8px 24px rgba(0,0,0,0.5);
+    background: #1c1c1e;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Title bar */
+  .titlebar {
+    background: #2c2c2e;
+    border-bottom: 0.5px solid rgba(255,255,255,0.08);
+    padding: 0 12px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-shrink: 0;
+  }
+
+  .traffic-lights {
+    display: flex;
+    gap: 7px;
+    margin-right: 16px;
+    flex-shrink: 0;
+  }
+  .tl {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    cursor: default;
+  }
+  .tl.red    { background: #ff5f57; box-shadow: 0 0 0 0.5px rgba(0,0,0,0.2); }
+  .tl.yellow { background: #febc2e; box-shadow: 0 0 0 0.5px rgba(0,0,0,0.2); }
+  .tl.green  { background: #28c840; box-shadow: 0 0 0 0.5px rgba(0,0,0,0.2); }
+
+  .window-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e8e8ed;
+    flex: 1;
+    text-align: center;
+  }
+
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .search-field {
+    display: flex;
+    align-items: center;
+    background: rgba(255,255,255,0.07);
+    border: 0.5px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    padding: 4px 8px;
+    gap: 6px;
+    width: 180px;
+  }
+  .search-field .icon { font-size: 11px; color: #636366; }
+  .search-field input {
+    background: none; border: none; outline: none;
+    font-size: 12px; color: #e8e8ed; width: 100%;
+    font-family: inherit;
+  }
+  .search-field input::placeholder { color: #48484a; }
+
+  .tb-btn {
+    background: rgba(255,255,255,0.07);
+    border: 0.5px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: #aeaeb2;
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+  .tb-btn:hover { background: rgba(255,255,255,0.12); }
+  .tb-btn.pin-active {
+    background: rgba(10, 132, 255, 0.18);
+    border-color: rgba(10, 132, 255, 0.4);
+    color: #0a84ff;
+  }
+
+  /* Session list */
+  .session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 0;
+  }
+
+  /* Section header */
+  .section-header {
+    display: flex;
+    align-items: center;
+    padding: 6px 16px 4px;
+    gap: 8px;
+  }
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #48484a;
+  }
+  .section-count {
+    font-size: 10px;
+    font-weight: 600;
+    color: #3a3a3c;
+    background: #2c2c2e;
+    border-radius: 8px;
+    padding: 1px 6px;
+  }
+  .section-count.amber { color: #ff9f0a; background: rgba(255,159,10,0.12); }
+  .section-count.green { color: #30d158; background: rgba(48,209,88,0.1); }
+
+  /* Attention banner */
+  .attention-banner {
+    margin: 4px 12px 8px;
+    background: rgba(255, 159, 10, 0.08);
+    border: 0.5px solid rgba(255,159,10,0.25);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .attention-banner .session-row {
+    border-bottom: none;
+    background: transparent;
+  }
+
+  /* Session row */
+  .session-row {
+    display: grid;
+    grid-template-columns: 20px 1fr auto auto 68px;
+    align-items: center;
+    padding: 7px 16px;
+    gap: 10px;
+    border-bottom: 0.5px solid rgba(255,255,255,0.04);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .session-row:hover { background: rgba(255,255,255,0.04); }
+  .session-row:last-child { border-bottom: none; }
+  .session-row.selected { background: rgba(10,132,255,0.12); }
+
+  /* Status dot */
+  .dot-wrap { display: flex; align-items: center; justify-content: center; }
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot.active  { background: #30d158; animation: pulse 1.2s ease-in-out infinite; }
+  .dot.idle    { background: #48484a; }
+  .dot.waiting { background: #ff9f0a; }
+  .dot.error   { background: #ff453a; }
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(48,209,88,0.4); }
+    50%      { opacity: 0.85; transform: scale(1.25); box-shadow: 0 0 0 4px rgba(48,209,88,0); }
+  }
+
+  /* Session info */
+  .session-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .session-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .agent-badge {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    padding: 1px 5px; border-radius: 3px;
+    flex-shrink: 0;
+    font-family: "SF Mono", "Fira Code", monospace;
+  }
+  .badge-codex { background: rgba(94,92,230,0.2); color: #7c7af0; border: 0.5px solid rgba(94,92,230,0.3); }
+  .badge-claude { background: rgba(255,149,0,0.15); color: #ff9500; border: 0.5px solid rgba(255,149,0,0.25); }
+  .badge-term  { background: rgba(255,255,255,0.07); color: #636366; border: 0.5px solid rgba(255,255,255,0.1); }
+
+  .session-name { font-size: 13px; font-weight: 600; color: #e8e8ed; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-branch { font-size: 11px; color: #636366; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: "SF Mono", "Fira Code", monospace; }
+  .session-preview { font-size: 11.5px; color: #636366; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-preview.waiting-text { color: #ff9f0a; }
+  .session-preview.error-text   { color: #ff453a; }
+  .session-preview.done-text    { color: #30d158; }
+
+  /* Time */
+  .session-time { font-size: 11px; color: #3a3a3c; font-family: "SF Mono", "Fira Code", monospace; white-space: nowrap; text-align: right; }
+
+  /* Focus button */
+  .focus-btn {
+    font-size: 11px; font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 5px;
+    border: 0.5px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.06);
+    color: #aeaeb2;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.1s;
+    text-align: center;
+  }
+  .focus-btn:hover { background: rgba(255,255,255,0.12); color: #e8e8ed; }
+  .focus-btn.disabled { opacity: 0.3; cursor: default; }
+  .focus-btn.waiting-btn { border-color: rgba(255,159,10,0.4); color: #ff9f0a; background: rgba(255,159,10,0.1); }
+  .focus-btn.waiting-btn:hover { background: rgba(255,159,10,0.18); }
+
+  /* Completed row */
+  .session-row.completed .session-name { color: #48484a; }
+  .session-row.completed .session-preview { color: #3a3a3c; }
+  .checkmark { font-size: 11px; color: #30d158; opacity: 0.6; }
+  .cross { font-size: 11px; color: #ff453a; opacity: 0.6; }
+
+  /* Section divider */
+  .section-divider { height: 1px; background: rgba(255,255,255,0.04); margin: 6px 0; }
+
+  /* ─── FOOTER ──────────────────────────────────────────────────────────────── */
+  .footer {
+    height: 30px;
+    background: #1565a8;
+    border-top: 0.5px solid rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  .quota-pill {
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 3px 8px;
+  }
+  .quota-icon { font-size: 11px; }
+  .quota-bar-wrap {
+    width: 28px; height: 4px;
+    background: rgba(255,255,255,0.25);
+    border-radius: 2px; overflow: hidden;
+  }
+  .quota-bar { height: 100%; border-radius: 2px; background: #fff; }
+  .quota-bar.critical { background: #ff453a; }
+  .quota-text { font-size: 10.5px; font-weight: 500; color: rgba(255,255,255,0.85); font-family: "SF Mono", "Fira Code", monospace; white-space: nowrap; }
+
+  .footer-spacer { flex: 1; }
+  .footer-status { font-size: 10.5px; color: rgba(255,255,255,0.5); white-space: nowrap; }
+  .footer-status span { color: rgba(255,255,255,0.8); font-weight: 600; }
+
+  /* ─── ROW NUMBER BADGES (keyboard shortcuts) ─────────────────────────────── */
+  .row-num {
+    font-size: 9px; font-weight: 700;
+    color: #3a3a3c;
+    font-family: "SF Mono", "Fira Code", monospace;
+    text-align: center;
+    width: 12px;
+  }
+
+  /* ─── HUD WINDOW ─────────────────────────────────────────────────────────── */
+  .hud-section {
+    display: flex;
+    gap: 32px;
+    align-items: flex-start;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .hud-window {
+    width: 308px;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.12),
+      0 20px 60px rgba(0,0,0,0.8),
+      0 4px 16px rgba(0,0,0,0.5);
+    background: rgba(30,30,32,0.92);
+    backdrop-filter: blur(24px) saturate(1.4);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .hud-header {
+    display: flex;
+    align-items: center;
+    padding: 8px 10px;
+    background: rgba(44,44,46,0.8);
+    border-bottom: 0.5px solid rgba(255,255,255,0.06);
+    gap: 10px;
+    cursor: default;
+  }
+
+  .hud-counts {
+    display: flex; gap: 10px; flex: 1; align-items: center;
+  }
+  .hud-count {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600; color: #636366;
+  }
+  .hud-count.active { color: #30d158; }
+  .hud-count.waiting { color: #ff9f0a; }
+  .hud-count .hud-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .hud-count.active .hud-dot  { background: #30d158; animation: pulse 1.2s ease-in-out infinite; }
+  .hud-count.idle .hud-dot    { background: #48484a; }
+  .hud-count.waiting .hud-dot { background: #ff9f0a; }
+  .hud-label { font-size: 10px; color: #48484a; font-weight: 500; }
+
+  .hud-expand-btn {
+    font-size: 11px; color: #636366;
+    background: rgba(255,255,255,0.06);
+    border: 0.5px solid rgba(255,255,255,0.1);
+    border-radius: 4px;
+    padding: 2px 7px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.1s;
+  }
+  .hud-expand-btn:hover { color: #e8e8ed; background: rgba(255,255,255,0.1); }
+
+  .hud-row {
+    display: grid;
+    grid-template-columns: 8px 1fr auto;
+    align-items: center;
+    padding: 5px 10px;
+    gap: 8px;
+    border-bottom: 0.5px solid rgba(255,255,255,0.04);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .hud-row:hover { background: rgba(255,255,255,0.05); }
+  .hud-row:last-child { border-bottom: none; }
+  .hud-row-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .hud-row-dot.active  { background: #30d158; animation: pulse 1.2s ease-in-out infinite; }
+  .hud-row-dot.idle    { background: #3a3a3c; }
+  .hud-row-dot.waiting { background: #ff9f0a; }
+
+  .hud-row-content { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .hud-row-name {
+    font-size: 12px; font-weight: 600; color: #e8e8ed;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .hud-row-name.waiting { color: #ff9f0a; }
+  .hud-row-preview {
+    font-size: 10.5px; color: #48484a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .hud-row-time { font-size: 10px; color: #3a3a3c; font-family: "SF Mono", "Fira Code", monospace; white-space: nowrap; }
+
+  /* ─── MINIMAL STRIP ──────────────────────────────────────────────────────── */
+  .hud-minimal {
+    width: 308px;
+    height: 28px;
+    border-radius: 7px;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.12),
+      0 8px 32px rgba(0,0,0,0.7);
+    background: rgba(28,28,30,0.94);
+    backdrop-filter: blur(24px);
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    gap: 10px;
+    cursor: default;
+  }
+  .minimal-count {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600;
+  }
+  .minimal-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .minimal-count.active { color: #30d158; }
+  .minimal-count.active .minimal-dot  { background: #30d158; animation: pulse 1.2s ease-in-out infinite; }
+  .minimal-count.idle   { color: #48484a; }
+  .minimal-count.idle .minimal-dot    { background: #48484a; }
+  .minimal-count.warn   { color: #ff9f0a; }
+  .minimal-count.warn .minimal-dot    { background: #ff9f0a; }
+
+  .minimal-label { font-size: 11px; font-weight: 500; color: #3a3a3c; flex: 1; text-align: center; }
+  .minimal-expand { font-size: 10px; color: #3a3a3c; }
+
+  /* ─── CONTEXT ANNOTATIONS ────────────────────────────────────────────────── */
+  .annotation {
+    position: relative;
+    display: inline-block;
+  }
+
+  /* ─── SECTION WRAPPER ────────────────────────────────────────────────────── */
+  .mockup-block { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+  /* ─── LEGEND ─────────────────────────────────────────────────────────────── */
+  .legend {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #636366; }
+  .legend-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* ─── CALLOUT LABELS ─────────────────────────────────────────────────────── */
+  .callouts { position: relative; }
+  .callout-label {
+    display: inline-block;
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #636366;
+    background: #2c2c2e;
+    border: 0.5px solid rgba(255,255,255,0.08);
+    border-radius: 4px;
+    padding: 2px 7px;
+  }
+  .callout-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .callout-line { flex: 1; height: 0.5px; background: rgba(255,255,255,0.06); }
+
+  /* page title */
+  .page-title {
+    font-size: 28px; font-weight: 700;
+    color: #e8e8ed;
+    letter-spacing: -0.02em;
+  }
+  .page-subtitle {
+    font-size: 14px; color: #636366; margin-top: 4px; text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="mockup-block" style="margin-bottom:0;">
+  <div class="page-title">Cockpit</div>
+  <div class="page-subtitle">UI/UX Mockup · Agent Sessions · macOS</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ FULL WINDOW -->
+<div class="mockup-block">
+  <h2>Full Window — Dashboard Mode</h2>
+
+  <div class="window">
+
+    <!-- Titlebar -->
+    <div class="titlebar">
+      <div class="traffic-lights">
+        <div class="tl red"></div>
+        <div class="tl yellow"></div>
+        <div class="tl green"></div>
+      </div>
+      <div class="window-title">Cockpit</div>
+      <div class="toolbar-right">
+        <div class="search-field">
+          <span class="icon">⌕</span>
+          <input type="text" placeholder="Filter sessions…">
+        </div>
+        <div class="tb-btn pin-active">⊞ Pinned</div>
+        <div class="tb-btn">HUD</div>
+        <div class="tb-btn">⟳</div>
+      </div>
+    </div>
+
+    <!-- Session list -->
+    <div class="session-list">
+
+      <!-- ── NEEDS ATTENTION ── -->
+      <div class="section-header">
+        <span class="section-label">Needs Attention</span>
+        <span class="section-count amber">1</span>
+      </div>
+      <div class="attention-banner">
+        <div class="session-row" style="background:transparent;">
+          <div class="dot-wrap"><div class="dot waiting"></div></div>
+          <div class="session-info">
+            <div class="session-name-row">
+              <span class="agent-badge badge-claude">CC</span>
+              <span class="session-name">my-api</span>
+              <span class="session-branch">fix/auth-refactor</span>
+            </div>
+            <div class="session-preview waiting-text">Waiting for input — confirm overwrite schema.sql?</div>
+          </div>
+          <div class="session-time">now</div>
+          <div></div>
+          <div class="focus-btn waiting-btn">Focus ↩</div>
+        </div>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <!-- ── ACTIVE ── -->
+      <div class="section-header">
+        <span class="section-label">Active</span>
+        <span class="section-count green">3</span>
+      </div>
+
+      <div class="session-row">
+        <div class="dot-wrap"><div class="dot active"></div></div>
+        <div class="session-info">
+          <div class="session-name-row">
+            <span class="agent-badge badge-codex">CX</span>
+            <span class="session-name">storefront</span>
+            <span class="session-branch">feature/cart-v2</span>
+          </div>
+          <div class="session-preview">Refactoring checkout flow, extracting PaymentStep component…</div>
+        </div>
+        <div class="session-time">12m</div>
+        <div></div>
+        <div class="focus-btn">Focus</div>
+      </div>
+
+      <div class="session-row">
+        <div class="dot-wrap"><div class="dot active"></div></div>
+        <div class="session-info">
+          <div class="session-name-row">
+            <span class="agent-badge badge-codex">CX</span>
+            <span class="session-name">my-api</span>
+            <span class="session-branch">fix/rate-limit</span>
+          </div>
+          <div class="session-preview">Running test suite — 44 / 120 passed (RateLimiterSpec…)</div>
+        </div>
+        <div class="session-time">3m</div>
+        <div></div>
+        <div class="focus-btn">Focus</div>
+      </div>
+
+      <div class="session-row">
+        <div class="dot-wrap"><div class="dot active"></div></div>
+        <div class="session-info">
+          <div class="session-name-row">
+            <span class="agent-badge badge-claude">CC</span>
+            <span class="session-name">design-sys</span>
+            <span class="session-branch">main</span>
+          </div>
+          <div class="session-preview">Updating token exports, writing tokens/spacing.ts…</div>
+        </div>
+        <div class="session-time">8m</div>
+        <div></div>
+        <div class="focus-btn">Focus</div>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <!-- ── OPEN / IDLE ── -->
+      <div class="section-header">
+        <span class="section-label">Open · Idle</span>
+        <span class="section-count">2</span>
+      </div>
+
+      <div class="session-row">
+        <div class="dot-wrap"><div class="dot idle"></div></div>
+        <div class="session-info">
+          <div class="session-name-row">
+            <span class="agent-badge badge-codex">CX</span>
+            <span class="session-name">mobile-app</span>
+            <span class="session-branch">feat/onboarding</span>
+          </div>
+          <div class="session-preview">Last: 47 minutes ago</div>
+        </div>
+        <div class="session-time">47m</div>
+        <div></div>
+        <div class="focus-btn">Focus</div>
+      </div>
+
+      <div class="session-row">
+        <div class="dot-wrap"><div class="dot idle"></div></div>
+        <div class="session-info">
+          <div class="session-name-row">
+            <span class="agent-badge badge-term">$_</span>
+            <span class="session-name">infra-mono</span>
+            <span class="session-branch">main</span>
+          </div>
+          <div class="session-preview">Last: 2 hours ago</div>
+        </div>
+        <div class="session-time">2h</div>
+        <div></div>
+        <div class="focus-btn disabled">Focus</div>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <!-- ── COMPLETED ── -->
+      <div class="section-header">
+        <span class="section-label">Completed</span>
+        <span class="section-count">1</span>
+        <span style="font-size:10px;color:#3a3a3c;margin-left:4px;">· last 10 min</span>
+      </div>
+
+      <div class="session-row completed">
+        <div class="dot-wrap"><span class="checkmark">✓</span></div>
+        <div class="session-info">
+          <div class="session-name-row">
+            <span class="agent-badge badge-codex" style="opacity:0.4;">CX</span>
+            <span class="session-name">analytics</span>
+            <span class="session-branch">fix/events</span>
+          </div>
+          <div class="session-preview done-text">Finished 4m ago · 23m run · 18 files changed · exit 0</div>
+        </div>
+        <div class="session-time" style="opacity:0.4;">4m</div>
+        <div></div>
+        <div class="focus-btn disabled">Log</div>
+      </div>
+
+    </div><!-- /session-list -->
+
+    <!-- Footer -->
+    <div class="footer">
+      <div class="quota-pill">
+        <span class="quota-icon" style="font-size:12px;">⬡</span>
+        <div class="quota-bar-wrap"><div class="quota-bar" style="width:62%;"></div></div>
+        <span class="quota-text">5h: 62%&nbsp;&nbsp;Wk: 41% ↻3d</span>
+      </div>
+      <div class="quota-pill">
+        <span class="quota-icon">◈</span>
+        <div class="quota-bar-wrap"><div class="quota-bar" style="width:28%;"></div></div>
+        <span class="quota-text">5h: 28%&nbsp;&nbsp;Wk: 19% ↻3d</span>
+      </div>
+      <div class="footer-spacer"></div>
+      <div class="footer-status"><span>3</span> active · just now</div>
+    </div>
+
+  </div><!-- /window -->
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#ff9f0a;"></div>Needs attention · amber</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#30d158;animation:pulse 1.2s ease-in-out infinite;"></div>Active working · pulsing green</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#48484a;"></div>Open · idle · neutral</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#30d158;opacity:0.4;"></div>Completed · muted</div>
+    <div class="legend-item"><span style="font-size:10px;font-family:monospace;background:#2c2c2e;padding:1px 5px;border-radius:3px;color:#7c7af0;border:0.5px solid rgba(94,92,230,0.3);">CX</span> Codex</div>
+    <div class="legend-item"><span style="font-size:10px;font-family:monospace;background:#2c2c2e;padding:1px 5px;border-radius:3px;color:#ff9500;border:0.5px solid rgba(255,149,0,0.25);">CC</span> Claude Code</div>
+    <div class="legend-item"><span style="font-size:10px;font-family:monospace;background:#2c2c2e;padding:1px 5px;border-radius:3px;color:#636366;border:0.5px solid rgba(255,255,255,0.1);">$_</span> Terminal</div>
+  </div>
+
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════ HUD MODES -->
+<div class="mockup-block">
+  <h2>HUD Modes — Always-on-Top Floating Panel</h2>
+
+  <div class="hud-section">
+
+    <!-- Expanded HUD -->
+    <div class="mockup-block">
+      <div style="font-size:11px;color:#48484a;text-align:center;margin-bottom:6px;">Panel · Expanded</div>
+      <div class="hud-window">
+        <div class="hud-header">
+          <div class="hud-counts">
+            <div class="hud-count active"><div class="hud-dot"></div>3</div>
+            <div class="hud-count idle"><div class="hud-dot"></div>2</div>
+            <div class="hud-count waiting"><div class="hud-dot"></div>1 ⚠</div>
+          </div>
+          <div class="hud-label" style="flex:1;text-align:center;">Cockpit</div>
+          <div class="hud-expand-btn">⊞ Full</div>
+        </div>
+
+        <!-- Waiting first -->
+        <div class="hud-row" style="background:rgba(255,159,10,0.06);border-left:2px solid rgba(255,159,10,0.5);">
+          <div class="hud-row-dot waiting"></div>
+          <div class="hud-row-content">
+            <div class="hud-row-name waiting">my-api / fix-auth</div>
+            <div class="hud-row-preview" style="color:#ff9f0a;opacity:0.7;">Waiting for input…</div>
+          </div>
+          <div class="hud-row-time">now</div>
+        </div>
+
+        <div class="hud-row">
+          <div class="hud-row-dot active"></div>
+          <div class="hud-row-content">
+            <div class="hud-row-name">storefront</div>
+            <div class="hud-row-preview">Refactoring checkout flow…</div>
+          </div>
+          <div class="hud-row-time">12m</div>
+        </div>
+
+        <div class="hud-row">
+          <div class="hud-row-dot active"></div>
+          <div class="hud-row-content">
+            <div class="hud-row-name">my-api / rate-limit</div>
+            <div class="hud-row-preview">Running tests (44/120)…</div>
+          </div>
+          <div class="hud-row-time">3m</div>
+        </div>
+
+        <div class="hud-row">
+          <div class="hud-row-dot active"></div>
+          <div class="hud-row-content">
+            <div class="hud-row-name">design-sys</div>
+            <div class="hud-row-preview">Updating token exports…</div>
+          </div>
+          <div class="hud-row-time">8m</div>
+        </div>
+
+        <div class="hud-row" style="opacity:0.55;">
+          <div class="hud-row-dot idle"></div>
+          <div class="hud-row-content">
+            <div class="hud-row-name">mobile-app</div>
+            <div class="hud-row-preview">Last: 47m ago</div>
+          </div>
+          <div class="hud-row-time">47m</div>
+        </div>
+
+        <div class="hud-row" style="opacity:0.55;">
+          <div class="hud-row-dot idle"></div>
+          <div class="hud-row-content">
+            <div class="hud-row-name">infra-mono</div>
+            <div class="hud-row-preview">Last: 2h ago</div>
+          </div>
+          <div class="hud-row-time">2h</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Minimal strip -->
+    <div class="mockup-block" style="justify-content:flex-start;margin-top:32px;">
+      <div style="font-size:11px;color:#48484a;text-align:center;margin-bottom:6px;">Panel · Collapsed to strip</div>
+      <div class="hud-minimal">
+        <div class="minimal-count active">
+          <div class="minimal-dot"></div>
+          3
+        </div>
+        <div class="minimal-count idle">
+          <div class="minimal-dot"></div>
+          2
+        </div>
+        <div class="minimal-count warn">
+          <div class="minimal-dot"></div>
+          ⚠ 1
+        </div>
+        <div class="minimal-label">Cockpit</div>
+        <div class="minimal-expand">⊞</div>
+      </div>
+
+      <div style="font-size:10px;color:#3a3a3c;text-align:center;margin-top:8px;max-width:240px;line-height:1.5;">
+        Snaps to screen edges. Expands on hover or click.<br>
+        Toggle with <span style="font-family:monospace;color:#48484a;">⌥⌘C</span>
+      </div>
+
+      <!-- Notification callout -->
+      <div style="margin-top:32px;width:308px;">
+        <div style="font-size:11px;color:#48484a;text-align:center;margin-bottom:8px;">macOS Notification · Needs Attention</div>
+        <div style="
+          background:rgba(44,44,46,0.92);
+          border:0.5px solid rgba(255,255,255,0.1);
+          border-radius:10px;
+          padding:12px 14px;
+          display:flex;
+          gap:10px;
+          align-items:flex-start;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        ">
+          <div style="width:32px;height:32px;border-radius:7px;background:rgba(255,149,0,0.15);border:0.5px solid rgba(255,149,0,0.3);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">⚡</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:600;color:#e8e8ed;margin-bottom:2px;">Agent Sessions</div>
+            <div style="font-size:11px;color:#aeaeb2;line-height:1.4;">my-api is waiting for input</div>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <div style="font-size:11px;font-weight:500;color:#0a84ff;background:rgba(10,132,255,0.12);border:0.5px solid rgba(10,132,255,0.3);border-radius:5px;padding:3px 10px;cursor:pointer;">Focus</div>
+              <div style="font-size:11px;font-weight:500;color:#636366;background:rgba(255,255,255,0.06);border:0.5px solid rgba(255,255,255,0.1);border-radius:5px;padding:3px 10px;cursor:pointer;">Dismiss</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════ KEYBOARD + GROUPING -->
+<div class="mockup-block">
+  <h2>Keyboard-First Switching + Project Grouping</h2>
+
+  <div style="display:flex;gap:32px;flex-wrap:wrap;justify-content:center;align-items:flex-start;">
+
+    <!-- Keyboard mode -->
+    <div class="mockup-block">
+      <div style="font-size:11px;color:#48484a;margin-bottom:6px;">⌘1–9 to jump · type to filter</div>
+      <div class="window" style="width:520px;">
+        <div class="titlebar" style="height:44px;">
+          <div class="traffic-lights">
+            <div class="tl red"></div><div class="tl yellow"></div><div class="tl green"></div>
+          </div>
+          <div class="window-title">Cockpit</div>
+          <div class="toolbar-right">
+            <div class="search-field" style="width:150px;border-color:rgba(10,132,255,0.5);box-shadow:0 0 0 2px rgba(10,132,255,0.15);">
+              <span class="icon" style="color:#0a84ff;">⌕</span>
+              <input type="text" value="my-api" style="color:#e8e8ed;">
+            </div>
+          </div>
+        </div>
+        <div class="session-list" style="padding:8px 0;">
+          <div class="session-row selected">
+            <div class="dot-wrap"><div class="dot waiting"></div></div>
+            <div class="session-info">
+              <div class="session-name-row">
+                <span style="font-size:9px;font-weight:700;color:#3a3a3c;font-family:monospace;width:14px;text-align:center;">1</span>
+                <span class="agent-badge badge-claude">CC</span>
+                <span class="session-name">my-api</span>
+                <span class="session-branch">fix/auth-refactor</span>
+              </div>
+              <div class="session-preview waiting-text">Waiting for input…</div>
+            </div>
+            <div class="session-time">now</div>
+            <div></div>
+            <div class="focus-btn waiting-btn">⌘1</div>
+          </div>
+          <div class="session-row">
+            <div class="dot-wrap"><div class="dot active"></div></div>
+            <div class="session-info">
+              <div class="session-name-row">
+                <span style="font-size:9px;font-weight:700;color:#3a3a3c;font-family:monospace;width:14px;text-align:center;">2</span>
+                <span class="agent-badge badge-codex">CX</span>
+                <span class="session-name">my-api</span>
+                <span class="session-branch">fix/rate-limit</span>
+              </div>
+              <div class="session-preview">Running tests (44/120)…</div>
+            </div>
+            <div class="session-time">3m</div>
+            <div></div>
+            <div class="focus-btn">⌘2</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grouping mode -->
+    <div class="mockup-block">
+      <div style="font-size:11px;color:#48484a;margin-bottom:6px;">Group by project (toolbar toggle)</div>
+      <div class="window" style="width:520px;">
+        <div class="titlebar" style="height:44px;">
+          <div class="traffic-lights">
+            <div class="tl red"></div><div class="tl yellow"></div><div class="tl green"></div>
+          </div>
+          <div class="window-title">Cockpit</div>
+          <div class="toolbar-right">
+            <div class="tb-btn pin-active">⊞ Group</div>
+          </div>
+        </div>
+        <div class="session-list" style="padding:8px 0;">
+
+          <!-- Group: storefront -->
+          <div style="padding:5px 16px 3px;display:flex;align-items:center;gap:8px;">
+            <span style="font-size:11px;font-weight:700;color:#aeaeb2;">storefront</span>
+            <span style="font-size:10px;color:#3a3a3c;background:#2c2c2e;border-radius:6px;padding:1px 6px;">2 active</span>
+            <div style="flex:1;height:0.5px;background:rgba(255,255,255,0.05);"></div>
+            <span style="font-size:10px;color:#3a3a3c;">▾</span>
+          </div>
+          <div class="session-row" style="padding-left:28px;">
+            <div class="dot-wrap"><div class="dot active"></div></div>
+            <div class="session-info">
+              <div class="session-name-row">
+                <span class="session-name" style="font-size:12px;">feature/cart-v2</span>
+              </div>
+              <div class="session-preview">Refactoring checkout flow…</div>
+            </div>
+            <div class="session-time">12m</div>
+            <div></div>
+            <div class="focus-btn">Focus</div>
+          </div>
+          <div class="session-row" style="padding-left:28px;opacity:0.6;">
+            <div class="dot-wrap"><div class="dot idle"></div></div>
+            <div class="session-info">
+              <div class="session-name-row">
+                <span class="session-name" style="font-size:12px;">feat/search</span>
+              </div>
+              <div class="session-preview">Last: 1h ago</div>
+            </div>
+            <div class="session-time">1h</div>
+            <div></div>
+            <div class="focus-btn">Focus</div>
+          </div>
+
+          <div style="height:4px;"></div>
+
+          <!-- Group: my-api -->
+          <div style="padding:5px 16px 3px;display:flex;align-items:center;gap:8px;">
+            <span style="font-size:11px;font-weight:700;color:#aeaeb2;">my-api</span>
+            <span style="font-size:10px;color:#ff9f0a;background:rgba(255,159,10,0.1);border-radius:6px;padding:1px 6px;">⚠ 1 waiting · 1 active</span>
+            <div style="flex:1;height:0.5px;background:rgba(255,255,255,0.05);"></div>
+            <span style="font-size:10px;color:#3a3a3c;">▾</span>
+          </div>
+          <div class="session-row" style="padding-left:28px;background:rgba(255,159,10,0.04);">
+            <div class="dot-wrap"><div class="dot waiting"></div></div>
+            <div class="session-info">
+              <div class="session-name-row"><span class="session-name" style="font-size:12px;">fix/auth-refactor</span></div>
+              <div class="session-preview waiting-text">Waiting for input…</div>
+            </div>
+            <div class="session-time">now</div>
+            <div></div>
+            <div class="focus-btn waiting-btn">Focus</div>
+          </div>
+          <div class="session-row" style="padding-left:28px;">
+            <div class="dot-wrap"><div class="dot active"></div></div>
+            <div class="session-info">
+              <div class="session-name-row"><span class="session-name" style="font-size:12px;">fix/rate-limit</span></div>
+              <div class="session-preview">Running tests (44/120)…</div>
+            </div>
+            <div class="session-time">3m</div>
+            <div></div>
+            <div class="focus-btn">Focus</div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div style="height:32px;"></div>
+
+</body>
+</html>

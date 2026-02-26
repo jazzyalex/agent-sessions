@@ -103,7 +103,8 @@ final class ClaudeSessionParser {
             cwd: cwd,
             repoName: nil,
             lightweightTitle: nil,
-            isHousekeeping: isHousekeeping
+            isHousekeeping: isHousekeeping,
+            codexInternalSessionIDHint: sessionID
         )
     }
 
@@ -667,6 +668,7 @@ final class ClaudeSessionParser {
 
             var model: String?
             var cwd: String?
+            var sessionID: String?
             var tmin: Date?
             var tmax: Date?
             var sampleCount = 0
@@ -679,6 +681,9 @@ final class ClaudeSessionParser {
                 }
 
                 // Extract metadata
+                if sessionID == nil, let sid = obj["sessionId"] as? String, !sid.isEmpty {
+                    sessionID = sid
+                }
                 if cwd == nil {
                     if let cwdVal = obj["cwd"] as? String, isValidPath(cwdVal) {
                         cwd = cwdVal
@@ -725,7 +730,8 @@ final class ClaudeSessionParser {
                                       cwd: cwd,
                                       repoName: nil,
                                       lightweightTitle: nil,
-                                      isHousekeeping: tempIsHousekeeping)
+                                      isHousekeeping: tempIsHousekeeping,
+                                      codexInternalSessionIDHint: sessionID)
             let title = tempSession.title
 
             // Create final lightweight session with empty events
@@ -741,7 +747,8 @@ final class ClaudeSessionParser {
                            cwd: cwd,
                            repoName: nil,
                            lightweightTitle: title,
-                           isHousekeeping: tempIsHousekeeping || title == "No prompt")
+                           isHousekeeping: tempIsHousekeeping || title == "No prompt",
+                           codexInternalSessionIDHint: sessionID)
         }
 
         guard let initial = build(headBytes: headBytesInitial) else { return nil }

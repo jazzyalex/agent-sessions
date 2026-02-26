@@ -28,6 +28,7 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
     var schemaVersion: Int?
     var publisher: String?
     var kind: String?
+    var source: SessionSource = .codex
 
     /// Codex's internal session id (preferred join key).
     var sessionId: String?
@@ -63,6 +64,55 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
     func isStale(now: Date, ttl: TimeInterval) -> Bool {
         guard let lastSeenAt else { return true }
         return now.timeIntervalSince(lastSeenAt) > ttl
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case publisher
+        case kind
+        case source
+        case sessionId
+        case sessionLogPath
+        case workspaceRoot
+        case pid
+        case tty
+        case startedAt
+        case lastSeenAt
+        case terminal
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion)
+        publisher = try c.decodeIfPresent(String.self, forKey: .publisher)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        source = try c.decodeIfPresent(SessionSource.self, forKey: .source) ?? .codex
+        sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
+        sessionLogPath = try c.decodeIfPresent(String.self, forKey: .sessionLogPath)
+        workspaceRoot = try c.decodeIfPresent(String.self, forKey: .workspaceRoot)
+        pid = try c.decodeIfPresent(Int.self, forKey: .pid)
+        tty = try c.decodeIfPresent(String.self, forKey: .tty)
+        startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
+        lastSeenAt = try c.decodeIfPresent(Date.self, forKey: .lastSeenAt)
+        terminal = try c.decodeIfPresent(Terminal.self, forKey: .terminal)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(schemaVersion, forKey: .schemaVersion)
+        try c.encodeIfPresent(publisher, forKey: .publisher)
+        try c.encodeIfPresent(kind, forKey: .kind)
+        try c.encode(source, forKey: .source)
+        try c.encodeIfPresent(sessionId, forKey: .sessionId)
+        try c.encodeIfPresent(sessionLogPath, forKey: .sessionLogPath)
+        try c.encodeIfPresent(workspaceRoot, forKey: .workspaceRoot)
+        try c.encodeIfPresent(pid, forKey: .pid)
+        try c.encodeIfPresent(tty, forKey: .tty)
+        try c.encodeIfPresent(startedAt, forKey: .startedAt)
+        try c.encodeIfPresent(lastSeenAt, forKey: .lastSeenAt)
+        try c.encodeIfPresent(terminal, forKey: .terminal)
     }
 }
 
@@ -119,10 +169,12 @@ final class CodexActiveSessionsModel: ObservableObject {
     private var appIsActive: Bool = true
 
     private struct SessionLookupCacheEntry {
+        var source: SessionSource
         var rawFilePath: String
         var normalizedLogPath: String
         var internalSessionIDHint: String?
         var filenameUUID: String?
+        var runtimeSessionIDs: [String]
     }
     private var sessionLookupCacheByID: [String: SessionLookupCacheEntry] = [:]
 #if DEBUG
@@ -152,7 +204,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func isActive(_ session: Session) -> Bool {
-        guard enabled, session.source == .codex else { return false }
+        guard enabled, supportsLiveSessions(for: session.source) else { return false }
 #if DEBUG
         debugMetrics.isActiveCalls &+= 1
 #endif
@@ -160,15 +212,15 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func isLive(_ session: Session) -> Bool {
-        guard enabled, session.source == .codex else { return false }
+        guard enabled, supportsLiveSessions(for: session.source) else { return false }
         let lookup = lookupCacheEntry(for: session)
-        if byLogPath[lookup.normalizedLogPath] != nil { return true }
+        if byLogPath[Self.logLookupKey(source: lookup.source, normalizedPath: lookup.normalizedLogPath)] != nil { return true }
         if presenceForSessionIDLookup(lookup) != nil { return true }
         return false
     }
 
     func liveState(_ session: Session) -> CodexLiveState? {
-        guard enabled, session.source == .codex else { return nil }
+        guard enabled, supportsLiveSessions(for: session.source) else { return nil }
         guard let presence = presence(for: session) else { return nil }
         return liveState(for: presence)
     }
@@ -180,15 +232,24 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func presence(for session: Session) -> CodexActivePresence? {
-        guard session.source == .codex else { return nil }
+        guard supportsLiveSessions(for: session.source) else { return nil }
         let lookup = lookupCacheEntry(for: session)
-        if let p = byLogPath[lookup.normalizedLogPath] { return p }
+        if let p = byLogPath[Self.logLookupKey(source: lookup.source, normalizedPath: lookup.normalizedLogPath)] { return p }
         if let p = presenceForSessionIDLookup(lookup) { return p }
         return nil
     }
 
     func revealURL(for session: Session) -> URL? {
         presence(for: session)?.revealURL
+    }
+
+    func supportsLiveSessions(for source: SessionSource) -> Bool {
+        switch source {
+        case .codex, .claude, .opencode:
+            return true
+        default:
+            return false
+        }
     }
 
     func setUnifiedConsumerVisible(_ visible: Bool, consumerID: UUID) {
@@ -278,7 +339,9 @@ final class CodexActiveSessionsModel: ObservableObject {
 #endif
         let ttl = Self.defaultStaleTTL
         let rootPaths = registryRoots().map(\.path)
-        let sessionsRoots = codexSessionsRoots().map(\.path)
+        let codexSessionRoots = codexSessionsRoots().map(\.path)
+        let claudeSessionRoots = claudeSessionsRoots().map(\.path)
+        let openCodeSessionRoots = openCodeSessionsRoots().map(\.path)
         let previousLogKeys = Set(byLogPath.keys)
         let previousSessionKeys = Set(bySessionID.keys)
         let previousLiveStates = liveStateByPresenceKey
@@ -305,9 +368,39 @@ final class CodexActiveSessionsModel: ObservableObject {
             }()
             if shouldProbeProcesses {
                 // Periodic fallback probe keeps mixed registry/non-registry environments complete.
-                out.append(contentsOf: Self.discoverPresencesFromRunningCodexProcesses(
+                out.append(contentsOf: Self.discoverPresencesFromRunningProcesses(
+                    source: .codex,
+                    processName: "codex",
                     now: now,
-                    sessionsRoots: sessionsRoots,
+                    sessionsRoots: codexSessionRoots,
+                    timeout: Self.processProbeTimeout
+                ))
+                out.append(contentsOf: Self.discoverPresencesFromRunningProcesses(
+                    source: .claude,
+                    processName: "claude",
+                    now: now,
+                    sessionsRoots: claudeSessionRoots,
+                    timeout: Self.processProbeTimeout
+                ))
+                out.append(contentsOf: Self.discoverPresencesFromRunningCommands(
+                    source: .claude,
+                    commandNeedles: ["claude", "claude-code"],
+                    now: now,
+                    sessionsRoots: claudeSessionRoots,
+                    timeout: Self.processProbeTimeout
+                ))
+                out.append(contentsOf: Self.discoverPresencesFromRunningProcesses(
+                    source: .opencode,
+                    processName: "opencode",
+                    now: now,
+                    sessionsRoots: openCodeSessionRoots,
+                    timeout: Self.processProbeTimeout
+                ))
+                out.append(contentsOf: Self.discoverPresencesFromRunningCommands(
+                    source: .opencode,
+                    commandNeedles: ["opencode"],
+                    now: now,
+                    sessionsRoots: openCodeSessionRoots,
                     timeout: Self.processProbeTimeout
                 ))
             } else {
@@ -315,7 +408,9 @@ final class CodexActiveSessionsModel: ObservableObject {
                 out.append(contentsOf: cachedProbeSnapshot.filter { !$0.isStale(now: now, ttl: ttl) })
             }
             if hasVisibleConsumerSnapshot {
-                out.append(contentsOf: Self.discoverPresencesFromITermSessions(now: now, timeout: Self.processProbeTimeout))
+                out.append(contentsOf: Self.discoverPresencesFromITermSessions(source: .codex, now: now, timeout: Self.processProbeTimeout))
+                out.append(contentsOf: Self.discoverPresencesFromITermSessions(source: .claude, now: now, timeout: Self.processProbeTimeout))
+                out.append(contentsOf: Self.discoverPresencesFromITermSessions(source: .opencode, now: now, timeout: Self.processProbeTimeout))
             }
             return (out, shouldProbeProcesses, registryHasPresences)
         }.value
@@ -336,12 +431,14 @@ final class CodexActiveSessionsModel: ObservableObject {
         for p in loaded {
             var keyed = false
             if let id = p.sessionId, !id.isEmpty {
-                sessionMap[id] = Self.merge(sessionMap[id], p)
+                let key = Self.sessionLookupKey(source: p.source, sessionId: id)
+                sessionMap[key] = Self.merge(sessionMap[key], p)
                 keyed = true
             }
             if let log = p.sessionLogPath, !log.isEmpty {
                 let norm = Self.normalizePath(log)
-                logMap[norm] = Self.merge(logMap[norm], p)
+                let key = Self.logLookupKey(source: p.source, normalizedPath: norm)
+                logMap[key] = Self.merge(logMap[key], p)
                 keyed = true
             }
             if !keyed {
@@ -355,7 +452,10 @@ final class CodexActiveSessionsModel: ObservableObject {
         // Use log-path map + session-id map for lookup, but keep a stable list for UI.
         var ui: [CodexActivePresence] = Array(logMap.values)
         for p in sessionMap.values {
-            if let log = p.sessionLogPath, !log.isEmpty, logMap[Self.normalizePath(log)] != nil { continue }
+            if let log = p.sessionLogPath, !log.isEmpty {
+                let key = Self.logLookupKey(source: p.source, normalizedPath: Self.normalizePath(log))
+                if logMap[key] != nil { continue }
+            }
             ui.append(p)
         }
         ui = Self.reconcileFallbackPresences(Array(fallbackMap.values), into: ui)
@@ -456,6 +556,25 @@ final class CodexActiveSessionsModel: ObservableObject {
         candidates.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions"))
 
         // Dedup by normalized path.
+        return dedupRoots(candidates)
+    }
+
+    private func claudeSessionsRoots() -> [URL] {
+        let defaults = UserDefaults.standard
+        let override = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
+            ?? defaults.string(forKey: "ClaudeSessionsRootOverride")
+            ?? ""
+        let discovery = ClaudeSessionDiscovery(customRoot: override.isEmpty ? nil : override)
+        return dedupRoots([discovery.sessionsRoot()])
+    }
+
+    private func openCodeSessionsRoots() -> [URL] {
+        let override = UserDefaults.standard.string(forKey: "OpenCodeSessionsRootOverride") ?? ""
+        let discovery = OpenCodeSessionDiscovery(customRoot: override.isEmpty ? nil : override)
+        return dedupRoots([discovery.sessionsRoot()])
+    }
+
+    private func dedupRoots(_ candidates: [URL]) -> [URL] {
         var out: [URL] = []
         var seen: Set<String> = []
         for u in candidates {
@@ -507,6 +626,7 @@ final class CodexActiveSessionsModel: ObservableObject {
 
         merged.publisher = prefer(merged.publisher, loser.publisher)
         merged.kind = prefer(merged.kind, loser.kind)
+        merged.source = winner.source
         merged.sessionId = prefer(merged.sessionId, loser.sessionId)
         merged.sessionLogPath = prefer(merged.sessionLogPath, loser.sessionLogPath)
         merged.workspaceRoot = prefer(merged.workspaceRoot, loser.workspaceRoot)
@@ -569,21 +689,21 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated private static func coalesceIdentity(for presence: CodexActivePresence) -> String {
         if let sid = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
            !sid.isEmpty {
-            return "sid:\(sid)"
+            return sessionLookupKey(source: presence.source, sessionId: sid)
         }
         if let log = presence.sessionLogPath, !log.isEmpty {
             let normalized = normalizePath(log)
-            if !normalized.isEmpty { return "log:\(normalized)" }
+            if !normalized.isEmpty { return logLookupKey(source: presence.source, normalizedPath: normalized) }
         }
         if let src = presence.sourceFilePath?.trimmingCharacters(in: .whitespacesAndNewlines),
            !src.isEmpty {
             let normalized = normalizePath(src)
-            if !normalized.isEmpty { return "src:\(normalized)" }
+            if !normalized.isEmpty { return "\(presence.source.rawValue)|src:\(normalized)" }
         }
         if let pid = presence.pid {
-            return "pid:\(pid)"
+            return "\(presence.source.rawValue)|pid:\(pid)"
         }
-        return "tty-only"
+        return "\(presence.source.rawValue)|tty-only"
     }
 
     static func reconcileFallbackPresences(_ fallbackPresences: [CodexActivePresence],
@@ -593,23 +713,27 @@ final class CodexActiveSessionsModel: ObservableObject {
         ttyIndex.reserveCapacity(ui.count)
 
         for (idx, presence) in ui.enumerated() {
-            if let tty = normalizedTTY(presence.tty), ttyIndex[tty] == nil {
-                ttyIndex[tty] = idx
+            if let tty = normalizedTTY(presence.tty) {
+                let key = "\(presence.source.rawValue)|\(tty)"
+                if ttyIndex[key] == nil {
+                    ttyIndex[key] = idx
+                }
             }
         }
 
         for fallback in fallbackPresences {
             if shouldMergeTTYOnlyITermFallback(fallback),
                let tty = normalizedTTY(fallback.tty),
-               let idx = ttyIndex[tty] {
+               let idx = ttyIndex["\(fallback.source.rawValue)|\(tty)"] {
                 ui[idx] = merge(ui[idx], fallback)
                 continue
             }
 
             let newIndex = ui.count
             ui.append(fallback)
-            if let tty = normalizedTTY(fallback.tty), ttyIndex[tty] == nil {
-                ttyIndex[tty] = newIndex
+            if let tty = normalizedTTY(fallback.tty),
+               ttyIndex["\(fallback.source.rawValue)|\(tty)"] == nil {
+                ttyIndex["\(fallback.source.rawValue)|\(tty)"] = newIndex
             }
         }
 
@@ -638,15 +762,55 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated static func presenceKey(for presence: CodexActivePresence) -> String {
         if let log = presence.sessionLogPath, !log.isEmpty {
             let normalized = normalizePath(log)
-            if !normalized.isEmpty { return normalized }
+            if !normalized.isEmpty { return logLookupKey(source: presence.source, normalizedPath: normalized) }
         }
         if let sid = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !sid.isEmpty { return "sid:\(sid)" }
+           !sid.isEmpty { return sessionLookupKey(source: presence.source, sessionId: sid) }
         if let src = presence.sourceFilePath?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !src.isEmpty { return "src:\(src)" }
-        if let pid = presence.pid { return "pid:\(pid)" }
-        if let tty = normalizedTTY(presence.tty) { return "tty:\(tty)" }
+           !src.isEmpty { return "\(presence.source.rawValue)|src:\(src)" }
+        if let pid = presence.pid { return "\(presence.source.rawValue)|pid:\(pid)" }
+        if let tty = normalizedTTY(presence.tty) { return "\(presence.source.rawValue)|tty:\(tty)" }
         return "unknown"
+    }
+
+    nonisolated static func logLookupKey(source: SessionSource, normalizedPath: String) -> String {
+        "\(source.rawValue)|log:\(normalizedPath)"
+    }
+
+    nonisolated static func sessionLookupKey(source: SessionSource, sessionId: String) -> String {
+        "\(source.rawValue)|sid:\(sessionId)"
+    }
+
+    nonisolated static func liveSessionIDCandidates(for session: Session) -> [String] {
+        func cleaned(_ raw: String?) -> String? {
+            guard let raw else { return nil }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        var out: [String] = []
+        out.reserveCapacity(3)
+
+        func appendUnique(_ raw: String?) {
+            guard let value = cleaned(raw), !out.contains(value) else { return }
+            out.append(value)
+        }
+
+        switch session.source {
+        case .codex:
+            appendUnique(session.codexInternalSessionIDHint)
+            appendUnique(session.codexFilenameUUID)
+        case .claude:
+            appendUnique(session.codexInternalSessionIDHint)
+            appendUnique(extractSessionID(fromLogPath: session.filePath, source: .claude))
+        case .opencode:
+            appendUnique(session.id)
+            appendUnique(extractSessionID(fromLogPath: session.filePath, source: .opencode))
+        default:
+            appendUnique(session.id)
+        }
+
+        return out
     }
 
     nonisolated static func normalizePath(_ raw: String) -> String {
@@ -674,16 +838,21 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     private func lookupCacheEntry(for session: Session) -> SessionLookupCacheEntry {
         let internalSessionIDHint = Self.nonEmptySessionID(session.codexInternalSessionIDHint)
+        let runtimeSessionIDs = Self.liveSessionIDCandidates(for: session)
         if let cached = sessionLookupCacheByID[session.id],
+           cached.source == session.source,
            cached.rawFilePath == session.filePath,
-           cached.internalSessionIDHint == internalSessionIDHint {
+           cached.internalSessionIDHint == internalSessionIDHint,
+           cached.runtimeSessionIDs == runtimeSessionIDs {
             return cached
         }
         let fresh = SessionLookupCacheEntry(
+            source: session.source,
             rawFilePath: session.filePath,
             normalizedLogPath: Self.normalizePath(session.filePath),
             internalSessionIDHint: internalSessionIDHint,
-            filenameUUID: session.codexFilenameUUID
+            filenameUUID: session.codexFilenameUUID,
+            runtimeSessionIDs: runtimeSessionIDs
         )
         sessionLookupCacheByID[session.id] = fresh
         return fresh
@@ -696,8 +865,11 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     private func presenceForSessionIDLookup(_ lookup: SessionLookupCacheEntry) -> CodexActivePresence? {
-        if let id = lookup.internalSessionIDHint, let p = bySessionID[id] { return p }
-        if let id = lookup.filenameUUID, id != lookup.internalSessionIDHint, let p = bySessionID[id] { return p }
+        for id in lookup.runtimeSessionIDs {
+            if let p = bySessionID[Self.sessionLookupKey(source: lookup.source, sessionId: id)] {
+                return p
+            }
+        }
         return nil
     }
 
@@ -786,11 +958,11 @@ final class CodexActiveSessionsModel: ObservableObject {
                 return normalizePath(log)
             }()
             let key: String = {
-                if let v = normalizedLogPath, !v.isEmpty { return v }
-                if let id = p.sessionId, !id.isEmpty { return "sid:\(id)" }
-                if let src = p.sourceFilePath, !src.isEmpty { return "src:\(src)" }
-                if let pid = p.pid { return "pid:\(pid)" }
-                if let tty = p.tty, !tty.isEmpty { return "tty:\(tty)" }
+                if let v = normalizedLogPath, !v.isEmpty { return logLookupKey(source: p.source, normalizedPath: v) }
+                if let id = p.sessionId, !id.isEmpty { return sessionLookupKey(source: p.source, sessionId: id) }
+                if let src = p.sourceFilePath, !src.isEmpty { return "\(p.source.rawValue)|src:\(src)" }
+                if let pid = p.pid { return "\(p.source.rawValue)|pid:\(pid)" }
+                if let tty = p.tty, !tty.isEmpty { return "\(p.source.rawValue)|tty:\(tty)" }
                 return "unknown"
             }()
 
@@ -798,6 +970,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             parts.reserveCapacity(13)
             parts.append(p.publisher ?? "")
             parts.append(p.kind ?? "")
+            parts.append(p.source.rawValue)
             parts.append(p.sessionId ?? "")
             parts.append(normalizedLogPath ?? "")
             parts.append(p.workspaceRoot ?? "")
@@ -948,6 +1121,55 @@ final class CodexActiveSessionsModel: ObservableObject {
         return .openIdle
     }
 
+    nonisolated private static func classifyGenericITermTail(_ tail: String) -> CodexLiveState? {
+        let normalized = tail.replacingOccurrences(of: "\r", with: "")
+        guard !normalized.isEmpty else { return nil }
+
+        let lines = normalized
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        let nonEmptyLines = lines.filter { !$0.isEmpty }
+        guard !nonEmptyLines.isEmpty else { return nil }
+
+        let recentWindow = nonEmptyLines.suffix(12)
+        let recentLower = recentWindow.joined(separator: "\n").lowercased()
+        let lastNonEmptyLine = recentWindow.last ?? ""
+
+        let busyMarkers = [
+            "esc to interrupt",
+            "working",
+            "running",
+            "thinking",
+            "processing",
+            "generating",
+            "applying",
+            "analyzing"
+        ]
+        if busyMarkers.contains(where: { recentLower.contains($0) }) {
+            return .activeWorking
+        }
+
+        if isLikelyPromptLine(lastNonEmptyLine) {
+            return .openIdle
+        }
+
+        // Ambiguous generic terminal output (no explicit busy marker, no clear prompt):
+        // defer to log mtime heuristic instead of forcing active.
+        return nil
+    }
+
+    nonisolated private static func isLikelyPromptLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if ["›", ">", "$", "#", "%", "❯", "λ"].contains(trimmed) { return true }
+        if let range = trimmed.range(of: #".*[\$#%]$"#, options: .regularExpression),
+           range.lowerBound == trimmed.startIndex,
+           range.upperBound == trimmed.endIndex {
+            return true
+        }
+        return false
+    }
+
     nonisolated static func heuristicLiveStateFromLogMTime(logPath: String?,
                                                            now: Date,
                                                            activeWriteWindow: TimeInterval = 2.5) -> CodexLiveState {
@@ -980,7 +1202,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                 tty: presence.tty,
                 termProgram: presence.terminal?.termProgram
             )
-            if canProbeITerm {
+            if canProbeITerm, presence.source == .codex {
                 if let tail = captureITermTail(
                     itermSessionId: presence.terminal?.itermSessionId,
                     tty: presence.tty,
@@ -992,9 +1214,21 @@ final class CodexActiveSessionsModel: ObservableObject {
                     // prefer open/idle over mtime heuristics to avoid false-active spikes.
                     state = .openIdle
                 }
+            } else if canProbeITerm, (presence.source == .claude || presence.source == .opencode) {
+                if let tail = captureITermTail(
+                    itermSessionId: presence.terminal?.itermSessionId,
+                    tty: presence.tty,
+                    timeout: timeout
+                ) {
+                    state = classifyGenericITermTail(tail)
+                }
             }
 
-            let heuristic = heuristicLiveStateFromLogMTime(logPath: presence.sessionLogPath, now: now)
+            let heuristic = heuristicLiveStateFromLogMTime(
+                logPath: presence.sessionLogPath,
+                now: now,
+                activeWriteWindow: activeWriteWindow(for: presence.source)
+            )
             let resolved = state ?? heuristic
             if let existing = out[key] {
                 if resolved.priority > existing.priority {
@@ -1006,6 +1240,17 @@ final class CodexActiveSessionsModel: ObservableObject {
         }
 
         return out
+    }
+
+    nonisolated private static func activeWriteWindow(for source: SessionSource) -> TimeInterval {
+        switch source {
+        case .codex:
+            return 2.5
+        case .claude, .opencode:
+            return 4.5
+        default:
+            return 2.5
+        }
     }
 
     nonisolated private static func captureITermTail(itermSessionId: String?,
@@ -1066,7 +1311,8 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     // MARK: - Live Session Discovery (Fallback)
 
-    nonisolated static func discoverPresencesFromITermSessions(now: Date,
+    nonisolated static func discoverPresencesFromITermSessions(source: SessionSource,
+                                                               now: Date,
                                                                timeout: TimeInterval) -> [CodexActivePresence] {
         let scriptLines = [
             "set outRows to {}",
@@ -1099,11 +1345,12 @@ final class CodexActiveSessionsModel: ObservableObject {
 
         var presences: [CodexActivePresence] = []
         presences.reserveCapacity(sessions.count)
-        for session in sessions where isLikelyCodexITermSessionName(session.name) {
+        for session in sessions where isLikelyITermSessionName(session.name, source: source) {
             var p = CodexActivePresence()
             p.schemaVersion = 1
             p.publisher = "agent-sessions-iterm"
             p.kind = "interactive"
+            p.source = source
             p.tty = normalizedTTY(session.tty)
             p.startedAt = nil
             p.lastSeenAt = now
@@ -1117,30 +1364,80 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     // Live-process scan complements iTerm discovery by attaching PID/cwd/log metadata.
-    /// Best-effort: infer active sessions by scanning running `codex` processes and the JSONL file they have open.
-    /// This is used when Codex CLI itself does not publish a stable active-session registry.
-    nonisolated static func discoverPresencesFromRunningCodexProcesses(now: Date,
-                                                                       sessionsRoots: [String],
-                                                                       timeout: TimeInterval) -> [CodexActivePresence] {
+    nonisolated static func discoverPresencesFromRunningProcesses(source: SessionSource,
+                                                                  processName: String,
+                                                                  now: Date,
+                                                                  sessionsRoots: [String],
+                                                                  timeout: TimeInterval) -> [CodexActivePresence] {
+        let user = NSUserName()
+        return discoverPresencesFromLsofQuery(
+            source: source,
+            queryArguments: ["-w", "-a", "-c", processName, "-u", user, "-nP", "-F", "pftn"],
+            now: now,
+            sessionsRoots: sessionsRoots,
+            timeout: timeout
+        )
+    }
+
+    // Fallback for CLIs whose live executable name may not be stable for `lsof -c`.
+    // We match terminal-backed commands from `ps`, then hydrate metadata via `lsof -p`.
+    nonisolated static func discoverPresencesFromRunningCommands(source: SessionSource,
+                                                                 commandNeedles: [String],
+                                                                 now: Date,
+                                                                 sessionsRoots: [String],
+                                                                 timeout: TimeInterval) -> [CodexActivePresence] {
+        let psPath = "/bin/ps"
+        let fm = FileManager.default
+        guard fm.isExecutableFile(atPath: psPath) else { return [] }
+        guard let psOut = runCommand(
+            executable: URL(fileURLWithPath: psPath),
+            arguments: ["axww", "-o", "pid=,tty=,command="],
+            timeout: timeout
+        ) else {
+            return []
+        }
+        let psText = String(decoding: psOut, as: UTF8.self)
+        let infos = parsePSCommandListOutput(psText)
+        let pids = infos
+            .filter { info in
+                guard info.tty != nil else { return false }
+                return commandContainsNeedle(info.command, needles: commandNeedles)
+            }
+            .map(\.pid)
+        guard !pids.isEmpty else { return [] }
+
+        let user = NSUserName()
+        let pidCSV = Array(Set(pids)).sorted().map(String.init).joined(separator: ",")
+        return discoverPresencesFromLsofQuery(
+            source: source,
+            queryArguments: ["-w", "-a", "-p", pidCSV, "-u", user, "-nP", "-F", "pftn"],
+            now: now,
+            sessionsRoots: sessionsRoots,
+            timeout: timeout
+        )
+    }
+
+    nonisolated private static func discoverPresencesFromLsofQuery(source: SessionSource,
+                                                                   queryArguments: [String],
+                                                                   now: Date,
+                                                                   sessionsRoots: [String],
+                                                                   timeout: TimeInterval) -> [CodexActivePresence] {
         let lsofPath = "/usr/sbin/lsof"
         let psPath = "/bin/ps"
         let fm = FileManager.default
         guard fm.isExecutableFile(atPath: lsofPath), fm.isExecutableFile(atPath: psPath) else { return [] }
 
         let roots = sessionsRoots.map(normalizePath)
-        let user = NSUserName()
-
-        // `lsof -F pftn` gives us PID + per-fd records including `cwd`, tty device, and open JSONL log path.
         guard let lsofOut = runCommand(
             executable: URL(fileURLWithPath: lsofPath),
-            arguments: ["-w", "-a", "-c", "codex", "-u", user, "-nP", "-F", "pftn"],
+            arguments: queryArguments,
             timeout: timeout
         ) else {
             return []
         }
 
         let lsofText = String(decoding: lsofOut, as: UTF8.self)
-        var infos = parseLsofMachineOutput(lsofText, sessionsRoots: roots)
+        var infos = parseLsofMachineOutput(lsofText, sessionsRoots: roots, source: source)
         if infos.isEmpty { return [] }
 
         // Enrich with iTerm session ids via `ps eww -p ...` (env vars).
@@ -1167,6 +1464,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             p.schemaVersion = 1
             p.publisher = "agent-sessions-process"
             p.kind = "interactive"
+            p.source = source
+            p.sessionId = info.sessionID
             p.sessionLogPath = info.sessionLogPath
             p.workspaceRoot = info.cwd
             p.pid = info.pid
@@ -1183,6 +1482,19 @@ final class CodexActiveSessionsModel: ObservableObject {
         return out
     }
 
+    /// Compatibility wrapper for existing call sites/tests.
+    nonisolated static func discoverPresencesFromRunningCodexProcesses(now: Date,
+                                                                       sessionsRoots: [String],
+                                                                       timeout: TimeInterval) -> [CodexActivePresence] {
+        discoverPresencesFromRunningProcesses(
+            source: .codex,
+            processName: "codex",
+            now: now,
+            sessionsRoots: sessionsRoots,
+            timeout: timeout
+        )
+    }
+
     // MARK: - Command Runner
 
     struct PSProcessEnvMeta: Equatable, Sendable {
@@ -1190,10 +1502,17 @@ final class CodexActiveSessionsModel: ObservableObject {
         var itermSessionId: String?
     }
 
+    struct PSCommandInfo: Equatable, Sendable {
+        var pid: Int
+        var tty: String?
+        var command: String
+    }
+
     struct LsofPIDInfo: Equatable, Sendable {
         var pid: Int
         var cwd: String?
         var tty: String?
+        var sessionID: String?
         var sessionLogPath: String?
         var termProgram: String?
         var itermSessionId: String?
@@ -1285,7 +1604,43 @@ final class CodexActiveSessionsModel: ObservableObject {
         return false
     }
 
+    nonisolated static func isLikelyClaudeITermSessionName(_ rawName: String) -> Bool {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !name.isEmpty else { return false }
+        if name == "claude" { return true }
+        if name.contains("(claude)") { return true }
+        if name.hasPrefix("claude ") || name.hasSuffix(" claude") { return true }
+        if name.contains("claude code") { return true }
+        return false
+    }
+
+    nonisolated static func isLikelyOpenCodeITermSessionName(_ rawName: String) -> Bool {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !name.isEmpty else { return false }
+        if name == "opencode" { return true }
+        if name.contains("(opencode)") { return true }
+        if name.hasPrefix("opencode ") || name.hasSuffix(" opencode") { return true }
+        return false
+    }
+
+    nonisolated static func isLikelyITermSessionName(_ rawName: String, source: SessionSource) -> Bool {
+        switch source {
+        case .codex:
+            return isLikelyCodexITermSessionName(rawName)
+        case .claude:
+            return isLikelyClaudeITermSessionName(rawName)
+        case .opencode:
+            return isLikelyOpenCodeITermSessionName(rawName)
+        default:
+            return false
+        }
+    }
+
     nonisolated static func parseLsofMachineOutput(_ text: String, sessionsRoots: [String]) -> [Int: LsofPIDInfo] {
+        parseLsofMachineOutput(text, sessionsRoots: sessionsRoots, source: .codex)
+    }
+
+    nonisolated static func parseLsofMachineOutput(_ text: String, sessionsRoots: [String], source: SessionSource) -> [Int: LsofPIDInfo] {
         var infos: [Int: LsofPIDInfo] = [:]
 
         var currentPID: Int? = nil
@@ -1346,16 +1701,12 @@ final class CodexActiveSessionsModel: ObservableObject {
                 }
 
                 // Session log path: prefer Codex rollout JSONL under configured sessions roots.
-                if name.hasSuffix(".jsonl"),
-                   (name as NSString).lastPathComponent.hasPrefix("rollout-"),
-                   sessionsRoots.contains(where: { root in
-                       let rp = root.hasSuffix("/") ? root : (root + "/")
-                       return name.hasPrefix(rp)
-                   }) {
+                if matchesSessionLogPath(name, source: source, sessionsRoots: sessionsRoots) {
                     // Prefer a writable fd if present (e.g., 26w).
                     let isWrite = (currentFD?.contains("w") ?? false)
                     if info.sessionLogPath == nil || isWrite {
                         info.sessionLogPath = name
+                        info.sessionID = extractSessionID(fromLogPath: name, source: source)
                     }
                     infos[pid] = info
                 }
@@ -1369,6 +1720,49 @@ final class CodexActiveSessionsModel: ObservableObject {
         // Some open Codex sessions have not opened a rollout JSONL yet; keep tty-only rows.
         return infos.filter { _, v in
             v.tty != nil && (v.sessionLogPath != nil || v.cwd != nil)
+        }
+    }
+
+    nonisolated private static func matchesSessionLogPath(_ path: String,
+                                                          source: SessionSource,
+                                                          sessionsRoots: [String]) -> Bool {
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        let fileName = (path as NSString).lastPathComponent.lowercased()
+        let underRoot = sessionsRoots.contains(where: { root in
+            let rp = root.hasSuffix("/") ? root : (root + "/")
+            return path.hasPrefix(rp)
+        })
+        guard underRoot else { return false }
+
+        switch source {
+        case .codex:
+            return ext == "jsonl" && fileName.hasPrefix("rollout-")
+        case .claude:
+            if !(ext == "jsonl" || ext == "ndjson") { return false }
+            if fileName == "history.jsonl" { return false }
+            return true
+        case .opencode:
+            return ext == "json" && fileName.hasPrefix("ses_")
+        default:
+            return false
+        }
+    }
+
+    nonisolated private static func extractSessionID(fromLogPath path: String, source: SessionSource) -> String? {
+        let base = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        switch source {
+        case .claude:
+            // Claude session files are typically <UUID>.jsonl under ~/.claude/projects/<project>/.
+            // Keep it strict so arbitrary filenames are not treated as session ids.
+            if UUID(uuidString: base) != nil { return base }
+            return nil
+        case .opencode:
+            if base.hasPrefix("ses_") {
+                return String(base.dropFirst("ses_".count))
+            }
+            return nil
+        default:
+            return nil
         }
     }
 
@@ -1394,6 +1788,212 @@ final class CodexActiveSessionsModel: ObservableObject {
         }
         return out
     }
+
+    nonisolated static func parsePSCommandListOutput(_ text: String) -> [PSCommandInfo] {
+        var out: [PSCommandInfo] = []
+        out.reserveCapacity(24)
+
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = String(raw)
+            let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
+            guard fields.count == 3, let pid = Int(fields[0]) else { continue }
+
+            let ttyRaw = String(fields[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let tty = ttyRaw == "??" || ttyRaw.isEmpty ? nil : ttyRaw
+            let command = String(fields[2]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !command.isEmpty else { continue }
+
+            out.append(PSCommandInfo(pid: pid, tty: tty, command: command))
+        }
+
+        return out
+    }
+
+    nonisolated static func commandContainsNeedle(_ command: String, needles: [String]) -> Bool {
+        let normalizedNeedles = Set(
+            needles
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+        )
+        guard !normalizedNeedles.isEmpty else { return false }
+
+        let tokens = splitCommandTokens(command)
+        guard !tokens.isEmpty else { return false }
+
+        for candidate in executableNeedleCandidates(from: tokens, depth: 0) {
+            if normalizedNeedles.contains(candidate) { return true }
+        }
+        return false
+    }
+
+    nonisolated private static func executableNeedleCandidates(from tokens: [String], depth: Int) -> [String] {
+        guard !tokens.isEmpty, depth < 2 else { return [] }
+        var index = 0
+
+        while index < tokens.count, isEnvironmentAssignmentToken(tokens[index]) {
+            index += 1
+        }
+
+        if index < tokens.count, commandBasename(tokens[index]) == "env" {
+            index += 1
+            while index < tokens.count {
+                let token = tokens[index]
+                if token.hasPrefix("-") {
+                    index += 1
+                    continue
+                }
+                if isEnvironmentAssignmentToken(token) {
+                    index += 1
+                    continue
+                }
+                break
+            }
+        }
+
+        guard index < tokens.count else { return [] }
+        let executable = commandBasename(tokens[index])
+        guard !executable.isEmpty else { return [] }
+
+        var out: [String] = [executable]
+        out.reserveCapacity(3)
+
+        if shellExecutables.contains(executable),
+           let commandString = shellCommandString(from: tokens, startAt: index + 1) {
+            let nested = splitCommandTokens(commandString)
+            out.append(contentsOf: executableNeedleCandidates(from: nested, depth: depth + 1))
+            return out
+        }
+
+        if wrapperExecutables.contains(executable),
+           let wrapped = firstWrappedExecutableToken(from: tokens, startAt: index + 1, wrapperExecutable: executable) {
+            out.append(commandBasename(wrapped))
+        }
+        return out
+    }
+
+    nonisolated private static func splitCommandTokens(_ command: String) -> [String] {
+        var out: [String] = []
+        out.reserveCapacity(8)
+        var current = ""
+        current.reserveCapacity(command.count)
+        var quote: Character?
+        var escaping = false
+
+        for ch in command {
+            if escaping {
+                current.append(ch)
+                escaping = false
+                continue
+            }
+
+            if ch == "\\" && quote != "'" {
+                escaping = true
+                continue
+            }
+
+            if let currentQuote = quote {
+                if ch == currentQuote {
+                    quote = nil
+                } else {
+                    current.append(ch)
+                }
+                continue
+            }
+
+            if ch == "\"" || ch == "'" {
+                quote = ch
+                continue
+            }
+
+            if ch == " " || ch == "\t" {
+                self.appendToken(current, into: &out)
+                current.removeAll(keepingCapacity: true)
+                continue
+            }
+            current.append(ch)
+        }
+
+        if escaping { current.append("\\") }
+        self.appendToken(current, into: &out)
+        return out
+    }
+
+    nonisolated private static func appendToken(_ token: String, into out: inout [String]) {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        out.append(trimmed)
+    }
+
+    nonisolated private static func commandBasename(_ token: String) -> String {
+        let stripped = token.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        guard !stripped.isEmpty else { return "" }
+        return URL(fileURLWithPath: stripped).lastPathComponent.lowercased()
+    }
+
+    nonisolated private static func isEnvironmentAssignmentToken(_ token: String) -> Bool {
+        guard let eq = token.firstIndex(of: "="), eq != token.startIndex else { return false }
+        let key = token[..<eq]
+        guard !key.isEmpty else { return false }
+        guard key.first == "_" || (key.first?.isLetter ?? false) else { return false }
+        return key.dropFirst().allSatisfy { $0 == "_" || $0.isLetter || $0.isNumber }
+    }
+
+    nonisolated private static func firstWrappedExecutableToken(from tokens: [String],
+                                                                startAt start: Int,
+                                                                wrapperExecutable: String) -> String? {
+        guard start < tokens.count else { return nil }
+        var idx = start
+        var canSkipWrapperSubcommand = true
+        let skipSubcommands = wrapperSubcommandSkips[wrapperExecutable] ?? []
+        while idx < tokens.count {
+            let token = tokens[idx]
+            if token.hasPrefix("-") {
+                idx += 1
+                continue
+            }
+            if isEnvironmentAssignmentToken(token) {
+                idx += 1
+                continue
+            }
+            if canSkipWrapperSubcommand, skipSubcommands.contains(commandBasename(token)) {
+                canSkipWrapperSubcommand = false
+                idx += 1
+                continue
+            }
+            canSkipWrapperSubcommand = false
+            return token
+        }
+        return nil
+    }
+
+    nonisolated private static func shellCommandString(from tokens: [String], startAt start: Int) -> String? {
+        guard start < tokens.count else { return nil }
+        var idx = start
+        while idx < tokens.count {
+            let token = tokens[idx]
+            if token == "-c" || token == "-lc" || token == "-ic" || token == "-lxc" || token == "-xc" {
+                let next = idx + 1
+                return next < tokens.count ? tokens[next] : nil
+            }
+            idx += 1
+        }
+        return nil
+    }
+
+    nonisolated private static let shellExecutables: Set<String> = [
+        "bash", "sh", "zsh", "fish", "ksh", "dash", "tcsh"
+    ]
+
+    nonisolated private static let wrapperExecutables: Set<String> = [
+        "node", "bun", "deno", "python", "python3", "ruby", "perl", "npx", "pnpm", "npm", "yarn", "yarnpkg", "uv", "uvx", "tsx"
+    ]
+
+    nonisolated private static let wrapperSubcommandSkips: [String: Set<String>] = [
+        "pnpm": ["dlx", "exec"],
+        "npm": ["exec", "x"],
+        "yarn": ["dlx", "exec"],
+        "yarnpkg": ["dlx", "exec"]
+    ]
 }
 
 private enum LenientISO8601 {

@@ -722,17 +722,17 @@ struct UnifiedSessionsView: View {
 	                        .help("Resume the selected session in its original CLI (⌃⌘R)")
 	                    Divider()
 	                }
-	                    if s.source == .codex {
-	                        let presence = activeCodexSessions.presence(for: s)
-	                        let focusURL = presence?.revealURL
-	                        let canFocus = CodexActiveSessionsModel.canAttemptITerm2Focus(
-	                            itermSessionId: presence?.terminal?.itermSessionId,
-	                            tty: presence?.tty,
+                    if activeCodexSessions.supportsLiveSessions(for: s.source) {
+                        let presence = livePresence(for: s)
+                        let focusURL = presence?.revealURL
+                        let canFocus = CodexActiveSessionsModel.canAttemptITerm2Focus(
+                            itermSessionId: presence?.terminal?.itermSessionId,
+                            tty: presence?.tty,
 	                            termProgram: presence?.terminal?.termProgram
 	                        ) || focusURL != nil
 	                        let helpText: String = {
 	                            if canFocus { return "Focus the existing iTerm2 tab/window for this session." }
-	                            if activeCodexSessions.isLive(s) { return "Focus is unavailable for this terminal session." }
+	                            if isSessionLive(s) { return "Focus is unavailable for this terminal session." }
 	                            return "This session is not currently live."
 	                        }()
 	                        Button("Focus in iTerm2") {
@@ -1019,7 +1019,7 @@ struct UnifiedSessionsView: View {
         ToolbarItem(placement: .principal) {
             HStack(spacing: 12) {
                 ActiveSessionsOnlyToggle(isOn: $showActiveSessionsOnly)
-                    .help("Show only live Codex sessions in the list (active working + open idle)")
+                    .help("Show only live sessions in the list (Codex, Claude, OpenCode)")
 
                 if codexAgentEnabled {
                     AgentTabToggle(title: "Codex", color: Color.agentCodex, isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
@@ -1530,8 +1530,9 @@ struct UnifiedSessionsView: View {
         let label: String
         let isSelected = selection == session.id
         let liveState: CodexLiveState? = {
-            guard session.source == .codex else { return nil }
-            return activeCodexSessions.liveState(session)
+            guard activeCodexSessions.supportsLiveSessions(for: session.source) else { return nil }
+            guard let presence = livePresence(for: session) else { return nil }
+            return activeCodexSessions.liveState(for: presence)
         }()
         let rowTextColor: Color = {
             if isSelected { return .white }
@@ -1694,8 +1695,135 @@ struct UnifiedSessionsView: View {
     }
 
     private func isSessionLive(_ session: Session) -> Bool {
-        guard session.source == .codex else { return false }
-        return activeCodexSessions.isLive(session)
+        guard activeCodexSessions.supportsLiveSessions(for: session.source) else { return false }
+        return livePresence(for: session) != nil
+    }
+
+    private func livePresence(for session: Session) -> CodexActivePresence? {
+        if let direct = activeCodexSessions.presence(for: session) {
+            return direct
+        }
+        if let workspace = workspaceFallbackPresence(for: session) {
+            return workspace
+        }
+        return unresolvedSourceFallbackPresence(for: session)
+    }
+
+    private func workspaceFallbackPresence(for session: Session) -> CodexActivePresence? {
+        guard session.source == .claude || session.source == .opencode else { return nil }
+        guard let cwdRaw = session.cwd?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !cwdRaw.isEmpty else { return nil }
+        let normalizedCWD = CodexActiveSessionsModel.normalizePath(cwdRaw)
+        guard !normalizedCWD.isEmpty else { return nil }
+
+        let siblingCandidates = unified.allSessions.filter { candidate in
+            guard candidate.source == session.source else { return false }
+            guard let candidateCWD = candidate.cwd?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !candidateCWD.isEmpty else { return false }
+            return CodexActiveSessionsModel.normalizePath(candidateCWD) == normalizedCWD
+        }
+        guard !siblingCandidates.isEmpty else { return nil }
+        let fallbackSiblingCandidates = Self.fallbackEligibleSessions(from: siblingCandidates) { candidate in
+            activeCodexSessions.presence(for: candidate) != nil
+        }
+        guard !fallbackSiblingCandidates.isEmpty else { return nil }
+
+        let workspaceCandidates = activeCodexSessions.presences.filter { presence in
+            guard presence.source == session.source else { return false }
+            guard let workspace = presence.workspaceRoot?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !workspace.isEmpty else { return false }
+            return CodexActiveSessionsModel.normalizePath(workspace) == normalizedCWD
+        }
+        guard !workspaceCandidates.isEmpty else { return nil }
+
+        // Only claim ambiguous workspace-only rows; keyed presences are reserved for direct joins.
+        let claimableCandidates = workspaceCandidates.filter { !presenceHasSessionSpecificJoinSignals($0) }
+        guard !claimableCandidates.isEmpty else { return nil }
+
+        return Self.fallbackClaimedPresence(
+            for: session,
+            among: fallbackSiblingCandidates,
+            using: claimableCandidates
+        )
+    }
+
+    private func unresolvedSourceFallbackPresence(for session: Session) -> CodexActivePresence? {
+        guard session.source == .claude || session.source == .opencode else { return nil }
+
+        let unresolved = activeCodexSessions.presences.filter { presence in
+            guard presence.source == session.source else { return false }
+            guard !presenceHasStrongJoinSignals(presence) else { return false }
+            let hasTTY = presence.tty?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            let hasPID = presence.pid != nil
+            let hasITermID = presence.terminal?.itermSessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            return hasTTY || hasPID || hasITermID
+        }
+        guard !unresolved.isEmpty else { return nil }
+
+        let sourceSessions = unified.allSessions.filter { $0.source == session.source }
+        let fallbackSourceSessions = Self.fallbackEligibleSessions(from: sourceSessions) { candidate in
+            activeCodexSessions.presence(for: candidate) != nil
+        }
+        guard !fallbackSourceSessions.isEmpty else { return nil }
+        return Self.fallbackClaimedPresence(
+            for: session,
+            among: fallbackSourceSessions,
+            using: unresolved
+        )
+    }
+
+    private func presenceHasSessionSpecificJoinSignals(_ presence: CodexActivePresence) -> Bool {
+        let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        return hasSessionID || hasLogPath
+    }
+
+    static func fallbackClaimedPresence(for session: Session,
+                                        among candidateSessions: [Session],
+                                        using fallbackPresences: [CodexActivePresence]) -> CodexActivePresence? {
+        guard !candidateSessions.isEmpty, !fallbackPresences.isEmpty else { return nil }
+        let orderedSessions = candidateSessions.sorted(by: fallbackSessionSort)
+        guard let rank = orderedSessions.firstIndex(where: { $0.source == session.source && $0.id == session.id }) else {
+            return nil
+        }
+        let orderedPresences = fallbackPresences.sorted(by: fallbackPresenceSort)
+        guard rank < orderedPresences.count else { return nil }
+        return orderedPresences[rank]
+    }
+
+    static func fallbackEligibleSessions(from candidateSessions: [Session],
+                                         hasDirectJoin: (Session) -> Bool) -> [Session] {
+        candidateSessions.filter { !hasDirectJoin($0) }
+    }
+
+    static func fallbackSessionSort(_ lhs: Session, _ rhs: Session) -> Bool {
+        if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
+        if lhs.startTime != rhs.startTime { return (lhs.startTime ?? .distantPast) > (rhs.startTime ?? .distantPast) }
+        if lhs.filePath != rhs.filePath { return lhs.filePath < rhs.filePath }
+        return lhs.id < rhs.id
+    }
+
+    static func fallbackPresenceSort(_ lhs: CodexActivePresence, _ rhs: CodexActivePresence) -> Bool {
+        let leftSeen = lhs.lastSeenAt ?? .distantPast
+        let rightSeen = rhs.lastSeenAt ?? .distantPast
+        if leftSeen != rightSeen { return leftSeen > rightSeen }
+
+        let leftStarted = lhs.startedAt ?? .distantPast
+        let rightStarted = rhs.startedAt ?? .distantPast
+        if leftStarted != rightStarted { return leftStarted > rightStarted }
+
+        let leftKey = CodexActiveSessionsModel.presenceKey(for: lhs)
+        let rightKey = CodexActiveSessionsModel.presenceKey(for: rhs)
+        if leftKey != rightKey { return leftKey < rightKey }
+        return (lhs.pid ?? .min) < (rhs.pid ?? .min)
+    }
+
+    private func presenceHasStrongJoinSignals(_ presence: CodexActivePresence) -> Bool {
+        let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasWorkspace = presence.workspaceRoot?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasSourcePath = presence.sourceFilePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        return hasSessionID || hasLogPath || hasWorkspace || hasSourcePath
     }
 
 	    private func progressLineText(_ p: SearchCoordinator.Progress) -> String {
