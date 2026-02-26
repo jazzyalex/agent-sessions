@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Sessions (Cockpit): Added a live-session filter segmented control with `Both`, `Active`, and `Open`; default is `Both`.
 
 ### Fixed
+- Sessions (Cockpit): Cockpit now hides only low-confidence unresolved live placeholders (missing join keys and fallback identity signals like tty/pid/source/workspace), preventing ghost rows while keeping valid fallback-detected live sessions visible.
 - Claude usage probe: Login-shell path and `PATH` resolution now strips injected OSC escape sequences (for example from iTerm2 shell integration), respects custom Claude binary overrides, and hardens tmux startup/trust-prompt handling to avoid false `tmux_not_found` and premature probe failures.
 - Cockpit/Sessions (Unified): Active Codex sessions are now joined by Codex internal `session_id` when log-path metadata is unavailable, restoring active indicators and Focus-in-iTerm2 availability.
 - Sessions (Unified): `Active-only` filtering now immediately applies during in-flight searches and re-seats selection when the previously selected row drops out of the filtered list.
