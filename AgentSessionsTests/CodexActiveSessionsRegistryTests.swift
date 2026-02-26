@@ -131,6 +131,32 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out[66606]?.itermSessionId, "w0t0p0:ABCDEF")
     }
 
+    func testParseITermSessionListOutput_parsesSessionRows() {
+        let text = """
+        349331C2-4268-4AEB-BD48-83342A767CF2\t/dev/ttys006\tAS-CX II (codex)
+        75A64ABD-FF8F-44C8-A1CE-4225F536D7E3\t/dev/ttys010\t-zsh
+        03167519-C7CD-4109-8999-641F9A8085E1tab/dev/ttys014tabcodex
+        """
+
+        let out = CodexActiveSessionsModel.parseITermSessionListOutput(text)
+        XCTAssertEqual(out.count, 3)
+        XCTAssertEqual(out[0].sessionID, "349331C2-4268-4AEB-BD48-83342A767CF2")
+        XCTAssertEqual(out[0].tty, "/dev/ttys006")
+        XCTAssertEqual(out[0].name, "AS-CX II (codex)")
+        XCTAssertEqual(out[1].sessionID, "75A64ABD-FF8F-44C8-A1CE-4225F536D7E3")
+        XCTAssertEqual(out[1].name, "-zsh")
+        XCTAssertEqual(out[2].sessionID, "03167519-C7CD-4109-8999-641F9A8085E1")
+        XCTAssertEqual(out[2].tty, "/dev/ttys014")
+        XCTAssertEqual(out[2].name, "codex")
+    }
+
+    func testIsLikelyCodexITermSessionName_matchesExpectedTabNames() {
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("codex"))
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("AS-CX II (codex)"))
+        XCTAssertFalse(CodexActiveSessionsModel.isLikelyCodexITermSessionName("-zsh"))
+        XCTAssertFalse(CodexActiveSessionsModel.isLikelyCodexITermSessionName("Codex-History"))
+    }
+
     func testNormalizePath_trimsAndStandardizesPath() {
         let path = "  ~/tmp/./sessions/../rollout.jsonl  "
         let normalized = CodexActiveSessionsModel.normalizePath(path)
@@ -199,12 +225,114 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .activeWorking)
     }
 
-    func testClassifyITermTail_nonPromptTailDefaultsToActiveWorking() {
+    func testClassifyITermTail_nonPromptTailDefaultsToOpenIdle() {
         let tail = """
         Analyzing files...
         Fetching status...
         """
-        XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .activeWorking)
+        XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .openIdle)
+    }
+
+    func testClassifyITermTail_historicalWorkedForDoesNotForceActive() {
+        let tail = """
+        — Worked for 1m 14s —
+
+        › Explain this codebase
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .openIdle)
+    }
+
+    @MainActor
+    func testCoalescePresencesByTTY_preservesDistinctSessionsOnSameTTY() {
+        var first = CodexActivePresence()
+        first.sessionId = "sid-a"
+        first.sessionLogPath = "/tmp/rollout-a.jsonl"
+        first.tty = "/dev/ttys011"
+        first.pid = 101
+        first.lastSeenAt = Date()
+
+        var second = CodexActivePresence()
+        second.sessionId = "sid-b"
+        second.sessionLogPath = "/tmp/rollout-b.jsonl"
+        second.tty = "/dev/ttys011"
+        second.pid = 202
+        second.lastSeenAt = Date()
+
+        let out = CodexActiveSessionsModel.coalescePresencesByTTY([first, second])
+
+        XCTAssertEqual(out.count, 2)
+        XCTAssertEqual(Set(out.compactMap(\.sessionId)), Set(["sid-a", "sid-b"]))
+    }
+
+    @MainActor
+    func testCoalescePresencesByTTY_mergesDuplicateIdentityOnSameTTY() {
+        var processPresence = CodexActivePresence()
+        processPresence.sessionId = "sid-a"
+        processPresence.sessionLogPath = "/tmp/rollout-a.jsonl"
+        processPresence.tty = "/dev/ttys011"
+        processPresence.pid = 101
+        processPresence.publisher = "agent-sessions-process"
+        processPresence.lastSeenAt = Date()
+
+        var registryPresence = CodexActivePresence()
+        registryPresence.sessionId = "sid-a"
+        registryPresence.sessionLogPath = "/tmp/rollout-a.jsonl"
+        registryPresence.tty = "/dev/ttys011"
+        registryPresence.publisher = "agent-sessions-shim"
+        registryPresence.sourceFilePath = "/tmp/as-registry.json"
+        registryPresence.lastSeenAt = Date()
+
+        let out = CodexActiveSessionsModel.coalescePresencesByTTY([processPresence, registryPresence])
+
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out.first?.sessionId, "sid-a")
+        XCTAssertEqual(out.first?.tty, "/dev/ttys011")
+    }
+
+    @MainActor
+    func testReconcileFallbackPresences_mergesTTYOnlyITermFallbackIntoKeyedRow() {
+        var keyed = CodexActivePresence()
+        keyed.sessionId = "sid-a"
+        keyed.sessionLogPath = "/tmp/rollout-a.jsonl"
+        keyed.tty = "/dev/ttys011"
+        keyed.publisher = "agent-sessions-process"
+        keyed.lastSeenAt = Date()
+
+        var ttyOnlyITerm = CodexActivePresence()
+        ttyOnlyITerm.publisher = "agent-sessions-iterm"
+        ttyOnlyITerm.tty = "/dev/ttys011"
+        ttyOnlyITerm.lastSeenAt = Date()
+        var terminal = CodexActivePresence.Terminal()
+        terminal.termProgram = "iTerm2"
+        terminal.itermSessionId = "ABC-123"
+        ttyOnlyITerm.terminal = terminal
+
+        let out = CodexActiveSessionsModel.reconcileFallbackPresences([ttyOnlyITerm], into: [keyed])
+
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out.first?.sessionId, "sid-a")
+        XCTAssertEqual(out.first?.terminal?.itermSessionId, "ABC-123")
+    }
+
+    @MainActor
+    func testReconcileFallbackPresences_keepsTTYOnlyITermFallbackWhenNoTTYMatch() {
+        var keyed = CodexActivePresence()
+        keyed.sessionId = "sid-a"
+        keyed.sessionLogPath = "/tmp/rollout-a.jsonl"
+        keyed.tty = "/dev/ttys011"
+        keyed.publisher = "agent-sessions-process"
+        keyed.lastSeenAt = Date()
+
+        var ttyOnlyITerm = CodexActivePresence()
+        ttyOnlyITerm.publisher = "agent-sessions-iterm"
+        ttyOnlyITerm.tty = "/dev/ttys099"
+        ttyOnlyITerm.lastSeenAt = Date()
+
+        let out = CodexActiveSessionsModel.reconcileFallbackPresences([ttyOnlyITerm], into: [keyed])
+
+        XCTAssertEqual(out.count, 2)
+        XCTAssertTrue(out.contains { $0.sessionId == "sid-a" })
+        XCTAssertTrue(out.contains { $0.publisher == "agent-sessions-iterm" && $0.tty == "/dev/ttys099" })
     }
 
     func testHeuristicLiveStateFromLogMTime_recentWriteIsActive() throws {
