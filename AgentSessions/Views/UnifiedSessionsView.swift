@@ -539,7 +539,8 @@ struct UnifiedSessionsView: View {
 						}
 					}
                     .onReceive(activeCodexSessions.$activeMembershipVersion) { _ in
-                        guard showActiveSessionsOnly else { return }
+                        // Always refresh cached rows so CLI Agent live-state dots (active/open)
+                        // update promptly even when Active-only filtering is disabled.
                         updateCachedRows()
                         ensureDefaultSelectionIfNeeded()
                         refreshSelectionSourceFromCachedRows()
