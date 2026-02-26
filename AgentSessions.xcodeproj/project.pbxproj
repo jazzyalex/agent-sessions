@@ -95,6 +95,7 @@
 		767434CE7D92B9BFF2BE0734 /* SessionViewMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53A7DBE9280787FB4D64FBD6 /* SessionViewMode.swift */; };
 		79F61D0D12836CDD2A0CD265 /* FixturePaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22E2B6C946DA8195F448959F /* FixturePaths.swift */; };
 		79F828CD9CA64FBFA8A436FA /* GeminiCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27186044E3B440E0B9A395FC /* GeminiCLIEnvironment.swift */; };
+		7A185CDA5E6A2DBBBF89FD55 /* CodexLiveStatusDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0943932CC38105FCE675A57B /* CodexLiveStatusDot.swift */; };
 		7B42161617C8C080455AAD80 /* OpenCodeSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF23433C19A198F51A627A65 /* OpenCodeSessionDiscovery.swift */; };
 		7BEB14926470151C9681D7EA /* TerminalModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA913FF55A1E3CE8A9586FF /* TerminalModels.swift */; };
 		7C94BD12E8155B4CB1BE43B1 /* CodexActiveSessionsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 950A9B5B26322D59C953E73A /* CodexActiveSessionsModel.swift */; };
@@ -300,6 +301,7 @@
 		05D72F56F8E9EB0484E4361C /* OpenCodeSessionIndexer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OpenCodeSessionIndexer.swift; path = AgentSessions/Services/OpenCodeSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
 		06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsCardsView.swift; sourceTree = "<group>"; };
 		07C64CB8C963064704869C9D /* ImageBrowserThumbnailCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ImageBrowserThumbnailCacheTests.swift; sourceTree = SOURCE_ROOT; };
+		0943932CC38105FCE675A57B /* CodexLiveStatusDot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/CodexLiveStatusDot.swift; sourceTree = SOURCE_ROOT; };
 		0AA81B3C81B142CCF423565C /* codex_050_legacy.jsonl */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = codex_050_legacy.jsonl; path = Resources/Fixtures/codex_050_legacy.jsonl; sourceTree = SOURCE_ROOT; };
 		0DDD967AC4CCB8C88A1752E1 /* ImageBrowserViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ImageBrowserViewModel.swift; sourceTree = SOURCE_ROOT; };
 		0F0FF569592BFE502A97E9AE /* ProgressThrottler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ProgressThrottler.swift; sourceTree = SOURCE_ROOT; };
@@ -391,8 +393,8 @@
 		9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WindowFocusCoordinator.swift; path = AgentSessions/Services/WindowFocusCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		924F17AD700936A779630365 /* ColorExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/GitInspector/Utilities/ColorExtensions.swift; sourceTree = SOURCE_ROOT; };
 		9250A5B0654ADC3B8ACA39B4 /* AgentUpdateService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/AgentUpdateService.swift; sourceTree = SOURCE_ROOT; };
-		96C1921B5ACCD5E3837178B7 /* InternalPayloadFormatter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/InternalPayloadFormatter.swift; sourceTree = SOURCE_ROOT; };
 		950A9B5B26322D59C953E73A /* CodexActiveSessionsModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/CodexActiveSessionsModel.swift; sourceTree = SOURCE_ROOT; };
+		96C1921B5ACCD5E3837178B7 /* InternalPayloadFormatter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/InternalPayloadFormatter.swift; sourceTree = SOURCE_ROOT; };
 		979E7E3D0E14477885B20675 /* CodexLaunchMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexLaunchMode.swift; path = AgentSessions/Resume/CodexLaunchMode.swift; sourceTree = SOURCE_ROOT; };
 		984DB58B4EDFDA087B0B1623 /* CodexSessionImagesGalleryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/CodexSessionImagesGalleryView.swift; sourceTree = SOURCE_ROOT; };
 		9A35FF4EC89DCD3987AD16BB /* OpenCodeSessionParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OpenCodeSessionParser.swift; path = AgentSessions/Services/OpenCodeSessionParser.swift; sourceTree = SOURCE_ROOT; };
@@ -1050,6 +1052,7 @@
 				984DB58B4EDFDA087B0B1623 /* CodexSessionImagesGalleryView.swift */,
 				214B1D26E0D5AB39144C1382 /* OpenClawTranscriptView.swift */,
 				F62C87416A0A968C73E08595 /* CockpitView.swift */,
+				0943932CC38105FCE675A57B /* CodexLiveStatusDot.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -1620,6 +1623,7 @@
 				E30E25DBB8A97DC728D7BB0D /* IDEOpener.swift in Sources */,
 				7C94BD12E8155B4CB1BE43B1 /* CodexActiveSessionsModel.swift in Sources */,
 				58948563F2E9CEE4A0163C91 /* CockpitView.swift in Sources */,
+				7A185CDA5E6A2DBBBF89FD55 /* CodexLiveStatusDot.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

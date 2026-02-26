@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 - Cockpit: Added a Cockpit window for active Codex sessions with iTerm2 focus, plus active-session indicators in the Unified sessions list.
 - Sessions (Unified): Added a small active-status dot in the `CLI Agent` column for live Codex sessions.
 - Sessions (Unified): Added a blue-dot toolbar filter toggle (dot-only control) before the agent toggles to show only active sessions in the list.
+- Sessions (Cockpit/Unified): Codex live-session status now distinguishes `active` (working) from `open` (idle). Active rows use a pulsing dot and open rows use a solid dot.
+- Sessions (Cockpit): Added a live-session filter segmented control with `Both`, `Active`, and `Open`; default is `Both`.
 
 ### Fixed
 - Claude usage probe: Login-shell path and `PATH` resolution now strips injected OSC escape sequences (for example from iTerm2 shell integration), respects custom Claude binary overrides, and hardens tmux startup/trust-prompt handling to avoid false `tmux_not_found` and premature probe failures.
@@ -17,11 +19,14 @@ All notable changes to this project will be documented in this file.
 - Sessions (Codex active indicators): Active-session path normalization now uses cached canonical (symlink-aware) paths so equivalent roots (for example `/var/...` and `/private/var/...`) still join correctly, process fallback probing now shifts to slower completeness sweeps when registry data is already present, and background polling/probing now backs off while the app is inactive.
 - Sessions (Codex active indicators): Active-session polling visibility now tracks Unified/Cockpit consumers per window instance, so closing one of multiple open windows no longer drops refresh cadence for the windows that remain visible.
 - Sessions (Codex active indicators): Re-enabling active-session detection now preserves existing visible-window consumer registrations, so polling/probing immediately returns to foreground cadence without requiring window reopen.
+- Sessions (Codex active indicators): Active lookups now avoid event-derived session-id fallback on row render paths, codex internal-id hint backfill now progresses in rotating background batches (instead of a fixed small cap), and active-only list rendering skips redundant per-row active checks.
+- Claude usage probe cleanup: orphaned `as-cc-*` tmux label cleanup is now processed in bounded batches with delayed follow-up passes to avoid large single-pass CPU spikes, and cleanup now excludes the currently active probe label.
 
 ### Changed
 - Preferences (Unified Window): Reordered sections so `Columns` and `Filters` appear before `Rich Transcript`.
 - Preferences (OpenClaw): Moved `Include deleted OpenClaw sessions` from Advanced to the OpenClaw pane as a standalone checkbox.
 - Sessions (Unified): Removed the leading dot from agent pill toggles in the main toolbar.
+- Sessions (Unified): `Active sessions only` now filters to live Codex sessions (`active` + `open`) instead of only actively working sessions.
 
 ## [2.12] - 2026-02-24
 

@@ -110,6 +110,7 @@ enum PreferencesKey {
     enum Cockpit {
         static let codexActiveSessionsEnabled = "CockpitCodexActiveSessionsEnabled"
         static let codexActiveRegistryRootOverride = "CockpitCodexActiveRegistryRootOverride"
+        static let codexLiveFilterMode = "CockpitCodexLiveFilterMode"
     }
 }
 

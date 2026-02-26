@@ -102,6 +102,25 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out[123]?.sessionLogPath, "/Users/alexm/.codex/sessions/2026/02/09/rollout-2026-02-09T12-34-56-00000000-0000-0000-0000-000000000000.jsonl")
     }
 
+    func testParseLsofMachineOutput_keepsTTYOnlySessionWhenNoRolloutOpenYet() throws {
+        let root = "/Users/alexm/.codex/sessions"
+        let text = """
+        p456
+        fcwd
+        tDIR
+        n/Users/alexm/Repository/Codex-History
+        f0
+        tCHR
+        n/dev/ttys099
+        """
+
+        let out = CodexActiveSessionsModel.parseLsofMachineOutput(text, sessionsRoots: [root])
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[456]?.cwd, "/Users/alexm/Repository/Codex-History")
+        XCTAssertEqual(out[456]?.tty, "/dev/ttys099")
+        XCTAssertNil(out[456]?.sessionLogPath)
+    }
+
     func testParsePSEnvironmentOutput_extractsITermSessionID() throws {
         let text = """
           PID   TT  STAT      TIME COMMAND
@@ -138,5 +157,97 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
     func testNormalizePath_emptyInputReturnsEmptyString() {
         XCTAssertEqual(CodexActiveSessionsModel.normalizePath(""), "")
         XCTAssertEqual(CodexActiveSessionsModel.normalizePath("   \n\t "), "")
+    }
+
+    func testCanAttemptITerm2Focus_allowsTTYWhenTermProgramUnavailable() {
+        XCTAssertTrue(CodexActiveSessionsModel.canAttemptITerm2Focus(
+            itermSessionId: nil,
+            tty: "/dev/ttys012",
+            termProgram: nil
+        ))
+    }
+
+    func testCanAttemptITerm2Focus_rejectsKnownNonITermTerminal() {
+        XCTAssertFalse(CodexActiveSessionsModel.canAttemptITerm2Focus(
+            itermSessionId: nil,
+            tty: "/dev/ttys012",
+            termProgram: "Apple_Terminal"
+        ))
+    }
+
+    func testClassifyITermTail_detectsActiveWorkingMarkers() {
+        let tail = """
+        • The bridge-session run is still active with CPU usage
+        Waiting for background terminal . python3 scripts/build_report.py
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .activeWorking)
+    }
+
+    func testClassifyITermTail_detectsOpenIdlePrompt() {
+        let tail = """
+        Explain this codebase
+        ›
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .openIdle)
+    }
+
+    func testClassifyITermTail_usesLastLinePromptNotHistoricalPrompt() {
+        let tail = """
+        › previous prompt
+        • Working for 12s
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .activeWorking)
+    }
+
+    func testClassifyITermTail_nonPromptTailDefaultsToActiveWorking() {
+        let tail = """
+        Analyzing files...
+        Fetching status...
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .activeWorking)
+    }
+
+    func testHeuristicLiveStateFromLogMTime_recentWriteIsActive() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("as-live-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let file = dir.appendingPathComponent("rollout-test.jsonl")
+        try Data("{}".utf8).write(to: file)
+
+        let now = Date()
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-0.6)], ofItemAtPath: file.path)
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.heuristicLiveStateFromLogMTime(
+                logPath: file.path,
+                now: now,
+                activeWriteWindow: 2.5
+            ),
+            .activeWorking
+        )
+    }
+
+    func testHeuristicLiveStateFromLogMTime_staleWriteIsOpen() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("as-live-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let file = dir.appendingPathComponent("rollout-test.jsonl")
+        try Data("{}".utf8).write(to: file)
+
+        let now = Date()
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-15)], ofItemAtPath: file.path)
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.heuristicLiveStateFromLogMTime(
+                logPath: file.path,
+                now: now,
+                activeWriteWindow: 2.5
+            ),
+            .openIdle
+        )
     }
 }
