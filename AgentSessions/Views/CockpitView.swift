@@ -6,12 +6,30 @@ struct CockpitView: View {
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
+    @AppStorage(PreferencesKey.Cockpit.codexLiveFilterMode) private var liveFilterModeRaw: String = LiveFilterMode.both.rawValue
     @State private var selection: Set<String> = []
     @State private var activeConsumerID = UUID()
+
+    private enum LiveFilterMode: String, CaseIterable, Identifiable {
+        case both
+        case active
+        case open
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .both: return "Both"
+            case .active: return "Active"
+            case .open: return "Open"
+            }
+        }
+    }
 
     private struct Row: Identifiable {
         let id: String
         let title: String
+        let liveState: CodexLiveState
         let repo: String
         let date: Date?
         let dateLabel: String
@@ -26,7 +44,11 @@ struct CockpitView: View {
         let workingDirectory: String?
     }
 
-    private var activeRows: [Row] {
+    private var liveFilterMode: LiveFilterMode {
+        LiveFilterMode(rawValue: liveFilterModeRaw) ?? .both
+    }
+
+    private var liveRows: [Row] {
         let dateFormatter = DateFormatter()
         dateFormatter.locale = .current
         dateFormatter.timeZone = .current
@@ -58,6 +80,7 @@ struct CockpitView: View {
                 if termProgram.lowercased().contains("terminal") { return "Terminal" }
                 return termProgram.isEmpty ? "—" : termProgram
             }()
+            let liveState = activeCodex.liveState(for: p)
 
             let focusHelp: String = {
                 if CodexActiveSessionsModel.canAttemptITerm2Focus(
@@ -81,6 +104,7 @@ struct CockpitView: View {
             return Row(
                 id: stableID,
                 title: title,
+                liveState: liveState,
                 repo: repo,
                 date: date,
                 dateLabel: dateLabel,
@@ -104,6 +128,25 @@ struct CockpitView: View {
             if a.repo != b.repo { return a.repo < b.repo }
             return a.title < b.title
         }
+    }
+
+    private var filteredRows: [Row] {
+        switch liveFilterMode {
+        case .both:
+            return liveRows
+        case .active:
+            return liveRows.filter { $0.liveState == .activeWorking }
+        case .open:
+            return liveRows.filter { $0.liveState == .openIdle }
+        }
+    }
+
+    private var activeRowCount: Int {
+        liveRows.filter { $0.liveState == .activeWorking }.count
+    }
+
+    private var openRowCount: Int {
+        liveRows.filter { $0.liveState == .openIdle }.count
     }
 
     var body: some View {
@@ -136,9 +179,11 @@ struct CockpitView: View {
                 .padding(.horizontal, 12)
             }
 
-            Table(activeRows, selection: $selection) {
+            Table(filteredRows, selection: $selection) {
                 TableColumn("Name") { row in
                     HStack(spacing: 8) {
+                        CodexLiveStatusDot(state: row.liveState, color: .blue, size: 7)
+                            .help(row.liveState == .activeWorking ? "Active (working)" : "Open (idle)")
                         Text(row.title)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -171,7 +216,7 @@ struct CockpitView: View {
             }
             .frame(minHeight: 360)
             .contextMenu(forSelectionType: String.self) { ids in
-                if ids.count == 1, let id = ids.first, let row = activeRows.first(where: { $0.id == id }) {
+                if ids.count == 1, let id = ids.first, let row = filteredRows.first(where: { $0.id == id }) {
                     Button("Focus in iTerm2") { focus(row) }
                         .disabled(!canFocus(row))
                         .help(row.focusHelp)
@@ -201,6 +246,14 @@ struct CockpitView: View {
         HStack(spacing: 10) {
             Text("Cockpit")
                 .font(.system(size: 14, weight: .semibold))
+            Picker("Show", selection: $liveFilterModeRaw) {
+                ForEach(LiveFilterMode.allCases) { mode in
+                    Text(mode.title).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 210)
+            .controlSize(.small)
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -220,7 +273,7 @@ struct CockpitView: View {
     }
 
     private var footerText: String {
-        "\(activeRows.count) active"
+        "\(filteredRows.count) shown • \(activeRowCount) active • \(openRowCount) open"
     }
 
     private func focus(_ row: Row) {

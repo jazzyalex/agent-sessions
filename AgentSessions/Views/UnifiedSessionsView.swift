@@ -212,6 +212,12 @@ struct UnifiedSessionsView: View {
     @State private var showAgentEnablementNotice: Bool = false
     @State private var isWindowKey: Bool = false
     @State private var activeConsumerID = UUID()
+#if DEBUG
+    @State private var debugActiveOnlyUpdateRowsCount: UInt64 = 0
+    @State private var debugActiveOnlyUpdateRowsTotalMs: Double = 0
+    @State private var debugActiveOnlyUpdateRowsMaxMs: Double = 0
+    @State private var debugActiveOnlyLastReportAt: Date = .distantPast
+#endif
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
     private enum SelectionChangeSource { case mouse }
@@ -232,7 +238,7 @@ struct UnifiedSessionsView: View {
         }
 
         guard showActiveSessionsOnly else { return baseRows }
-        return baseRows.filter { isSessionActive($0) }
+        return baseRows.filter { isSessionLive($0) }
     }
 
     init(unified: UnifiedSessionIndexer,
@@ -691,8 +697,8 @@ struct UnifiedSessionsView: View {
 	                        ) || focusURL != nil
 	                        let helpText: String = {
 	                            if canFocus { return "Focus the existing iTerm2 tab/window for this session." }
-	                            if activeCodexSessions.isActive(s) { return "Focus is unavailable for this terminal session." }
-	                            return "This session is not currently active."
+	                            if activeCodexSessions.isLive(s) { return "Focus is unavailable for this terminal session." }
+	                            return "This session is not currently live."
 	                        }()
 	                        Button("Focus in iTerm2") {
 	                            let didFocus = CodexActiveSessionsModel.tryFocusITerm2(
@@ -973,7 +979,7 @@ struct UnifiedSessionsView: View {
         ToolbarItem(placement: .principal) {
             HStack(spacing: 12) {
                 ActiveSessionsOnlyToggle(isOn: $showActiveSessionsOnly)
-                    .help("Show only active sessions in the list")
+                    .help("Show only live Codex sessions in the list (active working + open idle)")
 
                 if codexAgentEnabled {
                     AgentTabToggle(title: "Codex", color: Color.agentCodex, isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
@@ -1321,6 +1327,34 @@ struct UnifiedSessionsView: View {
     }
 
 	    private func updateCachedRows() {
+#if DEBUG
+        let startedAt = Date()
+        defer {
+            if showActiveSessionsOnly {
+                let elapsedMs = Date().timeIntervalSince(startedAt) * 1000.0
+                debugActiveOnlyUpdateRowsCount &+= 1
+                debugActiveOnlyUpdateRowsTotalMs += elapsedMs
+                debugActiveOnlyUpdateRowsMaxMs = max(debugActiveOnlyUpdateRowsMaxMs, elapsedMs)
+
+                if elapsedMs > 25 {
+                    print("[UnifiedSessionsView][perf] updateCachedRows active-only took \(String(format: "%.1f", elapsedMs))ms rows=\(cachedRows.count)")
+                }
+
+                let now = Date()
+                if now.timeIntervalSince(debugActiveOnlyLastReportAt) >= 10, debugActiveOnlyUpdateRowsCount > 0 {
+                    let avgMs = debugActiveOnlyUpdateRowsTotalMs / Double(debugActiveOnlyUpdateRowsCount)
+                    print(
+                        "[UnifiedSessionsView][perf] active-only updateCachedRows " +
+                        "count=\(debugActiveOnlyUpdateRowsCount) avgMs=\(String(format: "%.1f", avgMs)) maxMs=\(String(format: "%.1f", debugActiveOnlyUpdateRowsMaxMs))"
+                    )
+                    debugActiveOnlyUpdateRowsCount = 0
+                    debugActiveOnlyUpdateRowsTotalMs = 0
+                    debugActiveOnlyUpdateRowsMaxMs = 0
+                    debugActiveOnlyLastReportAt = now
+                }
+            }
+        }
+#endif
 	        let nextRows: [Session]
 	        if FeatureFlags.coalesceListResort {
             // unified.sessions is already sorted by the view model's descriptor
@@ -1445,7 +1479,10 @@ struct UnifiedSessionsView: View {
     private func cellSource(for session: Session) -> some View {
         let label: String
         let isSelected = selection == session.id
-        let isSessionActive = session.source == .codex && activeCodexSessions.isActive(session)
+        let liveState: CodexLiveState? = {
+            guard session.source == .codex else { return nil }
+            return activeCodexSessions.liveState(session)
+        }()
         let rowTextColor: Color = {
             if isSelected { return .white }
             return !stripMonochrome ? sourceAccent(session) : .secondary
@@ -1467,11 +1504,9 @@ struct UnifiedSessionsView: View {
             Text(label)
                 .font(.system(size: 12, weight: .regular, design: .monospaced))
                 .foregroundStyle(rowTextColor)
-            if isSessionActive {
-                Circle()
-                    .fill(rowDotColor)
-                    .frame(width: 6, height: 6)
-                    .accessibilityLabel(Text("\(label) active session"))
+            if let liveState {
+                CodexLiveStatusDot(state: liveState, color: rowDotColor, size: 6)
+                    .accessibilityLabel(Text("\(label) \(liveState == .activeWorking ? "active" : "open") session"))
             }
             Spacer(minLength: 4)
         }
@@ -1608,9 +1643,9 @@ struct UnifiedSessionsView: View {
         }
     }
 
-    private func isSessionActive(_ session: Session) -> Bool {
+    private func isSessionLive(_ session: Session) -> Bool {
         guard session.source == .codex else { return false }
-        return activeCodexSessions.isActive(session)
+        return activeCodexSessions.isLive(session)
     }
 
 	    private func progressLineText(_ p: SearchCoordinator.Progress) -> String {
@@ -1711,7 +1746,7 @@ private struct ActiveSessionsOnlyToggle: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text("Active sessions only"))
+        .accessibilityLabel(Text("Live sessions only"))
         .accessibilityValue(Text(isOn ? "On" : "Off"))
     }
 }

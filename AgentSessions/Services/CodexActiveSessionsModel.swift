@@ -2,6 +2,22 @@ import Foundation
 import SwiftUI
 import Darwin
 
+enum CodexLiveState: String, Sendable, CaseIterable {
+    case activeWorking
+    case openIdle
+
+    var isActiveWorking: Bool {
+        self == .activeWorking
+    }
+
+    fileprivate var priority: Int {
+        switch self {
+        case .activeWorking: return 2
+        case .openIdle: return 1
+        }
+    }
+}
+
 struct CodexActivePresence: Codable, Equatable, Sendable {
     struct Terminal: Codable, Equatable, Sendable {
         var termProgram: String?
@@ -61,6 +77,11 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated private static let processProbeMinIntervalRegistryPresentForeground: TimeInterval = 30
     nonisolated private static let processProbeMinIntervalRegistryPresentBackground: TimeInterval = 120
     nonisolated(unsafe) private static let normalizedPathCache = NSCache<NSString, NSString>()
+#if DEBUG
+    nonisolated(unsafe) private static var normalizedPathCacheHitCount: UInt64 = 0
+    nonisolated(unsafe) private static var normalizedPathCacheMissCount: UInt64 = 0
+    nonisolated private static let normalizedPathCacheMetricsLock = NSLock()
+#endif
 
     /// Changes only when the active membership (or stable presence metadata) changes.
     /// Used by views that want to refresh the sessions list only when active state changes,
@@ -90,6 +111,7 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     private var bySessionID: [String: CodexActivePresence] = [:]
     private var byLogPath: [String: CodexActivePresence] = [:]
+    private var liveStateByPresenceKey: [String: CodexLiveState] = [:]
     private var cachedProcessPresences: [CodexActivePresence] = []
     private var lastProcessProbeAt: Date? = nil
     private var unifiedVisibleConsumerIDs: Set<UUID> = []
@@ -99,12 +121,24 @@ final class CodexActiveSessionsModel: ObservableObject {
     private struct SessionLookupCacheEntry {
         var rawFilePath: String
         var normalizedLogPath: String
-        var internalSessionID: String?
         var internalSessionIDHint: String?
-        var loadedEventsCount: Int
         var filenameUUID: String?
     }
     private var sessionLookupCacheByID: [String: SessionLookupCacheEntry] = [:]
+#if DEBUG
+    private struct DebugMetrics {
+        var refreshCount: UInt64 = 0
+        var refreshTotalDurationMs: Double = 0
+        var refreshMaxDurationMs: Double = 0
+        var processProbeRuns: UInt64 = 0
+        var processProbeSkips: UInt64 = 0
+        var processProbeRegistryEmptyRuns: UInt64 = 0
+        var processProbeRegistryPresentRuns: UInt64 = 0
+        var isActiveCalls: UInt64 = 0
+    }
+    private var debugMetrics = DebugMetrics()
+    private var lastDebugMetricsReportAt: Date = .distantPast
+#endif
 
     init() {
         // Avoid background activity under `xcodebuild test`.
@@ -119,10 +153,30 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     func isActive(_ session: Session) -> Bool {
         guard enabled, session.source == .codex else { return false }
+#if DEBUG
+        debugMetrics.isActiveCalls &+= 1
+#endif
+        return liveState(session)?.isActiveWorking == true
+    }
+
+    func isLive(_ session: Session) -> Bool {
+        guard enabled, session.source == .codex else { return false }
         let lookup = lookupCacheEntry(for: session)
         if byLogPath[lookup.normalizedLogPath] != nil { return true }
         if presenceForSessionIDLookup(lookup) != nil { return true }
         return false
+    }
+
+    func liveState(_ session: Session) -> CodexLiveState? {
+        guard enabled, session.source == .codex else { return nil }
+        guard let presence = presence(for: session) else { return nil }
+        return liveState(for: presence)
+    }
+
+    func liveState(for presence: CodexActivePresence) -> CodexLiveState {
+        let key = Self.presenceKey(for: presence)
+        if let cached = liveStateByPresenceKey[key] { return cached }
+        return Self.heuristicLiveStateFromLogMTime(logPath: presence.sessionLogPath, now: Date())
     }
 
     func presence(for session: Session) -> CodexActivePresence? {
@@ -194,6 +248,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             presences = []
             bySessionID = [:]
             byLogPath = [:]
+            liveStateByPresenceKey = [:]
             cachedProcessPresences = []
             lastProcessProbeAt = nil
             lastPublishedPresenceSignatures = [:]
@@ -218,17 +273,21 @@ final class CodexActiveSessionsModel: ObservableObject {
         guard enabled else { return }
 
         let now = Date()
+#if DEBUG
+        let refreshStartedAt = Date()
+#endif
         let ttl = Self.defaultStaleTTL
         let rootPaths = registryRoots().map(\.path)
         let sessionsRoots = codexSessionsRoots().map(\.path)
         let previousLogKeys = Set(byLogPath.keys)
         let previousSessionKeys = Set(bySessionID.keys)
+        let previousLiveStates = liveStateByPresenceKey
         let lastProbeAt = lastProcessProbeAt
         let cachedProbeSnapshot = cachedProcessPresences
         let hasVisibleConsumerSnapshot = hasVisibleConsumer
         let appIsActiveSnapshot = appIsActive
 
-        let probeResult: (loaded: [CodexActivePresence], didProbe: Bool) = await Task.detached(priority: .utility) {
+        let probeResult: (loaded: [CodexActivePresence], didProbe: Bool, registryHadPresences: Bool) = await Task.detached(priority: .utility) {
             var out: [CodexActivePresence] = []
             let decoder = Self.makeDecoder()
             for path in rootPaths {
@@ -251,11 +310,11 @@ final class CodexActiveSessionsModel: ObservableObject {
                     sessionsRoots: sessionsRoots,
                     timeout: Self.processProbeTimeout
                 ))
-                return (out, true)
+                return (out, true, registryHasPresences)
             } else {
                 // Reuse recent probe findings between probe intervals.
                 out.append(contentsOf: cachedProbeSnapshot.filter { !$0.isStale(now: now, ttl: ttl) })
-                return (out, false)
+                return (out, false, registryHasPresences)
             }
         }.value
         let loaded = probeResult.loaded
@@ -271,13 +330,23 @@ final class CodexActiveSessionsModel: ObservableObject {
         // Deduplicate and merge: keep freshest lastSeenAt, but preserve metadata from any source.
         var sessionMap: [String: CodexActivePresence] = [:]
         var logMap: [String: CodexActivePresence] = [:]
+        var fallbackMap: [String: CodexActivePresence] = [:]
         for p in loaded {
+            var keyed = false
             if let id = p.sessionId, !id.isEmpty {
                 sessionMap[id] = Self.merge(sessionMap[id], p)
+                keyed = true
             }
             if let log = p.sessionLogPath, !log.isEmpty {
                 let norm = Self.normalizePath(log)
                 logMap[norm] = Self.merge(logMap[norm], p)
+                keyed = true
+            }
+            if !keyed {
+                let key = Self.presenceKey(for: p)
+                if key != "unknown" {
+                    fallbackMap[key] = Self.merge(fallbackMap[key], p)
+                }
             }
         }
 
@@ -287,25 +356,59 @@ final class CodexActiveSessionsModel: ObservableObject {
             if let log = p.sessionLogPath, !log.isEmpty, logMap[Self.normalizePath(log)] != nil { continue }
             ui.append(p)
         }
+        for p in fallbackMap.values {
+            ui.append(p)
+        }
+
+        let nextLiveStates = await Task.detached(priority: .utility) {
+            Self.classifyLiveStates(
+                for: ui,
+                now: now,
+                probeITerm: hasVisibleConsumerSnapshot && appIsActiveSnapshot,
+                timeout: Self.processProbeTimeout
+            )
+        }.value
 
         // Always keep lookup maps current, but avoid publishing UI changes on every heartbeat.
         bySessionID = sessionMap
         byLogPath = logMap
+        liveStateByPresenceKey = nextLiveStates
         lastRefreshAt = now
 
         let nextLogKeys = Set(logMap.keys)
         let nextSessionKeys = Set(sessionMap.keys)
         let membershipChanged = (nextLogKeys != previousLogKeys) || (nextSessionKeys != previousSessionKeys)
+        let liveStateChanged = nextLiveStates != previousLiveStates
 
         // Ignore lastSeenAt-only churn; only publish when stable fields that affect UI change.
         let nextSignatures = Self.stablePresenceSignatures(for: ui)
         let metadataChanged = nextSignatures != lastPublishedPresenceSignatures
 
-        if membershipChanged || metadataChanged {
+        if membershipChanged || metadataChanged || liveStateChanged {
             presences = ui.sorted(by: { ($0.lastSeenAt ?? .distantPast) > ($1.lastSeenAt ?? .distantPast) })
             lastPublishedPresenceSignatures = nextSignatures
             activeMembershipVersion &+= 1
         }
+#if DEBUG
+        let refreshDurationMs = Date().timeIntervalSince(refreshStartedAt) * 1000.0
+        debugMetrics.refreshCount &+= 1
+        debugMetrics.refreshTotalDurationMs += refreshDurationMs
+        debugMetrics.refreshMaxDurationMs = max(debugMetrics.refreshMaxDurationMs, refreshDurationMs)
+        if probeResult.didProbe {
+            debugMetrics.processProbeRuns &+= 1
+            if probeResult.registryHadPresences {
+                debugMetrics.processProbeRegistryPresentRuns &+= 1
+            } else {
+                debugMetrics.processProbeRegistryEmptyRuns &+= 1
+            }
+        } else {
+            debugMetrics.processProbeSkips &+= 1
+        }
+        if refreshDurationMs > 25 {
+            print("[CodexActiveSessionsModel][perf] refreshOnce took \(String(format: "%.1f", refreshDurationMs))ms didProbe=\(probeResult.didProbe) registryHadPresences=\(probeResult.registryHadPresences) loaded=\(loaded.count)")
+        }
+        maybeReportDebugMetrics(now: now)
+#endif
     }
 
     // MARK: - Registry Root Discovery
@@ -432,12 +535,30 @@ final class CodexActiveSessionsModel: ObservableObject {
         return URL(fileURLWithPath: expanded)
     }
 
+    nonisolated static func presenceKey(for presence: CodexActivePresence) -> String {
+        if let log = presence.sessionLogPath, !log.isEmpty {
+            let normalized = normalizePath(log)
+            if !normalized.isEmpty { return normalized }
+        }
+        if let sid = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !sid.isEmpty { return "sid:\(sid)" }
+        if let src = presence.sourceFilePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !src.isEmpty { return "src:\(src)" }
+        if let pid = presence.pid { return "pid:\(pid)" }
+        if let tty = presence.tty?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !tty.isEmpty { return "tty:\(tty)" }
+        return "unknown"
+    }
+
     nonisolated static func normalizePath(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 
         let key = trimmed as NSString
         if let cached = normalizedPathCache.object(forKey: key) {
+#if DEBUG
+            recordNormalizedPathCacheLookup(hit: true)
+#endif
             return cached as String
         }
 
@@ -446,31 +567,23 @@ final class CodexActiveSessionsModel: ObservableObject {
         // (for example /var/... vs /private/var/...).
         let normalized = URL(fileURLWithPath: expanded, isDirectory: false).standardizedFileURL.path
         normalizedPathCache.setObject(normalized as NSString, forKey: key)
+#if DEBUG
+        recordNormalizedPathCacheLookup(hit: false)
+#endif
         return normalized
     }
 
     private func lookupCacheEntry(for session: Session) -> SessionLookupCacheEntry {
         let internalSessionIDHint = Self.nonEmptySessionID(session.codexInternalSessionIDHint)
-        if let cached = sessionLookupCacheByID[session.id], cached.rawFilePath == session.filePath {
-            let hintChanged = cached.internalSessionIDHint != internalSessionIDHint
-            // Retry ID derivation when previously unavailable and hydrated events arrive.
-            let needsRetryFromHydratedEvents = cached.internalSessionID == nil &&
-                cached.loadedEventsCount != session.events.count
-            if !hintChanged && !needsRetryFromHydratedEvents {
-                return cached
-            }
+        if let cached = sessionLookupCacheByID[session.id],
+           cached.rawFilePath == session.filePath,
+           cached.internalSessionIDHint == internalSessionIDHint {
+            return cached
         }
-        let resolvedInternalSessionID: String? = {
-            if let hint = internalSessionIDHint { return hint }
-            guard !session.events.isEmpty else { return nil }
-            return Self.nonEmptySessionID(session.codexInternalSessionID)
-        }()
         let fresh = SessionLookupCacheEntry(
             rawFilePath: session.filePath,
             normalizedLogPath: Self.normalizePath(session.filePath),
-            internalSessionID: resolvedInternalSessionID,
             internalSessionIDHint: internalSessionIDHint,
-            loadedEventsCount: session.events.count,
             filenameUUID: session.codexFilenameUUID
         )
         sessionLookupCacheByID[session.id] = fresh
@@ -484,8 +597,8 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     private func presenceForSessionIDLookup(_ lookup: SessionLookupCacheEntry) -> CodexActivePresence? {
-        if let id = lookup.internalSessionID, let p = bySessionID[id] { return p }
-        if let id = lookup.filenameUUID, id != lookup.internalSessionID, let p = bySessionID[id] { return p }
+        if let id = lookup.internalSessionIDHint, let p = bySessionID[id] { return p }
+        if let id = lookup.filenameUUID, id != lookup.internalSessionIDHint, let p = bySessionID[id] { return p }
         return nil
     }
 
@@ -498,9 +611,12 @@ final class CodexActiveSessionsModel: ObservableObject {
                                                                    hasVisibleConsumer: Bool,
                                                                    appIsActive: Bool) -> TimeInterval {
         if registryHasPresences {
-            return appIsActive
-                ? Self.processProbeMinIntervalRegistryPresentForeground
-                : Self.processProbeMinIntervalRegistryPresentBackground
+            if appIsActive {
+                return hasVisibleConsumer
+                    ? Self.processProbeMinIntervalRegistryEmptyForeground
+                    : Self.processProbeMinIntervalRegistryPresentForeground
+            }
+            return Self.processProbeMinIntervalRegistryPresentBackground
         }
         if appIsActive {
             return hasVisibleConsumer
@@ -509,6 +625,47 @@ final class CodexActiveSessionsModel: ObservableObject {
         }
         return Self.processProbeMinIntervalRegistryEmptyBackground
     }
+
+#if DEBUG
+    nonisolated private static func recordNormalizedPathCacheLookup(hit: Bool) {
+        normalizedPathCacheMetricsLock.lock()
+        if hit {
+            normalizedPathCacheHitCount &+= 1
+        } else {
+            normalizedPathCacheMissCount &+= 1
+        }
+        normalizedPathCacheMetricsLock.unlock()
+    }
+
+    nonisolated private static func drainNormalizedPathCacheLookupCounts() -> (hits: UInt64, misses: UInt64) {
+        normalizedPathCacheMetricsLock.lock()
+        let hits = normalizedPathCacheHitCount
+        let misses = normalizedPathCacheMissCount
+        normalizedPathCacheHitCount = 0
+        normalizedPathCacheMissCount = 0
+        normalizedPathCacheMetricsLock.unlock()
+        return (hits, misses)
+    }
+
+    private func maybeReportDebugMetrics(now: Date) {
+        let reportInterval: TimeInterval = 10
+        guard now.timeIntervalSince(lastDebugMetricsReportAt) >= reportInterval else { return }
+        guard debugMetrics.refreshCount > 0 else { return }
+
+        let averageRefreshMs = debugMetrics.refreshTotalDurationMs / Double(debugMetrics.refreshCount)
+        let cache = Self.drainNormalizedPathCacheLookupCounts()
+        print(
+            "[CodexActiveSessionsModel][perf] " +
+            "refresh count=\(debugMetrics.refreshCount) avgMs=\(String(format: "%.1f", averageRefreshMs)) maxMs=\(String(format: "%.1f", debugMetrics.refreshMaxDurationMs)) " +
+            "probe runs=\(debugMetrics.processProbeRuns) skips=\(debugMetrics.processProbeSkips) " +
+            "probeRegistryEmptyRuns=\(debugMetrics.processProbeRegistryEmptyRuns) probeRegistryPresentRuns=\(debugMetrics.processProbeRegistryPresentRuns) " +
+            "isActiveCalls=\(debugMetrics.isActiveCalls) normalizePathCache hits=\(cache.hits) misses=\(cache.misses)"
+        )
+
+        debugMetrics = DebugMetrics()
+        lastDebugMetricsReportAt = now
+    }
+#endif
 
     nonisolated static func makeDecoder() -> JSONDecoder {
         let d = JSONDecoder()
@@ -580,7 +737,8 @@ final class CodexActiveSessionsModel: ObservableObject {
         guard let tty = tty?.trimmingCharacters(in: .whitespacesAndNewlines), !tty.isEmpty else { return false }
         let term = (termProgram ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if term.contains("iterm") { return true }
-        return false
+        // Process env snapshots can miss TERM_PROGRAM; keep tty-based iTerm2 probe available.
+        return term.isEmpty
     }
 
     /// Best-effort focus for iTerm2 sessions that works across windows/tabs (and usually Spaces).
@@ -652,6 +810,155 @@ final class CodexActiveSessionsModel: ObservableObject {
         return out == "ok"
     }
 
+    // MARK: - Live State Classification
+
+    nonisolated static func classifyITermTail(_ tail: String) -> CodexLiveState? {
+        let normalized = tail.replacingOccurrences(of: "\r", with: "")
+        guard !normalized.isEmpty else { return nil }
+        let lower = normalized.lowercased()
+
+        let busyMarkers = [
+            "• working",
+            "worked for ",
+            "working for ",
+            "waiting for background terminal",
+            "background terminal",
+            "esc to interrupt",
+            "re-connecting",
+            "reconnecting"
+        ]
+        let lines = normalized
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        let lastNonEmptyLine = lines.reversed().first(where: { !$0.isEmpty }) ?? ""
+        let lowerTailWindow = lines.suffix(20).joined(separator: "\n").lowercased()
+
+        if busyMarkers.contains(where: { lowerTailWindow.contains($0) || lastNonEmptyLine.lowercased().contains($0) || lower.contains($0) }) {
+            return .activeWorking
+        }
+
+        let isPromptLine = (lastNonEmptyLine == "›" || lastNonEmptyLine.hasPrefix("› "))
+        if isPromptLine {
+            return .openIdle
+        }
+
+        // Live session with no visible prompt and no explicit idle marker is usually mid-turn.
+        if !lastNonEmptyLine.isEmpty {
+            return .activeWorking
+        }
+        return nil
+    }
+
+    nonisolated static func heuristicLiveStateFromLogMTime(logPath: String?,
+                                                           now: Date,
+                                                           activeWriteWindow: TimeInterval = 2.5) -> CodexLiveState {
+        guard let logPath, !logPath.isEmpty else { return .openIdle }
+        let expanded = (logPath as NSString).expandingTildeInPath
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: expanded),
+              let mtime = attrs[.modificationDate] as? Date else {
+            return .openIdle
+        }
+        if now.timeIntervalSince(mtime) <= activeWriteWindow {
+            return .activeWorking
+        }
+        return .openIdle
+    }
+
+    nonisolated private static func classifyLiveStates(for presences: [CodexActivePresence],
+                                                       now: Date,
+                                                       probeITerm: Bool,
+                                                       timeout: TimeInterval) -> [String: CodexLiveState] {
+        var out: [String: CodexLiveState] = [:]
+        out.reserveCapacity(presences.count)
+
+        for presence in presences {
+            let key = presenceKey(for: presence)
+            guard key != "unknown" else { continue }
+
+            var state: CodexLiveState?
+            if probeITerm,
+               canAttemptITerm2Focus(
+                itermSessionId: presence.terminal?.itermSessionId,
+                tty: presence.tty,
+                termProgram: presence.terminal?.termProgram
+               ),
+               let tail = captureITermTail(
+                itermSessionId: presence.terminal?.itermSessionId,
+                tty: presence.tty,
+                timeout: timeout
+               ) {
+                state = classifyITermTail(tail)
+            }
+
+            let resolved = state ?? heuristicLiveStateFromLogMTime(logPath: presence.sessionLogPath, now: now)
+            if let existing = out[key] {
+                if resolved.priority > existing.priority {
+                    out[key] = resolved
+                }
+            } else {
+                out[key] = resolved
+            }
+        }
+
+        return out
+    }
+
+    nonisolated private static func captureITermTail(itermSessionId: String?,
+                                                     tty: String?,
+                                                     timeout: TimeInterval) -> String? {
+        let guid = itermSessionGuid(from: itermSessionId) ?? ""
+        let ttyValue = (tty ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetTTY = ttyValue.isEmpty ? "" : ttyValue
+        guard !guid.isEmpty || !targetTTY.isEmpty else { return nil }
+
+        let scriptLines = [
+            "on run argv",
+            "set targetGuid to \"\"",
+            "set targetTTY to \"\"",
+            "if (count of argv) >= 1 then set targetGuid to item 1 of argv",
+            "if (count of argv) >= 2 then set targetTTY to item 2 of argv",
+            "set targetTTYBase to targetTTY",
+            "if targetTTYBase starts with \"/dev/\" then set targetTTYBase to text 6 thru -1 of targetTTYBase",
+            "tell application \"iTerm2\"",
+            "repeat with w in windows",
+            "repeat with t in tabs of w",
+            "repeat with s in sessions of t",
+            "set sid to id of s",
+            "set stty to tty of s",
+            "set sttyBase to stty",
+            "if sttyBase starts with \"/dev/\" then set sttyBase to text 6 thru -1 of sttyBase",
+            "if ((targetGuid is not \"\" and sid is targetGuid) or (targetTTYBase is not \"\" and (stty is targetTTY or stty is targetTTYBase or sttyBase is targetTTYBase))) then",
+            "set txt to \"\"",
+            "try",
+            "set txt to contents of s",
+            "on error",
+            "set txt to \"\"",
+            "end try",
+            "set txtLen to length of txt",
+            "if txtLen > 4000 then",
+            "set txt to text (txtLen - 3999) thru txtLen of txt",
+            "end if",
+            "return txt",
+            "end if",
+            "end repeat",
+            "end repeat",
+            "end repeat",
+            "end tell",
+            "return \"\"",
+            "end run"
+        ]
+
+        guard let out = runCommand(
+            executable: URL(fileURLWithPath: "/usr/bin/osascript"),
+            arguments: scriptLines.flatMap { ["-e", $0] } + [guid, targetTTY],
+            timeout: timeout
+        ) else {
+            return nil
+        }
+        return String(decoding: out, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Live Process Discovery (Fallback)
 
     /// Best-effort: infer active sessions by scanning running `codex` processes and the JSONL file they have open.
@@ -700,12 +1007,11 @@ final class CodexActiveSessionsModel: ObservableObject {
         var out: [CodexActivePresence] = []
         out.reserveCapacity(infos.count)
         for info in infos.values {
-            guard let logPath = info.sessionLogPath else { continue }
             var p = CodexActivePresence()
             p.schemaVersion = 1
             p.publisher = "agent-sessions-process"
             p.kind = "interactive"
-            p.sessionLogPath = logPath
+            p.sessionLogPath = info.sessionLogPath
             p.workspaceRoot = info.cwd
             p.pid = info.pid
             p.tty = info.tty
@@ -863,8 +1169,9 @@ final class CodexActiveSessionsModel: ObservableObject {
         }
 
         // Keep only entries that look like a live terminal session.
+        // Some open Codex sessions have not opened a rollout JSONL yet; keep tty-only rows.
         return infos.filter { _, v in
-            v.sessionLogPath != nil && v.tty != nil
+            v.tty != nil && (v.sessionLogPath != nil || v.cwd != nil)
         }
     }
 
