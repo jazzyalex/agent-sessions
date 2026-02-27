@@ -1324,10 +1324,26 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated static func resolveClaudeStateFromITermProbe(isProcessing: Bool?,
                                                              isAtShellPrompt: Bool?,
                                                              tail: String?) -> CodexLiveState? {
-        if isAtShellPrompt == true { return .openIdle }
         if isProcessing == true { return .activeWorking }
+        if isAtShellPrompt == true { return .openIdle }
         guard let tail else { return nil }
-        return classifyClaudeITermTail(tail)
+        if let classified = classifyClaudeITermTail(tail) { return classified }
+        if hasLikelyClaudePromptNearBottom(tail) { return .openIdle }
+        // When iTerm probe metadata is inconclusive (common under tmux wrappers),
+        // treat non-prompt tails as active to avoid false-open for long-running output.
+        return .activeWorking
+    }
+
+    nonisolated private static func hasLikelyClaudePromptNearBottom(_ tail: String) -> Bool {
+        let normalized = sanitizeITermTail(tail)
+        guard !normalized.isEmpty else { return false }
+        let lines = normalized
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        let nonEmptyLines = lines.filter { !$0.isEmpty }
+        guard !nonEmptyLines.isEmpty else { return false }
+        let recentWindow = nonEmptyLines.suffix(8)
+        return recentWindow.contains(where: { isLikelyClaudePromptLine($0) })
     }
 
     nonisolated private static func modificationDateForPath(_ rawPath: String?) -> Date? {

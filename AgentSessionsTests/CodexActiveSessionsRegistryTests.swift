@@ -752,12 +752,39 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
-    func testResolveClaudeStateFromITermProbe_prefersPromptWhenBothFlagsTrue() {
+    func testResolveClaudeStateFromITermProbe_prefersProcessingWhenBothFlagsTrue() {
         XCTAssertEqual(
             CodexActiveSessionsModel.resolveClaudeStateFromITermProbe(
                 isProcessing: true,
                 isAtShellPrompt: true,
                 tail: "Esc to interrupt"
+            ),
+            .activeWorking
+        )
+    }
+
+    func testResolveClaudeStateFromITermProbe_marksActiveForAmbiguousTailWithoutPrompt() {
+        XCTAssertEqual(
+            CodexActiveSessionsModel.resolveClaudeStateFromITermProbe(
+                isProcessing: false,
+                isAtShellPrompt: false,
+                tail: "test\ntest\ntest"
+            ),
+            .activeWorking
+        )
+    }
+
+    func testResolveClaudeStateFromITermProbe_marksOpenWhenPromptExistsNearBottom() {
+        let tail = """
+        status line
+        ❯
+        ~/Repository/Triada  main
+        """
+        XCTAssertEqual(
+            CodexActiveSessionsModel.resolveClaudeStateFromITermProbe(
+                isProcessing: false,
+                isAtShellPrompt: false,
+                tail: tail
             ),
             .openIdle
         )
@@ -1093,7 +1120,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
-    func testCockpitUnresolvedPlaceholder_keepsTTYOnlyNonITermPresence() {
+    func testCockpitUnresolvedPlaceholder_hidesTTYOnlyNonITermPresence() {
         var presence = CodexActivePresence()
         presence.source = .claude
         presence.publisher = "agent-sessions-shim"
@@ -1102,7 +1129,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         terminal.termProgram = "tmux"
         presence.terminal = terminal
 
-        XCTAssertFalse(
+        XCTAssertTrue(
             CockpitView.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
@@ -1111,7 +1138,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
-    func testCockpitUnresolvedPlaceholder_keepsTTYOnlyPresenceWhenTermProgramMissing() {
+    func testCockpitUnresolvedPlaceholder_hidesTTYOnlyPresenceWhenTermProgramMissing() {
         var presence = CodexActivePresence()
         presence.source = .claude
         presence.publisher = "agent-sessions-shim"
@@ -1120,7 +1147,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         terminal.termProgram = nil
         presence.terminal = terminal
 
-        XCTAssertFalse(
+        XCTAssertTrue(
             CockpitView.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
