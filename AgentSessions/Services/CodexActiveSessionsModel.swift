@@ -283,6 +283,10 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func refreshNow() {
+        // Manual refresh should bypass probe throttling so live state transitions
+        // (active -> open and vice versa) are reflected immediately.
+        lastProcessProbeAt = nil
+        cachedProcessPresences = []
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             await self?.refreshOnce()
