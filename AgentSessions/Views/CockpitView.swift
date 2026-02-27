@@ -47,6 +47,7 @@ struct CockpitView: View {
         let source: SessionSource
         let title: String
         let liveState: CodexLiveState
+        let lastSeenAt: Date?
         let repo: String
         let date: Date?
         let dateLabel: String
@@ -155,6 +156,7 @@ struct CockpitView: View {
                 source: p.source,
                 title: title,
                 liveState: liveState,
+                lastSeenAt: p.lastSeenAt,
                 repo: repo,
                 date: date,
                 dateLabel: dateLabel,
@@ -271,6 +273,7 @@ struct CockpitView: View {
                 }
                 .width(min: 78, ideal: 90, max: 100)
             }
+            .id("cockpit-table-\(liveFilterModeRaw)-\(activeCodex.activeMembershipVersion)")
             .frame(minHeight: 360)
             .contextMenu(forSelectionType: String.self) { ids in
                 if ids.count == 1, let id = ids.first, let row = snapshot.filteredRows.first(where: { $0.id == id }) {
@@ -483,13 +486,40 @@ struct CockpitView: View {
         if existingHasDate != incomingHasDate {
             return incomingHasDate ? incoming : existing
         }
+        let existingSeen = existing.lastSeenAt ?? .distantPast
+        let incomingSeen = incoming.lastSeenAt ?? .distantPast
+        if incomingSeen != existingSeen {
+            return incomingSeen > existingSeen ? incoming : existing
+        }
+        let existingHasJoin = (existing.sessionID?.isEmpty == false) || existing.logPath != nil
+        let incomingHasJoin = (incoming.sessionID?.isEmpty == false) || incoming.logPath != nil
+        if existingHasJoin != incomingHasJoin {
+            return incomingHasJoin ? incoming : existing
+        }
         if existing.liveState != incoming.liveState {
-            return incoming.liveState == .activeWorking ? incoming : existing
+            let existingCanProbe = rowCanTailProbe(existing)
+            let incomingCanProbe = rowCanTailProbe(incoming)
+            if existingCanProbe != incomingCanProbe {
+                return incomingCanProbe ? incoming : existing
+            }
+            // Avoid sticky false-active ties when two duplicate candidates disagree.
+            if existing.liveState == .activeWorking, incoming.liveState == .openIdle {
+                return incoming
+            }
+            return existing
         }
         if incoming.title.count > existing.title.count {
             return incoming
         }
         return existing
+    }
+
+    private func rowCanTailProbe(_ row: Row) -> Bool {
+        CodexActiveSessionsModel.canAttemptITerm2TailProbe(
+            itermSessionId: row.itermSessionId,
+            tty: row.tty,
+            termProgram: row.termProgram
+        )
     }
 
     private func parseSessionTimestamp(from presence: CodexActivePresence) -> Date? {

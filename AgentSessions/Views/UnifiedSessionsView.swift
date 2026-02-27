@@ -705,7 +705,7 @@ struct UnifiedSessionsView: View {
 
             // Removed separate Refresh column to avoid churn
 	        }
-	        .id(columnLayoutID)
+	        .id("unified-table-\(columnLayoutID.uuidString)-\(activeCodexSessions.activeMembershipVersion)")
 	        .tableStyle(.inset(alternatesRowBackgrounds: true))
             .tint(UnifiedSessionsStyle.selectionAccent)
 	        .environment(\.defaultMinListRowHeight, 28)
@@ -1124,6 +1124,7 @@ struct UnifiedSessionsView: View {
                     }
                 }
             } action: {
+                activeCodexSessions.refreshNow()
                 unified.refresh()
             }
             .keyboardShortcut("r", modifiers: .command)
@@ -1568,6 +1569,7 @@ struct UnifiedSessionsView: View {
             }
             Spacer(minLength: 4)
         }
+        .id("source-cell-\(session.id)-\(activeCodexSessions.activeMembershipVersion)")
     }
 
     private func openDir(_ s: Session) {
