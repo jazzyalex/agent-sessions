@@ -11,6 +11,20 @@ struct CockpitView: View {
     @AppStorage(PreferencesKey.Cockpit.codexLiveFilterMode) private var liveFilterModeRaw: String = LiveFilterMode.both.rawValue
     @State private var selection: Set<String> = []
     @State private var activeConsumerID = UUID()
+    private static let rowDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
+    private static let codexRolloutTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
+        return formatter
+    }()
 
     private enum LiveFilterMode: String, CaseIterable, Identifiable {
         case both
@@ -47,35 +61,34 @@ struct CockpitView: View {
         let workingDirectory: String?
     }
 
+    private struct SessionLookupIndexes {
+        let byLogPath: [String: Session]
+        let bySessionID: [String: Session]
+        let byWorkspace: [String: Session]
+    }
+
+    private struct LiveRowsSnapshot {
+        let filteredRows: [Row]
+        let activeCount: Int
+        let openCount: Int
+    }
+
     private var liveFilterMode: LiveFilterMode {
         LiveFilterMode(rawValue: liveFilterModeRaw) ?? .both
     }
 
-    private var liveRows: [Row] {
-        let dateFormatter = DateFormatter()
-        dateFormatter.locale = .current
-        dateFormatter.timeZone = .current
-        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
-
-        var sessionsByLogPath: [String: Session] = [:]
+    private func makeLiveRowsSnapshot() -> LiveRowsSnapshot {
+        let lookupIndexes = buildSessionLookupIndexes()
         let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
-        let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions + opencodeIndexer.allSessions
-        for s in allSessions where supportedSources.contains(s.source) {
-            let key = CodexActiveSessionsModel.logLookupKey(
-                source: s.source,
-                normalizedPath: CodexActiveSessionsModel.normalizePath(s.filePath)
-            )
-            sessionsByLogPath[key] = s
-        }
 
         let mapped: [Row] = activeCodex.presences.compactMap { p in
             guard supportedSources.contains(p.source) else { return nil }
             let logNorm = p.sessionLogPath.map(CodexActiveSessionsModel.normalizePath)
             let session = logNorm.flatMap { normalized in
-                sessionsByLogPath[CodexActiveSessionsModel.logLookupKey(source: p.source, normalizedPath: normalized)]
-            } ?? resolveBySessionID(p.sessionId, source: p.source)
-                ?? resolveByWorkingDirectory(p.workspaceRoot, source: p.source)
-            if shouldHideUnresolvedPresencePlaceholder(p, resolvedSession: session) {
+                lookupIndexes.byLogPath[CodexActiveSessionsModel.logLookupKey(source: p.source, normalizedPath: normalized)]
+            } ?? resolveBySessionID(p.sessionId, source: p.source, lookupIndexes: lookupIndexes)
+                ?? resolveByWorkingDirectory(p.workspaceRoot, source: p.source, lookupIndexes: lookupIndexes)
+            if shouldHideUnresolvedPresencePlaceholder(p, resolvedSession: session, lookupIndexes: lookupIndexes) {
                 return nil
             }
 
@@ -87,7 +100,7 @@ struct CockpitView: View {
 
             // Use a stable session timestamp (session start/mtime), not a heartbeat.
             let date = session?.modifiedAt ?? parseSessionTimestamp(from: p)
-            let dateLabel = date.map { dateFormatter.string(from: $0) } ?? "—"
+            let dateLabel = date.map { Self.rowDateFormatter.string(from: $0) } ?? "—"
 
             let termProgram = p.terminal?.termProgram ?? ""
             let terminal: String = {
@@ -140,32 +153,31 @@ struct CockpitView: View {
         let deduped = dedupeRowsByResolvedSession(mapped)
 
         // Sort by session timestamp (newest first) so rows don't jump on heartbeat updates.
-        return deduped.sorted { a, b in
+        let rows = deduped.sorted { a, b in
             let da = a.date ?? .distantPast
             let db = b.date ?? .distantPast
             if da != db { return da > db }
             if a.repo != b.repo { return a.repo < b.repo }
             return a.title < b.title
         }
-    }
-
-    private var filteredRows: [Row] {
+        let filteredRows: [Row]
         switch liveFilterMode {
         case .both:
-            return liveRows
+            filteredRows = rows
         case .active:
-            return liveRows.filter { $0.liveState == .activeWorking }
+            filteredRows = rows.filter { $0.liveState == .activeWorking }
         case .open:
-            return liveRows.filter { $0.liveState == .openIdle }
+            filteredRows = rows.filter { $0.liveState == .openIdle }
         }
-    }
-
-    private var activeRowCount: Int {
-        liveRows.filter { $0.liveState == .activeWorking }.count
-    }
-
-    private var openRowCount: Int {
-        liveRows.filter { $0.liveState == .openIdle }.count
+        return LiveRowsSnapshot(
+            filteredRows: filteredRows,
+            activeCount: rows.reduce(into: 0) { partial, row in
+                if row.liveState == .activeWorking { partial += 1 }
+            },
+            openCount: rows.reduce(into: 0) { partial, row in
+                if row.liveState == .openIdle { partial += 1 }
+            }
+        )
     }
 
     var body: some View {
@@ -186,7 +198,8 @@ struct CockpitView: View {
     }
 
     private var content: some View {
-        VStack(spacing: 10) {
+        let snapshot = makeLiveRowsSnapshot()
+        return VStack(spacing: 10) {
             header
 
             if !activeEnabled {
@@ -198,7 +211,7 @@ struct CockpitView: View {
                 .padding(.horizontal, 12)
             }
 
-            Table(filteredRows, selection: $selection) {
+            Table(snapshot.filteredRows, selection: $selection) {
                 TableColumn("CLI Agent") { row in
                     Text(sourceLabel(for: row.source))
                         .foregroundStyle(Color.agentColor(for: row.source, monochrome: false))
@@ -240,7 +253,7 @@ struct CockpitView: View {
             }
             .frame(minHeight: 360)
             .contextMenu(forSelectionType: String.self) { ids in
-                if ids.count == 1, let id = ids.first, let row = filteredRows.first(where: { $0.id == id }) {
+                if ids.count == 1, let id = ids.first, let row = snapshot.filteredRows.first(where: { $0.id == id }) {
                     Button("Focus in iTerm2") { focus(row) }
                         .disabled(!canFocus(row))
                         .help(row.focusHelp)
@@ -257,7 +270,7 @@ struct CockpitView: View {
                 }
             }
 
-            footer
+            footer(snapshot: snapshot)
         }
         .frame(width: 980, height: 520)
     }
@@ -280,20 +293,27 @@ struct CockpitView: View {
         .padding(.top, 10)
     }
 
-    private var footer: some View {
+    private func footer(snapshot: LiveRowsSnapshot) -> some View {
         HStack {
-            Text(footerText)
+            Text(footerText(snapshot: snapshot))
                 .foregroundStyle(.secondary)
             Spacer()
-            Button("Refresh") { activeCodex.refreshNow() }
-                .help("Refresh active session registry now.")
+            Button("Refresh") { refreshAllSources() }
+                .help("Refresh active sessions and session indexes now.")
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
     }
 
-    private var footerText: String {
-        "\(filteredRows.count) shown • \(activeRowCount) active • \(openRowCount) open"
+    private func footerText(snapshot: LiveRowsSnapshot) -> String {
+        "\(snapshot.filteredRows.count) shown • \(snapshot.activeCount) active • \(snapshot.openCount) open"
+    }
+
+    private func refreshAllSources() {
+        activeCodex.refreshNow()
+        codexIndexer.refresh(mode: .incremental, trigger: .manual)
+        claudeIndexer.refresh(mode: .fullReconcile, trigger: .manual)
+        opencodeIndexer.refresh()
     }
 
     private func focus(_ row: Row) {
@@ -324,45 +344,18 @@ struct CockpitView: View {
         return CodexActiveSessionsModel.liveSessionIDCandidates(for: resolvedSession).first
     }
 
-    private func resolveBySessionID(_ id: String?, source: SessionSource) -> Session? {
+    private func resolveBySessionID(_ id: String?, source: SessionSource, lookupIndexes: SessionLookupIndexes) -> Session? {
         guard let id, !id.isEmpty else { return nil }
-        let matchesRuntimeSessionID: (Session) -> Bool = { session in
-            session.source == source && CodexActiveSessionsModel.liveSessionIDCandidates(for: session).contains(id)
-        }
-        switch source {
-        case .codex:
-            return codexIndexer.allSessions.first(where: matchesRuntimeSessionID)
-        case .opencode:
-            return opencodeIndexer.allSessions.first(where: matchesRuntimeSessionID)
-        case .claude:
-            return claudeIndexer.allSessions.first(where: matchesRuntimeSessionID)
-        default:
-            return nil
-        }
+        let key = CodexActiveSessionsModel.sessionLookupKey(source: source, sessionId: id)
+        return lookupIndexes.bySessionID[key]
     }
 
-    private func resolveByWorkingDirectory(_ path: String?, source: SessionSource) -> Session? {
+    private func resolveByWorkingDirectory(_ path: String?, source: SessionSource, lookupIndexes: SessionLookupIndexes) -> Session? {
         guard let path else { return nil }
         let normalized = CodexActiveSessionsModel.normalizePath(path)
         guard !normalized.isEmpty else { return nil }
-
-        let candidates: [Session]
-        switch source {
-        case .codex:
-            candidates = codexIndexer.allSessions.filter { $0.source == .codex }
-        case .claude:
-            candidates = claudeIndexer.allSessions.filter { $0.source == .claude }
-        case .opencode:
-            candidates = opencodeIndexer.allSessions.filter { $0.source == .opencode }
-        default:
-            candidates = []
-        }
-
-        let matches = candidates.filter { s in
-            guard let cwd = s.cwd else { return false }
-            return CodexActiveSessionsModel.normalizePath(cwd) == normalized
-        }
-        return matches.max(by: { $0.modifiedAt < $1.modifiedAt })
+        let key = workspaceLookupKey(source: source, normalizedPath: normalized)
+        return lookupIndexes.byWorkspace[key]
     }
 
     private func canFocus(_ row: Row) -> Bool {
@@ -374,18 +367,49 @@ struct CockpitView: View {
     }
 
     private func shouldHideUnresolvedPresencePlaceholder(_ presence: CodexActivePresence,
-                                                         resolvedSession: Session?) -> Bool {
-        // Keep unresolved fallback presences when they carry concrete fallback identity signals
-        // (for example tty/pid/source/workspace). Hide only low-confidence placeholders.
+                                                         resolvedSession: Session?,
+                                                         lookupIndexes: SessionLookupIndexes) -> Bool {
+        let hasWorkspaceMatch: Bool = {
+            guard let workspaceRoot = presence.workspaceRoot?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !workspaceRoot.isEmpty else {
+                return false
+            }
+            let workspaceKey = workspaceLookupKey(
+                source: presence.source,
+                normalizedPath: CodexActiveSessionsModel.normalizePath(workspaceRoot)
+            )
+            return lookupIndexes.byWorkspace[workspaceKey] != nil
+        }()
+        return Self.shouldHideUnresolvedPresencePlaceholder(
+            presence,
+            resolvedSession: resolvedSession,
+            hasWorkspaceMatch: hasWorkspaceMatch
+        )
+    }
+
+    static func shouldHideUnresolvedPresencePlaceholder(_ presence: CodexActivePresence,
+                                                        resolvedSession: Session?,
+                                                        hasWorkspaceMatch: Bool) -> Bool {
+        // Keep unresolved rows only when they still offer user actionability:
+        // direct join keys, focusable terminals, or known workspace joins.
+        // Registry file path (`sourceFilePath`) by itself is not actionable and can
+        // surface ghost sub-agent rows with no own terminal/session.
         guard resolvedSession == nil else { return false }
         let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         if hasSessionID || hasLogPath { return false }
-        let hasTTY = presence.tty?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let hasSourcePath = presence.sourceFilePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let hasWorkspaceRoot = presence.workspaceRoot?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let hasPID = presence.pid != nil
-        return !hasTTY && !hasSourcePath && !hasWorkspaceRoot && !hasPID
+
+        let canFocusFallback =
+            CodexActiveSessionsModel.canAttemptITerm2Focus(
+                itermSessionId: presence.terminal?.itermSessionId,
+                tty: presence.tty,
+                termProgram: presence.terminal?.termProgram
+            ) || presence.revealURL != nil
+        if canFocusFallback { return false }
+
+        if hasWorkspaceMatch { return false }
+
+        return true
     }
 
     private func dedupeRowsByResolvedSession(_ rows: [Row]) -> [Row] {
@@ -402,6 +426,16 @@ struct CockpitView: View {
                         source: row.source,
                         normalizedPath: CodexActiveSessionsModel.normalizePath(path)
                     )
+                }
+                if let tty = normalizeTTY(row.tty) {
+                    return "\(row.source.rawValue)|tty:\(tty)"
+                }
+                if let workspace = normalizedWorkingDirectory(row.workingDirectory), !workspace.isEmpty {
+                    return workspaceLookupKey(source: row.source, normalizedPath: workspace)
+                }
+                if let itermSessionId = row.itermSessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !itermSessionId.isEmpty {
+                    return "\(row.source.rawValue)|iterm:\(itermSessionId)"
                 }
                 return row.id
             }()
@@ -449,11 +483,71 @@ struct CockpitView: View {
             .replacingOccurrences(of: "rollout-", with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
 
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone.current
-        f.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
-        return f.date(from: ts)
+        return Self.codexRolloutTimestampFormatter.date(from: ts)
+    }
+
+    private func buildSessionLookupIndexes() -> SessionLookupIndexes {
+        let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
+        let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions + opencodeIndexer.allSessions
+
+        var byLogPath: [String: Session] = [:]
+        var bySessionID: [String: Session] = [:]
+        var byWorkspace: [String: Session] = [:]
+        byLogPath.reserveCapacity(allSessions.count)
+        bySessionID.reserveCapacity(allSessions.count * 2)
+        byWorkspace.reserveCapacity(allSessions.count)
+
+        for session in allSessions where supportedSources.contains(session.source) {
+            let logKey = CodexActiveSessionsModel.logLookupKey(
+                source: session.source,
+                normalizedPath: CodexActiveSessionsModel.normalizePath(session.filePath)
+            )
+            byLogPath[logKey] = preferredSession(existing: byLogPath[logKey], incoming: session)
+
+            for runtimeID in CodexActiveSessionsModel.liveSessionIDCandidates(for: session) {
+                let sid = runtimeID.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !sid.isEmpty else { continue }
+                let sessionKey = CodexActiveSessionsModel.sessionLookupKey(source: session.source, sessionId: sid)
+                bySessionID[sessionKey] = preferredSession(existing: bySessionID[sessionKey], incoming: session)
+            }
+
+            if let cwd = normalizedWorkingDirectory(session.cwd), !cwd.isEmpty {
+                let workspaceKey = workspaceLookupKey(source: session.source, normalizedPath: cwd)
+                byWorkspace[workspaceKey] = preferredSession(existing: byWorkspace[workspaceKey], incoming: session)
+            }
+        }
+
+        return SessionLookupIndexes(byLogPath: byLogPath, bySessionID: bySessionID, byWorkspace: byWorkspace)
+    }
+
+    private func preferredSession(existing: Session?, incoming: Session) -> Session {
+        guard let existing else { return incoming }
+        if incoming.modifiedAt != existing.modifiedAt { return incoming.modifiedAt > existing.modifiedAt ? incoming : existing }
+        let incomingStart = incoming.startTime ?? .distantPast
+        let existingStart = existing.startTime ?? .distantPast
+        if incomingStart != existingStart { return incomingStart > existingStart ? incoming : existing }
+        if incoming.filePath != existing.filePath { return incoming.filePath < existing.filePath ? incoming : existing }
+        return incoming.id < existing.id ? incoming : existing
+    }
+
+    private func normalizedWorkingDirectory(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let normalized = CodexActiveSessionsModel.normalizePath(raw)
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private func normalizeTTY(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.hasPrefix("/dev/") {
+            return trimmed
+        }
+        return "/dev/\(trimmed)"
+    }
+
+    private func workspaceLookupKey(source: SessionSource, normalizedPath: String) -> String {
+        "\(source.rawValue)|cwd:\(normalizedPath)"
     }
 
     private func sourceLabel(for source: SessionSource) -> String {

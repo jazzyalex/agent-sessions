@@ -1239,9 +1239,13 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     @MainActor
     private func refreshMode(for source: SessionSource, trigger: IndexRefreshTrigger) -> IndexRefreshMode {
-        guard source == .codex || source == .claude else { return .incremental }
         guard trigger == .manual else { return .incremental }
         let now = Date()
+        if source == .claude {
+            lastFullReconcileBySource[source] = now
+            return .fullReconcile
+        }
+        guard source == .codex else { return .incremental }
         guard let last = lastFullReconcileBySource[source] else {
             lastFullReconcileBySource[source] = now
             return .incremental

@@ -1728,9 +1728,13 @@ final class CodexActiveSessionsModel: ObservableObject {
                                                           sessionsRoots: [String]) -> Bool {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
         let fileName = (path as NSString).lastPathComponent.lowercased()
+        let normalizedPath = normalizePath(path)
+        guard !normalizedPath.isEmpty else { return false }
         let underRoot = sessionsRoots.contains(where: { root in
-            let rp = root.hasSuffix("/") ? root : (root + "/")
-            return path.hasPrefix(rp)
+            let normalizedRoot = normalizePath(root)
+            guard !normalizedRoot.isEmpty else { return false }
+            let rootPrefix = normalizedRoot.hasSuffix("/") ? normalizedRoot : (normalizedRoot + "/")
+            return normalizedPath == normalizedRoot || normalizedPath.hasPrefix(rootPrefix)
         })
         guard underRoot else { return false }
 
