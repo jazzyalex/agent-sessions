@@ -1242,9 +1242,15 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     nonisolated private static func isLikelyClaudePromptLine(_ line: String) -> Bool {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let promptWhitespace = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{00A0}"))
+        let trimmed = line.trimmingCharacters(in: promptWhitespace)
         guard !trimmed.isEmpty else { return false }
         if ["›", ">", "$", "#", "%", "❯", "λ"].contains(trimmed) { return true }
+        if trimmed.hasPrefix("❯") || trimmed.hasPrefix("›") {
+            let remainder = String(trimmed.dropFirst()).trimmingCharacters(in: promptWhitespace)
+            if remainder.isEmpty { return true }
+            if remainder.hasPrefix("(") { return true }
+        }
         if let last = trimmed.last, last == "$" || last == "#" || last == "%" {
             let body = trimmed.dropLast()
             // Prompt-like tails are typically "… <prompt-char>" (for example "user@host %").
@@ -1560,7 +1566,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             "on error",
             "set atPrompt to false",
             "end try",
-            "set metadata to ((processing as string) & tab & (atPrompt as string))",
+            "set sep to (ASCII character 9)",
+            "set metadata to ((processing as string) & sep & (atPrompt as string))",
             "return metadata & linefeed & txt",
             "end if",
             "end repeat",
@@ -1585,9 +1592,7 @@ final class CodexActiveSessionsModel: ObservableObject {
 
         var lines = normalized.components(separatedBy: "\n")
         let metadata = lines.isEmpty ? "" : lines.removeFirst()
-        let parts = metadata.components(separatedBy: "\t")
-        let isProcessing = parseAppleScriptBool(parts.first)
-        let isAtShellPrompt = parseAppleScriptBool(parts.count > 1 ? parts[1] : nil)
+        let (isProcessing, isAtShellPrompt) = parseITermProbeMetadata(metadata)
         let tail = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
 
         return ITermProbeResult(
@@ -1595,6 +1600,18 @@ final class CodexActiveSessionsModel: ObservableObject {
             isProcessing: isProcessing,
             isAtShellPrompt: isAtShellPrompt
         )
+    }
+
+    // Internal for targeted unit tests.
+    nonisolated static func parseITermProbeMetadata(_ metadata: String) -> (isProcessing: Bool?, isAtShellPrompt: Bool?) {
+        let trimmed = metadata.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return (nil, nil) }
+
+        let normalized = trimmed.replacingOccurrences(of: "tab", with: "\t")
+        let parts = normalized.components(separatedBy: "\t")
+        let isProcessing = parseAppleScriptBool(parts.first)
+        let isAtShellPrompt = parseAppleScriptBool(parts.count > 1 ? parts[1] : nil)
+        return (isProcessing, isAtShellPrompt)
     }
 
     nonisolated private static func parseAppleScriptBool(_ value: String?) -> Bool? {
