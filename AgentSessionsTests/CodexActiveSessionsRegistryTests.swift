@@ -254,6 +254,93 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertNotNil(UnifiedSessionsView.fallbackClaimedPresence(for: unresolved, among: eligible, using: [presence]))
     }
 
+    func testBuildFallbackPresenceMap_assignsWorkspaceFallbackToNewestEligibleSession() {
+        let now = Date()
+        let cwd = "/Users/alexm/Repository/Codex-History"
+        let sessions = [
+            makeFallbackSession(id: "older", source: .claude, cwd: cwd, modifiedAt: now.addingTimeInterval(-30)),
+            makeFallbackSession(id: "newest", source: .claude, cwd: cwd, modifiedAt: now)
+        ]
+        let workspacePresence = makeFallbackPresence(
+            source: .claude,
+            lastSeenAt: now,
+            workspaceRoot: cwd,
+            tty: "/dev/ttys101",
+            pid: 1101
+        )
+
+        let map = UnifiedSessionsView.buildFallbackPresenceMap(
+            sessions: sessions,
+            presences: [workspacePresence],
+            hasDirectJoin: { _ in false }
+        )
+
+        let newestKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: "newest")
+        let olderKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: "older")
+        XCTAssertNotNil(map[newestKey])
+        XCTAssertNil(map[olderKey])
+    }
+
+    func testBuildFallbackPresenceMap_unresolvedFallbackSkipsDirectJoinAndUsesRemainingSessions() {
+        let now = Date()
+        let sessions = [
+            makeFallbackSession(id: "direct", source: .opencode, cwd: nil, modifiedAt: now),
+            makeFallbackSession(id: "fallback", source: .opencode, cwd: nil, modifiedAt: now.addingTimeInterval(-5))
+        ]
+        let unresolvedPresence = makeFallbackPresence(
+            source: .opencode,
+            lastSeenAt: now,
+            workspaceRoot: nil,
+            tty: "/dev/ttys202",
+            pid: 2202
+        )
+
+        let map = UnifiedSessionsView.buildFallbackPresenceMap(
+            sessions: sessions,
+            presences: [unresolvedPresence],
+            hasDirectJoin: { $0.id == "direct" }
+        )
+
+        let directKey = UnifiedSessionsView.fallbackPresenceKey(source: .opencode, sessionID: "direct")
+        let fallbackKey = UnifiedSessionsView.fallbackPresenceKey(source: .opencode, sessionID: "fallback")
+        XCTAssertNil(map[directKey])
+        XCTAssertNotNil(map[fallbackKey])
+    }
+
+    func testBuildFallbackPresenceMap_keepsSourceScopedEntriesWhenSessionIDsCollide() {
+        let now = Date()
+        let sharedID = "shared-session-id"
+        let sessions = [
+            makeFallbackSession(id: sharedID, source: .claude, cwd: nil, modifiedAt: now),
+            makeFallbackSession(id: sharedID, source: .opencode, cwd: nil, modifiedAt: now)
+        ]
+        let claudePresence = makeFallbackPresence(
+            source: .claude,
+            lastSeenAt: now,
+            workspaceRoot: nil,
+            tty: "/dev/ttys301",
+            pid: 3301
+        )
+        let openCodePresence = makeFallbackPresence(
+            source: .opencode,
+            lastSeenAt: now,
+            workspaceRoot: nil,
+            tty: "/dev/ttys302",
+            pid: 3302
+        )
+
+        let map = UnifiedSessionsView.buildFallbackPresenceMap(
+            sessions: sessions,
+            presences: [claudePresence, openCodePresence],
+            hasDirectJoin: { _ in false }
+        )
+
+        let claudeKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: sharedID)
+        let openCodeKey = UnifiedSessionsView.fallbackPresenceKey(source: .opencode, sessionID: sharedID)
+        XCTAssertEqual(map[claudeKey]?.source, .claude)
+        XCTAssertEqual(map[openCodeKey]?.source, .opencode)
+    }
+
     func testParseLsofMachineOutput_matchesClaudeSessionFilesAndSkipsHistory() {
         let root = "/Users/alexm/.claude"
         let text = """
@@ -305,6 +392,33 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             out[888]?.sessionLogPath,
             "/Users/alexm/.local/share/opencode/storage/session/proj_test/ses_s_stage0_small.json"
         )
+    }
+
+    func testParseLsofMachineOutput_matchesClaudeSessionWhenRootNormalizationDiffers() throws {
+        let lexicalRoot = URL(fileURLWithPath: "/var/tmp", isDirectory: true).standardized.path
+        let canonicalRoot = URL(fileURLWithPath: "/var/tmp", isDirectory: true).standardizedFileURL.path
+        guard lexicalRoot != canonicalRoot else {
+            throw XCTSkip("No root normalization difference for /var/tmp on this runtime.")
+        }
+
+        let sessionLog = "\(canonicalRoot)/projects/proj/90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a.jsonl"
+        let text = """
+        p999
+        fcwd
+        tDIR
+        n\(canonicalRoot)
+        f0
+        tCHR
+        n/dev/ttys041
+        f27w
+        tREG
+        n\(sessionLog)
+        """
+
+        let out = CodexActiveSessionsModel.parseLsofMachineOutput(text, sessionsRoots: [lexicalRoot], source: .claude)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[999]?.sessionLogPath, sessionLog)
+        XCTAssertEqual(out[999]?.sessionID, "90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a")
     }
 
     func testParseITermSessionListOutput_parsesSessionRows() {
@@ -600,6 +714,37 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
                 activeWriteWindow: 2.5
             ),
             .openIdle
+        )
+    }
+
+    func testCockpitUnresolvedPlaceholder_hidesSourceFileOnlyPresence() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.publisher = "agent-sessions-shim"
+        presence.kind = "subagent"
+        presence.sourceFilePath = "/Users/alexm/.codex/active/subagent.json"
+
+        XCTAssertTrue(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
+    }
+
+    func testCockpitUnresolvedPlaceholder_keepsFocusableTTYPresence() {
+        var presence = CodexActivePresence()
+        presence.source = .claude
+        presence.publisher = "agent-sessions-shim"
+        presence.tty = "/dev/ttys011"
+
+        XCTAssertFalse(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
         )
     }
 

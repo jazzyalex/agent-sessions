@@ -52,6 +52,27 @@ final class AgentBinaryDetectionTests: XCTestCase {
 
         XCTAssertTrue(AgentEnablement.binaryDetectedInPATH(binURL.path, pathOverride: nil))
     }
+
+    func testBinaryInstalledForClaude_acceptsClaudeCodeBinaryName() throws {
+        let fileManager = FileManager.default
+        let dir = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: dir) }
+
+        let binURL = dir.appendingPathComponent("claude-code", isDirectory: false)
+        let created = fileManager.createFile(
+            atPath: binURL.path,
+            contents: Data("#!/bin/sh\nexit 0\n".utf8),
+            attributes: [.posixPermissions: NSNumber(value: 0o755)]
+        )
+        XCTAssertTrue(created)
+
+        let originalPATH = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        setenv("PATH", dir.path, 1)
+        defer { setenv("PATH", originalPATH, 1) }
+
+        XCTAssertTrue(AgentEnablement.binaryInstalled(for: .claude))
+    }
 }
 
 final class FocusedSessionRefreshIntervalsTests: XCTestCase {
@@ -117,5 +138,37 @@ final class FocusedSessionRefreshIntervalsTests: XCTestCase {
                 "Expected focused monitor capability for \(source.rawValue)"
             )
         }
+    }
+}
+
+final class ClaudeIndexerRefreshPolicyTests: XCTestCase {
+    func testShouldEscalateRecentDeltaToFullReconcile_whenIncrementalAndDriftDetected() {
+        let delta = SessionDiscoveryDelta(
+            changedFiles: [],
+            removedPaths: [],
+            currentByPath: [:],
+            driftDetected: true
+        )
+        XCTAssertTrue(ClaudeSessionIndexer.shouldEscalateRecentDeltaToFullReconcile(mode: .incremental, delta: delta))
+    }
+
+    func testShouldEscalateRecentDeltaToFullReconcile_whenIncrementalWithoutDrift() {
+        let delta = SessionDiscoveryDelta(
+            changedFiles: [],
+            removedPaths: [],
+            currentByPath: [:],
+            driftDetected: false
+        )
+        XCTAssertFalse(ClaudeSessionIndexer.shouldEscalateRecentDeltaToFullReconcile(mode: .incremental, delta: delta))
+    }
+
+    func testShouldEscalateRecentDeltaToFullReconcile_whenFullModeNeverEscalates() {
+        let delta = SessionDiscoveryDelta(
+            changedFiles: [],
+            removedPaths: [],
+            currentByPath: [:],
+            driftDetected: true
+        )
+        XCTAssertFalse(ClaudeSessionIndexer.shouldEscalateRecentDeltaToFullReconcile(mode: .fullReconcile, delta: delta))
     }
 }

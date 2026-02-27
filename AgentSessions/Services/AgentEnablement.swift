@@ -168,7 +168,7 @@ enum AgentEnablement {
     static func binaryInstalled(for source: SessionSource) -> Bool {
         switch source {
         case .codex: return binaryDetectedCached("codex")
-        case .claude: return binaryDetectedCached("claude")
+        case .claude: return binaryDetectedCached("claude") || binaryDetectedCached("claude-code")
         case .gemini: return binaryDetectedCached("gemini")
         case .opencode: return binaryDetectedCached("opencode")
         case .copilot: return binaryDetectedCached("copilot")

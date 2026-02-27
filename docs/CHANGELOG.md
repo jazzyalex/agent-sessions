@@ -28,8 +28,11 @@ All notable changes to this project will be documented in this file.
 - Sessions (Cockpit/Unified): Claude/OpenCode command fallback detection now matches executable command positions only (argv0/wrapper target/shell `-c` head), preventing argument/path-name false positives from creating phantom live rows.
 - Sessions (Unified): Claude/OpenCode live fallback matching now assigns up to `N` newest candidate sessions for `N` unresolved presences (workspace-scoped or source-scoped), so concurrent same-repo terminals stay visible in live dots and `Live sessions only`.
 - Sessions (Unified): Claude/OpenCode fallback ranking now excludes sessions already directly joined by `sessionId`/log path, preventing mixed direct+fallback states from dropping valid live dots and `Live sessions only` rows.
+- Sessions (Unified): Claude/OpenCode fallback presence caching now keys by source + session ID, preventing cross-provider ID collisions from showing incorrect live dots or `Live sessions only` rows.
+- Sessions (Cockpit): Unresolved registry-only placeholders are now hidden unless they are focusable or workspace-joinable, preventing ghost sub-agent rows (for example `Active Codex CLI session` with empty project).
 - Session view (Unified): Session list refresh now holds the prior selection/rows during transient empty publishes while indexing/search churn is in flight, preventing momentary blank transcript placeholder flashes.
 - Claude usage probe cleanup: orphaned `as-cc-*` tmux label cleanup is now processed in bounded batches with delayed follow-up passes to avoid large single-pass CPU spikes, and cleanup now excludes the currently active probe label.
+- Sessions (Cockpit/Unified/Claude): Cockpit now suppresses unresolved live placeholders that are neither focusable nor joinable to indexed workspace sessions, dedupes unresolved rows by stable tty/workspace identity, and its `Refresh` action now refreshes both live presence and provider indexes; Claude refresh now auto-escalates recent-scope drift to full reconcile, and manual refreshes in both Unified and Cockpit now run Claude full reconcile so newly opened Claude sessions appear reliably in the main Sessions list.
 
 ### Changed
 - Preferences (Unified Window): Reordered sections so `Columns` and `Filters` appear before `Rich Transcript`.

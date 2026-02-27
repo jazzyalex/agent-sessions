@@ -236,15 +236,29 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 
             let deltaScope: SessionDeltaScope = (mode == .fullReconcile) ? .full : .recent
             let previousStats = self.knownFileStatsByPathSnapshot()
-            let delta = self.discovery.discoverDelta(previousByPath: previousStats, scope: deltaScope)
+            let initialDelta = self.discovery.discoverDelta(previousByPath: previousStats, scope: deltaScope)
+            let shouldEscalate = Self.shouldEscalateRecentDeltaToFullReconcile(mode: mode, delta: initialDelta)
+            let effectiveMode: IndexRefreshMode = shouldEscalate ? .fullReconcile : mode
+            let delta: SessionDiscoveryDelta = {
+                if shouldEscalate {
+                    return self.discovery.discoverDelta(previousByPath: previousStats, scope: .full)
+                }
+                return initialDelta
+            }()
             let files: [URL] = {
-                if mode == .fullReconcile {
+                if effectiveMode == .fullReconcile {
                     return delta.currentByPath.keys.map { URL(fileURLWithPath: $0) }
                 }
                 return delta.changedFiles
             }()
+            if shouldEscalate {
+                LaunchProfiler.log("Claude.refresh: escalating recent delta to full reconcile due to drift")
+            }
             #if DEBUG
-            print("📁 Found \(files.count) Claude Code changed/new files (removed=\(delta.removedPaths.count), drift=\(delta.driftDetected))")
+            print(
+                "📁 Found \(files.count) Claude Code changed/new files " +
+                "(removed=\(delta.removedPaths.count), drift=\(delta.driftDetected), mode=\(effectiveMode))"
+            )
             #endif
             LaunchProfiler.log("Claude.refresh: file enumeration done (changed=\(files.count), removed=\(delta.removedPaths.count), drift=\(delta.driftDetected))")
 
@@ -319,7 +333,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             let filtered = merged.filter { hideProbes ? !ClaudeProbeConfig.isProbeSession($0) : true }
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .claude)
-            self.applyKnownFileStatsDelta(mode: mode, delta: delta)
+            self.applyKnownFileStatsDelta(mode: effectiveMode, delta: delta)
             self.scheduleAnalyticsDelta(changedFiles: files,
                                         removedPaths: delta.removedPaths,
                                         executionProfile: executionProfile)
@@ -409,6 +423,12 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         } catch {
             // Non-fatal. Cache will be built from runtime deltas.
         }
+    }
+
+    static func shouldEscalateRecentDeltaToFullReconcile(mode: IndexRefreshMode,
+                                                          delta: SessionDiscoveryDelta) -> Bool {
+        guard mode != .fullReconcile else { return false }
+        return delta.driftDetected
     }
 
     private func setRefreshToken(_ token: UUID) {
