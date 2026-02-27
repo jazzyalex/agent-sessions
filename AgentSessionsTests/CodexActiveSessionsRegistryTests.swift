@@ -531,11 +531,19 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         ))
     }
 
-    func testCanAttemptITerm2Focus_rejectsKnownNonITermTerminal() {
-        XCTAssertFalse(CodexActiveSessionsModel.canAttemptITerm2Focus(
+    func testCanAttemptITerm2Focus_allowsTTYForKnownNonITermTerminal() {
+        XCTAssertTrue(CodexActiveSessionsModel.canAttemptITerm2Focus(
             itermSessionId: nil,
             tty: "/dev/ttys012",
             termProgram: "Apple_Terminal"
+        ))
+    }
+
+    func testCanAttemptITerm2Focus_rejectsWhenNoTTYAndNoGUID() {
+        XCTAssertFalse(CodexActiveSessionsModel.canAttemptITerm2Focus(
+            itermSessionId: nil,
+            tty: nil,
+            termProgram: "tmux"
         ))
     }
 
@@ -610,6 +618,149 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         › Explain this codebase
         """
         XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .openIdle)
+    }
+
+    func testClassifyGenericITermTail_prefersPromptOverHistoricalWeakBusyMarkers() {
+        let tail = """
+        thinking about plan
+        running command
+        ›
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyGenericITermTail(tail), .openIdle)
+    }
+
+    func testClassifyGenericITermTail_keepsActiveWhenStrongMarkerNearBottomEvenWithPrompt() {
+        let tail = """
+        status line
+        Esc to interrupt
+        ›
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyGenericITermTail(tail), .activeWorking)
+    }
+
+    func testClassifyGenericITermTail_ignoresStaleStrongMarkerWhenPromptAtBottom() {
+        let tail = """
+        Esc to interrupt
+        old output line 1
+        old output line 2
+        old output line 3
+        old output line 4
+        ›
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyGenericITermTail(tail), .openIdle)
+    }
+
+    func testClassifyGenericITermTail_marksActiveWhenWeakBusyMarkerNearBottom() {
+        let tail = """
+        status: processing
+        still working on this
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyGenericITermTail(tail), .activeWorking)
+    }
+
+    func testClassifyGenericITermTail_returnsNilForAmbiguousNonPromptTail() {
+        let tail = """
+        thinking
+        status complete
+        next step ready
+        """
+        XCTAssertNil(CodexActiveSessionsModel.classifyGenericITermTail(tail))
+    }
+
+    func testClassifyClaudeITermTail_marksActiveForStrongNearBottomMarker() {
+        let tail = """
+        status line
+        Esc to interrupt
+        ›
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyClaudeITermTail(tail), .activeWorking)
+    }
+
+    func testClassifyClaudeITermTail_stripsANSIStylesBeforeMarkerMatch() {
+        let tail = "\u{001B}[2mEsc\u{001B}[0m to interrupt"
+        XCTAssertEqual(CodexActiveSessionsModel.classifyClaudeITermTail(tail), .activeWorking)
+    }
+
+    func testClassifyClaudeITermTail_marksOpenWhenPromptAndNoStrongMarker() {
+        let tail = """
+        previous line
+        ›
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyClaudeITermTail(tail), .openIdle)
+    }
+
+    func testClassifyClaudeITermTail_marksOpenForZshPercentPrompt() {
+        let tail = """
+        previous line
+        alex@mbp %
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyClaudeITermTail(tail), .openIdle)
+    }
+
+    func testClassifyClaudeITermTail_returnsNilForAmbiguousNonPromptTail() {
+        let tail = """
+        preparing tool execution
+        status update
+        """
+        XCTAssertNil(CodexActiveSessionsModel.classifyClaudeITermTail(tail))
+    }
+
+    func testClassifyClaudeITermTail_promptWinsOverGenericLexicalHistory() {
+        let tail = """
+        thinking about plan
+        running command
+        alex@mbp %
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyClaudeITermTail(tail), .openIdle)
+    }
+
+    func testClassifyClaudeITermTail_treatsPercentStatusTailAsAmbiguous() {
+        let tail = """
+        Downloading dependencies
+        78%
+        """
+        XCTAssertNil(CodexActiveSessionsModel.classifyClaudeITermTail(tail))
+    }
+
+    func testClassifyClaudeITermTail_marksActiveForWeakBusyMarkerNearBottom() {
+        let tail = """
+        status line
+        still thinking about the next tool call
+        """
+        XCTAssertEqual(CodexActiveSessionsModel.classifyClaudeITermTail(tail), .activeWorking)
+    }
+
+    func testResolveClaudeStateFromITermProbe_prefersProcessingFlag() {
+        XCTAssertEqual(
+            CodexActiveSessionsModel.resolveClaudeStateFromITermProbe(
+                isProcessing: true,
+                isAtShellPrompt: false,
+                tail: "›"
+            ),
+            .activeWorking
+        )
+    }
+
+    func testResolveClaudeStateFromITermProbe_usesPromptFlagWhenNotProcessing() {
+        XCTAssertEqual(
+            CodexActiveSessionsModel.resolveClaudeStateFromITermProbe(
+                isProcessing: false,
+                isAtShellPrompt: true,
+                tail: "status line"
+            ),
+            .openIdle
+        )
+    }
+
+    func testResolveClaudeStateFromITermProbe_prefersPromptWhenBothFlagsTrue() {
+        XCTAssertEqual(
+            CodexActiveSessionsModel.resolveClaudeStateFromITermProbe(
+                isProcessing: true,
+                isAtShellPrompt: true,
+                tail: "Esc to interrupt"
+            ),
+            .openIdle
+        )
     }
 
     @MainActor
@@ -749,6 +900,77 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testHeuristicLiveStateFromLogMTime_claudeWindow15s_staysActiveAt10s() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("as-live-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let file = dir.appendingPathComponent("claude-test.jsonl")
+        try Data("{}".utf8).write(to: file)
+
+        let now = Date()
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-10)], ofItemAtPath: file.path)
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.heuristicLiveStateFromLogMTime(
+                logPath: file.path,
+                now: now,
+                activeWriteWindow: 15.0
+            ),
+            .activeWorking
+        )
+    }
+
+    func testHeuristicLiveStateFromLogMTime_usesSourceFilePathWhenLogPathMissing() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("as-live-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("presence.json")
+        try Data("{}".utf8).write(to: source)
+
+        let now = Date()
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-0.5)], ofItemAtPath: source.path)
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.heuristicLiveStateFromLogMTime(
+                logPath: nil,
+                sourceFilePath: source.path,
+                now: now,
+                activeWriteWindow: 2.5
+            ),
+            .activeWorking
+        )
+    }
+
+    func testHeuristicLiveStateFromLogMTime_prefersLogPathOverFreshSourceFilePath() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("as-live-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let logFile = dir.appendingPathComponent("session.jsonl")
+        try Data("{}".utf8).write(to: logFile)
+        let source = dir.appendingPathComponent("presence.json")
+        try Data("{}".utf8).write(to: source)
+
+        let now = Date()
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-15)], ofItemAtPath: logFile.path)
+        try fm.setAttributes([.modificationDate: now.addingTimeInterval(-0.5)], ofItemAtPath: source.path)
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.heuristicLiveStateFromLogMTime(
+                logPath: logFile.path,
+                sourceFilePath: source.path,
+                now: now,
+                activeWriteWindow: 2.5
+            ),
+            .openIdle
+        )
+    }
+
     func testCockpitUnresolvedPlaceholder_hidesSourceFileOnlyPresence() {
         var presence = CodexActivePresence()
         presence.source = .codex
@@ -871,11 +1093,70 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
-    func testCockpitUnresolvedPlaceholder_keepsFocusableTTYPresence() {
+    func testCockpitUnresolvedPlaceholder_keepsTTYOnlyNonITermPresence() {
         var presence = CodexActivePresence()
         presence.source = .claude
         presence.publisher = "agent-sessions-shim"
         presence.tty = "/dev/ttys011"
+        var terminal = CodexActivePresence.Terminal()
+        terminal.termProgram = "tmux"
+        presence.terminal = terminal
+
+        XCTAssertFalse(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
+    }
+
+    func testCockpitUnresolvedPlaceholder_keepsTTYOnlyPresenceWhenTermProgramMissing() {
+        var presence = CodexActivePresence()
+        presence.source = .claude
+        presence.publisher = "agent-sessions-shim"
+        presence.tty = "/dev/ttys011"
+        var terminal = CodexActivePresence.Terminal()
+        terminal.termProgram = nil
+        presence.terminal = terminal
+
+        XCTAssertFalse(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
+    }
+
+    func testCockpitUnresolvedPlaceholder_keepsITermGuidPresence() {
+        var presence = CodexActivePresence()
+        presence.source = .claude
+        presence.publisher = "agent-sessions-process"
+        presence.tty = "/dev/ttys011"
+        var terminal = CodexActivePresence.Terminal()
+        terminal.termProgram = "tmux"
+        terminal.itermSessionId = "w0t0p0:ABCDEF"
+        presence.terminal = terminal
+
+        XCTAssertFalse(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
+    }
+
+    func testCockpitUnresolvedPlaceholder_keepsClaudeWithLogPathButNoITermIdentity() {
+        var presence = CodexActivePresence()
+        presence.source = .claude
+        presence.publisher = "agent-sessions-process"
+        presence.sessionLogPath = "/tmp/claude-unresolved.jsonl"
+        presence.tty = "/dev/ttys011"
+        var terminal = CodexActivePresence.Terminal()
+        terminal.termProgram = "tmux"
+        presence.terminal = terminal
 
         XCTAssertFalse(
             CockpitView.shouldHideUnresolvedPresencePlaceholder(
