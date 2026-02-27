@@ -228,7 +228,11 @@ final class CodexActiveSessionsModel: ObservableObject {
     func liveState(for presence: CodexActivePresence) -> CodexLiveState {
         let key = Self.presenceKey(for: presence)
         if let cached = liveStateByPresenceKey[key] { return cached }
-        return Self.heuristicLiveStateFromLogMTime(logPath: presence.sessionLogPath, now: Date())
+        return Self.heuristicLiveStateFromLogMTime(
+            logPath: presence.sessionLogPath,
+            sourceFilePath: presence.sourceFilePath,
+            now: Date()
+        )
     }
 
     func presence(for session: Session) -> CodexActivePresence? {
@@ -1001,13 +1005,12 @@ final class CodexActiveSessionsModel: ObservableObject {
         return trimmed
     }
 
-    nonisolated static func canAttemptITerm2Focus(itermSessionId: String?, tty: String?, termProgram: String?) -> Bool {
+    nonisolated static func canAttemptITerm2Focus(itermSessionId: String?, tty: String?, termProgram _: String?) -> Bool {
         if let guid = itermSessionGuid(from: itermSessionId), !guid.isEmpty { return true }
         guard let tty = tty?.trimmingCharacters(in: .whitespacesAndNewlines), !tty.isEmpty else { return false }
-        let term = (termProgram ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if term.contains("iterm") { return true }
-        // Process env snapshots can miss TERM_PROGRAM; keep tty-based iTerm2 probe available.
-        return term.isEmpty
+        // A concrete TTY is enough to attempt iTerm lookup by session tty, even when
+        // TERM_PROGRAM is proxied (for example, tmux/screen inside iTerm).
+        return true
     }
 
     nonisolated static func canAttemptITerm2TailProbe(itermSessionId: String?, tty: String?, termProgram _: String?) -> Bool {
@@ -1088,7 +1091,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     // MARK: - Live State Classification
 
     nonisolated static func classifyITermTail(_ tail: String) -> CodexLiveState? {
-        let normalized = tail.replacingOccurrences(of: "\r", with: "")
+        let normalized = sanitizeITermTail(tail)
         guard !normalized.isEmpty else { return nil }
         let lines = normalized
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -1127,8 +1130,9 @@ final class CodexActiveSessionsModel: ObservableObject {
         return .openIdle
     }
 
-    nonisolated private static func classifyGenericITermTail(_ tail: String) -> CodexLiveState? {
-        let normalized = tail.replacingOccurrences(of: "\r", with: "")
+    // Internal for targeted unit tests.
+    nonisolated static func classifyGenericITermTail(_ tail: String) -> CodexLiveState? {
+        let normalized = sanitizeITermTail(tail)
         guard !normalized.isEmpty else { return nil }
 
         let lines = normalized
@@ -1138,11 +1142,28 @@ final class CodexActiveSessionsModel: ObservableObject {
         guard !nonEmptyLines.isEmpty else { return nil }
 
         let recentWindow = nonEmptyLines.suffix(12)
-        let recentLower = recentWindow.joined(separator: "\n").lowercased()
         let lastNonEmptyLine = recentWindow.last ?? ""
+        let recentBottomLower = recentWindow.suffix(4).joined(separator: "\n").lowercased()
+        let lastTwoLower = recentWindow.suffix(2).joined(separator: "\n").lowercased()
 
-        let busyMarkers = [
+        let strongBusyMarkers = [
             "esc to interrupt",
+            "re-connecting",
+            "reconnecting"
+        ]
+        if strongBusyMarkers.contains(where: { recentBottomLower.contains($0) }) {
+            return .activeWorking
+        }
+
+        // Prompt at the bottom clears weak/historical busy text once strong
+        // live markers are absent in the near-bottom transcript window.
+        if isLikelyPromptLine(lastNonEmptyLine) {
+            return .openIdle
+        }
+
+        // Weaker lexical markers are matched only near the bottom to reduce
+        // stale-history false-active stickiness.
+        let weakBusyMarkers = [
             "working",
             "running",
             "thinking",
@@ -1151,16 +1172,60 @@ final class CodexActiveSessionsModel: ObservableObject {
             "applying",
             "analyzing"
         ]
-        if busyMarkers.contains(where: { recentLower.contains($0) }) {
+        if weakBusyMarkers.contains(where: { lastTwoLower.contains($0) }) {
             return .activeWorking
-        }
-
-        if isLikelyPromptLine(lastNonEmptyLine) {
-            return .openIdle
         }
 
         // Ambiguous generic terminal output (no explicit busy marker, no clear prompt):
         // defer to log mtime heuristic instead of forcing active.
+        return nil
+    }
+
+    // Internal for targeted unit tests.
+    nonisolated static func classifyClaudeITermTail(_ tail: String) -> CodexLiveState? {
+        let normalized = sanitizeITermTail(tail)
+        guard !normalized.isEmpty else { return nil }
+
+        let lines = normalized
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        let nonEmptyLines = lines.filter { !$0.isEmpty }
+        guard !nonEmptyLines.isEmpty else { return nil }
+
+        let recentWindow = nonEmptyLines.suffix(16)
+        let lastNonEmptyLine = recentWindow.last ?? ""
+        let recentBottomLower = recentWindow.suffix(6).joined(separator: "\n").lowercased()
+
+        let strongBusyMarkers = [
+            "esc to interrupt",
+            "re-connecting",
+            "reconnecting"
+        ]
+        if strongBusyMarkers.contains(where: { recentBottomLower.contains($0) }) {
+            return .activeWorking
+        }
+
+        if isLikelyClaudePromptLine(lastNonEmptyLine) {
+            return .openIdle
+        }
+
+        // Weaker lexical markers are matched near the bottom only, and only when
+        // prompt detection has already failed.
+        let weakBusyMarkers = [
+            "working",
+            "running",
+            "thinking",
+            "processing",
+            "generating",
+            "applying",
+            "analyzing"
+        ]
+        if weakBusyMarkers.contains(where: { recentBottomLower.contains($0) }) {
+            return .activeWorking
+        }
+
+        // Ambiguous Claude output should defer to probe metadata (is processing/prompt)
+        // and then log mtime fallback.
         return nil
     }
 
@@ -1176,15 +1241,111 @@ final class CodexActiveSessionsModel: ObservableObject {
         return false
     }
 
+    nonisolated private static func isLikelyClaudePromptLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if ["›", ">", "$", "#", "%", "❯", "λ"].contains(trimmed) { return true }
+        if let last = trimmed.last, last == "$" || last == "#" || last == "%" {
+            let body = trimmed.dropLast()
+            // Prompt-like tails are typically "… <prompt-char>" (for example "user@host %").
+            // This avoids treating status percentages like "78%" as prompt lines.
+            if body.last?.isWhitespace == true { return true }
+        }
+        if let range = trimmed.range(of: #".*[\$#]$"#, options: .regularExpression),
+           range.lowerBound == trimmed.startIndex,
+           range.upperBound == trimmed.endIndex {
+            return true
+        }
+        return false
+    }
+
+    nonisolated private static func sanitizeITermTail(_ tail: String) -> String {
+        let text = tail.replacingOccurrences(of: "\r", with: "")
+        var out = ""
+        out.reserveCapacity(text.count)
+
+        var i = text.startIndex
+        while i < text.endIndex {
+            let ch = text[i]
+            if ch == "\u{001B}" {
+                let next = text.index(after: i)
+                guard next < text.endIndex else { break }
+                let control = text[next]
+
+                // CSI: ESC [ ... final-byte
+                if control == "[" {
+                    var cursor = text.index(after: next)
+                    while cursor < text.endIndex {
+                        let scalar = text[cursor].unicodeScalars.first?.value ?? 0
+                        if (0x40...0x7E).contains(scalar) {
+                            cursor = text.index(after: cursor)
+                            break
+                        }
+                        cursor = text.index(after: cursor)
+                    }
+                    i = cursor
+                    continue
+                }
+
+                // OSC: ESC ] ... BEL or ESC \
+                if control == "]" {
+                    var cursor = text.index(after: next)
+                    while cursor < text.endIndex {
+                        let current = text[cursor]
+                        if current == "\u{0007}" {
+                            cursor = text.index(after: cursor)
+                            break
+                        }
+                        if current == "\u{001B}" {
+                            let oscNext = text.index(after: cursor)
+                            if oscNext < text.endIndex, text[oscNext] == "\\" {
+                                cursor = text.index(after: oscNext)
+                                break
+                            }
+                        }
+                        cursor = text.index(after: cursor)
+                    }
+                    i = cursor
+                    continue
+                }
+
+                // Drop unknown escape sequence introducer.
+                i = next
+                continue
+            }
+
+            out.append(ch)
+            i = text.index(after: i)
+        }
+        return out
+    }
+
+    // Internal for targeted unit tests.
+    nonisolated static func resolveClaudeStateFromITermProbe(isProcessing: Bool?,
+                                                             isAtShellPrompt: Bool?,
+                                                             tail: String?) -> CodexLiveState? {
+        if isAtShellPrompt == true { return .openIdle }
+        if isProcessing == true { return .activeWorking }
+        guard let tail else { return nil }
+        return classifyClaudeITermTail(tail)
+    }
+
+    nonisolated private static func modificationDateForPath(_ rawPath: String?) -> Date? {
+        guard let rawPath, !rawPath.isEmpty else { return nil }
+        let expanded = (rawPath as NSString).expandingTildeInPath
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: expanded),
+              let mtime = attrs[.modificationDate] as? Date else { return nil }
+        return mtime
+    }
+
     nonisolated static func heuristicLiveStateFromLogMTime(logPath: String?,
+                                                           sourceFilePath: String? = nil,
                                                            now: Date,
                                                            activeWriteWindow: TimeInterval = 2.5) -> CodexLiveState {
-        guard let logPath, !logPath.isEmpty else { return .openIdle }
-        let expanded = (logPath as NSString).expandingTildeInPath
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: expanded),
-              let mtime = attrs[.modificationDate] as? Date else {
-            return .openIdle
-        }
+        // Prefer true session log writes when available; source file mtime is a
+        // secondary fallback only for providers that omit sessionLogPath.
+        let mtime = modificationDateForPath(logPath) ?? modificationDateForPath(sourceFilePath)
+        guard let mtime else { return .openIdle }
         if now.timeIntervalSince(mtime) <= activeWriteWindow {
             return .activeWorking
         }
@@ -1220,7 +1381,19 @@ final class CodexActiveSessionsModel: ObservableObject {
                     // prefer open/idle over mtime heuristics to avoid false-active spikes.
                     state = .openIdle
                 }
-            } else if canProbeITerm, (presence.source == .claude || presence.source == .opencode) {
+            } else if canProbeITerm, presence.source == .claude {
+                if let probe = captureITermProbeResult(
+                    itermSessionId: presence.terminal?.itermSessionId,
+                    tty: presence.tty,
+                    timeout: timeout
+                ) {
+                    state = resolveClaudeStateFromITermProbe(
+                        isProcessing: probe.isProcessing,
+                        isAtShellPrompt: probe.isAtShellPrompt,
+                        tail: probe.tail
+                    )
+                }
+            } else if canProbeITerm, presence.source == .opencode {
                 if let tail = captureITermTail(
                     itermSessionId: presence.terminal?.itermSessionId,
                     tty: presence.tty,
@@ -1232,6 +1405,7 @@ final class CodexActiveSessionsModel: ObservableObject {
 
             let heuristic = heuristicLiveStateFromLogMTime(
                 logPath: presence.sessionLogPath,
+                sourceFilePath: presence.sourceFilePath,
                 now: now,
                 activeWriteWindow: activeWriteWindow(for: presence.source)
             )
@@ -1252,7 +1426,9 @@ final class CodexActiveSessionsModel: ObservableObject {
         switch source {
         case .codex:
             return 2.5
-        case .claude, .opencode:
+        case .claude:
+            return 15.0
+        case .opencode:
             return 4.5
         default:
             return 2.5
@@ -1313,6 +1489,104 @@ final class CodexActiveSessionsModel: ObservableObject {
         }
         return String(decoding: out, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private struct ITermProbeResult {
+        let tail: String?
+        let isProcessing: Bool?
+        let isAtShellPrompt: Bool?
+    }
+
+    nonisolated private static func captureITermProbeResult(itermSessionId: String?,
+                                                            tty: String?,
+                                                            timeout: TimeInterval) -> ITermProbeResult? {
+        let guid = itermSessionGuid(from: itermSessionId) ?? ""
+        let ttyValue = (tty ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetTTY = ttyValue.isEmpty ? "" : ttyValue
+        guard !guid.isEmpty || !targetTTY.isEmpty else { return nil }
+
+        let scriptLines = [
+            "on run argv",
+            "set targetGuid to \"\"",
+            "set targetTTY to \"\"",
+            "if (count of argv) >= 1 then set targetGuid to item 1 of argv",
+            "if (count of argv) >= 2 then set targetTTY to item 2 of argv",
+            "set targetTTYBase to targetTTY",
+            "if targetTTYBase starts with \"/dev/\" then set targetTTYBase to text 6 thru -1 of targetTTYBase",
+            "tell application \"iTerm2\"",
+            "repeat with w in windows",
+            "repeat with t in tabs of w",
+            "repeat with s in sessions of t",
+            "set sid to id of s",
+            "set stty to tty of s",
+            "set sttyBase to stty",
+            "if sttyBase starts with \"/dev/\" then set sttyBase to text 6 thru -1 of sttyBase",
+            "if ((targetGuid is not \"\" and sid is targetGuid) or (targetTTYBase is not \"\" and (stty is targetTTY or stty is targetTTYBase or sttyBase is targetTTYBase))) then",
+            "set txt to \"\"",
+            "try",
+            "set txt to contents of s",
+            "on error",
+            "set txt to \"\"",
+            "end try",
+            "set txtLen to length of txt",
+            "if txtLen > 4000 then",
+            "set txt to text (txtLen - 3999) thru txtLen of txt",
+            "end if",
+            "set processing to false",
+            "try",
+            "set processing to is processing of s",
+            "on error",
+            "set processing to false",
+            "end try",
+            "set atPrompt to false",
+            "try",
+            "set atPrompt to is at shell prompt of s",
+            "on error",
+            "set atPrompt to false",
+            "end try",
+            "set metadata to ((processing as string) & tab & (atPrompt as string))",
+            "return metadata & linefeed & txt",
+            "end if",
+            "end repeat",
+            "end repeat",
+            "end repeat",
+            "end tell",
+            "return \"\"",
+            "end run"
+        ]
+
+        guard let out = runCommand(
+            executable: URL(fileURLWithPath: "/usr/bin/osascript"),
+            arguments: scriptLines.flatMap { ["-e", $0] } + [guid, targetTTY],
+            timeout: timeout
+        ) else {
+            return nil
+        }
+
+        let raw = String(decoding: out, as: UTF8.self)
+        let normalized = raw.replacingOccurrences(of: "\r", with: "")
+        guard !normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+        var lines = normalized.components(separatedBy: "\n")
+        let metadata = lines.isEmpty ? "" : lines.removeFirst()
+        let parts = metadata.components(separatedBy: "\t")
+        let isProcessing = parseAppleScriptBool(parts.first)
+        let isAtShellPrompt = parseAppleScriptBool(parts.count > 1 ? parts[1] : nil)
+        let tail = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return ITermProbeResult(
+            tail: tail.isEmpty ? nil : tail,
+            isProcessing: isProcessing,
+            isAtShellPrompt: isAtShellPrompt
+        )
+    }
+
+    nonisolated private static func parseAppleScriptBool(_ value: String?) -> Bool? {
+        guard let value else { return nil }
+        let lower = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lower == "true" { return true }
+        if lower == "false" { return false }
+        return nil
     }
 
     // MARK: - Live Session Discovery (Fallback)
