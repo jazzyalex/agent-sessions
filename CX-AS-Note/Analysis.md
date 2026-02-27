@@ -61,3 +61,8 @@ The misclassification of active Claude sessions as "open" stems from a combinati
 
 ---
 *Analysis completed as requested without modifying any source code in the repository.*
+
+## Follow-up Status (2026-02-26)
+
+- Claude active/open session tracking appears correct in current validation.
+- Ghost active session behavior is still reproducible and requires additional investigation before declaring fully fixed.

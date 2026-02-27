@@ -395,6 +395,11 @@ struct CockpitView: View {
         // Registry file path (`sourceFilePath`) by itself is not actionable and can
         // surface ghost sub-agent rows with no own terminal/session.
         guard resolvedSession == nil else { return false }
+        let kind = presence.kind?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if kind == "subagent" { return true }
+
         let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         if hasSessionID || hasLogPath { return false }

@@ -1010,6 +1010,12 @@ final class CodexActiveSessionsModel: ObservableObject {
         return term.isEmpty
     }
 
+    nonisolated static func canAttemptITerm2TailProbe(itermSessionId: String?, tty: String?, termProgram _: String?) -> Bool {
+        if let guid = itermSessionGuid(from: itermSessionId), !guid.isEmpty { return true }
+        guard let tty = tty?.trimmingCharacters(in: .whitespacesAndNewlines), !tty.isEmpty else { return false }
+        return true
+    }
+
     /// Best-effort focus for iTerm2 sessions that works across windows/tabs (and usually Spaces).
     /// Returns `true` if iTerm2 reported the target session was selected.
     nonisolated static func tryFocusITerm2(itermSessionId: String?, tty: String?) -> Bool {
@@ -1197,7 +1203,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             guard key != "unknown" else { continue }
 
             var state: CodexLiveState?
-            let canProbeITerm = probeITerm && canAttemptITerm2Focus(
+            let canProbeITerm = probeITerm && canAttemptITerm2TailProbe(
                 itermSessionId: presence.terminal?.itermSessionId,
                 tty: presence.tty,
                 termProgram: presence.terminal?.termProgram

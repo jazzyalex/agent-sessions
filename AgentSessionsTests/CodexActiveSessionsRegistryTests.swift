@@ -539,6 +539,38 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         ))
     }
 
+    func testCanAttemptITerm2TailProbe_allowsTTYForTmux() {
+        XCTAssertTrue(CodexActiveSessionsModel.canAttemptITerm2TailProbe(
+            itermSessionId: nil,
+            tty: "/dev/ttys012",
+            termProgram: "tmux"
+        ))
+    }
+
+    func testCanAttemptITerm2TailProbe_allowsTTYForKnownNonITermTerminal() {
+        XCTAssertTrue(CodexActiveSessionsModel.canAttemptITerm2TailProbe(
+            itermSessionId: nil,
+            tty: "/dev/ttys012",
+            termProgram: "Apple_Terminal"
+        ))
+    }
+
+    func testCanAttemptITerm2TailProbe_rejectsWhenNoTTYAndNoGUID() {
+        XCTAssertFalse(CodexActiveSessionsModel.canAttemptITerm2TailProbe(
+            itermSessionId: nil,
+            tty: nil,
+            termProgram: "tmux"
+        ))
+    }
+
+    func testCanAttemptITerm2TailProbe_allowsGUIDWithoutTTY() {
+        XCTAssertTrue(CodexActiveSessionsModel.canAttemptITerm2TailProbe(
+            itermSessionId: "w0t0p0:ABCDEF",
+            tty: nil,
+            termProgram: "Apple_Terminal"
+        ))
+    }
+
     func testClassifyITermTail_detectsActiveWorkingMarkers() {
         let tail = """
         • The bridge-session run is still active with CPU usage
@@ -723,6 +755,38 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.publisher = "agent-sessions-shim"
         presence.kind = "subagent"
         presence.sourceFilePath = "/Users/alexm/.codex/active/subagent.json"
+
+        XCTAssertTrue(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
+    }
+
+    func testCockpitUnresolvedPlaceholder_hidesSubagentEvenWithSessionID() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.publisher = "agent-sessions-shim"
+        presence.kind = "subagent"
+        presence.sessionId = "sid-subagent"
+
+        XCTAssertTrue(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
+    }
+
+    func testCockpitUnresolvedPlaceholder_hidesSubagentEvenWithLogPath() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.publisher = "agent-sessions-shim"
+        presence.kind = "subagent"
+        presence.sessionLogPath = "/tmp/subagent-rollout.jsonl"
 
         XCTAssertTrue(
             CockpitView.shouldHideUnresolvedPresencePlaceholder(
