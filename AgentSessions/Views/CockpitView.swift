@@ -403,21 +403,22 @@ struct CockpitView: View {
         // Codex placeholders without a resolved indexed session are often stale
         // discovery artifacts in Cockpit. Keep Codex rows only when joined.
         if presence.source == .codex { return true }
-
         let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         if hasSessionID || hasLogPath { return false }
 
-        let canFocusFallback =
-            CodexActiveSessionsModel.canAttemptITerm2Focus(
-                itermSessionId: presence.terminal?.itermSessionId,
-                tty: presence.tty,
-                termProgram: presence.terminal?.termProgram
-            ) || presence.revealURL != nil
-        if canFocusFallback { return false }
+        let hasRevealURL = presence.revealURL != nil
+        let hasITermGuid = CodexActiveSessionsModel.itermSessionGuid(from: presence.terminal?.itermSessionId)?.isEmpty == false
+        let termProgram = presence.terminal?.termProgram?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        let reportsITermProgram = termProgram.contains("iterm")
+        let canFocusFallbackStrict = hasRevealURL || hasITermGuid || reportsITermProgram
 
+        // For non-Codex providers, unresolved placeholders are noisy in Cockpit
+        // unless they are iTerm-backed/focusable or can be workspace-joined.
+        if canFocusFallbackStrict { return false }
         if hasWorkspaceMatch { return false }
-
         return true
     }
 
