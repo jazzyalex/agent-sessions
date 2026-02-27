@@ -400,6 +400,10 @@ struct CockpitView: View {
             .lowercased()
         if kind == "subagent" { return true }
 
+        // Codex placeholders without a resolved indexed session are often stale
+        // discovery artifacts in Cockpit. Keep Codex rows only when joined.
+        if presence.source == .codex { return true }
+
         let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         if hasSessionID || hasLogPath { return false }

@@ -781,6 +781,22 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testCockpitUnresolvedPlaceholder_hidesCodexWithSessionID() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.publisher = "agent-sessions-shim"
+        presence.kind = "interactive"
+        presence.sessionId = "sid-codex"
+
+        XCTAssertTrue(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
+    }
+
     func testCockpitUnresolvedPlaceholder_hidesSubagentEvenWithLogPath() {
         var presence = CodexActivePresence()
         presence.source = .codex
@@ -792,6 +808,64 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             CockpitView.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
+    }
+
+    func testCockpitUnresolvedPlaceholder_hidesCodexWithLogPath() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.publisher = "agent-sessions-shim"
+        presence.kind = "interactive"
+        presence.sessionLogPath = "/tmp/codex-rollout.jsonl"
+
+        XCTAssertTrue(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
+    }
+
+    func testCockpitUnresolvedPlaceholder_hidesCodexTTYOnlyITermFallback() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.publisher = "agent-sessions-iterm"
+        presence.kind = "interactive"
+        presence.tty = "/dev/ttys099"
+        var terminal = CodexActivePresence.Terminal()
+        terminal.termProgram = "iTerm2"
+        terminal.itermSessionId = "ABC-123"
+        presence.terminal = terminal
+
+        XCTAssertTrue(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
+    }
+
+    func testCockpitUnresolvedPlaceholder_keepsResolvedCodexPresence() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.publisher = "agent-sessions-shim"
+        presence.kind = "interactive"
+        presence.sessionId = "sid-codex"
+        let resolved = makeFallbackSession(
+            id: "sid-codex",
+            source: .codex,
+            cwd: "/Users/alexm/Repository/Codex-History",
+            modifiedAt: Date()
+        )
+
+        XCTAssertFalse(
+            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: resolved,
                 hasWorkspaceMatch: false
             )
         )
