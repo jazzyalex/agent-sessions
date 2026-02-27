@@ -80,14 +80,34 @@ struct CockpitView: View {
     private func makeLiveRowsSnapshot() -> LiveRowsSnapshot {
         let lookupIndexes = buildSessionLookupIndexes()
         let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
+        let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions + opencodeIndexer.allSessions
+        let fallbackBySessionKey = UnifiedSessionsView.buildFallbackPresenceMap(
+            sessions: allSessions,
+            presences: activeCodex.presences
+        ) { candidate in
+            activeCodex.presence(for: candidate) != nil
+        }
+        var fallbackSessionByPresenceKey: [String: Session] = [:]
+        fallbackSessionByPresenceKey.reserveCapacity(fallbackBySessionKey.count)
+        for session in allSessions {
+            let sessionKey = UnifiedSessionsView.fallbackPresenceKey(source: session.source, sessionID: session.id)
+            guard let presence = fallbackBySessionKey[sessionKey] else { continue }
+            let presenceKey = CodexActiveSessionsModel.presenceKey(for: presence)
+            guard presenceKey != "unknown" else { continue }
+            fallbackSessionByPresenceKey[presenceKey] = preferredSession(
+                existing: fallbackSessionByPresenceKey[presenceKey],
+                incoming: session
+            )
+        }
 
         let mapped: [Row] = activeCodex.presences.compactMap { p in
             guard supportedSources.contains(p.source) else { return nil }
             let logNorm = p.sessionLogPath.map(CodexActiveSessionsModel.normalizePath)
+            let presenceKey = CodexActiveSessionsModel.presenceKey(for: p)
             let session = logNorm.flatMap { normalized in
                 lookupIndexes.byLogPath[CodexActiveSessionsModel.logLookupKey(source: p.source, normalizedPath: normalized)]
             } ?? resolveBySessionID(p.sessionId, source: p.source, lookupIndexes: lookupIndexes)
-                ?? resolveByWorkingDirectory(p.workspaceRoot, source: p.source, lookupIndexes: lookupIndexes)
+                ?? fallbackSessionByPresenceKey[presenceKey]
             if shouldHideUnresolvedPresencePlaceholder(p, resolvedSession: session, lookupIndexes: lookupIndexes) {
                 return nil
             }

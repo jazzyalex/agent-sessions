@@ -281,6 +281,40 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertNil(map[olderKey])
     }
 
+    func testBuildFallbackPresenceMap_assignsDistinctWorkspacePresencesAcrossSameWorkspaceSessions() {
+        let now = Date()
+        let cwd = "/Users/alexm/Repository/Triada"
+        let sessions = [
+            makeFallbackSession(id: "older", source: .claude, cwd: cwd, modifiedAt: now.addingTimeInterval(-60)),
+            makeFallbackSession(id: "newest", source: .claude, cwd: cwd, modifiedAt: now)
+        ]
+        let newestPresence = makeFallbackPresence(
+            source: .claude,
+            lastSeenAt: now,
+            workspaceRoot: cwd,
+            tty: "/dev/ttys012",
+            pid: 12012
+        )
+        let olderPresence = makeFallbackPresence(
+            source: .claude,
+            lastSeenAt: now.addingTimeInterval(-5),
+            workspaceRoot: cwd,
+            tty: "/dev/ttys013",
+            pid: 12013
+        )
+
+        let map = UnifiedSessionsView.buildFallbackPresenceMap(
+            sessions: sessions,
+            presences: [olderPresence, newestPresence],
+            hasDirectJoin: { _ in false }
+        )
+
+        let newestKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: "newest")
+        let olderKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: "older")
+        XCTAssertEqual(map[newestKey]?.pid, 12012)
+        XCTAssertEqual(map[olderKey]?.pid, 12013)
+    }
+
     func testBuildFallbackPresenceMap_unresolvedFallbackSkipsDirectJoinAndUsesRemainingSessions() {
         let now = Date()
         let sessions = [
@@ -730,6 +764,18 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(CodexActiveSessionsModel.classifyClaudeITermTail(tail), .activeWorking)
     }
 
+    func testParseITermProbeMetadata_parsesTabDelimitedMetadata() {
+        let parsed = CodexActiveSessionsModel.parseITermProbeMetadata("true\tfalse")
+        XCTAssertEqual(parsed.isProcessing, true)
+        XCTAssertEqual(parsed.isAtShellPrompt, false)
+    }
+
+    func testParseITermProbeMetadata_parsesLegacyLiteralTabTokenMetadata() {
+        let parsed = CodexActiveSessionsModel.parseITermProbeMetadata("falsetabtrue")
+        XCTAssertEqual(parsed.isProcessing, false)
+        XCTAssertEqual(parsed.isAtShellPrompt, true)
+    }
+
     func testResolveClaudeStateFromITermProbe_prefersProcessingFlag() {
         XCTAssertEqual(
             CodexActiveSessionsModel.resolveClaudeStateFromITermProbe(
@@ -747,6 +793,22 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
                 isProcessing: false,
                 isAtShellPrompt: true,
                 tail: "status line"
+            ),
+            .openIdle
+        )
+    }
+
+    func testResolveClaudeStateFromITermProbe_marksOpenForNoObviousNextStepPromptLine() {
+        let tail = """
+        response line
+        ❯ (No obvious next step)
+        ~/Repository/Triada  main
+        """
+        XCTAssertEqual(
+            CodexActiveSessionsModel.resolveClaudeStateFromITermProbe(
+                isProcessing: false,
+                isAtShellPrompt: false,
+                tail: tail
             ),
             .openIdle
         )
