@@ -237,7 +237,7 @@ final class TranscriptSessionResolutionPolicyTests: XCTestCase {
     }
 
     func testPrefersLiveEmptyWhenNotLoading() {
-        let live = makeSession(id: "session-1", events: [])
+        let live = makeSession(id: "session-1", events: [], eventCount: 0, fileSizeBytes: 0)
         let cached = makeSession(id: "session-1", events: [makeEvent(id: "e1")])
 
         let preferred = TranscriptSessionResolutionPolicy.preferredSession(
@@ -253,7 +253,7 @@ final class TranscriptSessionResolutionPolicyTests: XCTestCase {
     }
 
     func testPrefersLiveEmptyWhenDifferentSessionIsLoading() {
-        let live = makeSession(id: "session-1", events: [])
+        let live = makeSession(id: "session-1", events: [], eventCount: 0, fileSizeBytes: 0)
         let cached = makeSession(id: "session-1", events: [makeEvent(id: "e1")])
 
         let preferred = TranscriptSessionResolutionPolicy.preferredSession(
@@ -283,6 +283,22 @@ final class TranscriptSessionResolutionPolicyTests: XCTestCase {
         XCTAssertEqual(preferred?.events.first?.id, "e-live")
     }
 
+    func testPrefersCachedWhenLiveLooksTransientlyLightweightOutsideLoading() {
+        let live = makeSession(id: "session-1", events: [], eventCount: 4)
+        let cached = makeSession(id: "session-1", events: [makeEvent(id: "e1")])
+
+        let preferred = TranscriptSessionResolutionPolicy.preferredSession(
+            live: live,
+            cached: cached,
+            sessionID: "session-1",
+            isLoadingSession: false,
+            loadingSessionID: nil
+        )
+
+        XCTAssertEqual(preferred?.events.count, 1)
+        XCTAssertEqual(preferred?.id, "session-1")
+    }
+
     func testUsesCachedWhenLiveMissing() {
         let cached = makeSession(id: "session-1", events: [makeEvent(id: "e1")])
 
@@ -298,7 +314,10 @@ final class TranscriptSessionResolutionPolicyTests: XCTestCase {
         XCTAssertEqual(preferred?.id, "session-1")
     }
 
-    private func makeSession(id: String, events: [SessionEvent]) -> Session {
+    private func makeSession(id: String,
+                             events: [SessionEvent],
+                             eventCount: Int? = nil,
+                             fileSizeBytes: Int? = 1024) -> Session {
         Session(
             id: id,
             source: .claude,
@@ -306,8 +325,8 @@ final class TranscriptSessionResolutionPolicyTests: XCTestCase {
             endTime: Date(timeIntervalSince1970: 100),
             model: "claude-test",
             filePath: "/tmp/\(id).jsonl",
-            fileSizeBytes: 1024,
-            eventCount: max(events.count, 1),
+            fileSizeBytes: fileSizeBytes,
+            eventCount: eventCount ?? max(events.count, 1),
             events: events
         )
     }

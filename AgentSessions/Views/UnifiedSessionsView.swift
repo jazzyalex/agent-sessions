@@ -225,6 +225,7 @@ struct UnifiedSessionsView: View {
 	@AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
 	@AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
     @AppStorage("UnifiedShowActiveSessionsOnly") private var showActiveSessionsOnly: Bool = false
+    @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
 	@AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 	@AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
 	@AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
@@ -374,15 +375,16 @@ struct UnifiedSessionsView: View {
 
 			let lifecycle = AnyView(
 				base
-			                .onAppear {
-			                    activeCodexSessions.setUnifiedConsumerVisible(true, consumerID: activeConsumerID)
-			                    updateFooterUsageVisibility()
-			                    if sortOrder.isEmpty { sortOrder = [KeyPathComparator(\Session.modifiedAt, order: .reverse)] }
-			                    updateCachedRows()
-			                    ensureDefaultSelectionIfNeeded()
-			                    unified.setAppActive(NSApp.isActive)
-		                    updateFocusedSessionIfNeeded(selectedSession)
-		                    refreshSelectionSourceFromCachedRows()
+				                .onAppear {
+				                    activeCodexSessions.setUnifiedConsumerVisible(true, consumerID: activeConsumerID)
+				                    updateFooterUsageVisibility()
+				                    if sortOrder.isEmpty { sortOrder = [KeyPathComparator(\Session.modifiedAt, order: .reverse)] }
+				                    if !liveSessionsFeatureEnabled { showActiveSessionsOnly = false }
+				                    updateCachedRows()
+				                    ensureDefaultSelectionIfNeeded()
+				                    unified.setAppActive(NSApp.isActive)
+			                    updateFocusedSessionIfNeeded(selectedSession)
+			                    refreshSelectionSourceFromCachedRows()
 		                    searchCoordinator.setAppActive(NSApp.isActive)
 			                }
 			                .onDisappear {
@@ -430,13 +432,25 @@ struct UnifiedSessionsView: View {
 
         let afterActiveOnly = afterOpenClaw
             .onChange(of: showActiveSessionsOnly) { _, _ in
+                if !liveSessionsFeatureEnabled {
+                    showActiveSessionsOnly = false
+                }
                 updateCachedRows()
                 ensureDefaultSelectionIfNeeded()
                 refreshSelectionSourceFromCachedRows()
                 updateFocusedSessionIfNeeded(selectedSession)
             }
 
-			let afterUsage = afterActiveOnly
+        let afterLiveFeature = afterActiveOnly
+            .onChange(of: liveSessionsFeatureEnabled) { _, enabled in
+                if !enabled { showActiveSessionsOnly = false }
+                updateCachedRows()
+                ensureDefaultSelectionIfNeeded()
+                refreshSelectionSourceFromCachedRows()
+                updateFocusedSessionIfNeeded(selectedSession)
+            }
+
+			let afterUsage = afterLiveFeature
 				.onChange(of: codexUsageEnabled) { _, _ in updateFooterUsageVisibility() }
 				.onChange(of: claudeUsageEnabled) { _, _ in updateFooterUsageVisibility() }
 					.onChange(of: searchState.query) { _, newValue in
@@ -1016,7 +1030,12 @@ struct UnifiedSessionsView: View {
         ToolbarItem(placement: .principal) {
             HStack(spacing: 12) {
                 ActiveSessionsOnlyToggle(isOn: $showActiveSessionsOnly)
-                    .help("Show only live sessions in the list (Codex, Claude, OpenCode)")
+                    .disabled(!liveSessionsFeatureEnabled)
+                    .help(
+                        liveSessionsFeatureEnabled
+                            ? "Show only live sessions in the list (Codex, Claude)"
+                            : "Enable Live sessions + Cockpit (Beta) in Settings → Advanced."
+                    )
 
                 if codexAgentEnabled {
                     AgentTabToggle(title: "Codex", color: Color.agentCodex, isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
@@ -1770,7 +1789,7 @@ struct UnifiedSessionsView: View {
     static func buildFallbackPresenceMap(sessions: [Session],
                                          presences: [CodexActivePresence],
                                          hasDirectJoin: (Session) -> Bool) -> [String: CodexActivePresence] {
-        let supportedSources: Set<SessionSource> = [.claude, .opencode]
+        let supportedSources: Set<SessionSource> = [.claude]
         var fallbackBySessionKey: [String: CodexActivePresence] = [:]
         var fallbackEligibleBySource: [SessionSource: [Session]] = [:]
         var fallbackEligibleByWorkspace: [String: [Session]] = [:]

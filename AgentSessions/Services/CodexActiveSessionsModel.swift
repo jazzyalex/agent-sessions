@@ -248,12 +248,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func supportsLiveSessions(for source: SessionSource) -> Bool {
-        switch source {
-        case .codex, .claude, .opencode:
-            return true
-        default:
-            return false
-        }
+        Self.supportsLiveSessionSource(source)
     }
 
     func setUnifiedConsumerVisible(_ visible: Bool, consumerID: UUID) {
@@ -349,7 +344,6 @@ final class CodexActiveSessionsModel: ObservableObject {
         let rootPaths = registryRoots().map(\.path)
         let codexSessionRoots = codexSessionsRoots().map(\.path)
         let claudeSessionRoots = claudeSessionsRoots().map(\.path)
-        let openCodeSessionRoots = openCodeSessionsRoots().map(\.path)
         let previousLogKeys = Set(byLogPath.keys)
         let previousSessionKeys = Set(bySessionID.keys)
         let previousLiveStates = liveStateByPresenceKey
@@ -362,7 +356,9 @@ final class CodexActiveSessionsModel: ObservableObject {
             var out: [CodexActivePresence] = []
             let decoder = Self.makeDecoder()
             for path in rootPaths {
-                out.append(contentsOf: Self.loadPresences(from: URL(fileURLWithPath: path), decoder: decoder, now: now, ttl: ttl))
+                out.append(contentsOf: Self.filterSupportedPresences(
+                    Self.loadPresences(from: URL(fileURLWithPath: path), decoder: decoder, now: now, ttl: ttl)
+                ))
             }
             let registryHasPresences = !out.isEmpty
             let processProbeMinInterval = Self.processProbeMinIntervalSeconds(
@@ -397,33 +393,24 @@ final class CodexActiveSessionsModel: ObservableObject {
                     sessionsRoots: claudeSessionRoots,
                     timeout: Self.processProbeTimeout
                 ))
-                out.append(contentsOf: Self.discoverPresencesFromRunningProcesses(
-                    source: .opencode,
-                    processName: "opencode",
-                    now: now,
-                    sessionsRoots: openCodeSessionRoots,
-                    timeout: Self.processProbeTimeout
-                ))
-                out.append(contentsOf: Self.discoverPresencesFromRunningCommands(
-                    source: .opencode,
-                    commandNeedles: ["opencode"],
-                    now: now,
-                    sessionsRoots: openCodeSessionRoots,
-                    timeout: Self.processProbeTimeout
-                ))
             } else {
                 // Reuse recent probe findings between probe intervals.
-                out.append(contentsOf: cachedProbeSnapshot.filter { !$0.isStale(now: now, ttl: ttl) })
+                out.append(contentsOf: Self.filterSupportedPresences(
+                    cachedProbeSnapshot.filter { !$0.isStale(now: now, ttl: ttl) }
+                ))
             }
             if hasVisibleConsumerSnapshot {
                 out.append(contentsOf: Self.discoverPresencesFromITermSessions(source: .codex, now: now, timeout: Self.processProbeTimeout))
                 out.append(contentsOf: Self.discoverPresencesFromITermSessions(source: .claude, now: now, timeout: Self.processProbeTimeout))
-                out.append(contentsOf: Self.discoverPresencesFromITermSessions(source: .opencode, now: now, timeout: Self.processProbeTimeout))
             }
             return (out, shouldProbeProcesses, registryHasPresences)
         }.value
-        let latestProcessProbe = probeResult.loaded.filter { $0.publisher == "agent-sessions-process" }
-        let loaded = Self.coalescePresencesByTTY(probeResult.loaded)
+        let latestProcessProbe = Self.filterSupportedPresences(
+            probeResult.loaded.filter { $0.publisher == "agent-sessions-process" }
+        )
+        let loaded = Self.coalescePresencesByTTY(
+            Self.filterSupportedPresences(probeResult.loaded)
+        )
 
         if probeResult.didProbe {
             cachedProcessPresences = latestProcessProbe
@@ -576,12 +563,6 @@ final class CodexActiveSessionsModel: ObservableObject {
         return dedupRoots([discovery.sessionsRoot()])
     }
 
-    private func openCodeSessionsRoots() -> [URL] {
-        let override = UserDefaults.standard.string(forKey: "OpenCodeSessionsRootOverride") ?? ""
-        let discovery = OpenCodeSessionDiscovery(customRoot: override.isEmpty ? nil : override)
-        return dedupRoots([discovery.sessionsRoot()])
-    }
-
     private func dedupRoots(_ candidates: [URL]) -> [URL] {
         var out: [URL] = []
         var seen: Set<String> = []
@@ -590,6 +571,19 @@ final class CodexActiveSessionsModel: ObservableObject {
             if seen.insert(key).inserted { out.append(u) }
         }
         return out
+    }
+
+    nonisolated private static func supportsLiveSessionSource(_ source: SessionSource) -> Bool {
+        switch source {
+        case .codex, .claude:
+            return true
+        default:
+            return false
+        }
+    }
+
+    nonisolated private static func filterSupportedPresences(_ presences: [CodexActivePresence]) -> [CodexActivePresence] {
+        presences.filter { supportsLiveSessionSource($0.source) }
     }
 
     // MARK: - Loading
@@ -1419,14 +1413,6 @@ final class CodexActiveSessionsModel: ObservableObject {
                         tail: probe.tail
                     )
                 }
-            } else if canProbeITerm, presence.source == .opencode {
-                if let tail = captureITermTail(
-                    itermSessionId: presence.terminal?.itermSessionId,
-                    tty: presence.tty,
-                    timeout: timeout
-                ) {
-                    state = classifyGenericITermTail(tail)
-                }
             }
 
             let heuristic = heuristicLiveStateFromLogMTime(
@@ -1454,8 +1440,6 @@ final class CodexActiveSessionsModel: ObservableObject {
             return 2.5
         case .claude:
             return 15.0
-        case .opencode:
-            return 4.5
         default:
             return 2.5
         }

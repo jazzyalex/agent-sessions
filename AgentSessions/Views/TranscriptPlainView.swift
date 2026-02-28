@@ -111,11 +111,12 @@ enum TranscriptSessionResolutionPolicy {
                                  loadingSessionID: String?) -> Session? {
         if let live {
             let isTransientlyReloadingSameSession = isLoadingSession && loadingSessionID == sessionID
+            let hasNonTrivialSessionMetadata = (live.eventCount > 0) || ((live.fileSizeBytes ?? 0) > 0)
             if live.events.isEmpty,
-               isTransientlyReloadingSameSession,
                let cached,
                cached.id == sessionID,
-               !cached.events.isEmpty {
+               !cached.events.isEmpty,
+               (isTransientlyReloadingSameSession || hasNonTrivialSessionMetadata) {
                 return cached
             }
             return live

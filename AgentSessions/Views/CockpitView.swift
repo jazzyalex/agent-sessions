@@ -4,7 +4,6 @@ import AppKit
 struct CockpitView: View {
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
-    @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
@@ -80,8 +79,8 @@ struct CockpitView: View {
 
     private func makeLiveRowsSnapshot() -> LiveRowsSnapshot {
         let lookupIndexes = buildSessionLookupIndexes()
-        let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
-        let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions + opencodeIndexer.allSessions
+        let supportedSources: Set<SessionSource> = [.codex, .claude]
+        let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions
         let fallbackBySessionKey = UnifiedSessionsView.buildFallbackPresenceMap(
             sessions: allSessions,
             presences: activeCodex.presences
@@ -226,7 +225,7 @@ struct CockpitView: View {
 
             if !activeEnabled {
                 PreferenceCallout {
-                    Text("Active session detection is disabled in Settings.")
+                    Text("Live sessions + Cockpit (Beta) is disabled in Settings → Advanced.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -275,17 +274,18 @@ struct CockpitView: View {
             }
             .id("cockpit-table-\(liveFilterModeRaw)-\(activeCodex.activeMembershipVersion)")
             .frame(minHeight: 360)
+            .disabled(!activeEnabled)
             .contextMenu(forSelectionType: String.self) { ids in
                 if ids.count == 1, let id = ids.first, let row = snapshot.filteredRows.first(where: { $0.id == id }) {
                     Button("Focus in iTerm2") { focus(row) }
-                        .disabled(!canFocus(row))
+                        .disabled(!activeEnabled || !canFocus(row))
                         .help(row.focusHelp)
                     Divider()
                     Button("Reveal Log") { revealLog(row) }
-                        .disabled(row.logPath == nil)
+                        .disabled(!activeEnabled || row.logPath == nil)
                         .help("Reveal the session log in Finder.")
                     Button("Open Working Directory") { openWorkingDirectory(row) }
-                        .disabled(row.workingDirectory == nil)
+                        .disabled(!activeEnabled || row.workingDirectory == nil)
                         .help("Open the working directory in Finder.")
                 } else {
                     Button("Focus") {}.disabled(true)
@@ -310,6 +310,7 @@ struct CockpitView: View {
             .pickerStyle(.segmented)
             .frame(width: 210)
             .controlSize(.small)
+            .disabled(!activeEnabled)
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -322,6 +323,7 @@ struct CockpitView: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Refresh") { refreshAllSources() }
+                .disabled(!activeEnabled)
                 .help("Refresh active sessions and session indexes now.")
         }
         .padding(.horizontal, 12)
@@ -333,10 +335,10 @@ struct CockpitView: View {
     }
 
     private func refreshAllSources() {
+        guard activeEnabled else { return }
         activeCodex.refreshNow()
         codexIndexer.refresh(mode: .incremental, trigger: .manual)
         claudeIndexer.refresh(mode: .fullReconcile, trigger: .manual)
-        opencodeIndexer.refresh()
     }
 
     private func focus(_ row: Row) {
@@ -547,8 +549,8 @@ struct CockpitView: View {
     }
 
     private func buildSessionLookupIndexes() -> SessionLookupIndexes {
-        let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
-        let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions + opencodeIndexer.allSessions
+        let supportedSources: Set<SessionSource> = [.codex, .claude]
+        let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions
 
         var byLogPath: [String: Session] = [:]
         var bySessionID: [String: Session] = [:]

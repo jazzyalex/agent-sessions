@@ -260,8 +260,7 @@ struct AgentSessionsApp: App {
         Window("Cockpit", id: "Cockpit") {
             CockpitView(
                 codexIndexer: indexer,
-                claudeIndexer: claudeIndexer,
-                opencodeIndexer: opencodeIndexer
+                claudeIndexer: claudeIndexer
             )
                 .environmentObject(activeCodexSessions)
                 .background(WindowAutosave(name: "CockpitWindow"))
@@ -327,10 +326,17 @@ private struct OpenPinnedSessionsWindowButton: View {
 
 private struct OpenCockpitWindowButton: View {
     @Environment(\.openWindow) private var openWindow
+    @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
     var body: some View {
         Button("Cockpit") {
             openWindow(id: "Cockpit")
         }
+        .disabled(!liveSessionsFeatureEnabled)
+        .help(
+            liveSessionsFeatureEnabled
+                ? "Open Cockpit live sessions window."
+                : "Enable Live sessions + Cockpit (Beta) in Settings → Advanced."
+        )
         .keyboardShortcut("c", modifiers: [.command, .option, .shift])
     }
 }
