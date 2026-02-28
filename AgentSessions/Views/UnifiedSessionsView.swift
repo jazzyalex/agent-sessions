@@ -631,7 +631,16 @@ struct UnifiedSessionsView: View {
                        ideal: showStarColumn ? 40 : 0,
                        max: showStarColumn ? 44 : 0)
 
-            TableColumn("CLI Agent", value: \Session.sourceKey) { cellSource(for: $0) }
+            TableColumn("CLI Agent", value: \Session.sourceKey) { s in
+                cellSource(for: s)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        selectionChangeSource = .mouse
+                        setActiveSelection(s.id, source: s.source, userInitiated: true)
+                        autoSelectEnabled = false
+                        focusActiveTerminal(for: s)
+                    }
+            }
                 .width(min: showSourceColumn ? 90 : 0,
                        ideal: showSourceColumn ? 100 : 0,
                        max: showSourceColumn ? 120 : 0)
@@ -724,29 +733,14 @@ struct UnifiedSessionsView: View {
 	                    Divider()
 	                }
                     if activeCodexSessions.supportsLiveSessions(for: s.source) {
-                        let presence = livePresence(for: s)
-                        let focusURL = presence?.revealURL
-                        let canFocus = CodexActiveSessionsModel.canAttemptITerm2Focus(
-                            itermSessionId: presence?.terminal?.itermSessionId,
-                            tty: presence?.tty,
-	                            termProgram: presence?.terminal?.termProgram
-	                        ) || focusURL != nil
-	                        let helpText: String = {
-	                            if canFocus { return "Focus the existing iTerm2 tab/window for this session." }
-	                            if isSessionLive(s) { return "Focus is unavailable for this terminal session." }
-	                            return "This session is not currently live."
-	                        }()
-	                        Button("Focus in iTerm2") {
-	                            let didFocus = CodexActiveSessionsModel.tryFocusITerm2(
-	                                itermSessionId: presence?.terminal?.itermSessionId,
-	                                tty: presence?.tty
-	                            )
-	                            if !didFocus, let focusURL { NSWorkspace.shared.open(focusURL) }
-	                        }
-	                        .disabled(!canFocus)
-	                        .help(helpText)
-	                        Divider()
-	                    }
+                        let availability = terminalFocusAvailability(for: s)
+                        Button("Focus in iTerm2") {
+                            focusActiveTerminal(for: s)
+                        }
+                        .disabled(!availability.canFocus)
+                        .help(availability.helpText)
+                        Divider()
+                    }
 	                Button("Open Working Directory") { openDir(s) }
 	                    .keyboardShortcut("o", modifiers: [.command, .shift])
 	                    .help("Reveal working directory in Finder (⌘⇧O)")
@@ -1287,14 +1281,14 @@ struct UnifiedSessionsView: View {
     private func showImagesForSelectedSession(showNoSelectionAlert: Bool) {
         guard let session = selectedSession else {
             if showNoSelectionAlert {
-                showImagesAlert(message: "Select a session to view images.")
+                showActionAlert(message: "Select a session to view images.")
             }
             return
         }
         CodexImagesWindowController.shared.show(session: session, allSessions: unified.allSessions)
     }
 
-    private func showImagesAlert(message: String) {
+    private func showActionAlert(message: String) {
         let alert = NSAlert()
         alert.messageText = message
         if let window = NSApp.keyWindow {
@@ -1560,16 +1554,64 @@ struct UnifiedSessionsView: View {
         case .openclaw: label = "OpenClaw"
         }
         return HStack(spacing: 6) {
-            Text(label)
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                .foregroundStyle(rowTextColor)
             if let liveState {
                 CodexLiveStatusDot(state: liveState, color: rowDotColor, size: 6)
                     .accessibilityLabel(Text("\(label) \(liveState == .activeWorking ? "active" : "open") session"))
             }
+            Text(label)
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .foregroundStyle(rowTextColor)
             Spacer(minLength: 4)
         }
         .id("source-cell-\(session.id)-\(activeCodexSessions.activeMembershipVersion)")
+    }
+
+    private struct TerminalFocusAvailability {
+        let canFocus: Bool
+        let helpText: String
+    }
+
+    private func terminalFocusAvailability(for session: Session) -> TerminalFocusAvailability {
+        guard activeCodexSessions.supportsLiveSessions(for: session.source) else {
+            return TerminalFocusAvailability(
+                canFocus: false,
+                helpText: "This agent does not support live terminal focus."
+            )
+        }
+
+        let presence = livePresence(for: session)
+        let canFocus = CodexActiveSessionsModel.canAttemptITerm2Focus(
+            itermSessionId: presence?.terminal?.itermSessionId,
+            tty: presence?.tty,
+            termProgram: presence?.terminal?.termProgram
+        ) || presence?.revealURL != nil
+        let helpText: String = {
+            if canFocus { return "Focus the existing iTerm2 tab/window for this session." }
+            if isSessionLive(session) { return "Focus is unavailable for this terminal session." }
+            return "This session is not currently live."
+        }()
+        return TerminalFocusAvailability(canFocus: canFocus, helpText: helpText)
+    }
+
+    private func focusActiveTerminal(for session: Session) {
+        let availability = terminalFocusAvailability(for: session)
+        guard availability.canFocus else {
+            showActionAlert(message: availability.helpText)
+            return
+        }
+
+        let presence = livePresence(for: session)
+        if CodexActiveSessionsModel.tryFocusITerm2(
+            itermSessionId: presence?.terminal?.itermSessionId,
+            tty: presence?.tty
+        ) {
+            return
+        }
+        if let focusURL = presence?.revealURL, NSWorkspace.shared.open(focusURL) {
+            return
+        }
+
+        showActionAlert(message: "Unable to focus the terminal for this session.")
     }
 
     private func openDir(_ s: Session) {

@@ -257,7 +257,7 @@ struct AgentSessionsApp: App {
             .environmentObject(archiveManager)
         }
 
-        WindowGroup("Cockpit", id: "Cockpit") {
+        Window("Cockpit", id: "Cockpit") {
             CockpitView(
                 codexIndexer: indexer,
                 claudeIndexer: claudeIndexer,

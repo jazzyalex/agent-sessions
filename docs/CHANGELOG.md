@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Sessions (Unified): Added a blue-dot toolbar filter toggle (dot-only control) before the agent toggles to show only active sessions in the list.
 - Sessions (Cockpit/Unified): Codex live-session status now distinguishes `active` (working) from `open` (idle). Active rows use a pulsing dot and open rows use a solid dot.
 - Sessions (Cockpit): Added a live-session filter segmented control with `Both`, `Active`, and `Open`; default is `Both`.
+- Sessions (Unified): Added `CLI Agent` cell double-click terminal focusing in the Sessions list (same focus path as `Focus in iTerm2`), with explicit alert feedback when no focusable live terminal is available.
 
 ### Fixed
 - Sessions (Cockpit): Cockpit now hides only low-confidence unresolved live placeholders (missing join keys and fallback identity signals like tty/pid/source/workspace), preventing ghost rows while keeping valid fallback-detected live sessions visible.
@@ -58,6 +59,8 @@ All notable changes to this project will be documented in this file.
 - Sessions (Unified): `Active sessions only` now filters to live Codex sessions (`active` + `open`) instead of only actively working sessions.
 - Sessions (Unified): `Active sessions only` now filters to live Codex, Claude, and OpenCode sessions (`active` + `open`).
 - Sessions (Cockpit): Removed `Copy Session ID` from Cockpit row context menus; session ID copy remains available in the Sessions list.
+- Sessions (Unified): `CLI Agent` live-status dots now render before the agent name for improved column alignment.
+- Cockpit: `View > Cockpit` now always opens/focuses a single Cockpit window instance.
 
 ## [2.12] - 2026-02-24
 
