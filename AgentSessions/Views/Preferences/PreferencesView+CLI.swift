@@ -161,45 +161,6 @@ extension PreferencesView {
 	                    .font(.system(.caption, design: .monospaced))
 	                    .foregroundStyle(.secondary)
 	            }
-
-                sectionHeader("Active Sessions")
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Enable live session detection (Cockpit)", isOn: $codexActiveSessionsEnabled)
-                        .toggleStyle(.switch)
-                        .help("Mark live Codex, Claude, and OpenCode sessions as active/open and enable focusing iTerm2 tabs from Cockpit and session lists.")
-
-                    HStack(spacing: 12) {
-                        TextField("Active registry directory (optional)", text: $codexActiveRegistryRootOverride)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 360)
-                            .onSubmit { validateCodexActiveRegistryRootOverride() }
-                            .onChange(of: codexActiveRegistryRootOverride) { _, _ in
-                                validateCodexActiveRegistryRootOverride()
-                                codexActiveRegistryRootDebounce?.cancel()
-                                let work = DispatchWorkItem { validateCodexActiveRegistryRootOverride() }
-                                codexActiveRegistryRootDebounce = work
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-                            }
-                            .help("Override the directory used for active-session presence files. Leave blank to use $CODEX_HOME/active or ~/.codex/active.")
-
-                        Button(action: pickCodexActiveRegistryFolder) {
-                            Label("Choose…", systemImage: "folder")
-                                .labelStyle(.titleAndIcon)
-                        }
-                        .buttonStyle(.bordered)
-                        .help("Browse for a directory containing active-session presence JSON files")
-                    }
-
-                    if !codexActiveRegistryRootValid {
-                        Label("Path must point to an existing folder", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-
-                    Text("Default: $CODEX_HOME/active or ~/.codex/active")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
 	            }
 	            .disabled(!codexAgentEnabled)
 	        }

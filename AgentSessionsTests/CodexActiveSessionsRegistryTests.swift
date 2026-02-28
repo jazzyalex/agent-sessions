@@ -218,13 +218,13 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
     func testUnifiedFallbackClaimedPresence_supportsMultipleUnresolvedPresences() {
         let now = Date()
         let sessions = [
-            makeFallbackSession(id: "oldest", source: .opencode, cwd: nil, modifiedAt: now.addingTimeInterval(-200)),
-            makeFallbackSession(id: "older", source: .opencode, cwd: nil, modifiedAt: now.addingTimeInterval(-100)),
-            makeFallbackSession(id: "newest", source: .opencode, cwd: nil, modifiedAt: now)
+            makeFallbackSession(id: "oldest", source: .claude, cwd: nil, modifiedAt: now.addingTimeInterval(-200)),
+            makeFallbackSession(id: "older", source: .claude, cwd: nil, modifiedAt: now.addingTimeInterval(-100)),
+            makeFallbackSession(id: "newest", source: .claude, cwd: nil, modifiedAt: now)
         ]
         let unresolved = [
-            makeFallbackPresence(source: .opencode, lastSeenAt: now, workspaceRoot: nil, tty: "/dev/ttys020", pid: 2020),
-            makeFallbackPresence(source: .opencode, lastSeenAt: now.addingTimeInterval(-10), workspaceRoot: nil, tty: "/dev/ttys021", pid: 2021)
+            makeFallbackPresence(source: .claude, lastSeenAt: now, workspaceRoot: nil, tty: "/dev/ttys020", pid: 2020),
+            makeFallbackPresence(source: .claude, lastSeenAt: now.addingTimeInterval(-10), workspaceRoot: nil, tty: "/dev/ttys021", pid: 2021)
         ]
 
         XCTAssertNotNil(UnifiedSessionsView.fallbackClaimedPresence(for: sessions[2], among: sessions, using: unresolved))
@@ -318,11 +318,11 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
     func testBuildFallbackPresenceMap_unresolvedFallbackSkipsDirectJoinAndUsesRemainingSessions() {
         let now = Date()
         let sessions = [
-            makeFallbackSession(id: "direct", source: .opencode, cwd: nil, modifiedAt: now),
-            makeFallbackSession(id: "fallback", source: .opencode, cwd: nil, modifiedAt: now.addingTimeInterval(-5))
+            makeFallbackSession(id: "direct", source: .claude, cwd: nil, modifiedAt: now),
+            makeFallbackSession(id: "fallback", source: .claude, cwd: nil, modifiedAt: now.addingTimeInterval(-5))
         ]
         let unresolvedPresence = makeFallbackPresence(
-            source: .opencode,
+            source: .claude,
             lastSeenAt: now,
             workspaceRoot: nil,
             tty: "/dev/ttys202",
@@ -335,13 +335,13 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             hasDirectJoin: { $0.id == "direct" }
         )
 
-        let directKey = UnifiedSessionsView.fallbackPresenceKey(source: .opencode, sessionID: "direct")
-        let fallbackKey = UnifiedSessionsView.fallbackPresenceKey(source: .opencode, sessionID: "fallback")
+        let directKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: "direct")
+        let fallbackKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: "fallback")
         XCTAssertNil(map[directKey])
         XCTAssertNotNil(map[fallbackKey])
     }
 
-    func testBuildFallbackPresenceMap_keepsSourceScopedEntriesWhenSessionIDsCollide() {
+    func testBuildFallbackPresenceMap_ignoresUnsupportedSources() {
         let now = Date()
         let sharedID = "shared-session-id"
         let sessions = [
@@ -372,7 +372,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let claudeKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: sharedID)
         let openCodeKey = UnifiedSessionsView.fallbackPresenceKey(source: .opencode, sessionID: sharedID)
         XCTAssertEqual(map[claudeKey]?.source, .claude)
-        XCTAssertEqual(map[openCodeKey]?.source, .opencode)
+        XCTAssertNil(map[openCodeKey])
     }
 
     func testParseLsofMachineOutput_matchesClaudeSessionFilesAndSkipsHistory() {
@@ -486,6 +486,14 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("opencode", source: .opencode))
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyITermSessionName("zsh", source: .claude))
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyITermSessionName("workspace shell", source: .opencode))
+    }
+
+    @MainActor
+    func testSupportsLiveSessions_excludesOpenCodeForCurrentRelease() {
+        let model = CodexActiveSessionsModel()
+        XCTAssertTrue(model.supportsLiveSessions(for: .codex))
+        XCTAssertTrue(model.supportsLiveSessions(for: .claude))
+        XCTAssertFalse(model.supportsLiveSessions(for: .opencode))
     }
 
     func testLiveSessionIDCandidates_extractsClaudeRuntimeUUIDFromPath() {
