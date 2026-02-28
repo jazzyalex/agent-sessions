@@ -1,6 +1,10 @@
 import SwiftUI
 import AppKit
 
+private enum CockpitStyle {
+    static let selectionAccent = Color(hex: "007acc")
+}
+
 struct CockpitView: View {
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
@@ -235,12 +239,12 @@ struct CockpitView: View {
             Table(snapshot.filteredRows, selection: $selection) {
                 TableColumn("CLI Agent") { row in
                     Text(sourceLabel(for: row.source))
-                        .foregroundStyle(Color.agentColor(for: row.source, monochrome: false))
+                        .foregroundStyle(rowAgentForeground(for: row))
                 }
                 .width(min: 86, ideal: 96, max: 112)
                 TableColumn("Name") { row in
                     HStack(spacing: 8) {
-                        CodexLiveStatusDot(state: row.liveState, color: Color.agentColor(for: row.source, monochrome: false), size: 7)
+                        CodexLiveStatusDot(state: row.liveState, color: rowStatusDotColor(for: row), size: 7)
                             .help(row.liveState == .activeWorking ? "Active (working)" : "Open (idle)")
                         Text(row.title)
                             .lineLimit(1)
@@ -249,20 +253,20 @@ struct CockpitView: View {
                 }
                 TableColumn("Project") { row in
                     Text(row.repo)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(rowSecondaryForeground(for: row))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
                 TableColumn("Date") { row in
                     Text(row.dateLabel)
                         .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(rowSecondaryForeground(for: row))
                         .help(row.dateLabel)
                 }
                 .width(min: 140, ideal: 150, max: 170)
                 TableColumn("Terminal") { row in
                     Text(row.terminal)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(rowSecondaryForeground(for: row))
                 }
                 TableColumn("Focus") { row in
                     Button("Focus") { focus(row) }
@@ -273,6 +277,8 @@ struct CockpitView: View {
                 .width(min: 78, ideal: 90, max: 100)
             }
             .id("cockpit-table-\(liveFilterModeRaw)-\(activeCodex.activeMembershipVersion)")
+            .tableStyle(.inset(alternatesRowBackgrounds: true))
+            .tint(CockpitStyle.selectionAccent)
             .frame(minHeight: 360)
             .disabled(!activeEnabled)
             .contextMenu(forSelectionType: String.self) { ids in
@@ -332,6 +338,22 @@ struct CockpitView: View {
 
     private func footerText(snapshot: LiveRowsSnapshot) -> String {
         "\(snapshot.filteredRows.count) shown • \(snapshot.activeCount) active • \(snapshot.openCount) open"
+    }
+
+    private func rowIsSelected(_ row: Row) -> Bool {
+        selection.contains(row.id)
+    }
+
+    private func rowSecondaryForeground(for row: Row) -> Color {
+        rowIsSelected(row) ? .primary : .secondary
+    }
+
+    private func rowAgentForeground(for row: Row) -> Color {
+        rowIsSelected(row) ? .primary : Color.agentColor(for: row.source, monochrome: false)
+    }
+
+    private func rowStatusDotColor(for row: Row) -> Color {
+        rowAgentForeground(for: row)
     }
 
     private func refreshAllSources() {
