@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Sessions (Unified): Added `CLI Agent` cell double-click terminal focusing in the Sessions list (same focus path as `Focus in iTerm2`), with explicit alert feedback when no focusable live terminal is available.
 
 ### Fixed
+- Usage tracking (menu bar): The menu bar quota tracker now shows an in-progress spinner while Codex or Claude usage probes are running, matching the in-app usage strip behavior even when reset indicators are hidden.
 - Session view (Unified): Selected transcript rendering now keeps the last non-empty session snapshot when refresh churn briefly republishes lightweight/empty data for the same session ID, preventing flicker/empty transcript flashes during live updates.
 - Sessions (Cockpit): Cockpit now hides only low-confidence unresolved live placeholders (missing join keys and fallback identity signals like tty/pid/source/workspace), preventing ghost rows while keeping valid fallback-detected live sessions visible.
 - Sessions (Unified/Cockpit): Unified session-list live-status dots now refresh on Codex active-membership updates even when `Active sessions only` is off, keeping active/open indicators aligned with Cockpit state transitions.

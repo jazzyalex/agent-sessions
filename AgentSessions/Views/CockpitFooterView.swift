@@ -321,11 +321,7 @@ private struct IndexingIndicator: View {
 	    @ViewBuilder
 	    private func resetIndicator(labelText: String) -> some View {
 	        HStack(spacing: 4) {
-	            if data.isUpdating {
-	                RefreshSpinner(tint: baseForeground)
-	            } else {
-	                Text("↻")
-	            }
+	            Text("↻")
 	            Text(labelText)
 	        }
 	    }
@@ -335,6 +331,10 @@ private struct IndexingIndicator: View {
 		        HStack(spacing: 8) {
 	            ProviderIcon(provider: data.provider)
 	                .frame(width: 14, height: 14)
+	            if data.isUpdating {
+	                RefreshSpinner(tint: baseForeground)
+	                    .frame(width: 10, height: 10)
+	            }
 
             if style == .bars {
                 MiniUsageBar(
