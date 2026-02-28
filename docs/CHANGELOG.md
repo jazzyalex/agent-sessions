@@ -61,6 +61,8 @@ All notable changes to this project will be documented in this file.
 - Preferences (Advanced): Live-session/Cockpit controls are now consolidated under `Live Sessions + Cockpit (Beta)` in Settings → Advanced as the single feature toggle location.
 - Sessions (Live/Cockpit): OpenCode active/open session detection is temporarily disabled for this release; live-state scope is now Codex + Claude only.
 - Cockpit/Sessions (Live controls): When `Live Sessions + Cockpit (Beta)` is disabled, Cockpit and live-filter controls remain visible but disabled with explanatory help text.
+- Sessions (Cockpit): Cockpit header controls now show only `Active` and `Live` filters (removed `Cockpit`/`Show` text); `Live` includes both active and idle sessions.
+- Sessions (Cockpit): Cockpit window layout no longer uses a fixed content frame; default new-window height is now tuned for about 8 visible rows and resizing now scales rows naturally in both directions.
 - Preferences (Unified Window): Reordered sections so `Columns` and `Filters` appear before `Rich Transcript`.
 - Preferences (OpenClaw): Moved `Include deleted OpenClaw sessions` from Advanced to the OpenClaw pane as a standalone checkbox.
 - Sessions (Unified): Removed the leading dot from agent pill toggles in the main toolbar.

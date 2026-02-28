@@ -265,6 +265,7 @@ struct AgentSessionsApp: App {
                 .environmentObject(activeCodexSessions)
                 .background(WindowAutosave(name: "CockpitWindow"))
         }
+        .defaultSize(width: 980, height: 310)
 
         // Legacy windows removed; Unified is the single window.
         
