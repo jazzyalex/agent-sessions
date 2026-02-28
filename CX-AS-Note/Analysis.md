@@ -66,3 +66,32 @@ The misclassification of active Claude sessions as "open" stems from a combinati
 
 - Claude active/open session tracking appears correct in current validation.
 - Ghost active session behavior is still reproducible and requires additional investigation before declaring fully fixed.
+
+## Additional Known Issue (2026-02-28)
+
+### Issue 3: New session after agent restart is not recognized until first user prompt
+
+**Observed Behavior:**
+- Repro sequence:
+  1. Work in session A.
+  2. Stop agent (for example `Ctrl+C`).
+  3. Start agent again from terminal, creating session B.
+  4. Do not send a prompt yet.
+- Current result:
+  - Agent Sessions often still treats session A as current/live and does not promote session B.
+  - After the first user prompt in session B, classification snaps into expected behavior:
+    - session A moves to past,
+    - session B becomes active or idle.
+
+**Scope:**
+- Reproducible with both Codex and Claude session flows.
+- Appears to be a startup / first-event session-identity transition gap rather than a steady-state classifier issue.
+
+**Hypothesis (for future investigation):**
+- A newly spawned terminal agent process without a first user event may not yet expose enough durable join signals (`session_id`, log-path ownership/write activity, prompt metadata) for deterministic session handoff from A to B.
+- The first prompt creates the first unambiguous session-specific signal, allowing the join/classifier to correct state.
+
+**Investigation Notes to Capture Next:**
+- Presence payload before/after first prompt for A and B (`sessionId`, `sessionLogPath`, `workspaceRoot`, `tty`, `pid`, `lastSeenAt`).
+- iTerm probe metadata before/after first prompt (`is processing`, `is at shell prompt`, tail excerpt).
+- Process-to-session join evidence before/after first prompt (`lsof`/`ps` mapping for both sessions).
