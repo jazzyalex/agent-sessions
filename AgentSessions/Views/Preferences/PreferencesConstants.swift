@@ -112,6 +112,10 @@ enum PreferencesKey {
         static let codexActiveRegistryRootOverride = "CockpitCodexActiveRegistryRootOverride"
         static let codexLiveFilterMode = "CockpitCodexLiveFilterMode"
         static let legacyCodexLiveFilterMode = "LegacyCockpitCodexLiveFilterMode"
+        static let hudOpen = "CockpitHUDOpen"
+        static let hudGroupByProject = "CockpitHUDGroupByProject"
+        static let hudCompact = "CockpitHUDCompact"
+        static let hudPinned = "CockpitHUDPinned"
     }
 }
 

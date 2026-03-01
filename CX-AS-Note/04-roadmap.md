@@ -2,6 +2,21 @@
 
 ## Active
 
+- [ ] [2026-03-01] [Feature] Agent Cockpit branch column (post-HUD parity release)
+  - Goal:
+    - Add branch display to Agent Cockpit rows after backend/data support is explicitly approved.
+    - Keep compact mode branch-free even after branch support ships.
+  - Inputs:
+    - Current release intentionally hides branch in all Agent Cockpit modes to avoid introducing new backend capability.
+  - Dependencies:
+    - Confirmed branch-source strategy for live rows (without regressing current backend parity guarantees).
+    - HUD row layout update for non-compact modes only.
+    - QA coverage for dark/light, grouped/flat, and filter states.
+  - Definition of done:
+    - Branch column appears in non-compact Agent Cockpit views with stable data.
+    - Compact mode continues hiding branch by design.
+    - Changelog + summary entries document the behavior split.
+
 - [ ] [2026-02-28] [Feature] Subagent session support in Session list (Codex first, then Claude)
   - Goal:
     - Detect and label subagent sessions explicitly in Session list rows.
