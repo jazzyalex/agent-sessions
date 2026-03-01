@@ -3,13 +3,14 @@ import AppKit
 
 struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     let isPinned: Bool
+    let shownSessionCount: Int
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async { [weak view] in
             guard let window = view?.window else { return }
             context.coordinator.attach(to: window)
-            context.coordinator.applyStyle(isPinned: isPinned)
+            context.coordinator.applyStyle(isPinned: isPinned, shownSessionCount: shownSessionCount)
         }
         return view
     }
@@ -18,7 +19,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         DispatchQueue.main.async { [weak nsView] in
             guard let window = nsView?.window else { return }
             context.coordinator.attach(to: window)
-            context.coordinator.applyStyle(isPinned: isPinned)
+            context.coordinator.applyStyle(isPinned: isPinned, shownSessionCount: shownSessionCount)
         }
     }
 
@@ -40,7 +41,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             baselineHidesOnDeactivate = newWindow.hidesOnDeactivate
         }
 
-        func applyStyle(isPinned: Bool) {
+        func applyStyle(isPinned: Bool, shownSessionCount: Int) {
             guard let window else { return }
 
             if window.identifier?.rawValue != "AgentCockpit" {
@@ -48,8 +49,9 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             }
 
             window.isMovableByWindowBackground = true
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
+            window.title = "Agent Cockpit (\(shownSessionCount))"
+            window.titleVisibility = .visible
+            window.titlebarAppearsTransparent = false
             window.isRestorable = true
             window.minSize = NSSize(width: 560, height: 220)
 
