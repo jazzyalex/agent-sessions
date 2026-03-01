@@ -9,12 +9,13 @@
 
 ## Naming Conventions (enforced throughout)
 
-| Surface                | Name                  | Notes                                      |
-|------------------------|-----------------------|--------------------------------------------|
-| New floating panel     | Agent Cockpit HUD     | Window title. Users call it "Cockpit".     |
-| Existing table window  | Agent Cockpit Table   | Renamed in display only via window title.  |
-| Window ID (SwiftUI)    | `"CockpitHUD"`        | Alongside existing `"Cockpit"`.            |
-| Feature umbrella       | Agent Cockpit         | Used in menu items, preferences.           |
+| Surface                | Name                  | Notes                                                         |
+|------------------------|-----------------------|---------------------------------------------------------------|
+| New floating panel     | Agent Cockpit HUD     | Window title. Users call it "Cockpit".                        |
+| Existing sessions window | Session List        | Main Agent Sessions window — all sessions, idle, and past.    |
+| Window ID (SwiftUI)    | `"CockpitHUD"`        | Alongside existing `"Cockpit"`.                               |
+| Feature umbrella       | Agent Cockpit         | Used in menu items, preferences.                              |
+| Footer button          | "Session List →"      | Opens the main Agent Sessions window, not a separate table.   |
 
 ---
 
@@ -251,11 +252,107 @@ When the search field is focused, Up/Down and Enter operate on the filtered row 
 
 ---
 
-## Step 8 — Footer
+## Step 8 — Compact Mode
+
+Compact mode hides the filter bar and the footer, leaving only the topbar (title, chips,
+pin/compact buttons) and the session list. It is the minimal "ambient glance" state.
+
+### View changes
+
+Bind a `@State var isCompact: Bool` (restored from `PreferencesKey.Cockpit.hudCompact`).
+
+```swift
+VStack(spacing: 0) {
+    AgentCockpitHUDHeaderView(isCompact: $isCompact, isPinned: $isPinned, ...)
+    Divider()
+    AgentCockpitHUDBodyView(...)
+    if !isCompact {
+        Divider()
+        AgentCockpitHUDFooterView()
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+}
+.animation(.easeInOut(duration: 0.18), value: isCompact)
+```
+
+Apply the same `transition` + `animation` to the filter bar inside the header view:
+
+```swift
+if !isCompact {
+    AgentCockpitHUDFilterBar(...)
+        .transition(.move(edge: .top).combined(with: .opacity))
+}
+```
+
+### Compact toggle button
+
+Place in the trailing edge of the header topbar, to the right of the pin button:
+
+```swift
+Button {
+    withAnimation(.easeInOut(duration: 0.18)) { isCompact.toggle() }
+    UserDefaults.standard.set(isCompact, forKey: PreferencesKey.Cockpit.hudCompact)
+} label: {
+    Image(systemName: isCompact ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
+        .font(.system(size: 11, weight: .medium))
+}
+.buttonStyle(HUDIconButtonStyle(isOn: isCompact))
+.help(isCompact ? "Show filter and navigation" : "Compact mode")
+```
+
+Use `.keyboardShortcut("m", modifiers: [.command, .shift])` for discoverability.
+
+---
+
+## Step 8b — Pin Window
+
+Pin keeps the HUD floating above all other windows, including full-screen apps. It
+changes `NSPanel.level` at runtime — no window recreation needed.
+
+```swift
+func setPinned(_ pinned: Bool) {
+    guard let panel = NSApp.windows.first(where: { $0.identifier?.rawValue == "CockpitHUD" })
+            as? AgentCockpitHUDPanel else { return }
+    panel.level = pinned ? .screenSaver : .floating
+    // .screenSaver floats above full-screen apps; .floating is standard always-on-top
+    // Prefer .floating as default; only elevate to .screenSaver if user explicitly pins
+    UserDefaults.standard.set(pinned, forKey: PreferencesKey.Cockpit.hudPinned)
+}
+```
+
+Restore on launch: call `setPinned(true)` after window creation if `hudPinned == true`.
+
+### Pin button
+
+Place at the trailing edge of the topbar, left of the compact button:
+
+```swift
+Button {
+    isPinned.toggle()
+    setPinned(isPinned)
+} label: {
+    HStack(spacing: 4) {
+        Image(systemName: isPinned ? "pin.fill" : "pin")
+            .font(.system(size: 10, weight: .medium))
+        Text(isPinned ? "Pinned" : "Pin")
+            .font(.system(size: 10.5, weight: .semibold))
+    }
+}
+.buttonStyle(HUDIconButtonStyle(isOn: isPinned, tint: isPinned ? .orange : nil))
+.help(isPinned ? "Unpin — stop keeping on top" : "Pin — keep above all windows")
+```
+
+`HUDIconButtonStyle` is a custom `ButtonStyle` matching the small rounded pill shape
+shown in the mockup. When `tint` is non-nil (pinned state), it applies an orange-tinted
+background to distinguish pin from the blue accent used by By Project and compact.
+
+---
+
+## Step 9 — Footer
 
 ```swift
 HStack {
-    Button("⊟  Full window") { openWindow(id: "Cockpit") }
+    Button("Session List →") { openWindow(id: "Cockpit") }
         .buttonStyle(HUDFooterButtonStyle())
     Spacer()
     Text(freshnessLabel)
@@ -294,7 +391,7 @@ Add a **View menu** item:
 View → Agent Cockpit     ⌥⌘C
 ```
 
-Add a toolbar button in the existing `CockpitView` (Agent Cockpit Table):
+Add a toolbar button in the existing `CockpitView` (Session List):
 
 ```swift
 ToolbarItem { Button("HUD") { openWindow(id: "CockpitHUD") } }
@@ -322,9 +419,14 @@ Add to `PreferencesConstants.swift` under `PreferencesKey.Cockpit`:
 ```swift
 static let hudOpen           = "cockpitHUDOpen"           // Bool,   default false
 static let hudGroupByProject = "cockpitHUDGroupByProject" // Bool,   default false
+static let hudCompact        = "cockpitHUDCompact"        // Bool,   default false
+static let hudPinned         = "cockpitHUDPinned"         // Bool,   default false
 ```
 
-Persist `hudGroupByProject` immediately on toggle. Restore on launch.
+Persist all four immediately on toggle. Restore on launch.
+
+`hudCompact` controls whether the filter bar and footer are hidden.
+`hudPinned` controls `NSPanel.level` (see Pin section below).
 
 ---
 
@@ -344,13 +446,13 @@ Test every item below after the build succeeds. Report pass/fail for each.
 
 ### Window behavior
 - [ ] HUD opens via View → Agent Cockpit (⌥⌘C)
-- [ ] HUD opens via toolbar button in the Agent Cockpit Table window
+- [ ] HUD opens via toolbar button in the Session List window
 - [ ] HUD floats above other app windows when another app is in focus
 - [ ] HUD stays visible when switching to another Space (verify `canJoinAllSpaces`)
 - [ ] HUD is draggable by clicking anywhere on the background
 - [ ] Window position is restored correctly after quit and relaunch
-- [ ] Closing the HUD does not close the main app or the Table window
-- [ ] "Full window" footer button opens the Agent Cockpit Table window
+- [ ] Closing the HUD does not close the main app or the Session List window
+- [ ] "Session List →" footer button opens the Session List window
 
 ### Session display
 - [ ] Active sessions appear with a pulsing green dot
@@ -411,6 +513,24 @@ Test every item below after the build succeeds. Report pass/fail for each.
 - [ ] Pulsing animation is disabled when Reduce Motion is enabled in System Settings
 - [ ] The HUD is fully navigable via VoiceOver (rows announced with name + state)
 
+### Compact mode
+- [ ] Clicking the compact button hides the filter bar and footer with a smooth animation
+- [ ] Clicking again restores them with the reverse animation
+- [ ] Compact state is saved to preferences and restored after quit/relaunch
+- [ ] Session list, chips, pin button, and compact button remain fully visible and
+      interactive in compact mode
+- [ ] Chip filters still work in compact mode
+- [ ] `⌘⇧M` keyboard shortcut toggles compact mode
+- [ ] Window height shrinks appropriately when filter bar and footer are hidden
+
+### Pin window
+- [ ] Clicking "Pin" floats the HUD above all other windows including other apps
+- [ ] Clicking "Pinned" (same button) restores normal floating level
+- [ ] Pin state is saved to preferences and restored after quit/relaunch
+- [ ] Pin button shows filled icon + "Pinned" label with orange tint when active
+- [ ] Pinned HUD remains visible when switching to a full-screen app in another Space
+- [ ] Unpinning does not close or reposition the window
+
 ### Dark / Light mode
 - [ ] HUD renders correctly in macOS Dark mode
 - [ ] HUD renders correctly in macOS Light mode
@@ -422,7 +542,7 @@ Test every item below after the build succeeds. Report pass/fail for each.
 
 | File                              | Reason                              |
 |-----------------------------------|-------------------------------------|
-| `CockpitView.swift`               | Existing Agent Cockpit Table — untouched |
+| `CockpitView.swift`               | Existing Session List — untouched |
 | `CockpitFooterView.swift`         | Untouched                           |
 | `CodexLiveStatusDot.swift`        | Reuse as-is in HUD rows             |
 | `CodexActiveSessionsModel.swift`  | No new state, no new polling logic  |
