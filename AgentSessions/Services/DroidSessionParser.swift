@@ -83,7 +83,7 @@ final class DroidSessionParser {
     }
 
     private static func messageText(_ obj: [String: Any]) -> String? {
-        return stringValue(obj, keys: ["text", "content"])
+        return stringValue(obj, keys: ["text", "content", "message"])
     }
 
     private static func boolValue(_ any: Any?) -> Bool? {
@@ -113,7 +113,7 @@ final class DroidSessionParser {
             let type = normalizedType(typeRaw)
 
             switch type {
-            case "system", "message", "toolcall", "toolresult", "completion":
+            case "system", "message", "toolcall", "toolresult", "completion", "error":
                 recognized += 1
             default:
                 break
@@ -127,6 +127,7 @@ final class DroidSessionParser {
             }
             if type == "toolcall", stringValue(obj, keys: ["toolName", "tool_name", "name"]) != nil { sawPrimary = true }
             if type == "completion", obj["finalText"] != nil { sawPrimary = true }
+            if type == "error", messageText(obj) != nil { sawPrimary = true }
         }
 
         // Require multiple signals to avoid false positives.
@@ -543,6 +544,11 @@ final class DroidSessionParser {
                        !final.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         estimatedEvents += 1
                     }
+                case "error":
+                    if let errorText = messageText(obj),
+                       !errorText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        estimatedEvents += 1
+                    }
                 default:
                     break
                 }
@@ -778,6 +784,30 @@ final class DroidSessionParser {
                         toolOutput: nil,
                         messageID: obj["id"] as? String,
                         parentID: nil,
+                        isDelta: false,
+                        rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
+                    ))
+
+                case "error":
+                    let text = messageText(obj)
+                    let source = stringValue(obj, keys: ["source"])
+                    let rendered = [source, text]
+                        .compactMap { value -> String? in
+                            guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                            return value
+                        }
+                        .joined(separator: ": ")
+                    events.append(SessionEvent(
+                        id: baseID,
+                        timestamp: ts,
+                        kind: .error,
+                        role: "system",
+                        text: rendered.isEmpty ? text : rendered,
+                        toolName: nil,
+                        toolInput: nil,
+                        toolOutput: nil,
+                        messageID: obj["id"] as? String,
+                        parentID: stringValue(obj, keys: ["sessionId", "session_id"]),
                         isDelta: false,
                         rawJSON: rawJSONBase64(sanitizeLargeStrings(in: obj))
                     ))

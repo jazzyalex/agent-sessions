@@ -114,6 +114,13 @@
         "usage": ["usage", "token", "tokens", "limit", "quota"]
       },
       "weekly": {
+        "local_schema": {
+          "kind": "jsonl_newest",
+          "roots": ["~/.factory/sessions"],
+          "glob": "**/*.jsonl",
+          "required_types": ["message"],
+          "max_lines": 2500
+        },
         "probes": [
           {
             "kind": "script",
@@ -158,7 +165,9 @@
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["copilot", "--version"],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.copilot_cli.max_verified_version",
-      "upstream": [],
+      "upstream": [
+        { "kind": "github_latest_release", "repo": "github/copilot-cli" }
+      ],
       "risk_keywords": {
         "schema": ["session", "jsonl", "format", "schema"],
         "usage": ["usage", "token", "tokens", "limit", "quota"]
@@ -176,7 +185,9 @@
       "cadence": { "daily": true, "weekly": true },
       "installed_version_cmd": ["openclaw", "--version"],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.openclaw.max_verified_version",
-      "upstream": [],
+      "upstream": [
+        { "kind": "npm_latest", "package": "openclaw" }
+      ],
       "risk_keywords": {
         "schema": ["session", "jsonl", "transcript", "storage", "format", "schema", "model", "tool"],
         "usage": ["token", "quota", "limit"]

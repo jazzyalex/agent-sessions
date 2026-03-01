@@ -1,2 +1,1 @@
-{"id":"m_assistant_large_1","sessionID":"s_stage0_large","role":"assistant","time":{"created":1730000102000},"summary":{"title":null,"body":""},"agent":"opencode","model":{"providerID":"openai","modelID":"gpt-4o-mini"}}
-
+{"id":"m_assistant_large_1","sessionID":"s_stage0_large","role":"assistant","time":{"created":1730000102000},"summary":{"title":null,"body":""},"agent":"opencode","model":{"providerID":"openai","modelID":"gpt-4o-mini"},"cost":{"input":24,"output":8},"finish":"stop","mode":"chat","modelID":"gpt-4o-mini","parentID":"m_user_large_1","path":"/tmp/large","providerID":"openai","tokens":{"input":120,"output":16}}

@@ -100,6 +100,22 @@ final class DroidSessionParserTests: XCTestCase {
         XCTAssertTrue((errors.first?.text ?? "").contains("ls: /nope"))
     }
 
+    func testStreamJSONParsesErrorEvents() throws {
+        let lines = [
+            #"{"type":"system","subtype":"init","session_id":"sid-error","timestamp":1767812640310,"model":"droid-model","cwd":"/tmp"}"#,
+            #"{"type":"error","source":"cli","message":"Authentication failed","timestamp":1767812640597,"session_id":"sid-error"}"#,
+            #"{"type":"error","source":"cli","message":"Authentication failed","timestamp":1767812640598,"session_id":"sid-error"}"#
+        ]
+        let url = try writeTempJSONL(lines)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        guard let session = DroidSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        XCTAssertEqual(session.id, "sid-error")
+        let errors = session.events.filter { $0.kind == .error }
+        XCTAssertEqual(errors.count, 2)
+        XCTAssertTrue((errors.first?.text ?? "").contains("Authentication failed"))
+    }
+
     func testStreamJSONSupportsCamelAndSnakeFieldVariants() throws {
         let lines = [
             #"{"type":"system","subtype":"start","sessionId":"sid3","timestamp":"2025-12-26T00:00:00.000Z","model_name":"droid-camel","working_directory":"/tmp"}"#,
