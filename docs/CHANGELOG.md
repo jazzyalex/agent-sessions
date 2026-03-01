@@ -56,6 +56,7 @@ All notable changes to this project will be documented in this file.
 - Sessions (Cockpit/Unified/Claude): Cockpit now suppresses unresolved live placeholders that are neither focusable nor joinable to indexed workspace sessions, dedupes unresolved rows by stable tty/workspace identity, and its `Refresh` action now refreshes both live presence and provider indexes; Claude refresh now auto-escalates recent-scope drift to full reconcile, and manual refreshes in both Unified and Cockpit now run Claude full reconcile so newly opened Claude sessions appear reliably in the main Sessions list.
 
 ### Changed
+- Sessions (Agent Cockpit): Replaced the `Agent Cockpit` window UI with the new floating HUD layout (chips, inline filter, grouped mode, compact mode, pin mode, and keyboard row shortcuts) while keeping Legacy Cockpit available and reusing existing live-session backend logic.
 - Menu/Cockpit windows: Renamed the existing Cockpit window/menu item to `Legacy Cockpit` (defaulting to the `Live` filter), added a new single-instance `Agent Cockpit` window/menu item, moved `⌘⌥⇧C` to `Agent Cockpit`, and removed the Legacy shortcut.
 - Preferences (Advanced): Reordered sections so `Saved Sessions` appears above `Search`.
 - Preferences (Advanced): Reordered sections so `Git Context` appears at the bottom, and renamed `Live Sessions + Cockpit` to `Live Sessions + Cockpit BETA`.

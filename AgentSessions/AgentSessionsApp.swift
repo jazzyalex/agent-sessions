@@ -259,15 +259,13 @@ struct AgentSessionsApp: App {
         }
 
         Window("Agent Cockpit", id: "AgentCockpit") {
-            CockpitView(
+            AgentCockpitHUDView(
                 codexIndexer: indexer,
-                claudeIndexer: claudeIndexer,
-                liveFilterStorageKey: PreferencesKey.Cockpit.codexLiveFilterMode
+                claudeIndexer: claudeIndexer
             )
                 .environmentObject(activeCodexSessions)
-                .background(WindowAutosave(name: "AgentCockpitWindow"))
         }
-        .defaultSize(width: 980, height: 310)
+        .defaultSize(width: 644, height: 320)
 
         Window("Legacy Cockpit", id: "LegacyCockpit") {
             CockpitView(
