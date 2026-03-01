@@ -3,3 +3,4 @@
 {"type":"tool_call","sessionId":"sid_stage0_drift","timestamp":1767812642000,"id":"call_1","messageId":"m1","toolId":"Execute","toolName":"Execute","parameters":{"command":"ls -la","riskLevel":"low","riskLevelReason":"Read-only directory listing."}}
 {"type":"tool_result","sessionId":"sid_stage0_drift","timestamp":1767812643000,"id":"call_1","messageId":"m1","toolId":"Execute","isError":true,"value":"ls: /non-existent-directory: No such file or directory"}
 {"type":"completion","sessionId":"sid_stage0_drift","timestamp":1767812644000,"finalText":"Done","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"id":"end"}
+{"type":"error","source":"cli","message":"Authentication failed. Set FACTORY_API_KEY.","timestamp":1767812644100,"session_id":"sid_stage0_drift"}

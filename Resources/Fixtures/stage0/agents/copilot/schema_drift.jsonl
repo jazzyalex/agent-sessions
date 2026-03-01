@@ -1,4 +1,4 @@
-{"type":"session.start","data":{"sessionId":"copilot_stage0_drift","version":1,"producer":"copilot-agent","copilotVersion":"0.0.400","startTime":"2025-12-18T22:00:00.000Z"},"id":"e1","timestamp":"2025-12-18T22:00:00.000Z","parentId":null}
+{"type":"session.start","data":{"sessionId":"copilot_stage0_drift","version":1,"producer":"copilot-agent","copilotVersion":"0.0.420","startTime":"2025-12-18T22:00:00.000Z"},"id":"e1","timestamp":"2025-12-18T22:00:00.000Z","parentId":null}
 {"type":"session.info","data":{"infoType":"folder_trust","message":"Folder /tmp/drift has been added to trusted folders."},"id":"e2","timestamp":"2025-12-18T22:00:01.000Z","parentId":"e1"}
 {"type":"assistant.turn_start","data":{"turnId":"turn_1"},"id":"e2b","timestamp":"2025-12-18T22:00:01.500Z","parentId":"e2"}
 {"type":"tool.execution_start","data":{"toolCallId":"call_1","toolName":"bash","arguments":{"command":"echo hi"}},"id":"e3","timestamp":"2025-12-18T22:00:02.000Z","parentId":"e2"}

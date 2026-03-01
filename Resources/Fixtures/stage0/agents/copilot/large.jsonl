@@ -1,4 +1,4 @@
-{"type":"session.start","data":{"sessionId":"copilot_stage0_large","version":1,"producer":"copilot-agent","copilotVersion":"0.0.400","startTime":"2025-12-18T23:00:00.000Z"},"id":"e1","timestamp":"2025-12-18T23:00:00.000Z","parentId":null}
+{"type":"session.start","data":{"sessionId":"copilot_stage0_large","version":1,"producer":"copilot-agent","copilotVersion":"0.0.420","startTime":"2025-12-18T23:00:00.000Z"},"id":"e1","timestamp":"2025-12-18T23:00:00.000Z","parentId":null}
 {"type":"session.model_change","data":{"newModel":"gpt-5"},"id":"e2","timestamp":"2025-12-18T23:00:01.000Z","parentId":"e1"}
 {"type":"session.info","data":{"infoType":"folder_trust","message":"Folder /tmp/large has been added to trusted folders."},"id":"e3","timestamp":"2025-12-18T23:00:02.000Z","parentId":"e2"}
 {"type":"user.message","data":{"content":"Step 1","transformedContent":"Step 1","attachments":[]},"id":"e4","timestamp":"2025-12-18T23:00:03.000Z","parentId":"e3"}

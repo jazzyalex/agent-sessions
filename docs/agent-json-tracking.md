@@ -7,7 +7,7 @@ Update this file when:
 - Fixtures/tests are added or updated to cover format drift.
 
 ## Last Scan (Repo)
-- Repo commit: 3429971 (latest in this worktree)
+- Repo commit: 0c7aac7 (latest in this worktree)
 - Parser/indexer commit scan (30 commits, parser/indexer files):
   - d75afd2: Codex parsing hardening
   - 8439b09: Claude error classification to avoid false positives
@@ -20,6 +20,8 @@ Update this file when:
 Record every upstream check, even if no changes are needed.
 - YYYY-MM-DD: Agents checked; sources (release notes or repos); result (no change, candidate,
   or format change) and evidence path.
+- 2026-03-01: Full weekly check across all seven agents with online upstream verification. Sources: `https://github.com/openai/codex/releases/latest`, `https://github.com/anthropics/claude-code/releases/latest`, `https://github.com/anomalyco/opencode/releases/latest`, `https://docs.factory.ai/changelog/cli-updates`, `https://registry.npmjs.org/@google%2Fgemini-cli/latest`, `https://registry.npmjs.org/openclaw/latest`, `https://github.com/github/copilot-cli/releases/latest`. Result: bumped verified sessions for Codex `0.106.0`, Claude `2.1.63`, OpenCode `1.2.10`, Droid `0.62.1`, Gemini `0.30.0`, OpenClaw `2026.2.22`; Copilot remained `0.0.411` (installed not newer). Added Droid stream `type=error` parser coverage and refreshed stage0 drift fixtures/metadata for Gemini, OpenCode, OpenClaw, and Droid. Evidence: `scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json`, `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`, `Resources/Fixtures/stage0/agents/**`.
+- 2026-03-01: Follow-up after local CLI updates for Gemini/OpenCode/Copilot. Installed versions now match upstream for Gemini `0.31.0`, OpenCode `1.2.15`, Copilot `0.0.420`. Bumped verified support for all three; expanded OpenCode baseline evidence to include `part.text` keys (`messageID`, `sessionID`) so weekly schema drift checks remain additive-only. Evidence: `scripts/probe_scan_output/agent_watch/20260301-011329Z/report.json`, `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`, `Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/002.json`, `Resources/Fixtures/stage0/agents/copilot/{small,large,schema_drift}.jsonl`.
 - 2026-01-07: Gemini CLI 0.23.0 + OpenCode CLI 1.1.6; confirmed tool-output drift (exit codes embedded in Gemini functionResponse output; OpenCode tool parts expose `state.metadata.exit`). Evidence: `Resources/Fixtures/stage0/agents/gemini/large.json`, `Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/001.json`.
 - 2026-01-07: Droid CLI 0.43.0; sources `https://app.factory.ai/cli`, `https://docs.factory.ai/changelog/cli-updates`, `https://github.com/factory-ai/factory`; stream-json now emits numeric epoch timestamps, `tool_call`/`tool_result` IDs via `id`, `isError` flags, and `completion.usage` fields. Evidence: `Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl`.
 - 2026-01-07: Verification bump (no schema drift observed in local sessions vs stage0 baselines): Codex CLI 0.79.0, Claude Code 2.0.76 (sessions), OpenCode 1.1.6, Gemini CLI 0.23.0, Droid CLI 0.43.0. Evidence: `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`, updated fixtures under `Resources/Fixtures/stage0/agents/`.
@@ -153,6 +155,7 @@ Record every upstream check, even if no changes are needed.
 - Recent changes:
   - Support added in 2025-12 summary (no format changes noted yet).
   - Stream-json now includes `system.subtype=init`, `reasoning_effort`, tool IDs via `id`, `isError`, and `completion.usage` (2026-01-07 scan).
+  - Stream-json `type=error` records are now parsed as `.error` events for failed/auth-blocked probes (2026-03-01 scan).
 - Parser entry points:
   - `AgentSessions/Services/DroidSessionParser.swift`
   - `AgentSessions/Services/DroidSessionDiscovery.swift`

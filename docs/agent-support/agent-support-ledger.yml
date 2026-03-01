@@ -10,6 +10,68 @@
 #
 entries:
   - agent_sessions_version: "2.10.1"
+    as_of_date_utc: "2026-03-01"
+    as_of_commit: "0c7aac7"
+    verified:
+      opencode:
+        sessions:
+          max_verified_version: "1.2.15"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_small/msg_0001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_small/msg_0002.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0002.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_user_small/001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_small/001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/002.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/003.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/004.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/005.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/006.json", "Resources/Fixtures/stage0/agents/opencode/storage_legacy/session/proj_test/ses_s_stage0_drift.json", "scripts/probe_scan_output/agent_watch/20260301-011329Z/report.json"]
+      gemini:
+        sessions:
+          max_verified_version: "0.31.0"
+          evidence: ["Resources/Fixtures/stage0/agents/gemini/small.json", "Resources/Fixtures/stage0/agents/gemini/large.json", "Resources/Fixtures/stage0/agents/gemini/schema_drift.json", "scripts/probe_scan_output/agent_watch/20260301-011329Z/report.json"]
+      copilot:
+        sessions:
+          max_verified_version: "0.0.420"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260301-011329Z/report.json"]
+    notes:
+      - "User-updated CLIs verified on 2026-03-01: gemini 0.31.0, opencode 1.2.15, copilot 0.0.420."
+      - "OpenCode baseline evidence expanded to include part.text messageID/sessionID keys."
+
+  - agent_sessions_version: "2.10.1"
+    as_of_date_utc: "2026-03-01"
+    as_of_commit: "0c7aac7"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.106.0"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "Resources/Fixtures/stage0/agents/codex/large.jsonl", "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json"]
+        usage_limits:
+          max_verified_version: "0.106.0"
+          evidence: ["Resources/Fixtures/codex_053_rate_limit.jsonl", "AgentSessions/Resources/codex_status_capture.sh", "scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json"]
+      claude:
+        sessions:
+          max_verified_version: "2.1.63"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "Resources/Fixtures/stage0/agents/claude/large.jsonl", "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json"]
+        usage_limits:
+          max_verified_version: "2.1.63"
+          evidence: ["AgentSessions/Resources/claude_usage_capture.sh", "scripts/claude-status", "scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json"]
+      opencode:
+        sessions:
+          max_verified_version: "1.2.10"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_small/msg_0001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_small/msg_0002.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0002.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_user_small/001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_small/001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/003.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/004.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/005.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/006.json", "Resources/Fixtures/stage0/agents/opencode/storage_legacy/session/proj_test/ses_s_stage0_drift.json", "scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json"]
+      droid:
+        sessions:
+          max_verified_version: "0.62.1"
+          evidence: ["Resources/Fixtures/stage0/agents/droid/stream_json_schema_drift.jsonl", "Resources/Fixtures/stage0/agents/droid/session_store_schema_drift.jsonl", "scripts/droid_stream_schema_probe.py", "scripts/agent_captures/20260301-005449Z/droid/4188153a-5a2a-47c3-a650-a634c09819bd.jsonl", "scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json"]
+      gemini:
+        sessions:
+          max_verified_version: "0.30.0"
+          evidence: ["Resources/Fixtures/stage0/agents/gemini/small.json", "Resources/Fixtures/stage0/agents/gemini/large.json", "Resources/Fixtures/stage0/agents/gemini/schema_drift.json", "scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json"]
+      copilot:
+        sessions:
+          max_verified_version: "0.0.411"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json"]
+      openclaw:
+        sessions:
+          max_verified_version: "2026.2.22"
+          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json"]
+    notes:
+      - "Online upstream checks on 2026-03-01: codex 0.106.0, claude 2.1.63, opencode 1.2.15, droid 0.65.0, gemini 0.31.0, openclaw 2026.2.26, copilot 0.0.420."
+      - "Verified versions were bumped to locally installed versions with fixture/capture evidence and parser test coverage."
+
+  - agent_sessions_version: "2.10.1"
     as_of_date_utc: "2026-02-24"
     as_of_commit: "6311a1a"
     verified:

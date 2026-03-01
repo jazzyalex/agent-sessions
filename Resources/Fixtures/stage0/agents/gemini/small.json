@@ -8,7 +8,8 @@
       "id": "m1",
       "timestamp": "2026-01-16T18:34:01.000Z",
       "type": "user",
-      "content": "Hello"
+      "content": "Hello",
+      "displayContent": "Hello"
     },
     {
       "id": "m2",
