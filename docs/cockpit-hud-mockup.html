@@ -39,31 +39,31 @@ body.dark {
   --tab-bd:            rgba(255,255,255,0.08);
   --tab-sep:           rgba(255,255,255,0.06);
   --text-pri:          #e8e8ed;
-  --text-sec:          #48484a;
-  --text-ter:          #3a3a3c;
-  --text-dim:          #2a2a2c;
-  --rnum:              #2a2a2c;
-  --rnum-hover:        #48484a;
-  --dot-idle:          #2e2e30;
-  --preview-active:    #48484a;
-  --preview-idle:      #242426;
-  --badge-cx-bg:       rgba(94,92,230,0.16); --badge-cx-fg: #8f8df5; --badge-cx-bd: rgba(94,92,230,0.22);
-  --badge-cc-bg:       rgba(255,149,0,0.13);  --badge-cc-fg: #ff9f00; --badge-cc-bd: rgba(255,149,0,0.20);
-  --badge-sh-bg:       rgba(255,255,255,0.04);--badge-sh-fg: #3a3a3c; --badge-sh-bd: rgba(255,255,255,0.07);
-  --chip-idle-bg:      rgba(255,255,255,0.05);--chip-idle-fg: #48484a;
-  --chip-active-bg:    rgba(48,209,88,0.12);  --chip-active-fg: #30d158;
-  --chip-off-bg:       rgba(255,255,255,0.03);--chip-off-fg: #2e2e30;
-  --grp-name:          #48484a;
-  --grp-badge-bg:      rgba(255,255,255,0.04);--grp-badge-fg: #3a3a3c;
-  --grp-badge-g-bg:    rgba(48,209,88,0.10);  --grp-badge-g-fg: #30d158;
-  --grp-rule:          rgba(255,255,255,0.04);
-  --kbd-bg:            rgba(255,255,255,0.03); --kbd-bd: rgba(255,255,255,0.06); --kbd-fg: #242426;
-  --kbd-h-bg:          rgba(255,255,255,0.06); --kbd-h-bd: rgba(255,255,255,0.10); --kbd-h-fg: #48484a;
+  --text-sec:          #aeaeb2;
+  --text-ter:          #6e6e73;
+  --text-dim:          #48484a;
+  --rnum:              #3a3a3c;
+  --rnum-hover:        #6e6e73;
+  --dot-idle:          #48484a;
+  --preview-active:    #8e8e93;
+  --preview-idle:      #636366;
+  --badge-cx-bg:       rgba(94,92,230,0.18); --badge-cx-fg: #9e9cf8; --badge-cx-bd: rgba(94,92,230,0.28);
+  --badge-cc-bg:       rgba(255,149,0,0.15);  --badge-cc-fg: #ffb340; --badge-cc-bd: rgba(255,149,0,0.25);
+  --badge-sh-bg:       rgba(255,255,255,0.07);--badge-sh-fg: #6e6e73; --badge-sh-bd: rgba(255,255,255,0.12);
+  --chip-idle-bg:      rgba(255,255,255,0.07);--chip-idle-fg: #6e6e73;
+  --chip-active-bg:    rgba(48,209,88,0.14);  --chip-active-fg: #30d158;
+  --chip-off-bg:       rgba(255,255,255,0.03);--chip-off-fg: #3a3a3c;
+  --grp-name:          #6e6e73;
+  --grp-badge-bg:      rgba(255,255,255,0.06);--grp-badge-fg: #48484a;
+  --grp-badge-g-bg:    rgba(48,209,88,0.12);  --grp-badge-g-fg: #30d158;
+  --grp-rule:          rgba(255,255,255,0.06);
+  --kbd-bg:            rgba(255,255,255,0.05); --kbd-bd: rgba(255,255,255,0.09); --kbd-fg: #3a3a3c;
+  --kbd-h-bg:          rgba(255,255,255,0.09); --kbd-h-bd: rgba(255,255,255,0.14); --kbd-h-fg: #6e6e73;
   --accent:            #0a84ff; --accent-text: #4fa8f5;
   --green:             #30d158;
-  --idle-op:           0.55;
+  --idle-op:           0.6;
   --mode-bg:           rgba(255,255,255,0.07); --mode-bd: rgba(255,255,255,0.10); --mode-fg: #636366;
-  --sbranch-color:     #3a3a3c;
+  --sbranch-color:     #636366;
 }
 
 body.light {
@@ -185,6 +185,51 @@ body.light .stab.on { background: rgba(0,113,227,0.09); }
 .chip.active-chip .cdot { background: var(--green); animation: pulse 1.4s ease-in-out infinite; }
 .chip.idle-chip   .cdot { background: var(--dot-idle); }
 .chip.off         .cdot { background: var(--chip-off-fg); animation: none; }
+
+/* ── Compact + Pin icon buttons ───────────────────────────────────────── */
+.hud-icon-btns { display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+.hud-icon-btn {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  height: 24px; padding: 0 8px;
+  border-radius: 6px; cursor: pointer;
+  border: 0.5px solid var(--toggle-bd);
+  background: var(--toggle-bg);
+  font-size: 10.5px; font-weight: 600; color: var(--text-ter);
+  transition: all 0.15s; white-space: nowrap; flex-shrink: 0;
+}
+.hud-icon-btn:hover { color: var(--text-pri); filter: brightness(1.08); }
+.hud-icon-btn.on {
+  background: var(--toggle-on-bg);
+  border-color: var(--toggle-on-bd);
+  color: var(--accent);
+}
+/* Pin button gets a slightly warmer tint when active */
+.hud-icon-btn.pin-on {
+  background: rgba(255,149,0,0.12);
+  border-color: rgba(255,149,0,0.30);
+  color: #ff9500;
+}
+body.dark  .hud-icon-btn.pin-on { color: #ffb340; background: rgba(255,149,0,0.14); border-color: rgba(255,149,0,0.28); }
+
+/* ── Compact mode — animate filter bar and footer out ─────────────────── */
+.filter-bar {
+  overflow: hidden;
+  max-height: 40px; opacity: 1;
+  transition: max-height 0.2s ease, opacity 0.15s ease;
+}
+.hud-footer {
+  overflow: hidden;
+  max-height: 40px; opacity: 1;
+  transition: max-height 0.2s ease, opacity 0.15s ease, border-width 0.2s;
+}
+.hud.compact .filter-bar {
+  max-height: 0; opacity: 0; pointer-events: none;
+}
+.hud.compact .hud-footer {
+  max-height: 0; opacity: 0; pointer-events: none; border-top-width: 0;
+}
+.hud-header { transition: gap 0.2s; }
+.hud.compact .hud-header { gap: 0; }
 
 /* ── Filter bar ───────────────────────────────────────────────────────── */
 .filter-bar { display: flex; align-items: center; gap: 8px; }
@@ -350,6 +395,14 @@ body.light .srow.sel .skbd { border-color: rgba(0,113,227,0.22); }
             <div class="cdot"></div><span id="chipIdleLabel">2 idle</span>
           </div>
         </div>
+        <div class="hud-icon-btns">
+          <div class="hud-icon-btn" id="pinBtn" onclick="togglePin()" title="Keep on top">
+            <span id="pinIcon">⊕</span><span id="pinLabel">Pin</span>
+          </div>
+          <div class="hud-icon-btn" id="compactBtn" onclick="toggleCompact()" title="Compact mode">
+            <span id="compactIcon">⊟</span>
+          </div>
+        </div>
       </div>
       <div class="filter-bar">
         <div class="search" id="searchBox">
@@ -504,7 +557,7 @@ body.light .srow.sel .skbd { border-color: rgba(0,113,227,0.22); }
 
     <!-- Footer -->
     <div class="hud-footer">
-      <div class="foot-btn">⊟ Full window</div>
+      <div class="foot-btn">Session List →</div>
       <div class="foot-spacer"></div>
       <div class="freshness" id="freshness">just now</div>
     </div>
@@ -634,6 +687,31 @@ body.light .srow.sel .skbd { border-color: rgba(0,113,227,0.22); }
       }
     });
   });
+
+  // ── Compact mode ──────────────────────────────────────────────────────────
+  let isCompact = false;
+  function toggleCompact() {
+    isCompact = !isCompact;
+    document.querySelector('.hud').classList.toggle('compact', isCompact);
+    const btn  = document.getElementById('compactBtn');
+    const icon = document.getElementById('compactIcon');
+    btn.classList.toggle('on', isCompact);
+    icon.textContent = isCompact ? '⊞' : '⊟';
+    btn.title = isCompact ? 'Full mode' : 'Compact mode';
+  }
+
+  // ── Pin ───────────────────────────────────────────────────────────────────
+  let isPinned = false;
+  function togglePin() {
+    isPinned = !isPinned;
+    const btn  = document.getElementById('pinBtn');
+    const icon = document.getElementById('pinIcon');
+    const lbl  = document.getElementById('pinLabel');
+    btn.classList.toggle('pin-on', isPinned);
+    icon.textContent = isPinned ? '◉' : '⊕';
+    lbl.textContent  = isPinned ? 'Pinned' : 'Pin';
+    btn.title = isPinned ? 'Unpin window' : 'Keep on top';
+  }
 
   // ── Freshness ticker ─────────────────────────────────────────────────────
   let secs = 0;
