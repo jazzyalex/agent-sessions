@@ -57,7 +57,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Sessions (Agent Cockpit): Replaced the `Agent Cockpit` window UI with the new floating HUD layout (chips, inline filter, grouped mode, compact mode, pin mode, and keyboard row shortcuts) while keeping Legacy Cockpit available and reusing existing live-session backend logic.
+- Sessions (Agent Cockpit): Window title now includes the currently shown session count (`Agent Cockpit (N)`), the in-content `AGENT COCKPIT` label and footer row (`Session List` + freshness) were removed, and focused-window blue list focus ring styling was removed for a cleaner HUD appearance.
 - Menu/Cockpit windows: Renamed the existing Cockpit window/menu item to `Legacy Cockpit` (defaulting to the `Live` filter), added a new single-instance `Agent Cockpit` window/menu item, moved `⌘⌥⇧C` to `Agent Cockpit`, and removed the Legacy shortcut.
+- Menu/Cockpit windows: Removed `Legacy Cockpit` from the `View` menu so only `Agent Cockpit` is exposed in the primary window menu.
+- Menu/Cockpit windows: Removed `Legacy Cockpit` from the macOS `Window` menu while keeping the legacy scene code path available.
 - Preferences (Advanced): Reordered sections so `Saved Sessions` appears above `Search`.
 - Preferences (Advanced): Reordered sections so `Git Context` appears at the bottom, and renamed `Live Sessions + Cockpit` to `Live Sessions + Cockpit BETA`.
 - Preferences (Advanced): Live-session/Cockpit controls are now consolidated under `Live Sessions + Cockpit (Beta)` in Settings → Advanced as the single feature toggle location.

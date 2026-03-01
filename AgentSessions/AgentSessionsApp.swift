@@ -232,7 +232,6 @@ struct AgentSessionsApp: App {
                     NotificationCenter.default.post(name: .showImagesFromMenu, object: nil)
                 }
                 OpenAgentCockpitWindowButton()
-                OpenLegacyCockpitWindowButton()
                 OpenPinnedSessionsWindowButton()
             }
             CommandGroup(after: .help) {
@@ -277,6 +276,7 @@ struct AgentSessionsApp: App {
                 .background(WindowAutosave(name: "CockpitWindow"))
         }
         .defaultSize(width: 980, height: 310)
+        .commandsRemoved()
     }
 }
 
@@ -346,22 +346,6 @@ private struct OpenAgentCockpitWindowButton: View {
                 : "Enable Live sessions + Cockpit (Beta) in Settings → Advanced."
         )
         .keyboardShortcut("c", modifiers: [.command, .option, .shift])
-    }
-}
-
-private struct OpenLegacyCockpitWindowButton: View {
-    @Environment(\.openWindow) private var openWindow
-    @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
-    var body: some View {
-        Button("Legacy Cockpit") {
-            openWindow(id: "LegacyCockpit")
-        }
-        .disabled(!liveSessionsFeatureEnabled)
-        .help(
-            liveSessionsFeatureEnabled
-                ? "Open Legacy Cockpit."
-                : "Enable Live sessions + Cockpit (Beta) in Settings → Advanced."
-        )
     }
 }
 

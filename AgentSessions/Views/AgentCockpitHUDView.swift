@@ -116,7 +116,6 @@ struct AgentCockpitHUDView: View {
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
-    @Environment(\.openWindow) private var openWindow
 
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
@@ -128,7 +127,6 @@ struct AgentCockpitHUDView: View {
     @State private var filterText: String = ""
     @State private var selectedRowID: String?
     @State private var collapsedProjects: Set<String> = []
-    @State private var freshnessNow = Date()
     @State private var activeConsumerID = UUID()
     @State private var searchFocusToken: Int = 0
     @FocusState private var focusedArea: HUDFocusArea?
@@ -149,8 +147,6 @@ struct AgentCockpitHUDView: View {
         return formatter
     }()
 
-    private let freshnessTicker = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
-
     var body: some View {
         let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
         Group {
@@ -160,7 +156,6 @@ struct AgentCockpitHUDView: View {
             case .system: hudContent
             }
         }
-        .background(AgentCockpitHUDWindowConfigurator(isPinned: isPinned))
         .onAppear {
             activeCodex.setCockpitConsumerVisible(true, consumerID: activeConsumerID)
             UserDefaults.standard.set(true, forKey: PreferencesKey.Cockpit.hudOpen)
@@ -169,15 +164,13 @@ struct AgentCockpitHUDView: View {
             activeCodex.setCockpitConsumerVisible(false, consumerID: activeConsumerID)
             UserDefaults.standard.set(false, forKey: PreferencesKey.Cockpit.hudOpen)
         }
-        .onReceive(freshnessTicker) { now in
-            freshnessNow = now
-        }
     }
 
     private var hudContent: some View {
         let snapshot = makeRowsSnapshot()
         let rowsForDisplay = activeEnabled ? snapshot.rows : []
         let visibleRows = filteredRows(from: rowsForDisplay)
+        let shownSessionCount = visibleRows.count
         let grouped = groupedRows(from: visibleRows)
         let renderedRows = renderedRows(visibleRows: visibleRows, groupedRows: grouped)
         let rowIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
@@ -208,17 +201,10 @@ struct AgentCockpitHUDView: View {
             .background(Color.clear)
             .disabled(!activeEnabled)
 
-            if !isCompact {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.10))
-                    .frame(height: 0.5)
-                footer
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
             hiddenShortcuts(renderedRows: renderedRows)
         }
         .background(.ultraThinMaterial)
+        .background(AgentCockpitHUDWindowConfigurator(isPinned: isPinned, shownSessionCount: shownSessionCount))
         .clipShape(RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.cornerRadius, style: .continuous)
@@ -263,11 +249,6 @@ struct AgentCockpitHUDView: View {
     private func header(activeCount: Int, idleCount: Int) -> some View {
         VStack(spacing: isCompact ? 0 : 8) {
             HStack(spacing: 10) {
-                Text("Agent Cockpit")
-                    .font(.system(size: 12, weight: .bold, design: .default))
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
-
                 HStack(spacing: 6) {
                     Button {
                         guard activeEnabled else { return }
@@ -421,27 +402,8 @@ struct AgentCockpitHUDView: View {
         }
         .frame(minHeight: isCompact ? 110 : 170)
         .focusable()
+        .focusEffectDisabled()
         .focused($focusedArea, equals: .rows)
-    }
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            Button("Session List →") {
-                guard activeEnabled else { return }
-                openWindow(id: "Agent Sessions")
-            }
-            .buttonStyle(HUDFooterButtonStyle())
-            .disabled(!activeEnabled)
-
-            Spacer(minLength: 0)
-
-            Text(freshnessLabel)
-                .font(.system(size: 10, weight: .regular, design: .monospaced))
-                .foregroundStyle(.secondary.opacity(0.55))
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(Color.primary.opacity(0.035))
     }
 
     @ViewBuilder
@@ -598,14 +560,6 @@ struct AgentCockpitHUDView: View {
         if selectAll {
             searchFocusToken &+= 1
         }
-    }
-
-    private var freshnessLabel: String {
-        guard let lastRefresh = activeCodex.lastRefreshAt else { return "—" }
-        let seconds = max(Int(freshnessNow.timeIntervalSince(lastRefresh)), 0)
-        if seconds < 5 { return "just now" }
-        if seconds < 60 { return "\(seconds)s ago" }
-        return "\(seconds / 60)m ago"
     }
 
     private func focus(_ row: HUDRow) {
@@ -1091,22 +1045,6 @@ private struct HUDIconButtonStyle: ButtonStyle {
             return tint.opacity(0.30)
         }
         return isOn ? Color.accentColor.opacity(0.30) : Color.primary.opacity(0.08)
-    }
-}
-
-private struct HUDFooterButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 10.5, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 11)
-            .frame(height: 30)
-            .background(Color.primary.opacity(configuration.isPressed ? 0.08 : 0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
-            )
     }
 }
 
