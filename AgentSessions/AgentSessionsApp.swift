@@ -231,7 +231,8 @@ struct AgentSessionsApp: App {
                 Button("Image Browser") {
                     NotificationCenter.default.post(name: .showImagesFromMenu, object: nil)
                 }
-                OpenCockpitWindowButton()
+                OpenAgentCockpitWindowButton()
+                OpenLegacyCockpitWindowButton()
                 OpenPinnedSessionsWindowButton()
             }
             CommandGroup(after: .help) {
@@ -257,19 +258,27 @@ struct AgentSessionsApp: App {
             .environmentObject(archiveManager)
         }
 
-        Window("Cockpit", id: "Cockpit") {
+        Window("Agent Cockpit", id: "AgentCockpit") {
             CockpitView(
                 codexIndexer: indexer,
-                claudeIndexer: claudeIndexer
+                claudeIndexer: claudeIndexer,
+                liveFilterStorageKey: PreferencesKey.Cockpit.codexLiveFilterMode
+            )
+                .environmentObject(activeCodexSessions)
+                .background(WindowAutosave(name: "AgentCockpitWindow"))
+        }
+        .defaultSize(width: 980, height: 310)
+
+        Window("Legacy Cockpit", id: "LegacyCockpit") {
+            CockpitView(
+                codexIndexer: indexer,
+                claudeIndexer: claudeIndexer,
+                liveFilterStorageKey: PreferencesKey.Cockpit.legacyCodexLiveFilterMode
             )
                 .environmentObject(activeCodexSessions)
                 .background(WindowAutosave(name: "CockpitWindow"))
         }
         .defaultSize(width: 980, height: 310)
-
-        // Legacy windows removed; Unified is the single window.
-        
-        // No additional scenes
     }
 }
 
@@ -325,20 +334,36 @@ private struct OpenPinnedSessionsWindowButton: View {
     }
 }
 
-private struct OpenCockpitWindowButton: View {
+private struct OpenAgentCockpitWindowButton: View {
     @Environment(\.openWindow) private var openWindow
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
     var body: some View {
-        Button("Cockpit") {
-            openWindow(id: "Cockpit")
+        Button("Agent Cockpit") {
+            openWindow(id: "AgentCockpit")
         }
         .disabled(!liveSessionsFeatureEnabled)
         .help(
             liveSessionsFeatureEnabled
-                ? "Open Cockpit live sessions window."
+                ? "Open Agent Cockpit."
                 : "Enable Live sessions + Cockpit (Beta) in Settings → Advanced."
         )
         .keyboardShortcut("c", modifiers: [.command, .option, .shift])
+    }
+}
+
+private struct OpenLegacyCockpitWindowButton: View {
+    @Environment(\.openWindow) private var openWindow
+    @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
+    var body: some View {
+        Button("Legacy Cockpit") {
+            openWindow(id: "LegacyCockpit")
+        }
+        .disabled(!liveSessionsFeatureEnabled)
+        .help(
+            liveSessionsFeatureEnabled
+                ? "Open Legacy Cockpit."
+                : "Enable Live sessions + Cockpit (Beta) in Settings → Advanced."
+        )
     }
 }
 
