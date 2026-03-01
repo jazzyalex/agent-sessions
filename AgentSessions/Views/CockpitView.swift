@@ -15,7 +15,7 @@ struct CockpitView: View {
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
-    @AppStorage(PreferencesKey.Cockpit.codexLiveFilterMode) private var liveFilterModeRaw: String = LiveFilterMode.live.rawValue
+    @AppStorage private var liveFilterModeRaw: String
     @State private var selection: Set<String> = []
     @State private var activeConsumerID = UUID()
     private static let rowDateFormatter: DateFormatter = {
@@ -77,6 +77,19 @@ struct CockpitView: View {
         let filteredRows: [Row]
         let activeCount: Int
         let idleCount: Int
+    }
+
+    init(
+        codexIndexer: SessionIndexer,
+        claudeIndexer: ClaudeSessionIndexer,
+        liveFilterStorageKey: String = PreferencesKey.Cockpit.codexLiveFilterMode
+    ) {
+        self.codexIndexer = codexIndexer
+        self.claudeIndexer = claudeIndexer
+        _liveFilterModeRaw = AppStorage(
+            wrappedValue: LiveFilterMode.live.rawValue,
+            liveFilterStorageKey
+        )
     }
 
     private var liveFilterMode: LiveFilterMode {
