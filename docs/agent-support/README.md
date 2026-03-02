@@ -15,3 +15,4 @@ Start here for how Agent Sessions tracks supported agent versions and parsing co
 2. Use the update checklist before changing the matrix.
 3. Record every upstream check in the memory bank.
 4. Run monitoring (daily/weekly) to detect drift early.
+5. Treat both parser schema drift and discovery path-layout drift as release blockers.

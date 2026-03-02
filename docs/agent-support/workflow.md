@@ -39,6 +39,8 @@ detect upstream session format changes that could break JSON or JSONL parsing.
 8. If medium or high risk, acquire sample logs.
    - Capture a minimal session log for the new agent version.
    - Add or update fixtures and ensure parser tests pass.
+   - Run discovery-contract tests so storage-path/layout drift is caught (not just parser drift):
+     - `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/SessionParserTests/test*Discovery*`
    - Auto capture helper (Gemini/OpenCode): `./scripts/capture_latest_agent_sessions.py` writes the newest local session artifacts to `scripts/agent_captures/` for quick diffing and fixture updates.
    - Auto capture helper (OpenClaw): `./scripts/capture_latest_agent_sessions.py --agent openclaw` writes the latest local OpenClaw JSONL session to `scripts/agent_captures/` for quick diffing and fixture updates.
    - Auto capture helper (Droid): `./scripts/droid_stream_schema_probe.py` runs `droid exec --output-format stream-json` and writes stream logs plus a schema report to `scripts/agent_captures/`.
@@ -50,6 +52,7 @@ detect upstream session format changes that could break JSON or JSONL parsing.
 
 ## Error-Proof Guardrails
 - Never bump `max_verified_version` without fixtures or sample logs plus passing parser tests.
+- Never bump `max_verified_version` if discovery-contract checks fail for any monitored agent.
 - Require two signals before declaring a format change:
   - Example: release notes plus diff evidence, or diff evidence plus sample log.
 - If an agent does not log its version, keep `max_verified_version: "unknown"` and document

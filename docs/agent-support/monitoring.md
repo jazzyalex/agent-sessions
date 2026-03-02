@@ -17,6 +17,7 @@ This is intentionally **non-destructive**:
 ## Cadence
 - Daily: `codex`, `claude`, `opencode`, `droid`, `openclaw` (release watch only; quiet unless there is actionable change).
 - Weekly: all 7 agents including `gemini`, `copilot`, and `openclaw` (release watch + minimal probes + schema fingerprints).
+- Weekly also enforces `discovery_path_contract` checks from config to catch storage-layout drift that can break app discovery even when parser schema still matches.
 
 ## Sources of Truth
 - Current snapshot (latest): `docs/agent-support/agent-support-matrix.yml`
@@ -42,7 +43,7 @@ Severity levels:
 - `none`: nothing newer than verified and monitoring succeeded.
 - `low`: newer version exists; no schema/usage risk keywords; defer to weekly scan.
 - `medium`: newer version exists and release notes contain schema/usage/limits keywords; run probes and collect evidence.
-- `high`: probes indicate drift, monitoring failed, or local evidence suggests parsing/usage breakage risk.
+- `high`: probes indicate drift, monitoring failed, discovery path contract fails, or local evidence suggests parsing/usage breakage risk.
 
 Recommendation guidelines:
 - `ignore`: nothing to do.
@@ -80,8 +81,10 @@ Implementation detail:
 When the report recommends `prepare_hotfix`:
 1. Capture evidence into `scripts/agent_captures/` (or the report’s capture folder).
 2. Diff against fixtures, update parsers, add/update tests.
-3. Build + run tests.
-4. Update:
+3. Run discovery-contract tests before bumping verified versions:
+   - `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/SessionParserTests/test*Discovery*`
+4. Build + run tests.
+5. Update:
    - `docs/agent-json-tracking.md`
    - `docs/agent-support/agent-support-matrix.yml`
    - `docs/agent-support/agent-support-ledger.yml` (new AS release entry)

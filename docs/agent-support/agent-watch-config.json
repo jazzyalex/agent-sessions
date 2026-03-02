@@ -20,6 +20,10 @@
           "required_types": ["session_meta"],
           "max_lines": 2500
         },
+        "discovery_path_contract": {
+          "description": "Codex sessions should be discovered from day folders under a sessions root.",
+          "patterns": ["/sessions/[0-9]{4}/[0-9]{2}/[0-9]{2}/rollout-[^/]+\\.jsonl$"]
+        },
         "probes": [
           {
             "kind": "script",
@@ -49,6 +53,10 @@
           "glob": "**/*.jsonl",
           "required_types": ["user", "assistant"],
           "max_lines": 2500
+        },
+        "discovery_path_contract": {
+          "description": "Claude sessions should live under ~/.claude/projects/** with jsonl/ndjson files.",
+          "patterns": ["/\\.claude/projects/.+\\.(jsonl|ndjson)$"]
         },
         "probes": [
           {
@@ -87,6 +95,10 @@
           "max_messages": 250,
           "max_parts": 2500
         },
+        "discovery_path_contract": {
+          "description": "OpenCode sessions should come from storage/session/*/ses_*.json.",
+          "patterns": ["/opencode/storage/session/.+/ses_[^/]+\\.json$"]
+        },
         "probes": [
           {
             "kind": "script",
@@ -121,6 +133,10 @@
           "required_types": ["message"],
           "max_lines": 2500
         },
+        "discovery_path_contract": {
+          "description": "Droid interactive sessions should be under ~/.factory/sessions.",
+          "patterns": ["/\\.factory/sessions/.+\\.jsonl$"]
+        },
         "probes": [
           {
             "kind": "script",
@@ -150,6 +166,10 @@
           "glob": "**/session-*.json",
           "max_messages": 2500
         },
+        "discovery_path_contract": {
+          "description": "Gemini sessions should be under ~/.gemini/tmp/<project>/(chats/)?session-*.json.",
+          "patterns": ["/\\.gemini/tmp/[^/]+/(chats/)?session-[^/]+\\.json$"]
+        },
         "probes": [
           {
             "kind": "script",
@@ -178,6 +198,10 @@
           "roots": ["~/.copilot/session-state"],
           "glob": "*.jsonl",
           "max_lines": 2500
+        },
+        "discovery_path_contract": {
+          "description": "Copilot sessions should be top-level jsonl files under ~/.copilot/session-state.",
+          "patterns": ["/\\.copilot/session-state/[^/]+\\.jsonl$"]
         }
       }
     },
@@ -203,6 +227,10 @@
           "glob": "**/*.jsonl",
           "required_types": ["session", "message"],
           "max_lines": 2500
+        },
+        "discovery_path_contract": {
+          "description": "OpenClaw sessions should resolve to agents/<id>/sessions/*.jsonl.",
+          "patterns": ["/agents/[^/]+/sessions/[^/]+\\.jsonl$"]
         },
         "probes": [
           {
