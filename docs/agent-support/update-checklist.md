@@ -22,7 +22,7 @@ Use this checklist before changing the support matrix or memory bank.
 - Capture sample logs or update fixtures for new versions.
 - Run parser tests for affected agents.
 - Run discovery-contract tests for session path/layout assumptions:
-  - `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/SessionParserTests/test*Discovery*`
+  - `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/SessionParserTests`
 - If parsing behavior changes, update `docs/CHANGELOG.md` and `docs/summaries/YYYY-MM.md`.
 
 ## Update docs

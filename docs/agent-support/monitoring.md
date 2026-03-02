@@ -82,7 +82,7 @@ When the report recommends `prepare_hotfix`:
 1. Capture evidence into `scripts/agent_captures/` (or the report’s capture folder).
 2. Diff against fixtures, update parsers, add/update tests.
 3. Run discovery-contract tests before bumping verified versions:
-   - `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/SessionParserTests/test*Discovery*`
+   - `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/SessionParserTests`
 4. Build + run tests.
 5. Update:
    - `docs/agent-json-tracking.md`
