@@ -1550,9 +1550,12 @@ struct UnifiedSessionsView: View {
     private func cellSource(for session: Session) -> some View {
         let label: String
         let isSelected = selection == session.id
-        let liveState: CodexLiveState? = {
+        let presence: CodexActivePresence? = {
             guard activeCodexSessions.supportsLiveSessions(for: session.source) else { return nil }
-            guard let presence = livePresence(for: session) else { return nil }
+            return livePresence(for: session)
+        }()
+        let liveState: CodexLiveState? = {
+            guard let presence else { return nil }
             return activeCodexSessions.liveState(for: presence)
         }()
         let rowTextColor: Color = {
@@ -1560,9 +1563,18 @@ struct UnifiedSessionsView: View {
             return !stripMonochrome ? sourceAccent(session) : .secondary
         }()
         let rowDotColor: Color = {
+            if let liveState {
+                switch liveState {
+                case .activeWorking:
+                    return .green
+                case .openIdle:
+                    return Color(hex: "ff9f0a")
+                }
+            }
             if isSelected { return .white.opacity(0.95) }
             return !stripMonochrome ? sourceAccent(session) : .primary
         }()
+        let liveOpacity: Double = liveState == .openIdle ? 0.55 : 1.0
         switch session.source {
         case .codex: label = "Codex"
         case .claude: label = "Claude"
@@ -1574,7 +1586,12 @@ struct UnifiedSessionsView: View {
         }
         return HStack(spacing: 6) {
             if let liveState {
-                CodexLiveStatusDot(state: liveState, color: rowDotColor, size: 6)
+                CodexLiveStatusDot(
+                    state: liveState,
+                    color: rowDotColor,
+                    size: 6,
+                    lastSeenAt: presence?.lastSeenAt
+                )
                     .accessibilityLabel(Text("\(label) \(liveState == .activeWorking ? "active" : "open") session"))
             }
             Text(label)
@@ -1582,6 +1599,7 @@ struct UnifiedSessionsView: View {
                 .foregroundStyle(rowTextColor)
             Spacer(minLength: 4)
         }
+        .opacity(liveOpacity)
         .id("source-cell-\(session.id)-\(activeCodexSessions.activeMembershipVersion)")
     }
 

@@ -14,6 +14,9 @@ All notable changes to this project will be documented in this file.
 - Sessions (Unified): Added `CLI Agent` cell double-click terminal focusing in the Sessions list (same focus path as `Focus in iTerm2`), with explicit alert feedback when no focusable live terminal is available.
 
 ### Fixed
+- Sessions (Agent Cockpit): Idle HUD rows now keep the session display name in the main text column, `Last active ... ago` messaging was moved to a compact elapsed column (for example `16s`), active status dots now render as solid green indicators, and idle status dots now pulse amber with a larger size after 10 minutes idle.
+- Sessions (Unified): `CLI Agent` live-state styling now matches Agent Cockpit: active sessions use a solid green dot, idle sessions use a pulsing amber dot that grows slightly after 10 minutes idle, and idle source cells are visually dimmed.
+- Sessions (Agent Cockpit): Compact mode now uses chrome-less window styling (no titlebar controls), no longer forces compact height on every refresh, and now sizes compact list height with group/divider layout units to avoid hidden rows.
 - Sessions (Agent Cockpit/Codex live detection): Pinned `Agent Cockpit` now uses a faster background refresh cadence (`3s`), foreground-return iTerm live-state probing now ramps in bounded batches to flatten short CPU spikes, and iTerm session discovery now reuses a single session-list fetch for Codex+Claude.
 - Sessions (Gemini): Session discovery now accepts named Gemini project directories under `~/.gemini/tmp` (for example `radio4j`), while still supporting both `chats/session-*.json` and direct `session-*.json` layouts.
 - Usage tracking (menu bar): The menu bar quota tracker now shows an in-progress spinner while Codex or Claude usage probes are running, matching the in-app usage strip behavior even when reset indicators are hidden.
@@ -59,6 +62,8 @@ All notable changes to this project will be documented in this file.
 - Sessions (Cockpit/Unified/Claude): Cockpit now suppresses unresolved live placeholders that are neither focusable nor joinable to indexed workspace sessions, dedupes unresolved rows by stable tty/workspace identity, and its `Refresh` action now refreshes both live presence and provider indexes; Claude refresh now auto-escalates recent-scope drift to full reconcile, and manual refreshes in both Unified and Cockpit now run Claude full reconcile so newly opened Claude sessions appear reliably in the main Sessions list.
 
 ### Changed
+- Sessions (Agent Cockpit): Full HUD mode now allows long session names to wrap to two lines in the main row text, while compact mode keeps names single-line.
+- Sessions (Agent Cockpit): Compact HUD mode now hides the window title text and auto-resizes window height to fit visible sessions (up to 8 rows).
 - Sessions (Agent Cockpit): Replaced the `Agent Cockpit` window UI with the new floating HUD layout (chips, inline filter, grouped mode, compact mode, pin mode, and keyboard row shortcuts) while keeping Legacy Cockpit available and reusing existing live-session backend logic.
 - Sessions (Agent Cockpit): Window title now includes the currently shown session count (`Agent Cockpit (N)`), the in-content `AGENT COCKPIT` label and footer row (`Session List` + freshness) were removed, and focused-window blue list focus ring styling was removed for a cleaner HUD appearance.
 - Menu/Cockpit windows: Renamed the existing Cockpit window/menu item to `Legacy Cockpit` (defaulting to the `Live` filter), added a new single-instance `Agent Cockpit` window/menu item, moved `⌘⌥⇧C` to `Agent Cockpit`, and removed the Legacy shortcut.

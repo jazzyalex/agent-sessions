@@ -6,6 +6,7 @@ struct AgentCockpitHUDRowView: View {
     let isSelected: Bool
     let filterText: String
     let isGrouped: Bool
+    let isCompact: Bool
     let onTap: () -> Void
     @State private var isHovering: Bool = false
 
@@ -17,7 +18,10 @@ struct AgentCockpitHUDRowView: View {
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.65))
                     .frame(width: 22, alignment: .center)
 
-                AgentCockpitHUDStatusDot(liveState: row.liveState)
+                AgentCockpitHUDStatusDot(
+                    liveState: row.liveState,
+                    lastSeenAt: row.lastSeenAt
+                )
                     .frame(width: 9, alignment: .center)
                     .accessibilityLabel(row.liveState == .active ? "Active" : "Idle")
 
@@ -42,15 +46,16 @@ struct AgentCockpitHUDRowView: View {
                 Text(row.preview)
                     .font(.system(size: 11, weight: .regular))
                     .foregroundStyle(row.liveState == .active ? Color.secondary : Color.secondary.opacity(0.9))
-                    .lineLimit(1)
+                    .lineLimit(isCompact ? 1 : 2)
                     .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: !isCompact)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 Text(row.elapsed)
                     .font(.system(size: 10, weight: .regular, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .frame(width: 40, alignment: .trailing)
+                    .frame(width: 32, alignment: .trailing)
 
                 if let shortcutLabel {
                     Text(shortcutLabel)
@@ -129,32 +134,56 @@ struct AgentCockpitHUDRowView: View {
 
 private struct AgentCockpitHUDStatusDot: View {
     let liveState: HUDLiveState
+    let lastSeenAt: Date?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animate = false
 
     var body: some View {
         Circle()
-            .fill(liveState == .active ? Color.green : Color.secondary.opacity(0.55))
+            .fill(dotColor)
             .frame(width: 7, height: 7)
             .scaleEffect(scale)
             .opacity(opacity)
             .onAppear { updateAnimation() }
             .onChange(of: liveState) { _, _ in updateAnimation() }
+            .onChange(of: lastSeenAt) { _, _ in updateAnimation() }
             .onChange(of: reduceMotion) { _, _ in updateAnimation() }
     }
 
+    private var dotColor: Color {
+        switch liveState {
+        case .active:
+            return .green
+        case .idle:
+            return Color(hex: "ff9f0a")
+        }
+    }
+
+    private var shouldPulse: Bool {
+        liveState == .idle && !reduceMotion
+    }
+
+    private var idleNeedsAttention: Bool {
+        guard liveState == .idle, let lastSeenAt else { return false }
+        return Date().timeIntervalSince(lastSeenAt) >= 600
+    }
+
+    private var idleBaseScale: CGFloat {
+        idleNeedsAttention ? 1.16 : 1.0
+    }
+
     private var scale: CGFloat {
-        guard liveState == .active, !reduceMotion else { return 1.0 }
-        return animate ? 1.35 : 1.0
+        guard shouldPulse else { return idleBaseScale }
+        return animate ? idleBaseScale * 1.16 : idleBaseScale
     }
 
     private var opacity: Double {
-        guard liveState == .active, !reduceMotion else { return 1.0 }
-        return animate ? 0.75 : 1.0
+        guard shouldPulse else { return 1.0 }
+        return animate ? 0.72 : 1.0
     }
 
     private func updateAnimation() {
-        guard liveState == .active, !reduceMotion else {
+        guard shouldPulse else {
             animate = false
             return
         }
