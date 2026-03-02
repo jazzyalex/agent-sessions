@@ -276,6 +276,27 @@ def _newest_file_with_types(roots: list[str], glob: str, required_types: list[st
     return None
 
 
+def _check_discovery_path_contract(local_file: str | None, contract_cfg: dict[str, Any]) -> dict[str, Any]:
+    patterns_raw = contract_cfg.get("patterns")
+    patterns = [p for p in (patterns_raw if isinstance(patterns_raw, list) else []) if isinstance(p, str) and p]
+    if not patterns:
+        return {"ok": False, "error": "missing_patterns"}
+
+    description = contract_cfg.get("description")
+    candidate = (local_file or "").replace("\\", "/")
+    if not candidate:
+        return {"ok": False, "error": "no_local_file", "patterns": patterns, "description": description}
+
+    matched = next((pat for pat in patterns if re.search(pat, candidate)), None)
+    return {
+        "ok": bool(matched),
+        "file": candidate,
+        "matched_pattern": matched,
+        "patterns": patterns,
+        "description": description,
+    }
+
+
 def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
     type_keys: dict[str, set[str]] = {}
     type_counts: dict[str, int] = {}
@@ -898,11 +919,13 @@ def main(argv: list[str]) -> int:
         weekly_details: dict[str, Any] | None = None
         probe_failed = False
         probe_failed_but_upstream_degraded = False
+        discovery_contract_failed = False
         schema_matches_baseline: bool | None = None
         schema_diff: dict[str, Any] | None = None
         if args.mode == "weekly":
             weekly_details = {}
             local_schema_cfg = (agent_cfg.get("weekly") or {}).get("local_schema")
+            discovery_contract_cfg = (agent_cfg.get("weekly") or {}).get("discovery_path_contract")
             if isinstance(local_schema_cfg, dict):
                 kind = local_schema_cfg.get("kind")
                 roots = list(local_schema_cfg.get("roots") or [])
@@ -961,6 +984,16 @@ def main(argv: list[str]) -> int:
                 else:
                     weekly_details["local_schema"] = {"error": "no_files_found", "roots": roots, "glob": glob, "kind": kind}
 
+                if isinstance(discovery_contract_cfg, dict):
+                    local_file = None
+                    if isinstance(local_fp, dict):
+                        local_file_value = local_fp.get("file")
+                        if isinstance(local_file_value, str):
+                            local_file = local_file_value
+                    contract_result = _check_discovery_path_contract(local_file, discovery_contract_cfg)
+                    weekly_details["discovery_path_contract"] = contract_result
+                    discovery_contract_failed = bool(local_file) and not bool(contract_result.get("ok"))
+
             probes_cfg = (agent_cfg.get("weekly") or {}).get("probes") or []
             probe_results: list[dict[str, Any]] = []
             if isinstance(probes_cfg, list):
@@ -971,19 +1004,20 @@ def main(argv: list[str]) -> int:
             if probe_results:
                 weekly_details["probes"] = probe_results
                 probe_failed = any(not pr.get("ok") for pr in probe_results)
-                if agent_name == "claude":
-                    status = next((pr for pr in probe_results if pr.get("label") == "claude_status"), None)
-                    usage = next((pr for pr in probe_results if pr.get("label") == "claude_usage_probe"), None)
-                    status_parsed = (status or {}).get("parsed") if isinstance(status, dict) else None
-                    if isinstance(status_parsed, dict):
-                        indicator = status_parsed.get("indicator")
-                        incidents = status_parsed.get("incidents_count")
-                        degraded = (isinstance(indicator, str) and indicator not in ("none", "unknown")) or (
-                            isinstance(incidents, int) and incidents > 0
-                        )
-                        usage_ok = bool((usage or {}).get("ok")) if isinstance(usage, dict) else True
-                        if degraded and not usage_ok:
-                            probe_failed_but_upstream_degraded = True
+            probe_failed = probe_failed or discovery_contract_failed
+            if agent_name == "claude":
+                status = next((pr for pr in probe_results if pr.get("label") == "claude_status"), None)
+                usage = next((pr for pr in probe_results if pr.get("label") == "claude_usage_probe"), None)
+                status_parsed = (status or {}).get("parsed") if isinstance(status, dict) else None
+                if isinstance(status_parsed, dict):
+                    indicator = status_parsed.get("indicator")
+                    incidents = status_parsed.get("incidents_count")
+                    degraded = (isinstance(indicator, str) and indicator not in ("none", "unknown")) or (
+                        isinstance(incidents, int) and incidents > 0
+                    )
+                    usage_ok = bool((usage or {}).get("ok")) if isinstance(usage, dict) else True
+                    if degraded and not usage_ok:
+                        probe_failed_but_upstream_degraded = True
 
         severity, recommendation = _pick_severity(
             upstream_newer_than_verified=upstream_newer_than_verified,

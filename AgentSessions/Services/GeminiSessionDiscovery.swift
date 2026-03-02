@@ -3,8 +3,8 @@ import Foundation
 // MARK: - Gemini Session Discovery
 
 /// Discovery for Google Gemini CLI session checkpoints (ephemeral)
-/// Expected layout: ~/.gemini/tmp/<projectHash>/chats/session-*.json
-/// Also handle fallback: ~/.gemini/tmp/<projectHash>/session-*.json
+/// Expected layout: ~/.gemini/tmp/<project>/chats/session-*.json
+/// Also handle fallback: ~/.gemini/tmp/<project>/session-*.json
 final class GeminiSessionDiscovery: SessionDiscovery {
     private let customRoot: String?
 
@@ -29,35 +29,29 @@ final class GeminiSessionDiscovery: SessionDiscovery {
         }
 
         var out: [URL] = []
-        // Shallow scan: iterate hashed project directories
+        // Shallow scan: iterate per-project directories in ~/.gemini/tmp.
         guard let projects = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else {
             return []
         }
         for proj in projects {
             guard (try? proj.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-            // Gemini CLI project dirs are SHA-256-ish hex hashes (avoid scanning unrelated folders like "bin")
             let name = proj.lastPathComponent
-            if !(name.count >= 32 && name.count <= 64 && name.allSatisfy({ $0.isHexDigit })) { continue }
+            // Skip known non-project entries.
+            if name == "bin" || name == ".DS_Store" || name.hasSuffix(".txt") { continue }
 
-            // Prefer chats/ subdir
+            // Prefer chats/ subdir when present.
             let chats = proj.appendingPathComponent("chats", isDirectory: true)
-            if (try? chats.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
-               let it = fm.enumerator(at: chats, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) {
-                for case let f as URL in it {
-                    if f.pathExtension.lowercased() == "json" && f.lastPathComponent.hasPrefix("session-") {
-                        out.append(f)
-                    }
-                }
-            }
+            let chatFiles = sessionJSONFiles(in: chats, fileManager: fm)
 
             // Fallback: look directly in project dir for session-*.json
-            if let it2 = fm.enumerator(at: proj, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]) {
-                for case let f as URL in it2 {
-                    if f.pathExtension.lowercased() == "json" && f.lastPathComponent.hasPrefix("session-") {
-                        out.append(f)
-                    }
-                }
+            let rootFiles = sessionJSONFiles(in: proj, fileManager: fm)
+
+            // Only accept directories that actually contain session files.
+            if chatFiles.isEmpty && rootFiles.isEmpty {
+                continue
             }
+            out.append(contentsOf: chatFiles)
+            out.append(contentsOf: rootFiles)
         }
 
         // Sort by modification time (desc)
@@ -75,5 +69,26 @@ final class GeminiSessionDiscovery: SessionDiscovery {
             return lm > rm
         }
         return out
+    }
+
+    private func sessionJSONFiles(in dir: URL, fileManager fm: FileManager) -> [URL] {
+        guard (try? dir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+            return []
+        }
+
+        var found: [URL] = []
+        guard let it = fm.enumerator(
+            at: dir,
+            includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+            options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        for case let f as URL in it {
+            if f.pathExtension.lowercased() == "json" && f.lastPathComponent.hasPrefix("session-") {
+                found.append(f)
+            }
+        }
+        return found
     }
 }

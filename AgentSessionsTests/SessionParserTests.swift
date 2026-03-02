@@ -7,6 +7,14 @@ final class SessionParserTests: XCTestCase {
         return bundle.url(forResource: name, withExtension: "jsonl")!
     }
 
+    private func writeText(_ text: String, to url: URL) throws {
+        try text.data(using: .utf8)!.write(to: url)
+    }
+
+    private func canonicalPath(_ url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
     func testJSONLStreamingAndDecoding() throws {
         let url = fixtureURL("session_simple")
         let reader = JSONLReader(url: url)
@@ -543,6 +551,146 @@ final class SessionParserTests: XCTestCase {
         let found = discovery.discoverSessionFiles()
         XCTAssertEqual(found.count, 1)
         XCTAssertEqual(found.first?.lastPathComponent, "ses_demo.json")
+    }
+
+    func testCodexDiscoveryFindsRolloutFilesInDateHierarchy() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Codex-Discovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let dayDir = root
+            .appendingPathComponent("2026", isDirectory: true)
+            .appendingPathComponent("03", isDirectory: true)
+            .appendingPathComponent("02", isDirectory: true)
+        try fm.createDirectory(at: dayDir, withIntermediateDirectories: true)
+
+        let sessionURL = dayDir.appendingPathComponent("rollout-2026-03-02T01-00-00-abc123.jsonl")
+        try writeText(#"{"type":"session_meta"}"# + "\n", to: sessionURL)
+        try writeText("ignore", to: dayDir.appendingPathComponent("notes.txt"))
+
+        let discovery = CodexSessionDiscovery(customRoot: root.path)
+        let found = discovery.discoverSessionFiles()
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first?.lastPathComponent, sessionURL.lastPathComponent)
+    }
+
+    func testClaudeDiscoveryUsesProjectsSubtreeWhenPresent() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-Discovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let projectsDir = root.appendingPathComponent("projects/demo", isDirectory: true)
+        try fm.createDirectory(at: projectsDir, withIntermediateDirectories: true)
+        let sessionURL = projectsDir.appendingPathComponent("session.jsonl")
+        try writeText(#"{"type":"user","message":{"content":"hi"}}"# + "\n", to: sessionURL)
+
+        let rootJSONL = root.appendingPathComponent("history.jsonl")
+        try writeText(#"{"type":"meta"}"# + "\n", to: rootJSONL)
+
+        let discovery = ClaudeSessionDiscovery(customRoot: root.path)
+        let found = discovery.discoverSessionFiles()
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first.map(canonicalPath), canonicalPath(sessionURL))
+    }
+
+    func testCopilotDiscoveryAcceptsConfigRootOverride() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-Discovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let sessionStateDir = root.appendingPathComponent("session-state", isDirectory: true)
+        try fm.createDirectory(at: sessionStateDir, withIntermediateDirectories: true)
+        let sessionURL = sessionStateDir.appendingPathComponent("abc123.jsonl")
+        try writeText(#"{"type":"session"}"# + "\n", to: sessionURL)
+
+        let discovery = CopilotSessionDiscovery(customRoot: root.path)
+        let found = discovery.discoverSessionFiles()
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first.map(canonicalPath), canonicalPath(sessionURL))
+    }
+
+    func testDroidDiscoveryIncludesSessionStoreAndStreamJSON() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Droid-Discovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions", isDirectory: true)
+        let projectsRoot = root.appendingPathComponent("projects", isDirectory: true)
+        let sessionStoreDir = sessionsRoot.appendingPathComponent("projA", isDirectory: true)
+        let streamDir = projectsRoot.appendingPathComponent("projA", isDirectory: true)
+        try fm.createDirectory(at: sessionStoreDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: streamDir, withIntermediateDirectories: true)
+
+        let storeURL = sessionStoreDir.appendingPathComponent("store.jsonl")
+        try writeText(#"{"type":"session_start","session_id":"s1"}"# + "\n", to: storeURL)
+
+        let streamURL = streamDir.appendingPathComponent("stream.jsonl")
+        try writeText(
+            """
+            {"type":"system","session_id":"s_stream","message":"ok"}
+            {"type":"message","session_id":"s_stream","role":"user","text":"hello"}
+            {"type":"completion","session_id":"s_stream","finalText":"done"}
+            """,
+            to: streamURL
+        )
+
+        let noiseURL = streamDir.appendingPathComponent("noise.jsonl")
+        try writeText(#"{"type":"random"}"# + "\n", to: noiseURL)
+
+        let discovery = DroidSessionDiscovery(customSessionsRoot: sessionsRoot.path, customProjectsRoot: projectsRoot.path)
+        let found = Set(discovery.discoverSessionFiles().map(canonicalPath))
+        XCTAssertTrue(found.contains(canonicalPath(storeURL)))
+        XCTAssertTrue(found.contains(canonicalPath(streamURL)))
+        XCTAssertFalse(found.contains(canonicalPath(noiseURL)))
+    }
+
+    func testGeminiDiscoveryAcceptsNamedProjectDirectories() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Gemini-Discovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let namedWithChats = root.appendingPathComponent("radio4j/chats", isDirectory: true)
+        let namedWithoutChats = root.appendingPathComponent("radio-metadata-fr-scraper", isDirectory: true)
+        let noiseDir = root.appendingPathComponent("bin/chats", isDirectory: true)
+        try fm.createDirectory(at: namedWithChats, withIntermediateDirectories: true)
+        try fm.createDirectory(at: namedWithoutChats, withIntermediateDirectories: true)
+        try fm.createDirectory(at: noiseDir, withIntermediateDirectories: true)
+
+        let chatsSession = namedWithChats.appendingPathComponent("session-1.json")
+        let rootSession = namedWithoutChats.appendingPathComponent("session-2.json")
+        let ignoredSession = noiseDir.appendingPathComponent("session-bin.json")
+
+        try writeText("{}", to: chatsSession)
+        try writeText("{}", to: rootSession)
+        try writeText("{}", to: ignoredSession)
+
+        let discovery = GeminiSessionDiscovery(customRoot: root.path)
+        let found = Set(discovery.discoverSessionFiles().map(canonicalPath))
+
+        XCTAssertTrue(found.contains(canonicalPath(chatsSession)))
+        XCTAssertTrue(found.contains(canonicalPath(rootSession)))
+        XCTAssertFalse(found.contains(canonicalPath(ignoredSession)))
+    }
+
+    func testOpenClawDiscoveryFindsAgentSessionFiles() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-Discovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let sessionsDir = root.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let live = sessionsDir.appendingPathComponent("live.jsonl")
+        let lock = sessionsDir.appendingPathComponent("live.jsonl.lock")
+        let deleted = sessionsDir.appendingPathComponent("live.jsonl.deleted.1")
+        try writeText(#"{"type":"session"}"# + "\n", to: live)
+        try writeText("", to: lock)
+        try writeText("", to: deleted)
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        let found = discovery.discoverSessionFiles()
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first.map(canonicalPath), canonicalPath(live))
     }
 
     func testClaudeTitleSkipsLocalCommandCaveatAndUsesTrailingPrompt() {
