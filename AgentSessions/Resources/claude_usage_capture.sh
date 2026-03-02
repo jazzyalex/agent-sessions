@@ -52,6 +52,32 @@ error_json() {
 EOF
 }
 
+# Managed probe labels follow as-cc- + 12-char token (alpha start, digit end).
+is_managed_probe_label() {
+    local label="$1"
+    [[ "$label" =~ ^as-cc-[A-Za-z][A-Za-z0-9]{10}[0-9]$ ]]
+}
+
+remove_managed_socket_files() {
+    local label="$1"
+    if ! is_managed_probe_label "$label"; then
+        return
+    fi
+    local uid
+    uid="$(id -u 2>/dev/null || echo "")"
+    if [[ -z "$uid" ]]; then
+        return
+    fi
+    local roots=("/private/tmp/tmux-$uid" "/tmp/tmux-$uid")
+    local root socket_path
+    for root in "${roots[@]}"; do
+        socket_path="${root}/${label}"
+        if [[ -e "$socket_path" ]]; then
+            rm -f -- "$socket_path" 2>/dev/null || true
+        fi
+    done
+}
+
 # ============================================================================
 # Cleanup trap
 # ============================================================================
@@ -80,6 +106,7 @@ cleanup() {
         "$tmux_cmd" -L "$LABEL" kill-session -t "$SESSION" 2>/dev/null || true
         "$tmux_cmd" -L "$LABEL" kill-server 2>/dev/null || true
     fi
+    remove_managed_socket_files "$LABEL"
 }
 trap cleanup EXIT INT TERM HUP
 
