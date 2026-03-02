@@ -571,6 +571,26 @@ actor ClaudeStatusService {
         for pid in pids {
             await terminateProcessGroup(pid: pid)
         }
+
+        // Labels discovered on live orphan processes are protected during PID shutdown.
+        // After termination, unprotect and requeue so kill-server runs in this cycle.
+        guard !protectedLabels.isEmpty else { return }
+        tmuxCleanupPendingProtectedLabels.subtract(protectedLabels)
+        let rescannedLabels = scanTmuxLabels(prefix: Self.probeLabelPrefix)
+        enqueueTmuxCleanup(labels: rescannedLabels.union(protectedLabels), protectedLabels: [])
+        if tmuxCleanupInProgress {
+            scheduleDeferredTmuxCleanupPass()
+        } else {
+            tmuxCleanupInProgress = true
+            let hasMoreLabels = await runQueuedTmuxCleanupPass()
+            tmuxCleanupInProgress = false
+            if hasMoreLabels {
+                scheduleDeferredTmuxCleanupPass()
+            } else {
+                tmuxCleanupFollowUpTask?.cancel()
+                tmuxCleanupFollowUpTask = nil
+            }
+        }
     }
 
     private func cleanupOrphanedTmuxLabels() async {
