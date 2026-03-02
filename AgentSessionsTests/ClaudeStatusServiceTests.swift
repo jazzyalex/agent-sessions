@@ -2,6 +2,62 @@ import XCTest
 @testable import AgentSessions
 
 final class ClaudeStatusServiceTests: XCTestCase {
+    func testTerminalPathCacheCachesWithinTTL() {
+        var cache = ClaudeTerminalPathCache(ttlSeconds: 30)
+        var resolveCalls = 0
+        let now = Date(timeIntervalSince1970: 10_000)
+
+        let first = cache.resolve(at: now) {
+            resolveCalls += 1
+            return "/opt/homebrew/bin:/usr/bin:/bin"
+        }
+        let second = cache.resolve(at: now.addingTimeInterval(12)) {
+            resolveCalls += 1
+            return "/usr/bin:/bin"
+        }
+
+        XCTAssertEqual(first, "/opt/homebrew/bin:/usr/bin:/bin")
+        XCTAssertEqual(second, "/opt/homebrew/bin:/usr/bin:/bin")
+        XCTAssertEqual(resolveCalls, 1)
+    }
+
+    func testTerminalPathCacheRefreshesAfterTTLExpiry() {
+        var cache = ClaudeTerminalPathCache(ttlSeconds: 30)
+        var resolveCalls = 0
+        let now = Date(timeIntervalSince1970: 11_000)
+
+        _ = cache.resolve(at: now) {
+            resolveCalls += 1
+            return "/opt/homebrew/bin:/usr/bin:/bin"
+        }
+        let refreshed = cache.resolve(at: now.addingTimeInterval(45)) {
+            resolveCalls += 1
+            return "/usr/bin:/bin"
+        }
+
+        XCTAssertEqual(refreshed, "/usr/bin:/bin")
+        XCTAssertEqual(resolveCalls, 2)
+    }
+
+    func testTerminalPathCacheDoesNotCacheFailedResolutions() {
+        var cache = ClaudeTerminalPathCache(ttlSeconds: 30)
+        var resolveCalls = 0
+        let now = Date(timeIntervalSince1970: 12_000)
+
+        let first = cache.resolve(at: now) {
+            resolveCalls += 1
+            return nil
+        }
+        let second = cache.resolve(at: now.addingTimeInterval(1)) {
+            resolveCalls += 1
+            return "/usr/bin:/bin"
+        }
+
+        XCTAssertNil(first)
+        XCTAssertEqual(second, "/usr/bin:/bin")
+        XCTAssertEqual(resolveCalls, 2)
+    }
+
     func testTmuxPathCacheCachesWithinTTL() {
         var cache = ClaudeTmuxPathCache(ttlSeconds: 30)
         var resolveCalls = 0
