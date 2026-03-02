@@ -118,14 +118,17 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
 
 @MainActor
 final class CodexActiveSessionsModel: ObservableObject {
-    static let defaultPollInterval: TimeInterval = 2
-    static let defaultStaleTTL: TimeInterval = 10
-    static let backgroundPollInterval: TimeInterval = 15
+    nonisolated static let defaultPollInterval: TimeInterval = 2
+    nonisolated static let defaultStaleTTL: TimeInterval = 10
+    nonisolated static let backgroundPollInterval: TimeInterval = 15
+    nonisolated static let pinnedBackgroundPollInterval: TimeInterval = 3
     nonisolated private static let processProbeTimeout: TimeInterval = 0.75
     nonisolated private static let processProbeMinIntervalRegistryEmptyForeground: TimeInterval = 6
     nonisolated private static let processProbeMinIntervalRegistryEmptyBackground: TimeInterval = 45
     nonisolated private static let processProbeMinIntervalRegistryPresentForeground: TimeInterval = 30
     nonisolated private static let processProbeMinIntervalRegistryPresentBackground: TimeInterval = 120
+    nonisolated private static let resumeProbeBudgets: [Int] = [1, 2, 4]
+    nonisolated private static let steadyStateITermProbeBudget: Int = 4
     nonisolated(unsafe) private static let normalizedPathCache = NSCache<NSString, NSString>()
 #if DEBUG
     nonisolated(unsafe) private static var normalizedPathCacheHitCount: UInt64 = 0
@@ -156,8 +159,16 @@ final class CodexActiveSessionsModel: ObservableObject {
         didSet { refreshSoon() }
     }
 
+    @AppStorage(PreferencesKey.Cockpit.hudOpen)
+    private var hudOpen: Bool = false
+
+    @AppStorage(PreferencesKey.Cockpit.hudPinned)
+    private var hudPinned: Bool = false
+
     private var pollTask: Task<Void, Never>? = nil
     private var refreshTask: Task<Void, Never>? = nil
+    private var refreshInFlight: Bool = false
+    private var refreshQueued: Bool = false
 
     private var bySessionID: [String: CodexActivePresence] = [:]
     private var byLogPath: [String: CodexActivePresence] = [:]
@@ -167,6 +178,9 @@ final class CodexActiveSessionsModel: ObservableObject {
     private var unifiedVisibleConsumerIDs: Set<UUID> = []
     private var cockpitVisibleConsumerIDs: Set<UUID> = []
     private var appIsActive: Bool = true
+    private var resumeProbeBudgetIndex: Int? = nil
+    private var itermProbeRoundRobinCursor: Int = 0
+    private var forceFullProbeNextRefresh: Bool = false
 
     private struct SessionLookupCacheEntry {
         var source: SessionSource
@@ -256,6 +270,9 @@ final class CodexActiveSessionsModel: ObservableObject {
         if visible { unifiedVisibleConsumerIDs.insert(consumerID) }
         else { unifiedVisibleConsumerIDs.remove(consumerID) }
         guard hasVisibleConsumer != hadVisibleConsumer else { return }
+        if !hadVisibleConsumer, hasVisibleConsumer, appIsActive {
+            armForegroundProbeRamp()
+        }
         refreshSoon()
     }
 
@@ -264,12 +281,16 @@ final class CodexActiveSessionsModel: ObservableObject {
         if visible { cockpitVisibleConsumerIDs.insert(consumerID) }
         else { cockpitVisibleConsumerIDs.remove(consumerID) }
         guard hasVisibleConsumer != hadVisibleConsumer else { return }
+        if !hadVisibleConsumer, hasVisibleConsumer, appIsActive {
+            armForegroundProbeRamp()
+        }
         refreshSoon()
     }
 
     func setAppActive(_ active: Bool) {
         guard appIsActive != active else { return }
         appIsActive = active
+        if active { armForegroundProbeRamp() }
         refreshSoon()
     }
 
@@ -277,11 +298,21 @@ final class CodexActiveSessionsModel: ObservableObject {
         !unifiedVisibleConsumerIDs.isEmpty || !cockpitVisibleConsumerIDs.isEmpty
     }
 
+    private var hasVisibleCockpitConsumer: Bool {
+        !cockpitVisibleConsumerIDs.isEmpty
+    }
+
+    private var isPinnedCockpitVisible: Bool {
+        hasVisibleCockpitConsumer && hudOpen && hudPinned
+    }
+
     func refreshNow() {
         // Manual refresh should bypass probe throttling so live state transitions
         // (active -> open and vice versa) are reflected immediately.
         lastProcessProbeAt = nil
         cachedProcessPresences = []
+        forceFullProbeNextRefresh = true
+        armForegroundProbeRamp()
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             await self?.refreshOnce()
@@ -308,6 +339,8 @@ final class CodexActiveSessionsModel: ObservableObject {
         pollTask = nil
         refreshTask?.cancel()
         refreshTask = nil
+        refreshInFlight = false
+        refreshQueued = false
         if clear {
             presences = []
             bySessionID = [:]
@@ -320,6 +353,9 @@ final class CodexActiveSessionsModel: ObservableObject {
             // open windows immediately restore foreground cadence without requiring re-appear.
             sessionLookupCacheByID = [:]
             lastRefreshAt = nil
+            resumeProbeBudgetIndex = nil
+            itermProbeRoundRobinCursor = 0
+            forceFullProbeNextRefresh = false
             activeMembershipVersion &+= 1
         }
     }
@@ -335,6 +371,20 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     private func refreshOnce() async {
         guard enabled else { return }
+        if refreshInFlight {
+            refreshQueued = true
+            return
+        }
+        refreshInFlight = true
+        defer {
+            refreshInFlight = false
+            if refreshQueued {
+                refreshQueued = false
+                Task { [weak self] in
+                    await self?.refreshOnce()
+                }
+            }
+        }
 
         let now = Date()
 #if DEBUG
@@ -400,8 +450,11 @@ final class CodexActiveSessionsModel: ObservableObject {
                 ))
             }
             if hasVisibleConsumerSnapshot {
-                out.append(contentsOf: Self.discoverPresencesFromITermSessions(source: .codex, now: now, timeout: Self.processProbeTimeout))
-                out.append(contentsOf: Self.discoverPresencesFromITermSessions(source: .claude, now: now, timeout: Self.processProbeTimeout))
+                let sessions = Self.loadITermSessions(timeout: Self.processProbeTimeout)
+                if !sessions.isEmpty {
+                    out.append(contentsOf: Self.presencesFromITermSessions(sessions, source: .codex, now: now))
+                    out.append(contentsOf: Self.presencesFromITermSessions(sessions, source: .claude, now: now))
+                }
             }
             return (out, shouldProbeProcesses, registryHasPresences)
         }.value
@@ -455,12 +508,19 @@ final class CodexActiveSessionsModel: ObservableObject {
         }
         ui = Self.reconcileFallbackPresences(Array(fallbackMap.values), into: ui)
 
+        let probedITermPresenceKeys = plannedITermProbePresenceKeys(
+            for: ui,
+            hasVisibleConsumer: hasVisibleConsumerSnapshot
+        )
+
         let nextLiveStates = await Task.detached(priority: .utility) {
             Self.classifyLiveStates(
                 for: ui,
                 now: now,
                 probeITerm: hasVisibleConsumerSnapshot,
-                timeout: Self.processProbeTimeout
+                timeout: Self.processProbeTimeout,
+                previousLiveStates: previousLiveStates,
+                probedITermPresenceKeys: probedITermPresenceKeys
             )
         }.value
 
@@ -500,7 +560,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             debugMetrics.processProbeSkips &+= 1
         }
         if refreshDurationMs > 25 {
-            print("[CodexActiveSessionsModel][perf] refreshOnce took \(String(format: "%.1f", refreshDurationMs))ms didProbe=\(probeResult.didProbe) registryHadPresences=\(probeResult.registryHadPresences) loaded=\(loaded.count)")
+            print("[CodexActiveSessionsModel][perf] refreshOnce took \(String(format: "%.1f", refreshDurationMs))ms didProbe=\(probeResult.didProbe) registryHadPresences=\(probeResult.registryHadPresences) loaded=\(loaded.count) itermProbed=\(probedITermPresenceKeys.count)")
         }
         maybeReportDebugMetrics(now: now)
 #endif
@@ -875,9 +935,103 @@ final class CodexActiveSessionsModel: ObservableObject {
         return nil
     }
 
+    private func armForegroundProbeRamp() {
+        guard hasVisibleConsumer else { return }
+        resumeProbeBudgetIndex = 0
+    }
+
+    private func plannedITermProbePresenceKeys(for presences: [CodexActivePresence],
+                                               hasVisibleConsumer: Bool) -> Set<String> {
+        guard hasVisibleConsumer else { return [] }
+        let candidates = Self.itermProbeCandidateKeys(for: presences).sorted()
+        guard !candidates.isEmpty else { return [] }
+
+        if forceFullProbeNextRefresh {
+            forceFullProbeNextRefresh = false
+            resumeProbeBudgetIndex = nil
+            itermProbeRoundRobinCursor = candidates.count == 0 ? 0 : (itermProbeRoundRobinCursor % candidates.count)
+            return Set(candidates)
+        }
+
+        let budget = nextITermProbeBudget()
+        let selection = Self.selectRoundRobinKeys(
+            sortedKeys: candidates,
+            start: itermProbeRoundRobinCursor,
+            budget: budget
+        )
+        itermProbeRoundRobinCursor = selection.nextCursor
+        return Set(selection.selected)
+    }
+
+    private func nextITermProbeBudget() -> Int {
+        let next = Self.nextITermProbeBudget(resumeIndex: resumeProbeBudgetIndex)
+        resumeProbeBudgetIndex = next.nextResumeIndex
+        return next.budget
+    }
+
     private func pollIntervalSeconds() -> TimeInterval {
-        guard appIsActive else { return Self.backgroundPollInterval }
+        Self.effectivePollIntervalSeconds(
+            appIsActive: appIsActive,
+            hasVisibleConsumer: hasVisibleConsumer,
+            isPinnedCockpitVisible: isPinnedCockpitVisible
+        )
+    }
+
+    nonisolated static func effectivePollIntervalSeconds(appIsActive: Bool,
+                                                         hasVisibleConsumer: Bool,
+                                                         isPinnedCockpitVisible: Bool) -> TimeInterval {
+        guard appIsActive else {
+            return isPinnedCockpitVisible ? Self.pinnedBackgroundPollInterval : Self.backgroundPollInterval
+        }
         return hasVisibleConsumer ? Self.defaultPollInterval : Self.backgroundPollInterval
+    }
+
+    nonisolated static func nextITermProbeBudget(resumeIndex: Int?) -> (budget: Int, nextResumeIndex: Int?) {
+        guard let resumeIndex else {
+            return (Self.steadyStateITermProbeBudget, nil)
+        }
+        guard !Self.resumeProbeBudgets.isEmpty else {
+            return (Self.steadyStateITermProbeBudget, nil)
+        }
+        let bounded = max(0, min(resumeIndex, Self.resumeProbeBudgets.count - 1))
+        let budget = Self.resumeProbeBudgets[bounded]
+        let next: Int? = (bounded + 1 < Self.resumeProbeBudgets.count) ? (bounded + 1) : nil
+        return (budget, next)
+    }
+
+    nonisolated static func selectRoundRobinKeys(sortedKeys: [String],
+                                                 start: Int,
+                                                 budget: Int) -> (selected: [String], nextCursor: Int) {
+        guard !sortedKeys.isEmpty else { return ([], 0) }
+        let normalizedBudget = max(1, budget)
+        let cappedBudget = min(sortedKeys.count, normalizedBudget)
+        var out: [String] = []
+        out.reserveCapacity(cappedBudget)
+
+        let startIndex = ((start % sortedKeys.count) + sortedKeys.count) % sortedKeys.count
+        for offset in 0..<cappedBudget {
+            let index = (startIndex + offset) % sortedKeys.count
+            out.append(sortedKeys[index])
+        }
+        let next = (startIndex + cappedBudget) % sortedKeys.count
+        return (out, next)
+    }
+
+    nonisolated static func itermProbeCandidateKeys(for presences: [CodexActivePresence]) -> [String] {
+        var out: [String] = []
+        out.reserveCapacity(presences.count)
+        for presence in presences {
+            guard presence.source == .codex || presence.source == .claude else { continue }
+            guard canAttemptITerm2TailProbe(
+                itermSessionId: presence.terminal?.itermSessionId,
+                tty: presence.tty,
+                termProgram: presence.terminal?.termProgram
+            ) else { continue }
+            let key = presenceKey(for: presence)
+            if key == "unknown" { continue }
+            out.append(key)
+        }
+        return out
     }
 
     nonisolated private static func processProbeMinIntervalSeconds(registryHasPresences: Bool,
@@ -1375,7 +1529,9 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated private static func classifyLiveStates(for presences: [CodexActivePresence],
                                                        now: Date,
                                                        probeITerm: Bool,
-                                                       timeout: TimeInterval) -> [String: CodexLiveState] {
+                                                       timeout: TimeInterval,
+                                                       previousLiveStates: [String: CodexLiveState],
+                                                       probedITermPresenceKeys: Set<String>) -> [String: CodexLiveState] {
         var out: [String: CodexLiveState] = [:]
         out.reserveCapacity(presences.count)
 
@@ -1384,11 +1540,13 @@ final class CodexActiveSessionsModel: ObservableObject {
             guard key != "unknown" else { continue }
 
             var state: CodexLiveState?
-            let canProbeITerm = probeITerm && canAttemptITerm2TailProbe(
+            let probeEligible = probeITerm && canAttemptITerm2TailProbe(
                 itermSessionId: presence.terminal?.itermSessionId,
                 tty: presence.tty,
                 termProgram: presence.terminal?.termProgram
             )
+            let shouldProbeThisPresence = probeEligible && probedITermPresenceKeys.contains(key)
+            let canProbeITerm = shouldProbeThisPresence
             if canProbeITerm, presence.source == .codex {
                 if let tail = captureITermTail(
                     itermSessionId: presence.terminal?.itermSessionId,
@@ -1421,7 +1579,13 @@ final class CodexActiveSessionsModel: ObservableObject {
                 now: now,
                 activeWriteWindow: activeWriteWindow(for: presence.source)
             )
-            let resolved = state ?? heuristic
+            let resolved = resolveLiveState(
+                probedState: state,
+                previousState: previousLiveStates[key],
+                heuristic: heuristic,
+                attemptedITermProbe: shouldProbeThisPresence,
+                preservePreviousWhenProbeDeferred: probeEligible && !shouldProbeThisPresence
+            )
             if let existing = out[key] {
                 if resolved.priority > existing.priority {
                     out[key] = resolved
@@ -1432,6 +1596,16 @@ final class CodexActiveSessionsModel: ObservableObject {
         }
 
         return out
+    }
+
+    nonisolated static func resolveLiveState(probedState: CodexLiveState?,
+                                             previousState: CodexLiveState?,
+                                             heuristic: CodexLiveState,
+                                             attemptedITermProbe: Bool,
+                                             preservePreviousWhenProbeDeferred: Bool) -> CodexLiveState {
+        if let probedState { return probedState }
+        if preservePreviousWhenProbeDeferred, !attemptedITermProbe, let previousState { return previousState }
+        return heuristic
     }
 
     nonisolated private static func activeWriteWindow(for source: SessionSource) -> TimeInterval {
@@ -1615,6 +1789,12 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated static func discoverPresencesFromITermSessions(source: SessionSource,
                                                                now: Date,
                                                                timeout: TimeInterval) -> [CodexActivePresence] {
+        let sessions = loadITermSessions(timeout: timeout)
+        guard !sessions.isEmpty else { return [] }
+        return presencesFromITermSessions(sessions, source: source, now: now)
+    }
+
+    nonisolated private static func loadITermSessions(timeout: TimeInterval) -> [ITermSessionInfo] {
         let scriptLines = [
             "set outRows to {}",
             "set sep to (ASCII character 9)",
@@ -1641,7 +1821,12 @@ final class CodexActiveSessionsModel: ObservableObject {
             return []
         }
         let raw = String(decoding: out, as: UTF8.self)
-        let sessions = parseITermSessionListOutput(raw)
+        return parseITermSessionListOutput(raw)
+    }
+
+    nonisolated static func presencesFromITermSessions(_ sessions: [ITermSessionInfo],
+                                                        source: SessionSource,
+                                                        now: Date) -> [CodexActivePresence] {
         guard !sessions.isEmpty else { return [] }
 
         var presences: [CodexActivePresence] = []

@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Sessions (Unified): Added `CLI Agent` cell double-click terminal focusing in the Sessions list (same focus path as `Focus in iTerm2`), with explicit alert feedback when no focusable live terminal is available.
 
 ### Fixed
+- Sessions (Agent Cockpit/Codex live detection): Pinned `Agent Cockpit` now uses a faster background refresh cadence (`3s`), foreground-return iTerm live-state probing now ramps in bounded batches to flatten short CPU spikes, and iTerm session discovery now reuses a single session-list fetch for Codex+Claude.
 - Sessions (Gemini): Session discovery now accepts named Gemini project directories under `~/.gemini/tmp` (for example `radio4j`), while still supporting both `chats/session-*.json` and direct `session-*.json` layouts.
 - Usage tracking (menu bar): The menu bar quota tracker now shows an in-progress spinner while Codex or Claude usage probes are running, matching the in-app usage strip behavior even when reset indicators are hidden.
 - Sessions (Cockpit): Selected-row text/dot colors now switch to selection-aware foreground styling and use the main Sessions-list selection accent/table style, improving readability when a Cockpit row is selected.
