@@ -173,12 +173,17 @@ struct AgentCockpitHUDView: View {
         let shownSessionCount = visibleRows.count
         let grouped = groupedRows(from: visibleRows)
         let renderedRows = renderedRows(visibleRows: visibleRows, groupedRows: grouped)
+        let compactLayoutUnits = compactLayoutUnitCount(visibleRows: visibleRows, groupedRows: grouped)
+        let compactBodyHeight = compactListHeight(forLayoutUnits: compactLayoutUnits)
         let rowIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
             let (index, row) = pair
             if partial[row.id] == nil {
                 partial[row.id] = index + 1
             }
         }
+        let compactContentHeight = isCompact && activeEnabled
+            ? compactContentHeight(forBodyHeight: compactBodyHeight)
+            : nil
 
         return VStack(spacing: 0) {
             header(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount)
@@ -196,7 +201,8 @@ struct AgentCockpitHUDView: View {
             bodyList(
                 visibleRows: visibleRows,
                 groupedRows: grouped,
-                rowIndexMap: rowIndexMap
+                rowIndexMap: rowIndexMap,
+                compactBodyHeight: compactBodyHeight
             )
             .background(Color.clear)
             .disabled(!activeEnabled)
@@ -204,7 +210,14 @@ struct AgentCockpitHUDView: View {
             hiddenShortcuts(renderedRows: renderedRows)
         }
         .background(.ultraThinMaterial)
-        .background(AgentCockpitHUDWindowConfigurator(isPinned: isPinned, shownSessionCount: shownSessionCount))
+        .background(
+            AgentCockpitHUDWindowConfigurator(
+                isPinned: isPinned,
+                shownSessionCount: shownSessionCount,
+                isCompact: isCompact,
+                compactContentHeight: compactContentHeight
+            )
+        )
         .clipShape(RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.cornerRadius, style: .continuous)
@@ -343,7 +356,10 @@ struct AgentCockpitHUDView: View {
     }
 
     @ViewBuilder
-    private func bodyList(visibleRows: [HUDRow], groupedRows: [HUDGroup], rowIndexMap: [String: Int]) -> some View {
+    private func bodyList(visibleRows: [HUDRow],
+                          groupedRows: [HUDGroup],
+                          rowIndexMap: [String: Int],
+                          compactBodyHeight: CGFloat) -> some View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 if groupByProject {
@@ -364,7 +380,8 @@ struct AgentCockpitHUDView: View {
                                     rowNumber: rowIndexMap[row.id] ?? 0,
                                     isSelected: selectedRowID == row.id,
                                     filterText: filterText,
-                                    isGrouped: true
+                                    isGrouped: true,
+                                    isCompact: isCompact
                                 ) {
                                     selectedRowID = row.id
                                     focusedArea = .rows
@@ -389,7 +406,8 @@ struct AgentCockpitHUDView: View {
                             rowNumber: index + 1,
                             isSelected: selectedRowID == row.id,
                             filterText: filterText,
-                            isGrouped: false
+                            isGrouped: false,
+                            isCompact: isCompact
                         ) {
                             selectedRowID = row.id
                             focusedArea = .rows
@@ -400,10 +418,62 @@ struct AgentCockpitHUDView: View {
             }
             .padding(.vertical, 2)
         }
-        .frame(minHeight: isCompact ? 110 : 170)
+        .frame(
+            minHeight: isCompact ? compactBodyHeight : 170
+        )
         .focusable()
         .focusEffectDisabled()
         .focused($focusedArea, equals: .rows)
+    }
+
+    private func compactWindowVisibleSessionCount(from shownSessionCount: Int) -> Int {
+        min(max(shownSessionCount, 1), 8)
+    }
+
+    private func compactLayoutUnitCount(visibleRows: [HUDRow], groupedRows: [HUDGroup]) -> Int {
+        if groupByProject {
+            var remainingSessions = compactWindowVisibleSessionCount(
+                from: renderedRows(visibleRows: visibleRows, groupedRows: groupedRows).count
+            )
+            var units = 0
+            var emittedAnySession = false
+
+            for group in groupedRows {
+                units += 1 // group header
+                guard !collapsedProjects.contains(group.id) else { continue }
+                guard remainingSessions > 0 else { break }
+
+                let take = min(group.rows.count, remainingSessions)
+                units += take
+                remainingSessions -= take
+                if take > 0 { emittedAnySession = true }
+
+                if remainingSessions == 0 { break }
+            }
+
+            return max(units, emittedAnySession ? 1 : 2)
+        }
+
+        let visibleSessionCount = compactWindowVisibleSessionCount(from: visibleRows.count)
+        var units = visibleSessionCount
+        if chipFilter == nil,
+           let firstIdleIndex = visibleRows.firstIndex(where: { $0.liveState == .idle }),
+           firstIdleIndex < visibleSessionCount {
+            units += 1 // active/idle divider row
+        }
+        return max(units, 1)
+    }
+
+    private func compactListHeight(forLayoutUnits layoutUnits: Int) -> CGFloat {
+        let unitHeight: CGFloat = 31
+        let verticalInsets: CGFloat = 4
+        return (CGFloat(layoutUnits) * unitHeight) + verticalInsets
+    }
+
+    private func compactContentHeight(forBodyHeight bodyHeight: CGFloat) -> CGFloat {
+        let compactHeaderHeight: CGFloat = 44
+        let headerDividerHeight: CGFloat = 0.5
+        return compactHeaderHeight + headerDividerHeight + bodyHeight
     }
 
     @ViewBuilder
@@ -670,8 +740,7 @@ struct AgentCockpitHUDView: View {
 
         let hudRows = sorted.map { row in
             let hudState = mapLiveState(row.liveState)
-            let elapsed = elapsedLabel(from: row.date ?? row.lastSeenAt)
-            let idlePreview = row.lastSeenAt.map { "Last active \(elapsedLabel(from: $0)) ago" } ?? "Idle"
+            let elapsed = elapsedLabel(from: row.lastSeenAt ?? row.date)
             return HUDRow(
                 id: row.id,
                 source: row.source,
@@ -679,7 +748,7 @@ struct AgentCockpitHUDView: View {
                 projectName: row.repo,
                 displayName: row.title,
                 liveState: hudState,
-                preview: hudState == .active ? row.title : idlePreview,
+                preview: row.title,
                 elapsed: elapsed,
                 lastSeenAt: row.lastSeenAt,
                 itermSessionId: row.itermSessionId,
