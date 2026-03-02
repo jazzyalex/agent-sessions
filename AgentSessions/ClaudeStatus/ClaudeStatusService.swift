@@ -100,6 +100,7 @@ actor ClaudeStatusService {
     private static let tmuxCleanupFollowUpDelayNanoseconds: UInt64 = 1_000_000_000
     private static let tmuxCleanupMaxKillAttemptsPerLabel = 2
     private static let tmuxPathCacheTTLSeconds: TimeInterval = 30 * 60
+    private static let terminalPathCacheTTLSeconds: TimeInterval = 30 * 60
     private static let defaultScriptBootTimeoutSeconds = 10
     private static let scriptRuntimeBufferSeconds = 18
     private static let minimumScriptRuntimeTimeoutSeconds = 30
@@ -143,13 +144,16 @@ actor ClaudeStatusService {
     private var tmuxCleanupPendingProtectedLabels: Set<String> = []
     private var tmuxCleanupNextIndex: Int = 0
     private var tmuxCleanupRetryCounts: [String: Int] = [:]
+    private var refresherLoopGeneration: UInt64 = 0
     private var tmuxPathCache: ClaudeTmuxPathCache
+    private var terminalPathCache: ClaudeTerminalPathCache
 
     init(updateHandler: @escaping @Sendable (ClaudeUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (ClaudeServiceAvailability) -> Void) {
         self.updateHandler = updateHandler
         self.availabilityHandler = availabilityHandler
         self.tmuxPathCache = ClaudeTmuxPathCache(ttlSeconds: Self.tmuxPathCacheTTLSeconds)
+        self.terminalPathCache = ClaudeTerminalPathCache(ttlSeconds: Self.terminalPathCacheTTLSeconds)
     }
 
     static func cleanupOrphansOnLaunch() async {
@@ -182,6 +186,7 @@ actor ClaudeStatusService {
         shouldRun = false
         refresherTask?.cancel()
         refresherTask = nil
+        refresherLoopGeneration &+= 1
         if let label = activeProbeLabel {
             await cleanupTmuxProbe(label: label, session: Self.probeSessionName)
             activeProbeLabel = nil
@@ -337,7 +342,7 @@ actor ClaudeStatusService {
 
         var env = ProcessInfo.processInfo.environment
         // Replace minimal GUI PATH with the user's login shell PATH.
-        if let terminalPATH = resolveTerminalPATH() { env["PATH"] = terminalPATH }
+        if let terminalPATH = resolveTerminalPATHCached() { env["PATH"] = terminalPATH }
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
         env["WORKDIR"] = workDir
         env["MODEL"] = "sonnet"
@@ -402,7 +407,7 @@ actor ClaudeStatusService {
         // Set environment for script
         var env = ProcessInfo.processInfo.environment
         // Replace minimal GUI PATH with the user's login shell PATH.
-        if let terminalPATH = resolveTerminalPATH() { env["PATH"] = terminalPATH }
+        if let terminalPATH = resolveTerminalPATHCached() { env["PATH"] = terminalPATH }
         // Use stable probe working directory so Claude maps all probes to one project
         let workDir = ClaudeProbeConfig.probeWorkingDirectory()
         try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
@@ -635,7 +640,12 @@ actor ClaudeStatusService {
     private func scheduleDeferredTmuxCleanupPass() {
         tmuxCleanupFollowUpTask?.cancel()
         tmuxCleanupFollowUpTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.tmuxCleanupFollowUpDelayNanoseconds)
+            do {
+                try await Task.sleep(nanoseconds: Self.tmuxCleanupFollowUpDelayNanoseconds)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
             await self?.cleanupOrphanedTmuxLabels()
         }
     }
@@ -1108,6 +1118,8 @@ actor ClaudeStatusService {
     private func restartRefresherLoopIfNeeded() {
         refresherTask?.cancel()
         refresherTask = nil
+        refresherLoopGeneration &+= 1
+        let generation = refresherLoopGeneration
 
         // Auto probes run only when polling is allowed for the current visibility state.
         guard shouldRun, tmuxAvailable, claudeAvailable, autoPollingAllowed else {
@@ -1116,10 +1128,18 @@ actor ClaudeStatusService {
 
         refresherTask = Task { [weak self] in
             guard let self else { return }
-            while await self.shouldRun {
+            while !Task.isCancelled {
+                if await self.refresherLoopGeneration != generation { break }
+                if !(await self.shouldRun) { break }
                 await self.refreshTick()
+                if Task.isCancelled { break }
+                if await self.refresherLoopGeneration != generation { break }
                 let interval = await self.nextInterval()
-                try? await Task.sleep(nanoseconds: interval)
+                do {
+                    try await Task.sleep(nanoseconds: interval)
+                } catch {
+                    break
+                }
             }
         }
     }
@@ -1190,7 +1210,13 @@ actor ClaudeStatusService {
         }
     }
 
-    private func resolveTerminalPATH() -> String? {
+    private func resolveTerminalPATHCached(forceRefresh: Bool = false) -> String? {
+        terminalPathCache.resolve(at: Date(), forceRefresh: forceRefresh) { [self] in
+            resolveTerminalPATHViaLoginShell()
+        }
+    }
+
+    private func resolveTerminalPATHViaLoginShell() -> String? {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let startMarker = "__AS_PATH_BEGIN__"
         let endMarker = "__AS_PATH_END__"
@@ -1237,6 +1263,38 @@ actor ClaudeStatusService {
 }
 
 struct ClaudeTmuxPathCache {
+    let ttlSeconds: TimeInterval
+    private(set) var cachedPath: String?
+    private(set) var resolvedAt: Date?
+
+    init(ttlSeconds: TimeInterval) {
+        self.ttlSeconds = ttlSeconds
+    }
+
+    mutating func resolve(at now: Date,
+                          forceRefresh: Bool = false,
+                          resolver: () -> String?) -> String? {
+        if !forceRefresh,
+           let cachedPath,
+           let resolvedAt,
+           now.timeIntervalSince(resolvedAt) < ttlSeconds {
+            return cachedPath
+        }
+        guard let resolved = resolver() else {
+            return cachedPath
+        }
+        cachedPath = resolved
+        resolvedAt = now
+        return resolved
+    }
+
+    mutating func invalidate() {
+        cachedPath = nil
+        resolvedAt = nil
+    }
+}
+
+struct ClaudeTerminalPathCache {
     let ttlSeconds: TimeInterval
     private(set) var cachedPath: String?
     private(set) var resolvedAt: Date?
