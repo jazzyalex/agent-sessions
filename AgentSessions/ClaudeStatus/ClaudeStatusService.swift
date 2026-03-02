@@ -87,12 +87,18 @@ actor ClaudeStatusService {
     }
 
     private enum State { case idle, running, stopping }
+    private enum TmuxSocketState {
+        case stale
+        case live
+        case unknown
+    }
     private static let probeSessionName = "usage"
     private static let probeLabelPrefix = "as-cc-"
     private static let probeLabelLength = 12
     private static let tmuxCleanupPlanner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
-    private static let tmuxCleanupMaxLabelsPerPass = 20
-    private static let tmuxCleanupFollowUpDelayNanoseconds: UInt64 = 5_000_000_000
+    private static let tmuxCleanupMaxLabelsPerPass = 80
+    private static let tmuxCleanupFollowUpDelayNanoseconds: UInt64 = 1_000_000_000
+    private static let tmuxCleanupMaxKillAttemptsPerLabel = 2
     private static let tmuxPathCacheTTLSeconds: TimeInterval = 30 * 60
     private static let defaultScriptBootTimeoutSeconds = 10
     private static let scriptRuntimeBufferSeconds = 18
@@ -136,6 +142,7 @@ actor ClaudeStatusService {
     private var tmuxCleanupPendingLabels: [String] = []
     private var tmuxCleanupPendingProtectedLabels: Set<String> = []
     private var tmuxCleanupNextIndex: Int = 0
+    private var tmuxCleanupRetryCounts: [String: Int] = [:]
     private var tmuxPathCache: ClaudeTmuxPathCache
 
     init(updateHandler: @escaping @Sendable (ClaudeUsageSnapshot) -> Void,
@@ -656,6 +663,7 @@ actor ClaudeStatusService {
         if tmuxCleanupQueueNeedsRefill {
             tmuxCleanupPendingLabels = candidateQueue
             tmuxCleanupNextIndex = 0
+            tmuxCleanupRetryCounts = tmuxCleanupRetryCounts.filter { tmuxCleanupPendingLabels.contains($0.key) }
             return
         }
 
@@ -667,21 +675,18 @@ actor ClaudeStatusService {
         )
         tmuxCleanupPendingLabels = merged
         tmuxCleanupNextIndex = 0
+        tmuxCleanupRetryCounts = tmuxCleanupRetryCounts.filter { tmuxCleanupPendingLabels.contains($0.key) }
     }
 
     private func clearTmuxCleanupQueue() {
         tmuxCleanupPendingLabels.removeAll(keepingCapacity: false)
         tmuxCleanupPendingProtectedLabels.removeAll(keepingCapacity: false)
         tmuxCleanupNextIndex = 0
+        tmuxCleanupRetryCounts.removeAll(keepingCapacity: false)
     }
 
     private func runQueuedTmuxCleanupPass() async -> Bool {
         guard tmuxCleanupNextIndex < tmuxCleanupPendingLabels.count else {
-            clearTmuxCleanupQueue()
-            return false
-        }
-        guard let tmuxPath = resolveTmuxPathCached() else {
-            print("ClaudeStatusService: tmux cleanup skipped; tmux path unavailable")
             clearTmuxCleanupQueue()
             return false
         }
@@ -690,25 +695,60 @@ actor ClaudeStatusService {
         let end = min(start + Self.tmuxCleanupMaxLabelsPerPass, tmuxCleanupPendingLabels.count)
         let batch = tmuxCleanupPendingLabels[start..<end]
         var removed = 0
+        var staleRemoved = 0
         var skipped = 0
-        var invalidPath = false
+        var liveCandidates: [String] = []
+        liveCandidates.reserveCapacity(batch.count)
 
         for label in batch {
             if label == activeProbeLabel || tmuxCleanupPendingProtectedLabels.contains(label) {
                 skipped += 1
                 continue
             }
-            let result = await runProcess(executable: tmuxPath,
-                                          arguments: ["-L", label, "kill-server"],
-                                          timeoutSeconds: 1)
-            if result.status == 127 {
-                invalidPath = true
-                break
+            if (tmuxCleanupRetryCounts[label] ?? 0) >= Self.tmuxCleanupMaxKillAttemptsPerLabel {
+                skipped += 1
+                continue
             }
-            if result.status == 0 {
+            let socketState = tmuxSocketState(for: label)
+            switch socketState {
+            case .stale:
                 removeTmuxSocketFiles(label: label)
-                removed += 1
-            } else {
+                tmuxCleanupRetryCounts.removeValue(forKey: label)
+                staleRemoved += 1
+            case .live, .unknown:
+                liveCandidates.append(label)
+            }
+        }
+
+        var invalidPath = false
+
+        if !liveCandidates.isEmpty {
+            guard let tmuxPath = resolveTmuxPathCached() else {
+                print("ClaudeStatusService: tmux cleanup skipped; tmux path unavailable")
+                clearTmuxCleanupQueue()
+                return false
+            }
+            for label in liveCandidates {
+                let result = await runProcess(executable: tmuxPath,
+                                              arguments: ["-L", label, "kill-server"],
+                                              timeoutSeconds: 1)
+                if result.status == 127 {
+                    invalidPath = true
+                    break
+                }
+                if result.status == 0 {
+                    removeTmuxSocketFiles(label: label)
+                    tmuxCleanupRetryCounts.removeValue(forKey: label)
+                    removed += 1
+                    continue
+                }
+                if tmuxSocketState(for: label) == .stale {
+                    removeTmuxSocketFiles(label: label)
+                    tmuxCleanupRetryCounts.removeValue(forKey: label)
+                    staleRemoved += 1
+                    continue
+                }
+                tmuxCleanupRetryCounts[label, default: 0] += 1
                 skipped += 1
             }
         }
@@ -722,7 +762,7 @@ actor ClaudeStatusService {
 
         tmuxCleanupNextIndex = end
         let remaining = max(0, tmuxCleanupPendingLabels.count - tmuxCleanupNextIndex)
-        print("ClaudeStatusService: tmux cleanup pass processed=\(batch.count) removed=\(removed) skipped=\(skipped) remaining=\(remaining)")
+        print("ClaudeStatusService: tmux cleanup pass processed=\(batch.count) liveCandidates=\(liveCandidates.count) removed=\(removed) staleRemoved=\(staleRemoved) skipped=\(skipped) remaining=\(remaining)")
         if remaining == 0 {
             clearTmuxCleanupQueue()
             return false
@@ -774,8 +814,7 @@ actor ClaudeStatusService {
     private func removeTmuxSocketFiles(label: String) {
         guard Self.tmuxCleanupPlanner.isManagedProbeLabel(label) else { return }
         let fm = FileManager.default
-        for root in Self.tmuxSocketRoots(uid: getuid()) {
-            let path = (root as NSString).appendingPathComponent(label)
+        for path in Self.tmuxCleanupPlanner.socketPaths(uid: getuid(), label: label) {
             if fm.fileExists(atPath: path) {
                 try? fm.removeItem(atPath: path)
             }
@@ -784,6 +823,77 @@ actor ClaudeStatusService {
 
     private static func tmuxSocketRoots(uid: uid_t) -> [String] {
         ["/private/tmp/tmux-\(uid)", "/tmp/tmux-\(uid)"]
+    }
+
+    private func tmuxSocketState(for label: String) -> TmuxSocketState {
+        let paths = Self.tmuxCleanupPlanner.socketPaths(uid: getuid(), label: label)
+        guard !paths.isEmpty else { return .unknown }
+        var foundSocketPath = false
+        var sawUnknown = false
+
+        for path in paths {
+            var metadata = stat()
+            guard lstat(path, &metadata) == 0 else { continue }
+            foundSocketPath = true
+            if (metadata.st_mode & S_IFMT) != S_IFSOCK {
+                return .stale
+            }
+            switch tmuxSocketConnectionState(path: path) {
+            case .live:
+                return .live
+            case .stale:
+                continue
+            case .unknown:
+                sawUnknown = true
+            }
+        }
+
+        // If no socket exists in the default roots, the tmux server may still be alive
+        // under a nonstandard TMUX_TMPDIR. Treat as unknown so cleanup attempts kill-server.
+        guard foundSocketPath else { return .unknown }
+        return sawUnknown ? .unknown : .stale
+    }
+
+    private func tmuxSocketConnectionState(path: String) -> TmuxSocketState {
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return .unknown }
+        defer { _ = Darwin.close(fd) }
+
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        #if os(macOS)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        #endif
+
+        let bytes = path.utf8CString
+        guard bytes.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+            return .unknown
+        }
+
+        withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+            buffer.initializeMemory(as: CChar.self, repeating: 0)
+            guard let cBuffer = buffer.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
+            for (index, value) in bytes.enumerated() {
+                cBuffer[index] = value
+            }
+        }
+
+        var mutableAddress = address
+        let result = withUnsafePointer(to: &mutableAddress) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockAddr in
+                Darwin.connect(fd, sockAddr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+
+        if result == 0 {
+            return .live
+        }
+        switch errno {
+        case ECONNREFUSED, ENOENT, ENOTSOCK:
+            return .stale
+        default:
+            return .unknown
+        }
     }
 
     private func tmuxPanePID(tmuxPath: String, label: String, session: String) async -> pid_t? {
@@ -1179,6 +1289,11 @@ struct ClaudeTmuxCleanupPlanner {
             .filter { !protectedLabels.contains($0) }
             .filter { $0 != activeLabel }
             .sorted()
+    }
+
+    func socketPaths(uid: uid_t, label: String) -> [String] {
+        guard isManagedProbeLabel(label) else { return [] }
+        return ["/private/tmp/tmux-\(uid)/\(label)", "/tmp/tmux-\(uid)/\(label)"]
     }
 }
 

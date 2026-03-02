@@ -124,4 +124,25 @@ final class ClaudeStatusServiceTests: XCTestCase {
 
         XCTAssertEqual(queue, ["as-cc-AbCdEf1234g5"])
     }
+
+    func testCleanupPlannerSocketPathsForManagedLabel() {
+        let planner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
+
+        let paths = planner.socketPaths(uid: 501, label: "as-cc-AbCdEf1234g5")
+
+        XCTAssertEqual(
+            paths,
+            [
+                "/private/tmp/tmux-501/as-cc-AbCdEf1234g5",
+                "/tmp/tmux-501/as-cc-AbCdEf1234g5"
+            ]
+        )
+    }
+
+    func testCleanupPlannerSocketPathsRejectUnmanagedLabel() {
+        let planner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
+
+        XCTAssertTrue(planner.socketPaths(uid: 501, label: "as-cc-1bCdEf1234g5").isEmpty)
+        XCTAssertTrue(planner.socketPaths(uid: 501, label: "other-label").isEmpty)
+    }
 }
