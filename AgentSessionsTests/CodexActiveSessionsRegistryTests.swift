@@ -474,6 +474,135 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out[2].name, "codex")
     }
 
+    func testPresencesFromITermSessions_mapsRowsBySourceFromSingleSessionList() {
+        let now = Date()
+        let sessions = [
+            CodexActiveSessionsModel.ITermSessionInfo(sessionID: "COD-1", tty: "/dev/ttys006", name: "AS-CX II (codex)"),
+            CodexActiveSessionsModel.ITermSessionInfo(sessionID: "CLA-1", tty: "/dev/ttys010", name: "Claude"),
+            CodexActiveSessionsModel.ITermSessionInfo(sessionID: "SHELL-1", tty: "/dev/ttys011", name: "-zsh")
+        ]
+
+        let codex = CodexActiveSessionsModel.presencesFromITermSessions(sessions, source: .codex, now: now)
+        XCTAssertEqual(codex.count, 1)
+        XCTAssertEqual(codex[0].terminal?.itermSessionId, "COD-1")
+        XCTAssertEqual(codex[0].tty, "/dev/ttys006")
+
+        let claude = CodexActiveSessionsModel.presencesFromITermSessions(sessions, source: .claude, now: now)
+        XCTAssertEqual(claude.count, 1)
+        XCTAssertEqual(claude[0].terminal?.itermSessionId, "CLA-1")
+        XCTAssertEqual(claude[0].tty, "/dev/ttys010")
+    }
+
+    func testEffectivePollIntervalSeconds_usesPinnedBackgroundCadence() {
+        XCTAssertEqual(
+            CodexActiveSessionsModel.effectivePollIntervalSeconds(
+                appIsActive: false,
+                hasVisibleConsumer: true,
+                isPinnedCockpitVisible: true
+            ),
+            CodexActiveSessionsModel.pinnedBackgroundPollInterval
+        )
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.effectivePollIntervalSeconds(
+                appIsActive: false,
+                hasVisibleConsumer: true,
+                isPinnedCockpitVisible: false
+            ),
+            CodexActiveSessionsModel.backgroundPollInterval
+        )
+    }
+
+    func testNextITermProbeBudget_progressesThenFallsBackToSteadyState() {
+        var index: Int? = 0
+        let first = CodexActiveSessionsModel.nextITermProbeBudget(resumeIndex: index)
+        index = first.nextResumeIndex
+        let second = CodexActiveSessionsModel.nextITermProbeBudget(resumeIndex: index)
+        index = second.nextResumeIndex
+        let third = CodexActiveSessionsModel.nextITermProbeBudget(resumeIndex: index)
+        index = third.nextResumeIndex
+        let steady = CodexActiveSessionsModel.nextITermProbeBudget(resumeIndex: index)
+
+        XCTAssertEqual(first.budget, 1)
+        XCTAssertEqual(second.budget, 2)
+        XCTAssertEqual(third.budget, 4)
+        XCTAssertEqual(steady.budget, 4)
+        XCTAssertNil(steady.nextResumeIndex)
+    }
+
+    func testSelectRoundRobinKeys_cyclesWithoutSkipping() {
+        let keys = ["a", "b", "c", "d"]
+
+        let first = CodexActiveSessionsModel.selectRoundRobinKeys(sortedKeys: keys, start: 0, budget: 2)
+        XCTAssertEqual(first.selected, ["a", "b"])
+        XCTAssertEqual(first.nextCursor, 2)
+
+        let second = CodexActiveSessionsModel.selectRoundRobinKeys(sortedKeys: keys, start: first.nextCursor, budget: 2)
+        XCTAssertEqual(second.selected, ["c", "d"])
+        XCTAssertEqual(second.nextCursor, 0)
+    }
+
+    func testITermProbeCandidateKeys_filtersToProbeableCodexAndClaudeRows() {
+        var codex = CodexActivePresence()
+        codex.source = .codex
+        codex.sessionId = "sid-codex"
+        codex.tty = "/dev/ttys001"
+
+        var claude = CodexActivePresence()
+        claude.source = .claude
+        claude.sessionId = "sid-claude"
+        var terminal = CodexActivePresence.Terminal()
+        terminal.itermSessionId = "w0t0p0:CLA"
+        claude.terminal = terminal
+
+        var gemini = CodexActivePresence()
+        gemini.source = .gemini
+        gemini.sessionId = "sid-gemini"
+        gemini.tty = "/dev/ttys003"
+
+        let keys = Set(CodexActiveSessionsModel.itermProbeCandidateKeys(for: [codex, claude, gemini]))
+        XCTAssertEqual(keys.count, 2)
+        XCTAssertTrue(keys.contains("codex|sid:sid-codex"))
+        XCTAssertTrue(keys.contains("claude|sid:sid-claude"))
+    }
+
+    func testResolveLiveState_prefersPreviousStateWhenProbeSkipped() {
+        XCTAssertEqual(
+            CodexActiveSessionsModel.resolveLiveState(
+                probedState: nil,
+                previousState: .activeWorking,
+                heuristic: .openIdle,
+                attemptedITermProbe: false,
+                preservePreviousWhenProbeDeferred: true
+            ),
+            .activeWorking
+        )
+    }
+
+    func testResolveLiveState_usesHeuristicWhenProbeNotDeferred() {
+        XCTAssertEqual(
+            CodexActiveSessionsModel.resolveLiveState(
+                probedState: nil,
+                previousState: .activeWorking,
+                heuristic: .openIdle,
+                attemptedITermProbe: false,
+                preservePreviousWhenProbeDeferred: false
+            ),
+            .openIdle
+        )
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.resolveLiveState(
+                probedState: nil,
+                previousState: .activeWorking,
+                heuristic: .openIdle,
+                attemptedITermProbe: true,
+                preservePreviousWhenProbeDeferred: true
+            ),
+            .openIdle
+        )
+    }
+
     func testIsLikelyCodexITermSessionName_matchesExpectedTabNames() {
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("codex"))
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("AS-CX II (codex)"))
