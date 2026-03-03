@@ -46,6 +46,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private var baselineHidesOnDeactivate: Bool = true
         private var baselineStyleMask: NSWindow.StyleMask = []
         private var wasCompact = false
+        private var lastExpandedHeight: CGFloat = 320
 
         func attach(to newWindow: NSWindow) {
             guard window !== newWindow else { return }
@@ -54,6 +55,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             baselineCollectionBehavior = newWindow.collectionBehavior
             baselineHidesOnDeactivate = newWindow.hidesOnDeactivate
             baselineStyleMask = newWindow.styleMask
+            lastExpandedHeight = max(newWindow.frame.height, 320)
         }
 
         func applyStyle(isPinned: Bool,
@@ -70,6 +72,9 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             window.isRestorable = true
 
             if isCompact {
+                if !wasCompact {
+                    lastExpandedHeight = max(lastExpandedHeight, window.frame.height)
+                }
                 applyCompactChrome(to: window)
                 window.minSize = NSSize(width: 560, height: 128)
                 if let compactContentHeight {
@@ -80,7 +85,13 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 window.title = "Agent Cockpit (\(shownSessionCount))"
                 window.titleVisibility = .visible
                 window.titlebarAppearsTransparent = false
-                window.minSize = NSSize(width: 560, height: 220)
+                let expandedMinHeight: CGFloat = 320
+                window.minSize = NSSize(width: 560, height: expandedMinHeight)
+                if wasCompact {
+                    restoreExpandedHeight(to: window, minimumHeight: max(expandedMinHeight, lastExpandedHeight))
+                } else {
+                    lastExpandedHeight = max(window.frame.height, expandedMinHeight)
+                }
             }
 
             if isPinned {
@@ -150,6 +161,20 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             frame.origin.y += frame.height - targetHeight
             frame.size.height = targetHeight
             window.setFrame(frame, display: true, animate: true)
+        }
+
+        private func restoreExpandedHeight(to window: NSWindow, minimumHeight: CGFloat) {
+            let currentHeight = window.frame.height
+            guard currentHeight + 1 < minimumHeight else {
+                lastExpandedHeight = max(lastExpandedHeight, currentHeight)
+                return
+            }
+
+            var frame = window.frame
+            frame.origin.y += frame.height - minimumHeight
+            frame.size.height = minimumHeight
+            window.setFrame(frame, display: true, animate: true)
+            lastExpandedHeight = max(lastExpandedHeight, minimumHeight)
         }
     }
 }

@@ -138,24 +138,27 @@ private struct AgentCockpitHUDStatusDot: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animate = false
 
+    private let idleBaseColor = Color(hex: "ff9f0a")
+
     var body: some View {
         Circle()
-            .fill(dotColor)
+            .fill(fillColor)
             .frame(width: 7, height: 7)
             .scaleEffect(scale)
             .opacity(opacity)
+            .shadow(color: haloColor.opacity(haloOpacity), radius: haloRadius)
             .onAppear { updateAnimation() }
             .onChange(of: liveState) { _, _ in updateAnimation() }
             .onChange(of: lastSeenAt) { _, _ in updateAnimation() }
             .onChange(of: reduceMotion) { _, _ in updateAnimation() }
     }
 
-    private var dotColor: Color {
+    private var baseColor: Color {
         switch liveState {
         case .active:
             return .green
         case .idle:
-            return Color(hex: "ff9f0a")
+            return idleBaseColor
         }
     }
 
@@ -179,7 +182,30 @@ private struct AgentCockpitHUDStatusDot: View {
 
     private var opacity: Double {
         guard shouldPulse else { return 1.0 }
-        return animate ? 0.72 : 1.0
+        return animate ? 1.0 : 0.9
+    }
+
+    private var fillColor: Color {
+        guard liveState == .idle else { return baseColor }
+        return idleBaseColor
+    }
+
+    private var haloColor: Color {
+        idleBaseColor
+    }
+
+    private var haloOpacity: Double {
+        guard liveState == .idle else { return 0 }
+        guard shouldPulse else { return idleNeedsAttention ? 0.24 : 0.0 }
+        return animate ? 0.52 : 0.18
+    }
+
+    private var haloRadius: CGFloat {
+        guard liveState == .idle else { return 0 }
+        if shouldPulse {
+            return animate ? (idleNeedsAttention ? 5.0 : 3.8) : (idleNeedsAttention ? 3.4 : 2.2)
+        }
+        return idleNeedsAttention ? 3.0 : 0
     }
 
     private func updateAnimation() {
