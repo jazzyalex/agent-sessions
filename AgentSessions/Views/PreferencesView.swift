@@ -25,6 +25,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) var codexActiveSessionsEnabled: Bool = true
     @AppStorage(PreferencesKey.Cockpit.codexActiveRegistryRootOverride) var codexActiveRegistryRootOverride: String = ""
     @AppStorage(PreferencesKey.Cockpit.hudShowAgentNameInCompact) var cockpitShowAgentNameInCompact: Bool = true
+    @AppStorage(PreferencesKey.Cockpit.showTabSubtitleInFullMode) var cockpitShowTabSubtitleInFullMode: Bool = true
     // Codex probe cleanup prefs
     @AppStorage(PreferencesKey.codexProbeCleanupMode) var codexProbeCleanupMode: String = "none" // none | auto
     @State var showConfirmCodexAutoDelete: Bool = false

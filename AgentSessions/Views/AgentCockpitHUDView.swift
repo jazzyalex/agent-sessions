@@ -51,6 +51,43 @@ struct HUDRow: Identifiable, Equatable {
     let revealURL: URL?
     let tty: String?
     let termProgram: String?
+    let tabTitle: String?
+    let lastActivityAt: Date?
+    let lastActivityTooltip: String?
+
+    init(id: String,
+         source: SessionSource,
+         agentType: HUDAgentType,
+         projectName: String,
+         displayName: String,
+         liveState: HUDLiveState,
+         preview: String,
+         elapsed: String,
+         lastSeenAt: Date?,
+         itermSessionId: String?,
+         revealURL: URL?,
+         tty: String?,
+         termProgram: String?,
+         tabTitle: String? = nil,
+         lastActivityAt: Date? = nil,
+         lastActivityTooltip: String? = nil) {
+        self.id = id
+        self.source = source
+        self.agentType = agentType
+        self.projectName = projectName
+        self.displayName = displayName
+        self.liveState = liveState
+        self.preview = preview
+        self.elapsed = elapsed
+        self.lastSeenAt = lastSeenAt
+        self.itermSessionId = itermSessionId
+        self.revealURL = revealURL
+        self.tty = tty
+        self.termProgram = termProgram
+        self.tabTitle = tabTitle
+        self.lastActivityAt = lastActivityAt
+        self.lastActivityTooltip = lastActivityTooltip
+    }
 }
 
 private enum AgentCockpitHUDTheme {
@@ -96,9 +133,11 @@ private struct LegacyMappedRow: Identifiable {
     let itermSessionId: String?
     let tty: String?
     let termProgram: String?
+    let tabTitle: String?
     let sessionID: String?
     let logPath: String?
     let workingDirectory: String?
+    let lastActivityAt: Date?
 }
 
 private struct SessionLookupIndexes {
@@ -131,19 +170,20 @@ struct AgentCockpitHUDView: View {
     @State private var searchFocusToken: Int = 0
     @FocusState private var isSearchFocused: Bool
 
-    private static let rowDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        return formatter
-    }()
-
     private static let codexRolloutTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
+        return formatter
+    }()
+
+    private static let activityTooltipFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeZone = .current
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .medium
         return formatter
     }()
 
@@ -571,6 +611,7 @@ struct AgentCockpitHUDView: View {
 
             let repo = session?.repoName ?? session?.repoDisplay ?? "—"
             let date = session?.modifiedAt ?? parseSessionTimestamp(from: presence)
+            let lastActivityAt = activeCodex.lastActivityAt(for: presence) ?? date
             let liveState = activeCodex.liveState(for: presence)
 
             let stableID: String =
@@ -593,9 +634,11 @@ struct AgentCockpitHUDView: View {
                 itermSessionId: presence.terminal?.itermSessionId,
                 tty: presence.tty,
                 termProgram: presence.terminal?.termProgram,
+                tabTitle: presence.terminal?.tabTitle,
                 sessionID: authoritativeSessionID(for: presence, resolvedSession: session),
                 logPath: presence.sessionLogPath,
-                workingDirectory: session?.cwd ?? presence.workspaceRoot
+                workingDirectory: session?.cwd ?? presence.workspaceRoot,
+                lastActivityAt: lastActivityAt
             )
         }
 
@@ -607,8 +650,8 @@ struct AgentCockpitHUDView: View {
             if aState != bState {
                 return aState == .active
             }
-            let da = a.lastSeenAt ?? .distantPast
-            let db = b.lastSeenAt ?? .distantPast
+            let da = a.lastActivityAt ?? .distantPast
+            let db = b.lastActivityAt ?? .distantPast
             if da != db { return da > db }
             if a.repo != b.repo { return a.repo.localizedCaseInsensitiveCompare(b.repo) == .orderedAscending }
             return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
@@ -616,7 +659,8 @@ struct AgentCockpitHUDView: View {
 
         let hudRows = sorted.map { row in
             let hudState = Self.mapLiveStateForHUD(row.liveState)
-            let elapsed = elapsedLabel(from: row.lastSeenAt ?? row.date)
+            let elapsed = isCompact ? "" : elapsedLabel(from: row.lastActivityAt)
+            let activityTooltip = row.lastActivityAt.map { Self.activityTooltipFormatter.string(from: $0) }
             return HUDRow(
                 id: row.id,
                 source: row.source,
@@ -630,7 +674,10 @@ struct AgentCockpitHUDView: View {
                 itermSessionId: row.itermSessionId,
                 revealURL: row.focusURL,
                 tty: row.tty,
-                termProgram: row.termProgram
+                termProgram: row.termProgram,
+                tabTitle: row.tabTitle,
+                lastActivityAt: row.lastActivityAt,
+                lastActivityTooltip: activityTooltip
             )
         }
 

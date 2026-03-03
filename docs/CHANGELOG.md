@@ -14,6 +14,11 @@ All notable changes to this project will be documented in this file.
 - Sessions (Unified): Added `CLI Agent` cell double-click terminal focusing in the Sessions list (same focus path as `Focus in iTerm2`), with explicit alert feedback when no focusable live terminal is available.
 
 ### Fixed
+- Agent Cockpit: Removed the in-app `Legacy Cockpit` window scene so only `Agent Cockpit` is available at runtime.
+- Agent Cockpit: Full-mode row recency now reflects session write activity (`sessionLogPath`/presence source file mtime) instead of heartbeat timestamps; compact mode hides the recency token.
+- Agent Cockpit: Full-mode rows can now show iTerm tab title as an optional muted subtitle under the agent label, with long titles truncated and full text available on hover.
+- Agent Cockpit: iTerm subtitle detection now falls back to the iTerm window title when a tab/session title is empty, so full-mode subtitle rows remain informative in minimal-tab setups.
+- Preferences (Agent Cockpit): Added `Show tab subtitle under agent name` for full-mode cockpit rows (default on).
 - Sessions (Agent Cockpit): Idle HUD rows now keep the session display name in the main text column, `Last active ... ago` messaging was moved to a compact elapsed column (for example `16s`), active status dots now render as solid green indicators, and idle status dots now pulse amber with a larger size after 10 minutes idle.
 - Sessions (Unified): `CLI Agent` live-state styling now matches Agent Cockpit: active sessions use a solid green dot, idle sessions use a pulsing amber dot that grows slightly after 10 minutes idle, and idle source cells are visually dimmed.
 - Sessions (Agent Cockpit/Unified): Idle amber status-dot pulses now brighten at peak size (instead of dimming), making animation more visible in both Cockpit and the main Sessions list.
