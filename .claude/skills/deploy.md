@@ -6,8 +6,18 @@ This skill is an agent-facing entrypoint that avoids duplicating the deployment 
 
 - Runbook: `docs/deployment.md`
 - Unified tool: `tools/release/deploy` (see `tools/release/deploy --help`)
+- Recommended pre-release QA checklist: `docs/release/pre-release-qa.md`
 
 If anything here disagrees with the runbook, follow `docs/deployment.md`.
+
+## Recommended QA Gate (Before Deploy Steps)
+
+- Before bump/release/verify commands, recommend running `docs/release/pre-release-qa.md`.
+- Ask for QA status explicitly:
+  1. Was the checklist run for this candidate build?
+  2. Result: `GO` or `NO-GO`?
+  3. Any known risk accepted for release?
+- If QA was not run, pause deployment execution and recommend running the checklist first.
 
 ## Before Starting (Ask the User)
 

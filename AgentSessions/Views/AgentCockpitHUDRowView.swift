@@ -9,6 +9,7 @@ struct AgentCockpitHUDRowView: View {
     let isCompact: Bool
     let onTap: () -> Void
     @AppStorage(PreferencesKey.Cockpit.hudShowAgentNameInCompact) private var showAgentNameInCompact: Bool = true
+    @AppStorage(PreferencesKey.Cockpit.showTabSubtitleInFullMode) private var showTabSubtitleInFullMode: Bool = true
 
     var body: some View {
         Button(action: onTap) {
@@ -26,10 +27,7 @@ struct AgentCockpitHUDRowView: View {
                     .accessibilityLabel(row.liveState == .active ? "Active" : "Idle")
 
                 if !isCompact || showAgentNameInCompact {
-                    Text(row.agentType.label)
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundStyle(agentLabelColor)
-                        .frame(width: 56, alignment: .leading)
+                    agentLabelBlock
                 }
 
                 if !isGrouped {
@@ -49,11 +47,14 @@ struct AgentCockpitHUDRowView: View {
                     .fixedSize(horizontal: false, vertical: !isCompact)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(row.elapsed)
-                    .font(.system(size: 10, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: 32, alignment: .trailing)
+                if !isCompact {
+                    Text(row.elapsed)
+                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(width: 32, alignment: .trailing)
+                        .help(row.lastActivityTooltip ?? "Last activity unavailable")
+                }
 
                 if !isCompact {
                     if let shortcutLabel {
@@ -97,6 +98,39 @@ struct AgentCockpitHUDRowView: View {
         if isSelected { return "↩" }
         guard (1...9).contains(rowNumber) else { return nil }
         return "⌘\(rowNumber)"
+    }
+
+    @ViewBuilder
+    private var agentLabelBlock: some View {
+        if isCompact {
+            Text(row.agentType.label)
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .foregroundStyle(agentLabelColor)
+                .frame(width: 56, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.agentType.label)
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .foregroundStyle(agentLabelColor)
+                    .lineLimit(1)
+                if showTabSubtitleInFullMode, let tabTitle = normalizedTabTitle {
+                    Text(tabTitle)
+                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(tabTitle)
+                }
+            }
+            .frame(width: 112, alignment: .leading)
+        }
+    }
+
+    private var normalizedTabTitle: String? {
+        guard let raw = row.tabTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        return raw
     }
 
     private var agentLabelColor: Color {

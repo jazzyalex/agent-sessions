@@ -123,6 +123,12 @@ extension PreferencesView {
                 Toggle("Show agent name in compact mode", isOn: $cockpitShowAgentNameInCompact)
                     .help("When disabled, compact rows hide the agent-name text to free horizontal space. Status dot and row numbering remain visible.")
             }
+
+            sectionHeader("Full Mode")
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Show tab subtitle under agent name", isOn: $cockpitShowTabSubtitleInFullMode)
+                    .help("Displays iTerm tab title as a muted subtitle under the agent label in full Agent Cockpit rows. Long titles are truncated with hover tooltips.")
+            }
         }
     }
 

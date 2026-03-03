@@ -23,6 +23,7 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
         var termProgram: String?
         var itermSessionId: String?
         var revealUrl: String?
+        var tabTitle: String?
     }
 
     var schemaVersion: Int?
@@ -174,6 +175,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     private var bySessionID: [String: CodexActivePresence] = [:]
     private var byLogPath: [String: CodexActivePresence] = [:]
     private var liveStateByPresenceKey: [String: CodexLiveState] = [:]
+    private var lastActivityByPresenceKey: [String: Date] = [:]
     private var cachedProcessPresences: [CodexActivePresence] = []
     private var lastProcessProbeAt: Date? = nil
     private var unifiedVisibleConsumerIDs: Set<UUID> = []
@@ -248,6 +250,12 @@ final class CodexActiveSessionsModel: ObservableObject {
             sourceFilePath: presence.sourceFilePath,
             now: Date()
         )
+    }
+
+    func lastActivityAt(for presence: CodexActivePresence) -> Date? {
+        let key = Self.presenceKey(for: presence)
+        if let cached = lastActivityByPresenceKey[key] { return cached }
+        return Self.lastActivityAt(logPath: presence.sessionLogPath, sourceFilePath: presence.sourceFilePath)
     }
 
     func presence(for session: Session) -> CodexActivePresence? {
@@ -347,6 +355,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             bySessionID = [:]
             byLogPath = [:]
             liveStateByPresenceKey = [:]
+            lastActivityByPresenceKey = [:]
             cachedProcessPresences = []
             lastProcessProbeAt = nil
             lastPublishedPresenceSignatures = [:]
@@ -531,11 +540,15 @@ final class CodexActiveSessionsModel: ObservableObject {
                 probedITermPresenceKeys: probedITermPresenceKeys
             )
         }.value
+        let nextLastActivityByPresenceKey = await Task.detached(priority: .utility) {
+            Self.lastActivityByPresenceKey(for: ui)
+        }.value
 
         // Always keep lookup maps current, but avoid publishing UI changes on every heartbeat.
         bySessionID = sessionMap
         byLogPath = logMap
         liveStateByPresenceKey = nextLiveStates
+        lastActivityByPresenceKey = nextLastActivityByPresenceKey
         lastRefreshAt = now
 
         let nextLogKeys = Set(logMap.keys)
@@ -712,6 +725,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             t.termProgram = prefer(t.termProgram, other?.termProgram)
             t.itermSessionId = prefer(t.itermSessionId, other?.itermSessionId)
             t.revealUrl = prefer(t.revealUrl, other?.revealUrl)
+            t.tabTitle = prefer(t.tabTitle, other?.tabTitle)
             merged.terminal = t
         }
 
@@ -1144,7 +1158,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             }()
 
             var parts: [String] = []
-            parts.reserveCapacity(13)
+            parts.reserveCapacity(14)
             parts.append(p.publisher ?? "")
             parts.append(p.kind ?? "")
             parts.append(p.source.rawValue)
@@ -1157,6 +1171,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             parts.append(p.terminal?.termProgram ?? "")
             parts.append(p.terminal?.itermSessionId ?? "")
             parts.append(p.terminal?.revealUrl ?? "")
+            parts.append(p.terminal?.tabTitle ?? "")
             parts.append(p.sourceFilePath ?? "")
 
             out[key] = parts.joined(separator: "|")
@@ -1522,6 +1537,21 @@ final class CodexActiveSessionsModel: ObservableObject {
         return recentWindow.contains(where: { isLikelyClaudePromptLine($0) })
     }
 
+    nonisolated private static func lastActivityByPresenceKey(for presences: [CodexActivePresence]) -> [String: Date] {
+        var out: [String: Date] = [:]
+        out.reserveCapacity(presences.count)
+        for presence in presences {
+            let key = presenceKey(for: presence)
+            guard key != "unknown" else { continue }
+            guard let activity = lastActivityAt(logPath: presence.sessionLogPath, sourceFilePath: presence.sourceFilePath) else {
+                continue
+            }
+            if let existing = out[key], existing >= activity { continue }
+            out[key] = activity
+        }
+        return out
+    }
+
     nonisolated private static func modificationDateForPath(_ rawPath: String?) -> Date? {
         guard let rawPath, !rawPath.isEmpty else { return nil }
         let expanded = (rawPath as NSString).expandingTildeInPath
@@ -1530,13 +1560,17 @@ final class CodexActiveSessionsModel: ObservableObject {
         return mtime
     }
 
+    nonisolated private static func lastActivityAt(logPath: String?, sourceFilePath: String?) -> Date? {
+        modificationDateForPath(logPath) ?? modificationDateForPath(sourceFilePath)
+    }
+
     nonisolated static func heuristicLiveStateFromLogMTime(logPath: String?,
                                                            sourceFilePath: String? = nil,
                                                            now: Date,
                                                            activeWriteWindow: TimeInterval = 2.5) -> CodexLiveState {
         // Prefer true session log writes when available; source file mtime is a
         // secondary fallback only for providers that omit sessionLogPath.
-        let mtime = modificationDateForPath(logPath) ?? modificationDateForPath(sourceFilePath)
+        let mtime = lastActivityAt(logPath: logPath, sourceFilePath: sourceFilePath)
         guard let mtime else { return .openIdle }
         if now.timeIntervalSince(mtime) <= activeWriteWindow {
             return .activeWorking
@@ -1826,12 +1860,13 @@ final class CodexActiveSessionsModel: ObservableObject {
             "set sep to (ASCII character 9)",
             "tell application \"iTerm2\"",
             "repeat with w in windows",
+            "set wname to name of w",
             "repeat with t in tabs of w",
             "repeat with s in sessions of t",
             "set sid to id of s",
             "set stty to tty of s",
             "set sname to name of s",
-            "set end of outRows to (sid & sep & stty & sep & sname)",
+            "set end of outRows to (sid & sep & stty & sep & sname & sep & wname)",
             "end repeat",
             "end repeat",
             "end repeat",
@@ -1869,6 +1904,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             var t = CodexActivePresence.Terminal()
             t.termProgram = "iTerm2"
             t.itermSessionId = session.sessionID
+            let trimmedName = session.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            t.tabTitle = trimmedName.isEmpty ? nil : trimmedName
             p.terminal = t
             presences.append(p)
         }
@@ -2082,14 +2119,15 @@ final class CodexActiveSessionsModel: ObservableObject {
         out.reserveCapacity(16)
 
         func parseLine(_ line: String, separator: String) -> ITermSessionInfo? {
-            guard let first = line.range(of: separator) else { return nil }
-            let afterFirst = first.upperBound
-            guard let second = line[afterFirst...].range(of: separator) else { return nil }
+            let fields = line.components(separatedBy: separator)
+            guard fields.count >= 3 else { return nil }
 
-            let sid = String(line[..<first.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let sid = fields[0].trimmingCharacters(in: .whitespacesAndNewlines)
             guard !sid.isEmpty else { return nil }
-            let ttyRaw = String(line[afterFirst..<second.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = String(line[second.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let ttyRaw = fields[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let sessionName = fields[2].trimmingCharacters(in: .whitespacesAndNewlines)
+            let windowName = fields.count > 3 ? fields[3].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            let name = sessionName.isEmpty ? windowName : sessionName
             return ITermSessionInfo(
                 sessionID: sid,
                 tty: ttyRaw.isEmpty ? nil : ttyRaw,

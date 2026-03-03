@@ -474,6 +474,20 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out[2].name, "codex")
     }
 
+    func testParseITermSessionListOutput_fallsBackToWindowNameWhenSessionNameEmpty() {
+        let text = """
+        11111111-1111-1111-1111-111111111111\t/dev/ttys001\t\tCodex Window
+        22222222-2222-2222-2222-222222222222tab/dev/ttys002tabtabClaude Window
+        """
+
+        let out = CodexActiveSessionsModel.parseITermSessionListOutput(text)
+        XCTAssertEqual(out.count, 2)
+        XCTAssertEqual(out[0].sessionID, "11111111-1111-1111-1111-111111111111")
+        XCTAssertEqual(out[0].name, "Codex Window")
+        XCTAssertEqual(out[1].sessionID, "22222222-2222-2222-2222-222222222222")
+        XCTAssertEqual(out[1].name, "Claude Window")
+    }
+
     func testPresencesFromITermSessions_mapsRowsBySourceFromSingleSessionList() {
         let now = Date()
         let sessions = [
@@ -486,11 +500,13 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(codex.count, 1)
         XCTAssertEqual(codex[0].terminal?.itermSessionId, "COD-1")
         XCTAssertEqual(codex[0].tty, "/dev/ttys006")
+        XCTAssertEqual(codex[0].terminal?.tabTitle, "AS-CX II (codex)")
 
         let claude = CodexActiveSessionsModel.presencesFromITermSessions(sessions, source: .claude, now: now)
         XCTAssertEqual(claude.count, 1)
         XCTAssertEqual(claude[0].terminal?.itermSessionId, "CLA-1")
         XCTAssertEqual(claude[0].tty, "/dev/ttys010")
+        XCTAssertEqual(claude[0].terminal?.tabTitle, "Claude")
     }
 
     func testEffectivePollIntervalSeconds_usesPinnedBackgroundCadence() {

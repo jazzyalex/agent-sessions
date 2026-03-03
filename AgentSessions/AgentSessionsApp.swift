@@ -221,18 +221,18 @@ struct AgentSessionsApp: App {
             }
             // View menu with Saved Only toggle (stateful)
             CommandMenu("View") {
-                Button("Toggle Dark/Light") { indexer.toggleDarkLightUsingSystemAppearance() }
-                Button("Use System Appearance") { indexer.useSystemAppearance() }
-                    .disabled((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .system)
-                Divider()
-                // Bind through UserDefaults so it persists; also forward to unified when it changes
-                FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
-                Divider()
+                OpenAgentCockpitWindowButton()
                 Button("Image Browser") {
                     NotificationCenter.default.post(name: .showImagesFromMenu, object: nil)
                 }
-                OpenAgentCockpitWindowButton()
+                .keyboardShortcut("i", modifiers: [.command, .option, .shift])
                 OpenPinnedSessionsWindowButton()
+                Divider()
+                // Bind through UserDefaults so it persists; also forward to unified when it changes
+                FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
+                Button("Toggle Dark/Light") { indexer.toggleDarkLightUsingSystemAppearance() }
+                Button("Use System Appearance") { indexer.useSystemAppearance() }
+                    .disabled((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .system)
             }
             CommandGroup(after: .help) {
                 Button("Show Onboarding") {
@@ -265,18 +265,6 @@ struct AgentSessionsApp: App {
                 .environmentObject(activeCodexSessions)
         }
         .defaultSize(width: 644, height: 320)
-
-        Window("Legacy Cockpit", id: "LegacyCockpit") {
-            CockpitView(
-                codexIndexer: indexer,
-                claudeIndexer: claudeIndexer,
-                liveFilterStorageKey: PreferencesKey.Cockpit.legacyCodexLiveFilterMode
-            )
-                .environmentObject(activeCodexSessions)
-                .background(WindowAutosave(name: "CockpitWindow"))
-        }
-        .defaultSize(width: 980, height: 310)
-        .commandsRemoved()
     }
 }
 
@@ -319,6 +307,7 @@ private struct FavoritesOnlyToggle: View {
         )) {
             Text("Saved Only")
         }
+        .keyboardShortcut("s", modifiers: [.command, .option, .shift])
     }
 }
 

@@ -7,6 +7,9 @@ This runbook provides a **fully automated deployment process** with comprehensiv
 
 ## One-screen cheat sheet
 
+**Recommended first step**:
+- Run the pre-release QA checklist: `docs/release/pre-release-qa.md`
+
 **Core commands** (run from repo root):
 - `tools/release/deploy changelog [FROM_TAG]`
 - `tools/release/deploy bump [patch|minor|major]`
@@ -38,6 +41,9 @@ The entire deployment workflow is now handled by a single unified tool: `tools/r
 ### Typical Release Workflow
 
 ```bash
+# 0. Run recommended pre-release QA checklist first
+# docs/release/pre-release-qa.md
+
 # 1. Review what changed since last release
 tools/release/deploy changelog
 
@@ -258,6 +264,10 @@ Generate CHANGELOG entries from conventional commits:
 ## Pre-flight Checklist (Mostly Automated Now)
 
 Complete this checklist **before** running the deployment script. Answer all questions and verify all conditions.
+
+### 0. Recommended QA Gate
+- [ ] Run `docs/release/pre-release-qa.md` for the release candidate.
+- [ ] Record outcome (`GO` / `NO-GO`) and unresolved known risks (if any).
 
 ### 1. Version Planning
 - [ ] What version are you releasing? (e.g., 2.5.1)
