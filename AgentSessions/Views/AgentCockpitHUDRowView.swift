@@ -2,11 +2,12 @@ import SwiftUI
 
 struct AgentCockpitHUDRowView: View {
     let row: HUDRow
-    let rowNumber: Int
+    let shortcutIndex: Int?
     let isSelected: Bool
     let filterText: String
     let isGrouped: Bool
     let isCompact: Bool
+    let isNewlyInserted: Bool
     let onTap: () -> Void
     @AppStorage(PreferencesKey.Cockpit.hudShowAgentNameInCompact) private var showAgentNameInCompact: Bool = true
     @AppStorage(PreferencesKey.Cockpit.showTabSubtitleInFullMode) private var showTabSubtitleInFullMode: Bool = true
@@ -15,65 +16,10 @@ struct AgentCockpitHUDRowView: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 9) {
-                Text("\(rowNumber)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.secondary.opacity(isSelected ? 0.9 : 0.65))
-                    .frame(width: 22, alignment: .center)
-
-                AgentCockpitHUDStatusDot(
-                    liveState: row.liveState,
-                    lastSeenAt: row.lastSeenAt
-                )
-                .accessibilityLabel(row.liveState == .active ? "Active" : "Idle")
-
-                if !isCompact || showAgentNameInCompact {
-                    agentLabelBlock
-                }
-
-                if !isGrouped {
-                    highlightedText(row.projectName)
-                        .font(.system(size: 13, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(width: 165, alignment: .leading)
-                }
-
-                Text(row.preview)
-                    .font(.system(size: 13, weight: .regular, design: .monospaced))
-                    .foregroundStyle(previewColor)
-                    .lineLimit(isCompact ? 1 : 2)
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: !isCompact)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                if !isCompact {
-                    Text(row.elapsed)
-                        .font(.system(size: 10, weight: .regular, design: .monospaced))
-                        .foregroundStyle(elapsedColor)
-                        .lineLimit(1)
-                        .frame(width: 32, alignment: .trailing)
-                        .help(row.lastActivityTooltip ?? "Last activity unavailable")
-                }
-
-                if !isCompact {
-                    if let shortcutLabel {
-                        Text(shortcutLabel)
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundStyle(isSelected ? Color.primary.opacity(0.84) : Color.secondary.opacity(0.6))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .frame(width: 56)
-                            .background(Color.primary.opacity(isSelected ? 0.12 : 0.04))
-                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .strokeBorder(Color.primary.opacity(isSelected ? 0.20 : 0.10), lineWidth: 0.5)
-                            )
-                    } else {
-                        Color.clear
-                            .frame(width: 56, height: 20)
-                    }
+                if isCompact {
+                    compactLayout
+                } else {
+                    fullLayout
                 }
             }
             .padding(.leading, isGrouped ? 24 : 12)
@@ -81,6 +27,12 @@ struct AgentCockpitHUDRowView: View {
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity)
             .background(backgroundColor)
+            .overlay {
+                if isNewlyInserted {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.16 : 0.11))
+                }
+            }
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .opacity(row.liveState == .idle ? 0.60 : 1.0)
             .contentShape(Rectangle())
@@ -94,20 +46,28 @@ struct AgentCockpitHUDRowView: View {
         .buttonStyle(.plain)
     }
 
-    private var shortcutLabel: String? {
-        if isSelected { return "↩" }
-        guard (1...9).contains(rowNumber) else { return nil }
-        return "⌘\(rowNumber)"
+    private var statusDot: some View {
+        AgentCockpitHUDStatusDot(
+            liveState: row.liveState,
+            lastSeenAt: row.lastSeenAt
+        )
+        .accessibilityLabel(row.liveState == .active ? "Active" : "Idle")
+        .frame(width: 9, alignment: .center)
     }
 
-    @ViewBuilder
-    private var agentLabelBlock: some View {
-        if isCompact {
+    private var fullLayout: some View {
+        HStack(spacing: 9) {
+            statusDot
+
             agentBadge
-                .frame(width: 64, alignment: .leading)
-        } else {
+
             VStack(alignment: .leading, spacing: 2) {
-                agentBadge
+                highlightedText(row.displayName)
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
                 if showTabSubtitleInFullMode, let tabTitle = normalizedTabTitle {
                     Text(tabTitle)
                         .font(.system(size: 10, weight: .regular, design: .monospaced))
@@ -117,8 +77,77 @@ struct AgentCockpitHUDRowView: View {
                         .help(tabTitle)
                 }
             }
-            .frame(width: 148, alignment: .leading)
+            .frame(width: 120, alignment: .leading)
+
+            if isGrouped {
+                Color.clear
+                    .frame(width: 110, height: 1)
+            } else {
+                highlightedText(row.projectName)
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(width: 110, alignment: .leading)
+            }
+
+            Text(dedupedFullPreview)
+                .font(.system(size: 13, weight: .regular, design: .monospaced))
+                .foregroundStyle(previewColor)
+                .lineLimit(2)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(row.elapsed)
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                .foregroundStyle(elapsedColor)
+                .lineLimit(1)
+                .frame(minWidth: 30, alignment: .trailing)
+                .help(row.lastActivityTooltip ?? "Last activity unavailable")
+
+            if let shortcutLabel {
+                Text(shortcutLabel)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(isSelected ? Color.primary.opacity(0.84) : Color.secondary.opacity(0.6))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .frame(width: 56)
+                    .background(Color.primary.opacity(isSelected ? 0.12 : 0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(isSelected ? 0.20 : 0.10), lineWidth: 0.5)
+                    )
+            } else {
+                Color.clear
+                    .frame(width: 56, height: 20)
+            }
         }
+    }
+
+    private var compactLayout: some View {
+        HStack(spacing: 9) {
+            statusDot
+
+            if showAgentNameInCompact {
+                agentBadge
+                    .frame(width: 64, alignment: .leading)
+            }
+
+            Text(row.preview)
+                .font(.system(size: 13, weight: .regular, design: .monospaced))
+                .foregroundStyle(previewColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var shortcutLabel: String? {
+        if isSelected { return "↩" }
+        guard let shortcutIndex, (1...9).contains(shortcutIndex) else { return nil }
+        return "⌘\(shortcutIndex)"
     }
 
     private var normalizedTabTitle: String? {
@@ -126,6 +155,20 @@ struct AgentCockpitHUDRowView: View {
             return nil
         }
         return raw
+    }
+
+    private var dedupedFullPreview: String {
+        let preview = row.preview.trimmingCharacters(in: .whitespacesAndNewlines)
+        let display = row.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !preview.isEmpty else { return preview }
+        guard preview.caseInsensitiveCompare(display) == .orderedSame else { return preview }
+
+        if let tab = normalizedTabTitle,
+           tab.caseInsensitiveCompare(display) != .orderedSame {
+            return tab
+        }
+        // Preserve wrapped preview text instead of leaving the column blank.
+        return preview
     }
 
     private var previewColor: Color {
@@ -142,8 +185,23 @@ struct AgentCockpitHUDRowView: View {
     private var agentBadge: some View {
         Text(row.agentType.label)
             .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundStyle(isSelected ? Color.primary : row.agentType.standardTextColor)
+            .foregroundStyle(badgeTextColor)
             .lineLimit(1)
+    }
+
+    private var badgeTextColor: Color {
+        if isSelected { return .primary }
+        if colorScheme == .light {
+            switch row.agentType {
+            case .codex:
+                return Color(hex: "2b56b8")
+            case .claude:
+                return Color(hex: "b86a1d")
+            case .shell:
+                return Color(hex: "7a7a80")
+            }
+        }
+        return row.agentType.standardTextColor
     }
 
     private func highlightedText(_ text: String) -> Text {

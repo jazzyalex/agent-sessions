@@ -1515,6 +1515,32 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(counts.idle, 1)
     }
 
+    func testAgentCockpitHUD_stableMergedOrder_preservesExistingAndAppendsInserted() {
+        let existing = ["a", "b", "c"]
+        let incoming = ["b", "d", "c"]
+        let result = AgentCockpitHUDView.stableMergedOrder(existing: existing, incoming: incoming)
+        XCTAssertEqual(result.order, ["b", "c", "d"])
+        XCTAssertEqual(result.inserted, ["d"])
+    }
+
+    func testAgentCockpitHUD_hasMembershipChurn_detectsAddedOrRemovedRows() {
+        XCTAssertFalse(AgentCockpitHUDView.hasMembershipChurn(existing: ["a", "b"], incoming: ["b", "a"]))
+        XCTAssertTrue(AgentCockpitHUDView.hasMembershipChurn(existing: ["a", "b"], incoming: ["a", "b", "c"]))
+        XCTAssertTrue(AgentCockpitHUDView.hasMembershipChurn(existing: ["a", "b"], incoming: ["a"]))
+    }
+
+    func testAgentCockpitHUD_groupedRowsPreservingOrder_usesFirstSeenProjectOrder() {
+        let rows = [
+            makeHUDRow(id: "r1", project: "Beta", name: "B1", state: .active),
+            makeHUDRow(id: "r2", project: "Alpha", name: "A1", state: .idle),
+            makeHUDRow(id: "r3", project: "Beta", name: "B2", state: .idle)
+        ]
+
+        let grouped = AgentCockpitHUDView.groupedRowsPreservingOrder(rows)
+        XCTAssertEqual(grouped.map(\.projectName), ["Beta", "Alpha"])
+        XCTAssertEqual(grouped.first?.rows.map(\.id), ["r1", "r3"])
+    }
+
     private func makeHUDRow(id: String, project: String, name: String, state: HUDLiveState) -> HUDRow {
         HUDRow(
             id: id,
