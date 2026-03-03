@@ -5,7 +5,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     let isPinned: Bool
     let shownSessionCount: Int
     let isCompact: Bool
-    let compactContentHeight: CGFloat?
+    let activeEnabled: Bool
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -16,7 +16,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 isPinned: isPinned,
                 shownSessionCount: shownSessionCount,
                 isCompact: isCompact,
-                compactContentHeight: compactContentHeight
+                activeEnabled: activeEnabled
             )
         }
         return view
@@ -30,7 +30,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 isPinned: isPinned,
                 shownSessionCount: shownSessionCount,
                 isCompact: isCompact,
-                compactContentHeight: compactContentHeight
+                activeEnabled: activeEnabled
             )
         }
     }
@@ -40,13 +40,27 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     }
 
     final class Coordinator {
+        private enum Mode {
+            case full
+            case compact
+        }
+
         private weak var window: NSWindow?
         private var baselineLevel: NSWindow.Level = .normal
         private var baselineCollectionBehavior: NSWindow.CollectionBehavior = []
         private var baselineHidesOnDeactivate: Bool = true
         private var baselineStyleMask: NSWindow.StyleMask = []
         private let fallbackStandardStyleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
-        private var wasCompact = false
+        private var currentMode: Mode?
+
+        private let fullAutosaveName = "AgentCockpitHUDWindow.full"
+        private let compactAutosaveName = "AgentCockpitHUDWindow.compact"
+        private let rowResizeStep: CGFloat = 31
+        private let compactDefaultRows: CGFloat = 6
+        private let compactMinimumRows: CGFloat = 3
+        private let compactHeaderHeight: CGFloat = 44.5
+        private let compactDisabledCalloutHeight: CGFloat = 56
+        private let fullDefaultFrameSize = NSSize(width: 644, height: 320)
 
         func attach(to newWindow: NSWindow) {
             guard window !== newWindow else { return }
@@ -60,7 +74,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         func applyStyle(isPinned: Bool,
                         shownSessionCount: Int,
                         isCompact: Bool,
-                        compactContentHeight: CGFloat?) {
+                        activeEnabled: Bool) {
             guard let window else { return }
 
             if window.identifier?.rawValue != "AgentCockpit" {
@@ -71,25 +85,30 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             window.isRestorable = true
             // Keep vertical resize snapping aligned to row increments so partial rows
             // are not clipped at the window edge.
-            let rowResizeStep: CGFloat = 31
             window.resizeIncrements = NSSize(width: 1, height: rowResizeStep)
             window.contentResizeIncrements = NSSize(width: 1, height: rowResizeStep)
 
             if isCompact {
                 applyCompactChrome(to: window)
-                window.minSize = NSSize(width: 560, height: 128)
-                if let compactContentHeight {
-                    applyCompactHeight(compactContentHeight, to: window, forceShrink: !wasCompact)
-                }
+                window.minSize = NSSize(
+                    width: 560,
+                    height: compactMinimumWindowHeight(
+                        for: window,
+                        includesDisabledCallout: !activeEnabled
+                    )
+                )
+                applyModeTransition(to: .compact, window: window)
+                window.title = ""
+                window.titleVisibility = .hidden
+                window.titlebarAppearsTransparent = true
             } else {
                 captureBaselineStyleMaskIfNeeded(from: window.styleMask)
                 restoreStandardChrome(to: window)
+                window.minSize = NSSize(width: 560, height: 320)
+                applyModeTransition(to: .full, window: window)
                 window.title = "Agent Cockpit (\(shownSessionCount))"
                 window.titleVisibility = .visible
                 window.titlebarAppearsTransparent = false
-                let expandedMinHeight: CGFloat = 320
-                let nonResizingMinHeight = min(expandedMinHeight, window.frame.height)
-                window.minSize = NSSize(width: 560, height: nonResizingMinHeight)
             }
 
             if isPinned {
@@ -102,11 +121,6 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 window.collectionBehavior = baselineCollectionBehavior
                 window.hidesOnDeactivate = baselineHidesOnDeactivate
             }
-
-            if window.frameAutosaveName != "AgentCockpitHUDWindow" {
-                window.setFrameAutosaveName("AgentCockpitHUDWindow")
-            }
-            wasCompact = isCompact
         }
 
         private func applyCompactChrome(to window: NSWindow) {
@@ -158,15 +172,55 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             baselineStyleMask = styleMask
         }
 
-        private func applyCompactHeight(_ compactContentHeight: CGFloat,
-                                        to window: NSWindow,
-                                        forceShrink: Bool) {
-            let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
-            let targetHeight = max(window.minSize.height, compactContentHeight + chromeHeight)
-            let currentHeight = window.frame.height
-            if !forceShrink, currentHeight > targetHeight {
-                return
+        private func applyModeTransition(to mode: Mode, window: NSWindow) {
+            guard currentMode != mode else { return }
+
+            if let previousMode = currentMode {
+                window.saveFrame(usingName: autosaveName(for: previousMode))
             }
+
+            let targetAutosaveName = autosaveName(for: mode)
+            if window.frameAutosaveName != targetAutosaveName {
+                window.setFrameAutosaveName(targetAutosaveName)
+            }
+
+            let restored = window.setFrameUsingName(targetAutosaveName)
+            if !restored {
+                switch mode {
+                case .compact:
+                    applyCompactDefaultHeight(to: window)
+                case .full:
+                    applyFullDefaultSize(to: window)
+                }
+            }
+
+            currentMode = mode
+        }
+
+        private func autosaveName(for mode: Mode) -> String {
+            switch mode {
+            case .full:
+                return fullAutosaveName
+            case .compact:
+                return compactAutosaveName
+            }
+        }
+
+        private func compactMinimumWindowHeight(for window: NSWindow,
+                                                includesDisabledCallout: Bool) -> CGFloat {
+            let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
+            let calloutHeight = includesDisabledCallout ? compactDisabledCalloutHeight : 0
+            return compactContentHeight(forRows: compactMinimumRows) + calloutHeight + chromeHeight
+        }
+
+        private func compactContentHeight(forRows rows: CGFloat) -> CGFloat {
+            compactHeaderHeight + (rows * rowResizeStep)
+        }
+
+        private func applyCompactDefaultHeight(to window: NSWindow) {
+            let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
+            let targetHeight = max(window.minSize.height, compactContentHeight(forRows: compactDefaultRows) + chromeHeight)
+            let currentHeight = window.frame.height
             guard abs(currentHeight - targetHeight) > 1 else { return }
 
             var frame = window.frame
@@ -175,5 +229,21 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             window.setFrame(frame, display: true, animate: true)
         }
 
+        private func applyFullDefaultSize(to window: NSWindow) {
+            var frame = window.frame
+            let targetWidth = max(window.minSize.width, fullDefaultFrameSize.width)
+            let targetHeight = max(window.minSize.height, fullDefaultFrameSize.height)
+            let oldHeight = frame.height
+
+            guard abs(frame.width - targetWidth) > 1 || abs(frame.height - targetHeight) > 1 else {
+                return
+            }
+
+            frame.size.width = targetWidth
+            frame.size.height = targetHeight
+            // Preserve top edge when applying first-run defaults.
+            frame.origin.y += oldHeight - targetHeight
+            window.setFrame(frame, display: true, animate: false)
+        }
     }
 }

@@ -6,6 +6,12 @@
   - Goal:
     - Add branch display to Agent Cockpit rows after backend/data support is explicitly approved.
     - Keep compact mode branch-free even after branch support ships.
+  - Update [2026-03-03]:
+    - Branch support explicitly deferred for current HUD stabilization pass.
+    - Evaluate branch source strategy before implementation:
+      1. `Session.gitBranch` only (cheap, may be sparse in lightweight rows),
+      2. `Session.gitBranch` + live git fallback from `cwd` (more complete, async),
+      3. tab-title heuristic fallback (low confidence).
   - Inputs:
     - Current release intentionally hides branch in all Agent Cockpit modes to avoid introducing new backend capability.
   - Dependencies:

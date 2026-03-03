@@ -174,7 +174,16 @@ struct AgentCockpitHUDView: View {
     @State private var collapsedProjects: Set<String> = []
     @State private var activeConsumerID = UUID()
     @State private var searchFocusToken: Int = 0
+    @State private var orderedRowIDs: [String] = []
+    @State private var latestCanonicalRows: [HUDRow] = []
+    @State private var isWindowVisibleForOrdering: Bool = true
+    @State private var wasWindowHiddenSinceLastVisible: Bool = false
+    @State private var hiddenMembershipChurnDetected: Bool = false
+    @State private var highlightedRowIDs: Set<String> = []
     @FocusState private var isSearchFocused: Bool
+
+    private let fullBodyMinHeight: CGFloat = 170
+    private let compactBodyMinHeight: CGFloat = 31 * 3
 
     private static let codexRolloutTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -214,23 +223,18 @@ struct AgentCockpitHUDView: View {
 
     private var hudContent: some View {
         let snapshot = makeRowsSnapshot()
-        let rowsForDisplay = activeEnabled ? snapshot.rows : []
+        let canonicalRows = activeEnabled ? snapshot.rows : []
+        let rowsForDisplay = rowsOrderedForDisplay(from: canonicalRows)
         let visibleRows = filteredRows(from: rowsForDisplay)
         let shownSessionCount = visibleRows.count
         let grouped = groupedRows(from: visibleRows)
         let renderedRows = renderedRows(visibleRows: visibleRows, groupedRows: grouped)
-        let compactLayoutUnits = compactLayoutUnitCount(visibleRows: visibleRows, groupedRows: grouped)
-        let compactBodyHeight = compactListHeight(forLayoutUnits: compactLayoutUnits)
-        let rowIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
+        let shortcutIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
             let (index, row) = pair
             if partial[row.id] == nil {
                 partial[row.id] = index + 1
             }
         }
-        let compactCalloutHeight: CGFloat = !activeEnabled ? compactDisabledCalloutHeight : 0
-        let compactContentHeight = isCompact
-            ? compactContentHeight(forBodyHeight: compactBodyHeight, calloutHeight: compactCalloutHeight)
-            : nil
 
         return VStack(spacing: 0) {
             header(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount)
@@ -248,22 +252,29 @@ struct AgentCockpitHUDView: View {
             bodyList(
                 visibleRows: visibleRows,
                 groupedRows: grouped,
-                rowIndexMap: rowIndexMap,
-                compactBodyHeight: compactBodyHeight
+                shortcutIndexMap: shortcutIndexMap,
+                totalRowsCount: rowsForDisplay.count
             )
             .background(Color.clear)
             .disabled(!activeEnabled)
 
             hiddenShortcuts(renderedRows: renderedRows)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(.ultraThinMaterial)
         .background(
             AgentCockpitHUDWindowConfigurator(
                 isPinned: isPinned,
                 shownSessionCount: shownSessionCount,
                 isCompact: isCompact,
-                compactContentHeight: compactContentHeight
+                activeEnabled: activeEnabled
             )
+            .allowsHitTesting(false)
+        )
+        .background(
+            CockpitWindowVisibilityObserver { isVisible in
+                handleWindowVisibilityChange(isVisible: isVisible)
+            }
             .allowsHitTesting(false)
         )
         .clipShape(RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.cornerRadius, style: .continuous))
@@ -273,6 +284,18 @@ struct AgentCockpitHUDView: View {
         )
         .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
         .animation(.easeInOut(duration: 0.18), value: isCompact)
+        .onAppear {
+            latestCanonicalRows = canonicalRows
+            synchronizeOrderedRows(with: canonicalRows)
+        }
+        .onChange(of: canonicalRows) { _, rows in
+            latestCanonicalRows = rows
+            synchronizeOrderedRows(with: rows)
+        }
+        .onChange(of: isWindowVisibleForOrdering) { _, isVisible in
+            guard isVisible else { return }
+            synchronizeOrderedRows(with: latestCanonicalRows)
+        }
         .applyIf(isCompact) { view in
             view.ignoresSafeArea(.container, edges: .top)
         }
@@ -380,30 +403,56 @@ struct AgentCockpitHUDView: View {
     @ViewBuilder
     private func bodyList(visibleRows: [HUDRow],
                           groupedRows: [HUDGroup],
-                          rowIndexMap: [String: Int],
-                          compactBodyHeight: CGFloat) -> some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                if groupByProject {
-                    ForEach(groupedRows) { group in
-                        AgentCockpitHUDGroupHeader(
-                            projectName: group.projectName,
-                            activeCount: group.activeCount,
-                            idleCount: group.idleCount,
-                            isCollapsed: collapsedProjects.contains(group.id)
-                        ) {
-                            toggleCollapsed(projectID: group.id)
-                        }
+                          shortcutIndexMap: [String: Int],
+                          totalRowsCount: Int) -> some View {
+        Group {
+            if visibleRows.isEmpty {
+                emptyState(totalRowsCount: totalRowsCount)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isCompact ? .leading : .center)
+                    .padding(.horizontal, isCompact ? 14 : 0)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        if groupByProject {
+                            ForEach(groupedRows) { group in
+                                AgentCockpitHUDGroupHeader(
+                                    projectName: group.projectName,
+                                    activeCount: group.activeCount,
+                                    idleCount: group.idleCount,
+                                    isCollapsed: collapsedProjects.contains(group.id)
+                                ) {
+                                    toggleCollapsed(projectID: group.id)
+                                }
 
-                        if !collapsedProjects.contains(group.id) {
-                            ForEach(group.rows) { row in
+                                if !collapsedProjects.contains(group.id) {
+                                    ForEach(group.rows) { row in
+                                        AgentCockpitHUDRowView(
+                                            row: row,
+                                            shortcutIndex: shortcutIndexMap[row.id],
+                                            isSelected: false,
+                                            filterText: filterText,
+                                            isGrouped: true,
+                                            isCompact: isCompact,
+                                            isNewlyInserted: highlightedRowIDs.contains(row.id)
+                                        ) {
+                                            focus(row)
+                                        }
+                                        .contextMenu {
+                                            rowContextMenu(row)
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            ForEach(visibleRows) { row in
                                 AgentCockpitHUDRowView(
                                     row: row,
-                                    rowNumber: rowIndexMap[row.id] ?? 0,
+                                    shortcutIndex: shortcutIndexMap[row.id],
                                     isSelected: false,
                                     filterText: filterText,
-                                    isGrouped: true,
-                                    isCompact: isCompact
+                                    isGrouped: false,
+                                    isCompact: isCompact,
+                                    isNewlyInserted: highlightedRowIDs.contains(row.id)
                                 ) {
                                     focus(row)
                                 }
@@ -413,84 +462,16 @@ struct AgentCockpitHUDView: View {
                             }
                         }
                     }
-                } else {
-                    ForEach(Array(visibleRows.enumerated()), id: \.element.id) { index, row in
-                        AgentCockpitHUDRowView(
-                            row: row,
-                            rowNumber: index + 1,
-                            isSelected: false,
-                            filterText: filterText,
-                            isGrouped: false,
-                            isCompact: isCompact
-                        ) {
-                            focus(row)
-                        }
-                        .contextMenu {
-                            rowContextMenu(row)
-                        }
-                    }
+                    .padding(.vertical, isCompact ? 0 : 2)
                 }
+                .scrollIndicators(.visible)
             }
-            .padding(.vertical, isCompact ? 0 : 2)
-            .background(
-                CockpitScrollViewScrollerConfigurator(alwaysVisible: !isCompact)
-                    .allowsHitTesting(false)
-            )
         }
-        .scrollIndicators(isCompact ? .hidden : .visible)
         .frame(
-            minHeight: isCompact ? compactBodyHeight : 170
+            minHeight: isCompact ? compactBodyMinHeight : fullBodyMinHeight,
+            maxHeight: .infinity
         )
     }
-
-    private func compactWindowVisibleSessionCount(from shownSessionCount: Int) -> Int {
-        min(max(shownSessionCount, 1), 8)
-    }
-
-    private func compactLayoutUnitCount(visibleRows: [HUDRow], groupedRows: [HUDGroup]) -> Int {
-        if groupByProject {
-            var remainingSessions = compactWindowVisibleSessionCount(
-                from: renderedRows(visibleRows: visibleRows, groupedRows: groupedRows).count
-            )
-            var units = 0
-            var emittedAnySession = false
-
-            for group in groupedRows {
-                units += 1 // group header
-                guard !collapsedProjects.contains(group.id) else { continue }
-                guard remainingSessions > 0 else { break }
-
-                let take = min(group.rows.count, remainingSessions)
-                units += take
-                remainingSessions -= take
-                if take > 0 { emittedAnySession = true }
-
-                if remainingSessions == 0 { break }
-            }
-
-            return max(units, emittedAnySession ? 1 : 2)
-        }
-
-        let visibleSessionCount = compactWindowVisibleSessionCount(from: visibleRows.count)
-        return max(visibleSessionCount, 1)
-    }
-
-    private func compactListHeight(forLayoutUnits layoutUnits: Int) -> CGFloat {
-        let unitHeight: CGFloat = 31
-        let verticalInsets: CGFloat = isCompact ? 0 : 4
-        // Grouped compact mode needs extra bottom breathing room so the last row
-        // does not appear clipped against the rounded window edge.
-        let groupedBottomInset: CGFloat = groupByProject ? 10 : 0
-        return (CGFloat(layoutUnits) * unitHeight) + verticalInsets + groupedBottomInset
-    }
-
-    private func compactContentHeight(forBodyHeight bodyHeight: CGFloat, calloutHeight: CGFloat) -> CGFloat {
-        let compactHeaderHeight: CGFloat = 44
-        let headerDividerHeight: CGFloat = 0.5
-        return compactHeaderHeight + headerDividerHeight + calloutHeight + bodyHeight
-    }
-
-    private var compactDisabledCalloutHeight: CGFloat { 56 }
 
     @ViewBuilder
     private func hiddenShortcuts(renderedRows: [HUDRow]) -> some View {
@@ -555,7 +536,110 @@ struct AgentCockpitHUDView: View {
     }
 
     private func groupedRows(from rows: [HUDRow]) -> [HUDGroup] {
-        Self.groupedRows(rows)
+        if isWindowVisibleForOrdering {
+            return Self.groupedRowsPreservingOrder(rows)
+        }
+        return Self.groupedRows(rows)
+    }
+
+    @ViewBuilder
+    private func emptyState(totalRowsCount: Int) -> some View {
+        if isCompact {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(Color.secondary.opacity(0.45))
+                    .frame(width: 7, height: 7)
+                Text("No sessions")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 8)
+        } else {
+            Text(fullModeEmptyStateLabel(totalRowsCount: totalRowsCount))
+                .font(.system(size: 13, weight: .regular, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func fullModeEmptyStateLabel(totalRowsCount: Int) -> String {
+        let hasQuery = !filterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if hasQuery { return "No matching sessions" }
+
+        switch sessionFilterMode {
+        case .all:
+            return "No active sessions"
+        case .active:
+            return "No active sessions"
+        case .idle:
+            return totalRowsCount == 0 ? "No active sessions" : "No idle sessions"
+        }
+    }
+
+    private func rowsOrderedForDisplay(from canonicalRows: [HUDRow]) -> [HUDRow] {
+        guard !orderedRowIDs.isEmpty else { return canonicalRows }
+
+        let byID = Dictionary(uniqueKeysWithValues: canonicalRows.map { ($0.id, $0) })
+        let ordered = orderedRowIDs.compactMap { byID[$0] }
+        let orderedSet = Set(ordered.map(\.id))
+        if ordered.count == canonicalRows.count {
+            return ordered
+        }
+        let trailing = canonicalRows.filter { !orderedSet.contains($0.id) }
+        return ordered + trailing
+    }
+
+    private func synchronizeOrderedRows(with canonicalRows: [HUDRow]) {
+        let incomingIDs = canonicalRows.map(\.id)
+
+        guard !orderedRowIDs.isEmpty else {
+            orderedRowIDs = incomingIDs
+            return
+        }
+
+        if !isWindowVisibleForOrdering {
+            wasWindowHiddenSinceLastVisible = true
+            if Self.hasMembershipChurn(existing: orderedRowIDs, incoming: incomingIDs) {
+                hiddenMembershipChurnDetected = true
+            }
+            return
+        }
+
+        if wasWindowHiddenSinceLastVisible {
+            if hiddenMembershipChurnDetected {
+                orderedRowIDs = incomingIDs
+            } else {
+                let merge = Self.stableMergedOrder(existing: orderedRowIDs, incoming: incomingIDs)
+                orderedRowIDs = merge.order
+                queueInsertionHighlights(for: merge.inserted)
+            }
+            wasWindowHiddenSinceLastVisible = false
+            hiddenMembershipChurnDetected = false
+            return
+        }
+
+        let merge = Self.stableMergedOrder(existing: orderedRowIDs, incoming: incomingIDs)
+        orderedRowIDs = merge.order
+        queueInsertionHighlights(for: merge.inserted)
+    }
+
+    private func queueInsertionHighlights(for ids: [String]) {
+        let freshIDs = Set(ids)
+        guard !freshIDs.isEmpty else { return }
+        highlightedRowIDs.formUnion(freshIDs)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
+            withAnimation(.easeOut(duration: 0.20)) {
+                highlightedRowIDs.subtract(freshIDs)
+            }
+        }
+    }
+
+    private func handleWindowVisibilityChange(isVisible: Bool) {
+        guard isWindowVisibleForOrdering != isVisible else { return }
+        isWindowVisibleForOrdering = isVisible
+        if !isVisible {
+            wasWindowHiddenSinceLastVisible = true
+        }
     }
 
     private func focusSearchField(selectAll: Bool) {
@@ -885,6 +969,18 @@ struct AgentCockpitHUDView: View {
         }
     }
 
+    static func stableMergedOrder(existing: [String], incoming: [String]) -> (order: [String], inserted: [String]) {
+        let incomingSet = Set(incoming)
+        let kept = existing.filter { incomingSet.contains($0) }
+        let keptSet = Set(kept)
+        let inserted = incoming.filter { !keptSet.contains($0) }
+        return (kept + inserted, inserted)
+    }
+
+    static func hasMembershipChurn(existing: [String], incoming: [String]) -> Bool {
+        Set(existing) != Set(incoming)
+    }
+
     static func groupedRows(_ rows: [HUDRow]) -> [HUDGroup] {
         var buckets: [String: [HUDRow]] = [:]
         buckets.reserveCapacity(rows.count)
@@ -912,6 +1008,32 @@ struct AgentCockpitHUDView: View {
         }
 
         return out
+    }
+
+    static func groupedRowsPreservingOrder(_ rows: [HUDRow]) -> [HUDGroup] {
+        var buckets: [String: [HUDRow]] = [:]
+        var order: [String] = []
+        buckets.reserveCapacity(rows.count)
+        order.reserveCapacity(rows.count)
+
+        for row in rows {
+            if buckets[row.projectName] == nil {
+                order.append(row.projectName)
+            }
+            buckets[row.projectName, default: []].append(row)
+        }
+
+        return order.compactMap { projectName in
+            guard let projectRows = buckets[projectName] else { return nil }
+            let counts = counts(for: projectRows)
+            return HUDGroup(
+                id: projectName,
+                projectName: projectName,
+                rows: projectRows,
+                activeCount: counts.active,
+                idleCount: counts.idle
+            )
+        }
     }
 
     private func mapAgentType(_ source: SessionSource) -> HUDAgentType {
@@ -1190,6 +1312,120 @@ struct AgentCockpitHUDView: View {
 
     private func workspaceLookupKey(source: SessionSource, normalizedPath: String) -> String {
         "\(source.rawValue)|cwd:\(normalizedPath)"
+    }
+}
+
+private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
+    let onVisibilityChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onVisibilityChanged: onVisibilityChanged)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { [weak view] in
+            context.coordinator.attach(to: view?.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onVisibilityChanged = onVisibilityChanged
+        DispatchQueue.main.async { [weak nsView] in
+            context.coordinator.attach(to: nsView?.window)
+        }
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    final class Coordinator {
+        var onVisibilityChanged: (Bool) -> Void
+        private weak var window: NSWindow?
+        private var miniObserver: NSObjectProtocol?
+        private var deminiObserver: NSObjectProtocol?
+        private var occlusionObserver: NSObjectProtocol?
+        private var closeObserver: NSObjectProtocol?
+
+        init(onVisibilityChanged: @escaping (Bool) -> Void) {
+            self.onVisibilityChanged = onVisibilityChanged
+        }
+
+        func attach(to newWindow: NSWindow?) {
+            guard let newWindow else { return }
+            guard window !== newWindow else { return }
+            detach()
+            window = newWindow
+
+            miniObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didMiniaturizeNotification,
+                object: newWindow,
+                queue: .main
+            ) { [weak self] _ in
+                self?.emitCurrentVisibility()
+            }
+
+            deminiObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didDeminiaturizeNotification,
+                object: newWindow,
+                queue: .main
+            ) { [weak self] _ in
+                self?.emitCurrentVisibility()
+            }
+
+            occlusionObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification,
+                object: newWindow,
+                queue: .main
+            ) { [weak self] _ in
+                self?.emitCurrentVisibility()
+            }
+
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: newWindow,
+                queue: .main
+            ) { [weak self] _ in
+                self?.onVisibilityChanged(false)
+                self?.detach()
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                self?.emitCurrentVisibility()
+            }
+        }
+
+        func detach() {
+            if let observer = miniObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            if let observer = deminiObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            if let observer = occlusionObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            if let observer = closeObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            miniObserver = nil
+            deminiObserver = nil
+            occlusionObserver = nil
+            closeObserver = nil
+            window = nil
+        }
+
+        private func emitCurrentVisibility() {
+            guard let window else { return }
+            let visible = !window.isMiniaturized && window.isVisible
+            onVisibilityChanged(visible)
+        }
+
+        deinit {
+            detach()
+        }
     }
 }
 

@@ -85,12 +85,15 @@ All notable changes to this project will be documented in this file.
 - Sessions (Cockpit/Unified/Claude): Cockpit now suppresses unresolved live placeholders that are neither focusable nor joinable to indexed workspace sessions, dedupes unresolved rows by stable tty/workspace identity, and its `Refresh` action now refreshes both live presence and provider indexes; Claude refresh now auto-escalates recent-scope drift to full reconcile, and manual refreshes in both Unified and Cockpit now run Claude full reconcile so newly opened Claude sessions appear reliably in the main Sessions list.
 
 ### Changed
+- Sessions (Agent Cockpit): HUD rows now remove the visible row-number column, keep `⌘1...⌘9` shortcut badges bound to visual order, and apply one-shot highlight washes for newly added rows.
+- Sessions (Agent Cockpit): Row order now stays stable while the window is visible and only re-sorts after hide/minimize when membership changed while hidden; quick hide/show without row churn keeps order unchanged.
+- Sessions (Agent Cockpit): Compact/full window sizing now persists per mode across restarts, compact defaults to six rows on first use (minimum three rows), and session add/remove no longer auto-resizes the window.
+- Sessions (Agent Cockpit): Added explicit empty states (`No active sessions` in full mode, `No sessions` in compact mode) and enabled overflow scroll indicators in compact mode.
 - Sessions (Agent Cockpit/Unified): Live-status visual hierarchy now emphasizes idle sessions (stronger amber pulse) while active sessions use a calm static green dot; all live dots now render at 7pt and idle row dimming is slightly reduced for readability.
 - Sessions (Agent Cockpit): Agent badges, preview text, elapsed-time text, and grouped idle-count chips now use higher-contrast light/dark palettes for improved scanability.
-- Sessions (Agent Cockpit): Full mode now keeps vertical scroll indicators visible when the session list overflows, while compact mode keeps scroll indicators hidden.
-- Sessions (Agent Cockpit): Full-mode scroll indicators are now always visible when content overflows (including pinned and unfocused windows), while compact mode keeps existing hidden-on-idle behavior.
+- Sessions (Agent Cockpit): Full and compact HUD modes now both surface vertical scroll indicators for overflow lists.
 - Sessions (Agent Cockpit): Full HUD mode now allows long session names to wrap to two lines in the main row text, while compact mode keeps names single-line.
-- Sessions (Agent Cockpit): Compact HUD mode now hides the window title text and auto-resizes window height to fit visible sessions (up to 8 rows).
+- Sessions (Agent Cockpit): Compact HUD mode now hides the window title text while preserving user-controlled window height.
 - Sessions (Agent Cockpit): Replaced the `Agent Cockpit` window UI with the new floating HUD layout (chips, inline filter, grouped mode, compact mode, pin mode, and keyboard row shortcuts) while keeping Legacy Cockpit available and reusing existing live-session backend logic.
 - Sessions (Agent Cockpit): Window title now includes the currently shown session count (`Agent Cockpit (N)`), the in-content `AGENT COCKPIT` label and footer row (`Session List` + freshness) were removed, and focused-window blue list focus ring styling was removed for a cleaner HUD appearance.
 - Menu/Cockpit windows: Renamed the existing Cockpit window/menu item to `Legacy Cockpit` (defaulting to the `Live` filter), added a new single-instance `Agent Cockpit` window/menu item, moved `⌘⌥⇧C` to `Agent Cockpit`, and removed the Legacy shortcut.
@@ -102,7 +105,7 @@ All notable changes to this project will be documented in this file.
 - Sessions (Live/Cockpit): OpenCode active/open session detection is temporarily disabled for this release; live-state scope is now Codex + Claude only.
 - Cockpit/Sessions (Live controls): When `Live Sessions + Cockpit (Beta)` is disabled, Cockpit and live-filter controls remain visible but disabled with explanatory help text.
 - Sessions (Cockpit): Cockpit header controls now show only `Active` and `Live` filters (removed `Cockpit`/`Show` text); `Live` includes both active and idle sessions.
-- Sessions (Cockpit): Cockpit window layout no longer uses a fixed content frame; default new-window height is now tuned for about 8 visible rows and resizing now scales rows naturally in both directions.
+- Sessions (Cockpit): Cockpit window layout no longer uses a fixed content frame; rows scale naturally with window resizing, with per-mode frame persistence and no session-count auto-resize.
 - Preferences (Unified Window): Reordered sections so `Columns` and `Filters` appear before `Rich Transcript`.
 - Preferences (OpenClaw): Moved `Include deleted OpenClaw sessions` from Advanced to the OpenClaw pane as a standalone checkbox.
 - Preferences: Added a dedicated `Agent Cockpit` pane and moved Live Sessions + Cockpit settings there from `Advanced`; compact mode now includes a `Show agent name in compact mode` toggle (default on).
