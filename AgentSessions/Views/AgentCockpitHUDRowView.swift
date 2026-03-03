@@ -8,14 +8,13 @@ struct AgentCockpitHUDRowView: View {
     let isGrouped: Bool
     let isCompact: Bool
     let onTap: () -> Void
-    @State private var isHovering: Bool = false
 
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 9) {
                 Text("\(rowNumber)")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.65))
+                    .foregroundStyle(Color.secondary.opacity(isSelected ? 0.9 : 0.65))
                     .frame(width: 22, alignment: .center)
 
                 AgentCockpitHUDStatusDot(
@@ -26,26 +25,22 @@ struct AgentCockpitHUDRowView: View {
                     .accessibilityLabel(row.liveState == .active ? "Active" : "Idle")
 
                 Text(row.agentType.label)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(row.agentType.tint)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(row.agentType.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .strokeBorder(row.agentType.tint.opacity(0.22), lineWidth: 0.5)
-                    )
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .foregroundStyle(agentLabelColor)
+                    .frame(width: 56, alignment: .leading)
 
-                highlightedText(row.projectName)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(width: 165, alignment: .leading)
+                if !isGrouped {
+                    highlightedText(row.projectName)
+                        .font(.system(size: 13, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(width: 165, alignment: .leading)
+                }
 
                 Text(row.preview)
-                    .font(.system(size: 11, weight: .regular))
-                    .foregroundStyle(row.liveState == .active ? Color.secondary : Color.secondary.opacity(0.9))
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.primary)
                     .lineLimit(isCompact ? 1 : 2)
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: !isCompact)
@@ -57,22 +52,24 @@ struct AgentCockpitHUDRowView: View {
                     .lineLimit(1)
                     .frame(width: 32, alignment: .trailing)
 
-                if let shortcutLabel {
-                    Text(shortcutLabel)
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.6))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .frame(width: 56)
-                        .background(Color.primary.opacity(isSelected ? 0.10 : 0.04))
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .strokeBorder(Color.primary.opacity(isSelected ? 0.22 : 0.10), lineWidth: 0.5)
-                        )
-                } else {
-                    Color.clear
-                        .frame(width: 56, height: 20)
+                if !isCompact {
+                    if let shortcutLabel {
+                        Text(shortcutLabel)
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(isSelected ? Color.primary.opacity(0.84) : Color.secondary.opacity(0.6))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .frame(width: 56)
+                            .background(Color.primary.opacity(isSelected ? 0.12 : 0.04))
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(Color.primary.opacity(isSelected ? 0.20 : 0.10), lineWidth: 0.5)
+                            )
+                    } else {
+                        Color.clear
+                            .frame(width: 56, height: 20)
+                    }
                 }
             }
             .padding(.leading, isGrouped ? 24 : 12)
@@ -91,15 +88,16 @@ struct AgentCockpitHUDRowView: View {
             }
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            isHovering = hovering
-        }
     }
 
     private var shortcutLabel: String? {
         if isSelected { return "↩" }
         guard (1...9).contains(rowNumber) else { return nil }
         return "⌘\(rowNumber)"
+    }
+
+    private var agentLabelColor: Color {
+        return Color.agentColor(for: row.source, monochrome: false)
     }
 
     private func highlightedText(_ text: String) -> Text {
@@ -123,10 +121,7 @@ struct AgentCockpitHUDRowView: View {
 
     private var backgroundColor: Color {
         if isSelected {
-            return Color.accentColor.opacity(0.09)
-        }
-        if isHovering {
-            return Color.primary.opacity(0.035)
+            return Color.primary.opacity(0.055)
         }
         return .clear
     }
