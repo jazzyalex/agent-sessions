@@ -253,7 +253,7 @@ struct CockpitView: View {
 
             if !activeEnabled {
                 PreferenceCallout {
-                    Text("Live sessions + Cockpit (Beta) is disabled in Settings → Advanced.")
+                    Text("Live sessions + Cockpit (Beta) is disabled in Settings → Agent Cockpit.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

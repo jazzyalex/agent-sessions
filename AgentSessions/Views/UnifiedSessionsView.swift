@@ -1034,7 +1034,7 @@ struct UnifiedSessionsView: View {
                     .help(
                         liveSessionsFeatureEnabled
                             ? "Show only live sessions in the list (Codex, Claude)"
-                            : "Enable Live sessions + Cockpit (Beta) in Settings → Advanced."
+                            : "Enable Live sessions + Cockpit (Beta) in Settings → Agent Cockpit."
                     )
 
                 if codexAgentEnabled {

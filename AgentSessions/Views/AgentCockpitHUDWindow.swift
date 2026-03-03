@@ -117,7 +117,10 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         }
 
         private func applyCompactChrome(to window: NSWindow) {
-            window.styleMask.insert(.fullSizeContentView)
+            var compactMask = window.styleMask
+            compactMask.remove(.titled)
+            compactMask.insert(.fullSizeContentView)
+            window.styleMask = compactMask
             window.title = ""
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true

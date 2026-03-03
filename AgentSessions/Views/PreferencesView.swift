@@ -24,6 +24,7 @@ struct PreferencesView: View {
     // Cockpit: active-session registry + iTerm focus
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) var codexActiveSessionsEnabled: Bool = true
     @AppStorage(PreferencesKey.Cockpit.codexActiveRegistryRootOverride) var codexActiveRegistryRootOverride: String = ""
+    @AppStorage(PreferencesKey.Cockpit.hudShowAgentNameInCompact) var cockpitShowAgentNameInCompact: Bool = true
     // Codex probe cleanup prefs
     @AppStorage(PreferencesKey.codexProbeCleanupMode) var codexProbeCleanupMode: String = "none" // none | auto
     @State var showConfirmCodexAutoDelete: Bool = false
@@ -318,6 +319,8 @@ struct PreferencesView: View {
                 unifiedTab
             case .advanced:
                 advancedTab
+            case .agentCockpit:
+                agentCockpitTab
             case .codexCLI:
                 codexCLITab
             case .claudeResume:
@@ -944,6 +947,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case menuBar
     case unified
     case advanced
+    case agentCockpit
     case codexCLI
     case claudeResume
     case opencode
@@ -963,6 +967,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .menuBar: return "Menu Bar"
         case .unified: return "Unified Window"
         case .advanced: return "Advanced"
+        case .agentCockpit: return "Agent Cockpit"
         case .codexCLI: return "Codex CLI"
         case .claudeResume: return "Claude Code"
         case .opencode: return "OpenCode"
@@ -982,6 +987,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .menuBar: return "menubar.rectangle"
         case .unified: return "square.grid.2x2"
         case .advanced: return "gearshape.2"
+        case .agentCockpit: return "rectangle.3.group"
         case .codexCLI: return "terminal"
         case .claudeResume: return "c.square"
         case .opencode: return "chevron.left.slash.chevron.right"
@@ -995,8 +1001,8 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 }
 
 private extension PreferencesView {
-    // Sidebar order: General → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Agents → About
-    var visibleTabs: [PreferencesTab] { [.general, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI, .openClawCLI, .about] }
+    // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Agents → About
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI, .openClawCLI, .about] }
 }
 
 // MARK: - Probe helpers
@@ -1148,7 +1154,7 @@ extension PreferencesView {
             if droidVersionString == nil && droidProbeState != .probing { probeDroid() }
         case .openClawCLI:
             if openClawVersionString == nil && openClawProbeState != .probing { probeOpenClaw() }
-        case .menuBar, .usageProbes, .general, .unified, .advanced, .about:
+        case .menuBar, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
     }

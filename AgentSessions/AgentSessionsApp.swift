@@ -343,7 +343,7 @@ private struct OpenAgentCockpitWindowButton: View {
         .help(
             liveSessionsFeatureEnabled
                 ? "Open Agent Cockpit."
-                : "Enable Live sessions + Cockpit (Beta) in Settings → Advanced."
+                : "Enable Live sessions + Cockpit (Beta) in Settings → Agent Cockpit."
         )
         .keyboardShortcut("c", modifiers: [.command, .option, .shift])
     }
