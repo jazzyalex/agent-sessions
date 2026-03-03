@@ -122,6 +122,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated static let defaultStaleTTL: TimeInterval = 10
     nonisolated static let backgroundPollInterval: TimeInterval = 15
     nonisolated static let pinnedBackgroundPollInterval: TimeInterval = 3
+    nonisolated private static let codexInconclusiveTailActiveGraceWindow: TimeInterval = 6
     nonisolated private static let processProbeTimeout: TimeInterval = 0.75
     nonisolated private static let processProbeMinIntervalRegistryEmptyForeground: TimeInterval = 6
     nonisolated private static let processProbeMinIntervalRegistryEmptyBackground: TimeInterval = 45
@@ -401,6 +402,12 @@ final class CodexActiveSessionsModel: ObservableObject {
         let cachedProbeSnapshot = cachedProcessPresences
         let hasVisibleConsumerSnapshot = hasVisibleConsumer
         let appIsActiveSnapshot = appIsActive
+        let isPinnedCockpitVisibleSnapshot = isPinnedCockpitVisible
+        let shouldProbeITermSnapshot = Self.shouldProbeITermSessions(
+            appIsActive: appIsActiveSnapshot,
+            hasVisibleConsumer: hasVisibleConsumerSnapshot,
+            isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
+        )
 
         let probeResult: (loaded: [CodexActivePresence], didProbe: Bool, registryHadPresences: Bool) = await Task.detached(priority: .utility) {
             var out: [CodexActivePresence] = []
@@ -414,7 +421,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             let processProbeMinInterval = Self.processProbeMinIntervalSeconds(
                 registryHasPresences: registryHasPresences,
                 hasVisibleConsumer: hasVisibleConsumerSnapshot,
-                appIsActive: appIsActiveSnapshot
+                appIsActive: appIsActiveSnapshot,
+                isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
             )
             let shouldProbeProcesses: Bool = {
                 guard let last = lastProbeAt else { return true }
@@ -449,7 +457,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                     cachedProbeSnapshot.filter { !$0.isStale(now: now, ttl: ttl) }
                 ))
             }
-            if hasVisibleConsumerSnapshot {
+            if shouldProbeITermSnapshot {
                 let sessions = Self.loadITermSessions(timeout: Self.processProbeTimeout)
                 if !sessions.isEmpty {
                     out.append(contentsOf: Self.presencesFromITermSessions(sessions, source: .codex, now: now))
@@ -510,14 +518,14 @@ final class CodexActiveSessionsModel: ObservableObject {
 
         let probedITermPresenceKeys = plannedITermProbePresenceKeys(
             for: ui,
-            hasVisibleConsumer: hasVisibleConsumerSnapshot
+            hasVisibleConsumer: shouldProbeITermSnapshot
         )
 
         let nextLiveStates = await Task.detached(priority: .utility) {
             Self.classifyLiveStates(
                 for: ui,
                 now: now,
-                probeITerm: hasVisibleConsumerSnapshot,
+                probeITerm: shouldProbeITermSnapshot,
                 timeout: Self.processProbeTimeout,
                 previousLiveStates: previousLiveStates,
                 probedITermPresenceKeys: probedITermPresenceKeys
@@ -986,6 +994,13 @@ final class CodexActiveSessionsModel: ObservableObject {
         return hasVisibleConsumer ? Self.defaultPollInterval : Self.backgroundPollInterval
     }
 
+    nonisolated static func shouldProbeITermSessions(appIsActive: Bool,
+                                                     hasVisibleConsumer: Bool,
+                                                     isPinnedCockpitVisible: Bool) -> Bool {
+        guard hasVisibleConsumer else { return false }
+        return appIsActive || isPinnedCockpitVisible
+    }
+
     nonisolated static func nextITermProbeBudget(resumeIndex: Int?) -> (budget: Int, nextResumeIndex: Int?) {
         guard let resumeIndex else {
             return (Self.steadyStateITermProbeBudget, nil)
@@ -1036,10 +1051,16 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     nonisolated private static func processProbeMinIntervalSeconds(registryHasPresences: Bool,
                                                                    hasVisibleConsumer: Bool,
-                                                                   appIsActive: Bool) -> TimeInterval {
-        // Keep process probes warm while a UI consumer is on screen, even if app is backgrounded.
+                                                                   appIsActive: Bool,
+                                                                   isPinnedCockpitVisible: Bool) -> TimeInterval {
+        // Keep process probes warm while foregrounded or when pinned cockpit is explicitly visible.
         if hasVisibleConsumer {
-            return Self.processProbeMinIntervalRegistryEmptyForeground
+            if appIsActive || isPinnedCockpitVisible {
+                return Self.processProbeMinIntervalRegistryEmptyForeground
+            }
+            return registryHasPresences
+                ? Self.processProbeMinIntervalRegistryPresentBackground
+                : Self.processProbeMinIntervalRegistryEmptyBackground
         }
         if registryHasPresences {
             return appIsActive
@@ -1275,11 +1296,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             return .openIdle
         }
 
-        // If no busy marker is present, treat the session as open/idle by default.
-        if !lastNonEmptyLine.isEmpty {
-            return .openIdle
-        }
-        return .openIdle
+        // Ambiguous non-prompt Codex tails should defer to heuristic fallback.
+        return nil
     }
 
     // Internal for targeted unit tests.
@@ -1573,11 +1591,19 @@ final class CodexActiveSessionsModel: ObservableObject {
                 }
             }
 
+            var activeWriteWindow = activeWriteWindow(for: presence.source)
+            if presence.source == .codex,
+               canProbeITerm,
+               state == nil,
+               previousLiveStates[key] == .activeWorking {
+                // Short grace window for inconclusive tail probes to avoid active->idle flicker.
+                activeWriteWindow = max(activeWriteWindow, codexInconclusiveTailActiveGraceWindow)
+            }
             let heuristic = heuristicLiveStateFromLogMTime(
                 logPath: presence.sessionLogPath,
                 sourceFilePath: presence.sourceFilePath,
                 now: now,
-                activeWriteWindow: activeWriteWindow(for: presence.source)
+                activeWriteWindow: activeWriteWindow
             )
             let resolved = resolveLiveState(
                 probedState: state,

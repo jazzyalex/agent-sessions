@@ -513,6 +513,33 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testShouldProbeITermSessions_requiresVisibleConsumer() {
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldProbeITermSessions(
+                appIsActive: true,
+                hasVisibleConsumer: false,
+                isPinnedCockpitVisible: false
+            )
+        )
+    }
+
+    func testShouldProbeITermSessions_backgroundRequiresPinnedCockpit() {
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldProbeITermSessions(
+                appIsActive: false,
+                hasVisibleConsumer: true,
+                isPinnedCockpitVisible: false
+            )
+        )
+        XCTAssertTrue(
+            CodexActiveSessionsModel.shouldProbeITermSessions(
+                appIsActive: false,
+                hasVisibleConsumer: true,
+                isPinnedCockpitVisible: true
+            )
+        )
+    }
+
     func testNextITermProbeBudget_progressesThenFallsBackToSteadyState() {
         var index: Int? = 0
         let first = CodexActiveSessionsModel.nextITermProbeBudget(resumeIndex: index)
@@ -774,12 +801,12 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .activeWorking)
     }
 
-    func testClassifyITermTail_nonPromptTailDefaultsToOpenIdle() {
+    func testClassifyITermTail_nonPromptTailReturnsNilForHeuristicFallback() {
         let tail = """
         Analyzing files...
         Fetching status...
         """
-        XCTAssertEqual(CodexActiveSessionsModel.classifyITermTail(tail), .openIdle)
+        XCTAssertNil(CodexActiveSessionsModel.classifyITermTail(tail))
     }
 
     func testClassifyITermTail_historicalWorkedForDoesNotForceActive() {
@@ -1390,6 +1417,67 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
                 resolvedSession: nil,
                 hasWorkspaceMatch: false
             )
+        )
+    }
+
+    func testAgentCockpitHUD_mapLiveStateForHUD_mapsActiveAndIdle() {
+        XCTAssertEqual(AgentCockpitHUDView.mapLiveStateForHUD(.activeWorking), .active)
+        XCTAssertEqual(AgentCockpitHUDView.mapLiveStateForHUD(.openIdle), .idle)
+    }
+
+    func testAgentCockpitHUD_filteredRows_appliesStateAndQuery() {
+        let rows = [
+            makeHUDRow(id: "active-one", project: "Alpha", name: "Implement parser", state: .active),
+            makeHUDRow(id: "idle-one", project: "Beta", name: "Review docs", state: .idle),
+            makeHUDRow(id: "idle-two", project: "Alpha", name: "Ship release", state: .idle)
+        ]
+
+        let activeOnly = AgentCockpitHUDView.filteredRows(rows, mode: .active, query: "")
+        XCTAssertEqual(activeOnly.map(\.id), ["active-one"])
+
+        let idleWithQuery = AgentCockpitHUDView.filteredRows(rows, mode: .idle, query: "alpha")
+        XCTAssertEqual(idleWithQuery.map(\.id), ["idle-two"])
+    }
+
+    func testAgentCockpitHUD_groupedRows_ordersActiveProjectsFirstThenAlphabetical() {
+        let rows = [
+            makeHUDRow(id: "idle-beta", project: "Beta", name: "B", state: .idle),
+            makeHUDRow(id: "active-gamma", project: "Gamma", name: "G", state: .active),
+            makeHUDRow(id: "active-alpha", project: "Alpha", name: "A", state: .active)
+        ]
+
+        let grouped = AgentCockpitHUDView.groupedRows(rows)
+        XCTAssertEqual(grouped.map(\.projectName), ["Alpha", "Gamma", "Beta"])
+        XCTAssertEqual(grouped.map(\.activeCount), [1, 1, 0])
+        XCTAssertEqual(grouped.map(\.idleCount), [0, 0, 1])
+    }
+
+    func testAgentCockpitHUD_counts_reportsActiveAndIdleTotals() {
+        let rows = [
+            makeHUDRow(id: "a1", project: "Alpha", name: "A1", state: .active),
+            makeHUDRow(id: "i1", project: "Alpha", name: "I1", state: .idle),
+            makeHUDRow(id: "a2", project: "Beta", name: "A2", state: .active)
+        ]
+        let counts = AgentCockpitHUDView.counts(for: rows)
+        XCTAssertEqual(counts.active, 2)
+        XCTAssertEqual(counts.idle, 1)
+    }
+
+    private func makeHUDRow(id: String, project: String, name: String, state: HUDLiveState) -> HUDRow {
+        HUDRow(
+            id: id,
+            source: .codex,
+            agentType: .codex,
+            projectName: project,
+            displayName: name,
+            liveState: state,
+            preview: name,
+            elapsed: "1m",
+            lastSeenAt: Date(),
+            itermSessionId: nil,
+            revealURL: nil,
+            tty: nil,
+            termProgram: nil
         )
     }
 
