@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - Sessions (Agent Cockpit): Grouped compact mode now reserves extra bottom spacing so the last row is not cramped/clipped, and switching from compact back to full mode now preserves the current window size (no automatic full-mode resize).
 - Sessions (Agent Cockpit): Compact window sizing now also recalculates while live mode is disabled and reserves space for the disabled-state callout, preventing compact clipping in the disabled state.
 - Sessions (Agent Cockpit): Agent label, project name, and session name row typography/colors now align with the main Session list style (source-accent agent text and monospaced session/project text).
+- Sessions (Agent Cockpit): Agent-column labels now render as plain text (pill removed) and use the same standard Codex/Claude accent colors as the main Sessions list.
 - Sessions (Agent Cockpit): Removed persistent row-selection highlighting and removed up/down row navigation; cockpit row actions now use direct mouse clicks plus shortcut jumps (`Cmd+1...9`, `Cmd+0` for row 10).
 - Sessions (Agent Cockpit): Compact mode keeps the filter pills visible in the toolbar, removes the keyboard-shortcut badge column, and tightens compact height math so extra top/bottom blank bands are not reserved around the session rows.
 - Sessions (Agent Cockpit): Compact mode no longer reserves a titlebar-sized blank strip above the toolbar; compact rows now start at the top edge of the HUD content area.

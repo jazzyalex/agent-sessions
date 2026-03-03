@@ -7,12 +7,6 @@ enum HUDLiveState: Equatable {
     case idle
 }
 
-struct HUDAgentBadgeStyle {
-    let text: Color
-    let background: Color
-    let border: Color
-}
-
 enum HUDAgentType: Equatable {
     case codex
     case claude
@@ -26,48 +20,11 @@ enum HUDAgentType: Equatable {
         }
     }
 
-    func badgeStyle(for colorScheme: ColorScheme) -> HUDAgentBadgeStyle {
-        if colorScheme == .dark {
-            switch self {
-            case .codex:
-                return HUDAgentBadgeStyle(
-                    text: Color(hex: "9e9cf8"),
-                    background: Color(hex: "5e5ce6").opacity(0.18),
-                    border: Color(hex: "5e5ce6").opacity(0.28)
-                )
-            case .claude:
-                return HUDAgentBadgeStyle(
-                    text: Color(hex: "ffb340"),
-                    background: Color(hex: "ff9500").opacity(0.15),
-                    border: Color(hex: "ff9500").opacity(0.25)
-                )
-            case .shell:
-                return HUDAgentBadgeStyle(
-                    text: Color(hex: "6e6e73"),
-                    background: Color.white.opacity(0.07),
-                    border: Color.white.opacity(0.12)
-                )
-            }
-        }
+    var standardTextColor: Color {
         switch self {
-        case .codex:
-            return HUDAgentBadgeStyle(
-                text: Color(hex: "5856d6"),
-                background: Color(hex: "5e5ce6").opacity(0.09),
-                border: Color(hex: "5e5ce6").opacity(0.16)
-            )
-        case .claude:
-            return HUDAgentBadgeStyle(
-                text: Color(hex: "c47700"),
-                background: Color(hex: "ff9500").opacity(0.09),
-                border: Color(hex: "ff9500").opacity(0.16)
-            )
-        case .shell:
-            return HUDAgentBadgeStyle(
-                text: Color(hex: "8e8e93"),
-                background: Color.black.opacity(0.05),
-                border: Color.black.opacity(0.10)
-            )
+        case .codex: return .agentCodex
+        case .claude: return .agentClaude
+        case .shell: return .secondary
         }
     }
 }
