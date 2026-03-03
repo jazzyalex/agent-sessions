@@ -63,13 +63,13 @@ private enum HUDFocusArea: Hashable {
     case rows
 }
 
-private enum HUDSessionFilterMode: Equatable {
+enum HUDSessionFilterMode: Equatable {
     case all
     case active
     case idle
 }
 
-private struct HUDGroup: Identifiable {
+struct HUDGroup: Identifiable {
     let id: String
     let projectName: String
     let rows: [HUDRow]
@@ -534,59 +534,11 @@ struct AgentCockpitHUDView: View {
     }
 
     private func filteredRows(from rows: [HUDRow]) -> [HUDRow] {
-        let trimmed = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return rows.filter { row in
-            let statePass: Bool = {
-                switch sessionFilterMode {
-                case .all:
-                    return true
-                case .active:
-                    return row.liveState == .active
-                case .idle:
-                    return row.liveState == .idle
-                }
-            }()
-            guard statePass else { return false }
-
-            guard !trimmed.isEmpty else { return true }
-            let query = trimmed.lowercased()
-            return row.projectName.lowercased().contains(query)
-                || row.displayName.lowercased().contains(query)
-                || row.preview.lowercased().contains(query)
-        }
+        Self.filteredRows(rows, mode: sessionFilterMode, query: filterText)
     }
 
     private func groupedRows(from rows: [HUDRow]) -> [HUDGroup] {
-        var buckets: [String: [HUDRow]] = [:]
-        buckets.reserveCapacity(rows.count)
-
-        for row in rows {
-            buckets[row.projectName, default: []].append(row)
-        }
-
-        var out: [HUDGroup] = buckets.map { projectName, projectRows in
-            let activeCount = projectRows.reduce(into: 0) { partial, row in
-                if row.liveState == .active { partial += 1 }
-            }
-            let idleCount = projectRows.count - activeCount
-            return HUDGroup(
-                id: projectName,
-                projectName: projectName,
-                rows: projectRows,
-                activeCount: activeCount,
-                idleCount: idleCount
-            )
-        }
-
-        out.sort { a, b in
-            if a.hasActive != b.hasActive {
-                return a.hasActive && !b.hasActive
-            }
-            return a.projectName.localizedCaseInsensitiveCompare(b.projectName) == .orderedAscending
-        }
-
-        return out
+        Self.groupedRows(rows)
     }
 
     private func clampSelection(to rows: [HUDRow]) {
@@ -739,8 +691,8 @@ struct AgentCockpitHUDView: View {
         let deduped = dedupeRowsByResolvedSession(mappedRows)
 
         let sorted = deduped.sorted { a, b in
-            let aState = mapLiveState(a.liveState)
-            let bState = mapLiveState(b.liveState)
+            let aState = Self.mapLiveStateForHUD(a.liveState)
+            let bState = Self.mapLiveStateForHUD(b.liveState)
             if aState != bState {
                 return aState == .active
             }
@@ -752,7 +704,7 @@ struct AgentCockpitHUDView: View {
         }
 
         let hudRows = sorted.map { row in
-            let hudState = mapLiveState(row.liveState)
+            let hudState = Self.mapLiveStateForHUD(row.liveState)
             let elapsed = elapsedLabel(from: row.lastSeenAt ?? row.date)
             return HUDRow(
                 id: row.id,
@@ -771,15 +723,8 @@ struct AgentCockpitHUDView: View {
             )
         }
 
-        return HUDRowsSnapshot(
-            rows: hudRows,
-            activeCount: hudRows.reduce(into: 0) { partial, row in
-                if row.liveState == .active { partial += 1 }
-            },
-            idleCount: hudRows.reduce(into: 0) { partial, row in
-                if row.liveState == .idle { partial += 1 }
-            }
-        )
+        let counts = Self.counts(for: hudRows)
+        return HUDRowsSnapshot(rows: hudRows, activeCount: counts.active, idleCount: counts.idle)
     }
 
     private func elapsedLabel(from date: Date?) -> String {
@@ -791,8 +736,66 @@ struct AgentCockpitHUDView: View {
         return "\(delta / 86400)d"
     }
 
-    private func mapLiveState(_ liveState: CodexLiveState) -> HUDLiveState {
+    static func mapLiveStateForHUD(_ liveState: CodexLiveState) -> HUDLiveState {
         liveState == .activeWorking ? .active : .idle
+    }
+
+    static func counts(for rows: [HUDRow]) -> (active: Int, idle: Int) {
+        let active = rows.reduce(into: 0) { partial, row in
+            if row.liveState == .active { partial += 1 }
+        }
+        return (active: active, idle: rows.count - active)
+    }
+
+    static func filteredRows(_ rows: [HUDRow], mode: HUDSessionFilterMode, query: String) -> [HUDRow] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return rows.filter { row in
+            let statePass: Bool = {
+                switch mode {
+                case .all:
+                    return true
+                case .active:
+                    return row.liveState == .active
+                case .idle:
+                    return row.liveState == .idle
+                }
+            }()
+            guard statePass else { return false }
+            guard !trimmed.isEmpty else { return true }
+            let lowered = trimmed.lowercased()
+            return row.projectName.lowercased().contains(lowered)
+                || row.displayName.lowercased().contains(lowered)
+                || row.preview.lowercased().contains(lowered)
+        }
+    }
+
+    static func groupedRows(_ rows: [HUDRow]) -> [HUDGroup] {
+        var buckets: [String: [HUDRow]] = [:]
+        buckets.reserveCapacity(rows.count)
+
+        for row in rows {
+            buckets[row.projectName, default: []].append(row)
+        }
+
+        var out: [HUDGroup] = buckets.map { projectName, projectRows in
+            let counts = counts(for: projectRows)
+            return HUDGroup(
+                id: projectName,
+                projectName: projectName,
+                rows: projectRows,
+                activeCount: counts.active,
+                idleCount: counts.idle
+            )
+        }
+
+        out.sort { a, b in
+            if a.hasActive != b.hasActive {
+                return a.hasActive && !b.hasActive
+            }
+            return a.projectName.localizedCaseInsensitiveCompare(b.projectName) == .orderedAscending
+        }
+
+        return out
     }
 
     private func mapAgentType(_ source: SessionSource) -> HUDAgentType {
