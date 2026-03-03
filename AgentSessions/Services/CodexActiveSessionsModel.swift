@@ -418,8 +418,14 @@ final class CodexActiveSessionsModel: ObservableObject {
             isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
         )
 
-        let probeResult: (loaded: [CodexActivePresence], didProbe: Bool, registryHadPresences: Bool) = await Task.detached(priority: .utility) {
+        let probeResult: (
+            loaded: [CodexActivePresence],
+            didProbe: Bool,
+            registryHadPresences: Bool,
+            itermTabTitleByTTY: [String: String]
+        ) = await Task.detached(priority: .utility) {
             var out: [CodexActivePresence] = []
+            var itermTabTitleByTTY: [String: String] = [:]
             let decoder = Self.makeDecoder()
             for path in rootPaths {
                 out.append(contentsOf: Self.filterSupportedPresences(
@@ -469,11 +475,12 @@ final class CodexActiveSessionsModel: ObservableObject {
             if shouldProbeITermSnapshot {
                 let sessions = Self.loadITermSessions(timeout: Self.processProbeTimeout)
                 if !sessions.isEmpty {
+                    itermTabTitleByTTY = Self.itermTabTitleByTTY(sessions)
                     out.append(contentsOf: Self.presencesFromITermSessions(sessions, source: .codex, now: now))
                     out.append(contentsOf: Self.presencesFromITermSessions(sessions, source: .claude, now: now))
                 }
             }
-            return (out, shouldProbeProcesses, registryHasPresences)
+            return (out, shouldProbeProcesses, registryHasPresences, itermTabTitleByTTY)
         }.value
         let latestProcessProbe = Self.filterSupportedPresences(
             probeResult.loaded.filter { $0.publisher == "agent-sessions-process" }
@@ -524,6 +531,10 @@ final class CodexActiveSessionsModel: ObservableObject {
             ui.append(p)
         }
         ui = Self.reconcileFallbackPresences(Array(fallbackMap.values), into: ui)
+        ui = Self.enrichPresencesWithITermTabTitles(
+            ui,
+            tabTitleByTTY: probeResult.itermTabTitleByTTY
+        )
 
         let probedITermPresenceKeys = plannedITermProbePresenceKeys(
             for: ui,
@@ -2140,6 +2151,52 @@ final class CodexActiveSessionsModel: ObservableObject {
             if let parsed = parseLine(line, separator: "\t") ?? parseLine(line, separator: "tab") {
                 out.append(parsed)
             }
+        }
+
+        return out
+    }
+
+    nonisolated static func itermTabTitleByTTY(_ sessions: [ITermSessionInfo]) -> [String: String] {
+        var out: [String: String] = [:]
+        out.reserveCapacity(sessions.count)
+        for session in sessions {
+            guard let tty = normalizedTTY(session.tty) else { continue }
+            let title = session.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            if out[tty] == nil {
+                out[tty] = title
+            }
+        }
+        return out
+    }
+
+    nonisolated static func enrichPresencesWithITermTabTitles(_ presences: [CodexActivePresence],
+                                                              tabTitleByTTY: [String: String]) -> [CodexActivePresence] {
+        guard !tabTitleByTTY.isEmpty else { return presences }
+        var out: [CodexActivePresence] = []
+        out.reserveCapacity(presences.count)
+
+        for var presence in presences {
+            guard presence.source == .codex || presence.source == .claude else {
+                out.append(presence)
+                continue
+            }
+            let existingTitle = presence.terminal?.tabTitle?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !existingTitle.isEmpty {
+                out.append(presence)
+                continue
+            }
+            guard let tty = normalizedTTY(presence.tty),
+                  let tabTitle = tabTitleByTTY[tty] else {
+                out.append(presence)
+                continue
+            }
+
+            var terminal = presence.terminal ?? CodexActivePresence.Terminal()
+            terminal.tabTitle = tabTitle
+            presence.terminal = terminal
+            out.append(presence)
         }
 
         return out

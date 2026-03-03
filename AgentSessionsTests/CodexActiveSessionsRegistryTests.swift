@@ -509,6 +509,42 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(claude[0].terminal?.tabTitle, "Claude")
     }
 
+    func testITermTabTitleByTTY_buildsMapAndPrefersFirstNonEmptyTitle() {
+        let sessions = [
+            CodexActiveSessionsModel.ITermSessionInfo(sessionID: "A", tty: "/dev/ttys001", name: "First"),
+            CodexActiveSessionsModel.ITermSessionInfo(sessionID: "B", tty: "/dev/ttys001", name: "Second"),
+            CodexActiveSessionsModel.ITermSessionInfo(sessionID: "C", tty: "/dev/ttys002", name: "Claude")
+        ]
+
+        let map = CodexActiveSessionsModel.itermTabTitleByTTY(sessions)
+        XCTAssertEqual(map["/dev/ttys001"], "First")
+        XCTAssertEqual(map["/dev/ttys002"], "Claude")
+    }
+
+    func testEnrichPresencesWithITermTabTitles_onlyBackfillsMissingTitles() {
+        var codexMissing = CodexActivePresence()
+        codexMissing.source = .codex
+        codexMissing.tty = "/dev/ttys001"
+        var codexTerminal = CodexActivePresence.Terminal()
+        codexTerminal.itermSessionId = "SID-1"
+        codexMissing.terminal = codexTerminal
+
+        var claudeExisting = CodexActivePresence()
+        claudeExisting.source = .claude
+        claudeExisting.tty = "/dev/ttys002"
+        var claudeTerminal = CodexActivePresence.Terminal()
+        claudeTerminal.tabTitle = "Already Set"
+        claudeExisting.terminal = claudeTerminal
+
+        let enriched = CodexActiveSessionsModel.enrichPresencesWithITermTabTitles(
+            [codexMissing, claudeExisting],
+            tabTitleByTTY: ["/dev/ttys001": "Codex Window", "/dev/ttys002": "Claude Window"]
+        )
+
+        XCTAssertEqual(enriched[0].terminal?.tabTitle, "Codex Window")
+        XCTAssertEqual(enriched[1].terminal?.tabTitle, "Already Set")
+    }
+
     func testEffectivePollIntervalSeconds_usesPinnedBackgroundCadence() {
         XCTAssertEqual(
             CodexActiveSessionsModel.effectivePollIntervalSeconds(

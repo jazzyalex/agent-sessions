@@ -13,6 +13,7 @@ struct CockpitView: View {
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
+    @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
     @AppStorage private var liveFilterModeRaw: String
@@ -45,6 +46,11 @@ struct CockpitView: View {
             case .live: return "Live"
             }
         }
+    }
+
+    private var effectiveColorScheme: ColorScheme {
+        let current = AppAppearance(rawValue: appAppearanceRaw) ?? .system
+        return current.effectiveColorScheme(systemScheme: systemColorScheme)
     }
 
     private struct Row: Identifiable {
@@ -378,7 +384,12 @@ struct CockpitView: View {
     }
 
     private func rowStatusDotColor(for row: Row) -> Color {
-        rowAgentForeground(for: row)
+        switch row.liveState {
+        case .activeWorking:
+            return Color(hex: "30d158")
+        case .openIdle:
+            return effectiveColorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
+        }
     }
 
     private func refreshAllSources() {

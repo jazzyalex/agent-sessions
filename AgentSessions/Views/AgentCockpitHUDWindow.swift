@@ -45,8 +45,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private var baselineCollectionBehavior: NSWindow.CollectionBehavior = []
         private var baselineHidesOnDeactivate: Bool = true
         private var baselineStyleMask: NSWindow.StyleMask = []
+        private let fallbackStandardStyleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
         private var wasCompact = false
-        private var lastExpandedHeight: CGFloat = 320
 
         func attach(to newWindow: NSWindow) {
             guard window !== newWindow else { return }
@@ -54,8 +54,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             baselineLevel = newWindow.level
             baselineCollectionBehavior = newWindow.collectionBehavior
             baselineHidesOnDeactivate = newWindow.hidesOnDeactivate
-            baselineStyleMask = newWindow.styleMask
-            lastExpandedHeight = max(newWindow.frame.height, 320)
+            captureBaselineStyleMaskIfNeeded(from: newWindow.styleMask)
         }
 
         func applyStyle(isPinned: Bool,
@@ -77,26 +76,20 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             window.contentResizeIncrements = NSSize(width: 1, height: rowResizeStep)
 
             if isCompact {
-                if !wasCompact {
-                    lastExpandedHeight = max(lastExpandedHeight, window.frame.height)
-                }
                 applyCompactChrome(to: window)
                 window.minSize = NSSize(width: 560, height: 128)
                 if let compactContentHeight {
                     applyCompactHeight(compactContentHeight, to: window, forceShrink: !wasCompact)
                 }
             } else {
+                captureBaselineStyleMaskIfNeeded(from: window.styleMask)
                 restoreStandardChrome(to: window)
                 window.title = "Agent Cockpit (\(shownSessionCount))"
                 window.titleVisibility = .visible
                 window.titlebarAppearsTransparent = false
                 let expandedMinHeight: CGFloat = 320
-                window.minSize = NSSize(width: 560, height: expandedMinHeight)
-                if wasCompact {
-                    restoreExpandedHeight(to: window, minimumHeight: max(expandedMinHeight, lastExpandedHeight))
-                } else {
-                    lastExpandedHeight = max(window.frame.height, expandedMinHeight)
-                }
+                let nonResizingMinHeight = min(expandedMinHeight, window.frame.height)
+                window.minSize = NSSize(width: 560, height: nonResizingMinHeight)
             }
 
             if isPinned {
@@ -137,11 +130,12 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         }
 
         private func restoreStandardChrome(to window: NSWindow) {
-            if !baselineStyleMask.isEmpty {
-                window.styleMask = baselineStyleMask
-            } else {
-                window.styleMask.remove(.fullSizeContentView)
+            var restoredMask = baselineStyleMask
+            if !restoredMask.contains(.titled) {
+                restoredMask.formUnion(fallbackStandardStyleMask)
+                restoredMask.remove(.fullSizeContentView)
             }
+            window.styleMask = restoredMask
             window.titlebarSeparatorStyle = .automatic
             let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
             for buttonType in buttons {
@@ -152,6 +146,16 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             if let container = window.standardWindowButton(.closeButton)?.superview {
                 container.isHidden = false
             }
+        }
+
+        private func captureBaselineStyleMaskIfNeeded(from styleMask: NSWindow.StyleMask) {
+            guard styleMask.contains(.titled) else {
+                if baselineStyleMask.isEmpty {
+                    baselineStyleMask = fallbackStandardStyleMask
+                }
+                return
+            }
+            baselineStyleMask = styleMask
         }
 
         private func applyCompactHeight(_ compactContentHeight: CGFloat,
@@ -171,18 +175,5 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             window.setFrame(frame, display: true, animate: true)
         }
 
-        private func restoreExpandedHeight(to window: NSWindow, minimumHeight: CGFloat) {
-            let currentHeight = window.frame.height
-            guard currentHeight + 1 < minimumHeight else {
-                lastExpandedHeight = max(lastExpandedHeight, currentHeight)
-                return
-            }
-
-            var frame = window.frame
-            frame.origin.y += frame.height - minimumHeight
-            frame.size.height = minimumHeight
-            window.setFrame(frame, display: true, animate: true)
-            lastExpandedHeight = max(lastExpandedHeight, minimumHeight)
-        }
     }
 }

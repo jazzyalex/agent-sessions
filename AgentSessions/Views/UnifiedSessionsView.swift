@@ -51,6 +51,13 @@ private extension Notification.Name {
     static let collapseInlineSearchIfEmpty = Notification.Name("UnifiedSessionsCollapseInlineSearchIfEmpty")
 }
 
+private enum CockpitNavigationUserInfoKey {
+    static let source = "source"
+    static let runtimeSessionID = "runtimeSessionID"
+    static let logPath = "logPath"
+    static let workingDirectory = "workingDirectory"
+}
+
 private enum UnifiedSessionsStyle {
     static let selectionAccent = Color(hex: "007acc")
     static let timestampColor = Color(hex: "8E8E93")
@@ -210,6 +217,7 @@ struct UnifiedSessionsView: View {
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.openWindow) private var openWindow
 
     let layoutMode: LayoutMode
     let analyticsReady: Bool
@@ -385,6 +393,7 @@ struct UnifiedSessionsView: View {
 				                    unified.setAppActive(NSApp.isActive)
 			                    updateFocusedSessionIfNeeded(selectedSession)
 			                    refreshSelectionSourceFromCachedRows()
+                                tryHandlePendingCockpitNavigationIfNeeded()
 		                    searchCoordinator.setAppActive(NSApp.isActive)
 			                }
 			                .onDisappear {
@@ -479,6 +488,7 @@ struct UnifiedSessionsView: View {
 				if !sessions.isEmpty {
 					hasEverHadSessions = true
 				}
+                tryHandlePendingCockpitNavigationIfNeeded()
 			}
 
 		let afterSessionSearch = afterSessions
@@ -523,7 +533,12 @@ struct UnifiedSessionsView: View {
 					}
 				}
 
-				let afterShowImages = afterNavigateFromImages
+				let afterNavigateFromCockpit = afterNavigateFromImages
+					.onReceive(NotificationCenter.default.publisher(for: .navigateToSessionFromCockpit)) { n in
+						handleNavigateToSessionFromCockpit(n)
+					}
+
+				let afterShowImages = afterNavigateFromCockpit
 					.onReceive(NotificationCenter.default.publisher(for: .showImagesFromMenu)) { _ in
 						showImagesForSelectedSession(showNoSelectionAlert: true)
 					}
@@ -1151,6 +1166,18 @@ struct UnifiedSessionsView: View {
             .disabled(selectedSession == nil)
             .accessibilityLabel(Text("Image Browser"))
 
+            ToolbarIconButton(
+                help: liveSessionsFeatureEnabled
+                    ? "Open Agent Cockpit."
+                    : "Enable Live sessions + Cockpit (Beta) in Settings → Agent Cockpit."
+            ) { _ in
+                ToolbarIcon(systemName: "rectangle.3.group")
+            } action: {
+                openWindow(id: "AgentCockpit")
+            }
+            .disabled(!liveSessionsFeatureEnabled)
+            .accessibilityLabel(Text("Agent Cockpit"))
+
             if isGitInspectorEnabled {
                 ToolbarIconButton(help: "Show historical and current git context with safety analysis (⌘⇧G)") { _ in
                     ToolbarIcon(systemName: "clock.arrow.circlepath")
@@ -1364,6 +1391,171 @@ struct UnifiedSessionsView: View {
         updateFocusedSessionIfNeeded(s)
     }
 
+    private struct CockpitNavigationTarget {
+        let unifiedSessionID: String
+        let source: SessionSource?
+        let runtimeSessionID: String?
+        let logPath: String?
+        let workingDirectory: String?
+    }
+
+    private func handleNavigateToSessionFromCockpit(_ notification: Notification) {
+        guard let unifiedSessionID = notification.object as? String else { return }
+        let sourceRaw = notification.userInfo?[CockpitNavigationUserInfoKey.source] as? String
+        let source = sourceRaw.flatMap(SessionSource.init(rawValue:))
+        let target = CockpitNavigationTarget(
+            unifiedSessionID: unifiedSessionID,
+            source: source,
+            runtimeSessionID: notification.userInfo?[CockpitNavigationUserInfoKey.runtimeSessionID] as? String,
+            logPath: notification.userInfo?[CockpitNavigationUserInfoKey.logPath] as? String,
+            workingDirectory: notification.userInfo?[CockpitNavigationUserInfoKey.workingDirectory] as? String
+        )
+        _ = handleCockpitNavigation(target, emitBeepOnFailure: false)
+    }
+
+    @discardableResult
+    private func handleCockpitNavigation(_ target: CockpitNavigationTarget, emitBeepOnFailure: Bool) -> Bool {
+        guard let session = resolveCockpitNavigationTarget(target) else {
+            if emitBeepOnFailure {
+                NSSound.beep()
+            }
+            return false
+        }
+
+        let wasVisible = cachedRows.contains(where: { $0.id == session.id })
+        if !wasVisible {
+            applyAutoRevealFiltersForCockpitNavigation(session)
+            _ = updateCachedRows()
+        }
+
+        guard cachedRows.contains(where: { $0.id == session.id }) else {
+            if emitBeepOnFailure {
+                NSSound.beep()
+            }
+            return false
+        }
+
+        let selectedSource = cachedRows.first(where: { $0.id == session.id })?.source ?? session.source
+        setActiveSelection(session.id, source: selectedSource, userInitiated: true)
+        focusCoordinator.perform(.selectSession(id: session.id))
+        NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+        updateFocusedSessionIfNeeded(session)
+        CockpitNavigationBridge.clearIfMatching(unifiedSessionID: target.unifiedSessionID)
+
+        NSApp.activate(ignoringOtherApps: true)
+        if let main = NSApp.windows.first(where: { $0.isVisible && $0.title == "Agent Sessions" }) ?? NSApp.mainWindow {
+            main.makeKeyAndOrderFront(nil)
+        }
+        return true
+    }
+
+    private func tryHandlePendingCockpitNavigationIfNeeded() {
+        guard let pending = CockpitNavigationBridge.load() else { return }
+        if Date().timeIntervalSince(pending.createdAt) > 45 {
+            CockpitNavigationBridge.clear()
+            return
+        }
+
+        let source = pending.sourceRawValue.flatMap(SessionSource.init(rawValue:))
+        let target = CockpitNavigationTarget(
+            unifiedSessionID: pending.unifiedSessionID,
+            source: source,
+            runtimeSessionID: pending.runtimeSessionID,
+            logPath: pending.logPath,
+            workingDirectory: pending.workingDirectory
+        )
+        _ = handleCockpitNavigation(target, emitBeepOnFailure: false)
+    }
+
+    private func resolveCockpitNavigationTarget(_ target: CockpitNavigationTarget) -> Session? {
+        let scoped = unified.allSessions.filter { session in
+            guard let source = target.source else { return true }
+            return session.source == source
+        }
+
+        if let direct = scoped.first(where: { $0.id == target.unifiedSessionID }) {
+            return direct
+        }
+
+        if let logPath = target.logPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !logPath.isEmpty {
+            let normalized = CodexActiveSessionsModel.normalizePath(logPath)
+            if let match = scoped.first(where: {
+                CodexActiveSessionsModel.normalizePath($0.filePath) == normalized
+            }) {
+                return match
+            }
+        }
+
+        if let runtimeSessionID = target.runtimeSessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !runtimeSessionID.isEmpty {
+            if let match = scoped.first(where: {
+                CodexActiveSessionsModel.liveSessionIDCandidates(for: $0).contains(runtimeSessionID)
+            }) {
+                return match
+            }
+        }
+
+        if let workingDirectory = target.workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !workingDirectory.isEmpty {
+            let normalized = CodexActiveSessionsModel.normalizePath(workingDirectory)
+            if let match = scoped.first(where: { session in
+                guard let cwd = session.cwd else { return false }
+                return CodexActiveSessionsModel.normalizePath(cwd) == normalized
+            }) {
+                return match
+            }
+        }
+
+        return nil
+    }
+
+    private func applyAutoRevealFiltersForCockpitNavigation(_ session: Session) {
+        ensureSourceIncludedForCockpitNavigation(session.source)
+
+        if showActiveSessionsOnly, !isSessionLive(session) {
+            showActiveSessionsOnly = false
+        }
+        if unified.showFavoritesOnly {
+            unified.showFavoritesOnly = false
+        }
+
+        if !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !unified.query.isEmpty {
+            unified.queryDraft = ""
+            unified.query = ""
+            searchCoordinator.cancel()
+        }
+
+        if unified.projectFilter != nil { unified.projectFilter = nil }
+        if unified.dateFrom != nil { unified.dateFrom = nil }
+        if unified.dateTo != nil { unified.dateTo = nil }
+        if unified.selectedModel != nil { unified.selectedModel = nil }
+        let allKinds = Set(SessionEventKind.allCases)
+        if unified.selectedKinds != allKinds {
+            unified.selectedKinds = allKinds
+        }
+        unified.recomputeNow()
+    }
+
+    private func ensureSourceIncludedForCockpitNavigation(_ source: SessionSource) {
+        switch source {
+        case .codex:
+            if !unified.includeCodex { unified.includeCodex = true }
+        case .claude:
+            if !unified.includeClaude { unified.includeClaude = true }
+        case .gemini:
+            if !unified.includeGemini { unified.includeGemini = true }
+        case .opencode:
+            if !unified.includeOpenCode { unified.includeOpenCode = true }
+        case .copilot:
+            if !unified.includeCopilot { unified.includeCopilot = true }
+        case .droid:
+            if !unified.includeDroid { unified.includeDroid = true }
+        case .openclaw:
+            if !unified.includeOpenClaw { unified.includeOpenClaw = true }
+        }
+    }
+
     private func handleWindowDidBecomeKey() {
         isWindowKey = true
         updateFocusedSessionIfNeeded(selectedSession)
@@ -1566,15 +1758,15 @@ struct UnifiedSessionsView: View {
             if let liveState {
                 switch liveState {
                 case .activeWorking:
-                    return .green
+                    return Color(hex: "30d158")
                 case .openIdle:
-                    return Color(hex: "ff9f0a")
+                    return effectiveColorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
                 }
             }
             if isSelected { return .white.opacity(0.95) }
             return !stripMonochrome ? sourceAccent(session) : .primary
         }()
-        let liveOpacity: Double = liveState == .openIdle ? 0.55 : 1.0
+        let liveOpacity: Double = liveState == .openIdle ? 0.60 : 1.0
         switch session.source {
         case .codex: label = "Codex"
         case .claude: label = "Claude"
@@ -1589,7 +1781,7 @@ struct UnifiedSessionsView: View {
                 CodexLiveStatusDot(
                     state: liveState,
                     color: rowDotColor,
-                    size: 6,
+                    size: 7,
                     lastSeenAt: presence?.lastSeenAt
                 )
                     .accessibilityLabel(Text("\(label) \(liveState == .activeWorking ? "active" : "open") session"))

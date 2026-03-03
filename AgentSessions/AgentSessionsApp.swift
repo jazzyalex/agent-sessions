@@ -8,10 +8,80 @@ extension Notification.Name {
     static let openTranscriptFindFromMenu = Notification.Name("AgentSessionsOpenTranscriptFindFromMenu")
     static let showOnboardingFromMenu = Notification.Name("AgentSessionsShowOnboardingFromMenu")
     static let navigateToSessionFromImages = Notification.Name("AgentSessionsNavigateToSessionFromImages")
+    static let navigateToSessionFromCockpit = Notification.Name("AgentSessionsNavigateToSessionFromCockpit")
     static let navigateToSessionEventFromImages = Notification.Name("AgentSessionsNavigateToSessionEventFromImages")
     static let showImagesFromMenu = Notification.Name("AgentSessionsShowImagesFromMenu")
     static let showImagesForInlineImage = Notification.Name("AgentSessionsShowImagesForInlineImage")
     static let selectImagesBrowserItem = Notification.Name("AgentSessionsSelectImagesBrowserItem")
+}
+
+struct PendingCockpitNavigationRequest {
+    let unifiedSessionID: String
+    let sourceRawValue: String?
+    let runtimeSessionID: String?
+    let logPath: String?
+    let workingDirectory: String?
+    let createdAt: Date
+}
+
+enum CockpitNavigationBridge {
+    private static let defaultsKey = "AgentSessionsPendingCockpitNavigationRequest"
+    private static let unifiedSessionIDKey = "unifiedSessionID"
+    private static let sourceRawValueKey = "sourceRawValue"
+    private static let runtimeSessionIDKey = "runtimeSessionID"
+    private static let logPathKey = "logPath"
+    private static let workingDirectoryKey = "workingDirectory"
+    private static let createdAtKey = "createdAtEpoch"
+
+    static func store(_ request: PendingCockpitNavigationRequest) {
+        let payload: [String: Any] = [
+            unifiedSessionIDKey: request.unifiedSessionID,
+            sourceRawValueKey: request.sourceRawValue ?? "",
+            runtimeSessionIDKey: request.runtimeSessionID ?? "",
+            logPathKey: request.logPath ?? "",
+            workingDirectoryKey: request.workingDirectory ?? "",
+            createdAtKey: request.createdAt.timeIntervalSince1970
+        ]
+        UserDefaults.standard.set(payload, forKey: defaultsKey)
+    }
+
+    static func load() -> PendingCockpitNavigationRequest? {
+        guard let payload = UserDefaults.standard.dictionary(forKey: defaultsKey),
+              let unifiedSessionID = payload[unifiedSessionIDKey] as? String,
+              !unifiedSessionID.isEmpty,
+              let createdAtEpoch = payload[createdAtKey] as? TimeInterval else {
+            return nil
+        }
+
+        func optionalValue(for key: String) -> String? {
+            guard let raw = payload[key] as? String else { return nil }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        return PendingCockpitNavigationRequest(
+            unifiedSessionID: unifiedSessionID,
+            sourceRawValue: optionalValue(for: sourceRawValueKey),
+            runtimeSessionID: optionalValue(for: runtimeSessionIDKey),
+            logPath: optionalValue(for: logPathKey),
+            workingDirectory: optionalValue(for: workingDirectoryKey),
+            createdAt: Date(timeIntervalSince1970: createdAtEpoch)
+        )
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+    }
+
+    static func clearIfMatching(unifiedSessionID: String) {
+        guard let pending = load() else { return }
+        guard pending.unifiedSessionID == unifiedSessionID else { return }
+        clear()
+    }
+
+    static func hasPending(unifiedSessionID: String) -> Bool {
+        load()?.unifiedSessionID == unifiedSessionID
+    }
 }
 
 @main

@@ -3,12 +3,11 @@ import SwiftUI
 struct CodexLiveStatusDot: View {
     let state: CodexLiveState
     var color: Color
-    var size: CGFloat = 6
+    var size: CGFloat = 7
     var lastSeenAt: Date? = nil
 
-    private let idleBaseColor = Color(hex: "ff9f0a")
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @State private var animatePulse: Bool = false
 
     var body: some View {
@@ -29,23 +28,18 @@ struct CodexLiveStatusDot: View {
         state == .openIdle && !reduceMotion
     }
 
-    private var idleNeedsAttention: Bool {
-        guard state == .openIdle, let lastSeenAt else { return false }
-        return Date().timeIntervalSince(lastSeenAt) >= 600
-    }
-
-    private var idleBaseScale: CGFloat {
-        idleNeedsAttention ? 1.16 : 1.0
+    private var idleBaseColor: Color {
+        colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
     }
 
     private var pulseScale: CGFloat {
-        guard shouldPulse else { return idleBaseScale }
-        return animatePulse ? idleBaseScale * 1.16 : idleBaseScale
+        guard shouldPulse else { return 1.0 }
+        return animatePulse ? 1.25 : 1.0
     }
 
     private var pulseOpacity: Double {
         guard shouldPulse else { return 1.0 }
-        return animatePulse ? 1.0 : 0.9
+        return animatePulse ? 1.0 : 0.88
     }
 
     private var fillColor: Color {
@@ -59,16 +53,14 @@ struct CodexLiveStatusDot: View {
 
     private var haloOpacity: Double {
         guard state == .openIdle else { return 0 }
-        guard shouldPulse else { return idleNeedsAttention ? 0.24 : 0.0 }
-        return animatePulse ? 0.52 : 0.18
+        guard shouldPulse else { return 0 }
+        return animatePulse ? 0.65 : 0.22
     }
 
     private var haloRadius: CGFloat {
         guard state == .openIdle else { return 0 }
-        if shouldPulse {
-            return animatePulse ? (idleNeedsAttention ? 5.0 : 3.8) : (idleNeedsAttention ? 3.4 : 2.2)
-        }
-        return idleNeedsAttention ? 3.0 : 0
+        guard shouldPulse else { return 0 }
+        return animatePulse ? 4.8 : 3.2
     }
 
     private func updateAnimation() {
