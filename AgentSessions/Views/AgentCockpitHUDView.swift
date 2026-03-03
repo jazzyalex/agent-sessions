@@ -181,8 +181,9 @@ struct AgentCockpitHUDView: View {
                 partial[row.id] = index + 1
             }
         }
-        let compactContentHeight = isCompact && activeEnabled
-            ? compactContentHeight(forBodyHeight: compactBodyHeight)
+        let compactCalloutHeight: CGFloat = !activeEnabled ? compactDisabledCalloutHeight : 0
+        let compactContentHeight = isCompact
+            ? compactContentHeight(forBodyHeight: compactBodyHeight, calloutHeight: compactCalloutHeight)
             : nil
 
         return VStack(spacing: 0) {
@@ -470,11 +471,13 @@ struct AgentCockpitHUDView: View {
         return (CGFloat(layoutUnits) * unitHeight) + verticalInsets
     }
 
-    private func compactContentHeight(forBodyHeight bodyHeight: CGFloat) -> CGFloat {
+    private func compactContentHeight(forBodyHeight bodyHeight: CGFloat, calloutHeight: CGFloat) -> CGFloat {
         let compactHeaderHeight: CGFloat = 44
         let headerDividerHeight: CGFloat = 0.5
-        return compactHeaderHeight + headerDividerHeight + bodyHeight
+        return compactHeaderHeight + headerDividerHeight + calloutHeight + bodyHeight
     }
+
+    private var compactDisabledCalloutHeight: CGFloat { 56 }
 
     @ViewBuilder
     private func hiddenShortcuts(renderedRows: [HUDRow]) -> some View {
