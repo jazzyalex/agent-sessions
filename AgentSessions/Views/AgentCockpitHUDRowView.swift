@@ -140,19 +140,10 @@ struct AgentCockpitHUDRowView: View {
     }
 
     private var agentBadge: some View {
-        let style = row.agentType.badgeStyle(for: colorScheme)
-        return Text(row.agentType.label)
+        Text(row.agentType.label)
             .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundStyle(style.text)
+            .foregroundStyle(isSelected ? Color.primary : row.agentType.standardTextColor)
             .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(style.background)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(style.border, lineWidth: 0.75)
-            )
     }
 
     private func highlightedText(_ text: String) -> Text {
