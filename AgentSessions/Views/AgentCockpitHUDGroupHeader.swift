@@ -2,10 +2,11 @@ import SwiftUI
 
 struct AgentCockpitHUDGroupHeader: View {
     let projectName: String
-    let summary: String
-    let hasActive: Bool
+    let activeCount: Int
+    let idleCount: Int
     let isCollapsed: Bool
     let onTap: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(action: onTap) {
@@ -15,13 +16,25 @@ struct AgentCockpitHUDGroupHeader: View {
                     .tracking(0.8)
                     .foregroundStyle(.secondary.opacity(0.9))
 
-                Text(summary)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(hasActive ? Color.green : .secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background((hasActive ? Color.green : Color.secondary).opacity(0.12))
-                    .clipShape(Capsule())
+                if activeCount > 0 {
+                    Text("\(activeCount) active")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color(hex: "30d158"))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color(hex: "30d158").opacity(colorScheme == .dark ? 0.18 : 0.12))
+                        .clipShape(Capsule())
+                }
+
+                if idleCount > 0 {
+                    Text("\(idleCount) idle")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(colorScheme == .dark ? Color(hex: "6e6e73") : Color(hex: "8e8e93"))
+                        .padding(.vertical, 2)
+                        .padding(.horizontal, 8)
+                        .background(colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.05))
+                        .clipShape(Capsule())
+                }
 
                 Rectangle()
                     .fill(Color.primary.opacity(0.08))

@@ -10,6 +10,7 @@ struct AgentCockpitHUDRowView: View {
     let onTap: () -> Void
     @AppStorage(PreferencesKey.Cockpit.hudShowAgentNameInCompact) private var showAgentNameInCompact: Bool = true
     @AppStorage(PreferencesKey.Cockpit.showTabSubtitleInFullMode) private var showTabSubtitleInFullMode: Bool = true
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(action: onTap) {
@@ -23,8 +24,7 @@ struct AgentCockpitHUDRowView: View {
                     liveState: row.liveState,
                     lastSeenAt: row.lastSeenAt
                 )
-                    .frame(width: 9, alignment: .center)
-                    .accessibilityLabel(row.liveState == .active ? "Active" : "Idle")
+                .accessibilityLabel(row.liveState == .active ? "Active" : "Idle")
 
                 if !isCompact || showAgentNameInCompact {
                     agentLabelBlock
@@ -41,7 +41,7 @@ struct AgentCockpitHUDRowView: View {
 
                 Text(row.preview)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(previewColor)
                     .lineLimit(isCompact ? 1 : 2)
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: !isCompact)
@@ -50,7 +50,7 @@ struct AgentCockpitHUDRowView: View {
                 if !isCompact {
                     Text(row.elapsed)
                         .font(.system(size: 10, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(elapsedColor)
                         .lineLimit(1)
                         .frame(width: 32, alignment: .trailing)
                         .help(row.lastActivityTooltip ?? "Last activity unavailable")
@@ -82,7 +82,7 @@ struct AgentCockpitHUDRowView: View {
             .frame(maxWidth: .infinity)
             .background(backgroundColor)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .opacity(row.liveState == .idle ? 0.55 : 1.0)
+            .opacity(row.liveState == .idle ? 0.60 : 1.0)
             .contentShape(Rectangle())
             .overlay(alignment: .bottom) {
                 Rectangle()
@@ -103,26 +103,21 @@ struct AgentCockpitHUDRowView: View {
     @ViewBuilder
     private var agentLabelBlock: some View {
         if isCompact {
-            Text(row.agentType.label)
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                .foregroundStyle(agentLabelColor)
-                .frame(width: 56, alignment: .leading)
+            agentBadge
+                .frame(width: 64, alignment: .leading)
         } else {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.agentType.label)
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundStyle(agentLabelColor)
-                    .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                agentBadge
                 if showTabSubtitleInFullMode, let tabTitle = normalizedTabTitle {
                     Text(tabTitle)
                         .font(.system(size: 10, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(elapsedColor)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .help(tabTitle)
                 }
             }
-            .frame(width: 112, alignment: .leading)
+            .frame(width: 148, alignment: .leading)
         }
     }
 
@@ -133,8 +128,31 @@ struct AgentCockpitHUDRowView: View {
         return raw
     }
 
-    private var agentLabelColor: Color {
-        return Color.agentColor(for: row.source, monochrome: false)
+    private var previewColor: Color {
+        if colorScheme == .dark {
+            return row.liveState == .active ? Color(hex: "8e8e93") : Color(hex: "636366")
+        }
+        return row.liveState == .active ? Color(hex: "6e6e73") : Color(hex: "aeaeb2")
+    }
+
+    private var elapsedColor: Color {
+        colorScheme == .dark ? Color(hex: "6e6e73") : Color(hex: "8e8e93")
+    }
+
+    private var agentBadge: some View {
+        let style = row.agentType.badgeStyle(for: colorScheme)
+        return Text(row.agentType.label)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(style.text)
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(style.background)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(style.border, lineWidth: 0.75)
+            )
     }
 
     private func highlightedText(_ text: String) -> Text {
@@ -168,9 +186,8 @@ private struct AgentCockpitHUDStatusDot: View {
     let liveState: HUDLiveState
     let lastSeenAt: Date?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @State private var animate = false
-
-    private let idleBaseColor = Color(hex: "ff9f0a")
 
     var body: some View {
         Circle()
@@ -188,38 +205,32 @@ private struct AgentCockpitHUDStatusDot: View {
     private var baseColor: Color {
         switch liveState {
         case .active:
-            return .green
+            return Color(hex: "30d158")
         case .idle:
             return idleBaseColor
         }
+    }
+
+    private var idleBaseColor: Color {
+        colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
     }
 
     private var shouldPulse: Bool {
         liveState == .idle && !reduceMotion
     }
 
-    private var idleNeedsAttention: Bool {
-        guard liveState == .idle, let lastSeenAt else { return false }
-        return Date().timeIntervalSince(lastSeenAt) >= 600
-    }
-
-    private var idleBaseScale: CGFloat {
-        idleNeedsAttention ? 1.16 : 1.0
-    }
-
     private var scale: CGFloat {
-        guard shouldPulse else { return idleBaseScale }
-        return animate ? idleBaseScale * 1.16 : idleBaseScale
+        guard shouldPulse else { return 1.0 }
+        return animate ? 1.25 : 1.0
     }
 
     private var opacity: Double {
         guard shouldPulse else { return 1.0 }
-        return animate ? 1.0 : 0.9
+        return animate ? 1.0 : 0.88
     }
 
     private var fillColor: Color {
-        guard liveState == .idle else { return baseColor }
-        return idleBaseColor
+        baseColor
     }
 
     private var haloColor: Color {
@@ -228,16 +239,14 @@ private struct AgentCockpitHUDStatusDot: View {
 
     private var haloOpacity: Double {
         guard liveState == .idle else { return 0 }
-        guard shouldPulse else { return idleNeedsAttention ? 0.24 : 0.0 }
-        return animate ? 0.52 : 0.18
+        guard shouldPulse else { return 0 }
+        return animate ? 0.65 : 0.22
     }
 
     private var haloRadius: CGFloat {
         guard liveState == .idle else { return 0 }
-        if shouldPulse {
-            return animate ? (idleNeedsAttention ? 5.0 : 3.8) : (idleNeedsAttention ? 3.4 : 2.2)
-        }
-        return idleNeedsAttention ? 3.0 : 0
+        guard shouldPulse else { return 0 }
+        return animate ? 4.8 : 3.2
     }
 
     private func updateAnimation() {

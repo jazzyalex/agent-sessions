@@ -21,14 +21,18 @@
 
 ## State Model (v1 — keep it simple)
 
-Two states only. No "waiting", no "error", no "needs attention".
+Two states only. No "waiting", no "error".
 
 ```swift
 enum HUDLiveState {
-    case active  // agent is producing output / progressing
-    case idle    // session is open but not active
+    case active  // agent is working — no action needed, all good
+    case idle    // waiting for user input — NEEDS ATTENTION
 }
 ```
+
+**Visual hierarchy (CRITICAL):**
+- `idle` = needs user attention → loud amber pulsing dot (the loudest element)
+- `active` = agent is working fine → calm static green dot (visible but not demanding)
 
 Detection maps directly from `CodexActiveSessionsModel`:
 - `.activeWorking` → `HUDLiveState.active`
@@ -79,6 +83,22 @@ final class AgentCockpitHUDPanel: NSPanel {
 
 Host `AgentCockpitHUDView` in an `NSHostingView` as the panel's `contentView`.
 
+### Window resize behavior
+
+The window NEVER auto-resizes when sessions are added or removed. The user sets the
+window size manually and it stays fixed. Overflow uses a scrollbar.
+
+- **Full mode:** user-resizable, default 644x320. Scrollbar appears when rows exceed
+  the visible area. When sessions are removed, the list gets shorter and space is empty.
+  When sessions are added, a brief highlight animation on the new row draws attention.
+- **Compact mode:** user-resizable height, fixed width. Default shows 5 rows.
+  Minimum 3 rows. Scrollbar for overflow.
+
+### Empty state
+
+- **Full mode:** centered empty state message — "No active sessions"
+- **Compact mode:** single muted line — "No sessions" with a muted dot
+
 ---
 
 ## Step 2 — Session Data Shape
@@ -89,11 +109,12 @@ struct HUDRow: Identifiable {
     let agentType: HUDAgentType   // .codex, .claude, .shell
     let projectName: String       // repo basename (for grouping)
     let displayName: String       // session title or branch name
-    let liveState: HUDLiveState   // .active | .idle
-    let preview: String           // last output line, or "Last active Xm ago"
+    let liveState: HUDLiveState   // .active | .idle (idle = needs attention)
+    let preview: String           // last output line, or "Waiting for input — 47m"
     let elapsed: String           // e.g. "12m", "3m", "2h"
     let itermSessionId: String?
     let revealUrl: String?
+    var manualOrder: Int?         // nil = auto-sort; set by drag-to-reorder
 }
 
 enum HUDAgentType {
@@ -105,8 +126,33 @@ enum HUDAgentType {
 ```
 
 Build `[HUDRow]` from `CodexActiveSessionsModel.presences` in a computed property.
-Refresh whenever `activeMembershipVersion` changes. Sort: `.active` rows first,
-then `.idle` rows. Within each group, sort by `lastSeenAt` descending.
+Refresh whenever `activeMembershipVersion` changes.
+
+### Sort order
+
+Idle first (needs user attention), then active (working, no action needed).
+Within each group, sort by recency descending (most recently changed state on top).
+
+**Recency-stable ordering:** do NOT re-sort while the Cockpit window is visible/focused.
+Only re-sort when the window reappears after being hidden or minimized. This prevents
+the list from jumping around while the user is looking at it. (Same pattern as chat apps
+with unread ordering.)
+
+### Manual reordering
+
+Support drag-to-reorder rows. When the user drags a row to a new position, store the
+custom order as an array of session IDs in UserDefaults (`cockpitHUDRowOrder`). Sessions
+that have been manually positioned keep their slot. New sessions that haven't been manually
+positioned fall back to the recency sort and appear at the top of their state group.
+
+If a manually-positioned session ends, its slot stays reserved for one poll cycle (show
+"ended" in the preview column), then remove it and compact the list.
+
+### No row numbers
+
+Do NOT display a `#` column. Row numbers change when sessions come and go, making them
+useless for muscle memory. Keyboard shortcuts (`⌘1`–`⌘9`) bind to the current visual
+order, which is stable while the window is visible.
 
 ---
 
@@ -135,16 +181,28 @@ The chips (active / idle) are toggle buttons that filter the visible row list.
 - Chip labels show the live count, e.g. "3 active", "2 idle".
 
 ```swift
+// Active chip — static green dot (working, all good)
 Button {
     chipFilter = chipFilter == .active ? nil : .active
 } label {
     HStack(spacing: 4) {
-        Circle().fill(Color.green).frame(width:5, height:5)
-            // animate if active
+        Circle().fill(Color(hex: "#30d158")).frame(width:5, height:5)
         Text("\(activeCount) active")
     }
 }
 .buttonStyle(HUDChipStyle(isOn: chipFilter == nil || chipFilter == .active))
+
+// Idle chip — pulsing amber dot (needs attention)
+Button {
+    chipFilter = chipFilter == .idle ? nil : .idle
+} label {
+    HStack(spacing: 4) {
+        Circle().fill(amberColor).frame(width:5, height:5)
+            // pulse animation matching row dots
+        Text("\(idleCount) idle")
+    }
+}
+.buttonStyle(HUDChipStyle(isOn: chipFilter == nil || chipFilter == .idle))
 ```
 
 ### Search field
@@ -171,20 +229,19 @@ chip and text filters.
 When `groupByProject == false`:
 
 ```
-[visible rows, filtered by chipFilter and filterText, sorted active-first]
-  ── visual divider between active and idle sections ──
+[visible rows, filtered by chipFilter and filterText, sorted idle-first (needs attention)]
+  ── visual divider between idle and active sections ──
 ```
 
-Row numbering: assign 1-based indices over the *visible* sorted array after filters
-are applied.
+No row number column. Keyboard shortcuts `⌘1`–`⌘9` bind to the current visual order.
 
 ---
 
 ## Step 5 — Body: Grouped List
 
 When `groupByProject == true`, group rows by `projectName`. Sort groups: groups with
-any `.active` session appear before idle-only groups. Within each group, sort rows
-`.active` first.
+any `.idle` session (needs attention) appear before active-only groups. Within each
+group, sort rows `.idle` first (needs attention on top).
 
 Each group has a collapsible header (`AgentCockpitHUDGroupHeader`):
 
@@ -199,22 +256,30 @@ and empty groups (all rows filtered out) are hidden too.
 
 ## Step 6 — AgentCockpitHUDRowView.swift
 
-Fixed grid layout (8 columns):
+Fixed grid layout (7 columns — no row number column):
 
 ```
-[22px rnum] [9px dot] [auto badge] [120pt name] [110pt branch] [1fr preview] [auto time] [56pt kbd]
+[9px dot] [auto badge] [120pt name] [110pt branch] [1fr preview] [auto time] [56pt kbd]
 ```
 
 **Agent badge:** `Text(row.agentType.label)` at 9pt bold monospaced, with agent-specific
-tint (Codex = indigo, Claude = orange, Shell = neutral).
+tint. Light mode: Codex text `#5856d6` on `rgba(94,92,230,0.09)` bg with `0.16` border,
+Claude text `#c47700` on `rgba(255,149,0,0.09)` bg with `0.16` border, Shell text
+`#8e8e93` on `rgba(0,0,0,0.05)` bg. Dark mode: Codex `#9e9cf8`, Claude `#ffb340`,
+Shell `#6e6e73`.
 
-**Status dot:**
-- `.active` → green, `Circle().scaleEffect(pulse).opacity(pulseOpacity)` with
-  repeating animation (scale 1.0→1.35, opacity 1.0→0.75, 1.4s easeInOut).
-  Respect `accessibilityReduceMotion` — disable animation if true.
-- `.idle` → solid neutral color, no animation.
+**Status dot (7pt diameter, no outer frame):**
+- `.active` → static green `#30d158`, NO animation. Agent is working, no action needed.
+- `.idle` → pulsing amber, NEEDS ATTENTION (waiting for user input).
+  Amber color: light `#e08600`, dark `#ffb340`.
+  Animation: `Circle().scaleEffect(pulse).opacity(pulseOpacity)` with repeating
+  animation (scale 1.0→1.25, opacity 1.0→0.85, halo opacity peak 0.65, 1.4s easeInOut).
+  Respect `accessibilityReduceMotion` — disable animation if true (show static amber).
 
-**Idle row opacity:** apply `.opacity(0.55)` to the entire row when `liveState == .idle`.
+**Idle row opacity:** apply `.opacity(0.60)` to the entire row when `liveState == .idle`.
+
+**Drag handle:** support `onMove` for drag-to-reorder. Use a `≡` drag indicator that
+appears on hover at the leading edge of the row (before the dot).
 
 **Row interaction:**
 - `.onTapGesture { focusSession(row) }` — single tap focuses the terminal (primary
@@ -256,6 +321,10 @@ When the search field is focused, Up/Down and Enter operate on the filtered row 
 
 Compact mode hides the filter bar and the footer, leaving only the topbar (title, chips,
 pin/compact buttons) and the session list. It is the minimal "ambient glance" state.
+
+**Compact window sizing:** Fixed height showing 5 rows by default. The user can drag the
+window edge to show more (up to all sessions) or fewer (minimum 3 rows). The window does
+NOT auto-resize when sessions are added/removed — overflow shows a scrollbar.
 
 ### View changes
 
@@ -421,6 +490,7 @@ static let hudOpen           = "cockpitHUDOpen"           // Bool,   default fal
 static let hudGroupByProject = "cockpitHUDGroupByProject" // Bool,   default false
 static let hudCompact        = "cockpitHUDCompact"        // Bool,   default false
 static let hudPinned         = "cockpitHUDPinned"         // Bool,   default false
+static let hudRowOrder       = "cockpitHUDRowOrder"       // [String], default [] (session IDs for manual order)
 ```
 
 Persist all four immediately on toggle. Restore on launch.
@@ -455,9 +525,12 @@ Test every item below after the build succeeds. Report pass/fail for each.
 - [ ] "Session List →" footer button opens the Session List window
 
 ### Session display
-- [ ] Active sessions appear with a pulsing green dot
-- [ ] Idle sessions appear with a static neutral dot and reduced opacity (~0.55)
-- [ ] Active sessions sort above idle sessions in flat view
+- [ ] Active sessions appear with a static green (#30d158) dot — NO pulse
+- [ ] Idle sessions appear with a pulsing amber dot (light: #e08600, dark: #ffb340)
+- [ ] Idle pulse is clearly visible in light mode (scale 1.25, halo opacity 0.65)
+- [ ] Idle rows have opacity 0.60 (not 0.55)
+- [ ] Idle sessions sort ABOVE active sessions in flat view (needs attention first)
+- [ ] No row number (#) column is displayed
 - [ ] Session name, branch, preview, and elapsed time all display correctly
 - [ ] Preview text truncates with ellipsis and does not wrap
 - [ ] Agent badge label reads "Codex", "Claude", or "Shell" (not CC/CX/$_)
@@ -467,7 +540,7 @@ Test every item below after the build succeeds. Report pass/fail for each.
 - [ ] Tapping "active" chip hides all idle rows; idle chip dims
 - [ ] Tapping "idle" chip hides all active rows; active chip dims
 - [ ] Tapping the active chip again (while it is the filter) restores all rows
-- [ ] Row numbers re-index correctly after chip filtering (1, 2, 3… not gaps)
+- [ ] Keyboard shortcuts re-map correctly after chip filtering
 - [ ] The flat divider between active and idle sections hides when chip filter is active
 - [ ] Chip counts update when sessions change state (active ↔ idle)
 
@@ -501,10 +574,34 @@ Test every item below after the build succeeds. Report pass/fail for each.
 - [ ] Rows with no valid `itermSessionId` or `revealUrl` do not crash on click
 - [ ] No right-click context menu appears anywhere in the HUD
 
+### Session ordering and drag-reorder
+- [ ] Idle sessions appear above active sessions (needs attention first)
+- [ ] List does NOT re-sort while the Cockpit window is visible/focused
+- [ ] List re-sorts when the window reappears after being hidden
+- [ ] Drag-to-reorder works: user can drag a row to a new position
+- [ ] Manually reordered sessions keep their position across poll cycles
+- [ ] New sessions (not manually positioned) appear at the top of their state group
+- [ ] Custom row order is persisted in UserDefaults and restored on relaunch
+- [ ] When a manually-positioned session ends, it shows "ended" briefly then removes
+
+### Window resize behavior
+- [ ] Window NEVER auto-resizes when sessions are added or removed
+- [ ] Full mode: scrollbar appears when rows overflow the visible area
+- [ ] Full mode: removing sessions leaves empty space (no collapse)
+- [ ] Full mode: adding a session shows a brief highlight animation on the new row
+- [ ] Compact mode: fixed height showing 5 rows by default
+- [ ] Compact mode: user can drag to resize (minimum 3 rows)
+- [ ] Compact mode: scrollbar for overflow
+
+### Empty state
+- [ ] Full mode: shows centered "No active sessions" message when list is empty
+- [ ] Compact mode: shows single muted line "No sessions" when list is empty
+
 ### Live updates
 - [ ] Freshness label updates: "just now" → "Ns ago" → "Nm ago"
-- [ ] Sessions that become active update their dot from idle to pulsing without
-      requiring a manual refresh
+- [ ] Sessions that become active update their dot from pulsing amber to static green
+      without requiring a manual refresh
+- [ ] Sessions that become idle update their dot from static green to pulsing amber
 - [ ] Sessions that exit are removed from the list within the next poll cycle (≤ 2s)
 - [ ] Chip counts update automatically as session states change
 
@@ -521,7 +618,7 @@ Test every item below after the build succeeds. Report pass/fail for each.
       interactive in compact mode
 - [ ] Chip filters still work in compact mode
 - [ ] `⌘⇧M` keyboard shortcut toggles compact mode
-- [ ] Window height shrinks appropriately when filter bar and footer are hidden
+- [ ] Window stays at fixed size when entering compact mode (does not auto-shrink)
 
 ### Pin window
 - [ ] Clicking "Pin" floats the HUD above all other windows including other apps
@@ -564,3 +661,6 @@ Test every item below after the build succeeds. Report pass/fail for each.
 | `HUDAgentType`                | AgentCockpitHUDView.swift         | enum (3 cases)   |
 | `PreferencesKey.Cockpit.hudOpen`          | PreferencesConstants.swift | static let |
 | `PreferencesKey.Cockpit.hudGroupByProject`| PreferencesConstants.swift | static let |
+| `PreferencesKey.Cockpit.hudCompact`       | PreferencesConstants.swift | static let |
+| `PreferencesKey.Cockpit.hudPinned`        | PreferencesConstants.swift | static let |
+| `PreferencesKey.Cockpit.hudRowOrder`      | PreferencesConstants.swift | static let |

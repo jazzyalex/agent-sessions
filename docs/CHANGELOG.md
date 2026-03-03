@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Sessions (Unified): Added an Agent Cockpit toolbar icon button in the main window for one-click access to the cockpit window.
+- Sessions (Agent Cockpit): Added a row context menu with `Go to Session`, `Focus in iTerm2`, `Reveal Log`, `Open Working Directory`, `Copy Session ID`, `Copy Tab Title`, and `Copy Working Directory Path`.
 - Cockpit: Added a Cockpit window for active Codex sessions with iTerm2 focus, plus active-session indicators in the Unified sessions list.
 - Sessions (Cockpit/Unified): Live session detection now includes Claude in addition to Codex, with mixed-source live rows in Cockpit and source-aware live filtering in Unified Sessions.
 - Sessions (Unified): Added a small active-status dot in the `CLI Agent` column for live Codex sessions.
@@ -14,6 +16,10 @@ All notable changes to this project will be documented in this file.
 - Sessions (Unified): Added `CLI Agent` cell double-click terminal focusing in the Sessions list (same focus path as `Focus in iTerm2`), with explicit alert feedback when no focusable live terminal is available.
 
 ### Fixed
+- Sessions (Agent Cockpit): Switching from compact mode back to full mode now reliably restores normal titled-window chrome, including title text and traffic-light controls.
+- Sessions (Agent Cockpit): Full-mode iTerm subtitle rows now preserve tab/window title metadata through live-row dedupe so subtitle text no longer disappears unexpectedly.
+- Sessions (Agent Cockpit/Unified): `Go to Session` navigation from cockpit now auto-reveals hidden target sessions in the main list by relaxing restrictive filters when needed.
+- Sessions (Agent Cockpit/Unified): `Go to Session` navigation now uses a pending request handoff with retries, preventing dropped navigation when the Agent Sessions window/view is still initializing; auto-reveal now also clears `Saved Only` filtering so non-favorite targets can be selected.
 - Agent Cockpit: Removed the in-app `Legacy Cockpit` window scene so only `Agent Cockpit` is available at runtime.
 - Agent Cockpit: Full-mode row recency now reflects session write activity (`sessionLogPath`/presence source file mtime) instead of heartbeat timestamps; compact mode hides the recency token.
 - Agent Cockpit: Full-mode rows can now show iTerm tab title as an optional muted subtitle under the agent label, with long titles truncated and full text available on hover.
@@ -24,7 +30,7 @@ All notable changes to this project will be documented in this file.
 - Sessions (Agent Cockpit/Unified): Idle amber status-dot pulses now brighten at peak size (instead of dimming), making animation more visible in both Cockpit and the main Sessions list.
 - Sessions (Agent Cockpit): Filter controls now use three single-select pills (`All N`, `Active N`, `Idle N`), with `Active` pill accent in amber and `Idle` pill accent in green for clearer state while preserving compact cockpit styling.
 - Sessions (Agent Cockpit): Compact mode now uses chrome-less window styling (no titlebar controls), no longer forces compact height on every refresh, and now sizes compact list height with group/divider layout units to avoid hidden rows.
-- Sessions (Agent Cockpit): Grouped compact mode now reserves extra bottom spacing so the last row is not cramped/clipped, and switching from compact back to full mode now restores a safe expanded window height to prevent grouped-row truncation.
+- Sessions (Agent Cockpit): Grouped compact mode now reserves extra bottom spacing so the last row is not cramped/clipped, and switching from compact back to full mode now preserves the current window size (no automatic full-mode resize).
 - Sessions (Agent Cockpit): Compact window sizing now also recalculates while live mode is disabled and reserves space for the disabled-state callout, preventing compact clipping in the disabled state.
 - Sessions (Agent Cockpit): Agent label, project name, and session name row typography/colors now align with the main Session list style (source-accent agent text and monospaced session/project text).
 - Sessions (Agent Cockpit): Removed persistent row-selection highlighting and removed up/down row navigation; cockpit row actions now use direct mouse clicks plus shortcut jumps (`Cmd+1...9`, `Cmd+0` for row 10).
@@ -78,6 +84,10 @@ All notable changes to this project will be documented in this file.
 - Sessions (Cockpit/Unified/Claude): Cockpit now suppresses unresolved live placeholders that are neither focusable nor joinable to indexed workspace sessions, dedupes unresolved rows by stable tty/workspace identity, and its `Refresh` action now refreshes both live presence and provider indexes; Claude refresh now auto-escalates recent-scope drift to full reconcile, and manual refreshes in both Unified and Cockpit now run Claude full reconcile so newly opened Claude sessions appear reliably in the main Sessions list.
 
 ### Changed
+- Sessions (Agent Cockpit/Unified): Live-status visual hierarchy now emphasizes idle sessions (stronger amber pulse) while active sessions use a calm static green dot; all live dots now render at 7pt and idle row dimming is slightly reduced for readability.
+- Sessions (Agent Cockpit): Agent badges, preview text, elapsed-time text, and grouped idle-count chips now use higher-contrast light/dark palettes for improved scanability.
+- Sessions (Agent Cockpit): Full mode now keeps vertical scroll indicators visible when the session list overflows, while compact mode keeps scroll indicators hidden.
+- Sessions (Agent Cockpit): Full-mode scroll indicators are now always visible when content overflows (including pinned and unfocused windows), while compact mode keeps existing hidden-on-idle behavior.
 - Sessions (Agent Cockpit): Full HUD mode now allows long session names to wrap to two lines in the main row text, while compact mode keeps names single-line.
 - Sessions (Agent Cockpit): Compact HUD mode now hides the window title text and auto-resizes window height to fit visible sessions (up to 8 rows).
 - Sessions (Agent Cockpit): Replaced the `Agent Cockpit` window UI with the new floating HUD layout (chips, inline filter, grouped mode, compact mode, pin mode, and keyboard row shortcuts) while keeping Legacy Cockpit available and reusing existing live-session backend logic.

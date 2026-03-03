@@ -7,6 +7,12 @@ enum HUDLiveState: Equatable {
     case idle
 }
 
+struct HUDAgentBadgeStyle {
+    let text: Color
+    let background: Color
+    let border: Color
+}
+
 enum HUDAgentType: Equatable {
     case codex
     case claude
@@ -20,19 +26,48 @@ enum HUDAgentType: Equatable {
         }
     }
 
-    var tint: Color {
-        switch self {
-        case .codex: return Color(hex: "5856d6")
-        case .claude: return Color(hex: "c47700")
-        case .shell: return .secondary
+    func badgeStyle(for colorScheme: ColorScheme) -> HUDAgentBadgeStyle {
+        if colorScheme == .dark {
+            switch self {
+            case .codex:
+                return HUDAgentBadgeStyle(
+                    text: Color(hex: "9e9cf8"),
+                    background: Color(hex: "5e5ce6").opacity(0.18),
+                    border: Color(hex: "5e5ce6").opacity(0.28)
+                )
+            case .claude:
+                return HUDAgentBadgeStyle(
+                    text: Color(hex: "ffb340"),
+                    background: Color(hex: "ff9500").opacity(0.15),
+                    border: Color(hex: "ff9500").opacity(0.25)
+                )
+            case .shell:
+                return HUDAgentBadgeStyle(
+                    text: Color(hex: "6e6e73"),
+                    background: Color.white.opacity(0.07),
+                    border: Color.white.opacity(0.12)
+                )
+            }
         }
-    }
-
-    var background: Color {
         switch self {
-        case .codex: return Color(hex: "5856d6").opacity(0.12)
-        case .claude: return Color(hex: "ff9500").opacity(0.12)
-        case .shell: return Color.secondary.opacity(0.12)
+        case .codex:
+            return HUDAgentBadgeStyle(
+                text: Color(hex: "5856d6"),
+                background: Color(hex: "5e5ce6").opacity(0.09),
+                border: Color(hex: "5e5ce6").opacity(0.16)
+            )
+        case .claude:
+            return HUDAgentBadgeStyle(
+                text: Color(hex: "c47700"),
+                background: Color(hex: "ff9500").opacity(0.09),
+                border: Color(hex: "ff9500").opacity(0.16)
+            )
+        case .shell:
+            return HUDAgentBadgeStyle(
+                text: Color(hex: "8e8e93"),
+                background: Color.black.opacity(0.05),
+                border: Color.black.opacity(0.10)
+            )
         }
     }
 }
@@ -52,6 +87,10 @@ struct HUDRow: Identifiable, Equatable {
     let tty: String?
     let termProgram: String?
     let tabTitle: String?
+    let resolvedSessionID: String?
+    let runtimeSessionID: String?
+    let logPath: String?
+    let workingDirectory: String?
     let lastActivityAt: Date?
     let lastActivityTooltip: String?
 
@@ -69,6 +108,10 @@ struct HUDRow: Identifiable, Equatable {
          tty: String?,
          termProgram: String?,
          tabTitle: String? = nil,
+         resolvedSessionID: String? = nil,
+         runtimeSessionID: String? = nil,
+         logPath: String? = nil,
+         workingDirectory: String? = nil,
          lastActivityAt: Date? = nil,
          lastActivityTooltip: String? = nil) {
         self.id = id
@@ -85,6 +128,10 @@ struct HUDRow: Identifiable, Equatable {
         self.tty = tty
         self.termProgram = termProgram
         self.tabTitle = tabTitle
+        self.resolvedSessionID = resolvedSessionID
+        self.runtimeSessionID = runtimeSessionID
+        self.logPath = logPath
+        self.workingDirectory = workingDirectory
         self.lastActivityAt = lastActivityAt
         self.lastActivityTooltip = lastActivityTooltip
     }
@@ -134,6 +181,7 @@ private struct LegacyMappedRow: Identifiable {
     let tty: String?
     let termProgram: String?
     let tabTitle: String?
+    let resolvedSessionID: String?
     let sessionID: String?
     let logPath: String?
     let workingDirectory: String?
@@ -156,6 +204,7 @@ struct AgentCockpitHUDView: View {
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
+    @Environment(\.openWindow) private var openWindow
 
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
@@ -382,8 +431,8 @@ struct AgentCockpitHUDView: View {
                     ForEach(groupedRows) { group in
                         AgentCockpitHUDGroupHeader(
                             projectName: group.projectName,
-                            summary: group.summaryText,
-                            hasActive: group.hasActive,
+                            activeCount: group.activeCount,
+                            idleCount: group.idleCount,
                             isCollapsed: collapsedProjects.contains(group.id)
                         ) {
                             toggleCollapsed(projectID: group.id)
@@ -401,6 +450,9 @@ struct AgentCockpitHUDView: View {
                                 ) {
                                     focus(row)
                                 }
+                                .contextMenu {
+                                    rowContextMenu(row)
+                                }
                             }
                         }
                     }
@@ -416,11 +468,19 @@ struct AgentCockpitHUDView: View {
                         ) {
                             focus(row)
                         }
+                        .contextMenu {
+                            rowContextMenu(row)
+                        }
                     }
                 }
             }
             .padding(.vertical, isCompact ? 0 : 2)
+            .background(
+                CockpitScrollViewScrollerConfigurator(alwaysVisible: !isCompact)
+                    .allowsHitTesting(false)
+            )
         }
+        .scrollIndicators(isCompact ? .hidden : .visible)
         .frame(
             minHeight: isCompact ? compactBodyHeight : 170
         )
@@ -558,6 +618,142 @@ struct AgentCockpitHUDView: View {
         }
     }
 
+    @ViewBuilder
+    private func rowContextMenu(_ row: HUDRow) -> some View {
+        Button("Go to Session") {
+            goToSession(row)
+        }
+        .disabled(!activeEnabled || row.resolvedSessionID == nil)
+        .help("Select this session in the main Agent Sessions window and open its transcript.")
+
+        Button("Focus in iTerm2") {
+            focus(row)
+        }
+        .disabled(!activeEnabled || !canFocus(row))
+        .help("Focus the existing iTerm2 tab/window for this session.")
+
+        Divider()
+
+        Button("Reveal Log") {
+            revealLog(row)
+        }
+        .disabled(!activeEnabled || row.logPath == nil)
+        .help("Reveal the session log in Finder.")
+
+        Button("Open Working Directory") {
+            openWorkingDirectory(row)
+        }
+        .disabled(!activeEnabled || row.workingDirectory == nil)
+        .help("Open the working directory in Finder.")
+
+        Divider()
+
+        Button("Copy Session ID") {
+            copyToPasteboard(row.runtimeSessionID ?? row.resolvedSessionID)
+        }
+        .disabled((row.runtimeSessionID ?? row.resolvedSessionID) == nil)
+
+        Button("Copy Tab Title") {
+            copyToPasteboard(normalizedTabTitle(row))
+        }
+        .disabled(normalizedTabTitle(row) == nil)
+
+        Button("Copy Working Directory Path") {
+            copyToPasteboard(row.workingDirectory)
+        }
+        .disabled(row.workingDirectory == nil)
+    }
+
+    private func canFocus(_ row: HUDRow) -> Bool {
+        CodexActiveSessionsModel.canAttemptITerm2Focus(
+            itermSessionId: row.itermSessionId,
+            tty: row.tty,
+            termProgram: row.termProgram
+        ) || row.revealURL != nil
+    }
+
+    private func goToSession(_ row: HUDRow) {
+        guard activeEnabled else { return }
+        guard let resolvedSessionID = row.resolvedSessionID else {
+            NSSound.beep()
+            return
+        }
+        let pendingRequest = PendingCockpitNavigationRequest(
+            unifiedSessionID: resolvedSessionID,
+            sourceRawValue: row.source.rawValue,
+            runtimeSessionID: row.runtimeSessionID,
+            logPath: row.logPath,
+            workingDirectory: row.workingDirectory,
+            createdAt: Date()
+        )
+        CockpitNavigationBridge.store(pendingRequest)
+
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow(id: "Agent Sessions")
+
+        var payload: [AnyHashable: Any] = ["source": row.source.rawValue]
+        if let runtimeSessionID = row.runtimeSessionID, !runtimeSessionID.isEmpty {
+            payload["runtimeSessionID"] = runtimeSessionID
+        }
+        if let logPath = row.logPath, !logPath.isEmpty {
+            payload["logPath"] = logPath
+        }
+        if let workingDirectory = row.workingDirectory, !workingDirectory.isEmpty {
+            payload["workingDirectory"] = workingDirectory
+        }
+        postGoToSessionNotification(
+            unifiedSessionID: resolvedSessionID,
+            payload: payload,
+            attempt: 0
+        )
+    }
+
+    private func postGoToSessionNotification(unifiedSessionID: String,
+                                             payload: [AnyHashable: Any],
+                                             attempt: Int) {
+        NotificationCenter.default.post(
+            name: .navigateToSessionFromCockpit,
+            object: unifiedSessionID,
+            userInfo: payload
+        )
+
+        guard attempt < 8 else { return }
+        guard CockpitNavigationBridge.hasPending(unifiedSessionID: unifiedSessionID) else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            postGoToSessionNotification(
+                unifiedSessionID: unifiedSessionID,
+                payload: payload,
+                attempt: attempt + 1
+            )
+        }
+    }
+
+    private func revealLog(_ row: HUDRow) {
+        guard let path = row.logPath else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    private func openWorkingDirectory(_ row: HUDRow) {
+        guard let path = row.workingDirectory else { return }
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+    }
+
+    private func copyToPasteboard(_ text: String?) {
+        guard let text else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(trimmed, forType: .string)
+    }
+
+    private func normalizedTabTitle(_ row: HUDRow) -> String? {
+        guard let tabTitle = row.tabTitle else { return nil }
+        let trimmed = tabTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private var disabledCallout: some View {
         PreferenceCallout {
             Text("Live sessions + Cockpit (Beta) is disabled in Settings → Agent Cockpit.")
@@ -635,6 +831,7 @@ struct AgentCockpitHUDView: View {
                 tty: presence.tty,
                 termProgram: presence.terminal?.termProgram,
                 tabTitle: presence.terminal?.tabTitle,
+                resolvedSessionID: session?.id,
                 sessionID: authoritativeSessionID(for: presence, resolvedSession: session),
                 logPath: presence.sessionLogPath,
                 workingDirectory: session?.cwd ?? presence.workspaceRoot,
@@ -676,6 +873,10 @@ struct AgentCockpitHUDView: View {
                 tty: row.tty,
                 termProgram: row.termProgram,
                 tabTitle: row.tabTitle,
+                resolvedSessionID: row.resolvedSessionID,
+                runtimeSessionID: row.sessionID,
+                logPath: row.logPath,
+                workingDirectory: row.workingDirectory,
                 lastActivityAt: row.lastActivityAt,
                 lastActivityTooltip: activityTooltip
             )
@@ -867,36 +1068,68 @@ struct AgentCockpitHUDView: View {
 
     private func preferredRow(existing: LegacyMappedRow?, incoming: LegacyMappedRow) -> LegacyMappedRow {
         guard let existing else { return incoming }
+        let winner: LegacyMappedRow
+        let loser: LegacyMappedRow
         let existingHasDate = existing.date != nil
         let incomingHasDate = incoming.date != nil
         if existingHasDate != incomingHasDate {
-            return incomingHasDate ? incoming : existing
+            winner = incomingHasDate ? incoming : existing
+            loser = incomingHasDate ? existing : incoming
+            return mergeMetadata(into: winner, from: loser)
         }
         let existingSeen = existing.lastSeenAt ?? .distantPast
         let incomingSeen = incoming.lastSeenAt ?? .distantPast
         if incomingSeen != existingSeen {
-            return incomingSeen > existingSeen ? incoming : existing
+            winner = incomingSeen > existingSeen ? incoming : existing
+            loser = incomingSeen > existingSeen ? existing : incoming
+            return mergeMetadata(into: winner, from: loser)
         }
         let existingHasJoin = (existing.sessionID?.isEmpty == false) || existing.logPath != nil
         let incomingHasJoin = (incoming.sessionID?.isEmpty == false) || incoming.logPath != nil
         if existingHasJoin != incomingHasJoin {
-            return incomingHasJoin ? incoming : existing
+            winner = incomingHasJoin ? incoming : existing
+            loser = incomingHasJoin ? existing : incoming
+            return mergeMetadata(into: winner, from: loser)
         }
         if existing.liveState != incoming.liveState {
             let existingCanProbe = rowCanTailProbe(existing)
             let incomingCanProbe = rowCanTailProbe(incoming)
             if existingCanProbe != incomingCanProbe {
-                return incomingCanProbe ? incoming : existing
+                winner = incomingCanProbe ? incoming : existing
+                loser = incomingCanProbe ? existing : incoming
+                return mergeMetadata(into: winner, from: loser)
             }
             if existing.liveState == .activeWorking, incoming.liveState == .openIdle {
-                return incoming
+                return mergeMetadata(into: incoming, from: existing)
             }
-            return existing
+            return mergeMetadata(into: existing, from: incoming)
         }
         if incoming.title.count > existing.title.count {
-            return incoming
+            return mergeMetadata(into: incoming, from: existing)
         }
-        return existing
+        return mergeMetadata(into: existing, from: incoming)
+    }
+
+    private func mergeMetadata(into winner: LegacyMappedRow, from loser: LegacyMappedRow) -> LegacyMappedRow {
+        LegacyMappedRow(
+            id: winner.id,
+            source: winner.source,
+            title: winner.title,
+            liveState: winner.liveState,
+            lastSeenAt: winner.lastSeenAt ?? loser.lastSeenAt,
+            repo: winner.repo,
+            date: winner.date ?? loser.date,
+            focusURL: winner.focusURL ?? loser.focusURL,
+            itermSessionId: winner.itermSessionId ?? loser.itermSessionId,
+            tty: winner.tty ?? loser.tty,
+            termProgram: winner.termProgram ?? loser.termProgram,
+            tabTitle: winner.tabTitle ?? loser.tabTitle,
+            resolvedSessionID: winner.resolvedSessionID ?? loser.resolvedSessionID,
+            sessionID: winner.sessionID ?? loser.sessionID,
+            logPath: winner.logPath ?? loser.logPath,
+            workingDirectory: winner.workingDirectory ?? loser.workingDirectory,
+            lastActivityAt: winner.lastActivityAt ?? loser.lastActivityAt
+        )
     }
 
     private func rowCanTailProbe(_ row: LegacyMappedRow) -> Bool {
@@ -1003,6 +1236,84 @@ struct AgentCockpitHUDView: View {
     }
 }
 
+private struct CockpitScrollViewScrollerConfigurator: NSViewRepresentable {
+    let alwaysVisible: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        NSView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { [weak nsView] in
+            context.coordinator.attachIfNeeded(to: nsView)
+            context.coordinator.apply(alwaysVisible: alwaysVisible)
+        }
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.restoreBaseline()
+    }
+
+    final class Coordinator {
+        private weak var scrollView: NSScrollView?
+        private var baselineAutohides: Bool?
+        private var baselineScrollerStyle: NSScroller.Style?
+
+        func attachIfNeeded(to view: NSView?) {
+            guard let candidate = enclosingScrollView(from: view) else { return }
+            guard scrollView !== candidate else { return }
+            scrollView = candidate
+            baselineAutohides = candidate.autohidesScrollers
+            baselineScrollerStyle = candidate.scrollerStyle
+        }
+
+        func apply(alwaysVisible: Bool) {
+            guard let scrollView else { return }
+            scrollView.hasVerticalScroller = true
+            if alwaysVisible {
+                scrollView.autohidesScrollers = false
+                scrollView.scrollerStyle = .legacy
+            } else {
+                if let baselineAutohides {
+                    scrollView.autohidesScrollers = baselineAutohides
+                }
+                if let baselineScrollerStyle {
+                    scrollView.scrollerStyle = baselineScrollerStyle
+                }
+            }
+        }
+
+        func restoreBaseline() {
+            apply(alwaysVisible: false)
+            scrollView = nil
+            baselineAutohides = nil
+            baselineScrollerStyle = nil
+        }
+
+        private func enclosingScrollView(from view: NSView?) -> NSScrollView? {
+            var current = view
+            while let node = current {
+                if let scrollView = node as? NSScrollView {
+                    return scrollView
+                }
+                if let enclosing = node.enclosingScrollView {
+                    return enclosing
+                }
+                current = node.superview
+            }
+            return nil
+        }
+
+        deinit {
+            restoreBaseline()
+        }
+    }
+}
+
 private struct HUDIconButtonStyle: ButtonStyle {
     let isOn: Bool
     let tint: Color?
@@ -1052,6 +1363,7 @@ private enum HUDFilterPillKind {
 private struct HUDFilterPillStyle: ButtonStyle {
     let isOn: Bool
     let kind: HUDFilterPillKind
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -1074,9 +1386,9 @@ private struct HUDFilterPillStyle: ButtonStyle {
         case .all:
             return .primary
         case .active:
-            return .green
+            return Color(hex: "30d158")
         case .idle:
-            return Color(hex: "ff9f0a")
+            return idleColor
         }
     }
 
@@ -1086,9 +1398,9 @@ private struct HUDFilterPillStyle: ButtonStyle {
         case .all:
             return Color.primary.opacity(0.10)
         case .active:
-            return Color.green.opacity(0.16)
+            return Color(hex: "30d158").opacity(0.16)
         case .idle:
-            return Color(hex: "ff9f0a").opacity(0.16)
+            return idleColor.opacity(0.16)
         }
     }
 
@@ -1098,10 +1410,14 @@ private struct HUDFilterPillStyle: ButtonStyle {
         case .all:
             return Color.primary.opacity(0.18)
         case .active:
-            return Color.green.opacity(0.35)
+            return Color(hex: "30d158").opacity(0.35)
         case .idle:
-            return Color(hex: "ff9f0a").opacity(0.35)
+            return idleColor.opacity(0.35)
         }
+    }
+
+    private var idleColor: Color {
+        colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
     }
 }
 
