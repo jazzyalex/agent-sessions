@@ -70,6 +70,11 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
 
             window.isMovableByWindowBackground = true
             window.isRestorable = true
+            // Keep vertical resize snapping aligned to row increments so partial rows
+            // are not clipped at the window edge.
+            let rowResizeStep: CGFloat = 31
+            window.resizeIncrements = NSSize(width: 1, height: rowResizeStep)
+            window.contentResizeIncrements = NSSize(width: 1, height: rowResizeStep)
 
             if isCompact {
                 if !wasCompact {

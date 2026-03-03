@@ -179,8 +179,12 @@ struct AgentCockpitHUDView: View {
         let shownSessionCount = visibleRows.count
         let grouped = groupedRows(from: visibleRows)
         let renderedRows = renderedRows(visibleRows: visibleRows, groupedRows: grouped)
+        let showsIdleDividerInCompact = compactShowsIdleDivider(visibleRows: visibleRows)
         let compactLayoutUnits = compactLayoutUnitCount(visibleRows: visibleRows, groupedRows: grouped)
-        let compactBodyHeight = compactListHeight(forLayoutUnits: compactLayoutUnits)
+        let compactBodyHeight = compactListHeight(
+            forLayoutUnits: compactLayoutUnits,
+            includesIdleDivider: showsIdleDividerInCompact
+        )
         let rowIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
             let (index, row) = pair
             if partial[row.id] == nil {
@@ -269,28 +273,36 @@ struct AgentCockpitHUDView: View {
     private func header(activeCount: Int, idleCount: Int) -> some View {
         VStack(spacing: isCompact ? 0 : 8) {
             HStack(spacing: 10) {
-                Picker("Show", selection: $sessionFilterMode) {
-                    Text("All \(activeCount + idleCount)")
-                        .tag(HUDSessionFilterMode.all)
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 5, height: 5)
+                HStack(spacing: 6) {
+                    Button {
+                        guard activeEnabled else { return }
+                        sessionFilterMode = .all
+                    } label: {
+                        Text("All \(activeCount + idleCount)")
+                    }
+                    .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .all, kind: .all))
+                    .help("Show all live sessions.")
+
+                    Button {
+                        guard activeEnabled else { return }
+                        sessionFilterMode = .active
+                    } label: {
                         Text("Active \(activeCount)")
                     }
-                    .tag(HUDSessionFilterMode.active)
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(Color(hex: "ff9f0a"))
-                            .frame(width: 5, height: 5)
+                    .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .active, kind: .active))
+                    .help("Show active working sessions only.")
+
+                    Button {
+                        guard activeEnabled else { return }
+                        sessionFilterMode = .idle
+                    } label: {
                         Text("Idle \(idleCount)")
                     }
-                    .tag(HUDSessionFilterMode.idle)
+                    .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .idle, kind: .idle))
+                    .help("Show idle sessions only.")
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 330)
                 .disabled(!activeEnabled)
+                .opacity(activeEnabled ? 1 : 0.6)
 
                 Spacer(minLength: 0)
 
@@ -298,10 +310,8 @@ struct AgentCockpitHUDView: View {
                     Button {
                         isPinned.toggle()
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: isPinned ? "pin.fill" : "pin")
-                            Text(isPinned ? "Pinned" : "Pin")
-                        }
+                        Image(systemName: isPinned ? "pin.fill" : "pin")
+                            .font(.system(size: 11, weight: .semibold))
                     }
                     .buttonStyle(HUDIconButtonStyle(isOn: isPinned, tint: isPinned ? .orange : nil))
                     .help(isPinned ? "Unpin — stop keeping on top" : "Pin — keep above all windows")
@@ -349,6 +359,7 @@ struct AgentCockpitHUDView: View {
                         }
                     }
                     .buttonStyle(HUDIconButtonStyle(isOn: groupByProject, tint: .accentColor))
+                    .help("Group sessions by project.")
                 }
                 .padding(.horizontal, 14)
                 .padding(.bottom, 12)
@@ -418,7 +429,7 @@ struct AgentCockpitHUDView: View {
                     }
                 }
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, isCompact ? 0 : 2)
         }
         .frame(
             minHeight: isCompact ? compactBodyHeight : 170
@@ -457,28 +468,31 @@ struct AgentCockpitHUDView: View {
         }
 
         let visibleSessionCount = compactWindowVisibleSessionCount(from: visibleRows.count)
-        var units = visibleSessionCount
-        if sessionFilterMode == .all,
-           let firstIdleIndex = visibleRows.firstIndex(where: { $0.liveState == .idle }),
-           firstIdleIndex < visibleSessionCount {
-            units += 1 // active/idle divider row
-        }
-        return max(units, 1)
+        return max(visibleSessionCount, 1)
     }
 
-    private func compactListHeight(forLayoutUnits layoutUnits: Int) -> CGFloat {
+    private func compactListHeight(forLayoutUnits layoutUnits: Int, includesIdleDivider: Bool) -> CGFloat {
         let unitHeight: CGFloat = 31
-        let verticalInsets: CGFloat = 4
+        let verticalInsets: CGFloat = isCompact ? 0 : 4
+        let dividerHeight: CGFloat = includesIdleDivider ? 7 : 0
         // Grouped compact mode needs extra bottom breathing room so the last row
         // does not appear clipped against the rounded window edge.
         let groupedBottomInset: CGFloat = groupByProject ? 10 : 0
-        return (CGFloat(layoutUnits) * unitHeight) + verticalInsets + groupedBottomInset
+        return (CGFloat(layoutUnits) * unitHeight) + dividerHeight + verticalInsets + groupedBottomInset
     }
 
     private func compactContentHeight(forBodyHeight bodyHeight: CGFloat, calloutHeight: CGFloat) -> CGFloat {
-        let compactHeaderHeight: CGFloat = 50
+        let compactHeaderHeight: CGFloat = 44
         let headerDividerHeight: CGFloat = 0.5
         return compactHeaderHeight + headerDividerHeight + calloutHeight + bodyHeight
+    }
+
+    private func compactShowsIdleDivider(visibleRows: [HUDRow]) -> Bool {
+        guard !groupByProject else { return false }
+        guard sessionFilterMode == .all else { return false }
+        let visibleSessionCount = compactWindowVisibleSessionCount(from: visibleRows.count)
+        guard let firstIdleIndex = visibleRows.firstIndex(where: { $0.liveState == .idle }) else { return false }
+        return firstIdleIndex < visibleSessionCount
     }
 
     private var compactDisabledCalloutHeight: CGFloat { 56 }
@@ -1082,6 +1096,68 @@ private struct HUDIconButtonStyle: ButtonStyle {
             return tint.opacity(0.30)
         }
         return isOn ? Color.accentColor.opacity(0.30) : Color.primary.opacity(0.08)
+    }
+}
+
+private enum HUDFilterPillKind {
+    case all
+    case active
+    case idle
+}
+
+private struct HUDFilterPillStyle: ButtonStyle {
+    let isOn: Bool
+    let kind: HUDFilterPillKind
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 4)
+            .background(background.opacity(configuration.isPressed ? 0.85 : 1.0))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(border, lineWidth: 0.5)
+            )
+            .opacity(isOn ? 1.0 : 0.72)
+    }
+
+    private var foreground: Color {
+        guard isOn else { return .secondary }
+        switch kind {
+        case .all:
+            return .primary
+        case .active:
+            return .green
+        case .idle:
+            return Color(hex: "ff9f0a")
+        }
+    }
+
+    private var background: Color {
+        guard isOn else { return Color.primary.opacity(0.04) }
+        switch kind {
+        case .all:
+            return Color.primary.opacity(0.10)
+        case .active:
+            return Color.green.opacity(0.16)
+        case .idle:
+            return Color(hex: "ff9f0a").opacity(0.16)
+        }
+    }
+
+    private var border: Color {
+        guard isOn else { return Color.primary.opacity(0.10) }
+        switch kind {
+        case .all:
+            return Color.primary.opacity(0.18)
+        case .active:
+            return Color.green.opacity(0.35)
+        case .idle:
+            return Color(hex: "ff9f0a").opacity(0.35)
+        }
     }
 }
 
