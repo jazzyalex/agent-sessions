@@ -58,11 +58,6 @@ private enum AgentCockpitHUDTheme {
     static let toolbarButtonCornerRadius: CGFloat = 7
 }
 
-private enum HUDFocusArea: Hashable {
-    case search
-    case rows
-}
-
 enum HUDSessionFilterMode: Equatable {
     case all
     case active
@@ -131,11 +126,10 @@ struct AgentCockpitHUDView: View {
 
     @State private var sessionFilterMode: HUDSessionFilterMode = .all
     @State private var filterText: String = ""
-    @State private var selectedRowID: String?
     @State private var collapsedProjects: Set<String> = []
     @State private var activeConsumerID = UUID()
     @State private var searchFocusToken: Int = 0
-    @FocusState private var focusedArea: HUDFocusArea?
+    @FocusState private var isSearchFocused: Bool
 
     private static let rowDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -179,12 +173,8 @@ struct AgentCockpitHUDView: View {
         let shownSessionCount = visibleRows.count
         let grouped = groupedRows(from: visibleRows)
         let renderedRows = renderedRows(visibleRows: visibleRows, groupedRows: grouped)
-        let showsIdleDividerInCompact = compactShowsIdleDivider(visibleRows: visibleRows)
         let compactLayoutUnits = compactLayoutUnitCount(visibleRows: visibleRows, groupedRows: grouped)
-        let compactBodyHeight = compactListHeight(
-            forLayoutUnits: compactLayoutUnits,
-            includesIdleDivider: showsIdleDividerInCompact
-        )
+        let compactBodyHeight = compactListHeight(forLayoutUnits: compactLayoutUnits)
         let rowIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
             let (index, row) = pair
             if partial[row.id] == nil {
@@ -228,6 +218,7 @@ struct AgentCockpitHUDView: View {
                 isCompact: isCompact,
                 compactContentHeight: compactContentHeight
             )
+            .allowsHitTesting(false)
         )
         .clipShape(RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.cornerRadius, style: .continuous))
         .overlay(
@@ -236,36 +227,8 @@ struct AgentCockpitHUDView: View {
         )
         .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
         .animation(.easeInOut(duration: 0.18), value: isCompact)
-        .onMoveCommand { direction in
-            guard activeEnabled else { return }
-            switch direction {
-            case .up:
-                selectPrevious(in: renderedRows)
-            case .down:
-                selectNext(in: renderedRows)
-            default:
-                break
-            }
-        }
-        .onSubmit {
-            guard activeEnabled else { return }
-            guard focusedArea == .rows || focusedArea == .search else { return }
-            focusSelectedRow(from: renderedRows)
-        }
-        .onChange(of: filterText) { _, _ in
-            clampSelection(to: renderedRows)
-        }
-        .onChange(of: sessionFilterMode) { _, _ in
-            clampSelection(to: renderedRows)
-        }
-        .onChange(of: groupByProject) { _, _ in
-            clampSelection(to: renderedRows)
-        }
-        .onChange(of: collapsedProjects) { _, _ in
-            clampSelection(to: renderedRows)
-        }
-        .onChange(of: activeCodex.activeMembershipVersion) { _, _ in
-            clampSelection(to: renderedRows)
+        .applyIf(isCompact) { view in
+            view.ignoresSafeArea(.container, edges: .top)
         }
     }
 
@@ -340,13 +303,13 @@ struct AgentCockpitHUDView: View {
                         focusToken: searchFocusToken
                     )
                     .disabled(!activeEnabled)
-                    .focused($focusedArea, equals: .search)
+                    .focused($isSearchFocused)
                     .onExitCommand {
                         guard activeEnabled else { return }
                         if !filterText.isEmpty {
                             filterText = ""
                         }
-                        focusedArea = .rows
+                        isSearchFocused = false
                     }
 
                     Button {
@@ -391,39 +354,26 @@ struct AgentCockpitHUDView: View {
                                 AgentCockpitHUDRowView(
                                     row: row,
                                     rowNumber: rowIndexMap[row.id] ?? 0,
-                                    isSelected: selectedRowID == row.id,
+                                    isSelected: false,
                                     filterText: filterText,
                                     isGrouped: true,
                                     isCompact: isCompact
                                 ) {
-                                    selectedRowID = row.id
-                                    focusedArea = .rows
                                     focus(row)
                                 }
                             }
                         }
                     }
                 } else {
-                    let firstIdleIndex = sessionFilterMode == .all
-                        ? visibleRows.firstIndex(where: { $0.liveState == .idle })
-                        : nil
-
                     ForEach(Array(visibleRows.enumerated()), id: \.element.id) { index, row in
-                        if let firstIdleIndex, index == firstIdleIndex {
-                            Divider()
-                                .padding(.vertical, 3)
-                        }
-
                         AgentCockpitHUDRowView(
                             row: row,
                             rowNumber: index + 1,
-                            isSelected: selectedRowID == row.id,
+                            isSelected: false,
                             filterText: filterText,
                             isGrouped: false,
                             isCompact: isCompact
                         ) {
-                            selectedRowID = row.id
-                            focusedArea = .rows
                             focus(row)
                         }
                     }
@@ -434,9 +384,6 @@ struct AgentCockpitHUDView: View {
         .frame(
             minHeight: isCompact ? compactBodyHeight : 170
         )
-        .focusable()
-        .focusEffectDisabled()
-        .focused($focusedArea, equals: .rows)
     }
 
     private func compactWindowVisibleSessionCount(from shownSessionCount: Int) -> Int {
@@ -471,28 +418,19 @@ struct AgentCockpitHUDView: View {
         return max(visibleSessionCount, 1)
     }
 
-    private func compactListHeight(forLayoutUnits layoutUnits: Int, includesIdleDivider: Bool) -> CGFloat {
+    private func compactListHeight(forLayoutUnits layoutUnits: Int) -> CGFloat {
         let unitHeight: CGFloat = 31
         let verticalInsets: CGFloat = isCompact ? 0 : 4
-        let dividerHeight: CGFloat = includesIdleDivider ? 7 : 0
         // Grouped compact mode needs extra bottom breathing room so the last row
         // does not appear clipped against the rounded window edge.
         let groupedBottomInset: CGFloat = groupByProject ? 10 : 0
-        return (CGFloat(layoutUnits) * unitHeight) + dividerHeight + verticalInsets + groupedBottomInset
+        return (CGFloat(layoutUnits) * unitHeight) + verticalInsets + groupedBottomInset
     }
 
     private func compactContentHeight(forBodyHeight bodyHeight: CGFloat, calloutHeight: CGFloat) -> CGFloat {
         let compactHeaderHeight: CGFloat = 44
         let headerDividerHeight: CGFloat = 0.5
         return compactHeaderHeight + headerDividerHeight + calloutHeight + bodyHeight
-    }
-
-    private func compactShowsIdleDivider(visibleRows: [HUDRow]) -> Bool {
-        guard !groupByProject else { return false }
-        guard sessionFilterMode == .all else { return false }
-        let visibleSessionCount = compactWindowVisibleSessionCount(from: visibleRows.count)
-        guard let firstIdleIndex = visibleRows.firstIndex(where: { $0.liveState == .idle }) else { return false }
-        return firstIdleIndex < visibleSessionCount
     }
 
     private var compactDisabledCalloutHeight: CGFloat { 56 }
@@ -522,13 +460,21 @@ struct AgentCockpitHUDView: View {
                     guard activeEnabled else { return }
                     guard renderedRows.indices.contains(n - 1) else { return }
                     let row = renderedRows[n - 1]
-                    selectedRowID = row.id
                     focus(row)
                 }
                 .keyboardShortcut(KeyEquivalent(Character(String(n))), modifiers: .command)
                 .frame(width: 0, height: 0)
                 .opacity(0)
             }
+
+            Button("") {
+                guard activeEnabled else { return }
+                guard renderedRows.indices.contains(9) else { return }
+                focus(renderedRows[9])
+            }
+            .keyboardShortcut("0", modifiers: .command)
+            .frame(width: 0, height: 0)
+            .opacity(0)
         }
     }
 
@@ -555,57 +501,8 @@ struct AgentCockpitHUDView: View {
         Self.groupedRows(rows)
     }
 
-    private func clampSelection(to rows: [HUDRow]) {
-        guard !rows.isEmpty else {
-            selectedRowID = nil
-            return
-        }
-        if let selectedRowID, rows.contains(where: { $0.id == selectedRowID }) {
-            return
-        }
-        selectedRowID = rows.first?.id
-    }
-
-    private func selectPrevious(in rows: [HUDRow]) {
-        guard !rows.isEmpty else { return }
-        if selectedRowID == nil {
-            selectedRowID = rows.first?.id
-            return
-        }
-        guard let selectedRowID,
-              let index = rows.firstIndex(where: { $0.id == selectedRowID }) else {
-            self.selectedRowID = rows.first?.id
-            return
-        }
-        let nextIndex = max(0, index - 1)
-        self.selectedRowID = rows[nextIndex].id
-    }
-
-    private func selectNext(in rows: [HUDRow]) {
-        guard !rows.isEmpty else { return }
-        if selectedRowID == nil {
-            selectedRowID = rows.first?.id
-            return
-        }
-        guard let selectedRowID,
-              let index = rows.firstIndex(where: { $0.id == selectedRowID }) else {
-            self.selectedRowID = rows.first?.id
-            return
-        }
-        let nextIndex = min(rows.count - 1, index + 1)
-        self.selectedRowID = rows[nextIndex].id
-    }
-
-    private func focusSelectedRow(from rows: [HUDRow]) {
-        guard let selectedRowID,
-              let row = rows.first(where: { $0.id == selectedRowID }) else {
-            return
-        }
-        focus(row)
-    }
-
     private func focusSearchField(selectAll: Bool) {
-        focusedArea = .search
+        isSearchFocused = true
         if selectAll {
             searchFocusToken &+= 1
         }
@@ -623,7 +520,7 @@ struct AgentCockpitHUDView: View {
 
     private var disabledCallout: some View {
         PreferenceCallout {
-            Text("Live sessions + Cockpit (Beta) is disabled in Settings → Advanced.")
+            Text("Live sessions + Cockpit (Beta) is disabled in Settings → Agent Cockpit.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

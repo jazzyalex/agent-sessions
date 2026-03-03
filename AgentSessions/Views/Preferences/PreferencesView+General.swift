@@ -70,9 +70,9 @@ extension PreferencesView {
         }
     }
 
-    var advancedTab: some View {
+    var agentCockpitTab: some View {
         VStack(alignment: .leading, spacing: 24) {
-            Text("Advanced")
+            Text("Agent Cockpit")
                 .font(.title2)
                 .fontWeight(.semibold)
 
@@ -117,6 +117,20 @@ extension PreferencesView {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
+
+            sectionHeader("Compact Mode")
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Show agent name in compact mode", isOn: $cockpitShowAgentNameInCompact)
+                    .help("When disabled, compact rows hide the agent-name text to free horizontal space. Status dot and row numbering remain visible.")
+            }
+        }
+    }
+
+    var advancedTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Advanced")
+                .font(.title2)
+                .fontWeight(.semibold)
 
             sectionHeader("Saved Sessions")
             VStack(alignment: .leading, spacing: 12) {

@@ -22,8 +22,11 @@ All notable changes to this project will be documented in this file.
 - Sessions (Agent Cockpit): Grouped compact mode now reserves extra bottom spacing so the last row is not cramped/clipped, and switching from compact back to full mode now restores a safe expanded window height to prevent grouped-row truncation.
 - Sessions (Agent Cockpit): Compact window sizing now also recalculates while live mode is disabled and reserves space for the disabled-state callout, preventing compact clipping in the disabled state.
 - Sessions (Agent Cockpit): Agent label, project name, and session name row typography/colors now align with the main Session list style (source-accent agent text and monospaced session/project text).
-- Sessions (Agent Cockpit): Row selection now uses one unified gray selected state for both mouse and keyboard navigation, with non-selected hover fill removed to avoid dual-highlight confusion.
+- Sessions (Agent Cockpit): Removed persistent row-selection highlighting and removed up/down row navigation; cockpit row actions now use direct mouse clicks plus shortcut jumps (`Cmd+1...9`, `Cmd+0` for row 10).
 - Sessions (Agent Cockpit): Compact mode keeps the filter pills visible in the toolbar, removes the keyboard-shortcut badge column, and tightens compact height math so extra top/bottom blank bands are not reserved around the session rows.
+- Sessions (Agent Cockpit): Compact mode no longer reserves a titlebar-sized blank strip above the toolbar; compact rows now start at the top edge of the HUD content area.
+- Sessions (Agent Cockpit): Removed the active/idle split divider between rows in compact/full list rendering, and hardened HUD window configurator wiring to remain click-through for controls/rows.
+- Preferences: Reordered the Settings sidebar so `Agent Cockpit` appears directly after `General`.
 - Sessions (Agent Cockpit/Codex live detection): Pinned `Agent Cockpit` now uses a faster background refresh cadence (`3s`), foreground-return iTerm live-state probing now ramps in bounded batches to flatten short CPU spikes, and iTerm session discovery now reuses a single session-list fetch for Codex+Claude.
 - Sessions (Agent Cockpit/Codex live-state): Codex ambiguous non-prompt iTerm tails now fall back to log-write heuristics (instead of immediately forcing idle), and background iTerm probing is now deferred unless the app is foregrounded or a pinned cockpit is visible.
 - Sessions (Gemini): Session discovery now accepts named Gemini project directories under `~/.gemini/tmp` (for example `radio4j`), while still supporting both `chats/session-*.json` and direct `session-*.json` layouts.
@@ -86,6 +89,7 @@ All notable changes to this project will be documented in this file.
 - Sessions (Cockpit): Cockpit window layout no longer uses a fixed content frame; default new-window height is now tuned for about 8 visible rows and resizing now scales rows naturally in both directions.
 - Preferences (Unified Window): Reordered sections so `Columns` and `Filters` appear before `Rich Transcript`.
 - Preferences (OpenClaw): Moved `Include deleted OpenClaw sessions` from Advanced to the OpenClaw pane as a standalone checkbox.
+- Preferences: Added a dedicated `Agent Cockpit` pane and moved Live Sessions + Cockpit settings there from `Advanced`; compact mode now includes a `Show agent name in compact mode` toggle (default on).
 - Sessions (Unified): Removed the leading dot from agent pill toggles in the main toolbar.
 - Sessions (Unified): `Active sessions only` now filters to live Codex sessions (`active` + `open`) instead of only actively working sessions.
 - Sessions (Unified): `Active sessions only` now filters to live Codex and Claude sessions (`active` + `open`).

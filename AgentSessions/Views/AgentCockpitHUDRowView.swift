@@ -8,6 +8,7 @@ struct AgentCockpitHUDRowView: View {
     let isGrouped: Bool
     let isCompact: Bool
     let onTap: () -> Void
+    @AppStorage(PreferencesKey.Cockpit.hudShowAgentNameInCompact) private var showAgentNameInCompact: Bool = true
 
     var body: some View {
         Button(action: onTap) {
@@ -24,10 +25,12 @@ struct AgentCockpitHUDRowView: View {
                     .frame(width: 9, alignment: .center)
                     .accessibilityLabel(row.liveState == .active ? "Active" : "Idle")
 
-                Text(row.agentType.label)
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundStyle(agentLabelColor)
-                    .frame(width: 56, alignment: .leading)
+                if !isCompact || showAgentNameInCompact {
+                    Text(row.agentType.label)
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(agentLabelColor)
+                        .frame(width: 56, alignment: .leading)
+                }
 
                 if !isGrouped {
                     highlightedText(row.projectName)
