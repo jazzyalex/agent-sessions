@@ -63,6 +63,12 @@ private enum HUDFocusArea: Hashable {
     case rows
 }
 
+private enum HUDSessionFilterMode: Equatable {
+    case all
+    case active
+    case idle
+}
+
 private struct HUDGroup: Identifiable {
     let id: String
     let projectName: String
@@ -123,7 +129,7 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.Cockpit.hudCompact) private var isCompact: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudPinned) private var isPinned: Bool = false
 
-    @State private var chipFilter: HUDLiveState? = nil
+    @State private var sessionFilterMode: HUDSessionFilterMode = .all
     @State private var filterText: String = ""
     @State private var selectedRowID: String?
     @State private var collapsedProjects: Set<String> = []
@@ -245,7 +251,7 @@ struct AgentCockpitHUDView: View {
         .onChange(of: filterText) { _, _ in
             clampSelection(to: renderedRows)
         }
-        .onChange(of: chipFilter) { _, _ in
+        .onChange(of: sessionFilterMode) { _, _ in
             clampSelection(to: renderedRows)
         }
         .onChange(of: groupByProject) { _, _ in
@@ -263,33 +269,28 @@ struct AgentCockpitHUDView: View {
     private func header(activeCount: Int, idleCount: Int) -> some View {
         VStack(spacing: isCompact ? 0 : 8) {
             HStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    Button {
-                        guard activeEnabled else { return }
-                        chipFilter = chipFilter == .active ? nil : .active
-                    } label: {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 5, height: 5)
-                            Text("\(activeCount) active")
-                        }
+                Picker("Show", selection: $sessionFilterMode) {
+                    Text("All \(activeCount + idleCount)")
+                        .tag(HUDSessionFilterMode.all)
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 5, height: 5)
+                        Text("Active \(activeCount)")
                     }
-                    .buttonStyle(HUDChipStyle(isOn: chipFilter == nil || chipFilter == .active, kind: .active))
-
-                    Button {
-                        guard activeEnabled else { return }
-                        chipFilter = chipFilter == .idle ? nil : .idle
-                    } label: {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(Color.secondary.opacity(0.7))
-                                .frame(width: 5, height: 5)
-                            Text("\(idleCount) idle")
-                        }
+                    .tag(HUDSessionFilterMode.active)
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color(hex: "ff9f0a"))
+                            .frame(width: 5, height: 5)
+                        Text("Idle \(idleCount)")
                     }
-                    .buttonStyle(HUDChipStyle(isOn: chipFilter == nil || chipFilter == .idle, kind: .idle))
+                    .tag(HUDSessionFilterMode.idle)
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 330)
+                .disabled(!activeEnabled)
 
                 Spacer(minLength: 0)
 
@@ -392,7 +393,7 @@ struct AgentCockpitHUDView: View {
                         }
                     }
                 } else {
-                    let firstIdleIndex = chipFilter == nil
+                    let firstIdleIndex = sessionFilterMode == .all
                         ? visibleRows.firstIndex(where: { $0.liveState == .idle })
                         : nil
 
@@ -457,7 +458,7 @@ struct AgentCockpitHUDView: View {
 
         let visibleSessionCount = compactWindowVisibleSessionCount(from: visibleRows.count)
         var units = visibleSessionCount
-        if chipFilter == nil,
+        if sessionFilterMode == .all,
            let firstIdleIndex = visibleRows.firstIndex(where: { $0.liveState == .idle }),
            firstIdleIndex < visibleSessionCount {
             units += 1 // active/idle divider row
@@ -468,11 +469,14 @@ struct AgentCockpitHUDView: View {
     private func compactListHeight(forLayoutUnits layoutUnits: Int) -> CGFloat {
         let unitHeight: CGFloat = 31
         let verticalInsets: CGFloat = 4
-        return (CGFloat(layoutUnits) * unitHeight) + verticalInsets
+        // Grouped compact mode needs extra bottom breathing room so the last row
+        // does not appear clipped against the rounded window edge.
+        let groupedBottomInset: CGFloat = groupByProject ? 10 : 0
+        return (CGFloat(layoutUnits) * unitHeight) + verticalInsets + groupedBottomInset
     }
 
     private func compactContentHeight(forBodyHeight bodyHeight: CGFloat, calloutHeight: CGFloat) -> CGFloat {
-        let compactHeaderHeight: CGFloat = 44
+        let compactHeaderHeight: CGFloat = 50
         let headerDividerHeight: CGFloat = 0.5
         return compactHeaderHeight + headerDividerHeight + calloutHeight + bodyHeight
     }
@@ -534,8 +538,14 @@ struct AgentCockpitHUDView: View {
 
         return rows.filter { row in
             let statePass: Bool = {
-                guard let chipFilter else { return true }
-                return row.liveState == chipFilter
+                switch sessionFilterMode {
+                case .all:
+                    return true
+                case .active:
+                    return row.liveState == .active
+                case .idle:
+                    return row.liveState == .idle
+                }
             }()
             guard statePass else { return false }
 
@@ -1029,54 +1039,6 @@ struct AgentCockpitHUDView: View {
 
     private func workspaceLookupKey(source: SessionSource, normalizedPath: String) -> String {
         "\(source.rawValue)|cwd:\(normalizedPath)"
-    }
-}
-
-private enum HUDChipKind {
-    case active
-    case idle
-}
-
-private struct HUDChipStyle: ButtonStyle {
-    let isOn: Bool
-    let kind: HUDChipKind
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(foreground)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 4)
-            .background(background.opacity(configuration.isPressed ? 0.85 : 1.0))
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(border, lineWidth: 0.5)
-            )
-            .opacity(isOn ? 1.0 : 0.6)
-    }
-
-    private var foreground: Color {
-        switch kind {
-        case .active: return isOn ? .green : .secondary
-        case .idle: return .secondary
-        }
-    }
-
-    private var background: Color {
-        switch kind {
-        case .active:
-            return isOn ? Color.green.opacity(0.15) : Color.primary.opacity(0.04)
-        case .idle:
-            return Color.primary.opacity(0.06)
-        }
-    }
-
-    private var border: Color {
-        switch kind {
-        case .active: return isOn ? Color.green.opacity(0.35) : Color.primary.opacity(0.08)
-        case .idle: return Color.primary.opacity(0.08)
-        }
     }
 }
 
