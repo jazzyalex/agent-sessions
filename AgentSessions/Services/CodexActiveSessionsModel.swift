@@ -177,6 +177,8 @@ final class CodexActiveSessionsModel: ObservableObject {
     private var liveStateByPresenceKey: [String: CodexLiveState] = [:]
     private var lastActivityByPresenceKey: [String: Date] = [:]
     private var cachedProcessPresences: [CodexActivePresence] = []
+    private var cachedITermTabTitleByTTY: [String: String] = [:]
+    private var cachedITermTabTitleBySessionGuid: [String: String] = [:]
     private var lastProcessProbeAt: Date? = nil
     private var unifiedVisibleConsumerIDs: Set<UUID> = []
     private var cockpitVisibleConsumerIDs: Set<UUID> = []
@@ -347,6 +349,8 @@ final class CodexActiveSessionsModel: ObservableObject {
         // (active -> open and vice versa) are reflected immediately.
         lastProcessProbeAt = nil
         cachedProcessPresences = []
+        cachedITermTabTitleByTTY = [:]
+        cachedITermTabTitleBySessionGuid = [:]
         forceFullProbeNextRefresh = true
         armForegroundProbeRamp()
         refreshTask?.cancel()
@@ -384,6 +388,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             liveStateByPresenceKey = [:]
             lastActivityByPresenceKey = [:]
             cachedProcessPresences = []
+            cachedITermTabTitleByTTY = [:]
+            cachedITermTabTitleBySessionGuid = [:]
             lastProcessProbeAt = nil
             lastPublishedPresenceSignatures = [:]
             // Preserve visible-consumer registrations across disable/enable toggles so
@@ -451,10 +457,12 @@ final class CodexActiveSessionsModel: ObservableObject {
             loaded: [CodexActivePresence],
             didProbe: Bool,
             registryHadPresences: Bool,
-            itermTabTitleByTTY: [String: String]
+            itermTabTitleByTTY: [String: String],
+            itermTabTitleBySessionGuid: [String: String]
         ) = await Task.detached(priority: .utility) {
             var out: [CodexActivePresence] = []
             var itermTabTitleByTTY: [String: String] = [:]
+            var itermTabTitleBySessionGuid: [String: String] = [:]
             let decoder = Self.makeDecoder()
             for path in rootPaths {
                 out.append(contentsOf: Self.filterSupportedPresences(
@@ -506,11 +514,12 @@ final class CodexActiveSessionsModel: ObservableObject {
                 let sessions = Self.loadITermSessions(timeout: Self.processProbeTimeout)
                 if !sessions.isEmpty {
                     itermTabTitleByTTY = Self.itermTabTitleByTTY(sessions)
+                    itermTabTitleBySessionGuid = Self.itermTabTitleBySessionGuid(sessions)
                     out.append(contentsOf: Self.presencesFromITermSessions(sessions, source: .codex, now: now))
                     out.append(contentsOf: Self.presencesFromITermSessions(sessions, source: .claude, now: now))
                 }
             }
-            return (out, shouldProbeProcesses, registryHasPresences, itermTabTitleByTTY)
+            return (out, shouldProbeProcesses, registryHasPresences, itermTabTitleByTTY, itermTabTitleBySessionGuid)
         }.value
         let latestProcessProbe = Self.filterSupportedPresences(
             probeResult.loaded.filter { $0.publisher == "agent-sessions-process" }
@@ -518,6 +527,17 @@ final class CodexActiveSessionsModel: ObservableObject {
         let loaded = Self.coalescePresencesByTTY(
             Self.filterSupportedPresences(probeResult.loaded)
         )
+        if shouldProbeITermSnapshot {
+            // Treat empty probe results as authoritative so stale titles do not stick.
+            cachedITermTabTitleByTTY = probeResult.itermTabTitleByTTY
+            cachedITermTabTitleBySessionGuid = probeResult.itermTabTitleBySessionGuid
+        }
+        let effectiveITermTabTitleByTTY = shouldProbeITermSnapshot
+            ? probeResult.itermTabTitleByTTY
+            : cachedITermTabTitleByTTY
+        let effectiveITermTabTitleBySessionGuid = shouldProbeITermSnapshot
+            ? probeResult.itermTabTitleBySessionGuid
+            : cachedITermTabTitleBySessionGuid
 
         if probeResult.didProbe {
             cachedProcessPresences = latestProcessProbe
@@ -563,7 +583,8 @@ final class CodexActiveSessionsModel: ObservableObject {
         ui = Self.reconcileFallbackPresences(Array(fallbackMap.values), into: ui)
         ui = Self.enrichPresencesWithITermTabTitles(
             ui,
-            tabTitleByTTY: probeResult.itermTabTitleByTTY
+            tabTitleByTTY: effectiveITermTabTitleByTTY,
+            tabTitleBySessionGuid: effectiveITermTabTitleBySessionGuid
         )
 
         let probedITermPresenceKeys = plannedITermProbePresenceKeys(
@@ -1914,7 +1935,14 @@ final class CodexActiveSessionsModel: ObservableObject {
             "set sid to id of s",
             "set stty to tty of s",
             "set sname to name of s",
-            "set end of outRows to (sid & sep & stty & sep & sname & sep & wname)",
+            "set ttitle to \"\"",
+            "try",
+            "set ttitle to variable named \"tab.title\" of s",
+            "on error",
+            "set ttitle to \"\"",
+            "end try",
+            "if ttitle is missing value then set ttitle to \"\"",
+            "set end of outRows to (sid & sep & stty & sep & sname & sep & ttitle & sep & wname)",
             "end repeat",
             "end repeat",
             "end repeat",
@@ -2268,9 +2296,24 @@ final class CodexActiveSessionsModel: ObservableObject {
         return out
     }
 
+    nonisolated static func itermTabTitleBySessionGuid(_ sessions: [ITermSessionInfo]) -> [String: String] {
+        var out: [String: String] = [:]
+        out.reserveCapacity(sessions.count)
+        for session in sessions {
+            guard let guid = itermSessionGuid(from: session.sessionID), !guid.isEmpty else { continue }
+            let title = (session.displayName ?? session.name).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            if out[guid] == nil {
+                out[guid] = title
+            }
+        }
+        return out
+    }
+
     nonisolated static func enrichPresencesWithITermTabTitles(_ presences: [CodexActivePresence],
-                                                              tabTitleByTTY: [String: String]) -> [CodexActivePresence] {
-        guard !tabTitleByTTY.isEmpty else { return presences }
+                                                              tabTitleByTTY: [String: String],
+                                                              tabTitleBySessionGuid: [String: String] = [:]) -> [CodexActivePresence] {
+        guard !tabTitleByTTY.isEmpty || !tabTitleBySessionGuid.isEmpty else { return presences }
         var out: [CodexActivePresence] = []
         out.reserveCapacity(presences.count)
 
@@ -2281,18 +2324,25 @@ final class CodexActiveSessionsModel: ObservableObject {
             }
             let existingTitle = presence.terminal?.tabTitle?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !existingTitle.isEmpty {
+            let guid = itermSessionGuid(from: presence.terminal?.itermSessionId)
+            let lookupTitle = firstNonEmpty([
+                guid.flatMap { tabTitleBySessionGuid[$0] } ?? "",
+                normalizedTTY(presence.tty).flatMap { tabTitleByTTY[$0] } ?? ""
+            ])
+            if lookupTitle.isEmpty, !existingTitle.isEmpty {
                 out.append(presence)
                 continue
             }
-            guard let tty = normalizedTTY(presence.tty),
-                  let tabTitle = tabTitleByTTY[tty] else {
+            if lookupTitle.isEmpty {
                 out.append(presence)
                 continue
             }
-
+            if !existingTitle.isEmpty, equalsIgnoringCaseAndDiacritics(existingTitle, lookupTitle) {
+                out.append(presence)
+                continue
+            }
             var terminal = presence.terminal ?? CodexActivePresence.Terminal()
-            terminal.tabTitle = tabTitle
+            terminal.tabTitle = lookupTitle
             presence.terminal = terminal
             out.append(presence)
         }

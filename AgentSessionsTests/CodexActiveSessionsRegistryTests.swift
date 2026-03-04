@@ -508,6 +508,14 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out[1].displayName, "Tennis")
     }
 
+    func testParseITermSessionListOutput_usesTabTitleWhenWindowTitleEmpty() {
+        let text = "EEEE5555-2222-2222-2222-222222222222\t/dev/ttys025\tcodex\tSCRIPTS - CX\t"
+        let out = CodexActiveSessionsModel.parseITermSessionListOutput(text)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[0].name, "codex")
+        XCTAssertEqual(out[0].displayName, "SCRIPTS - CX")
+    }
+
     func testParseITermSessionListOutput_prefersWindowDisplayNameForGenericSessionName() {
         let text = "CCCC3333-2222-2222-2222-222222222222\t/dev/ttys023\tcodex\tTennis"
         let out = CodexActiveSessionsModel.parseITermSessionListOutput(text)
@@ -579,7 +587,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(map["/dev/ttys002"], "Claude")
     }
 
-    func testEnrichPresencesWithITermTabTitles_onlyBackfillsMissingTitles() {
+    func testEnrichPresencesWithITermTabTitles_prefersFreshITermTitles() {
         var codexMissing = CodexActivePresence()
         codexMissing.source = .codex
         codexMissing.tty = "/dev/ttys001"
@@ -600,7 +608,50 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
 
         XCTAssertEqual(enriched[0].terminal?.tabTitle, "Codex Window")
-        XCTAssertEqual(enriched[1].terminal?.tabTitle, "Already Set")
+        XCTAssertEqual(enriched[1].terminal?.tabTitle, "Claude Window")
+    }
+
+    func testITermTabTitleBySessionGuid_buildsMapAndPrefersFirstNonEmptyTitle() {
+        let sessions = [
+            CodexActiveSessionsModel.ITermSessionInfo(
+                sessionID: "w0t0p0:AAAA1111-BBBB-2222-CCCC-333333333333",
+                tty: "/dev/ttys001",
+                name: "codex",
+                displayName: "Alpha"
+            ),
+            CodexActiveSessionsModel.ITermSessionInfo(
+                sessionID: "AAAA1111-BBBB-2222-CCCC-333333333333",
+                tty: "/dev/ttys009",
+                name: "codex",
+                displayName: "Ignored Duplicate"
+            ),
+            CodexActiveSessionsModel.ITermSessionInfo(
+                sessionID: "w0t0p0:DDDD4444-BBBB-2222-CCCC-333333333333",
+                tty: "/dev/ttys002",
+                name: "codex",
+                displayName: "Beta"
+            )
+        ]
+
+        let map = CodexActiveSessionsModel.itermTabTitleBySessionGuid(sessions)
+        XCTAssertEqual(map["AAAA1111-BBBB-2222-CCCC-333333333333"], "Alpha")
+        XCTAssertEqual(map["DDDD4444-BBBB-2222-CCCC-333333333333"], "Beta")
+    }
+
+    func testEnrichPresencesWithITermTabTitles_usesSessionGuidWhenTTYMissing() {
+        var codex = CodexActivePresence()
+        codex.source = .codex
+        var terminal = CodexActivePresence.Terminal()
+        terminal.itermSessionId = "w0t0p0:AAAA1111-BBBB-2222-CCCC-333333333333"
+        codex.terminal = terminal
+
+        let enriched = CodexActiveSessionsModel.enrichPresencesWithITermTabTitles(
+            [codex],
+            tabTitleByTTY: [:],
+            tabTitleBySessionGuid: ["AAAA1111-BBBB-2222-CCCC-333333333333": "Guid Title"]
+        )
+
+        XCTAssertEqual(enriched[0].terminal?.tabTitle, "Guid Title")
     }
 
     func testEffectivePollIntervalSeconds_usesCockpitVisibilityInBackground() {
