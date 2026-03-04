@@ -52,8 +52,10 @@ struct AgentCockpitHUDRowView: View {
     }
 
     private var statusDot: some View {
-        AgentCockpitHUDStatusDot(
-            liveState: row.liveState,
+        CodexLiveStatusDot(
+            state: codexLiveState,
+            color: statusDotColor,
+            size: 7,
             lastSeenAt: row.lastSeenAt
         )
         .accessibilityLabel(row.liveState == .active ? "Active" : "Idle")
@@ -191,6 +193,19 @@ struct AgentCockpitHUDRowView: View {
         return row.agentType.standardTextColor
     }
 
+    private var codexLiveState: CodexLiveState {
+        row.liveState == .active ? .activeWorking : .openIdle
+    }
+
+    private var statusDotColor: Color {
+        switch row.liveState {
+        case .active:
+            return Color(hex: "30d158")
+        case .idle:
+            return colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
+        }
+    }
+
     private func highlightedText(_ text: String) -> Text {
         let trimmed = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -215,84 +230,5 @@ struct AgentCockpitHUDRowView: View {
             return Color.primary.opacity(0.055)
         }
         return .clear
-    }
-}
-
-private struct AgentCockpitHUDStatusDot: View {
-    let liveState: HUDLiveState
-    let lastSeenAt: Date?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var animate = false
-
-    var body: some View {
-        Circle()
-            .fill(fillColor)
-            .frame(width: 7, height: 7)
-            .scaleEffect(scale)
-            .opacity(opacity)
-            .shadow(color: haloColor.opacity(haloOpacity), radius: haloRadius)
-            .onAppear { updateAnimation() }
-            .onChange(of: liveState) { _, _ in updateAnimation() }
-            .onChange(of: lastSeenAt) { _, _ in updateAnimation() }
-            .onChange(of: reduceMotion) { _, _ in updateAnimation() }
-    }
-
-    private var baseColor: Color {
-        switch liveState {
-        case .active:
-            return Color(hex: "30d158")
-        case .idle:
-            return idleBaseColor
-        }
-    }
-
-    private var idleBaseColor: Color {
-        colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
-    }
-
-    private var shouldPulse: Bool {
-        liveState == .idle && !reduceMotion
-    }
-
-    private var scale: CGFloat {
-        guard shouldPulse else { return 1.0 }
-        return animate ? 1.25 : 1.0
-    }
-
-    private var opacity: Double {
-        guard shouldPulse else { return 1.0 }
-        return animate ? 1.0 : 0.88
-    }
-
-    private var fillColor: Color {
-        baseColor
-    }
-
-    private var haloColor: Color {
-        idleBaseColor
-    }
-
-    private var haloOpacity: Double {
-        guard liveState == .idle else { return 0 }
-        guard shouldPulse else { return 0 }
-        return animate ? 0.65 : 0.22
-    }
-
-    private var haloRadius: CGFloat {
-        guard liveState == .idle else { return 0 }
-        guard shouldPulse else { return 0 }
-        return animate ? 4.8 : 3.2
-    }
-
-    private func updateAnimation() {
-        guard shouldPulse else {
-            animate = false
-            return
-        }
-        animate = false
-        withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
-            animate = true
-        }
     }
 }

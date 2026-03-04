@@ -1,3 +1,27 @@
+## Quick Summary: Ghostty vs iTerm2 Support
+
+Ghostty can be integrated into the same live-session framework as iTerm2, but it cannot currently match iTerm2's session-level control and probe precision in this codepath.
+
+1. Exact tab/session focus
+
+- iTerm2 gives a stable session identity (GUID + deep link).
+- Ghostty currently has no equivalent session-target API in this codepath, so focus is app-level fallback.
+
+2. High-confidence terminal-state probing
+
+- iTerm2 exposes session-level probe signals (`is processing`, `is at shell prompt`, session contents).
+- Ghostty path is heuristic (log/source activity), so active/idle is less precise.
+
+3. Reliable tab-title enrichment
+
+- iTerm2 lets us enumerate sessions and names for subtitle mapping.
+- Ghostty has no confirmed equivalent enumeration here, so subtitle is only shown if metadata already exists.
+
+4. Deep-link reveal behavior
+
+- iTerm2 supports `iterm2:///reveal?...`.
+- No comparable Ghostty deep-link/session reveal is wired here.
+
 ## Verified Plan: Terminal.app + Ghostty Live/Idle + Cockpit (Codex + Claude)
 
 ### Verification Snapshot (2026-03-03)
@@ -124,3 +148,69 @@ Yes, we should support `Terminal.app` and `Ghostty` for active/idle sessions in 
 2. “Full parity” means maximum parity supported by each terminal’s real interfaces.
 3. Ghostty exact tab/session focus is not assumed until an official control API is available.
 4. No feature flags are added unless explicitly requested.
+
+## V2: Ghostty Integration Delta (After V1)
+
+### What Changed From V1
+1. This v2 section narrows the integration strategy: Ghostty joins the same live-session framework, but does not reuse iTerm-specific probe and focus logic directly.
+2. Focus UX is included for Ghostty as app-level fallback behavior, with explicit UI messaging for non-exact focus.
+3. Subtitle fallback policy is now strict: if no real terminal-provided Ghostty tab title is available, show no subtitle.
+
+### Final Architecture Decision
+1. Keep one shared live-session pipeline in `CodexActiveSessionsModel`:
+- discovery -> coalesce -> classify -> UI publish
+2. Split terminal-specific behavior by capability:
+- iTerm2 backend: existing high-fidelity probe/focus path
+- Ghostty backend: heuristic classification + app-level focus fallback
+3. Direct answer to the design question:
+- Ghostty can share the framework with iTerm2, but should not keep iTerm2 logic unchanged.
+
+### Public Interfaces / Types (Planned)
+1. Add `TerminalKind` classification:
+- `iterm2`, `terminalApp`, `ghostty`, `unknown`
+2. Add explicit focus outcome model:
+- `TerminalFocusResult { exact, appOnly, unavailable }`
+3. Keep existing `CodexActivePresence.Terminal` fields backward-compatible while layering capability routing internally.
+
+### Behavior Matrix: iTerm2 vs Ghostty
+| Capability | iTerm2 | Ghostty v2 |
+|---|---|---|
+| Probe source | iTerm session metadata + tail/probe capture | Existing live heuristics (log/source activity windows) |
+| Exact tab focus | Yes | No (not assumed) |
+| Focus action in UI | Exact session focus | App activation fallback with explicit help text |
+| Subtitle source | iTerm session/tab title | Only real Ghostty title metadata; otherwise blank |
+| Fallback policy | Existing iTerm fallback rules | Heuristic-only, no iTerm probe call path |
+
+### Implementation Delta (From Current Code)
+1. Tighten iTerm candidate gating in `itermProbeCandidateKeys` and related eligibility checks so non-iTerm terminals (including Ghostty) are not routed into iTerm probe functions.
+2. Preserve all current iTerm behavior once candidate routing is narrowed.
+3. Add Ghostty terminal-kind inference from `termProgram` and use that to route classification/focus behavior.
+4. Add Ghostty focus UX path that returns `appOnly` when app activation succeeds and `unavailable` when it does not.
+5. Update Cockpit/HUD/Unified focus help text to reflect exact vs app-only vs unavailable behavior.
+
+### Test and Validation Plan
+1. Eligibility tests:
+- Ghostty presences do not appear in iTerm probe candidate sets.
+- iTerm presences still do.
+2. Classification tests:
+- Ghostty uses heuristic resolution and avoids iTerm tail/probe functions.
+- iTerm classification remains unchanged.
+3. Focus tests:
+- iTerm returns exact path behavior.
+- Ghostty returns app-only or unavailable, never false exact.
+4. UI tests:
+- Focus help text and button enablement match `TerminalFocusResult`.
+- Ghostty subtitle remains hidden when no real title metadata exists.
+5. Regression tests:
+- Existing iTerm tests stay green.
+- No duplicate live rows or unresolved ghost-row regressions.
+
+### Out of Scope in V2
+1. Exact Ghostty tab/session targeting.
+2. Fabricated subtitle fallback values (session title or cwd) when terminal title metadata is absent.
+3. Expanding live-session scope beyond Codex + Claude.
+
+### Defaults and Assumptions
+1. V1 content remains historical and unchanged; v2 is appended as the delta section.
+2. No feature flags are introduced.
+3. Ghostty integration is capability-aware, not iTerm-emulation.
