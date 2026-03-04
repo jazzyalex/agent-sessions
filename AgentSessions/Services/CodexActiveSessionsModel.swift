@@ -1937,7 +1937,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             "set sname to name of s",
             "set ttitle to \"\"",
             "try",
-            "set ttitle to variable named \"tab.title\" of s",
+            "set ttitle to title of t",
             "on error",
             "set ttitle to \"\"",
             "end try",
