@@ -60,7 +60,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private let fullAutosaveName = "AgentCockpitHUDWindow.full"
         private let compactAutosaveName = "AgentCockpitHUDWindow.compact"
         private let rowResizeStep: CGFloat = 31
-        private let compactDefaultRows: CGFloat = 6
+        private let compactDefaultRowsWhenToolbarVisible: CGFloat = 6
+        private let compactDefaultRowsWhenToolbarHidden: CGFloat = 4
         private let compactMinimumRows: CGFloat = 3
         private let compactMinimumWidth: CGFloat = 330
         private let compactDefaultFrameWidth: CGFloat = 330
@@ -301,9 +302,10 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                                              includesToolbar: Bool) {
             let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
             let calloutHeight = includesDisabledCallout ? compactDisabledCalloutHeight : 0
+            let defaultRows = includesToolbar ? compactDefaultRowsWhenToolbarVisible : compactDefaultRowsWhenToolbarHidden
             let targetHeight = max(
                 window.minSize.height,
-                compactContentHeight(forRows: compactDefaultRows, includesToolbar: includesToolbar) + calloutHeight + chromeHeight
+                compactContentHeight(forRows: defaultRows, includesToolbar: includesToolbar) + calloutHeight + chromeHeight
             )
             let targetWidth = max(window.minSize.width, compactDefaultFrameWidth)
 
@@ -325,7 +327,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
 
         private func applyCompactToolbarVisibilityTransition(to isVisible: Bool,
                                                              window: NSWindow) {
-            let delta = compactHeaderHeight
+            let rowDelta = compactDefaultRowsWhenToolbarVisible - compactDefaultRowsWhenToolbarHidden
+            let delta = compactHeaderHeight + (rowDelta * rowResizeStep)
             guard delta > 0 else { return }
 
             var frame = window.frame
