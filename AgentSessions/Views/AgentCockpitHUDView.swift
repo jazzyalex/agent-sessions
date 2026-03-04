@@ -265,7 +265,8 @@ struct AgentCockpitHUDView: View {
                 visibleRows: visibleRows,
                 groupedRows: grouped,
                 shortcutIndexMap: shortcutIndexMap,
-                totalRowsCount: rowsForDisplay.count
+                totalRowsCount: rowsForDisplay.count,
+                showsCompactToolbar: showsCompactToolbar
             )
             .background(Color.clear)
             .disabled(!activeEnabled)
@@ -425,12 +426,15 @@ struct AgentCockpitHUDView: View {
     private func bodyList(visibleRows: [HUDRow],
                           groupedRows: [HUDGroup],
                           shortcutIndexMap: [String: Int],
-                          totalRowsCount: Int) -> some View {
+                          totalRowsCount: Int,
+                          showsCompactToolbar: Bool) -> some View {
         Group {
             if visibleRows.isEmpty {
                 emptyState(totalRowsCount: totalRowsCount)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isCompact ? .leading : .center)
                     .padding(.horizontal, isCompact ? 14 : 0)
+            } else if shouldCenterCompactRows(visibleRows: visibleRows, showsCompactToolbar: showsCompactToolbar) {
+                compactCenteredBodyRows(visibleRows: visibleRows, shortcutIndexMap: shortcutIndexMap)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -492,6 +496,39 @@ struct AgentCockpitHUDView: View {
             minHeight: isCompact ? compactBodyMinHeight : fullBodyMinHeight,
             maxHeight: .infinity
         )
+    }
+
+    @ViewBuilder
+    private func compactCenteredBodyRows(visibleRows: [HUDRow],
+                                         shortcutIndexMap: [String: Int]) -> some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            ForEach(visibleRows) { row in
+                AgentCockpitHUDRowView(
+                    row: row,
+                    shortcutIndex: shortcutIndexMap[row.id],
+                    isSelected: false,
+                    filterText: filterText,
+                    isGrouped: false,
+                    isCompact: isCompact,
+                    isNewlyInserted: highlightedRowIDs.contains(row.id)
+                ) {
+                    focus(row)
+                }
+                .contextMenu {
+                    rowContextMenu(row)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func shouldCenterCompactRows(visibleRows: [HUDRow],
+                                         showsCompactToolbar: Bool) -> Bool {
+        guard isCompact else { return false }
+        guard !showsCompactToolbar else { return false }
+        guard !groupByProject else { return false }
+        return visibleRows.count <= 4
     }
 
     @ViewBuilder
