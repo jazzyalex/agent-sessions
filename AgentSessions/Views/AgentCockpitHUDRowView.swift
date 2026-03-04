@@ -4,6 +4,8 @@ private enum AgentCockpitHUDRowLayout {
     static let agentColumnWidth: CGFloat = 84
     static let projectColumnWidth: CGFloat = 80
     static let groupedProjectSpacerWidth: CGFloat = 4
+    static let compactAgentColumnWidth: CGFloat = 64
+    static let compactTabColumnWidth: CGFloat = 96
 }
 
 struct AgentCockpitHUDRowView: View {
@@ -133,8 +135,16 @@ struct AgentCockpitHUDRowView: View {
 
             if showAgentNameInCompact {
                 agentBadge
-                    .frame(width: 64, alignment: .leading)
+                    .frame(width: AgentCockpitHUDRowLayout.compactAgentColumnWidth, alignment: .leading)
             }
+
+            Text(compactTabWindowLabel)
+                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                .foregroundStyle(elapsedColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: AgentCockpitHUDRowLayout.compactTabColumnWidth, alignment: .leading)
+                .help(normalizedTabTitle ?? "No tab/window title")
 
             Text(sessionTitle)
                 .font(.system(size: 13, weight: sessionTitleWeight, design: .monospaced))
@@ -153,6 +163,11 @@ struct AgentCockpitHUDRowView: View {
 
     private var normalizedTabTitle: String? {
         row.cleanedTabTitle
+    }
+
+    private var compactTabWindowLabel: String {
+        let cleaned = normalizedTabTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return cleaned.isEmpty ? "—" : cleaned
     }
 
     private var elapsedColor: Color {

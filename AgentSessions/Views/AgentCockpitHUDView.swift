@@ -183,6 +183,8 @@ struct AgentCockpitHUDView: View {
     @State private var wasWindowHiddenSinceLastVisible: Bool = false
     @State private var hiddenMembershipChurnDetected: Bool = false
     @State private var highlightedRowIDs: Set<String> = []
+    @State private var isCockpitWindowKey: Bool = true
+    @State private var isCompactWindowHovered: Bool = false
     @FocusState private var isSearchFocused: Bool
 
     private let fullBodyMinHeight: CGFloat = 170
@@ -234,6 +236,7 @@ struct AgentCockpitHUDView: View {
         let shownSessionCount = visibleRows.count
         let grouped = groupedRows(from: visibleRows)
         let renderedRows = renderedRows(visibleRows: visibleRows, groupedRows: grouped)
+        let showsCompactToolbar = !isCompact || isCockpitWindowKey || isCompactWindowHovered
         let shortcutIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
             let (index, row) = pair
             if partial[row.id] == nil {
@@ -242,11 +245,15 @@ struct AgentCockpitHUDView: View {
         }
 
         return VStack(spacing: 0) {
-            header(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount)
-                .background(Color.primary.opacity(0.04))
-            Rectangle()
-                .fill(Color.primary.opacity(0.10))
-                .frame(height: 0.5)
+            if showsCompactToolbar {
+                header(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount)
+                    .background(Color.primary.opacity(0.04))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                Rectangle()
+                    .fill(Color.primary.opacity(0.10))
+                    .frame(height: 0.5)
+                    .transition(.opacity)
+            }
 
             if !activeEnabled {
                 disabledCallout
@@ -279,6 +286,8 @@ struct AgentCockpitHUDView: View {
         .background(
             CockpitWindowVisibilityObserver { isVisible in
                 handleWindowVisibilityChange(isVisible: isVisible)
+            } onKeyWindowChanged: { isKey in
+                handleWindowKeyChange(isKey: isKey)
             }
             .allowsHitTesting(false)
         )
@@ -300,6 +309,12 @@ struct AgentCockpitHUDView: View {
         .onChange(of: isWindowVisibleForOrdering) { _, isVisible in
             guard isVisible else { return }
             synchronizeOrderedRows(with: latestCanonicalRows)
+        }
+        .onHover { hovering in
+            guard isCompact else { return }
+            withAnimation(.easeInOut(duration: 0.14)) {
+                isCompactWindowHovered = hovering
+            }
         }
         .applyIf(isCompact) { view in
             view.ignoresSafeArea(.container, edges: .top)
@@ -645,6 +660,12 @@ struct AgentCockpitHUDView: View {
         isWindowVisibleForOrdering = isVisible
         if !isVisible {
             wasWindowHiddenSinceLastVisible = true
+        }
+    }
+
+    private func handleWindowKeyChange(isKey: Bool) {
+        withAnimation(.easeInOut(duration: 0.14)) {
+            isCockpitWindowKey = isKey
         }
     }
 
@@ -1398,9 +1419,13 @@ struct AgentCockpitHUDView: View {
 
 private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
     let onVisibilityChanged: (Bool) -> Void
+    var onKeyWindowChanged: ((Bool) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onVisibilityChanged: onVisibilityChanged)
+        Coordinator(
+            onVisibilityChanged: onVisibilityChanged,
+            onKeyWindowChanged: onKeyWindowChanged
+        )
     }
 
     func makeNSView(context: Context) -> NSView {
@@ -1413,6 +1438,7 @@ private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.onVisibilityChanged = onVisibilityChanged
+        context.coordinator.onKeyWindowChanged = onKeyWindowChanged
         DispatchQueue.main.async { [weak nsView] in
             context.coordinator.attach(to: nsView?.window)
         }
@@ -1424,14 +1450,19 @@ private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
 
     final class Coordinator {
         var onVisibilityChanged: (Bool) -> Void
+        var onKeyWindowChanged: ((Bool) -> Void)?
         private weak var window: NSWindow?
         private var miniObserver: NSObjectProtocol?
         private var deminiObserver: NSObjectProtocol?
         private var occlusionObserver: NSObjectProtocol?
         private var closeObserver: NSObjectProtocol?
+        private var becameKeyObserver: NSObjectProtocol?
+        private var resignedKeyObserver: NSObjectProtocol?
 
-        init(onVisibilityChanged: @escaping (Bool) -> Void) {
+        init(onVisibilityChanged: @escaping (Bool) -> Void,
+             onKeyWindowChanged: ((Bool) -> Void)?) {
             self.onVisibilityChanged = onVisibilityChanged
+            self.onKeyWindowChanged = onKeyWindowChanged
         }
 
         func attach(to newWindow: NSWindow?) {
@@ -1470,11 +1501,29 @@ private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 self?.onVisibilityChanged(false)
+                self?.onKeyWindowChanged?(false)
                 self?.detach()
+            }
+
+            becameKeyObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: newWindow,
+                queue: .main
+            ) { [weak self] _ in
+                self?.emitCurrentKeyState()
+            }
+
+            resignedKeyObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResignKeyNotification,
+                object: newWindow,
+                queue: .main
+            ) { [weak self] _ in
+                self?.emitCurrentKeyState()
             }
 
             DispatchQueue.main.async { [weak self] in
                 self?.emitCurrentVisibility()
+                self?.emitCurrentKeyState()
             }
         }
 
@@ -1491,10 +1540,18 @@ private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
             if let observer = closeObserver {
                 NotificationCenter.default.removeObserver(observer)
             }
+            if let observer = becameKeyObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            if let observer = resignedKeyObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
             miniObserver = nil
             deminiObserver = nil
             occlusionObserver = nil
             closeObserver = nil
+            becameKeyObserver = nil
+            resignedKeyObserver = nil
             window = nil
         }
 
@@ -1502,6 +1559,11 @@ private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
             guard let window else { return }
             let visible = !window.isMiniaturized && window.isVisible
             onVisibilityChanged(visible)
+        }
+
+        private func emitCurrentKeyState() {
+            guard let window else { return }
+            onKeyWindowChanged?(window.isKeyWindow)
         }
 
         deinit {
