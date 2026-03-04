@@ -62,7 +62,9 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private let rowResizeStep: CGFloat = 31
         private let compactDefaultRowsWhenToolbarVisible: CGFloat = 6
         private let compactDefaultRowsWhenToolbarHidden: CGFloat = 4
-        private let compactMinimumRows: CGFloat = 3
+        private let compactMinimumRowsWhenToolbarVisible: CGFloat = 1
+        private let compactMinimumRowsWhenToolbarHidden: CGFloat = 3
+        private let compactMaximumRowsWhenToolbarVisible: CGFloat = 10
         private let compactMinimumWidth: CGFloat = 330
         private let compactDefaultFrameWidth: CGFloat = 330
         private let compactHeaderHeight: CGFloat = 44.5
@@ -121,6 +123,13 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                    previousCompactToolbarVisibility != compactToolbarVisible {
                     applyCompactToolbarVisibilityTransition(
                         to: compactToolbarVisible,
+                        window: window
+                    )
+                }
+                if compactToolbarVisible {
+                    applyCompactVisibleRowsAutoHeight(
+                        shownSessionCount: shownSessionCount,
+                        activeEnabled: activeEnabled,
                         window: window
                     )
                 }
@@ -290,7 +299,10 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                                                 includesToolbar: Bool) -> CGFloat {
             let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
             let calloutHeight = includesDisabledCallout ? compactDisabledCalloutHeight : 0
-            return compactContentHeight(forRows: compactMinimumRows, includesToolbar: includesToolbar) + calloutHeight + chromeHeight
+            let minimumRows = includesToolbar
+                ? compactMinimumRowsWhenToolbarVisible
+                : compactMinimumRowsWhenToolbarHidden
+            return compactContentHeight(forRows: minimumRows, includesToolbar: includesToolbar) + calloutHeight + chromeHeight
         }
 
         private func compactContentHeight(forRows rows: CGFloat, includesToolbar: Bool) -> CGFloat {
@@ -339,6 +351,27 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             frame.origin.y += frame.height - targetHeight
             frame.size.height = targetHeight
             window.setFrame(frame, display: true, animate: true)
+        }
+
+        private func applyCompactVisibleRowsAutoHeight(shownSessionCount: Int,
+                                                       activeEnabled: Bool,
+                                                       window: NSWindow) {
+            let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
+            let calloutHeight = activeEnabled ? 0 : compactDisabledCalloutHeight
+            let clampedRows = max(
+                Int(compactMinimumRowsWhenToolbarVisible),
+                min(shownSessionCount, Int(compactMaximumRowsWhenToolbarVisible))
+            )
+            let targetHeight = max(
+                window.minSize.height,
+                compactContentHeight(forRows: CGFloat(clampedRows), includesToolbar: true) + calloutHeight + chromeHeight
+            )
+
+            guard abs(window.frame.height - targetHeight) > 0.5 else { return }
+            var frame = window.frame
+            frame.origin.y += frame.height - targetHeight
+            frame.size.height = targetHeight
+            window.setFrame(frame, display: true, animate: false)
         }
 
         private func applyFullDefaultSize(to window: NSWindow) {
