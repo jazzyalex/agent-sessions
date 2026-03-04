@@ -188,7 +188,9 @@ struct AgentCockpitHUDView: View {
     @FocusState private var isSearchFocused: Bool
 
     private let fullBodyMinHeight: CGFloat = 170
-    private let compactBodyMinHeight: CGFloat = 31 * 3
+    private let compactBodyRowHeight: CGFloat = 31
+    private let compactBodyMinRowsWhenToolbarHidden: CGFloat = 3
+    private let compactBodyMaxRowsWhenToolbarVisible: CGFloat = 10
 
     private static let codexRolloutTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -493,9 +495,23 @@ struct AgentCockpitHUDView: View {
             }
         }
         .frame(
-            minHeight: isCompact ? compactBodyMinHeight : fullBodyMinHeight,
+            minHeight: isCompact
+                ? compactBodyMinHeight(
+                    visibleRowCount: visibleRows.count,
+                    showsCompactToolbar: showsCompactToolbar
+                )
+                : fullBodyMinHeight,
             maxHeight: .infinity
         )
+    }
+
+    private func compactBodyMinHeight(visibleRowCount: Int,
+                                      showsCompactToolbar: Bool) -> CGFloat {
+        if showsCompactToolbar {
+            let rows = min(max(visibleRowCount, 1), Int(compactBodyMaxRowsWhenToolbarVisible))
+            return CGFloat(rows) * compactBodyRowHeight
+        }
+        return compactBodyMinRowsWhenToolbarHidden * compactBodyRowHeight
     }
 
     @ViewBuilder
