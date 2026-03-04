@@ -59,6 +59,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private let rowResizeStep: CGFloat = 31
         private let compactDefaultRows: CGFloat = 6
         private let compactMinimumRows: CGFloat = 3
+        private let compactMinimumWidth: CGFloat = 330
+        private let compactDefaultFrameWidth: CGFloat = 330
         private let compactHeaderHeight: CGFloat = 44.5
         private let compactDisabledCalloutHeight: CGFloat = 56
         private let fullDefaultFrameSize = NSSize(width: 644, height: 320)
@@ -95,7 +97,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             if isCompact {
                 applyCompactChrome(to: window)
                 window.minSize = NSSize(
-                    width: 560,
+                    width: compactMinimumWidth,
                     height: compactMinimumWindowHeight(
                         for: window,
                         includesDisabledCallout: !activeEnabled
@@ -219,7 +221,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             if !restored {
                 switch mode {
                 case .compact:
-                    applyCompactDefaultHeight(to: window)
+                    applyCompactDefaultSize(to: window)
                 case .full:
                     applyFullDefaultSize(to: window)
                 }
@@ -260,14 +262,23 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             compactHeaderHeight + (rows * rowResizeStep)
         }
 
-        private func applyCompactDefaultHeight(to window: NSWindow) {
+        private func applyCompactDefaultSize(to window: NSWindow) {
             let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
             let targetHeight = max(window.minSize.height, compactContentHeight(forRows: compactDefaultRows) + chromeHeight)
-            let currentHeight = window.frame.height
-            guard abs(currentHeight - targetHeight) > 1 else { return }
+            let targetWidth = max(window.minSize.width, compactDefaultFrameWidth)
 
             var frame = window.frame
-            frame.origin.y += frame.height - targetHeight
+            let widthChanged = abs(frame.width - targetWidth) > 1
+            let previousHeight = frame.height
+            if widthChanged {
+                frame.size.width = targetWidth
+            }
+            if abs(previousHeight - targetHeight) <= 1 {
+                guard widthChanged else { return }
+                window.setFrame(frame, display: true, animate: true)
+                return
+            }
+            frame.origin.y += previousHeight - targetHeight
             frame.size.height = targetHeight
             window.setFrame(frame, display: true, animate: true)
         }
