@@ -279,7 +279,8 @@ struct AgentCockpitHUDView: View {
                 isPinned: isPinned,
                 shownSessionCount: shownSessionCount,
                 isCompact: isCompact,
-                activeEnabled: activeEnabled
+                activeEnabled: activeEnabled,
+                compactToolbarVisible: showsCompactToolbar
             )
             .allowsHitTesting(false)
         )
