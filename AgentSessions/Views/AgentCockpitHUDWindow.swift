@@ -40,7 +40,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     }
 
     final class Coordinator {
-        private enum Mode {
+        private enum Mode: Hashable {
             case full
             case compact
         }
@@ -48,10 +48,11 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private weak var window: NSWindow?
         private var baselineLevel: NSWindow.Level = .normal
         private var baselineCollectionBehavior: NSWindow.CollectionBehavior = []
-        private var baselineHidesOnDeactivate: Bool = true
+        private var baselineHidesOnDeactivate: Bool = false
         private var baselineStyleMask: NSWindow.StyleMask = []
         private let fallbackStandardStyleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
         private var currentMode: Mode?
+        private static let pinnedCollectionBehavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         private let fullAutosaveName = "AgentCockpitHUDWindow.full"
         private let compactAutosaveName = "AgentCockpitHUDWindow.compact"
@@ -61,13 +62,12 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private let compactHeaderHeight: CGFloat = 44.5
         private let compactDisabledCalloutHeight: CGFloat = 56
         private let fullDefaultFrameSize = NSSize(width: 644, height: 320)
+        private var cachedFrameByMode: [Mode: NSRect] = [:]
 
         func attach(to newWindow: NSWindow) {
             guard window !== newWindow else { return }
             window = newWindow
-            baselineLevel = newWindow.level
-            baselineCollectionBehavior = newWindow.collectionBehavior
-            baselineHidesOnDeactivate = newWindow.hidesOnDeactivate
+            captureBaselineWindowStateIfSafe(from: newWindow)
             captureBaselineStyleMaskIfNeeded(from: newWindow.styleMask)
         }
 
@@ -76,6 +76,10 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                         isCompact: Bool,
                         activeEnabled: Bool) {
             guard let window else { return }
+            captureBaselineWindowStateIfSafe(from: window)
+            if let currentMode {
+                cachedFrameByMode[currentMode] = window.frame
+            }
 
             if window.identifier?.rawValue != "AgentCockpit" {
                 window.identifier = NSUserInterfaceItemIdentifier("AgentCockpit")
@@ -113,14 +117,34 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
 
             if isPinned {
                 window.level = .screenSaver
-                window.collectionBehavior = baselineCollectionBehavior.union([.canJoinAllSpaces, .fullScreenAuxiliary])
+                window.collectionBehavior = baselineCollectionBehavior.union(Self.pinnedCollectionBehavior)
                 window.hidesOnDeactivate = false
             } else {
                 // Restore non-pinned behavior to the window's baseline values.
-                window.level = baselineLevel
-                window.collectionBehavior = baselineCollectionBehavior
+                window.level = Self.sanitizedUnpinnedLevel(from: baselineLevel)
+                window.collectionBehavior = Self.sanitizedUnpinnedCollectionBehavior(from: baselineCollectionBehavior)
                 window.hidesOnDeactivate = baselineHidesOnDeactivate
             }
+        }
+
+        static func sanitizedUnpinnedLevel(from baselineLevel: NSWindow.Level) -> NSWindow.Level {
+            if baselineLevel == .screenSaver {
+                return .normal
+            }
+            return baselineLevel
+        }
+
+        static func sanitizedUnpinnedCollectionBehavior(from baselineCollectionBehavior: NSWindow.CollectionBehavior) -> NSWindow.CollectionBehavior {
+            baselineCollectionBehavior.subtracting(pinnedCollectionBehavior)
+        }
+
+        private func captureBaselineWindowStateIfSafe(from window: NSWindow) {
+            // If the window is currently pinned, preserve the previous baseline so unpin restores
+            // regular behavior instead of re-capturing pinned state as the baseline.
+            guard window.level != .screenSaver else { return }
+            baselineLevel = window.level
+            baselineCollectionBehavior = Self.sanitizedUnpinnedCollectionBehavior(from: window.collectionBehavior)
+            baselineHidesOnDeactivate = window.hidesOnDeactivate
         }
 
         private func applyCompactChrome(to window: NSWindow) {
@@ -175,8 +199,10 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private func applyModeTransition(to mode: Mode, window: NSWindow) {
             guard currentMode != mode else { return }
 
-            if let previousMode = currentMode {
-                window.saveFrame(usingName: autosaveName(for: previousMode))
+            let previousMode = currentMode
+                ?? inferredMode(from: window.frameAutosaveName)
+            if let previousMode {
+                persistFrame(window.frame, for: previousMode, window: window)
             }
 
             let targetAutosaveName = autosaveName(for: mode)
@@ -184,7 +210,12 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 window.setFrameAutosaveName(targetAutosaveName)
             }
 
-            let restored = window.setFrameUsingName(targetAutosaveName)
+            let restoredFromCache: Bool = {
+                guard let cached = cachedFrameByMode[mode] else { return false }
+                window.setFrame(cached, display: true, animate: false)
+                return true
+            }()
+            let restored = restoredFromCache || window.setFrameUsingName(targetAutosaveName)
             if !restored {
                 switch mode {
                 case .compact:
@@ -195,6 +226,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             }
 
             currentMode = mode
+            cachedFrameByMode[mode] = window.frame
         }
 
         private func autosaveName(for mode: Mode) -> String {
@@ -204,6 +236,17 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             case .compact:
                 return compactAutosaveName
             }
+        }
+
+        private func inferredMode(from autosaveName: String) -> Mode? {
+            if autosaveName == fullAutosaveName { return .full }
+            if autosaveName == compactAutosaveName { return .compact }
+            return nil
+        }
+
+        private func persistFrame(_ frame: NSRect, for mode: Mode, window: NSWindow) {
+            cachedFrameByMode[mode] = frame
+            window.saveFrame(usingName: autosaveName(for: mode))
         }
 
         private func compactMinimumWindowHeight(for window: NSWindow,

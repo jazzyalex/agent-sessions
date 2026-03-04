@@ -44,6 +44,7 @@ struct HUDRow: Identifiable, Equatable {
     let tty: String?
     let termProgram: String?
     let tabTitle: String?
+    let cleanedTabTitle: String?
     let resolvedSessionID: String?
     let runtimeSessionID: String?
     let logPath: String?
@@ -65,6 +66,7 @@ struct HUDRow: Identifiable, Equatable {
          tty: String?,
          termProgram: String?,
          tabTitle: String? = nil,
+         cleanedTabTitle: String? = nil,
          resolvedSessionID: String? = nil,
          runtimeSessionID: String? = nil,
          logPath: String? = nil,
@@ -85,6 +87,7 @@ struct HUDRow: Identifiable, Equatable {
         self.tty = tty
         self.termProgram = termProgram
         self.tabTitle = tabTitle
+        self.cleanedTabTitle = cleanedTabTitle
         self.resolvedSessionID = resolvedSessionID
         self.runtimeSessionID = runtimeSessionID
         self.logPath = logPath
@@ -213,9 +216,11 @@ struct AgentCockpitHUDView: View {
         }
         .onAppear {
             activeCodex.setCockpitConsumerVisible(true, consumerID: activeConsumerID)
+            activeCodex.setCockpitWindowVisible(true, consumerID: activeConsumerID)
             UserDefaults.standard.set(true, forKey: PreferencesKey.Cockpit.hudOpen)
         }
         .onDisappear {
+            activeCodex.setCockpitWindowVisible(false, consumerID: activeConsumerID)
             activeCodex.setCockpitConsumerVisible(false, consumerID: activeConsumerID)
             UserDefaults.standard.set(false, forKey: PreferencesKey.Cockpit.hudOpen)
         }
@@ -635,6 +640,7 @@ struct AgentCockpitHUDView: View {
     }
 
     private func handleWindowVisibilityChange(isVisible: Bool) {
+        activeCodex.setCockpitWindowVisible(isVisible, consumerID: activeConsumerID)
         guard isWindowVisibleForOrdering != isVisible else { return }
         isWindowVisibleForOrdering = isVisible
         if !isVisible {
@@ -790,9 +796,7 @@ struct AgentCockpitHUDView: View {
     }
 
     private func normalizedTabTitle(_ row: HUDRow) -> String? {
-        guard let tabTitle = row.tabTitle else { return nil }
-        let trimmed = tabTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        row.cleanedTabTitle
     }
 
     private var disabledCallout: some View {
@@ -899,6 +903,7 @@ struct AgentCockpitHUDView: View {
             let hudState = Self.mapLiveStateForHUD(row.liveState)
             let elapsed = isCompact ? "" : elapsedLabel(from: row.lastActivityAt)
             let activityTooltip = row.lastActivityAt.map { Self.activityTooltipFormatter.string(from: $0) }
+            let cleanedTabTitle = Self.normalizedCockpitTabTitle(row.tabTitle, source: row.source)
             return HUDRow(
                 id: row.id,
                 source: row.source,
@@ -914,6 +919,7 @@ struct AgentCockpitHUDView: View {
                 tty: row.tty,
                 termProgram: row.termProgram,
                 tabTitle: row.tabTitle,
+                cleanedTabTitle: cleanedTabTitle,
                 resolvedSessionID: row.resolvedSessionID,
                 runtimeSessionID: row.sessionID,
                 logPath: row.logPath,
@@ -938,6 +944,80 @@ struct AgentCockpitHUDView: View {
 
     static func mapLiveStateForHUD(_ liveState: CodexLiveState) -> HUDLiveState {
         liveState == .activeWorking ? .active : .idle
+    }
+
+    private static let trailingParentheticalRegex: NSRegularExpression = {
+        // Optional trailing "(...)" suffix used by iTerm tab defaults, e.g. "(codex*)".
+        guard let regex = try? NSRegularExpression(pattern: #"\s*\(([^()]*)\)\s*$"#) else {
+            fatalError("Invalid cockpit tab-title suffix regex.")
+        }
+        return regex
+    }()
+
+    private static let defaultTabTokensBySource: [SessionSource: Set<String>] = [
+        .codex: ["codex"],
+        .claude: ["claude", "claude code"]
+    ]
+
+    static func normalizedCockpitTabTitle(_ rawTitle: String?, source: SessionSource) -> String? {
+        guard let rawTitle else { return nil }
+        let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let defaultTokens = defaultTabTokensBySource[source, default: []]
+        guard !defaultTokens.isEmpty else { return trimmed }
+
+        let normalized = normalizeTabToken(trimmed)
+        if defaultTokens.contains(normalized) {
+            return nil
+        }
+
+        if let stripped = strippingTrailingDefaultSuffix(from: trimmed, defaults: defaultTokens) {
+            let normalizedStripped = normalizeTabToken(stripped)
+            guard !normalizedStripped.isEmpty, !defaultTokens.contains(normalizedStripped) else {
+                return nil
+            }
+            return stripped
+        }
+
+        return trimmed
+    }
+
+    private static func strippingTrailingDefaultSuffix(from text: String,
+                                                       defaults: Set<String>) -> String? {
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+        guard let match = trailingParentheticalRegex.firstMatch(in: text, options: [], range: range) else {
+            return nil
+        }
+        let suffixRange = match.range(at: 1)
+        guard suffixRange.location != NSNotFound else { return nil }
+        let suffix = nsText.substring(with: suffixRange)
+        guard defaults.contains(normalizeTabToken(suffix)) else {
+            return nil
+        }
+
+        let prefixRange = NSRange(location: 0, length: match.range.location)
+        let prefix = nsText.substring(with: prefixRange).trimmingCharacters(in: .whitespacesAndNewlines)
+        return prefix
+    }
+
+    private static func normalizeTabToken(_ text: String) -> String {
+        let lowered = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lowered.isEmpty else { return "" }
+
+        var sanitized = String()
+        sanitized.reserveCapacity(lowered.count)
+        for scalar in lowered.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                sanitized.unicodeScalars.append(scalar)
+            } else {
+                sanitized.append(" ")
+            }
+        }
+
+        return sanitized
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
     }
 
     static func counts(for rows: [HUDRow]) -> (active: Int, idle: Int) {
@@ -966,6 +1046,7 @@ struct AgentCockpitHUDView: View {
             return row.projectName.lowercased().contains(lowered)
                 || row.displayName.lowercased().contains(lowered)
                 || row.preview.lowercased().contains(lowered)
+                || (row.cleanedTabTitle?.lowercased().contains(lowered) ?? false)
         }
     }
 
