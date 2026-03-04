@@ -29,10 +29,13 @@ struct AgentCockpitHUDGroupHeader: View {
                 if idleCount > 0 {
                     Text("\(idleCount) idle")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(colorScheme == .dark ? Color(hex: "6e6e73") : Color(hex: "8e8e93"))
+                        .foregroundStyle(colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600"))
                         .padding(.vertical, 2)
                         .padding(.horizontal, 8)
-                        .background(colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.05))
+                        .background(
+                            (colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600"))
+                                .opacity(colorScheme == .dark ? 0.16 : 0.12)
+                        )
                         .clipShape(Capsule())
                 }
 

@@ -1,5 +1,11 @@
 import SwiftUI
 
+private enum AgentCockpitHUDRowLayout {
+    static let agentColumnWidth: CGFloat = 84
+    static let projectColumnWidth: CGFloat = 80
+    static let groupedProjectSpacerWidth: CGFloat = 4
+}
+
 struct AgentCockpitHUDRowView: View {
     let row: HUDRow
     let shortcutIndex: Int?
@@ -15,7 +21,7 @@ struct AgentCockpitHUDRowView: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 9) {
+            HStack(spacing: 6) {
                 if isCompact {
                     compactLayout
                 } else {
@@ -34,7 +40,6 @@ struct AgentCockpitHUDRowView: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .opacity(row.liveState == .idle ? 0.60 : 1.0)
             .contentShape(Rectangle())
             .overlay(alignment: .bottom) {
                 Rectangle()
@@ -56,17 +61,11 @@ struct AgentCockpitHUDRowView: View {
     }
 
     private var fullLayout: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 6) {
             statusDot
 
-            agentBadge
-
             VStack(alignment: .leading, spacing: 2) {
-                highlightedText(row.displayName)
-                    .font(.system(size: 13, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                agentBadge
 
                 if showTabSubtitleInFullMode, let tabTitle = normalizedTabTitle {
                     Text(tabTitle)
@@ -77,23 +76,23 @@ struct AgentCockpitHUDRowView: View {
                         .help(tabTitle)
                 }
             }
-            .frame(width: 120, alignment: .leading)
+            .frame(width: AgentCockpitHUDRowLayout.agentColumnWidth, alignment: .leading)
 
             if isGrouped {
                 Color.clear
-                    .frame(width: 110, height: 1)
+                    .frame(width: AgentCockpitHUDRowLayout.groupedProjectSpacerWidth, height: 1)
             } else {
                 highlightedText(row.projectName)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(width: 110, alignment: .leading)
+                    .frame(width: AgentCockpitHUDRowLayout.projectColumnWidth, alignment: .leading)
             }
 
-            Text(dedupedFullPreview)
-                .font(.system(size: 13, weight: .regular, design: .monospaced))
-                .foregroundStyle(previewColor)
+            highlightedText(sessionTitle)
+                .font(.system(size: 13, weight: sessionTitleWeight, design: .monospaced))
+                .foregroundStyle(.primary)
                 .lineLimit(2)
                 .truncationMode(.tail)
                 .fixedSize(horizontal: false, vertical: true)
@@ -127,7 +126,7 @@ struct AgentCockpitHUDRowView: View {
     }
 
     private var compactLayout: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 6) {
             statusDot
 
             if showAgentNameInCompact {
@@ -135,9 +134,9 @@ struct AgentCockpitHUDRowView: View {
                     .frame(width: 64, alignment: .leading)
             }
 
-            Text(row.preview)
-                .font(.system(size: 13, weight: .regular, design: .monospaced))
-                .foregroundStyle(previewColor)
+            Text(sessionTitle)
+                .font(.system(size: 13, weight: sessionTitleWeight, design: .monospaced))
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -151,35 +150,23 @@ struct AgentCockpitHUDRowView: View {
     }
 
     private var normalizedTabTitle: String? {
-        guard let raw = row.tabTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-            return nil
-        }
-        return raw
-    }
-
-    private var dedupedFullPreview: String {
-        let preview = row.preview.trimmingCharacters(in: .whitespacesAndNewlines)
-        let display = row.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !preview.isEmpty else { return preview }
-        guard preview.caseInsensitiveCompare(display) == .orderedSame else { return preview }
-
-        if let tab = normalizedTabTitle,
-           tab.caseInsensitiveCompare(display) != .orderedSame {
-            return tab
-        }
-        // Preserve wrapped preview text instead of leaving the column blank.
-        return preview
-    }
-
-    private var previewColor: Color {
-        if colorScheme == .dark {
-            return row.liveState == .active ? Color(hex: "8e8e93") : Color(hex: "636366")
-        }
-        return row.liveState == .active ? Color(hex: "6e6e73") : Color(hex: "aeaeb2")
+        row.cleanedTabTitle
     }
 
     private var elapsedColor: Color {
         colorScheme == .dark ? Color(hex: "6e6e73") : Color(hex: "8e8e93")
+    }
+
+    private var sessionTitle: String {
+        let preview = row.preview.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !preview.isEmpty {
+            return preview
+        }
+        return row.displayName
+    }
+
+    private var sessionTitleWeight: Font.Weight {
+        row.liveState == .idle ? .semibold : .regular
     }
 
     private var agentBadge: some View {

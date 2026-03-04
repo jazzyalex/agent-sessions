@@ -180,6 +180,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     private var lastProcessProbeAt: Date? = nil
     private var unifiedVisibleConsumerIDs: Set<UUID> = []
     private var cockpitVisibleConsumerIDs: Set<UUID> = []
+    private var cockpitWindowVisibleConsumerIDs: Set<UUID> = []
     private var appIsActive: Bool = true
     private var resumeProbeBudgetIndex: Int? = nil
     private var itermProbeRoundRobinCursor: Int = 0
@@ -288,9 +289,27 @@ final class CodexActiveSessionsModel: ObservableObject {
     func setCockpitConsumerVisible(_ visible: Bool, consumerID: UUID) {
         let hadVisibleConsumer = hasVisibleConsumer
         if visible { cockpitVisibleConsumerIDs.insert(consumerID) }
-        else { cockpitVisibleConsumerIDs.remove(consumerID) }
+        else {
+            cockpitVisibleConsumerIDs.remove(consumerID)
+            cockpitWindowVisibleConsumerIDs.remove(consumerID)
+        }
         guard hasVisibleConsumer != hadVisibleConsumer else { return }
         if !hadVisibleConsumer, hasVisibleConsumer, appIsActive {
+            armForegroundProbeRamp()
+        }
+        refreshSoon()
+    }
+
+    func setCockpitWindowVisible(_ visible: Bool, consumerID: UUID) {
+        let hadVisibleCockpitWindow = hasVisibleCockpitWindow
+        if visible {
+            guard cockpitVisibleConsumerIDs.contains(consumerID) else { return }
+            cockpitWindowVisibleConsumerIDs.insert(consumerID)
+        } else {
+            cockpitWindowVisibleConsumerIDs.remove(consumerID)
+        }
+        guard hasVisibleCockpitWindow != hadVisibleCockpitWindow else { return }
+        if !hadVisibleCockpitWindow, hasVisibleCockpitWindow, appIsActive {
             armForegroundProbeRamp()
         }
         refreshSoon()
@@ -309,6 +328,14 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     private var hasVisibleCockpitConsumer: Bool {
         !cockpitVisibleConsumerIDs.isEmpty
+    }
+
+    private var hasVisibleCockpitWindow: Bool {
+        !cockpitWindowVisibleConsumerIDs.isEmpty
+    }
+
+    private var isCockpitVisible: Bool {
+        hasVisibleCockpitWindow && hudOpen
     }
 
     private var isPinnedCockpitVisible: Bool {
@@ -411,10 +438,12 @@ final class CodexActiveSessionsModel: ObservableObject {
         let cachedProbeSnapshot = cachedProcessPresences
         let hasVisibleConsumerSnapshot = hasVisibleConsumer
         let appIsActiveSnapshot = appIsActive
+        let isCockpitVisibleSnapshot = isCockpitVisible
         let isPinnedCockpitVisibleSnapshot = isPinnedCockpitVisible
         let shouldProbeITermSnapshot = Self.shouldProbeITermSessions(
             appIsActive: appIsActiveSnapshot,
             hasVisibleConsumer: hasVisibleConsumerSnapshot,
+            isCockpitVisible: isCockpitVisibleSnapshot,
             isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
         )
 
@@ -437,6 +466,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                 registryHasPresences: registryHasPresences,
                 hasVisibleConsumer: hasVisibleConsumerSnapshot,
                 appIsActive: appIsActiveSnapshot,
+                isCockpitVisible: isCockpitVisibleSnapshot,
                 isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
             )
             let shouldProbeProcesses: Bool = {
@@ -1006,24 +1036,30 @@ final class CodexActiveSessionsModel: ObservableObject {
         Self.effectivePollIntervalSeconds(
             appIsActive: appIsActive,
             hasVisibleConsumer: hasVisibleConsumer,
+            isCockpitVisible: isCockpitVisible,
             isPinnedCockpitVisible: isPinnedCockpitVisible
         )
     }
 
     nonisolated static func effectivePollIntervalSeconds(appIsActive: Bool,
                                                          hasVisibleConsumer: Bool,
+                                                         isCockpitVisible: Bool,
                                                          isPinnedCockpitVisible: Bool) -> TimeInterval {
         guard appIsActive else {
-            return isPinnedCockpitVisible ? Self.pinnedBackgroundPollInterval : Self.backgroundPollInterval
+            if isPinnedCockpitVisible || isCockpitVisible {
+                return Self.pinnedBackgroundPollInterval
+            }
+            return Self.backgroundPollInterval
         }
         return hasVisibleConsumer ? Self.defaultPollInterval : Self.backgroundPollInterval
     }
 
     nonisolated static func shouldProbeITermSessions(appIsActive: Bool,
                                                      hasVisibleConsumer: Bool,
+                                                     isCockpitVisible: Bool,
                                                      isPinnedCockpitVisible: Bool) -> Bool {
         guard hasVisibleConsumer else { return false }
-        return appIsActive || isPinnedCockpitVisible
+        return appIsActive || isPinnedCockpitVisible || isCockpitVisible
     }
 
     nonisolated static func nextITermProbeBudget(resumeIndex: Int?) -> (budget: Int, nextResumeIndex: Int?) {
@@ -1077,10 +1113,11 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated private static func processProbeMinIntervalSeconds(registryHasPresences: Bool,
                                                                    hasVisibleConsumer: Bool,
                                                                    appIsActive: Bool,
+                                                                   isCockpitVisible: Bool,
                                                                    isPinnedCockpitVisible: Bool) -> TimeInterval {
         // Keep process probes warm while foregrounded or when pinned cockpit is explicitly visible.
         if hasVisibleConsumer {
-            if appIsActive || isPinnedCockpitVisible {
+            if appIsActive || isPinnedCockpitVisible || isCockpitVisible {
                 return Self.processProbeMinIntervalRegistryEmptyForeground
             }
             return registryHasPresences
@@ -2203,31 +2240,55 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     nonisolated static func isLikelyCodexITermSessionName(_ rawName: String) -> Bool {
-        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !name.isEmpty else { return false }
-        if name == "codex" { return true }
-        if name.contains("(codex)") { return true }
-        if name.hasPrefix("codex ") || name.hasSuffix(" codex") { return true }
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return false }
+        let normalized = normalizeITermSessionNameForMatching(rawName)
+        guard !normalized.isEmpty else { return false }
+        if normalized == "codex" { return true }
+        if normalized.hasSuffix(" codex") { return true }
+        if trimmed.hasPrefix("codex ") { return true }
         return false
     }
 
     nonisolated static func isLikelyClaudeITermSessionName(_ rawName: String) -> Bool {
-        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !name.isEmpty else { return false }
-        if name == "claude" { return true }
-        if name.contains("(claude)") { return true }
-        if name.hasPrefix("claude ") || name.hasSuffix(" claude") { return true }
-        if name.contains("claude code") { return true }
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return false }
+        let normalized = normalizeITermSessionNameForMatching(rawName)
+        guard !normalized.isEmpty else { return false }
+        if normalized == "claude" || normalized == "claude code" { return true }
+        if normalized.hasSuffix(" claude") || normalized.hasSuffix(" claude code") { return true }
+        if trimmed.hasPrefix("claude ") || trimmed.hasPrefix("claude-code ") { return true }
         return false
     }
 
     nonisolated static func isLikelyOpenCodeITermSessionName(_ rawName: String) -> Bool {
-        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !name.isEmpty else { return false }
-        if name == "opencode" { return true }
-        if name.contains("(opencode)") { return true }
-        if name.hasPrefix("opencode ") || name.hasSuffix(" opencode") { return true }
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return false }
+        let normalized = normalizeITermSessionNameForMatching(rawName)
+        guard !normalized.isEmpty else { return false }
+        if normalized == "opencode" { return true }
+        if normalized.hasSuffix(" opencode") { return true }
+        if trimmed.hasPrefix("opencode ") { return true }
         return false
+    }
+
+    nonisolated private static func normalizeITermSessionNameForMatching(_ rawName: String) -> String {
+        let lowered = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lowered.isEmpty else { return "" }
+
+        var sanitized = String()
+        sanitized.reserveCapacity(lowered.count)
+        for scalar in lowered.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                sanitized.unicodeScalars.append(scalar)
+            } else {
+                sanitized.append(" ")
+            }
+        }
+
+        return sanitized
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
     }
 
     nonisolated static func isLikelyITermSessionName(_ rawName: String, source: SessionSource) -> Bool {

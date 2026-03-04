@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import AgentSessions
 
 final class CodexActiveSessionsRegistryTests: XCTestCase {
@@ -545,11 +546,12 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(enriched[1].terminal?.tabTitle, "Already Set")
     }
 
-    func testEffectivePollIntervalSeconds_usesPinnedBackgroundCadence() {
+    func testEffectivePollIntervalSeconds_usesCockpitVisibilityInBackground() {
         XCTAssertEqual(
             CodexActiveSessionsModel.effectivePollIntervalSeconds(
                 appIsActive: false,
                 hasVisibleConsumer: true,
+                isCockpitVisible: true,
                 isPinnedCockpitVisible: true
             ),
             CodexActiveSessionsModel.pinnedBackgroundPollInterval
@@ -559,6 +561,17 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             CodexActiveSessionsModel.effectivePollIntervalSeconds(
                 appIsActive: false,
                 hasVisibleConsumer: true,
+                isCockpitVisible: true,
+                isPinnedCockpitVisible: false
+            ),
+            CodexActiveSessionsModel.pinnedBackgroundPollInterval
+        )
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.effectivePollIntervalSeconds(
+                appIsActive: false,
+                hasVisibleConsumer: true,
+                isCockpitVisible: false,
                 isPinnedCockpitVisible: false
             ),
             CodexActiveSessionsModel.backgroundPollInterval
@@ -570,16 +583,18 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             CodexActiveSessionsModel.shouldProbeITermSessions(
                 appIsActive: true,
                 hasVisibleConsumer: false,
+                isCockpitVisible: false,
                 isPinnedCockpitVisible: false
             )
         )
     }
 
-    func testShouldProbeITermSessions_backgroundRequiresPinnedCockpit() {
+    func testShouldProbeITermSessions_backgroundAllowsVisibleCockpit() {
         XCTAssertFalse(
             CodexActiveSessionsModel.shouldProbeITermSessions(
                 appIsActive: false,
                 hasVisibleConsumer: true,
+                isCockpitVisible: false,
                 isPinnedCockpitVisible: false
             )
         )
@@ -587,6 +602,15 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             CodexActiveSessionsModel.shouldProbeITermSessions(
                 appIsActive: false,
                 hasVisibleConsumer: true,
+                isCockpitVisible: true,
+                isPinnedCockpitVisible: false
+            )
+        )
+        XCTAssertTrue(
+            CodexActiveSessionsModel.shouldProbeITermSessions(
+                appIsActive: false,
+                hasVisibleConsumer: true,
+                isCockpitVisible: true,
                 isPinnedCockpitVisible: true
             )
         )
@@ -684,14 +708,19 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
 
     func testIsLikelyCodexITermSessionName_matchesExpectedTabNames() {
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("codex"))
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("codex --resume 123"))
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("AS-CX II (codex)"))
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("AS-CX II (codex*)"))
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("AS-CX II (codex\")"))
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyCodexITermSessionName("-zsh"))
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyCodexITermSessionName("Codex-History"))
     }
 
     func testIsLikelyITermSessionName_matchesClaudeAndOpenCodeNames() {
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("Claude", source: .claude))
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("claude --model sonnet", source: .claude))
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("opencode", source: .opencode))
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("opencode --continue", source: .opencode))
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyITermSessionName("zsh", source: .claude))
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyITermSessionName("workspace shell", source: .opencode))
     }
@@ -1475,6 +1504,61 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
     func testAgentCockpitHUD_mapLiveStateForHUD_mapsActiveAndIdle() {
         XCTAssertEqual(AgentCockpitHUDView.mapLiveStateForHUD(.activeWorking), .active)
         XCTAssertEqual(AgentCockpitHUDView.mapLiveStateForHUD(.openIdle), .idle)
+    }
+
+    func testAgentCockpitHUD_normalizedCockpitTabTitle_stripsDefaultSuffixes() {
+        XCTAssertEqual(
+            AgentCockpitHUDView.normalizedCockpitTabTitle("CC - AS III (codex*)", source: .codex),
+            "CC - AS III"
+        )
+        XCTAssertEqual(
+            AgentCockpitHUDView.normalizedCockpitTabTitle("CC - AS III (codex\")", source: .codex),
+            "CC - AS III"
+        )
+        XCTAssertEqual(
+            AgentCockpitHUDView.normalizedCockpitTabTitle("Project triage (claude code*)", source: .claude),
+            "Project triage"
+        )
+    }
+
+    func testAgentCockpitHUD_normalizedCockpitTabTitle_hidesDefaultOnlyNames() {
+        XCTAssertNil(AgentCockpitHUDView.normalizedCockpitTabTitle("codex", source: .codex))
+        XCTAssertNil(AgentCockpitHUDView.normalizedCockpitTabTitle("codex*", source: .codex))
+        XCTAssertNil(AgentCockpitHUDView.normalizedCockpitTabTitle("codex\"", source: .codex))
+        XCTAssertNil(AgentCockpitHUDView.normalizedCockpitTabTitle("claude", source: .claude))
+        XCTAssertNil(AgentCockpitHUDView.normalizedCockpitTabTitle("claude code*", source: .claude))
+    }
+
+    func testAgentCockpitHUD_normalizedCockpitTabTitle_keepsCustomTitles() {
+        XCTAssertEqual(
+            AgentCockpitHUDView.normalizedCockpitTabTitle("release-checklist", source: .codex),
+            "release-checklist"
+        )
+        XCTAssertEqual(
+            AgentCockpitHUDView.normalizedCockpitTabTitle("Code Review (workspace)", source: .claude),
+            "Code Review (workspace)"
+        )
+    }
+
+    func testAgentCockpitHUDWindowSanitization_restoresNormalFromPinnedBaseline() {
+        XCTAssertEqual(
+            AgentCockpitHUDWindowConfigurator.Coordinator.sanitizedUnpinnedLevel(from: .screenSaver),
+            .normal
+        )
+        XCTAssertEqual(
+            AgentCockpitHUDWindowConfigurator.Coordinator.sanitizedUnpinnedLevel(from: .floating),
+            .floating
+        )
+    }
+
+    func testAgentCockpitHUDWindowSanitization_removesPinnedCollectionFlags() {
+        let baseline: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .moveToActiveSpace]
+        let sanitized = AgentCockpitHUDWindowConfigurator.Coordinator.sanitizedUnpinnedCollectionBehavior(
+            from: baseline
+        )
+        XCTAssertFalse(sanitized.contains(.canJoinAllSpaces))
+        XCTAssertFalse(sanitized.contains(.fullScreenAuxiliary))
+        XCTAssertTrue(sanitized.contains(.moveToActiveSpace))
     }
 
     func testAgentCockpitHUD_filteredRows_appliesStateAndQuery() {

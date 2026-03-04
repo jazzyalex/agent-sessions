@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 - Sessions (Unified): Added `CLI Agent` cell double-click terminal focusing in the Sessions list (same focus path as `Focus in iTerm2`), with explicit alert feedback when no focusable live terminal is available.
 
 ### Fixed
+- Sessions (Agent Cockpit): Unpin now reliably restores normal window stacking behavior, cockpit tab subtitles now show only cleaned custom tab/window labels (default CLI suffixes are hidden), and row typography/spacing was tightened so idle titles stay readable in both compact and full modes.
+- Sessions (Agent Cockpit): Compact/full toggles now preserve user-resized frame dimensions in both directions, cockpit-visible background probing now remains warm even when unpinned (preventing intermittent `No active sessions` flicker while unfocused), and grouped `Idle` pills now use the same amber palette as idle status dots.
 - Sessions (Agent Cockpit): Switching from compact mode back to full mode now reliably restores normal titled-window chrome, including title text and traffic-light controls.
 - Sessions (Agent Cockpit): Full-mode iTerm subtitle rows now preserve tab/window title metadata through live-row dedupe so subtitle text no longer disappears unexpectedly.
 - Sessions (Agent Cockpit/Unified): `Go to Session` navigation from cockpit now auto-reveals hidden target sessions in the main list by relaxing restrictive filters when needed.
