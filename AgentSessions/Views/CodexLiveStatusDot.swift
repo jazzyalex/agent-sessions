@@ -17,6 +17,12 @@ struct CodexLiveStatusDot: View {
             .scaleEffect(pulseScale)
             .opacity(pulseOpacity)
             .shadow(color: haloColor.opacity(haloOpacity), radius: haloRadius)
+            .transaction { transaction in
+                // Keep active (green) dots fully static even when parent rows animate.
+                if state == .activeWorking {
+                    transaction.animation = nil
+                }
+            }
             .onAppear { updateAnimation() }
             .onChange(of: state) { _, _ in updateAnimation() }
             .onChange(of: lastSeenAt) { _, _ in updateAnimation() }
