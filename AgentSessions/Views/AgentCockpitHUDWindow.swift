@@ -7,6 +7,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     let isCompact: Bool
     let activeEnabled: Bool
     let compactToolbarVisible: Bool
+    let groupByProject: Bool
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -18,7 +19,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 shownSessionCount: shownSessionCount,
                 isCompact: isCompact,
                 activeEnabled: activeEnabled,
-                compactToolbarVisible: compactToolbarVisible
+                compactToolbarVisible: compactToolbarVisible,
+                groupByProject: groupByProject
             )
         }
         return view
@@ -33,7 +35,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 shownSessionCount: shownSessionCount,
                 isCompact: isCompact,
                 activeEnabled: activeEnabled,
-                compactToolbarVisible: compactToolbarVisible
+                compactToolbarVisible: compactToolbarVisible,
+                groupByProject: groupByProject
             )
         }
     }
@@ -84,7 +87,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                         shownSessionCount: Int,
                         isCompact: Bool,
                         activeEnabled: Bool,
-                        compactToolbarVisible: Bool) {
+                        compactToolbarVisible: Bool,
+                        groupByProject: Bool) {
             guard let window else { return }
             captureBaselineWindowStateIfSafe(from: window)
             if let currentMode {
@@ -123,10 +127,11 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                    previousCompactToolbarVisibility != compactToolbarVisible {
                     applyCompactToolbarVisibilityTransition(
                         to: compactToolbarVisible,
+                        groupByProject: groupByProject,
                         window: window
                     )
                 }
-                if compactToolbarVisible {
+                if compactToolbarVisible, !groupByProject {
                     applyCompactVisibleRowsAutoHeight(
                         shownSessionCount: shownSessionCount,
                         activeEnabled: activeEnabled,
@@ -338,8 +343,11 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         }
 
         private func applyCompactToolbarVisibilityTransition(to isVisible: Bool,
+                                                             groupByProject: Bool,
                                                              window: NSWindow) {
-            let rowDelta = compactDefaultRowsWhenToolbarVisible - compactDefaultRowsWhenToolbarHidden
+            let rowDelta = groupByProject
+                ? 0
+                : (compactDefaultRowsWhenToolbarVisible - compactDefaultRowsWhenToolbarHidden)
             let delta = compactHeaderHeight + (rowDelta * rowResizeStep)
             guard delta > 0 else { return }
 

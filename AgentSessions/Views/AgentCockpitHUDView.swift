@@ -283,7 +283,8 @@ struct AgentCockpitHUDView: View {
                 shownSessionCount: shownSessionCount,
                 isCompact: isCompact,
                 activeEnabled: activeEnabled,
-                compactToolbarVisible: showsCompactToolbar
+                compactToolbarVisible: showsCompactToolbar,
+                groupByProject: groupByProject
             )
             .allowsHitTesting(false)
         )
