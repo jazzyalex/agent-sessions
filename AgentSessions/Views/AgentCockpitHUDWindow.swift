@@ -6,6 +6,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     let shownSessionCount: Int
     let isCompact: Bool
     let activeEnabled: Bool
+    let compactToolbarVisible: Bool
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -16,7 +17,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 isPinned: isPinned,
                 shownSessionCount: shownSessionCount,
                 isCompact: isCompact,
-                activeEnabled: activeEnabled
+                activeEnabled: activeEnabled,
+                compactToolbarVisible: compactToolbarVisible
             )
         }
         return view
@@ -30,7 +32,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 isPinned: isPinned,
                 shownSessionCount: shownSessionCount,
                 isCompact: isCompact,
-                activeEnabled: activeEnabled
+                activeEnabled: activeEnabled,
+                compactToolbarVisible: compactToolbarVisible
             )
         }
     }
@@ -65,6 +68,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private let compactDisabledCalloutHeight: CGFloat = 56
         private let fullDefaultFrameSize = NSSize(width: 644, height: 320)
         private var cachedFrameByMode: [Mode: NSRect] = [:]
+        private var lastAppliedCompactToolbarVisibility: Bool?
 
         func attach(to newWindow: NSWindow) {
             guard window !== newWindow else { return }
@@ -76,7 +80,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         func applyStyle(isPinned: Bool,
                         shownSessionCount: Int,
                         isCompact: Bool,
-                        activeEnabled: Bool) {
+                        activeEnabled: Bool,
+                        compactToolbarVisible: Bool) {
             guard let window else { return }
             captureBaselineWindowStateIfSafe(from: window)
             if let currentMode {
@@ -95,15 +100,30 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             window.contentResizeIncrements = NSSize(width: 1, height: rowResizeStep)
 
             if isCompact {
+                let previousCompactToolbarVisibility = lastAppliedCompactToolbarVisibility
                 applyCompactChrome(to: window)
                 window.minSize = NSSize(
                     width: compactMinimumWidth,
                     height: compactMinimumWindowHeight(
                         for: window,
-                        includesDisabledCallout: !activeEnabled
+                        includesDisabledCallout: !activeEnabled,
+                        includesToolbar: compactToolbarVisible
                     )
                 )
-                applyModeTransition(to: .compact, window: window)
+                applyModeTransition(
+                    to: .compact,
+                    window: window,
+                    activeEnabled: activeEnabled,
+                    compactToolbarVisible: compactToolbarVisible
+                )
+                if let previousCompactToolbarVisibility,
+                   previousCompactToolbarVisibility != compactToolbarVisible {
+                    applyCompactToolbarVisibilityTransition(
+                        to: compactToolbarVisible,
+                        window: window
+                    )
+                }
+                lastAppliedCompactToolbarVisibility = compactToolbarVisible
                 window.title = ""
                 window.titleVisibility = .hidden
                 window.titlebarAppearsTransparent = true
@@ -111,7 +131,13 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 captureBaselineStyleMaskIfNeeded(from: window.styleMask)
                 restoreStandardChrome(to: window)
                 window.minSize = NSSize(width: 560, height: 320)
-                applyModeTransition(to: .full, window: window)
+                applyModeTransition(
+                    to: .full,
+                    window: window,
+                    activeEnabled: activeEnabled,
+                    compactToolbarVisible: true
+                )
+                lastAppliedCompactToolbarVisibility = nil
                 window.title = "Agent Cockpit (\(shownSessionCount))"
                 window.titleVisibility = .visible
                 window.titlebarAppearsTransparent = false
@@ -198,7 +224,10 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             baselineStyleMask = styleMask
         }
 
-        private func applyModeTransition(to mode: Mode, window: NSWindow) {
+        private func applyModeTransition(to mode: Mode,
+                                         window: NSWindow,
+                                         activeEnabled: Bool,
+                                         compactToolbarVisible: Bool) {
             guard currentMode != mode else { return }
 
             let previousMode = currentMode
@@ -221,7 +250,11 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             if !restored {
                 switch mode {
                 case .compact:
-                    applyCompactDefaultSize(to: window)
+                    applyCompactDefaultSize(
+                        to: window,
+                        includesDisabledCallout: !activeEnabled,
+                        includesToolbar: compactToolbarVisible
+                    )
                 case .full:
                     applyFullDefaultSize(to: window)
                 }
@@ -252,19 +285,26 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         }
 
         private func compactMinimumWindowHeight(for window: NSWindow,
-                                                includesDisabledCallout: Bool) -> CGFloat {
+                                                includesDisabledCallout: Bool,
+                                                includesToolbar: Bool) -> CGFloat {
             let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
             let calloutHeight = includesDisabledCallout ? compactDisabledCalloutHeight : 0
-            return compactContentHeight(forRows: compactMinimumRows) + calloutHeight + chromeHeight
+            return compactContentHeight(forRows: compactMinimumRows, includesToolbar: includesToolbar) + calloutHeight + chromeHeight
         }
 
-        private func compactContentHeight(forRows rows: CGFloat) -> CGFloat {
-            compactHeaderHeight + (rows * rowResizeStep)
+        private func compactContentHeight(forRows rows: CGFloat, includesToolbar: Bool) -> CGFloat {
+            (includesToolbar ? compactHeaderHeight : 0) + (rows * rowResizeStep)
         }
 
-        private func applyCompactDefaultSize(to window: NSWindow) {
+        private func applyCompactDefaultSize(to window: NSWindow,
+                                             includesDisabledCallout: Bool,
+                                             includesToolbar: Bool) {
             let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
-            let targetHeight = max(window.minSize.height, compactContentHeight(forRows: compactDefaultRows) + chromeHeight)
+            let calloutHeight = includesDisabledCallout ? compactDisabledCalloutHeight : 0
+            let targetHeight = max(
+                window.minSize.height,
+                compactContentHeight(forRows: compactDefaultRows, includesToolbar: includesToolbar) + calloutHeight + chromeHeight
+            )
             let targetWidth = max(window.minSize.width, compactDefaultFrameWidth)
 
             var frame = window.frame
@@ -279,6 +319,21 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 return
             }
             frame.origin.y += previousHeight - targetHeight
+            frame.size.height = targetHeight
+            window.setFrame(frame, display: true, animate: true)
+        }
+
+        private func applyCompactToolbarVisibilityTransition(to isVisible: Bool,
+                                                             window: NSWindow) {
+            let delta = compactHeaderHeight
+            guard delta > 0 else { return }
+
+            var frame = window.frame
+            let proposedHeight = isVisible ? frame.height + delta : frame.height - delta
+            let targetHeight = max(window.minSize.height, proposedHeight)
+            guard abs(targetHeight - frame.height) > 0.5 else { return }
+
+            frame.origin.y += frame.height - targetHeight
             frame.size.height = targetHeight
             window.setFrame(frame, display: true, animate: true)
         }
