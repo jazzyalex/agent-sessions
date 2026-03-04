@@ -1952,7 +1952,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             var t = CodexActivePresence.Terminal()
             t.termProgram = "iTerm2"
             t.itermSessionId = session.sessionID
-            let trimmedName = session.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedName = (session.displayName ?? session.name).trimmingCharacters(in: .whitespacesAndNewlines)
             t.tabTitle = trimmedName.isEmpty ? nil : trimmedName
             p.terminal = t
             presences.append(p)
@@ -2119,6 +2119,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         var sessionID: String
         var tty: String?
         var name: String
+        var displayName: String?
     }
 
     /// Run a local command with a small timeout. Returns stdout on success.
@@ -2174,12 +2175,26 @@ final class CodexActiveSessionsModel: ObservableObject {
             guard !sid.isEmpty else { return nil }
             let ttyRaw = fields[1].trimmingCharacters(in: .whitespacesAndNewlines)
             let sessionName = fields[2].trimmingCharacters(in: .whitespacesAndNewlines)
-            let windowName = fields.count > 3 ? fields[3].trimmingCharacters(in: .whitespacesAndNewlines) : ""
-            let name = sessionName.isEmpty ? windowName : sessionName
+            let tabName: String
+            let windowName: String
+            if fields.count > 4 {
+                tabName = fields[3].trimmingCharacters(in: .whitespacesAndNewlines)
+                windowName = fields[4].trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                tabName = ""
+                windowName = fields.count > 3 ? fields[3].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            }
+            let matchName = firstNonEmpty([sessionName, tabName, windowName])
+            let displayName = preferredITermDisplayName(
+                sessionName: sessionName,
+                tabName: tabName,
+                windowName: windowName
+            )
             return ITermSessionInfo(
                 sessionID: sid,
                 tty: ttyRaw.isEmpty ? nil : ttyRaw,
-                name: name
+                name: matchName,
+                displayName: displayName
             )
         }
 
@@ -2193,12 +2208,58 @@ final class CodexActiveSessionsModel: ObservableObject {
         return out
     }
 
+    nonisolated private static func firstNonEmpty(_ candidates: [String]) -> String {
+        for candidate in candidates {
+            if !candidate.isEmpty { return candidate }
+        }
+        return ""
+    }
+
+    nonisolated private static func preferredITermDisplayName(sessionName: String,
+                                                              tabName: String,
+                                                              windowName: String) -> String? {
+        let session = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tab = tabName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let window = windowName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSession = normalizeITermSessionNameForMatching(session)
+        let shouldPreferContainerTitle = genericITermSessionNameTokens.contains(normalizedSession)
+
+        if !tab.isEmpty, !equalsIgnoringCaseAndDiacritics(tab, session) {
+            return tab
+        }
+        if shouldPreferContainerTitle,
+           !window.isEmpty,
+           !equalsIgnoringCaseAndDiacritics(window, session) {
+            return window
+        }
+
+        let fallback = firstNonEmpty([session, tab, window])
+        return fallback.isEmpty ? nil : fallback
+    }
+
+    nonisolated private static func equalsIgnoringCaseAndDiacritics(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.compare(rhs, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+    }
+
+    nonisolated private static let genericITermSessionNameTokens: Set<String> = [
+        "codex",
+        "claude",
+        "claude code",
+        "opencode",
+        "open code",
+        "zsh",
+        "bash",
+        "fish",
+        "sh",
+        "shell"
+    ]
+
     nonisolated static func itermTabTitleByTTY(_ sessions: [ITermSessionInfo]) -> [String: String] {
         var out: [String: String] = [:]
         out.reserveCapacity(sessions.count)
         for session in sessions {
             guard let tty = normalizedTTY(session.tty) else { continue }
-            let title = session.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = (session.displayName ?? session.name).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { continue }
             if out[tty] == nil {
                 out[tty] = title

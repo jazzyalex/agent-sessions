@@ -468,11 +468,14 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out[0].sessionID, "349331C2-4268-4AEB-BD48-83342A767CF2")
         XCTAssertEqual(out[0].tty, "/dev/ttys006")
         XCTAssertEqual(out[0].name, "AS-CX II (codex)")
+        XCTAssertEqual(out[0].displayName, "AS-CX II (codex)")
         XCTAssertEqual(out[1].sessionID, "75A64ABD-FF8F-44C8-A1CE-4225F536D7E3")
         XCTAssertEqual(out[1].name, "-zsh")
+        XCTAssertEqual(out[1].displayName, "-zsh")
         XCTAssertEqual(out[2].sessionID, "03167519-C7CD-4109-8999-641F9A8085E1")
         XCTAssertEqual(out[2].tty, "/dev/ttys014")
         XCTAssertEqual(out[2].name, "codex")
+        XCTAssertEqual(out[2].displayName, "codex")
     }
 
     func testParseITermSessionListOutput_fallsBackToWindowNameWhenSessionNameEmpty() {
@@ -485,8 +488,40 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out.count, 2)
         XCTAssertEqual(out[0].sessionID, "11111111-1111-1111-1111-111111111111")
         XCTAssertEqual(out[0].name, "Codex Window")
+        XCTAssertEqual(out[0].displayName, "Codex Window")
         XCTAssertEqual(out[1].sessionID, "22222222-2222-2222-2222-222222222222")
         XCTAssertEqual(out[1].name, "Claude Window")
+        XCTAssertEqual(out[1].displayName, "Claude Window")
+    }
+
+    func testParseITermSessionListOutput_prefersCustomTabOrWindowDisplayName() {
+        let text = """
+        AAAA1111-1111-1111-1111-111111111111\t/dev/ttys021\tcodex\tTennis - CX\tTennis
+        BBBB2222-2222-2222-2222-222222222222\t/dev/ttys022\tcodex\tcodex\tTennis
+        """
+
+        let out = CodexActiveSessionsModel.parseITermSessionListOutput(text)
+        XCTAssertEqual(out.count, 2)
+        XCTAssertEqual(out[0].name, "codex")
+        XCTAssertEqual(out[0].displayName, "Tennis - CX")
+        XCTAssertEqual(out[1].name, "codex")
+        XCTAssertEqual(out[1].displayName, "Tennis")
+    }
+
+    func testParseITermSessionListOutput_prefersWindowDisplayNameForGenericSessionName() {
+        let text = "CCCC3333-2222-2222-2222-222222222222\t/dev/ttys023\tcodex\tTennis"
+        let out = CodexActiveSessionsModel.parseITermSessionListOutput(text)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[0].name, "codex")
+        XCTAssertEqual(out[0].displayName, "Tennis")
+    }
+
+    func testParseITermSessionListOutput_keepsCustomSessionNameWhenWindowDiffers() {
+        let text = "DDDD4444-2222-2222-2222-222222222222\t/dev/ttys024\tAS-CX II (codex)\tTennis"
+        let out = CodexActiveSessionsModel.parseITermSessionListOutput(text)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[0].name, "AS-CX II (codex)")
+        XCTAssertEqual(out[0].displayName, "AS-CX II (codex)")
     }
 
     func testPresencesFromITermSessions_mapsRowsBySourceFromSingleSessionList() {
@@ -510,9 +545,31 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(claude[0].terminal?.tabTitle, "Claude")
     }
 
+    func testPresencesFromITermSessions_usesDisplayNameForTabSubtitle() {
+        let now = Date()
+        let sessions = [
+            CodexActiveSessionsModel.ITermSessionInfo(
+                sessionID: "COD-2",
+                tty: "/dev/ttys021",
+                name: "codex",
+                displayName: "Tennis - CX"
+            )
+        ]
+
+        let codex = CodexActiveSessionsModel.presencesFromITermSessions(sessions, source: .codex, now: now)
+        XCTAssertEqual(codex.count, 1)
+        XCTAssertEqual(codex[0].terminal?.itermSessionId, "COD-2")
+        XCTAssertEqual(codex[0].terminal?.tabTitle, "Tennis - CX")
+    }
+
     func testITermTabTitleByTTY_buildsMapAndPrefersFirstNonEmptyTitle() {
         let sessions = [
-            CodexActiveSessionsModel.ITermSessionInfo(sessionID: "A", tty: "/dev/ttys001", name: "First"),
+            CodexActiveSessionsModel.ITermSessionInfo(
+                sessionID: "A",
+                tty: "/dev/ttys001",
+                name: "codex",
+                displayName: "First"
+            ),
             CodexActiveSessionsModel.ITermSessionInfo(sessionID: "B", tty: "/dev/ttys001", name: "Second"),
             CodexActiveSessionsModel.ITermSessionInfo(sessionID: "C", tty: "/dev/ttys002", name: "Claude")
         ]
