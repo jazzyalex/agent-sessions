@@ -3,45 +3,38 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>2.12</title>
-            <pubDate>Mon, 23 Feb 2026 21:24:08 -0800</pubDate>
+            <title>3.0</title>
+            <pubDate>Wed, 04 Mar 2026 18:37:16 -0800</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 2.12</h2>
+<h2>What&#x27;s New in 3.0</h2>
 <h3>Highlights</h3>
 <ul>
-<li>Onboarding (updates): Auto-onboarding is now suppressed for upgrades from `2.11.x` to `2.12`; update onboarding continues for users upgrading from older major/minor versions.</li>
-<li>Codex usage tracking: JSONL backward scans now continue extracting token-usage fields while searching for the preferred `codex` rate-limit stream, preventing stale token values when newer non-codex limit buckets are present.</li>
-<li>Sessions (OpenClaw): Tool format scanning now recognizes underscore/case variants for tool-call and tool-result blocks, and `is_error` tool-result flags are now classified as errors in transcript events.</li>
-<li>Transcript (Session view): Added semantic transcript rendering for plans, code blocks, diffs, and Codex review summaries, including distinct block accents and improved block grouping boundaries.</li>
-<li>Transcript (Session view): Added clickable local file references (for example `Foo.swift:56`, `Foo.swift#L56`) with configurable editor open behavior (System default, Cursor, VS Code) and optional CLI path override.</li>
-<li>Preferences (Unified Window): Added Rich Transcript controls for review cards, file linkification, code/diff line numbers, and preferred editor target.</li>
+<li>Sessions (Agent Cockpit): Full-mode subtitles now prefer custom iTerm window titles when session naming is set to default job labels (for example `codex`), so configured window-label subtitles are no longer dropped.</li>
+<li>Sessions (Agent Cockpit): Unpin now reliably restores normal window stacking behavior, cockpit tab subtitles now show only cleaned custom tab/window labels (default CLI suffixes are hidden), and row typography/spacing was tightened so idle titles stay readable in both compact and full modes.</li>
+<li>Sessions (Agent Cockpit): HUD row status dots now use the same shared renderer as the main Sessions list, so active (green) dots remain steady in both compact and full cockpit modes.</li>
+<li>Agent Cockpit (Beta): Agent Cockpit is now the primary live command center for iTerm2 Codex/Claude sessions, with grouped active/idle visibility and one-click focus workflows.</li>
+<li>Sessions (Agent Cockpit): HUD rows now remove the visible row-number column, keep `⌘1...⌘9` shortcut badges bound to visual order, and apply one-shot highlight washes for newly added rows.</li>
+<li>Onboarding (v3): New-user onboarding now introduces `Agent Cockpit (Beta)` as the third slide immediately after `Connect Your Agents`.</li>
 </ul>
 <h3>Other Changes</h3>
 <ul>
-<li>Preferences/About: Added a new Diagnostics section for crash reporting with local pending queue controls (`Email Crash Report`, `Export Report`, `Clear Pending`) and a direct support email link.</li>
-<li>Crash reporting: Crash diagnostics are queued locally on launch and shared only through an explicit pre-filled email draft action; no automatic startup/background upload occurs.</li>
-<li>Crash reporting UX: Crash capture is always on (toggle removed), and when a new crash report is detected at launch the app now prompts to either `Email Crash Report` or `Export + Open GitHub Issue`.</li>
-<li>Transcript (Session view): Code-fence opening detection now requires line-start fences, preventing inline triple-backtick snippets from consuming later fenced blocks and misclassifying narrative text as code.</li>
-<li>Transcript (Session view): Codex review-card parsing now skips malformed fenced JSON candidates and continues scanning later candidates, so one invalid payload block no longer suppresses a valid review summary.</li>
-<li>Transcript (Session view): `path:line:column` file references now preserve their column target when linkified, avoiding overlap with `path:line` parsing that could drop column navigation.</li>
-<li>Transcript (Session view): Opening file links in Cursor/VS Code no longer blocks transcript interaction while the editor CLI starts; CLI launches now run asynchronously with fallback behavior preserved.</li>
-<li>Transcript (Session view): Multiple Cursor/VS Code file-link opens now run concurrently, so slow/unavailable editor CLIs no longer serialize later clicks behind earlier timeout waits.</li>
-<li>Session view (Unified): Jump-to-latest arrow visibility is now driven by transcript position for every agent/session type, so it appears whenever the viewport is away from the end (including immediately after switching sessions) and no longer depends on active-session refresh paths.</li>
-<li>Session view (Unified): The floating jump-to-latest control now uses a smaller compact circle and now appears immediately after session selection whenever the transcript is not at the tail (no initial scroll required).</li>
+<li>Onboarding (v3 updates): Upgrade onboarding is now a focused two-slide flow with an `Agent Cockpit (Beta)` how-it-works explainer followed by a feedback/community-support slide.</li>
+<li>Sessions (Unified): Added an Agent Cockpit toolbar icon button in the main window for one-click access to the cockpit window.</li>
+<li>Sessions (Agent Cockpit): Added a row context menu with `Go to Session`, `Focus in iTerm2`, `Reveal Log`, `Open Working Directory`, `Copy Session ID`, `Copy Tab Title`, and `Copy Working Directory Path`.</li>
+<li>Cockpit: Added a Cockpit window for active Codex sessions with iTerm2 focus, plus active-session indicators in the Unified sessions list.</li>
+<li>Sessions (Cockpit/Unified): Live session detection now includes Claude in addition to Codex, with mixed-source live rows in Cockpit and source-aware live filtering in Unified Sessions.</li>
+<li>Sessions (Unified): Added a small active-status dot in the `CLI Agent` column for live Codex sessions.</li>
+<li>Sessions (Unified): Added a blue-dot toolbar filter toggle (dot-only control) before the agent toggles to show only active sessions in the list.</li>
+<li>Sessions (Cockpit/Unified): Codex live-session status now distinguishes `active` (working) from `open` (idle). Active rows use a pulsing dot and open rows use a solid dot.</li>
+<li>Sessions (Cockpit): Added a live-session filter segmented control with `Both`, `Active`, and `Open`; default is `Both`.</li>
+<li>Sessions (Unified): Added `CLI Agent` cell double-click terminal focusing in the Sessions list (same focus path as `Focus in iTerm2`), with explicit alert feedback when no focusable live terminal is available.</li>
 </ul>
-<h3>Reminder: What You Got in 2.11</h3>
-<ul>
-<li>OpenClaw sessions: Added OpenClaw (clawdbot) session support, including Advanced visibility for deleted transcripts.</li>
-<li>Images: Expanded image workflows across both Session view (inline thumbnails) and Image Browser (cross-agent browsing, filters, and actions).</li>
-<li>Search completeness: Reduced missing/incomplete search results for some sessions with incremental changed-file indexing, search backfill paths, and stale-row cleanup.</li>
-<li>Energy spikes: Reduced Energy Warning spikes by replacing always-on idle refresh with app-activation/event-driven behavior and power-aware probing/indexing cadence.</li>
-</ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v2.12">https://github.com/jazzyalex/agent-sessions/releases/tag/v2.12</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.0">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.0</a></p>
             ]]></description>
-            <sparkle:version>22</sparkle:version>
-            <sparkle:shortVersionString>2.12</sparkle:shortVersionString>
+            <sparkle:version>23</sparkle:version>
+            <sparkle:shortVersionString>3.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v2.12/AgentSessions-2.12.dmg" length="12268846" type="application/octet-stream" sparkle:edSignature="JN+pHHLEt8nTsAFdyR8ZHmg9mK1HRBwCbBzNjZkcrTtVj0chwcP6QFvXMscXIVQpSGll9yXAhn2zSLYs07A4AQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.0/AgentSessions-3.0.dmg" length="13981822" type="application/octet-stream" sparkle:edSignature="qsNBfdzQff/ymGO5IvmRCxYwjJN7a7KKwUvv//0IxwYLV7IQwgG8+VX0t71dwsR2VVAf8Xngl8mZYl2GeOyDCQ=="/>
         </item>
     </channel>
 </rss>
