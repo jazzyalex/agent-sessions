@@ -21,7 +21,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v2.12/AgentSessions-2.12.dmg"><b>Download Agent Sessions 2.12 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.0/AgentSessions-3.0.dmg"><b>Download Agent Sessions 3.0 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -62,7 +62,7 @@ Agent Sessions helps you search across large session histories, quickly find the
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-2.12.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v2.12/AgentSessions-2.12.dmg)
+1. [Download AgentSessions-3.0.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.0/AgentSessions-3.0.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
@@ -101,15 +101,14 @@ open "/Applications/Agent Sessions.app"
 
 ---
 
-## What's New in 2.12
+## What's New in 3.0
 
 Short version:
-- Major update: Transcript rendering now recognizes semantic plans/code/diffs/review cards and improves file-link behavior for faster navigation.
-- Major update: Added crash diagnostics controls in Preferences with local queueing plus explicit email/export reporting workflows.
-- Major bug fix: Live transcript refresh/render paths are more stable during rapid updates, mode switches, and table/list churn.
-- Major bug fix: Focused-session monitoring is now consistent across supported agents with source-aware cadence and better window-focus handling.
-- Codex usage tracking now keeps token usage fresher by continuing JSONL parsing while selecting preferred rate-limit streams.
-- OpenClaw parsing is more resilient with normalized tool-call/result variants and improved tool-result error classification.
+- Major update: Agent Cockpit is now the primary live command center, with faster access and refined HUD interactions.
+- Major update: Onboarding now introduces Agent Cockpit early for new users, and update onboarding is streamlined to a cockpit explainer plus direct feedback/support links.
+- Beta scope note: Live Agent Cockpit detection is currently limited to iTerm2 sessions from Codex CLI and Claude Code.
+- Major bug fix: Cockpit and session-list live indicators now stay more consistent during focus changes and refresh churn.
+- Quality and usability improvements across cockpit row actions, subtitle handling, compact/full sizing, and stability.
 
 Details: `docs/CHANGELOG.md` and `docs/summaries/`.
 

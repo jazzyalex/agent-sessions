@@ -42,9 +42,18 @@ struct OnboardingSheetView: View {
     @StateObject private var agentAvailabilityModel = OnboardingAgentAvailabilityModel()
 
     private let onboardingFeedbackFormURL = URL(string: "https://docs.google.com/forms/d/1SSILAAn0RYmjhWDfJwc5BqpAIunhrJN1SAvy_OzhdaA/viewform")
+    private let githubSponsorsURL = URL(string: "https://github.com/sponsors/jazzyalex")
+    private let buyMeCoffeeURL = URL(string: "https://buymeacoffee.com/jazzyalexd")
 
     private var palette: OnboardingPalette { OnboardingPalette(colorScheme: colorScheme) }
-    private var slides: [OnboardingSlide] { OnboardingSlide.allCases }
+    private var slides: [OnboardingSlide] {
+        switch content.kind {
+        case .fullTour:
+            return [.sessionsFound, .connectAgents, .agentCockpit, .workWithSessions, .analyticsUsage]
+        case .updateTour:
+            return [.agentCockpit, .feedbackSupport]
+        }
+    }
     private var isFirst: Bool { slideIndex == 0 }
     private var isLast: Bool { slideIndex == slides.count - 1 }
 
@@ -113,10 +122,14 @@ struct OnboardingSheetView: View {
                 sessionsFoundSlide
             case .connectAgents:
                 connectAgentsSlide
+            case .agentCockpit:
+                agentCockpitSlide
             case .workWithSessions:
                 workWithSessionsSlide
             case .analyticsUsage:
                 analyticsUsageSlide
+            case .feedbackSupport:
+                feedbackSupportSlide
             }
         }
         .id(slideIndex)
@@ -206,6 +219,78 @@ struct OnboardingSheetView: View {
         }
     }
 
+    private var agentCockpitSlide: some View {
+        let isUpdateTour = content.kind == .updateTour
+        let cockpitImageName = colorScheme == .dark
+            ? "OnboardingCockpitScreenshot"
+            : "OnboardingCockpitScreenshotDark"
+
+        return VStack(spacing: 18) {
+            SlideHeader(
+                palette: palette,
+                icon: .symbol("sparkles.tv"),
+                iconGradient: palette.iconGradientBlue,
+                title: "Agent Cockpit (Beta)",
+                subtitle: isUpdateTour
+                    ? "A focused live HUD for active iTerm2 sessions from Codex CLI and Claude Code."
+                    : "A focused live HUD for active iTerm2 sessions from Codex CLI and Claude Code."
+            )
+
+            GeometryReader { rowGeometry in
+                let columnGap: CGFloat = 26
+                let minDetailsWidth: CGFloat = 250
+                let targetScreenshotWidth = rowGeometry.size.width * 0.48
+                let maxScreenshotWidth = max(210, rowGeometry.size.width - minDetailsWidth - columnGap)
+                let screenshotWidth = min(max(220, targetScreenshotWidth), maxScreenshotWidth)
+                let detailsWidth = max(minDetailsWidth, rowGeometry.size.width - screenshotWidth - columnGap)
+
+                HStack(alignment: .top, spacing: columnGap) {
+                    CockpitScreenshotCard(
+                        palette: palette,
+                        imageName: cockpitImageName,
+                        preferredHeight: isUpdateTour ? 296 : 288
+                    )
+                    .frame(width: screenshotWidth)
+
+                    VStack(spacing: 10) {
+                        CockpitQuickRow(
+                            palette: palette,
+                            icon: "keyboard",
+                            iconColor: palette.accentBlue,
+                            title: "Open Agent Cockpit",
+                            description: "Use View → Agent Cockpit (⌥⌘⇧C) or the toolbar button in the main window"
+                        )
+                        CockpitQuickRow(
+                            palette: palette,
+                            icon: "dot.radiowaves.left.and.right",
+                            iconColor: palette.accentGreen,
+                            title: "Read Live Status",
+                            description: "Rows update active and idle state so you can scan work in progress without tab hopping"
+                        )
+                        CockpitQuickRow(
+                            palette: palette,
+                            icon: "arrowshape.turn.up.right.fill",
+                            iconColor: palette.accentOrange,
+                            title: "Jump to the Right Place",
+                            description: "Go to Session to open it in Agent Sessions, then Focus in iTerm2 when you need the terminal"
+                        )
+                        CockpitBetaScopeRow(palette: palette)
+                    }
+                    .frame(width: detailsWidth, alignment: .top)
+                    .layoutPriority(1)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            .padding(.top, 8)
+            .frame(height: isUpdateTour ? 304 : 296)
+
+            TipBox(
+                text: "Live sessions + cockpit is controlled in Settings → Agent Cockpit. You can disable it anytime.",
+                palette: palette
+            )
+        }
+    }
+
     private var workWithSessionsSlide: some View {
         VStack(spacing: 18) {
             SlideHeader(
@@ -286,6 +371,33 @@ struct OnboardingSheetView: View {
             Text("Limit tracking syncs with your terminal. Toggle off anytime in Settings.")
                 .font(.system(size: 12, weight: .regular, design: .default))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var feedbackSupportSlide: some View {
+        VStack(spacing: 16) {
+            SlideHeader(
+                palette: palette,
+                icon: .symbol("heart.text.square"),
+                iconGradient: palette.iconGradientGreen,
+                title: "Help Shape Agent Cockpit",
+                subtitle: "Share feedback from real use and support ongoing development if Agent Sessions helps your daily workflow."
+            )
+
+            if let onboardingFeedbackFormURL {
+                FeedbackRequestCard(palette: palette, formURL: onboardingFeedbackFormURL)
+            }
+
+            CommunitySupportCard(
+                palette: palette,
+                githubSponsorsURL: githubSponsorsURL,
+                buyMeCoffeeURL: buyMeCoffeeURL
+            )
+
+            TipBox(
+                text: "Community support keeps Agent Sessions local-first, independent, and actively maintained.",
+                palette: palette
+            )
         }
     }
 
@@ -603,11 +715,13 @@ private final class OnboardingAgentAvailabilityModel: ObservableObject {
     }
 }
 
-private enum OnboardingSlide: Int, CaseIterable {
+private enum OnboardingSlide {
     case sessionsFound
     case connectAgents
+    case agentCockpit
     case workWithSessions
     case analyticsUsage
+    case feedbackSupport
 }
 
 private struct AgentCount: Identifiable {
@@ -868,6 +982,194 @@ private struct FeedbackRequestCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .stroke(palette.tipStroke, lineWidth: 1)
+        )
+    }
+}
+
+private struct CommunitySupportCard: View {
+    let palette: OnboardingPalette
+    let githubSponsorsURL: URL?
+    let buyMeCoffeeURL: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "person.2.badge.gearshape.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(palette.accentGreen)
+
+                Text("Support the project")
+                    .font(.system(size: 13, weight: .semibold, design: .default))
+                    .foregroundStyle(.primary)
+            }
+
+            Text("If Agent Sessions is part of your regular workflow, consider a small pledge to help fund ongoing development.")
+                .font(.system(size: 12, weight: .regular, design: .default))
+                .foregroundStyle(.secondary)
+
+            if let githubSponsorsURL {
+                Link(destination: githubSponsorsURL) {
+                    HStack(spacing: 6) {
+                        Text("Support on GitHub Sponsors")
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .font(.system(size: 12, weight: .semibold, design: .default))
+                    .foregroundStyle(palette.accentGreen)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let buyMeCoffeeURL {
+                Link(destination: buyMeCoffeeURL) {
+                    HStack(spacing: 6) {
+                        Text("Buy me a coffee")
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .font(.system(size: 12, weight: .semibold, design: .default))
+                    .foregroundStyle(palette.accentBlue)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(palette.tipFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(palette.tipStroke, lineWidth: 1)
+        )
+    }
+}
+
+private struct CockpitScreenshotCard: View {
+    let palette: OnboardingPalette
+    let imageName: String
+    let preferredHeight: CGFloat
+
+    var body: some View {
+        Group {
+            if let cockpitImage = NSImage(named: NSImage.Name(imageName)) {
+                Image(nsImage: cockpitImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, minHeight: preferredHeight, maxHeight: preferredHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "photo")
+                    Text("Cockpit screenshot unavailable")
+                }
+                .font(.system(size: 12, weight: .semibold, design: .default))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: preferredHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(palette.tipFill)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(palette.tipStroke, lineWidth: 1)
+                )
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct CockpitQuickRow: View {
+    let palette: OnboardingPalette
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let description: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(iconColor)
+                .frame(width: 16, height: 16)
+                .padding(7)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(iconColor.opacity(0.18))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold, design: .default))
+                    .foregroundStyle(.primary)
+                Text(description)
+                    .font(.system(size: 11, weight: .regular, design: .default))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(palette.rowFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(palette.rowStroke, lineWidth: 1)
+        )
+    }
+}
+
+private struct CockpitBetaScopeRow: View {
+    let palette: OnboardingPalette
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "shield")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(palette.accentBlue)
+                .frame(width: 16, height: 16)
+                .padding(7)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(palette.accentBlue.opacity(0.18))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Current Beta Scope")
+                    .font(.system(size: 12, weight: .semibold, design: .default))
+                    .foregroundStyle(.primary)
+
+                (
+                    Text("Live detection is currently limited to ")
+                        .foregroundStyle(.secondary)
+                    + Text("iTerm2")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                    + Text(" sessions from Codex CLI and Claude Code.")
+                        .foregroundStyle(.secondary)
+                )
+                .font(.system(size: 11, weight: .regular, design: .default))
+                .multilineTextAlignment(.leading)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(palette.rowFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(palette.rowStroke, lineWidth: 1)
         )
     }
 }
