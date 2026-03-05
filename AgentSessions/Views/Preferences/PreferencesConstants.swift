@@ -111,6 +111,8 @@ enum PreferencesKey {
         static let codexActiveSessionsEnabled = "CockpitCodexActiveSessionsEnabled"
         static let codexActiveRegistryRootOverride = "CockpitCodexActiveRegistryRootOverride"
         static let hudShowAgentNameInCompact = "CockpitHUDShowAgentNameInCompact"
+        static let hudCompactBaselineRows = "CockpitHUDCompactBaselineRows"
+        static let hudCompactAutoFitEnabled = "CockpitHUDCompactAutoFitEnabled"
         static let showTabSubtitleInFullMode = "CockpitShowTabSubtitleInFullMode"
         static let codexLiveFilterMode = "CockpitCodexLiveFilterMode"
         static let hudOpen = "CockpitHUDOpen"

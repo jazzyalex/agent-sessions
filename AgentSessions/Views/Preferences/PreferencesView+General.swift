@@ -122,6 +122,20 @@ extension PreferencesView {
             VStack(alignment: .leading, spacing: 12) {
                 Toggle("Show agent name in compact mode", isOn: $cockpitShowAgentNameInCompact)
                     .help("When disabled, compact rows hide the agent-name text to free horizontal space. Status dot and row numbering remain visible.")
+
+                labeledRow("Default Compact Size") {
+                    Picker("", selection: $cockpitCompactBaselineRows) {
+                        Text("Small").tag(3)
+                        Text("Medium").tag(4)
+                        Text("Large").tag(6)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 280)
+                    .help("Sets the default compact window height by visible rows. Sessions above this count scroll inside the list.")
+                }
+
+                Toggle("Auto-fit compact height to visible sessions", isOn: $cockpitCompactAutoFitEnabled)
+                    .help("When enabled, compact mode grows/shrinks with visible session count. Off keeps compact height stable and uses scrolling.")
             }
 
             sectionHeader("Full Mode")

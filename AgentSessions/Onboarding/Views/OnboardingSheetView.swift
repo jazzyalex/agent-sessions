@@ -42,6 +42,7 @@ struct OnboardingSheetView: View {
     @StateObject private var agentAvailabilityModel = OnboardingAgentAvailabilityModel()
 
     private let onboardingFeedbackFormURL = URL(string: "https://docs.google.com/forms/d/1SSILAAn0RYmjhWDfJwc5BqpAIunhrJN1SAvy_OzhdaA/viewform")
+    private let githubRepositoryURL = URL(string: "https://github.com/jazzyalex/agent-sessions")
     private let githubSponsorsURL = URL(string: "https://github.com/sponsors/jazzyalex")
     private let buyMeCoffeeURL = URL(string: "https://buymeacoffee.com/jazzyalexd")
 
@@ -180,7 +181,11 @@ struct OnboardingSheetView: View {
             }
 
             if let onboardingFeedbackFormURL {
-                FeedbackRequestCard(palette: palette, formURL: onboardingFeedbackFormURL)
+                FeedbackRequestCard(
+                    palette: palette,
+                    formURL: onboardingFeedbackFormURL,
+                    repositoryURL: githubRepositoryURL
+                )
             }
         }
     }
@@ -385,7 +390,11 @@ struct OnboardingSheetView: View {
             )
 
             if let onboardingFeedbackFormURL {
-                FeedbackRequestCard(palette: palette, formURL: onboardingFeedbackFormURL)
+                FeedbackRequestCard(
+                    palette: palette,
+                    formURL: onboardingFeedbackFormURL,
+                    repositoryURL: githubRepositoryURL
+                )
             }
 
             CommunitySupportCard(
@@ -944,6 +953,7 @@ private struct TipBox: View {
 private struct FeedbackRequestCard: View {
     let palette: OnboardingPalette
     let formURL: URL
+    let repositoryURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -971,6 +981,23 @@ private struct FeedbackRequestCard: View {
                 .foregroundStyle(palette.accentBlue)
             }
             .buttonStyle(.plain)
+
+            Text("If Agent Sessions helps your workflow, a GitHub star helps more people discover the project.")
+                .font(.system(size: 12, weight: .regular, design: .default))
+                .foregroundStyle(.secondary)
+
+            if let repositoryURL {
+                Link(destination: repositoryURL) {
+                    HStack(spacing: 6) {
+                        Text("Star Agent Sessions on GitHub")
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .font(.system(size: 12, weight: .semibold, design: .default))
+                    .foregroundStyle(palette.accentGreen)
+                }
+                .buttonStyle(.plain)
+            }
 
         }
         .padding(14)

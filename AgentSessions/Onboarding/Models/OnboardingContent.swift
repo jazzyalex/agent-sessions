@@ -155,7 +155,7 @@ extension OnboardingContent {
             Screen(
                 symbolName: "heart.text.square",
                 title: "Feedback & Community Support",
-                body: "Share feedback in the Google Form and support ongoing development via GitHub Sponsors or Buy Me a Coffee."
+                body: "Share feedback in the Google Form, star the GitHub repository, and support ongoing development via GitHub Sponsors or Buy Me a Coffee."
             )
         ]
     }
