@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 ## [3.0] - 2026-03-04
 
 ### Added
+- Agent Cockpit (Beta): Agent Cockpit is now the primary live command center for iTerm2 Codex/Claude sessions, with grouped active/idle visibility and one-click focus workflows.
 - Onboarding (v3): New-user onboarding now introduces `Agent Cockpit (Beta)` as the third slide immediately after `Connect Your Agents`.
 - Onboarding (v3 updates): Upgrade onboarding is now a focused two-slide flow with an `Agent Cockpit (Beta)` how-it-works explainer followed by a feedback/community-support slide.
 - Sessions (Unified): Added an Agent Cockpit toolbar icon button in the main window for one-click access to the cockpit window.

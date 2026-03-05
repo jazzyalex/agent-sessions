@@ -44,8 +44,21 @@ Agent Sessions helps you search across large session histories, quickly find the
   <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI and Claude Code sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
 
+## Agent Cockpit (Beta)
+
+Agent Cockpit is the 3.0 live command center for active iTerm2 Codex CLI and Claude Code sessions.
+
+<div align="center">
+  <p style="margin:0 0 0px 0;"><em>Agent Cockpit (Dark Mode)</em></p>
+  <img src="docs/assets/screenshot-cockpit-dark.png" alt="Agent Cockpit in dark mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>
+
+  <p style="margin:8px 0 0px 0;"><em>Agent Cockpit (Light Mode)</em></p>
+  <img src="docs/assets/screenshot-cockpit-light.png" alt="Agent Cockpit in light mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>
+</div>
+
 ## Core Features
 
+- Agent Cockpit live HUD for active Codex CLI and Claude Code iTerm2 sessions.
 - Unified browsing across supported agents, with strict filtering and a single session list.
 - Unified Search across all sessions plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
