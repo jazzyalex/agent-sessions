@@ -101,12 +101,37 @@
       margin: 10px 0;
     }
 
-    .button-row > .btn { height: 40px; }
-    .header-right { display:flex; align-items:center; gap:12px; }
-    .ph-badge img { height:24px; width:auto; opacity:0.9; vertical-align:middle; }
-    .ph-badge img:hover { opacity:1; }
-    .hero-row { position: relative; }
-    .ph-badge { position: absolute; right: 30px; top: 50%; transform: translateY(-50%); }
+    .button-row>.btn {
+      height: 40px;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .ph-badge img {
+      height: 24px;
+      width: auto;
+      opacity: 0.9;
+      vertical-align: middle;
+    }
+
+    .ph-badge img:hover {
+      opacity: 1;
+    }
+
+    .hero-row {
+      position: relative;
+    }
+
+    .ph-badge {
+      position: absolute;
+      right: 30px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
 
     .features {
       display: grid;
@@ -120,6 +145,8 @@
       border: 1px solid #d0d7de;
       border-radius: 8px;
       padding: 20px;
+      height: 100%;
+      box-sizing: border-box;
     }
 
     .card h3 {
@@ -137,10 +164,15 @@
       grid-column: span 2;
     }
 
+    .card.full-width {
+      grid-column: 1 / -1;
+    }
+
     @media (max-width: 600px) {
       .card.double-width {
         grid-column: span 1;
       }
+
       .card.double-width ul {
         column-count: 1;
       }
@@ -192,7 +224,6 @@
     .cockpit-grid img {
       width: 100%;
       border-radius: 8px;
-      border: 1px solid #d0d7de;
       display: block;
     }
   </style>
@@ -209,12 +240,17 @@
       </a>
     </div>
     <div class="header-right">
-      <span>• macOS • Open Source • <span id="github-stars-container" style="display:none;">⭐ <span id="github-stars">–</span></span></span>
+      <span>• macOS • Open Source • <span id="github-stars-container" style="display:none;">⭐ <span
+            id="github-stars">–</span></span></span>
     </div>
   </header>
   <div class="container">
-    <h1 style="font-size: 24px;">Session Browser for Codex CLI, Claude Code, Gemini CLI, Copilot CLI, Droid, OpenCode & OpenClaw</h1>
-    <p><em>Agent Sessions 3.0</em> puts <strong>Agent Cockpit</strong> at the center as a live HUD for iTerm2 Codex/Claude sessions, while still keeping <strong>Codex CLI</strong>, <strong>Claude Code</strong>, <strong>Gemini CLI</strong>, <strong>GitHub Copilot CLI</strong>, <strong>Droid (Factory CLI)</strong>, <strong>OpenCode</strong>, and <strong>OpenClaw</strong> in one local-first interface.
+    <h1 style="font-size: 24px;">Session Browser for Codex CLI, Claude Code, Gemini CLI, Copilot CLI, Droid, OpenCode &
+      OpenClaw</h1>
+    <p><em>Agent Sessions 3.0</em> puts <strong>Agent Cockpit</strong> at the center as a live HUD for iTerm2
+      Codex/Claude sessions, while still keeping <strong>Codex CLI</strong>, <strong>Claude Code</strong>,
+      <strong>Gemini CLI</strong>, <strong>GitHub Copilot CLI</strong>, <strong>Droid (Factory CLI)</strong>,
+      <strong>OpenCode</strong>, and <strong>OpenClaw</strong> in one local-first interface.
     <p></p>
     <div class="hero-row" style="margin-bottom: 20px;">
       <span
@@ -222,8 +258,8 @@
         open source, and built for terminal vibe warriors.</span>
     </div>
 
-      <br>
-      
+    <br>
+
     <div class="button-row" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
       <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.0/AgentSessions-3.0.dmg"
         class="btn primary"
@@ -243,15 +279,16 @@
     </div>
 
     <h3 style="margin-top:40px;">Install with Homebrew Tap</h3>
-    
+
     <pre><code style="font-size: 12px;">brew tap jazzyalex/agent-sessions
 brew install --cask agent-sessions</code></pre>
 
     <div class="features">
 
-      <div class="card double-width">
+      <div class="card">
         <h3>7 Agents Supported</h3>
-        <p>Browse all your agent sessions in a unified window. Enable only your favorite agents and then filter sessions by agent instantly.</p>
+        <p>Browse all your agent sessions in a unified window. Enable only your favorite agents and then filter sessions
+          by agent instantly.</p>
         <ul style="margin: 12px 0 0 0; padding-left: 20px; line-height: 1.8; column-count: 2; column-gap: 20px;">
           <li><strong>Codex CLI</strong></li>
           <li><strong>Claude Code</strong></li>
@@ -262,36 +299,38 @@ brew install --cask agent-sessions</code></pre>
           <li><strong>OpenClaw / Clawdbot</strong></li>
         </ul>
       </div>
-      <div class="card double-width">
-        <h3>Agent Cockpit Command Center</h3>
-        <p>Agent Cockpit is the 3.0 live HUD for active iTerm2 Codex CLI and Claude Code sessions, with grouped active and idle visibility, quick focus jumps, and compact/full cockpit modes.</p>
+      <div class="card">
+        <h3>Unified Search</h3>
+        <p>Apple Notes-style search across all agents and within a single session. Incremental indexing and backfill
+          improve coverage for long-running and recently changed sessions.</p>
+      </div>
+      <div class="card">
+        <h3>Local & Private</h3>
+        <p>All processing on your Mac. Reads session directories locally. No cloud uploads or telemetry. Read-only by
+          design.</p>
+      </div>
+      <div class="card full-width">
+        <h3>Agent Cockpit</h3>
+        <p>Agent Cockpit is the 3.0 live HUD for active iTerm2 Codex CLI and Claude Code sessions, with grouped active
+          and idle visibility, quick focus jumps, and compact/full cockpit modes.</p>
         <div class="cockpit-grid">
           <img src="assets/screenshot-cockpit-light.png" alt="Agent Cockpit in light mode">
         </div>
       </div>
       <div class="card">
-        <h3>Unified Search</h3>
-        <p>Apple Notes-style search across all agents and within a single session. Incremental indexing and backfill improve coverage for long-running and recently changed sessions.</p>
-      </div>
-      <div class="card">
-        <h3>Agent Cockpit (Beta)</h3>
-        <p>Open the live cockpit HUD for active iTerm2 sessions. Current beta scope tracks Codex CLI and Claude Code activity.</p>
-      </div>
-      <div class="card">
         <h3>Saved Sessions</h3>
-        <p>New dedicated Saved Sessions window for managing archived sessions. Delete, reveal, and diagnose with archive status tooltips.</p>
+        <p>New dedicated Saved Sessions window for managing archived sessions. Delete, reveal, and diagnose with archive
+          status tooltips.</p>
       </div>
       <div class="card">
         <h3>Usage Tracking</h3>
-        <p>Track Codex and Claude usage in-app and in the menu bar. Power-aware probing and refresh cadence reduce idle load and energy spikes.</p>
+        <p>Track Codex and Claude usage in-app and in the menu bar. Power-aware probing and refresh cadence reduce idle
+          load and energy spikes.</p>
       </div>
       <div class="card">
         <h3>Analytics</h3>
-        <p>Interactive flip cards with sparklines and insights. Session trends, agent breakdowns, and time-of-day heatmaps. Git Inspector shows repository state.</p>
-      </div>
-      <div class="card">
-        <h3>Local & Private</h3>
-        <p>All processing on your Mac. Reads session directories locally. No cloud uploads or telemetry. Read-only by design.</p>
+        <p>Interactive flip cards with sparklines and insights. Session trends, agent breakdowns, and time-of-day
+          heatmaps. Git Inspector shows repository state.</p>
       </div>
 
     </div>

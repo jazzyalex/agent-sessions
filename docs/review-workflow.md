@@ -1,6 +1,6 @@
 # Codex headless review→fix workflow
 
-This repo includes a headless loop script that runs:
+This repo uses a globally installed headless loop script that runs:
 
 1. `codex review` (non-interactive)
 2. if not clean, `codex exec` to apply fixes
@@ -12,6 +12,20 @@ From repo root:
 
 ```bash
 ./scripts/codex_review_fix_loop.sh
+```
+
+The wrapper above resolves to:
+
+- `~/.codex/skills/review-skill/scripts/codex_review_fix_loop.sh`
+
+Canonical source of truth for this skill:
+
+- `/Users/alexm/Repository/Skills/skills/review-skill`
+
+Sync to global when updated:
+
+```bash
+/Users/alexm/Repository/Skills/skills/sync_to_global.sh --skill review-skill
 ```
 
 Default loop mode is `conservative`:
@@ -50,13 +64,13 @@ Artifacts are written to:
 Create/edit `.codex-review-control.md` in repo root. Model/scope/context changes apply between rounds; `status: stop` is also honored during in-flight heartbeat polling.
 
 See:
-- `.agents/skills/review-skill/references/control-file.md`
+- `~/.codex/skills/review-skill/references/control-file.md`
 
 ## Make scripts executable
 
 Depending on how you apply these files, you may need:
 
 ```bash
-chmod +x .agents/skills/review-skill/scripts/codex_review_fix_loop.sh
+chmod +x ~/.codex/skills/review-skill/scripts/codex_review_fix_loop.sh
 chmod +x scripts/codex_review_fix_loop.sh
 ```
