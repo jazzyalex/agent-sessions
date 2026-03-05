@@ -10,6 +10,11 @@ This runbook provides a **fully automated deployment process** with comprehensiv
 **Recommended first step**:
 - Run the pre-release QA checklist: `docs/release/pre-release-qa.md`
 
+**Workspace rule (mandatory)**:
+- Deploy only from the user’s current local repository checkout.
+- Do not use temporary clones or alternate worktrees to bypass a dirty tree.
+- If `git status --short` is not clean, stop and ask the user to clean/stash/commit before any deploy command.
+
 **Core commands** (run from repo root):
 - `tools/release/deploy changelog [FROM_TAG]`
 - `tools/release/deploy bump [patch|minor|major]`
@@ -170,6 +175,10 @@ Before building, the system validates:
 - ✅ **CHANGELOG**: Section exists for version with correct date format
 
 **Benefit**: Catches errors before the 10-minute build/notarize cycle
+
+Agent behavior requirement:
+- If git state is dirty, do not workaround with a separate clone/worktree.
+- Stop and request local cleanup in the same repository, then continue deployment there.
 
 ### 3. Pre-Deployment Smoke Testing (NEW!)
 After DMG creation, before upload:

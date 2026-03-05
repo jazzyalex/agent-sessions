@@ -10,6 +10,12 @@ This skill is an agent-facing entrypoint that avoids duplicating the deployment 
 
 If anything here disagrees with the runbook, follow `docs/deployment.md`.
 
+## Workspace Policy (Hard Rule)
+
+- Always run deployment from the user’s current local repository checkout.
+- Do not clone to temporary directories and do not switch to alternate worktrees as a deployment workaround.
+- If the local worktree is dirty, stop and tell the user to clean the tree first (commit, stash, or discard), then continue in the same local repo.
+
 ## Recommended QA Gate (Before Deploy Steps)
 
 - Before bump/release/verify commands, recommend running `docs/release/pre-release-qa.md`.
