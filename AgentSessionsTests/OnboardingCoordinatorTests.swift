@@ -95,6 +95,45 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(defaults.onboardingLastSeenAppMajorMinor, "2.12")
     }
 
+    func testReleaseThreeFullTourIncludesAgentCockpitAsThirdScreen() {
+        let fullTour = OnboardingContent.fullTour(for: "3.0")
+        let titles = fullTour.screens.map(\.title)
+
+        XCTAssertEqual(titles.count, 5)
+        XCTAssertEqual(titles[2], "Agent Cockpit (Beta)")
+    }
+
+    func testReleaseThreeUpdateCatalogHasTwoScreenTour() {
+        let updateTour = OnboardingContent.updateTour(for: "3.0")
+
+        XCTAssertEqual(updateTour?.kind, .updateTour)
+        XCTAssertEqual(updateTour?.screens.count, 2)
+        XCTAssertEqual(updateTour?.screens.first?.title, "Agent Cockpit (Beta)")
+        XCTAssertEqual(updateTour?.screens.last?.title, "Feedback & Community Support")
+    }
+
+    func testCheckAndPresentIfNeededForReleaseThreeShowsTwoScreenUpdateTour() async {
+        let suite = "OnboardingCoordinatorTests.release3Update"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defaults.onboardingLastActionMajorMinor = "2.12"
+        defaults.onboardingLastSeenAppMajorMinor = "2.12"
+
+        let result = await MainActor.run { () -> (isPresented: Bool, kind: OnboardingContent.Kind?, screens: Int) in
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "3.0" },
+                isFreshInstallProvider: { false }
+            )
+            coordinator.checkAndPresentIfNeeded()
+            return (coordinator.isPresented, coordinator.content?.kind, coordinator.content?.screens.count ?? 0)
+        }
+
+        XCTAssertTrue(result.isPresented)
+        XCTAssertEqual(result.kind, .updateTour)
+        XCTAssertEqual(result.screens, 2)
+    }
+
     func testSkipRecordsVersionAndDismisses() async {
         let suite = "OnboardingCoordinatorTests.skip"
         let defaults = UserDefaults(suiteName: suite)!

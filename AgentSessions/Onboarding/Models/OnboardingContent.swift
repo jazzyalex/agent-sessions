@@ -65,7 +65,7 @@ extension OnboardingContent {
         OnboardingContent(
             versionMajorMinor: majorMinor,
             kind: .fullTour,
-            screens: onboardingScreens()
+            screens: fullTourScreens()
         )
     }
 
@@ -73,7 +73,7 @@ extension OnboardingContent {
         OnboardingContent(
             versionMajorMinor: majorMinor,
             kind: .updateTour,
-            screens: onboardingScreens()
+            screens: fullTourScreens()
         )
     }
 
@@ -81,11 +81,46 @@ extension OnboardingContent {
         "2.9": OnboardingContent(
             versionMajorMinor: "2.9",
             kind: .updateTour,
-            screens: onboardingScreens()
+            screens: legacyUpdateTourScreens()
+        ),
+        "3.0": OnboardingContent(
+            versionMajorMinor: "3.0",
+            kind: .updateTour,
+            screens: release3UpdateTourScreens()
         )
     ]
 
-    private static func onboardingScreens() -> [Screen] {
+    private static func fullTourScreens() -> [Screen] {
+        [
+            Screen(
+                symbolName: "checkmark.circle",
+                title: "Sessions Found",
+                body: "Your CLI agent history is ready to browse."
+            ),
+            Screen(
+                symbolName: "display",
+                title: "Connect Your Agents",
+                body: "Enable the agents you use. Disabled agents will not appear in filters or analytics."
+            ),
+            Screen(
+                symbolName: "sparkles.tv",
+                title: "Agent Cockpit (Beta)",
+                body: "Open a live HUD for active sessions in iTerm2. Beta scope currently covers Codex CLI and Claude Code."
+            ),
+            Screen(
+                symbolName: "list.bullet",
+                title: "Work With Sessions",
+                body: "Quick actions to navigate and manage your work."
+            ),
+            Screen(
+                symbolName: "chart.bar.xaxis",
+                title: "Analytics & Usage",
+                body: "See your coding patterns and track usage limits."
+            )
+        ]
+    }
+
+    private static func legacyUpdateTourScreens() -> [Screen] {
         [
             Screen(
                 symbolName: "checkmark.circle",
@@ -106,6 +141,21 @@ extension OnboardingContent {
                 symbolName: "chart.bar.xaxis",
                 title: "Analytics & Usage",
                 body: "See your coding patterns and track usage limits."
+            )
+        ]
+    }
+
+    private static func release3UpdateTourScreens() -> [Screen] {
+        [
+            Screen(
+                symbolName: "sparkles.tv",
+                title: "Agent Cockpit (Beta)",
+                body: "Live session HUD for iTerm2, currently scoped to Codex CLI and Claude Code."
+            ),
+            Screen(
+                symbolName: "heart.text.square",
+                title: "Feedback & Community Support",
+                body: "Share feedback in the Google Form and support ongoing development via GitHub Sponsors or Buy Me a Coffee."
             )
         ]
     }
