@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Sessions (Agent Cockpit): Active green live-status dots now render through a strictly static path so they no longer pulse in cockpit rows; idle amber dots remain animated.
+
 ## [3.0] - 2026-03-04
 
 ### Added
