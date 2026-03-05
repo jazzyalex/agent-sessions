@@ -3,34 +3,28 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.0</title>
-            <pubDate>Wed, 04 Mar 2026 18:37:16 -0800</pubDate>
+            <title>3.0.1</title>
+            <pubDate>Wed, 04 Mar 2026 21:50:03 -0800</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.0</h2>
-<h3>Features</h3>
+<h2>What&#x27;s New in 3.0.1</h2>
+<h3>Bug Fixes</h3>
+<ul>
+<li>Sessions (Agent Cockpit): Active green live-status dots now render through a strictly static path so they no longer pulse in cockpit rows; idle amber dots remain animated.</li>
+<li>Sessions (Agent Cockpit): Compact mode no longer auto-resizes on every row-count change by default; it now uses a stable default height (`Medium`, 4 rows) with internal scrolling, preserves user-resized compact height when toggling full↔compact and across app restarts, and adds compact-size controls (`Small/Medium/Large`) in Settings plus optional auto-fit re-enable.</li>
+</ul>
+<h3>Reminder: What You Got in 3.0</h3>
 <ul>
 <li>Agent Cockpit (Beta) is now the primary live command center for active iTerm2 Codex CLI and Claude Code sessions.</li>
 <li>Onboarding was redesigned around cockpit-first workflows so new and upgrading users reach live session controls faster.</li>
 <li>Cockpit gained direct row actions (`Go to Session`, terminal focus, log/workdir reveal, and copy helpers) for quick workflow handoffs.</li>
-</ul>
-<h3>Improvements</h3>
-<ul>
 <li>Live session tracking now better reflects real activity with clearer active vs idle states and steadier HUD indicators.</li>
-<li>Gemini session discovery now supports newer named project folder layouts under `~/.gemini/tmp`, restoring full indexing for recent Gemini CLI data structures.</li>
-<li>Cockpit compact/full behavior, subtitles, sizing, and toolbar ergonomics were refined for faster scanning and less layout churn.</li>
 </ul>
-<h3>Bug Fixes</h3>
-<ul>
-<li>Claude usage probe CPU spikes were reduced by hardening tmux cleanup/socket-liveness handling and probe lifecycle management.</li>
-<li>Cockpit window behavior is more stable: unpin restore, subtitle retention, ordering consistency, and compact/full transition reliability were fixed.</li>
-<li>Unified session view refresh and live-state joins were hardened to reduce transient empty flashes, ghost rows, and stale live indicators.</li>
-</ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.0">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.0</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.0.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.0.1</a></p>
             ]]></description>
-<sparkle:version>23</sparkle:version>
-            <sparkle:shortVersionString>3.0</sparkle:shortVersionString>
+            <sparkle:version>24</sparkle:version>
+            <sparkle:shortVersionString>3.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.0/AgentSessions-3.0.dmg" length="13981822" type="application/octet-stream" sparkle:edSignature="qsNBfdzQff/ymGO5IvmRCxYwjJN7a7KKwUvv//0IxwYLV7IQwgG8+VX0t71dwsR2VVAf8Xngl8mZYl2GeOyDCQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.0.1/AgentSessions-3.0.1.dmg" length="13916708" type="application/octet-stream" sparkle:edSignature="J1mZ7xh/kkwKPzYpt/mp+SFzOGBDcy0Egwky0sJH3YfhEw/ztQSXqxo961Tu8IqpUkSmcV8/oW8YpWdHG+i/Bg=="/>
         </item>
     </channel>
 </rss>
