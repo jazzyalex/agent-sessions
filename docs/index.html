@@ -215,14 +215,19 @@
     }
 
     .cockpit-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
       gap: 12px;
       margin-top: 12px;
     }
 
     .cockpit-grid img {
-      width: 100%;
+      width: 45%;
+      max-width: 45%;
+      height: auto;
+      object-fit: contain;
+      flex-shrink: 0;
       border-radius: 8px;
       display: block;
     }
@@ -247,7 +252,7 @@
   <div class="container">
     <h1 style="font-size: 24px;">Session Browser for Codex CLI, Claude Code, Gemini CLI, Copilot CLI, Droid, OpenCode &
       OpenClaw</h1>
-    <p><em>Agent Sessions 3.0</em> puts <strong>Agent Cockpit</strong> at the center as a live HUD for iTerm2
+    <p><em>Agent Sessions 3</em> puts <strong>Agent Cockpit</strong> at the center as a live HUD for iTerm2
       Codex/Claude sessions, while still keeping <strong>Codex CLI</strong>, <strong>Claude Code</strong>,
       <strong>Gemini CLI</strong>, <strong>GitHub Copilot CLI</strong>, <strong>Droid (Factory CLI)</strong>,
       <strong>OpenCode</strong>, and <strong>OpenClaw</strong> in one local-first interface.
@@ -264,7 +269,7 @@
       <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.0/AgentSessions-3.0.dmg"
         class="btn primary"
         style="padding:10px 18px;border-radius:8px;background:#007aff;color:#fff;text-decoration:none;font-weight:500">
-        Download Agent Sessions 3.0
+        Download Agent Sessions 3
       </a>
 
       <a href="https://github.com/jazzyalex/agent-sessions" class="btn secondary"
@@ -311,10 +316,11 @@ brew install --cask agent-sessions</code></pre>
       </div>
       <div class="card full-width">
         <h3>Agent Cockpit</h3>
-        <p>Agent Cockpit is the 3.0 live HUD for active iTerm2 Codex CLI and Claude Code sessions, with grouped active
+        <p>Agent Cockpit is live HUD for active iTerm2 Codex CLI and Claude Code sessions, with grouped active
           and idle visibility, quick focus jumps, and compact/full cockpit modes.</p>
         <div class="cockpit-grid">
           <img src="assets/screenshot-cockpit-light.png" alt="Agent Cockpit in light mode">
+          <img src="assets/screenshot-cockpit-dark.png" alt="Agent Cockpit in dark mode">
         </div>
       </div>
       <div class="card">
