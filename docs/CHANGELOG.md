@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-03-04
+
 ### Fixed
 - Sessions (Agent Cockpit): Active green live-status dots now render through a strictly static path so they no longer pulse in cockpit rows; idle amber dots remain animated.
 - Sessions (Agent Cockpit): Compact mode no longer auto-resizes on every row-count change by default; it now uses a stable default height (`Medium`, 4 rows) with internal scrolling, preserves user-resized compact height when toggling full↔compact and across app restarts, and adds compact-size controls (`Small/Medium/Large`) in Settings plus optional auto-fit re-enable.
