@@ -4,7 +4,7 @@ import html
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 
@@ -14,9 +14,12 @@ class NotesBundle:
     title: str
     highlights: List[str]
     other: List[str]
-    baseline_version: Optional[str]
-    baseline_items: List[str]
-    github_url: Optional[str]
+    features: List[str] = field(default_factory=list)
+    improvements: List[str] = field(default_factory=list)
+    bug_fixes: List[str] = field(default_factory=list)
+    baseline_version: Optional[str] = None
+    baseline_items: List[str] = field(default_factory=list)
+    github_url: Optional[str] = None
 
 
 def _read_file(path: str) -> str:
@@ -192,6 +195,54 @@ def _other_changes(items: Dict[str, List[str]], highlights: List[str], max_items
     return remainder
 
 
+def _dedupe_keep_order(items: List[str]) -> List[str]:
+    seen = set()
+    out: List[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _normalized_heading(heading: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", heading.strip().lower()).strip()
+
+
+def _structured_sections(items: Dict[str, List[str]]) -> Tuple[List[str], List[str], List[str]]:
+    features: List[str] = []
+    improvements: List[str] = []
+    bug_fixes: List[str] = []
+
+    for heading, bullets in items.items():
+        key = _normalized_heading(heading)
+        if key in {"features", "feature", "major features", "new features"}:
+            features.extend(bullets)
+            continue
+        if key in {"improvements", "improvement", "improved", "major changes", "major updates"}:
+            improvements.extend(bullets)
+            continue
+        if key in {"bug fixes", "bug fix", "fixes", "critical fixes", "major bug fixes"}:
+            bug_fixes.extend(bullets)
+            continue
+
+    # Fallback map for changelog sections that still use Added/Changed/Fixed headings.
+    if not features:
+        features.extend(items.get("Added", []))
+    if not improvements:
+        improvements.extend(items.get("Changed", []))
+        improvements.extend(items.get("Performance", []))
+    if not bug_fixes:
+        bug_fixes.extend(items.get("Fixed", []))
+
+    return (
+        _dedupe_keep_order(features)[:6],
+        _dedupe_keep_order(improvements)[:6],
+        _dedupe_keep_order(bug_fixes)[:6],
+    )
+
+
 def _baseline_version_for(version: str, sections: Dict[str, str]) -> Optional[str]:
     """
     - For A.B.C, baseline is A.B (parent major/minor)
@@ -241,8 +292,14 @@ def build_notes_bundle(version: str, changelog_path: str, github_url: Optional[s
         raise SystemExit(f"ERROR: CHANGELOG missing section for [{version}]")
 
     current_items = _items_with_fallback(sections[version])
+    features, improvements, bug_fixes = _structured_sections(current_items)
     highlights = _pick_highlights(current_items, max_items=6)
     other = _other_changes(current_items, highlights, max_items=10)
+
+    # Prefer user-facing grouped sections when we have meaningful content.
+    if features or improvements or bug_fixes:
+        highlights = []
+        other = []
 
     if not highlights and not other:
         highlights = ["Small bug fixes and stability improvements."]
@@ -258,6 +315,9 @@ def build_notes_bundle(version: str, changelog_path: str, github_url: Optional[s
         title=title,
         highlights=highlights,
         other=other,
+        features=features,
+        improvements=improvements,
+        bug_fixes=bug_fixes,
         baseline_version=baseline_version,
         baseline_items=baseline_items,
         github_url=github_url,
@@ -274,11 +334,23 @@ def _render_list(items: List[str]) -> str:
 def render_html(bundle: NotesBundle) -> str:
     parts: List[str] = [f"<h2>{html.escape(bundle.title)}</h2>"]
 
-    if bundle.highlights:
+    if bundle.features:
+        parts.append("<h3>Features</h3>")
+        parts.append(_render_list(bundle.features))
+
+    if bundle.improvements:
+        parts.append("<h3>Improvements</h3>")
+        parts.append(_render_list(bundle.improvements))
+
+    if bundle.bug_fixes:
+        parts.append("<h3>Bug Fixes</h3>")
+        parts.append(_render_list(bundle.bug_fixes))
+
+    if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.highlights:
         parts.append("<h3>Highlights</h3>")
         parts.append(_render_list(bundle.highlights))
 
-    if bundle.other:
+    if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.other:
         parts.append("<h3>Other Changes</h3>")
         parts.append(_render_list(bundle.other))
 
@@ -295,12 +367,27 @@ def render_html(bundle: NotesBundle) -> str:
 def render_plaintext(bundle: NotesBundle) -> str:
     out: List[str] = [bundle.title, ""]
 
-    if bundle.highlights:
+    if bundle.features:
+        out.append("Features:")
+        out.extend([f"- {x}" for x in bundle.features])
+        out.append("")
+
+    if bundle.improvements:
+        out.append("Improvements:")
+        out.extend([f"- {x}" for x in bundle.improvements])
+        out.append("")
+
+    if bundle.bug_fixes:
+        out.append("Bug Fixes:")
+        out.extend([f"- {x}" for x in bundle.bug_fixes])
+        out.append("")
+
+    if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.highlights:
         out.append("Highlights:")
         out.extend([f"- {x}" for x in bundle.highlights])
         out.append("")
 
-    if bundle.other:
+    if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.other:
         out.append("Other Changes:")
         out.extend([f"- {x}" for x in bundle.other])
         out.append("")
