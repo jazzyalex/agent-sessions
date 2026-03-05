@@ -181,6 +181,20 @@
       border: 1px solid #d0d7de;
       margin-top: 20px;
     }
+
+    .cockpit-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .cockpit-grid img {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid #d0d7de;
+      display: block;
+    }
   </style>
 </head>
 
@@ -247,6 +261,14 @@ brew install --cask agent-sessions</code></pre>
           <li><strong>Gemini CLI</strong></li>
           <li><strong>OpenClaw / Clawdbot</strong></li>
         </ul>
+      </div>
+      <div class="card double-width">
+        <h3>Agent Cockpit Command Center</h3>
+        <p>Agent Cockpit is the 3.0 live HUD for active iTerm2 Codex CLI and Claude Code sessions, with grouped active and idle visibility, quick focus jumps, and compact/full cockpit modes.</p>
+        <div class="cockpit-grid">
+          <img src="assets/screenshot-cockpit-dark.png" alt="Agent Cockpit in dark mode">
+          <img src="assets/screenshot-cockpit-light.png" alt="Agent Cockpit in light mode">
+        </div>
       </div>
       <div class="card">
         <h3>Unified Search</h3>
