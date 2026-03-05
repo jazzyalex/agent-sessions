@@ -171,6 +171,8 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.Cockpit.hudGroupByProject) private var groupByProject: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudCompact) private var isCompact: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudPinned) private var isPinned: Bool = false
+    @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) private var compactBaselineRows: Int = 4
+    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) private var compactAutoFitEnabled: Bool = false
 
     @State private var sessionFilterMode: HUDSessionFilterMode = .all
     @State private var filterText: String = ""
@@ -208,6 +210,10 @@ struct AgentCockpitHUDView: View {
         formatter.timeStyle = .medium
         return formatter
     }()
+
+    private var effectiveCompactBaselineRows: Int {
+        min(max(compactBaselineRows, 3), Int(compactBodyMaxRowsWhenToolbarVisible))
+    }
 
     var body: some View {
         let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
@@ -284,7 +290,9 @@ struct AgentCockpitHUDView: View {
                 isCompact: isCompact,
                 activeEnabled: activeEnabled,
                 compactToolbarVisible: showsCompactToolbar,
-                groupByProject: groupByProject
+                groupByProject: groupByProject,
+                compactPreferredRows: effectiveCompactBaselineRows,
+                compactAutoFitEnabled: compactAutoFitEnabled
             )
             .allowsHitTesting(false)
         )
@@ -508,9 +516,12 @@ struct AgentCockpitHUDView: View {
 
     private func compactBodyMinHeight(visibleRowCount: Int,
                                       showsCompactToolbar: Bool) -> CGFloat {
-        if showsCompactToolbar {
+        if compactAutoFitEnabled && showsCompactToolbar {
             let rows = min(max(visibleRowCount, 1), Int(compactBodyMaxRowsWhenToolbarVisible))
             return CGFloat(rows) * compactBodyRowHeight
+        }
+        if showsCompactToolbar {
+            return CGFloat(effectiveCompactBaselineRows) * compactBodyRowHeight
         }
         return compactBodyMinRowsWhenToolbarHidden * compactBodyRowHeight
     }
