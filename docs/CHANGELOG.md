@@ -9,6 +9,21 @@ All notable changes to this project will be documented in this file.
 
 ## [3.0] - 2026-03-04
 
+### Features
+- Agent Cockpit (Beta) is now the primary live command center for active iTerm2 Codex CLI and Claude Code sessions.
+- Onboarding was redesigned around cockpit-first workflows so new and upgrading users reach live session controls faster.
+- Cockpit gained direct row actions (`Go to Session`, terminal focus, log/workdir reveal, and copy helpers) for quick workflow handoffs.
+
+### Improvements
+- Live session tracking now better reflects real activity with clearer active vs idle states and steadier HUD indicators.
+- Gemini session discovery now supports newer named project folder layouts under `~/.gemini/tmp`, restoring full indexing for recent Gemini CLI data structures.
+- Cockpit compact/full behavior, subtitles, sizing, and toolbar ergonomics were refined for faster scanning and less layout churn.
+
+### Bug Fixes
+- Claude usage probe CPU spikes were reduced by hardening tmux cleanup/socket-liveness handling and probe lifecycle management.
+- Cockpit window behavior is more stable: unpin restore, subtitle retention, ordering consistency, and compact/full transition reliability were fixed.
+- Unified session view refresh and live-state joins were hardened to reduce transient empty flashes, ghost rows, and stale live indicators.
+
 ### Added
 - Agent Cockpit (Beta): Agent Cockpit is now the primary live command center for iTerm2 Codex/Claude sessions, with grouped active/idle visibility and one-click focus workflows.
 - Onboarding (v3): New-user onboarding now introduces `Agent Cockpit (Beta)` as the third slide immediately after `Connect Your Agents`.
