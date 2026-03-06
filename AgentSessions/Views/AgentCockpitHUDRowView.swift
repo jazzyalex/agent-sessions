@@ -60,7 +60,7 @@ struct AgentCockpitHUDRowView: View {
             size: 7,
             lastSeenAt: row.lastSeenAt
         )
-        .accessibilityLabel(row.liveState == .active ? "Active" : "Idle")
+        .accessibilityLabel(row.liveState == .active ? "Active" : "Waiting")
         .frame(width: 9, alignment: .center)
     }
 
