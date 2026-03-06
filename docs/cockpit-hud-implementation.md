@@ -26,12 +26,12 @@ Two states only. No "waiting", no "error".
 ```swift
 enum HUDLiveState {
     case active  // agent is working — no action needed, all good
-    case idle    // waiting for user input — NEEDS ATTENTION
+    case idle    // waiting for user input — NEEDS ATTENTION ("Waiting" in UI copy)
 }
 ```
 
 **Visual hierarchy (CRITICAL):**
-- `idle` = needs user attention → loud amber pulsing dot (the loudest element)
+- `waiting` (`idle` state) = needs user attention → loud amber pulsing dot (the loudest element)
 - `active` = agent is working fine → calm static green dot (visible but not demanding)
 
 Detection maps directly from `CodexActiveSessionsModel`:
@@ -178,7 +178,7 @@ The chips (active / idle) are toggle buttons that filter the visible row list.
 - Tapping a chip that is off: sets `chipFilter` to that state.
 - Tapping the active chip again: sets `chipFilter = nil` (shows all).
 - Both chips are always visible; the non-selected chip renders at reduced opacity.
-- Chip labels show the live count, e.g. "3 active", "2 idle".
+- Chip labels show the live count, e.g. "3 active", "2 waiting".
 
 ```swift
 // Active chip — static green dot (working, all good)
@@ -192,14 +192,14 @@ Button {
 }
 .buttonStyle(HUDChipStyle(isOn: chipFilter == nil || chipFilter == .active))
 
-// Idle chip — pulsing amber dot (needs attention)
+// Waiting chip — pulsing amber dot (needs attention)
 Button {
     chipFilter = chipFilter == .idle ? nil : .idle
 } label {
     HStack(spacing: 4) {
         Circle().fill(amberColor).frame(width:5, height:5)
             // pulse animation matching row dots
-        Text("\(idleCount) idle")
+        Text("\(idleCount) waiting")
     }
 }
 .buttonStyle(HUDChipStyle(isOn: chipFilter == nil || chipFilter == .idle))
@@ -246,7 +246,7 @@ group, sort rows `.idle` first (needs attention on top).
 Each group has a collapsible header (`AgentCockpitHUDGroupHeader`):
 
 - Clicking the header collapses/expands that group's rows.
-- The header shows: project name + summary badge ("1 active · 1 idle" etc.).
+- The header shows: project name + summary badge ("1 active · 1 waiting" etc.).
 - Collapsed state persists only for the current session (not to disk).
 
 Chip and text filters still apply inside grouped view: rows that don't match are hidden,
@@ -534,15 +534,15 @@ Test every item below after the build succeeds. Report pass/fail for each.
 - [ ] Session name, branch, preview, and elapsed time all display correctly
 - [ ] Preview text truncates with ellipsis and does not wrap
 - [ ] Agent badge label reads "Codex", "Claude", or "Shell" (not CC/CX/$_)
-- [ ] No "Waiting" state appears anywhere — only active or idle
+- [ ] No stale `Idle` copy appears anywhere user-facing; non-active rows read as `Waiting`
 
 ### Chip filters
-- [ ] Tapping "active" chip hides all idle rows; idle chip dims
-- [ ] Tapping "idle" chip hides all active rows; active chip dims
+- [ ] Tapping "active" chip hides all waiting rows; waiting chip dims
+- [ ] Tapping "waiting" chip hides all active rows; active chip dims
 - [ ] Tapping the active chip again (while it is the filter) restores all rows
 - [ ] Keyboard shortcuts re-map correctly after chip filtering
-- [ ] The flat divider between active and idle sections hides when chip filter is active
-- [ ] Chip counts update when sessions change state (active ↔ idle)
+- [ ] The flat divider between active and waiting sections hides when chip filter is active
+- [ ] Chip counts update when sessions change state (active ↔ waiting)
 
 ### Text filter
 - [ ] Typing in the search field narrows rows in real time (no separate "mode")
@@ -556,8 +556,8 @@ Test every item below after the build succeeds. Report pass/fail for each.
 
 ### Grouping
 - [ ] "By Project" toggle groups sessions under their repo name
-- [ ] Groups with active sessions appear above idle-only groups
-- [ ] Group badge shows correct count summary ("1 active · 1 idle", "2 active", etc.)
+- [ ] Groups with active sessions appear above waiting-only groups
+- [ ] Group badge shows correct count summary ("1 active · 1 waiting", "2 active", etc.)
 - [ ] Clicking a group header collapses its rows; clicking again expands them
 - [ ] Collapsed state does not persist across HUD close/reopen
 - [ ] "By Project" preference is saved and restored after quit/relaunch
@@ -601,12 +601,12 @@ Test every item below after the build succeeds. Report pass/fail for each.
 - [ ] Freshness label updates: "just now" → "Ns ago" → "Nm ago"
 - [ ] Sessions that become active update their dot from pulsing amber to static green
       without requiring a manual refresh
-- [ ] Sessions that become idle update their dot from static green to pulsing amber
+- [ ] Sessions that become waiting update their dot from static green to pulsing amber
 - [ ] Sessions that exit are removed from the list within the next poll cycle (≤ 2s)
 - [ ] Chip counts update automatically as session states change
 
 ### Accessibility
-- [ ] Status dots have accessibility labels ("Active" / "Idle")
+- [ ] Status dots have accessibility labels ("Active" / "Waiting")
 - [ ] Pulsing animation is disabled when Reduce Motion is enabled in System Settings
 - [ ] The HUD is fully navigable via VoiceOver (rows announced with name + state)
 

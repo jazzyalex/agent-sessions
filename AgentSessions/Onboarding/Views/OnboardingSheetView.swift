@@ -270,7 +270,7 @@ struct OnboardingSheetView: View {
                             icon: "dot.radiowaves.left.and.right",
                             iconColor: palette.accentGreen,
                             title: "Read Live Status",
-                            description: "Rows update active and idle state so you can scan work in progress without tab hopping"
+                            description: "Rows update active and waiting state so you can scan work in progress without tab hopping"
                         )
                         CockpitQuickRow(
                             palette: palette,

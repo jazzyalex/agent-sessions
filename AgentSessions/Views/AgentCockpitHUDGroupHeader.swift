@@ -27,7 +27,7 @@ struct AgentCockpitHUDGroupHeader: View {
                 }
 
                 if idleCount > 0 {
-                    Text("\(idleCount) idle")
+                    Text("\(idleCount) waiting")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600"))
                         .padding(.vertical, 2)

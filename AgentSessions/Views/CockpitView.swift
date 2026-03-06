@@ -275,7 +275,7 @@ struct CockpitView: View {
                 TableColumn("Name") { row in
                     HStack(spacing: 8) {
                         CodexLiveStatusDot(state: row.liveState, color: rowStatusDotColor(for: row), size: 7)
-                            .help(row.liveState == .activeWorking ? "Active (working)" : "Idle")
+                            .help(row.liveState == .activeWorking ? "Active (working)" : "Waiting")
                         Text(row.title)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -368,7 +368,7 @@ struct CockpitView: View {
     }
 
     private func footerText(snapshot: LiveRowsSnapshot) -> String {
-        "\(snapshot.filteredRows.count) shown • \(snapshot.activeCount) active • \(snapshot.idleCount) idle"
+        "\(snapshot.filteredRows.count) shown • \(snapshot.activeCount) active • \(snapshot.idleCount) waiting"
     }
 
     private func rowIsSelected(_ row: Row) -> Bool {
