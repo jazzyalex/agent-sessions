@@ -54,7 +54,7 @@ check_output() {
     local output
     output=$(eval "$command" 2>/dev/null || echo "")
 
-    if echo "$output" | grep -q "$expected"; then
+    if grep -q -- "$expected" <<<"$output"; then
         green "$name"
     else
         if [[ "$required" == "true" ]]; then
@@ -75,7 +75,7 @@ echo "GitHub Release:"
 check "Release exists" "gh release view $TAG"
 check "DMG asset uploaded" "gh release view $TAG --json assets -q '.assets[].name' | grep -q 'AgentSessions-$VERSION.dmg'"
 check "SHA256 asset uploaded" "gh release view $TAG --json assets -q '.assets[].name' | grep -q 'AgentSessions-$VERSION.dmg.sha256'"
-check_output "Release has notes" "gh release view $TAG --json body -q '.body'" "."
+check "Release has notes" "gh release view $TAG --json body -q '.body' | grep -q '[^[:space:]]'"
 
 echo ""
 
@@ -85,7 +85,7 @@ check "Appcast is accessible" "curl -sf https://jazzyalex.github.io/agent-sessio
 check_output "Appcast has correct version" "curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -o '<sparkle:shortVersionString>[^<]*' | head -1" "$VERSION"
 check "Appcast has EdDSA signature" "curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -q 'sparkle:edSignature'"
 check_output "Appcast URL points to GitHub Releases" "curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml | grep 'enclosure url'" "github.com/jazzyalex/agent-sessions/releases"
-check "Appcast has release notes" "curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -q '<description>'"
+check_output "Appcast has release notes" "curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml" "<description"
 
 echo ""
 
