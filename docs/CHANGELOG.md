@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Sessions (Agent Cockpit): Cockpit HUD labels now use `Waiting` instead of `Idle` for non-active live sessions, including filter pills, grouped counts, empty states, and accessibility labels.
 - Sessions (Agent Cockpit): Pinned compact HUD mode now keeps a fixed height while the hover toolbar fades in as an overlay, preventing row targets from shifting under the cursor during quick session switching.
+- Sessions (Agent Cockpit): Grouped project headers now keep repo names on a single truncated line instead of wrapping to two rows in compact/full HUD layouts.
 
 ## [3.0.1] - 2026-03-04
 

@@ -15,6 +15,10 @@ struct AgentCockpitHUDGroupHeader: View {
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(.secondary.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+                    .help(projectName)
 
                 if activeCount > 0 {
                     Text("\(activeCount) active")
