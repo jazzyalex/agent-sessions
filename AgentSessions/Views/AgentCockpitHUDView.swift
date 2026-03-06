@@ -100,7 +100,6 @@ struct HUDRow: Identifiable, Equatable {
 private enum AgentCockpitHUDTheme {
     static let cornerRadius: CGFloat = 12
     static let toolbarButtonCornerRadius: CGFloat = 7
-    static let compactToolbarReservedHeight: CGFloat = 44.5
 }
 
 enum HUDSessionFilterMode: Equatable {
@@ -245,9 +244,7 @@ struct AgentCockpitHUDView: View {
         let shownSessionCount = visibleRows.count
         let grouped = groupedRows(from: visibleRows)
         let renderedRows = renderedRows(visibleRows: visibleRows, groupedRows: grouped)
-        let usesPinnedCompactToolbarOverlay = isCompact && isPinned
-        let showsCompactToolbar = !isCompact || isCockpitWindowKey || isCompactWindowHovered
-        let reservesCompactToolbarSpace = !isCompact || showsCompactToolbar || usesPinnedCompactToolbarOverlay
+        let showsCompactToolbar = !isCompact || isPinned || isCockpitWindowKey || isCompactWindowHovered
         let shortcutIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
             let (index, row) = pair
             if partial[row.id] == nil {
@@ -255,44 +252,34 @@ struct AgentCockpitHUDView: View {
             }
         }
 
-        return ZStack(alignment: .top) {
-            VStack(spacing: 0) {
-                if !usesPinnedCompactToolbarOverlay && showsCompactToolbar {
-                    header(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount)
-                        .background(Color.primary.opacity(0.04))
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.10))
-                        .frame(height: 0.5)
-                        .transition(.opacity)
-                }
-
-                if !activeEnabled {
-                    disabledCallout
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                }
-
-                bodyList(
-                    visibleRows: visibleRows,
-                    groupedRows: grouped,
-                    shortcutIndexMap: shortcutIndexMap,
-                    totalRowsCount: rowsForDisplay.count,
-                    showsCompactToolbar: reservesCompactToolbarSpace
-                )
-                .background(Color.clear)
-                .disabled(!activeEnabled)
-
-                hiddenShortcuts(renderedRows: renderedRows)
+        return VStack(spacing: 0) {
+            if showsCompactToolbar {
+                header(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount)
+                    .background(Color.primary.opacity(0.04))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                Rectangle()
+                    .fill(Color.primary.opacity(0.10))
+                    .frame(height: 0.5)
+                    .transition(.opacity)
             }
-            .padding(.top, usesPinnedCompactToolbarOverlay ? AgentCockpitHUDTheme.compactToolbarReservedHeight : 0)
 
-            if usesPinnedCompactToolbarOverlay {
-                compactToolbarOverlay(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount)
-                    .opacity(showsCompactToolbar ? 1 : 0)
-                    .allowsHitTesting(showsCompactToolbar)
-                    .animation(.easeInOut(duration: 0.14), value: showsCompactToolbar)
+            if !activeEnabled {
+                disabledCallout
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
             }
+
+            bodyList(
+                visibleRows: visibleRows,
+                groupedRows: grouped,
+                shortcutIndexMap: shortcutIndexMap,
+                totalRowsCount: rowsForDisplay.count,
+                showsCompactToolbar: showsCompactToolbar
+            )
+            .background(Color.clear)
+            .disabled(!activeEnabled)
+
+            hiddenShortcuts(renderedRows: renderedRows)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(.ultraThinMaterial)
@@ -302,7 +289,7 @@ struct AgentCockpitHUDView: View {
                 shownSessionCount: shownSessionCount,
                 isCompact: isCompact,
                 activeEnabled: activeEnabled,
-                compactToolbarVisible: reservesCompactToolbarSpace,
+                compactToolbarVisible: showsCompactToolbar,
                 groupByProject: groupByProject,
                 compactPreferredRows: effectiveCompactBaselineRows,
                 compactAutoFitEnabled: compactAutoFitEnabled
@@ -443,17 +430,6 @@ struct AgentCockpitHUDView: View {
                 .padding(.bottom, 12)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
-        }
-    }
-
-    @ViewBuilder
-    private func compactToolbarOverlay(activeCount: Int, idleCount: Int) -> some View {
-        VStack(spacing: 0) {
-            header(activeCount: activeCount, idleCount: idleCount)
-                .background(.ultraThinMaterial)
-            Rectangle()
-                .fill(Color.primary.opacity(0.10))
-                .frame(height: 0.5)
         }
     }
 
@@ -1790,7 +1766,7 @@ private enum HUDFilterPillKind {
 private struct HUDFilterPillStyle: ButtonStyle {
     let isOn: Bool
     let kind: HUDFilterPillKind
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorScheme) private var hudColorScheme
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -1844,7 +1820,7 @@ private struct HUDFilterPillStyle: ButtonStyle {
     }
 
     private var idleColor: Color {
-        colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
+        hudColorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
     }
 }
 
