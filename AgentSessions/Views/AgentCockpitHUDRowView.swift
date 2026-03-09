@@ -88,7 +88,7 @@ struct AgentCockpitHUDRowView: View {
             } else {
                 highlightedText(row.projectName)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(primaryTextColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(width: AgentCockpitHUDRowLayout.projectColumnWidth, alignment: .leading)
@@ -96,7 +96,7 @@ struct AgentCockpitHUDRowView: View {
 
             highlightedText(sessionTitle)
                 .font(.system(size: 13, weight: sessionTitleWeight, design: .monospaced))
-                .foregroundStyle(.primary)
+                .foregroundStyle(primaryTextColor)
                 .lineLimit(2)
                 .truncationMode(.tail)
                 .fixedSize(horizontal: false, vertical: true)
@@ -148,7 +148,7 @@ struct AgentCockpitHUDRowView: View {
 
             Text(sessionTitle)
                 .font(.system(size: 13, weight: sessionTitleWeight, design: .monospaced))
-                .foregroundStyle(.primary)
+                .foregroundStyle(primaryTextColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -170,8 +170,17 @@ struct AgentCockpitHUDRowView: View {
         return cleaned.isEmpty ? "—" : cleaned
     }
 
+    private var isStaleWaiting: Bool {
+        AgentCockpitHUDView.isStaleWaiting(row)
+    }
+
     private var elapsedColor: Color {
-        colorScheme == .dark ? Color(hex: "6e6e73") : Color(hex: "8e8e93")
+        let base = colorScheme == .dark ? Color(hex: "6e6e73") : Color(hex: "8e8e93")
+        return isStaleWaiting ? base.opacity(0.72) : base
+    }
+
+    private var primaryTextColor: Color {
+        isStaleWaiting ? Color.primary.opacity(0.82) : .primary
     }
 
     private var sessionTitle: String {
@@ -195,17 +204,20 @@ struct AgentCockpitHUDRowView: View {
 
     private var badgeTextColor: Color {
         if isSelected { return .primary }
+        let base: Color
         if colorScheme == .light {
             switch row.agentType {
             case .codex:
-                return Color(hex: "2b56b8")
+                base = Color(hex: "2b56b8")
             case .claude:
-                return Color(hex: "b86a1d")
+                base = Color(hex: "b86a1d")
             case .shell:
-                return Color(hex: "7a7a80")
+                base = Color(hex: "7a7a80")
             }
+        } else {
+            base = row.agentType.standardTextColor
         }
-        return row.agentType.standardTextColor
+        return isStaleWaiting ? base.opacity(0.76) : base
     }
 
     private var codexLiveState: CodexLiveState {
@@ -217,6 +229,9 @@ struct AgentCockpitHUDRowView: View {
         case .active:
             return Color(hex: "30d158")
         case .idle:
+            if isStaleWaiting {
+                return colorScheme == .dark ? Color(hex: "c79033") : Color(hex: "b37512")
+            }
             return colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
         }
     }

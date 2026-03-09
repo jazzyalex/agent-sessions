@@ -8,9 +8,12 @@ extension PreferencesView {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            sectionHeader("Menu Bar Usage")
+            sectionHeader("Menu Bar Item")
             VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Show menu bar usage", isOn: $menuBarEnabled, help: "Add a menu bar item that displays usage meters")
+                toggleRow("Show menu bar item", isOn: $menuBarEnabled, help: "Add a menu bar item that shows live session counts and usage details when available")
+                Text("The menu bar item shows active and waiting sessions first. Usage controls and reset details appear below when usage tracking is enabled.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             sectionHeader("Menu Bar Label")
@@ -18,17 +21,17 @@ extension PreferencesView {
                 toggleRow("Show Codex reset indicators", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showCodexResetTimes) }
-                ), help: "Show the ↻ reset indicator next to the Codex meter in the menu bar label")
+                ), help: "Show the ↻ reset indicator next to the Codex usage meter when the menu bar label is displaying usage")
 
                 toggleRow("Show Claude reset indicators", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showClaudeResetTimes) }
-                ), help: "Show the ↻ reset indicator next to the Claude meter in the menu bar label")
+                ), help: "Show the ↻ reset indicator next to the Claude usage meter when the menu bar label is displaying usage")
 
                 toggleRow("Show pills in menu bar", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showPills) as? Bool ?? false },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showPills) }
-                ), help: "Add pill containers around meters. Off by default to keep the menu bar compact.")
+                ), help: "Add pill containers around usage meters. Off by default to keep the menu bar compact.")
             }
             .disabled(!menuBarEnabled)
         }

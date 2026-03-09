@@ -7,6 +7,12 @@ enum HUDLiveState: Equatable {
     case idle
 }
 
+enum HUDDisplayPriority: Int, Equatable {
+    case active = 0
+    case waitingFresh = 1
+    case waitingStale = 2
+}
+
 enum HUDAgentType: Equatable {
     case codex
     case claude
@@ -114,8 +120,18 @@ struct HUDGroup: Identifiable {
     let rows: [HUDRow]
     let activeCount: Int
     let idleCount: Int
+    let freshIdleCount: Int
+    let staleIdleCount: Int
 
     var hasActive: Bool { activeCount > 0 }
+    var hasFreshWaiting: Bool { freshIdleCount > 0 }
+    var isStaleOnly: Bool { activeCount == 0 && freshIdleCount == 0 && staleIdleCount > 0 }
+    var displayPriority: HUDDisplayPriority {
+        if hasActive { return .active }
+        if hasFreshWaiting { return .waitingFresh }
+        return .waitingStale
+    }
+    var collapseSyncKey: String { "\(id)|\(isStaleOnly ? 1 : 0)" }
 
     var summaryText: String {
         if activeCount > 0 && idleCount > 0 {
@@ -126,6 +142,11 @@ struct HUDGroup: Identifiable {
         }
         return "\(idleCount) waiting"
     }
+}
+
+struct HUDLiveSessionSummary: Equatable {
+    let activeCount: Int
+    let waitingCount: Int
 }
 
 private struct LegacyMappedRow: Identifiable {
@@ -160,11 +181,17 @@ private struct HUDRowsSnapshot {
     let idleCount: Int
 }
 
+private struct HUDWaitingCounts {
+    let active: Int
+    let idle: Int
+    let freshIdle: Int
+    let staleIdle: Int
+}
+
 struct AgentCockpitHUDView: View {
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
-    @Environment(\.openWindow) private var openWindow
 
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
@@ -181,18 +208,23 @@ struct AgentCockpitHUDView: View {
     @State private var searchFocusToken: Int = 0
     @State private var orderedRowIDs: [String] = []
     @State private var latestCanonicalRows: [HUDRow] = []
+    @State private var latestCanonicalRowsSnapshotAt: Date = Date()
     @State private var isWindowVisibleForOrdering: Bool = true
     @State private var wasWindowHiddenSinceLastVisible: Bool = false
     @State private var hiddenMembershipChurnDetected: Bool = false
+    @State private var hiddenPriorityChurnDetected: Bool = false
     @State private var highlightedRowIDs: Set<String> = []
     @State private var isCockpitWindowKey: Bool = true
     @State private var isCompactWindowHovered: Bool = false
+    @State private var staleAutoCollapsedProjects: Set<String> = []
+    @State private var manuallyExpandedStaleProjects: Set<String> = []
     @FocusState private var isSearchFocused: Bool
 
     private let fullBodyMinHeight: CGFloat = 170
     private let compactBodyRowHeight: CGFloat = 31
     private let compactBodyMinRowsWhenToolbarHidden: CGFloat = 3
     private let compactBodyMaxRowsWhenToolbarVisible: CGFloat = 10
+    private static let staleWaitingThreshold: TimeInterval = 4 * 60 * 60
 
     private static let codexRolloutTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -241,9 +273,11 @@ struct AgentCockpitHUDView: View {
         let canonicalRows = activeEnabled ? snapshot.rows : []
         let rowsForDisplay = rowsOrderedForDisplay(from: canonicalRows)
         let visibleRows = filteredRows(from: rowsForDisplay)
+        let fullListLayoutSignature = fullUngroupedLayoutSignature(for: visibleRows)
         let shownSessionCount = visibleRows.count
-        let grouped = groupedRows(from: visibleRows)
-        let renderedRows = renderedRows(visibleRows: visibleRows, groupedRows: grouped)
+        let groupedVisibleRows = groupByProject ? groupedRows(from: visibleRows) : []
+        let groupedRowsForCollapseSync = groupByProject ? groupedRows(from: rowsForDisplay) : []
+        let renderedRows = renderedRows(visibleRows: visibleRows, groupedRows: groupedVisibleRows)
         let showsCompactToolbar = !isCompact || isPinned || isCockpitWindowKey || isCompactWindowHovered
         let shortcutIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
             let (index, row) = pair
@@ -271,10 +305,11 @@ struct AgentCockpitHUDView: View {
 
             bodyList(
                 visibleRows: visibleRows,
-                groupedRows: grouped,
+                groupedRows: groupedVisibleRows,
                 shortcutIndexMap: shortcutIndexMap,
                 totalRowsCount: rowsForDisplay.count,
-                showsCompactToolbar: showsCompactToolbar
+                showsCompactToolbar: showsCompactToolbar,
+                fullListLayoutSignature: fullListLayoutSignature
             )
             .background(Color.clear)
             .disabled(!activeEnabled)
@@ -312,16 +347,48 @@ struct AgentCockpitHUDView: View {
         .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
         .animation(.easeInOut(duration: 0.18), value: isCompact)
         .onAppear {
+            let now = Date()
+            synchronizeOrderedRows(
+                with: canonicalRows,
+                previousRows: [],
+                previousSnapshotAt: now,
+                incomingSnapshotAt: now
+            )
             latestCanonicalRows = canonicalRows
-            synchronizeOrderedRows(with: canonicalRows)
+            latestCanonicalRowsSnapshotAt = now
+            synchronizeCollapsedProjectsForStaleGroups(with: groupedRowsForCollapseSync)
         }
-        .onChange(of: canonicalRows) { _, rows in
+        .onChange(of: canonicalRows) { oldRows, rows in
+            let now = Date()
+            synchronizeOrderedRows(
+                with: rows,
+                previousRows: oldRows,
+                previousSnapshotAt: latestCanonicalRowsSnapshotAt,
+                incomingSnapshotAt: now
+            )
             latestCanonicalRows = rows
-            synchronizeOrderedRows(with: rows)
+            latestCanonicalRowsSnapshotAt = now
+            synchronizeCollapsedProjectsForStaleGroups(with: groupedRowsForCollapseSync)
         }
         .onChange(of: isWindowVisibleForOrdering) { _, isVisible in
             guard isVisible else { return }
-            synchronizeOrderedRows(with: latestCanonicalRows)
+            let now = Date()
+            synchronizeOrderedRows(
+                with: latestCanonicalRows,
+                previousRows: latestCanonicalRows,
+                previousSnapshotAt: latestCanonicalRowsSnapshotAt,
+                incomingSnapshotAt: now
+            )
+            latestCanonicalRowsSnapshotAt = now
+        }
+        .onChange(of: groupedRowsForCollapseSync.map(\.collapseSyncKey)) { _, _ in
+            synchronizeCollapsedProjectsForStaleGroups(with: groupedRowsForCollapseSync)
+        }
+        .onChange(of: groupByProject) { _, _ in
+            synchronizeCollapsedProjectsForStaleGroups(with: groupedRowsForCollapseSync)
+        }
+        .onChange(of: isCompact) { _, _ in
+            synchronizeCollapsedProjectsForStaleGroups(with: groupedRowsForCollapseSync)
         }
         .onHover { hovering in
             guard isCompact else { return }
@@ -372,6 +439,15 @@ struct AgentCockpitHUDView: View {
                 Spacer(minLength: 0)
 
                 HStack(spacing: 6) {
+                    Button {
+                        AppWindowRouter.showAgentSessionsWindow()
+                    } label: {
+                        Image(systemName: "rectangle.stack")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
+                    .help("Open Agent Sessions")
+
                     Button {
                         isPinned.toggle()
                     } label: {
@@ -438,7 +514,8 @@ struct AgentCockpitHUDView: View {
                           groupedRows: [HUDGroup],
                           shortcutIndexMap: [String: Int],
                           totalRowsCount: Int,
-                          showsCompactToolbar: Bool) -> some View {
+                          showsCompactToolbar: Bool,
+                          fullListLayoutSignature: Int) -> some View {
         Group {
             if visibleRows.isEmpty {
                 emptyState(totalRowsCount: totalRowsCount)
@@ -450,14 +527,18 @@ struct AgentCockpitHUDView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         if groupByProject {
-                            ForEach(groupedRows) { group in
+                            ForEach(Array(groupedRows.enumerated()), id: \.element.id) { index, group in
+                                if shouldShowStaleGroupsDivider(before: index, in: groupedRows) {
+                                    staleGroupsDivider
+                                }
                                 AgentCockpitHUDGroupHeader(
                                     projectName: group.projectName,
                                     activeCount: group.activeCount,
                                     idleCount: group.idleCount,
+                                    isStaleOnly: group.isStaleOnly,
                                     isCollapsed: collapsedProjects.contains(group.id)
                                 ) {
-                                    toggleCollapsed(projectID: group.id)
+                                    toggleCollapsed(projectID: group.id, isStaleOnly: group.isStaleOnly)
                                 }
 
                                 if !collapsedProjects.contains(group.id) {
@@ -499,6 +580,7 @@ struct AgentCockpitHUDView: View {
                         }
                     }
                     .padding(.vertical, isCompact ? 0 : 2)
+                    .id(fullListLayoutSignature)
                 }
                 .scrollIndicators(.visible)
             }
@@ -610,11 +692,18 @@ struct AgentCockpitHUDView: View {
         }
     }
 
-    private func toggleCollapsed(projectID: String) {
+    private func toggleCollapsed(projectID: String, isStaleOnly: Bool) {
         if collapsedProjects.contains(projectID) {
             collapsedProjects.remove(projectID)
+            staleAutoCollapsedProjects.remove(projectID)
+            if isStaleOnly {
+                manuallyExpandedStaleProjects.insert(projectID)
+            }
         } else {
             collapsedProjects.insert(projectID)
+            if isStaleOnly {
+                manuallyExpandedStaleProjects.remove(projectID)
+            }
         }
     }
 
@@ -627,6 +716,16 @@ struct AgentCockpitHUDView: View {
             return Self.groupedRowsPreservingOrder(rows)
         }
         return Self.groupedRows(rows)
+    }
+
+    @ViewBuilder
+    private var staleGroupsDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.10))
+            .frame(height: 0.5)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
     }
 
     @ViewBuilder
@@ -663,6 +762,19 @@ struct AgentCockpitHUDView: View {
         }
     }
 
+    private func fullUngroupedLayoutSignature(for rows: [HUDRow]) -> Int {
+        guard !isCompact, !groupByProject else { return 0 }
+        var hasher = Hasher()
+        hasher.combine(rows.count)
+        for row in rows {
+            hasher.combine(row.id)
+            hasher.combine(row.projectName)
+            hasher.combine(row.displayName)
+            hasher.combine(row.cleanedTabTitle ?? "")
+        }
+        return hasher.finalize()
+    }
+
     private func rowsOrderedForDisplay(from canonicalRows: [HUDRow]) -> [HUDRow] {
         guard !orderedRowIDs.isEmpty else { return canonicalRows }
 
@@ -676,7 +788,10 @@ struct AgentCockpitHUDView: View {
         return ordered + trailing
     }
 
-    private func synchronizeOrderedRows(with canonicalRows: [HUDRow]) {
+    private func synchronizeOrderedRows(with canonicalRows: [HUDRow],
+                                        previousRows: [HUDRow],
+                                        previousSnapshotAt: Date,
+                                        incomingSnapshotAt: Date) {
         let incomingIDs = canonicalRows.map(\.id)
 
         guard !orderedRowIDs.isEmpty else {
@@ -689,11 +804,17 @@ struct AgentCockpitHUDView: View {
             if Self.hasMembershipChurn(existing: orderedRowIDs, incoming: incomingIDs) {
                 hiddenMembershipChurnDetected = true
             }
+            if Self.hasPriorityChurn(existing: previousRows,
+                                     existingSnapshotAt: previousSnapshotAt,
+                                     incoming: canonicalRows,
+                                     incomingSnapshotAt: incomingSnapshotAt) {
+                hiddenPriorityChurnDetected = true
+            }
             return
         }
 
         if wasWindowHiddenSinceLastVisible {
-            if hiddenMembershipChurnDetected {
+            if hiddenMembershipChurnDetected || hiddenPriorityChurnDetected {
                 orderedRowIDs = incomingIDs
             } else {
                 let merge = Self.stableMergedOrder(existing: orderedRowIDs, incoming: incomingIDs)
@@ -702,12 +823,86 @@ struct AgentCockpitHUDView: View {
             }
             wasWindowHiddenSinceLastVisible = false
             hiddenMembershipChurnDetected = false
+            hiddenPriorityChurnDetected = false
+            return
+        }
+
+        if Self.hasPriorityChurn(existing: previousRows,
+                                 existingSnapshotAt: previousSnapshotAt,
+                                 incoming: canonicalRows,
+                                 incomingSnapshotAt: incomingSnapshotAt) {
+            orderedRowIDs = incomingIDs
             return
         }
 
         let merge = Self.stableMergedOrder(existing: orderedRowIDs, incoming: incomingIDs)
         orderedRowIDs = merge.order
         queueInsertionHighlights(for: merge.inserted)
+    }
+
+    private func synchronizeCollapsedProjectsForStaleGroups(with groups: [HUDGroup]) {
+        let synchronized = Self.synchronizeCollapsedProjectsForStaleGroups(
+            isCompact: isCompact,
+            groupByProject: groupByProject,
+            groups: groups,
+            collapsedProjects: collapsedProjects,
+            staleAutoCollapsedProjects: staleAutoCollapsedProjects,
+            manuallyExpandedStaleProjects: manuallyExpandedStaleProjects
+        )
+        collapsedProjects = synchronized.collapsedProjects
+        staleAutoCollapsedProjects = synchronized.staleAutoCollapsedProjects
+        manuallyExpandedStaleProjects = synchronized.manuallyExpandedStaleProjects
+    }
+
+    static func synchronizeCollapsedProjectsForStaleGroups(
+        isCompact: Bool,
+        groupByProject: Bool,
+        groups: [HUDGroup],
+        collapsedProjects: Set<String>,
+        staleAutoCollapsedProjects: Set<String>,
+        manuallyExpandedStaleProjects: Set<String>
+    ) -> (collapsedProjects: Set<String>, staleAutoCollapsedProjects: Set<String>, manuallyExpandedStaleProjects: Set<String>) {
+        var collapsedProjects = collapsedProjects
+        var staleAutoCollapsedProjects = staleAutoCollapsedProjects
+        var manuallyExpandedStaleProjects = manuallyExpandedStaleProjects
+
+        guard isCompact, groupByProject else {
+            if !staleAutoCollapsedProjects.isEmpty {
+                collapsedProjects.subtract(staleAutoCollapsedProjects)
+            }
+            staleAutoCollapsedProjects.removeAll(keepingCapacity: false)
+            manuallyExpandedStaleProjects.removeAll(keepingCapacity: false)
+            return (collapsedProjects, staleAutoCollapsedProjects, manuallyExpandedStaleProjects)
+        }
+
+        let staleOnlyIDs = Set(groups.lazy.filter(\.isStaleOnly).map(\.id))
+        let noLongerStale = staleAutoCollapsedProjects.subtracting(staleOnlyIDs)
+        if !noLongerStale.isEmpty {
+            collapsedProjects.subtract(noLongerStale)
+            staleAutoCollapsedProjects.subtract(noLongerStale)
+        }
+
+        manuallyExpandedStaleProjects.formIntersection(staleOnlyIDs)
+
+        for group in groups where group.isStaleOnly {
+            guard !staleAutoCollapsedProjects.contains(group.id),
+                  !manuallyExpandedStaleProjects.contains(group.id) else {
+                continue
+            }
+            collapsedProjects.insert(group.id)
+            staleAutoCollapsedProjects.insert(group.id)
+        }
+
+        staleAutoCollapsedProjects.formIntersection(staleOnlyIDs)
+        return (collapsedProjects, staleAutoCollapsedProjects, manuallyExpandedStaleProjects)
+    }
+
+    private func shouldShowStaleGroupsDivider(before index: Int, in groups: [HUDGroup]) -> Bool {
+        guard isCompact, groupByProject else { return false }
+        guard groups.indices.contains(index) else { return false }
+        guard groups[index].isStaleOnly else { return false }
+        guard groups.contains(where: { !$0.isStaleOnly }) else { return false }
+        return index == 0 || !groups[index - 1].isStaleOnly
     }
 
     private func queueInsertionHighlights(for ids: [String]) {
@@ -823,8 +1018,7 @@ struct AgentCockpitHUDView: View {
         )
         CockpitNavigationBridge.store(pendingRequest)
 
-        NSApp.activate(ignoringOtherApps: true)
-        openWindow(id: "Agent Sessions")
+        AppWindowRouter.showAgentSessionsWindow()
 
         var payload: [AnyHashable: Any] = ["source": row.source.rawValue]
         if let runtimeSessionID = row.runtimeSessionID, !runtimeSessionID.isEmpty {
@@ -896,7 +1090,124 @@ struct AgentCockpitHUDView: View {
     }
 
     private func makeRowsSnapshot() -> HUDRowsSnapshot {
-        let lookupIndexes = buildSessionLookupIndexes()
+        Self.makeRowsSnapshot(
+            codexIndexer: codexIndexer,
+            claudeIndexer: claudeIndexer,
+            activeCodex: activeCodex,
+            isCompact: isCompact
+        )
+    }
+
+    static func liveSessionSummary(activeCodex: CodexActiveSessionsModel) -> HUDLiveSessionSummary {
+        let presences = displayableLiveSummaryPresences(from: activeCodex.presences, lookupIndexes: nil)
+        let activeCount = presences.reduce(into: 0) { count, presence in
+            if activeCodex.liveState(for: presence) == .activeWorking {
+                count += 1
+            }
+        }
+        let waitingCount = max(0, presences.count - activeCount)
+        return HUDLiveSessionSummary(activeCount: activeCount, waitingCount: waitingCount)
+    }
+
+    static func liveSessionSummary(activeCodex: CodexActiveSessionsModel,
+                                   codexIndexer: SessionIndexer,
+                                   claudeIndexer: ClaudeSessionIndexer) -> HUDLiveSessionSummary {
+        let lookupIndexes = buildSessionLookupIndexes(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer)
+        let presences = displayableLiveSummaryPresences(from: activeCodex.presences, lookupIndexes: lookupIndexes)
+        let activeCount = presences.reduce(into: 0) { count, presence in
+            if activeCodex.liveState(for: presence) == .activeWorking {
+                count += 1
+            }
+        }
+        let waitingCount = max(0, presences.count - activeCount)
+        return HUDLiveSessionSummary(activeCount: activeCount, waitingCount: waitingCount)
+    }
+
+    private static func displayableLiveSummaryPresences(from presences: [CodexActivePresence],
+                                                        lookupIndexes: SessionLookupIndexes?) -> [CodexActivePresence] {
+        let supportedSources: Set<SessionSource> = [.codex, .claude]
+        let filtered = presences.filter { presence in
+            guard supportedSources.contains(presence.source) else { return false }
+            let hasWorkspaceMatch = hasWorkspaceMatchForSummary(presence, lookupIndexes: lookupIndexes)
+            return !Self.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: hasWorkspaceMatch
+            )
+        }
+
+        let coalesced = CodexActiveSessionsModel.coalescePresencesByTTY(filtered)
+        var byKey: [String: CodexActivePresence] = [:]
+        byKey.reserveCapacity(coalesced.count)
+        for presence in coalesced {
+            let key = liveSummaryPresenceKey(for: presence)
+            byKey[key] = preferredLiveSummaryPresence(existing: byKey[key], incoming: presence)
+        }
+        return Array(byKey.values)
+    }
+
+    private static func hasWorkspaceMatchForSummary(_ presence: CodexActivePresence,
+                                                    lookupIndexes: SessionLookupIndexes?) -> Bool {
+        guard let lookupIndexes else { return false }
+        return Self.resolveByWorkspace(
+            presence.workspaceRoot,
+            source: presence.source,
+            lookupIndexes: lookupIndexes
+        ) != nil
+    }
+
+    private static func liveSummaryPresenceKey(for presence: CodexActivePresence) -> String {
+        if let sessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !sessionID.isEmpty {
+            return CodexActiveSessionsModel.sessionLookupKey(source: presence.source, sessionId: sessionID)
+        }
+        if let logPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !logPath.isEmpty {
+            return CodexActiveSessionsModel.logLookupKey(
+                source: presence.source,
+                normalizedPath: CodexActiveSessionsModel.normalizePath(logPath)
+            )
+        }
+        if let tty = normalizeTTY(presence.tty) {
+            return "\(presence.source.rawValue)|tty:\(tty)"
+        }
+        if let workspace = normalizedWorkingDirectory(presence.workspaceRoot), !workspace.isEmpty {
+            return workspaceLookupKey(source: presence.source, normalizedPath: workspace)
+        }
+        if let sourceFilePath = presence.sourceFilePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !sourceFilePath.isEmpty {
+            return "\(presence.source.rawValue)|src:\(CodexActiveSessionsModel.normalizePath(sourceFilePath))"
+        }
+        if let pid = presence.pid {
+            return "\(presence.source.rawValue)|pid:\(pid)"
+        }
+        return CodexActiveSessionsModel.presenceKey(for: presence)
+    }
+
+    private static func preferredLiveSummaryPresence(existing: CodexActivePresence?,
+                                                     incoming: CodexActivePresence) -> CodexActivePresence {
+        guard let existing else { return incoming }
+        let existingSeen = existing.lastSeenAt ?? .distantPast
+        let incomingSeen = incoming.lastSeenAt ?? .distantPast
+        if incomingSeen != existingSeen {
+            return incomingSeen > existingSeen ? incoming : existing
+        }
+        let existingHasJoin = (existing.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            || (existing.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+        let incomingHasJoin = (incoming.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            || (incoming.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+        if existingHasJoin != incomingHasJoin {
+            return incomingHasJoin ? incoming : existing
+        }
+        return existing
+    }
+
+    private static func makeRowsSnapshot(codexIndexer: SessionIndexer,
+                                         claudeIndexer: ClaudeSessionIndexer,
+                                         activeCodex: CodexActiveSessionsModel,
+                                         isCompact: Bool,
+                                         now: Date = Date()) -> HUDRowsSnapshot {
+        let lookupIndexes = buildSessionLookupIndexes(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer)
         let supportedSources: Set<SessionSource> = [.codex, .claude]
         let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions
         let fallbackBySessionKey = UnifiedSessionsView.buildFallbackPresenceMap(
@@ -914,7 +1225,7 @@ struct AgentCockpitHUDView: View {
             guard let presence = fallbackBySessionKey[sessionKey] else { continue }
             let presenceKey = CodexActiveSessionsModel.presenceKey(for: presence)
             guard presenceKey != "unknown" else { continue }
-            fallbackSessionByPresenceKey[presenceKey] = preferredSession(
+            fallbackSessionByPresenceKey[presenceKey] = Self.preferredSession(
                 existing: fallbackSessionByPresenceKey[presenceKey],
                 incoming: session
             )
@@ -927,10 +1238,11 @@ struct AgentCockpitHUDView: View {
 
             let session = logNorm.flatMap { normalized in
                 lookupIndexes.byLogPath[CodexActiveSessionsModel.logLookupKey(source: presence.source, normalizedPath: normalized)]
-            } ?? resolveBySessionID(presence.sessionId, source: presence.source, lookupIndexes: lookupIndexes)
+            } ?? Self.resolveBySessionID(presence.sessionId, source: presence.source, lookupIndexes: lookupIndexes)
+                ?? Self.resolveByWorkspace(presence.workspaceRoot, source: presence.source, lookupIndexes: lookupIndexes)
                 ?? fallbackSessionByPresenceKey[presenceKey]
 
-            if shouldHideUnresolvedPresencePlaceholder(presence, resolvedSession: session, lookupIndexes: lookupIndexes) {
+            if Self.shouldHideUnresolvedPresencePlaceholder(presence, resolvedSession: session, lookupIndexes: lookupIndexes) {
                 return nil
             }
 
@@ -938,8 +1250,8 @@ struct AgentCockpitHUDView: View {
                 ?? presence.sessionId.map { "Session \($0.prefix(8))" }
                 ?? "Active \(presence.source.displayName) session"
 
-            let repo = session?.repoName ?? session?.repoDisplay ?? "—"
-            let date = session?.modifiedAt ?? parseSessionTimestamp(from: presence)
+            let repo = Self.projectLabel(resolvedSession: session, presence: presence)
+            let date = session?.modifiedAt ?? Self.parseSessionTimestamp(from: presence)
             let lastActivityAt = activeCodex.lastActivityAt(for: presence) ?? date
             let liveState = activeCodex.liveState(for: presence)
 
@@ -965,20 +1277,22 @@ struct AgentCockpitHUDView: View {
                 termProgram: presence.terminal?.termProgram,
                 tabTitle: presence.terminal?.tabTitle,
                 resolvedSessionID: session?.id,
-                sessionID: authoritativeSessionID(for: presence, resolvedSession: session),
+                sessionID: Self.authoritativeSessionID(for: presence, resolvedSession: session),
                 logPath: presence.sessionLogPath,
                 workingDirectory: session?.cwd ?? presence.workspaceRoot,
                 lastActivityAt: lastActivityAt
             )
         }
 
-        let deduped = dedupeRowsByResolvedSession(mappedRows)
+        let deduped = Self.dedupeRowsByResolvedSession(mappedRows)
 
         let sorted = deduped.sorted { a, b in
             let aState = Self.mapLiveStateForHUD(a.liveState)
             let bState = Self.mapLiveStateForHUD(b.liveState)
-            if aState != bState {
-                return aState == .active
+            let aPriority = Self.displayPriority(for: aState, lastActivityAt: a.lastActivityAt, now: now)
+            let bPriority = Self.displayPriority(for: bState, lastActivityAt: b.lastActivityAt, now: now)
+            if aPriority != bPriority {
+                return aPriority.rawValue < bPriority.rawValue
             }
             let da = a.lastActivityAt ?? .distantPast
             let db = b.lastActivityAt ?? .distantPast
@@ -989,13 +1303,13 @@ struct AgentCockpitHUDView: View {
 
         let hudRows = sorted.map { row in
             let hudState = Self.mapLiveStateForHUD(row.liveState)
-            let elapsed = isCompact ? "" : elapsedLabel(from: row.lastActivityAt)
+            let elapsed = isCompact ? "" : Self.elapsedLabel(from: row.lastActivityAt)
             let activityTooltip = row.lastActivityAt.map { Self.activityTooltipFormatter.string(from: $0) }
             let cleanedTabTitle = Self.normalizedCockpitTabTitle(row.tabTitle, source: row.source)
             return HUDRow(
                 id: row.id,
                 source: row.source,
-                agentType: mapAgentType(row.source),
+                agentType: Self.mapAgentType(row.source),
                 projectName: row.repo,
                 displayName: row.title,
                 liveState: hudState,
@@ -1017,11 +1331,11 @@ struct AgentCockpitHUDView: View {
             )
         }
 
-        let counts = Self.counts(for: hudRows)
+        let counts = Self.waitingCounts(for: hudRows, now: now)
         return HUDRowsSnapshot(rows: hudRows, activeCount: counts.active, idleCount: counts.idle)
     }
 
-    private func elapsedLabel(from date: Date?) -> String {
+    private static func elapsedLabel(from date: Date?) -> String {
         guard let date else { return "—" }
         let delta = max(Int(Date().timeIntervalSince(date)), 0)
         if delta < 60 { return "\(delta)s" }
@@ -1032,6 +1346,26 @@ struct AgentCockpitHUDView: View {
 
     static func mapLiveStateForHUD(_ liveState: CodexLiveState) -> HUDLiveState {
         liveState == .activeWorking ? .active : .idle
+    }
+
+    static func displayPriority(for row: HUDRow, now: Date = Date()) -> HUDDisplayPriority {
+        displayPriority(for: row.liveState, lastActivityAt: row.lastActivityAt, now: now)
+    }
+
+    static func displayPriority(for liveState: HUDLiveState,
+                                lastActivityAt: Date?,
+                                now: Date = Date()) -> HUDDisplayPriority {
+        switch liveState {
+        case .active:
+            return .active
+        case .idle:
+            guard let lastActivityAt else { return .waitingFresh }
+            return now.timeIntervalSince(lastActivityAt) >= staleWaitingThreshold ? .waitingStale : .waitingFresh
+        }
+    }
+
+    static func isStaleWaiting(_ row: HUDRow, now: Date = Date()) -> Bool {
+        displayPriority(for: row, now: now) == .waitingStale
     }
 
     private static let trailingParentheticalRegex: NSRegularExpression = {
@@ -1115,6 +1449,42 @@ struct AgentCockpitHUDView: View {
         return (active: active, idle: rows.count - active)
     }
 
+    static func liveSessionSummary(for rows: [HUDRow], now: Date = Date()) -> HUDLiveSessionSummary {
+        let counts = waitingCounts(for: rows, now: now)
+        return HUDLiveSessionSummary(activeCount: counts.active, waitingCount: counts.idle)
+    }
+
+    static func hasPriorityChurn(existing: [HUDRow], incoming: [HUDRow], now: Date = Date()) -> Bool {
+        hasPriorityChurn(
+            existing: existing,
+            existingSnapshotAt: now,
+            incoming: incoming,
+            incomingSnapshotAt: now
+        )
+    }
+
+    static func hasPriorityChurn(existing: [HUDRow],
+                                 existingSnapshotAt: Date,
+                                 incoming: [HUDRow],
+                                 incomingSnapshotAt: Date) -> Bool {
+        guard !existing.isEmpty, !incoming.isEmpty else { return false }
+        let existingIDs = existing.map(\.id)
+        let incomingIDs = incoming.map(\.id)
+        if Set(existingIDs) == Set(incomingIDs), existingIDs != incomingIDs {
+            return true
+        }
+        let existingPriorities = Dictionary(
+            uniqueKeysWithValues: existing.map { ($0.id, displayPriority(for: $0, now: existingSnapshotAt)) }
+        )
+        for row in incoming {
+            guard let existingPriority = existingPriorities[row.id] else { continue }
+            if existingPriority != displayPriority(for: row, now: incomingSnapshotAt) {
+                return true
+            }
+        }
+        return false
+    }
+
     static func filteredRows(_ rows: [HUDRow], mode: HUDSessionFilterMode, query: String) -> [HUDRow] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return rows.filter { row in
@@ -1150,7 +1520,7 @@ struct AgentCockpitHUDView: View {
         Set(existing) != Set(incoming)
     }
 
-    static func groupedRows(_ rows: [HUDRow]) -> [HUDGroup] {
+    static func groupedRows(_ rows: [HUDRow], now: Date = Date()) -> [HUDGroup] {
         var buckets: [String: [HUDRow]] = [:]
         buckets.reserveCapacity(rows.count)
 
@@ -1159,19 +1529,22 @@ struct AgentCockpitHUDView: View {
         }
 
         var out: [HUDGroup] = buckets.map { projectName, projectRows in
-            let counts = counts(for: projectRows)
+            let sortedRows = sortRows(projectRows, now: now)
+            let counts = waitingCounts(for: sortedRows, now: now)
             return HUDGroup(
                 id: projectName,
                 projectName: projectName,
-                rows: projectRows,
+                rows: sortedRows,
                 activeCount: counts.active,
-                idleCount: counts.idle
+                idleCount: counts.idle,
+                freshIdleCount: counts.freshIdle,
+                staleIdleCount: counts.staleIdle
             )
         }
 
         out.sort { a, b in
-            if a.hasActive != b.hasActive {
-                return a.hasActive && !b.hasActive
+            if a.displayPriority != b.displayPriority {
+                return a.displayPriority.rawValue < b.displayPriority.rawValue
             }
             return a.projectName.localizedCaseInsensitiveCompare(b.projectName) == .orderedAscending
         }
@@ -1179,7 +1552,7 @@ struct AgentCockpitHUDView: View {
         return out
     }
 
-    static func groupedRowsPreservingOrder(_ rows: [HUDRow]) -> [HUDGroup] {
+    static func groupedRowsPreservingOrder(_ rows: [HUDRow], now: Date = Date()) -> [HUDGroup] {
         var buckets: [String: [HUDRow]] = [:]
         var order: [String] = []
         buckets.reserveCapacity(rows.count)
@@ -1192,20 +1565,70 @@ struct AgentCockpitHUDView: View {
             buckets[row.projectName, default: []].append(row)
         }
 
-        return order.compactMap { projectName in
+        let groups: [HUDGroup] = order.compactMap { projectName -> HUDGroup? in
             guard let projectRows = buckets[projectName] else { return nil }
-            let counts = counts(for: projectRows)
+            let sortedRows = sortRows(projectRows, now: now)
+            let counts = waitingCounts(for: sortedRows, now: now)
             return HUDGroup(
                 id: projectName,
                 projectName: projectName,
-                rows: projectRows,
+                rows: sortedRows,
                 activeCount: counts.active,
-                idleCount: counts.idle
+                idleCount: counts.idle,
+                freshIdleCount: counts.freshIdle,
+                staleIdleCount: counts.staleIdle
             )
+        }
+
+        return groups.sorted { a, b in
+            if a.displayPriority != b.displayPriority {
+                return a.displayPriority.rawValue < b.displayPriority.rawValue
+            }
+            guard let aIndex = order.firstIndex(of: a.projectName),
+                  let bIndex = order.firstIndex(of: b.projectName) else {
+                return a.projectName.localizedCaseInsensitiveCompare(b.projectName) == .orderedAscending
+            }
+            return aIndex < bIndex
         }
     }
 
-    private func mapAgentType(_ source: SessionSource) -> HUDAgentType {
+    private static func waitingCounts(for rows: [HUDRow], now: Date = Date()) -> HUDWaitingCounts {
+        var active = 0
+        var idle = 0
+        var freshIdle = 0
+        var staleIdle = 0
+
+        for row in rows {
+            switch displayPriority(for: row, now: now) {
+            case .active:
+                active += 1
+            case .waitingFresh:
+                idle += 1
+                freshIdle += 1
+            case .waitingStale:
+                idle += 1
+                staleIdle += 1
+            }
+        }
+
+        return HUDWaitingCounts(active: active, idle: idle, freshIdle: freshIdle, staleIdle: staleIdle)
+    }
+
+    private static func sortRows(_ rows: [HUDRow], now: Date = Date()) -> [HUDRow] {
+        rows.sorted { a, b in
+            let aPriority = displayPriority(for: a, now: now)
+            let bPriority = displayPriority(for: b, now: now)
+            if aPriority != bPriority {
+                return aPriority.rawValue < bPriority.rawValue
+            }
+            let da = a.lastActivityAt ?? .distantPast
+            let db = b.lastActivityAt ?? .distantPast
+            if da != db { return da > db }
+            return a.displayName.localizedCaseInsensitiveCompare(b.displayName) == .orderedAscending
+        }
+    }
+
+    private static func mapAgentType(_ source: SessionSource) -> HUDAgentType {
         switch source {
         case .codex:
             return .codex
@@ -1216,7 +1639,7 @@ struct AgentCockpitHUDView: View {
         }
     }
 
-    private func authoritativeSessionID(for presence: CodexActivePresence, resolvedSession: Session?) -> String? {
+    private static func authoritativeSessionID(for presence: CodexActivePresence, resolvedSession: Session?) -> String? {
         if let sessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
            !sessionID.isEmpty {
             return sessionID
@@ -1225,26 +1648,91 @@ struct AgentCockpitHUDView: View {
         return CodexActiveSessionsModel.liveSessionIDCandidates(for: resolvedSession).first
     }
 
-    private func resolveBySessionID(_ id: String?, source: SessionSource, lookupIndexes: SessionLookupIndexes) -> Session? {
+    private static func resolveBySessionID(_ id: String?, source: SessionSource, lookupIndexes: SessionLookupIndexes) -> Session? {
         guard let id, !id.isEmpty else { return nil }
         let key = CodexActiveSessionsModel.sessionLookupKey(source: source, sessionId: id)
         return lookupIndexes.bySessionID[key]
     }
 
-    private func shouldHideUnresolvedPresencePlaceholder(_ presence: CodexActivePresence,
-                                                         resolvedSession: Session?,
-                                                         lookupIndexes: SessionLookupIndexes) -> Bool {
-        let hasWorkspaceMatch: Bool = {
-            guard let workspaceRoot = presence.workspaceRoot?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !workspaceRoot.isEmpty else {
-                return false
+    private static func resolveByWorkspace(_ workspaceRoot: String?,
+                                           source: SessionSource,
+                                           lookupIndexes: SessionLookupIndexes) -> Session? {
+        guard let normalizedWorkspace = normalizedWorkingDirectory(workspaceRoot), !normalizedWorkspace.isEmpty else {
+            return nil
+        }
+        let exactKey = workspaceLookupKey(source: source, normalizedPath: normalizedWorkspace)
+        if let session = lookupIndexes.byWorkspace[exactKey] {
+            return session
+        }
+
+        let sourcePrefix = "\(source.rawValue)|cwd:"
+        var best: (session: Session, score: Int)?
+        for (key, session) in lookupIndexes.byWorkspace {
+            guard key.hasPrefix(sourcePrefix) else { continue }
+            let sessionPath = String(key.dropFirst(sourcePrefix.count))
+            guard !sessionPath.isEmpty else { continue }
+            let hasRelation =
+                normalizedWorkspace == sessionPath
+                || normalizedWorkspace.hasPrefix(sessionPath + "/")
+                || sessionPath.hasPrefix(normalizedWorkspace + "/")
+            guard hasRelation else { continue }
+            let candidate = (session: session, score: sessionPath.count)
+            if let best, best.score >= candidate.score {
+                continue
             }
-            let workspaceKey = workspaceLookupKey(
-                source: presence.source,
-                normalizedPath: CodexActiveSessionsModel.normalizePath(workspaceRoot)
-            )
-            return lookupIndexes.byWorkspace[workspaceKey] != nil
-        }()
+            best = candidate
+        }
+        return best?.session
+    }
+
+    static func projectLabel(resolvedSession: Session?, presence: CodexActivePresence) -> String {
+        if let repoName = normalizedProjectLabel(resolvedSession?.repoName) {
+            return repoName
+        }
+        if let inferred = inferredProjectName(fromPath: resolvedSession?.cwd) {
+            return inferred
+        }
+        if let inferred = inferredProjectName(fromPath: presence.workspaceRoot) {
+            return inferred
+        }
+        if let repoDisplay = normalizedProjectLabel(resolvedSession?.repoDisplay), repoDisplay != "—" {
+            return repoDisplay
+        }
+        return "-"
+    }
+
+    private static func normalizedProjectLabel(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    private static func inferredProjectName(fromPath rawPath: String?) -> String? {
+        guard let rawPath = normalizedProjectLabel(rawPath) else { return nil }
+        let normalizedPath = CodexActiveSessionsModel.normalizePath(rawPath)
+        guard !normalizedPath.isEmpty else { return nil }
+        let genericNames = Set(["documents", "desktop", "downloads", "tmp", "temp", "src", "code"])
+
+        let url = URL(fileURLWithPath: normalizedPath)
+        let candidate = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !candidate.isEmpty, candidate != ".", !genericNames.contains(candidate.lowercased()) {
+            return candidate
+        }
+
+        let parent = url.deletingLastPathComponent().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !parent.isEmpty, parent != ".", !genericNames.contains(parent.lowercased()) else { return nil }
+        return parent
+    }
+
+    private static func shouldHideUnresolvedPresencePlaceholder(_ presence: CodexActivePresence,
+                                                                resolvedSession: Session?,
+                                                                lookupIndexes: SessionLookupIndexes) -> Bool {
+        let hasWorkspaceMatch = Self.resolveByWorkspace(
+            presence.workspaceRoot,
+            source: presence.source,
+            lookupIndexes: lookupIndexes
+        ) != nil
         return Self.shouldHideUnresolvedPresencePlaceholder(
             presence,
             resolvedSession: resolvedSession,
@@ -1261,11 +1749,11 @@ struct AgentCockpitHUDView: View {
             .lowercased()
         if kind == "subagent" { return true }
 
-        if presence.source == .codex { return true }
-
         let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         if hasSessionID || hasLogPath { return false }
+
+        if presence.source == .codex { return !hasWorkspaceMatch }
 
         let hasRevealURL = presence.revealURL != nil
         let hasITermGuid = CodexActiveSessionsModel.itermSessionGuid(from: presence.terminal?.itermSessionId)?.isEmpty == false
@@ -1280,7 +1768,7 @@ struct AgentCockpitHUDView: View {
         return true
     }
 
-    private func dedupeRowsByResolvedSession(_ rows: [LegacyMappedRow]) -> [LegacyMappedRow] {
+    private static func dedupeRowsByResolvedSession(_ rows: [LegacyMappedRow]) -> [LegacyMappedRow] {
         var byKey: [String: LegacyMappedRow] = [:]
         byKey.reserveCapacity(rows.count)
 
@@ -1295,11 +1783,11 @@ struct AgentCockpitHUDView: View {
                         normalizedPath: CodexActiveSessionsModel.normalizePath(path)
                     )
                 }
-                if let tty = normalizeTTY(row.tty) {
+                if let tty = Self.normalizeTTY(row.tty) {
                     return "\(row.source.rawValue)|tty:\(tty)"
                 }
-                if let workspace = normalizedWorkingDirectory(row.workingDirectory), !workspace.isEmpty {
-                    return workspaceLookupKey(source: row.source, normalizedPath: workspace)
+                if let workspace = Self.normalizedWorkingDirectory(row.workingDirectory), !workspace.isEmpty {
+                    return Self.workspaceLookupKey(source: row.source, normalizedPath: workspace)
                 }
                 if let itermSessionId = row.itermSessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !itermSessionId.isEmpty {
@@ -1308,13 +1796,13 @@ struct AgentCockpitHUDView: View {
                 return row.id
             }()
             let existing = byKey[key]
-            byKey[key] = preferredRow(existing: existing, incoming: row)
+            byKey[key] = Self.preferredRow(existing: existing, incoming: row)
         }
 
         return Array(byKey.values)
     }
 
-    private func preferredRow(existing: LegacyMappedRow?, incoming: LegacyMappedRow) -> LegacyMappedRow {
+    private static func preferredRow(existing: LegacyMappedRow?, incoming: LegacyMappedRow) -> LegacyMappedRow {
         guard let existing else { return incoming }
         let winner: LegacyMappedRow
         let loser: LegacyMappedRow
@@ -1323,42 +1811,42 @@ struct AgentCockpitHUDView: View {
         if existingHasDate != incomingHasDate {
             winner = incomingHasDate ? incoming : existing
             loser = incomingHasDate ? existing : incoming
-            return mergeMetadata(into: winner, from: loser)
+            return Self.mergeMetadata(into: winner, from: loser)
         }
         let existingSeen = existing.lastSeenAt ?? .distantPast
         let incomingSeen = incoming.lastSeenAt ?? .distantPast
         if incomingSeen != existingSeen {
             winner = incomingSeen > existingSeen ? incoming : existing
             loser = incomingSeen > existingSeen ? existing : incoming
-            return mergeMetadata(into: winner, from: loser)
+            return Self.mergeMetadata(into: winner, from: loser)
         }
         let existingHasJoin = (existing.sessionID?.isEmpty == false) || existing.logPath != nil
         let incomingHasJoin = (incoming.sessionID?.isEmpty == false) || incoming.logPath != nil
         if existingHasJoin != incomingHasJoin {
             winner = incomingHasJoin ? incoming : existing
             loser = incomingHasJoin ? existing : incoming
-            return mergeMetadata(into: winner, from: loser)
+            return Self.mergeMetadata(into: winner, from: loser)
         }
         if existing.liveState != incoming.liveState {
-            let existingCanProbe = rowCanTailProbe(existing)
-            let incomingCanProbe = rowCanTailProbe(incoming)
+            let existingCanProbe = Self.rowCanTailProbe(existing)
+            let incomingCanProbe = Self.rowCanTailProbe(incoming)
             if existingCanProbe != incomingCanProbe {
                 winner = incomingCanProbe ? incoming : existing
                 loser = incomingCanProbe ? existing : incoming
-                return mergeMetadata(into: winner, from: loser)
+                return Self.mergeMetadata(into: winner, from: loser)
             }
             if existing.liveState == .activeWorking, incoming.liveState == .openIdle {
-                return mergeMetadata(into: incoming, from: existing)
+                return Self.mergeMetadata(into: incoming, from: existing)
             }
-            return mergeMetadata(into: existing, from: incoming)
+            return Self.mergeMetadata(into: existing, from: incoming)
         }
         if incoming.title.count > existing.title.count {
-            return mergeMetadata(into: incoming, from: existing)
+            return Self.mergeMetadata(into: incoming, from: existing)
         }
-        return mergeMetadata(into: existing, from: incoming)
+        return Self.mergeMetadata(into: existing, from: incoming)
     }
 
-    private func mergeMetadata(into winner: LegacyMappedRow, from loser: LegacyMappedRow) -> LegacyMappedRow {
+    private static func mergeMetadata(into winner: LegacyMappedRow, from loser: LegacyMappedRow) -> LegacyMappedRow {
         LegacyMappedRow(
             id: winner.id,
             source: winner.source,
@@ -1380,7 +1868,7 @@ struct AgentCockpitHUDView: View {
         )
     }
 
-    private func rowCanTailProbe(_ row: LegacyMappedRow) -> Bool {
+    private static func rowCanTailProbe(_ row: LegacyMappedRow) -> Bool {
         CodexActiveSessionsModel.canAttemptITerm2TailProbe(
             itermSessionId: row.itermSessionId,
             tty: row.tty,
@@ -1388,7 +1876,7 @@ struct AgentCockpitHUDView: View {
         )
     }
 
-    private func parseSessionTimestamp(from presence: CodexActivePresence) -> Date? {
+    private static func parseSessionTimestamp(from presence: CodexActivePresence) -> Date? {
         guard let path = presence.sessionLogPath else { return nil }
         if presence.source != .codex {
             if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
@@ -1413,7 +1901,8 @@ struct AgentCockpitHUDView: View {
         return Self.codexRolloutTimestampFormatter.date(from: ts)
     }
 
-    private func buildSessionLookupIndexes() -> SessionLookupIndexes {
+    private static func buildSessionLookupIndexes(codexIndexer: SessionIndexer,
+                                                  claudeIndexer: ClaudeSessionIndexer) -> SessionLookupIndexes {
         let supportedSources: Set<SessionSource> = [.codex, .claude]
         let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions
 
@@ -1429,25 +1918,25 @@ struct AgentCockpitHUDView: View {
                 source: session.source,
                 normalizedPath: CodexActiveSessionsModel.normalizePath(session.filePath)
             )
-            byLogPath[logKey] = preferredSession(existing: byLogPath[logKey], incoming: session)
+            byLogPath[logKey] = Self.preferredSession(existing: byLogPath[logKey], incoming: session)
 
             for runtimeID in CodexActiveSessionsModel.liveSessionIDCandidates(for: session) {
                 let sid = runtimeID.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !sid.isEmpty else { continue }
                 let sessionKey = CodexActiveSessionsModel.sessionLookupKey(source: session.source, sessionId: sid)
-                bySessionID[sessionKey] = preferredSession(existing: bySessionID[sessionKey], incoming: session)
+                bySessionID[sessionKey] = Self.preferredSession(existing: bySessionID[sessionKey], incoming: session)
             }
 
-            if let cwd = normalizedWorkingDirectory(session.cwd), !cwd.isEmpty {
-                let workspaceKey = workspaceLookupKey(source: session.source, normalizedPath: cwd)
-                byWorkspace[workspaceKey] = preferredSession(existing: byWorkspace[workspaceKey], incoming: session)
+            if let cwd = Self.normalizedWorkingDirectory(session.cwd), !cwd.isEmpty {
+                let workspaceKey = Self.workspaceLookupKey(source: session.source, normalizedPath: cwd)
+                byWorkspace[workspaceKey] = Self.preferredSession(existing: byWorkspace[workspaceKey], incoming: session)
             }
         }
 
         return SessionLookupIndexes(byLogPath: byLogPath, bySessionID: bySessionID, byWorkspace: byWorkspace)
     }
 
-    private func preferredSession(existing: Session?, incoming: Session) -> Session {
+    private static func preferredSession(existing: Session?, incoming: Session) -> Session {
         guard let existing else { return incoming }
         if incoming.modifiedAt != existing.modifiedAt {
             return incoming.modifiedAt > existing.modifiedAt ? incoming : existing
@@ -1463,13 +1952,13 @@ struct AgentCockpitHUDView: View {
         return incoming.id < existing.id ? incoming : existing
     }
 
-    private func normalizedWorkingDirectory(_ raw: String?) -> String? {
+    private static func normalizedWorkingDirectory(_ raw: String?) -> String? {
         guard let raw else { return nil }
         let normalized = CodexActiveSessionsModel.normalizePath(raw)
         return normalized.isEmpty ? nil : normalized
     }
 
-    private func normalizeTTY(_ raw: String?) -> String? {
+    private static func normalizeTTY(_ raw: String?) -> String? {
         guard let raw else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -1479,7 +1968,7 @@ struct AgentCockpitHUDView: View {
         return "/dev/\(trimmed)"
     }
 
-    private func workspaceLookupKey(source: SessionSource, normalizedPath: String) -> String {
+    private static func workspaceLookupKey(source: SessionSource, normalizedPath: String) -> String {
         "\(source.rawValue)|cwd:\(normalizedPath)"
     }
 }
