@@ -1683,17 +1683,66 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(idleWithQuery.map(\.id), ["idle-two"])
     }
 
-    func testAgentCockpitHUD_groupedRows_ordersActiveProjectsFirstThenAlphabetical() {
+    func testAgentCockpitHUD_displayPriority_marksWaitingRowsStaleAfterThreshold() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let fresh = makeHUDRow(
+            id: "fresh",
+            project: "Alpha",
+            name: "Fresh wait",
+            state: .idle,
+            lastActivityAt: now.addingTimeInterval(-(3 * 60 * 60))
+        )
+        let stale = makeHUDRow(
+            id: "stale",
+            project: "Alpha",
+            name: "Stale wait",
+            state: .idle,
+            lastActivityAt: now.addingTimeInterval(-(4 * 60 * 60 + 1))
+        )
+        let unknown = makeHUDRow(
+            id: "unknown",
+            project: "Alpha",
+            name: "Unknown wait",
+            state: .idle,
+            lastActivityAt: nil
+        )
+
+        XCTAssertEqual(AgentCockpitHUDView.displayPriority(for: fresh, now: now), .waitingFresh)
+        XCTAssertEqual(AgentCockpitHUDView.displayPriority(for: stale, now: now), .waitingStale)
+        XCTAssertEqual(AgentCockpitHUDView.displayPriority(for: unknown, now: now), .waitingFresh)
+    }
+
+    func testAgentCockpitHUD_groupedRows_ordersCurrentProjectsBeforeStaleOnlyProjects() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
         let rows = [
-            makeHUDRow(id: "idle-beta", project: "Beta", name: "B", state: .idle),
-            makeHUDRow(id: "active-gamma", project: "Gamma", name: "G", state: .active),
-            makeHUDRow(id: "active-alpha", project: "Alpha", name: "A", state: .active)
+            makeHUDRow(
+                id: "idle-beta",
+                project: "Beta",
+                name: "B",
+                state: .idle,
+                lastActivityAt: now.addingTimeInterval(-(5 * 60 * 60))
+            ),
+            makeHUDRow(
+                id: "active-gamma",
+                project: "Gamma",
+                name: "G",
+                state: .active,
+                lastActivityAt: now.addingTimeInterval(-120)
+            ),
+            makeHUDRow(
+                id: "idle-alpha",
+                project: "Alpha",
+                name: "A",
+                state: .idle,
+                lastActivityAt: now.addingTimeInterval(-(45 * 60))
+            )
         ]
 
-        let grouped = AgentCockpitHUDView.groupedRows(rows)
-        XCTAssertEqual(grouped.map(\.projectName), ["Alpha", "Gamma", "Beta"])
-        XCTAssertEqual(grouped.map(\.activeCount), [1, 1, 0])
-        XCTAssertEqual(grouped.map(\.idleCount), [0, 0, 1])
+        let grouped = AgentCockpitHUDView.groupedRows(rows, now: now)
+        XCTAssertEqual(grouped.map(\.projectName), ["Gamma", "Alpha", "Beta"])
+        XCTAssertEqual(grouped.map(\.displayPriority), [.active, .waitingFresh, .waitingStale])
+        XCTAssertEqual(grouped.map(\.idleCount), [0, 1, 1])
+        XCTAssertEqual(grouped.last?.isStaleOnly, true)
     }
 
     func testAgentCockpitHUD_counts_reportsActiveAndIdleTotals() {
@@ -1705,6 +1754,233 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let counts = AgentCockpitHUDView.counts(for: rows)
         XCTAssertEqual(counts.active, 2)
         XCTAssertEqual(counts.idle, 1)
+    }
+
+    func testAgentCockpitHUD_liveSessionSummary_countsFreshAndStaleWaitingTogether() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let rows = [
+            makeHUDRow(id: "active", project: "Alpha", name: "Active", state: .active, lastActivityAt: now.addingTimeInterval(-30)),
+            makeHUDRow(id: "fresh-wait", project: "Alpha", name: "Fresh", state: .idle, lastActivityAt: now.addingTimeInterval(-(60 * 60))),
+            makeHUDRow(id: "stale-wait", project: "Beta", name: "Stale", state: .idle, lastActivityAt: now.addingTimeInterval(-(5 * 60 * 60)))
+        ]
+
+        let summary = AgentCockpitHUDView.liveSessionSummary(for: rows, now: now)
+        XCTAssertEqual(summary.activeCount, 1)
+        XCTAssertEqual(summary.waitingCount, 2)
+    }
+
+    func testAgentCockpitHUD_liveSessionSummary_treatsUnknownWaitingAsWaiting() {
+        let rows = [
+            makeHUDRow(id: "waiting", project: "Alpha", name: "Unknown", state: .idle, lastActivityAt: nil)
+        ]
+
+        let summary = AgentCockpitHUDView.liveSessionSummary(for: rows)
+        XCTAssertEqual(summary.activeCount, 0)
+        XCTAssertEqual(summary.waitingCount, 1)
+    }
+
+    func testAgentCockpitHUD_groupedRows_ordersStaleWaitingRowsLastInsideMixedProject() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let rows = [
+            makeHUDRow(
+                id: "stale",
+                project: "Alpha",
+                name: "Stale row",
+                state: .idle,
+                lastActivityAt: now.addingTimeInterval(-(2 * 86_400))
+            ),
+            makeHUDRow(
+                id: "fresh",
+                project: "Alpha",
+                name: "Fresh row",
+                state: .idle,
+                lastActivityAt: now.addingTimeInterval(-(30 * 60))
+            ),
+            makeHUDRow(
+                id: "active",
+                project: "Alpha",
+                name: "Active row",
+                state: .active,
+                lastActivityAt: now.addingTimeInterval(-60)
+            )
+        ]
+
+        let grouped = AgentCockpitHUDView.groupedRows(rows, now: now)
+        XCTAssertEqual(grouped.count, 1)
+        XCTAssertEqual(grouped[0].rows.map(\.id), ["active", "fresh", "stale"])
+        XCTAssertFalse(grouped[0].isStaleOnly)
+    }
+
+    func testAgentCockpitHUD_hasPriorityChurn_detectsFreshWaitingTurningStale() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let existing = [
+            makeHUDRow(
+                id: "same",
+                project: "Alpha",
+                name: "Wait",
+                state: .idle,
+                lastActivityAt: now.addingTimeInterval(-(3 * 60 * 60))
+            )
+        ]
+        let incoming = [
+            makeHUDRow(
+                id: "same",
+                project: "Alpha",
+                name: "Wait",
+                state: .idle,
+                lastActivityAt: now.addingTimeInterval(-(5 * 60 * 60))
+            )
+        ]
+
+        XCTAssertTrue(AgentCockpitHUDView.hasPriorityChurn(existing: existing, incoming: incoming, now: now))
+    }
+
+    func testAgentCockpitHUD_hasPriorityChurn_detectsOrderShiftForSameRows() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let nearThreshold = makeHUDRow(
+            id: "near-threshold",
+            project: "Alpha",
+            name: "Near threshold",
+            state: .idle,
+            lastActivityAt: now.addingTimeInterval(-(3 * 60 * 60 + 59 * 60))
+        )
+        let fresh = makeHUDRow(
+            id: "fresh",
+            project: "Alpha",
+            name: "Fresh",
+            state: .idle,
+            lastActivityAt: now.addingTimeInterval(-(3 * 60 * 60 + 50 * 60))
+        )
+
+        let existing = [nearThreshold, fresh]
+        let incoming = [fresh, nearThreshold]
+        XCTAssertTrue(AgentCockpitHUDView.hasPriorityChurn(existing: existing, incoming: incoming, now: now))
+    }
+
+    func testAgentCockpitHUD_hasPriorityChurn_detectsTimeOnlyStaleTransitionAcrossSnapshots() {
+        let existingSnapshotAt = Date(timeIntervalSince1970: 1_000_000)
+        let incomingSnapshotAt = existingSnapshotAt.addingTimeInterval(31 * 60)
+        let lastActivityAt = existingSnapshotAt.addingTimeInterval(-(3 * 60 * 60 + 45 * 60))
+
+        let row = makeHUDRow(
+            id: "same",
+            project: "Alpha",
+            name: "Wait",
+            state: .idle,
+            lastActivityAt: lastActivityAt
+        )
+
+        XCTAssertTrue(
+            AgentCockpitHUDView.hasPriorityChurn(
+                existing: [row],
+                existingSnapshotAt: existingSnapshotAt,
+                incoming: [row],
+                incomingSnapshotAt: incomingSnapshotAt
+            )
+        )
+    }
+
+    func testAgentCockpitHUD_synchronizeCollapsedProjects_clearsCompactOnlyStateWhenLeavingCompactMode() {
+        let staleGroup = makeHUDGroup(
+            id: "stale",
+            rows: [makeHUDRow(id: "s1", project: "stale", name: "S1", state: .idle)],
+            activeCount: 0,
+            idleCount: 1,
+            freshIdleCount: 0,
+            staleIdleCount: 1
+        )
+        let synchronized = AgentCockpitHUDView.synchronizeCollapsedProjectsForStaleGroups(
+            isCompact: false,
+            groupByProject: true,
+            groups: [staleGroup],
+            collapsedProjects: ["stale", "manual"],
+            staleAutoCollapsedProjects: ["stale"],
+            manuallyExpandedStaleProjects: ["stale"]
+        )
+
+        XCTAssertEqual(synchronized.collapsedProjects, ["manual"])
+        XCTAssertEqual(synchronized.staleAutoCollapsedProjects, [])
+        XCTAssertEqual(synchronized.manuallyExpandedStaleProjects, [])
+    }
+
+    func testAgentCockpitHUD_synchronizeCollapsedProjects_autoCollapsesStaleOnlyGroupsInCompactMode() {
+        let staleGroup = makeHUDGroup(
+            id: "stale",
+            rows: [makeHUDRow(id: "s1", project: "stale", name: "S1", state: .idle)],
+            activeCount: 0,
+            idleCount: 1,
+            freshIdleCount: 0,
+            staleIdleCount: 1
+        )
+        let activeGroup = makeHUDGroup(
+            id: "active",
+            rows: [makeHUDRow(id: "a1", project: "active", name: "A1", state: .active)],
+            activeCount: 1,
+            idleCount: 0,
+            freshIdleCount: 0,
+            staleIdleCount: 0
+        )
+
+        let synchronized = AgentCockpitHUDView.synchronizeCollapsedProjectsForStaleGroups(
+            isCompact: true,
+            groupByProject: true,
+            groups: [activeGroup, staleGroup],
+            collapsedProjects: [],
+            staleAutoCollapsedProjects: [],
+            manuallyExpandedStaleProjects: []
+        )
+
+        XCTAssertEqual(synchronized.collapsedProjects, ["stale"])
+        XCTAssertEqual(synchronized.staleAutoCollapsedProjects, ["stale"])
+        XCTAssertEqual(synchronized.manuallyExpandedStaleProjects, [])
+    }
+
+    func testAgentCockpitHUD_projectLabel_prefersWorkspaceInferenceForUnresolvedPresence() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.workspaceRoot = "/Users/test/Repository/ProjectAlpha"
+
+        XCTAssertEqual(
+            AgentCockpitHUDView.projectLabel(resolvedSession: nil, presence: presence),
+            "ProjectAlpha"
+        )
+    }
+
+    func testAgentCockpitHUD_projectLabel_fallsBackToHyphenWhenInferenceFails() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+
+        XCTAssertEqual(
+            AgentCockpitHUDView.projectLabel(resolvedSession: nil, presence: presence),
+            "-"
+        )
+    }
+
+    func testAgentCockpitHUD_shouldHideUnresolvedCodexPlaceholder_allowsWorkspaceMatch() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.workspaceRoot = "/Users/test/Repository/ProjectAlpha"
+
+        XCTAssertFalse(
+            AgentCockpitHUDView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: true
+            )
+        )
+    }
+
+    func testAgentCockpitHUD_shouldHideUnresolvedCodexPlaceholder_hidesWithoutWorkspaceMatch() {
+        var presence = CodexActivePresence()
+        presence.source = .codex
+
+        XCTAssertTrue(
+            AgentCockpitHUDView.shouldHideUnresolvedPresencePlaceholder(
+                presence,
+                resolvedSession: nil,
+                hasWorkspaceMatch: false
+            )
+        )
     }
 
     func testAgentCockpitHUD_stableMergedOrder_preservesExistingAndAppendsInserted() {
@@ -1733,7 +2009,11 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(grouped.first?.rows.map(\.id), ["r1", "r3"])
     }
 
-    private func makeHUDRow(id: String, project: String, name: String, state: HUDLiveState) -> HUDRow {
+    private func makeHUDRow(id: String,
+                            project: String,
+                            name: String,
+                            state: HUDLiveState,
+                            lastActivityAt: Date? = Date()) -> HUDRow {
         HUDRow(
             id: id,
             source: .codex,
@@ -1747,7 +2027,25 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             itermSessionId: nil,
             revealURL: nil,
             tty: nil,
-            termProgram: nil
+            termProgram: nil,
+            lastActivityAt: lastActivityAt
+        )
+    }
+
+    private func makeHUDGroup(id: String,
+                              rows: [HUDRow],
+                              activeCount: Int,
+                              idleCount: Int,
+                              freshIdleCount: Int,
+                              staleIdleCount: Int) -> HUDGroup {
+        HUDGroup(
+            id: id,
+            projectName: id,
+            rows: rows,
+            activeCount: activeCount,
+            idleCount: idleCount,
+            freshIdleCount: freshIdleCount,
+            staleIdleCount: staleIdleCount
         )
     }
 

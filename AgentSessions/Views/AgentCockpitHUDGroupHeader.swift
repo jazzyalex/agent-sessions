@@ -4,6 +4,7 @@ struct AgentCockpitHUDGroupHeader: View {
     let projectName: String
     let activeCount: Int
     let idleCount: Int
+    let isStaleOnly: Bool
     let isCollapsed: Bool
     let onTap: () -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -33,13 +34,10 @@ struct AgentCockpitHUDGroupHeader: View {
                 if idleCount > 0 {
                     Text("\(idleCount) waiting")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600"))
+                        .foregroundStyle(waitingBadgeTextColor)
                         .padding(.vertical, 2)
                         .padding(.horizontal, 8)
-                        .background(
-                            (colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600"))
-                                .opacity(colorScheme == .dark ? 0.16 : 0.12)
-                        )
+                        .background(waitingBadgeBackgroundColor)
                         .clipShape(Capsule())
                 }
 
@@ -58,5 +56,19 @@ struct AgentCockpitHUDGroupHeader: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var waitingBadgeBaseColor: Color {
+        colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
+    }
+
+    private var waitingBadgeTextColor: Color {
+        isStaleOnly ? waitingBadgeBaseColor.opacity(0.78) : waitingBadgeBaseColor
+    }
+
+    private var waitingBadgeBackgroundColor: Color {
+        let baseOpacity = colorScheme == .dark ? 0.16 : 0.12
+        let adjustedOpacity = isStaleOnly ? baseOpacity * 0.62 : baseOpacity
+        return waitingBadgeBaseColor.opacity(adjustedOpacity)
     }
 }

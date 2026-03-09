@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 - Sessions (Agent Cockpit): Cockpit HUD labels now use `Waiting` instead of `Idle` for non-active live sessions, including filter pills, grouped counts, empty states, and accessibility labels.
 - Sessions (Agent Cockpit): Pinned compact HUD mode now keeps its toolbar always visible, eliminating hover overlays and preventing row targets from shifting under the cursor during quick session switching.
 - Sessions (Agent Cockpit): Grouped project headers now keep repo names on a single truncated line instead of wrapping to two rows in compact/full HUD layouts.
+- Sessions (Agent Cockpit): Grouped HUD projects with only 4h+ waiting sessions now sink below current work, auto-collapse by default in compact grouped mode, and are separated by a divider so long-postponed sessions stay visible without competing equally for attention.
+- Sessions (Agent Cockpit): 4h+ waiting rows now keep the `Waiting` label but render with dimmer same-hue waiting styling in compact and full modes, while mixed projects keep recent waiting/active rows ahead of stale waiting rows.
+- Menu Bar / Agent Cockpit: The cockpit toolbar now includes a direct `Open Agent Sessions` action, and the menu bar item now shows live active/waiting counts first with quick links to Agent Cockpit and the main Agent Sessions window.
+- Sessions / Menu Bar: Fixed regressions where unresolved Codex live presences could disappear from Agent Cockpit, the menu bar item could stay hidden despite being enabled, and cockpit `Open Agent Sessions` could fail with a missing scene id.
 
 ## [3.0.1] - 2026-03-04
 

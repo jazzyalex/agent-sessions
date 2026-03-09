@@ -24,6 +24,45 @@ struct PendingCockpitNavigationRequest {
     let createdAt: Date
 }
 
+enum AppWindowRouter {
+    @MainActor static var openAgentSessionsWindow: (() -> Void)?
+    @MainActor static var openAgentCockpitWindow: (() -> Void)?
+
+    @MainActor private static func existingWindow(title: String, identifier: String? = nil) -> NSWindow? {
+        if let identifier {
+            if let identifiedWindow = NSApp.windows.first(where: { $0.identifier?.rawValue == identifier }) {
+                return identifiedWindow
+            }
+        }
+
+        return NSApp.windows.first(where: { $0.title == title })
+    }
+
+    @MainActor static func showAgentSessionsWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let main = existingWindow(title: "Agent Sessions") ?? NSApp.mainWindow {
+            main.makeKeyAndOrderFront(nil)
+            return
+        }
+        if let openAgentSessionsWindow {
+            openAgentSessionsWindow()
+            return
+        }
+    }
+
+    @MainActor static func showAgentCockpitWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let cockpit = existingWindow(title: "", identifier: "AgentCockpit") {
+            cockpit.makeKeyAndOrderFront(nil)
+            return
+        }
+        if let openAgentCockpitWindow {
+            openAgentCockpitWindow()
+            return
+        }
+    }
+}
+
 enum CockpitNavigationBridge {
     private static let defaultsKey = "AgentSessionsPendingCockpitNavigationRequest"
     private static let unifiedSessionIDKey = "unifiedSessionID"
@@ -115,6 +154,7 @@ struct AgentSessionsApp: App {
     @AppStorage("CodexUsageEnabled") private var codexUsageEnabledPref: Bool = false
     @AppStorage("ClaudeUsageEnabled") private var claudeUsageEnabledPref: Bool = false
     @AppStorage("ShowClaudeUsageStrip") private var showClaudeUsageStrip: Bool = false
+    @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
@@ -137,7 +177,7 @@ struct AgentSessionsApp: App {
 
     var body: some Scene {
         // Default unified window
-        WindowGroup("Agent Sessions") {
+        WindowGroup("Agent Sessions", id: "Agent Sessions") {
             let unified = unifiedIndexerHolder.makeUnified(
                 codexIndexer: indexer,
                 claudeIndexer: claudeIndexer,
@@ -171,6 +211,7 @@ struct AgentSessionsApp: App {
                 .environmentObject(archiveManager)
                 .environmentObject(updaterController)
                 .background(WindowAutosave(name: "MainWindow"))
+                .background(WindowOpenRegistrationView())
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
                     if UpdaterController.shared == nil || UpdaterController.shared !== updaterController {
@@ -226,17 +267,16 @@ struct AgentSessionsApp: App {
                 .onChange(of: menuBarEnabled) { _, newValue in
                     updateUsageModels()
                 }
+                .onChange(of: liveSessionsEnabled) { _, _ in
+                    updateUsageModels()
+                }
                 .onChange(of: codexAgentEnabled) { _, _ in handleAgentEnablementChange() }
                 .onChange(of: claudeAgentEnabled) { _, _ in handleAgentEnablementChange() }
                 .onChange(of: geminiAgentEnabled) { _, _ in handleAgentEnablementChange() }
                 .onChange(of: openCodeAgentEnabled) { _, _ in handleAgentEnablementChange() }
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
-                    if statusItemController == nil {
-                        statusItemController = StatusItemController(indexer: indexer,
-                                                                     codexStatus: codexUsageModel,
-                                                                     claudeStatus: claudeUsageModel)
-                    }
+                    ensureStatusItemController()
                     updateUsageModels()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .showOnboardingFromMenu)) { _ in
@@ -333,6 +373,12 @@ struct AgentSessionsApp: App {
                 claudeIndexer: claudeIndexer
             )
                 .environmentObject(activeCodexSessions)
+                .background(WindowOpenRegistrationView())
+                .onAppear {
+                    guard !AppRuntime.isRunningTests else { return }
+                    ensureStatusItemController()
+                    updateUsageModels()
+                }
         }
         .defaultSize(width: 644, height: 320)
     }
@@ -475,8 +521,16 @@ extension AgentSessionsApp {
         let claudeTrackingEnabled = claudeEnabled && claudeAgentEnabled
         claudeUsageModel.setEnabled(claudeTrackingEnabled)
 
-        let anyUsageTrackingEnabled = codexTrackingEnabled || claudeTrackingEnabled
-        statusItemController?.setEnabled(menuBarEnabled && anyUsageTrackingEnabled)
+        statusItemController?.setEnabled(menuBarEnabled)
+    }
+
+    private func ensureStatusItemController() {
+        guard statusItemController == nil else { return }
+        statusItemController = StatusItemController(indexer: indexer,
+                                                    claudeIndexer: claudeIndexer,
+                                                    activeSessions: activeCodexSessions,
+                                                    codexStatus: codexUsageModel,
+                                                    claudeStatus: claudeUsageModel)
     }
 
     private func setupAnalytics() {
@@ -617,6 +671,23 @@ extension AgentSessionsApp {
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         _ = alert.runModal()
+    }
+}
+
+private struct WindowOpenRegistrationView: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+                AppWindowRouter.openAgentSessionsWindow = {
+                    openWindow(id: "Agent Sessions")
+                }
+                AppWindowRouter.openAgentCockpitWindow = {
+                    openWindow(id: "AgentCockpit")
+                }
+            }
     }
 }
 // MARK: - Onboarding window presentation

@@ -2,6 +2,86 @@ import SwiftUI
 import AppKit
 
 struct UsageMenuBarLabel: View {
+    @EnvironmentObject var activeCodex: CodexActiveSessionsModel
+    @EnvironmentObject var codexIndexer: SessionIndexer
+    @EnvironmentObject var claudeIndexer: ClaudeSessionIndexer
+    @EnvironmentObject var codexStatus: CodexUsageModel
+    @EnvironmentObject var claudeStatus: ClaudeUsageModel
+    @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
+    @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if liveSessionsEnabled {
+                LiveSessionMenuBarLabel(
+                    summary: AgentCockpitHUDView.liveSessionSummary(
+                        activeCodex: activeCodex,
+                        codexIndexer: codexIndexer,
+                        claudeIndexer: claudeIndexer
+                    )
+                )
+            }
+            if hasAnyUsageSource {
+                UsageMeterMenuBarLabel()
+                    .environmentObject(codexStatus)
+                    .environmentObject(claudeStatus)
+            }
+            if !liveSessionsEnabled && !hasAnyUsageSource {
+                FallbackMenuBarLabel()
+            }
+        }
+        .frame(height: NSStatusBar.system.thickness)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var hasAnyUsageSource: Bool {
+        (codexAgentEnabled && codexUsageEnabled) || (claudeAgentEnabled && claudeUsageEnabled)
+    }
+}
+
+private struct LiveSessionMenuBarLabel: View {
+    let summary: HUDLiveSessionSummary
+
+    var body: some View {
+        HStack(spacing: 7) {
+            if summary.activeCount > 0 {
+                countSegment(count: summary.activeCount, color: Color(hex: "30d158"))
+            }
+            if summary.waitingCount > 0 {
+                countSegment(count: summary.waitingCount, color: Color(hex: "e08600"))
+            }
+            if summary.activeCount == 0 && summary.waitingCount == 0 {
+                Text("—")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary.opacity(0.85))
+            }
+        }
+    }
+
+    private func countSegment(count: Int, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text("\(count)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.primary)
+        }
+    }
+}
+
+private struct FallbackMenuBarLabel: View {
+    var body: some View {
+        Text("AS")
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.secondary.opacity(0.9))
+    }
+}
+
+private struct UsageMeterMenuBarLabel: View {
     @EnvironmentObject var codexStatus: CodexUsageModel
     @EnvironmentObject var claudeStatus: ClaudeUsageModel
     @Environment(\.colorScheme) private var colorScheme
@@ -79,8 +159,6 @@ struct UsageMenuBarLabel: View {
                 )
             }
         }
-        .frame(height: NSStatusBar.system.thickness)
-        .fixedSize(horizontal: true, vertical: false)
         .onAppear { applyMenuVisibility(visibility) }
         .onChange(of: visibility) { _, newValue in
             applyMenuVisibility(newValue)
@@ -95,7 +173,6 @@ struct UsageMenuBarMenuContent: View {
     @EnvironmentObject var indexer: SessionIndexer
     @EnvironmentObject var codexStatus: CodexUsageModel
     @EnvironmentObject var claudeStatus: ClaudeUsageModel
-    @Environment(\.openWindow) private var openWindow
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage("MenuBarStyle") private var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
@@ -214,9 +291,7 @@ struct UsageMenuBarMenuContent: View {
             }
             Divider()
             Button("Open Agent Sessions") {
-                // Bring main window to front
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "Agent Sessions")
+                AppWindowRouter.showAgentSessionsWindow()
             }
             // Dynamic label: warn when Claude probes will consume tokens
             let refreshLabel: some View = AnyView(Text("Refresh Limits"))
