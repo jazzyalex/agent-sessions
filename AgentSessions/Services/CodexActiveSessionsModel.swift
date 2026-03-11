@@ -2315,8 +2315,6 @@ final class CodexActiveSessionsModel: ObservableObject {
                         // prefer open/idle over mtime heuristics to avoid false-active spikes.
                         state = .openIdle
                     }
-                } else {
-                    state = previousLiveStates[key]
                 }
             } else if shouldProbeThisPresence, presence.source == .claude {
                 if let probe = matchedBatchProbe {
@@ -2325,8 +2323,6 @@ final class CodexActiveSessionsModel: ObservableObject {
                         isAtShellPrompt: probe.isAtShellPrompt,
                         tail: probe.tail
                     )
-                } else {
-                    state = previousLiveStates[key]
                 }
             }
 
@@ -2348,8 +2344,8 @@ final class CodexActiveSessionsModel: ObservableObject {
                 probedState: state,
                 previousState: previousLiveStates[key],
                 heuristic: heuristic,
-                attemptedITermProbe: matchedBatchProbe != nil,
-                preservePreviousWhenProbeDeferred: probeEligible && matchedBatchProbe == nil
+                attemptedITermProbe: shouldProbeThisPresence,
+                preservePreviousWhenProbeDeferred: probeEligible && !shouldProbeThisPresence
             )
             if let existing = out[key] {
                 if resolved.priority > existing.priority {
@@ -2361,6 +2357,23 @@ final class CodexActiveSessionsModel: ObservableObject {
         }
 
         return out
+    }
+
+    // Internal for targeted unit tests.
+    nonisolated static func classifyLiveStatesForTesting(for presences: [CodexActivePresence],
+                                                         now: Date,
+                                                         probeITerm: Bool,
+                                                         previousLiveStates: [String: CodexLiveState],
+                                                         probedITermPresenceKeys: Set<String>,
+                                                         batchProbeResults: [String: ITermProbeResult]) -> [String: CodexLiveState] {
+        classifyLiveStates(
+            for: presences,
+            now: now,
+            probeITerm: probeITerm,
+            previousLiveStates: previousLiveStates,
+            probedITermPresenceKeys: probedITermPresenceKeys,
+            batchProbeResults: batchProbeResults
+        )
     }
 
     private struct ITermProbeTarget {

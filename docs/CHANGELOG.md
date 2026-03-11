@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- Sessions (Agent Cockpit): Live-state reconciliation now treats selected-but-missing batched iTerm probe rows as probe misses (heuristic/open-idle fallback) instead of preserving stale prior activity states, preventing stuck `active`/`waiting` status after tab/session disappearance or partial probe output.
 - Sessions (Agent Cockpit): Fixed a queued-refresh task lifecycle leak in pinned Cockpit mode by tracking and canceling deferred follow-up refresh tasks, and reduced long-run probe overhead with lower-frequency wait polling plus bounded session lookup cache pruning to prevent gradual CPU climb under steady workloads.
 - Sessions (Agent Cockpit): Pinned Cockpit background updates now reuse cached HUD snapshots and back off expensive iTerm/process probes, cutting CPU use while preserving live row motion and status visibility.
 - Sessions (Agent Cockpit): Pinned/open Cockpit refreshes now keep the last confirmed rows visible until a full empty refresh is confirmed, eliminating transient all-row flicker while the HUD is updating in the background; pinned background tail probes now prioritize previously active rows and sample fewer waiting rows per cycle to reduce long-run CPU climb.
