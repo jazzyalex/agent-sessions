@@ -941,6 +941,51 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testClassifyLiveStates_selectedProbeWithoutBatchRowFallsBackToHeuristic() {
+        var codex = CodexActivePresence()
+        codex.source = .codex
+        codex.sessionId = "sid-codex"
+        codex.tty = "/dev/ttys001"
+
+        var claude = CodexActivePresence()
+        claude.source = .claude
+        claude.sessionId = "sid-claude"
+        claude.tty = "/dev/ttys002"
+
+        let codexKey = "codex|sid:sid-codex"
+        let claudeKey = "claude|sid:sid-claude"
+        let states = CodexActiveSessionsModel.classifyLiveStatesForTesting(
+            for: [codex, claude],
+            now: Date(),
+            probeITerm: true,
+            previousLiveStates: [codexKey: .activeWorking, claudeKey: .activeWorking],
+            probedITermPresenceKeys: [codexKey, claudeKey],
+            batchProbeResults: [:]
+        )
+
+        XCTAssertEqual(states[codexKey], .openIdle)
+        XCTAssertEqual(states[claudeKey], .openIdle)
+    }
+
+    func testClassifyLiveStates_deferredProbePreservesPreviousState() {
+        var codex = CodexActivePresence()
+        codex.source = .codex
+        codex.sessionId = "sid-codex"
+        codex.tty = "/dev/ttys001"
+
+        let key = "codex|sid:sid-codex"
+        let states = CodexActiveSessionsModel.classifyLiveStatesForTesting(
+            for: [codex],
+            now: Date(),
+            probeITerm: true,
+            previousLiveStates: [key: .activeWorking],
+            probedITermPresenceKeys: [],
+            batchProbeResults: [:]
+        )
+
+        XCTAssertEqual(states[key], .activeWorking)
+    }
+
     func testIsLikelyCodexITermSessionName_matchesExpectedTabNames() {
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("codex"))
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyCodexITermSessionName("codex --resume 123"))
