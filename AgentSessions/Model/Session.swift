@@ -745,15 +745,45 @@ private extension Session {
 
     // Try to find a Git repository root by walking up from cwd.
     struct GitInfo { let root: String; let isWorktree: Bool; let isSubmodule: Bool }
+    private final class GitInfoCacheBox: NSObject {
+        let root: String?
+        let isWorktree: Bool
+        let isSubmodule: Bool
+
+        init(_ info: GitInfo?) {
+            self.root = info?.root
+            self.isWorktree = info?.isWorktree ?? false
+            self.isSubmodule = info?.isSubmodule ?? false
+        }
+
+        var info: GitInfo? {
+            guard let root else { return nil }
+            return GitInfo(root: root, isWorktree: isWorktree, isSubmodule: isSubmodule)
+        }
+    }
+    private static let gitInfoCache: NSCache<NSString, GitInfoCacheBox> = {
+        let cache = NSCache<NSString, GitInfoCacheBox>()
+        cache.countLimit = 2048
+        return cache
+    }()
+
     static func gitInfo(from start: String, maxLevels: Int = 6) -> GitInfo? {
-        var url = URL(fileURLWithPath: start)
+        let normalizedStart = URL(fileURLWithPath: start).standardizedFileURL.path
+        let cacheKey = "\(normalizedStart)|\(maxLevels)" as NSString
+        if let cached = gitInfoCache.object(forKey: cacheKey) {
+            return cached.info
+        }
+
+        var url = URL(fileURLWithPath: normalizedStart)
         let fm = FileManager.default
+        var resolved: GitInfo?
         for _ in 0..<maxLevels {
             let dotGitDir = url.appendingPathComponent(".git")
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: dotGitDir.path, isDirectory: &isDir), isDir.boolValue {
                 // Regular repo root
-                return GitInfo(root: url.path, isWorktree: false, isSubmodule: false)
+                resolved = GitInfo(root: url.path, isWorktree: false, isSubmodule: false)
+                break
             }
             // .git file pointing to gitdir
             if fm.fileExists(atPath: dotGitDir.path) {
@@ -763,13 +793,15 @@ private extension Session {
                     let lower = path.lowercased()
                     let worktree = lower.contains(".git/worktrees/")
                     let submodule = lower.contains(".git/modules/")
-                    return GitInfo(root: url.path, isWorktree: worktree, isSubmodule: submodule)
+                    resolved = GitInfo(root: url.path, isWorktree: worktree, isSubmodule: submodule)
+                    break
                 }
             }
             let parent = url.deletingLastPathComponent()
             if parent.path == url.path { break }
             url = parent
         }
-        return nil
+        gitInfoCache.setObject(GitInfoCacheBox(resolved), forKey: cacheKey)
+        return resolved
     }
 }

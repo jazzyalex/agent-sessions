@@ -11,40 +11,33 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     let compactPreferredRows: Int
     let compactAutoFitEnabled: Bool
 
+    private var styleInputs: Coordinator.StyleInputs {
+        Coordinator.StyleInputs(
+            isPinned: isPinned,
+            shownSessionCount: shownSessionCount,
+            isCompact: isCompact,
+            activeEnabled: activeEnabled,
+            compactToolbarVisible: compactToolbarVisible,
+            groupByProject: groupByProject,
+            compactPreferredRows: compactPreferredRows,
+            compactAutoFitEnabled: compactAutoFitEnabled
+        )
+    }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async { [weak view] in
             guard let window = view?.window else { return }
             context.coordinator.attach(to: window)
-            context.coordinator.applyStyle(
-                isPinned: isPinned,
-                shownSessionCount: shownSessionCount,
-                isCompact: isCompact,
-                activeEnabled: activeEnabled,
-                compactToolbarVisible: compactToolbarVisible,
-                groupByProject: groupByProject,
-                compactPreferredRows: compactPreferredRows,
-                compactAutoFitEnabled: compactAutoFitEnabled
-            )
+            context.coordinator.applyStyleIfNeeded(styleInputs)
         }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { [weak nsView] in
-            guard let window = nsView?.window else { return }
-            context.coordinator.attach(to: window)
-            context.coordinator.applyStyle(
-                isPinned: isPinned,
-                shownSessionCount: shownSessionCount,
-                isCompact: isCompact,
-                activeEnabled: activeEnabled,
-                compactToolbarVisible: compactToolbarVisible,
-                groupByProject: groupByProject,
-                compactPreferredRows: compactPreferredRows,
-                compactAutoFitEnabled: compactAutoFitEnabled
-            )
-        }
+        guard let window = nsView.window else { return }
+        context.coordinator.attach(to: window)
+        context.coordinator.applyStyleIfNeeded(styleInputs)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -52,9 +45,54 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     }
 
     final class Coordinator {
+#if DEBUG
+        private struct DebugAttachmentState {
+            var activeConfiguratorCount: Int = 0
+            var maxActiveConfiguratorCount: Int = 0
+        }
+        private static let debugAttachmentLock = NSLock()
+        private static var debugAttachmentState = DebugAttachmentState()
+
+        static func debugAttachmentSnapshot() -> (activeConfigurators: Int, maxActiveConfigurators: Int) {
+            debugAttachmentLock.lock()
+            let state = debugAttachmentState
+            debugAttachmentLock.unlock()
+            return (
+                activeConfigurators: state.activeConfiguratorCount,
+                maxActiveConfigurators: state.maxActiveConfiguratorCount
+            )
+        }
+
+        private static func recordAttach() {
+            debugAttachmentLock.lock()
+            debugAttachmentState.activeConfiguratorCount += 1
+            debugAttachmentState.maxActiveConfiguratorCount = max(
+                debugAttachmentState.maxActiveConfiguratorCount,
+                debugAttachmentState.activeConfiguratorCount
+            )
+            debugAttachmentLock.unlock()
+        }
+
+        private static func recordDetach() {
+            debugAttachmentLock.lock()
+            debugAttachmentState.activeConfiguratorCount = max(0, debugAttachmentState.activeConfiguratorCount - 1)
+            debugAttachmentLock.unlock()
+        }
+#endif
         private enum Mode: Hashable {
             case full
             case compact
+        }
+
+        struct StyleInputs: Equatable {
+            let isPinned: Bool
+            let shownSessionCount: Int
+            let isCompact: Bool
+            let activeEnabled: Bool
+            let compactToolbarVisible: Bool
+            let groupByProject: Bool
+            let compactPreferredRows: Int
+            let compactAutoFitEnabled: Bool
         }
 
         private weak var window: NSWindow?
@@ -83,12 +121,45 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private var lastAppliedCompactToolbarVisibility: Bool?
         private var lastAppliedCompactPreferredRows: Int?
         private var lastAppliedCompactAutoFitEnabled: Bool?
+        private var lastAppliedStyleInputs: StyleInputs?
 
         func attach(to newWindow: NSWindow) {
             guard window !== newWindow else { return }
+            if window != nil {
+#if DEBUG
+                Self.recordDetach()
+#endif
+            }
             window = newWindow
+#if DEBUG
+            Self.recordAttach()
+#endif
+            lastAppliedStyleInputs = nil
             captureBaselineWindowStateIfSafe(from: newWindow)
             captureBaselineStyleMaskIfNeeded(from: newWindow.styleMask)
+        }
+
+        deinit {
+            if window != nil {
+#if DEBUG
+                Self.recordDetach()
+#endif
+            }
+        }
+
+        func applyStyleIfNeeded(_ inputs: StyleInputs) {
+            guard lastAppliedStyleInputs != inputs else { return }
+            applyStyle(
+                isPinned: inputs.isPinned,
+                shownSessionCount: inputs.shownSessionCount,
+                isCompact: inputs.isCompact,
+                activeEnabled: inputs.activeEnabled,
+                compactToolbarVisible: inputs.compactToolbarVisible,
+                groupByProject: inputs.groupByProject,
+                compactPreferredRows: inputs.compactPreferredRows,
+                compactAutoFitEnabled: inputs.compactAutoFitEnabled
+            )
+            lastAppliedStyleInputs = inputs
         }
 
         func applyStyle(isPinned: Bool,
