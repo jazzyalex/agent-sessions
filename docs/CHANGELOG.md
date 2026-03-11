@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- Navigation: Fixed `Open Agent Sessions` from Cockpit after app relaunch with only Cockpit restored; it now opens the main Agent Sessions window instead of re-focusing the Cockpit window.
+- Sessions (Agent Cockpit): Pinned Cockpit now uses a high status-bar window level that keeps it on top while allowing macOS tooltips to appear above the HUD instead of rendering behind it.
 - Menu Bar: Added a dedicated `Show Active/Waiting sessions` toggle in the menu and a `Show menu bar icons` toggle in Settings → Menu Bar so live session dots can be shown/hidden independently of usage meters.
 - Sessions (Agent Cockpit): Pinned background Cockpit refreshes now retain process-backed live rows until the next deferred process probe window completes, eliminating recurring partial-list flicker when the cockpit is unfocused.
 - Sessions (Agent Cockpit): Live-state reconciliation now treats selected-but-missing batched iTerm probe rows as probe misses (heuristic/open-idle fallback) instead of preserving stale prior activity states, preventing stuck `active`/`waiting` status after tab/session disappearance or partial probe output.

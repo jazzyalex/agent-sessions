@@ -1920,6 +1920,10 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             .normal
         )
         XCTAssertEqual(
+            AgentCockpitHUDWindowConfigurator.Coordinator.sanitizedUnpinnedLevel(from: .statusBar),
+            .normal
+        )
+        XCTAssertEqual(
             AgentCockpitHUDWindowConfigurator.Coordinator.sanitizedUnpinnedLevel(from: .floating),
             .floating
         )

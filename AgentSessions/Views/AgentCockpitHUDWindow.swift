@@ -102,6 +102,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private var baselineStyleMask: NSWindow.StyleMask = []
         private let fallbackStandardStyleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
         private var currentMode: Mode?
+        // Keep pinned cockpit above regular windows without covering system tooltip windows.
+        private static let pinnedWindowLevel: NSWindow.Level = .statusBar
         private static let pinnedCollectionBehavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         private let fullAutosaveName = "AgentCockpitHUDWindow.full"
@@ -262,7 +264,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             }
 
             if isPinned {
-                window.level = .screenSaver
+                window.level = Self.pinnedWindowLevel
                 window.collectionBehavior = baselineCollectionBehavior.union(Self.pinnedCollectionBehavior)
                 window.hidesOnDeactivate = false
             } else {
@@ -274,7 +276,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         }
 
         static func sanitizedUnpinnedLevel(from baselineLevel: NSWindow.Level) -> NSWindow.Level {
-            if baselineLevel == .screenSaver {
+            if baselineLevel == .screenSaver || baselineLevel == pinnedWindowLevel {
                 return .normal
             }
             return baselineLevel
@@ -287,7 +289,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private func captureBaselineWindowStateIfSafe(from window: NSWindow) {
             // If the window is currently pinned, preserve the previous baseline so unpin restores
             // regular behavior instead of re-capturing pinned state as the baseline.
-            guard window.level != .screenSaver else { return }
+            guard window.level != .screenSaver,
+                  window.level != Self.pinnedWindowLevel else { return }
             baselineLevel = window.level
             baselineCollectionBehavior = Self.sanitizedUnpinnedCollectionBehavior(from: window.collectionBehavior)
             baselineHidesOnDeactivate = window.hidesOnDeactivate
