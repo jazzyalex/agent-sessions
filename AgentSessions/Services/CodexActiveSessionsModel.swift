@@ -685,6 +685,17 @@ final class CodexActiveSessionsModel: ObservableObject {
             isCockpitVisible: isCockpitVisibleSnapshot,
             isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
         )
+        let processPresenceCacheTTL = Self.effectiveCachedProcessPresenceTTL(
+            baseTTL: ttl,
+            processProbeMinInterval: processProbeMinInterval,
+            pollInterval: Self.effectivePollIntervalSeconds(
+                appIsActive: appIsActiveSnapshot,
+                hasVisibleConsumer: hasVisibleConsumerSnapshot,
+                isCockpitVisible: isCockpitVisibleSnapshot,
+                isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
+            ),
+            hasVisibleConsumer: hasVisibleConsumerSnapshot
+        )
         let shouldProbeProcesses: Bool = {
             guard let last = lastProcessProbeAtSnapshot else { return true }
             return now.timeIntervalSince(last) >= processProbeMinInterval
@@ -705,7 +716,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             out.append(contentsOf: processPresences)
         } else {
             out.append(contentsOf: Self.filterSupportedPresences(
-                cachedProcessProbeSnapshot.filter { !$0.isStale(now: now, ttl: ttl) }
+                cachedProcessProbeSnapshot.filter { !$0.isStale(now: now, ttl: processPresenceCacheTTL) }
             ))
         }
 
@@ -1716,6 +1727,19 @@ final class CodexActiveSessionsModel: ObservableObject {
         guard ui.isEmpty else { return false }
         guard !registryHadPresences else { return true }
         return !(didProbeProcesses && didProbeITerm)
+    }
+
+    nonisolated static func effectiveCachedProcessPresenceTTL(baseTTL: TimeInterval,
+                                                              processProbeMinInterval: TimeInterval,
+                                                              pollInterval: TimeInterval,
+                                                              hasVisibleConsumer: Bool) -> TimeInterval {
+        let normalizedBaseTTL = max(0, baseTTL)
+        guard hasVisibleConsumer else { return normalizedBaseTTL }
+
+        // Keep cached process presences alive through deferred-probe windows so
+        // pinned/background UI does not oscillate between partial and full rows.
+        let bridgedTTL = max(0, processProbeMinInterval) + max(0, pollInterval)
+        return max(normalizedBaseTTL, bridgedTTL)
     }
 
     nonisolated static func processProbeMinIntervalSeconds(registryHasPresences: Bool,
