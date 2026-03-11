@@ -768,6 +768,68 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testEffectiveCachedProcessPresenceTTL_bridgesPinnedBackgroundDeferredProbeWindow() {
+        let processProbeMinInterval = CodexActiveSessionsModel.processProbeMinIntervalSeconds(
+            registryHasPresences: false,
+            hasVisibleConsumer: true,
+            appIsActive: false,
+            isCockpitVisible: true,
+            isPinnedCockpitVisible: true
+        )
+        let pollInterval = CodexActiveSessionsModel.effectivePollIntervalSeconds(
+            appIsActive: false,
+            hasVisibleConsumer: true,
+            isCockpitVisible: true,
+            isPinnedCockpitVisible: true
+        )
+
+        let ttl = CodexActiveSessionsModel.effectiveCachedProcessPresenceTTL(
+            baseTTL: CodexActiveSessionsModel.defaultStaleTTL,
+            processProbeMinInterval: processProbeMinInterval,
+            pollInterval: pollInterval,
+            hasVisibleConsumer: true
+        )
+
+        XCTAssertEqual(ttl, processProbeMinInterval + pollInterval)
+        XCTAssertGreaterThanOrEqual(ttl, processProbeMinInterval + pollInterval)
+    }
+
+    func testEffectiveCachedProcessPresenceTTL_keepsForegroundTTLWhenBaseAlreadyCoversGap() {
+        let processProbeMinInterval = CodexActiveSessionsModel.processProbeMinIntervalSeconds(
+            registryHasPresences: false,
+            hasVisibleConsumer: true,
+            appIsActive: true,
+            isCockpitVisible: true,
+            isPinnedCockpitVisible: true
+        )
+        let pollInterval = CodexActiveSessionsModel.effectivePollIntervalSeconds(
+            appIsActive: true,
+            hasVisibleConsumer: true,
+            isCockpitVisible: true,
+            isPinnedCockpitVisible: true
+        )
+
+        let ttl = CodexActiveSessionsModel.effectiveCachedProcessPresenceTTL(
+            baseTTL: CodexActiveSessionsModel.defaultStaleTTL,
+            processProbeMinInterval: processProbeMinInterval,
+            pollInterval: pollInterval,
+            hasVisibleConsumer: true
+        )
+
+        XCTAssertEqual(ttl, CodexActiveSessionsModel.defaultStaleTTL)
+    }
+
+    func testEffectiveCachedProcessPresenceTTL_usesBaseWhenNoVisibleConsumer() {
+        let ttl = CodexActiveSessionsModel.effectiveCachedProcessPresenceTTL(
+            baseTTL: CodexActiveSessionsModel.defaultStaleTTL,
+            processProbeMinInterval: CodexActiveSessionsModel.pinnedBackgroundProcessProbeMinInterval,
+            pollInterval: CodexActiveSessionsModel.pinnedBackgroundPollInterval,
+            hasVisibleConsumer: false
+        )
+
+        XCTAssertEqual(ttl, CodexActiveSessionsModel.defaultStaleTTL)
+    }
+
     func testResolveLiveState_preservesPreviousStateWhenITermProbeWasDeferred() {
         XCTAssertEqual(
             CodexActiveSessionsModel.resolveLiveState(
