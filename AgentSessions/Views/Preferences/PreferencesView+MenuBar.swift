@@ -18,6 +18,11 @@ extension PreferencesView {
 
             sectionHeader("Menu Bar Label")
             VStack(alignment: .leading, spacing: 12) {
+                toggleRow("Show menu bar icons", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showLiveSessionIcons) as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showLiveSessionIcons) }
+                ), help: "Show or hide the Active/Waiting session indicators in the menu bar label.")
+
                 toggleRow("Show Codex reset indicators", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.MenuBar.showCodexResetTimes) }

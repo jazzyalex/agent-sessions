@@ -131,6 +131,7 @@ final class StatusItemController: NSObject {
         let codexUsageEnabled = d.object(forKey: PreferencesKey.codexUsageEnabled) as? Bool ?? false
         let claudeUsageEnabled = d.object(forKey: PreferencesKey.claudeUsageEnabled) as? Bool ?? false
         let liveSessionsEnabled = d.object(forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled) as? Bool ?? true
+        let showLiveSessionIcons = d.object(forKey: PreferencesKey.MenuBar.showLiveSessionIcons) as? Bool ?? true
         let codexTrackingEnabled = codexAgentEnabled && codexUsageEnabled
         let claudeTrackingEnabled = claudeAgentEnabled && claudeUsageEnabled
         let anyUsageTrackingEnabled = codexTrackingEnabled || claudeTrackingEnabled
@@ -155,6 +156,14 @@ final class StatusItemController: NSObject {
             menu.addItem(makeActionItem(title: "Open Agent Cockpit", action: #selector(openAgentCockpit)))
             menu.addItem(makeActionItem(title: "Open Agent Sessions", action: #selector(openAgentSessions)))
         }
+
+        let liveSessionsToggle = makeCheckboxItem(
+            title: "Show Active/Waiting sessions",
+            checked: showLiveSessionIcons,
+            action: #selector(toggleShowLiveSessionIcons)
+        )
+        liveSessionsToggle.isEnabled = liveSessionsEnabled
+        menu.addItem(liveSessionsToggle)
 
         if liveSessionsEnabled && anyUsageTrackingEnabled {
             menu.addItem(NSMenuItem.separator())
@@ -270,6 +279,13 @@ final class StatusItemController: NSObject {
         let d = UserDefaults.standard
         let current = d.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true
         d.set(!current, forKey: PreferencesKey.MenuBar.showClaudeResetTimes)
+        updateLength()
+    }
+
+    @objc private func toggleShowLiveSessionIcons() {
+        let d = UserDefaults.standard
+        let current = d.object(forKey: PreferencesKey.MenuBar.showLiveSessionIcons) as? Bool ?? true
+        d.set(!current, forKey: PreferencesKey.MenuBar.showLiveSessionIcons)
         updateLength()
     }
     @objc private func openUsagePreferences() {

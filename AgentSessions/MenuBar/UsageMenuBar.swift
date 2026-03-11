@@ -83,6 +83,7 @@ struct UsageMenuBarLabel: View {
     @EnvironmentObject var codexStatus: CodexUsageModel
     @EnvironmentObject var claudeStatus: ClaudeUsageModel
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsEnabled: Bool = true
+    @AppStorage(PreferencesKey.MenuBar.showLiveSessionIcons) private var showLiveSessionIcons: Bool = true
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
@@ -91,7 +92,7 @@ struct UsageMenuBarLabel: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            if liveSessionsEnabled {
+            if liveSessionsEnabled && showLiveSessionIcons {
                 LiveSessionMenuBarLabel(summary: liveSummaryModel.summary)
             }
             if hasAnyUsageSource {
@@ -99,7 +100,7 @@ struct UsageMenuBarLabel: View {
                     .environmentObject(codexStatus)
                     .environmentObject(claudeStatus)
             }
-            if !liveSessionsEnabled && !hasAnyUsageSource {
+            if !(liveSessionsEnabled && showLiveSessionIcons) && !hasAnyUsageSource {
                 FallbackMenuBarLabel()
             }
         }

@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- Menu Bar: Added a dedicated `Show Active/Waiting sessions` toggle in the menu and a `Show menu bar icons` toggle in Settings → Menu Bar so live session dots can be shown/hidden independently of usage meters.
 - Sessions (Agent Cockpit): Pinned background Cockpit refreshes now retain process-backed live rows until the next deferred process probe window completes, eliminating recurring partial-list flicker when the cockpit is unfocused.
 - Sessions (Agent Cockpit): Live-state reconciliation now treats selected-but-missing batched iTerm probe rows as probe misses (heuristic/open-idle fallback) instead of preserving stale prior activity states, preventing stuck `active`/`waiting` status after tab/session disappearance or partial probe output.
 - Sessions (Agent Cockpit): Fixed a queued-refresh task lifecycle leak in pinned Cockpit mode by tracking and canceling deferred follow-up refresh tasks, and reduced long-run probe overhead with lower-frequency wait polling plus bounded session lookup cache pruning to prevent gradual CPU climb under steady workloads.
