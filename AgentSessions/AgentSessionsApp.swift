@@ -224,6 +224,10 @@ struct AgentSessionsApp: App {
                         LaunchProfiler.reset("Unified main window")
                         LaunchProfiler.log("Window appeared")
                         LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
+                        Task.detached(priority: .utility) {
+                            await CodexStatusService.cleanupOrphansOnLaunch()
+                            await ClaudeStatusService.cleanupOrphansOnLaunch()
+                        }
                         Task {
                             let detectedCount = await CrashReportingService.shared.detectAndQueueOnLaunch()
                             if detectedCount > 0 {

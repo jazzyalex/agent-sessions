@@ -201,4 +201,34 @@ final class ClaudeStatusServiceTests: XCTestCase {
         XCTAssertTrue(planner.socketPaths(uid: 501, label: "as-cc-1bCdEf1234g5").isEmpty)
         XCTAssertTrue(planner.socketPaths(uid: 501, label: "other-label").isEmpty)
     }
+
+    func testParseManagedProbePIDs_matchesOnlyManagedTmuxAndClaudeProbeProcesses() {
+        let snapshot = """
+          101 /opt/homebrew/bin/tmux -L as-cc-AbCdEf1234g5 new-session -d -s usage
+          102 /Users/alexm/.local/bin/claude --model sonnet WORKDIR=/Users/alexm/.config/agent-sessions/claude-probe TMUX=/private/tmp/tmux-501/as-cc-AbCdEf1234g5,123,0
+          103 /opt/homebrew/bin/tmux -L other-label new-session -d -s usage
+          104 /Users/alexm/.local/bin/claude --model sonnet WORKDIR=/Users/alexm/.config/agent-sessions/claude-probe TMUX=/private/tmp/tmux-501/other-label,123,0
+          105 /Users/alexm/.local/bin/claude --model sonnet
+        """
+
+        let pids = ClaudeStatusService.parseManagedProbePIDs(
+            from: snapshot,
+            label: "as-cc-AbCdEf1234g5",
+            uid: 501
+        )
+
+        XCTAssertEqual(pids, [101, 102])
+    }
+
+    func testParseManagedProbePIDs_rejectsUnmanagedLabels() {
+        let snapshot = "101 /opt/homebrew/bin/tmux -L as-cc-AbCdEf1234g5 new-session -d -s usage"
+
+        let pids = ClaudeStatusService.parseManagedProbePIDs(
+            from: snapshot,
+            label: "other-label",
+            uid: 501
+        )
+
+        XCTAssertTrue(pids.isEmpty)
+    }
 }

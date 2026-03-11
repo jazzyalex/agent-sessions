@@ -169,13 +169,13 @@ private struct LegacyMappedRow: Identifiable {
     let lastActivityAt: Date?
 }
 
-private struct SessionLookupIndexes {
+struct SessionLookupIndexes {
     let byLogPath: [String: Session]
     let bySessionID: [String: Session]
     let byWorkspace: [String: Session]
 }
 
-private struct HUDRowsSnapshot {
+private struct HUDRowsSnapshot: Equatable {
     let rows: [HUDRow]
     let activeCount: Int
     let idleCount: Int
@@ -188,9 +188,189 @@ private struct HUDWaitingCounts {
     let staleIdle: Int
 }
 
+private struct HUDPresentationInputs: Equatable {
+    let canonicalRows: [HUDRow]
+    let snapshotTimestamp: Date
+    let isCompact: Bool
+    let sessionFilterMode: HUDSessionFilterMode
+    let filterText: String
+    let groupByProject: Bool
+    let collapsedProjects: Set<String>
+    let orderedRowIDs: [String]
+    let isWindowVisibleForOrdering: Bool
+}
+
+private struct HUDPresentationState {
+    let inputs: HUDPresentationInputs
+    let rowsForDisplay: [HUDRow]
+    let visibleRows: [HUDRow]
+    let fullListLayoutSignature: Int
+    let shownSessionCount: Int
+    let groupedVisibleRows: [HUDGroup]
+    let groupedRowsForCollapseSync: [HUDGroup]
+    let renderedRows: [HUDRow]
+    let shortcutIndexMap: [String: Int]
+
+    static let empty = HUDPresentationState(
+        inputs: HUDPresentationInputs(
+            canonicalRows: [],
+            snapshotTimestamp: .distantPast,
+            isCompact: false,
+            sessionFilterMode: .all,
+            filterText: "",
+            groupByProject: false,
+            collapsedProjects: [],
+            orderedRowIDs: [],
+            isWindowVisibleForOrdering: true
+        ),
+        rowsForDisplay: [],
+        visibleRows: [],
+        fullListLayoutSignature: 0,
+        shownSessionCount: 0,
+        groupedVisibleRows: [],
+        groupedRowsForCollapseSync: [],
+        renderedRows: [],
+        shortcutIndexMap: [:]
+    )
+}
+
+@MainActor
+private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
+    @Published private(set) var snapshot = HUDRowsSnapshot(rows: [], activeCount: 0, idleCount: 0)
+    @Published private(set) var snapshotTimestamp: Date = Date()
+
+    private weak var activeCodex: CodexActiveSessionsModel?
+    private var codexSessions: [Session]
+    private var claudeSessions: [Session]
+    private var lookupIndexes: SessionLookupIndexes
+    private var presences: [CodexActivePresence] = []
+    private var isCompact: Bool
+    private var cancellables: Set<AnyCancellable> = []
+    private var activeCancellable: AnyCancellable?
+    private var rebuildScheduled: Bool = false
+#if DEBUG
+    private struct DebugRebuildState {
+        var rebuildCount: UInt64 = 0
+        var lookupRebuildCount: UInt64 = 0
+    }
+    private static let debugRebuildLock = NSLock()
+    private static var debugRebuildState = DebugRebuildState()
+
+    static func debugRebuildSnapshot() -> (rebuildCount: UInt64, lookupRebuildCount: UInt64) {
+        debugRebuildLock.lock()
+        let state = debugRebuildState
+        debugRebuildLock.unlock()
+        return (
+            rebuildCount: state.rebuildCount,
+            lookupRebuildCount: state.lookupRebuildCount
+        )
+    }
+
+    private static func recordDebugRebuild() {
+        debugRebuildLock.lock()
+        debugRebuildState.rebuildCount &+= 1
+        debugRebuildLock.unlock()
+    }
+
+    private static func recordDebugLookupRebuild() {
+        debugRebuildLock.lock()
+        debugRebuildState.lookupRebuildCount &+= 1
+        debugRebuildLock.unlock()
+    }
+#endif
+
+    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, initialCompact: Bool) {
+        codexSessions = codexIndexer.allSessions
+        claudeSessions = claudeIndexer.allSessions
+        lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
+            codexSessions: codexSessions,
+            claudeSessions: claudeSessions
+        )
+        isCompact = initialCompact
+
+        codexIndexer.$allSessions
+            .sink { [weak self] sessions in
+                guard let self else { return }
+                codexSessions = sessions
+                rebuildLookupIndexes()
+                scheduleRebuild()
+            }
+            .store(in: &cancellables)
+
+        claudeIndexer.$allSessions
+            .sink { [weak self] sessions in
+                guard let self else { return }
+                claudeSessions = sessions
+                rebuildLookupIndexes()
+                scheduleRebuild()
+            }
+            .store(in: &cancellables)
+    }
+
+    func bind(activeCodex: CodexActiveSessionsModel) {
+        self.activeCodex = activeCodex
+        presences = activeCodex.presences
+        activeCancellable = activeCodex.$presences.sink { [weak self] presences in
+            guard let self else { return }
+            self.presences = presences
+            scheduleRebuild()
+        }
+        scheduleRebuild()
+    }
+
+    func setCompact(_ compact: Bool, activeCodex: CodexActiveSessionsModel) {
+        self.activeCodex = activeCodex
+        guard isCompact != compact else { return }
+        isCompact = compact
+        scheduleRebuild()
+    }
+
+    private func rebuildLookupIndexes() {
+        lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
+            codexSessions: codexSessions,
+            claudeSessions: claudeSessions
+        )
+#if DEBUG
+        Self.recordDebugLookupRebuild()
+#endif
+    }
+
+    private func scheduleRebuild() {
+        guard !rebuildScheduled else { return }
+        rebuildScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.rebuildScheduled = false
+            self.rebuildIfReady()
+        }
+    }
+
+    private func rebuildIfReady(activeCodex: CodexActiveSessionsModel? = nil) {
+        let activeCodex = activeCodex ?? self.activeCodex
+        guard let activeCodex else { return }
+        let now = Date()
+        let nextSnapshot = AgentCockpitHUDView.makeRowsSnapshot(
+            codexSessions: codexSessions,
+            claudeSessions: claudeSessions,
+            presences: presences,
+            activeCodex: activeCodex,
+            isCompact: isCompact,
+            lookupIndexes: lookupIndexes,
+            now: now
+        )
+        if nextSnapshot != snapshot {
+            snapshot = nextSnapshot
+        }
+        snapshotTimestamp = now
+#if DEBUG
+        Self.recordDebugRebuild()
+#endif
+    }
+}
+
 struct AgentCockpitHUDView: View {
-    @ObservedObject var codexIndexer: SessionIndexer
-    @ObservedObject var claudeIndexer: ClaudeSessionIndexer
+    let codexIndexer: SessionIndexer
+    let claudeIndexer: ClaudeSessionIndexer
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
 
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
@@ -218,6 +398,8 @@ struct AgentCockpitHUDView: View {
     @State private var isCompactWindowHovered: Bool = false
     @State private var staleAutoCollapsedProjects: Set<String> = []
     @State private var manuallyExpandedStaleProjects: Set<String> = []
+    @State private var presentationState: HUDPresentationState = .empty
+    @StateObject private var derivedState: AgentCockpitHUDDerivedStateModel
     @FocusState private var isSearchFocused: Bool
 
     private let fullBodyMinHeight: CGFloat = 170
@@ -247,6 +429,18 @@ struct AgentCockpitHUDView: View {
         min(max(compactBaselineRows, 3), Int(compactBodyMaxRowsWhenToolbarVisible))
     }
 
+    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer) {
+        self.codexIndexer = codexIndexer
+        self.claudeIndexer = claudeIndexer
+        _derivedState = StateObject(
+            wrappedValue: AgentCockpitHUDDerivedStateModel(
+                codexIndexer: codexIndexer,
+                claudeIndexer: claudeIndexer,
+                initialCompact: UserDefaults.standard.object(forKey: PreferencesKey.Cockpit.hudCompact) as? Bool ?? false
+            )
+        )
+    }
+
     var body: some View {
         let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
         Group {
@@ -269,59 +463,127 @@ struct AgentCockpitHUDView: View {
     }
 
     private var hudContent: some View {
-        let snapshot = makeRowsSnapshot()
+        let snapshot = derivedState.snapshot
+        let snapshotTimestamp = derivedState.snapshotTimestamp
         let canonicalRows = activeEnabled ? snapshot.rows : []
-        let rowsForDisplay = rowsOrderedForDisplay(from: canonicalRows)
-        let visibleRows = filteredRows(from: rowsForDisplay)
-        let fullListLayoutSignature = fullUngroupedLayoutSignature(for: visibleRows)
-        let shownSessionCount = visibleRows.count
-        let groupedVisibleRows = groupByProject ? groupedRows(from: visibleRows) : []
-        let groupedRowsForCollapseSync = groupByProject ? groupedRows(from: rowsForDisplay) : []
-        let renderedRows = renderedRows(visibleRows: visibleRows, groupedRows: groupedVisibleRows)
+        let currentPresentationInputs = HUDPresentationInputs(
+            canonicalRows: canonicalRows,
+            snapshotTimestamp: snapshotTimestamp,
+            isCompact: isCompact,
+            sessionFilterMode: sessionFilterMode,
+            filterText: filterText,
+            groupByProject: groupByProject,
+            collapsedProjects: collapsedProjects,
+            orderedRowIDs: orderedRowIDs,
+            isWindowVisibleForOrdering: isWindowVisibleForOrdering
+        )
+        let displayState = presentationState.inputs == currentPresentationInputs
+            ? presentationState
+            : Self.makePresentationState(from: currentPresentationInputs)
         let showsCompactToolbar = !isCompact || isPinned || isCockpitWindowKey || isCompactWindowHovered
-        let shortcutIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
-            let (index, row) = pair
-            if partial[row.id] == nil {
-                partial[row.id] = index + 1
-            }
-        }
 
-        return VStack(spacing: 0) {
-            if showsCompactToolbar {
-                header(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount)
-                    .background(Color.primary.opacity(0.04))
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                Rectangle()
-                    .fill(Color.primary.opacity(0.10))
-                    .frame(height: 0.5)
-                    .transition(.opacity)
-            }
-
-            if !activeEnabled {
-                disabledCallout
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-            }
-
-            bodyList(
-                visibleRows: visibleRows,
-                groupedRows: groupedVisibleRows,
-                shortcutIndexMap: shortcutIndexMap,
-                totalRowsCount: rowsForDisplay.count,
-                showsCompactToolbar: showsCompactToolbar,
-                fullListLayoutSignature: fullListLayoutSignature
+        return configuredHUDContent(
+            snapshot: snapshot,
+            displayState: displayState,
+            showsCompactToolbar: showsCompactToolbar
+        )
+        .onAppear {
+            derivedState.bind(activeCodex: activeCodex)
+            derivedState.setCompact(isCompact, activeCodex: activeCodex)
+            presentationState = Self.makePresentationState(from: currentPresentationInputs)
+            synchronizeOrderedRows(
+                with: canonicalRows,
+                previousRows: [],
+                previousSnapshotAt: snapshotTimestamp,
+                incomingSnapshotAt: snapshotTimestamp
             )
-            .background(Color.clear)
-            .disabled(!activeEnabled)
-
-            hiddenShortcuts(renderedRows: renderedRows)
+            latestCanonicalRows = canonicalRows
+            latestCanonicalRowsSnapshotAt = snapshotTimestamp
+            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
+        .onChange(of: canonicalRows) { oldRows, rows in
+            synchronizeOrderedRows(
+                with: rows,
+                previousRows: oldRows,
+                previousSnapshotAt: latestCanonicalRowsSnapshotAt,
+                incomingSnapshotAt: derivedState.snapshotTimestamp
+            )
+            latestCanonicalRows = rows
+            latestCanonicalRowsSnapshotAt = derivedState.snapshotTimestamp
+            refreshPresentationState(
+                canonicalRows: rows,
+                snapshotTimestamp: derivedState.snapshotTimestamp
+            )
+            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
+        }
+        .onChange(of: isWindowVisibleForOrdering) { _, isVisible in
+            guard isVisible else { return }
+            synchronizeOrderedRows(
+                with: latestCanonicalRows,
+                previousRows: latestCanonicalRows,
+                previousSnapshotAt: latestCanonicalRowsSnapshotAt,
+                incomingSnapshotAt: derivedState.snapshotTimestamp
+            )
+            latestCanonicalRowsSnapshotAt = derivedState.snapshotTimestamp
+        }
+        .onChange(of: displayState.groupedRowsForCollapseSync.map(\.collapseSyncKey)) { _, _ in
+            synchronizeCollapsedProjectsForStaleGroups(with: displayState.groupedRowsForCollapseSync)
+        }
+        .onChange(of: groupByProject) { _, _ in
+            refreshPresentationState(
+                canonicalRows: canonicalRows,
+                snapshotTimestamp: snapshotTimestamp
+            )
+            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
+        }
+        .onChange(of: isCompact) { _, _ in
+            derivedState.setCompact(isCompact, activeCodex: activeCodex)
+            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
+        }
+        .onChange(of: sessionFilterMode) { _, _ in
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: snapshotTimestamp)
+        }
+        .onChange(of: filterText) { _, _ in
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: snapshotTimestamp)
+        }
+        .onChange(of: orderedRowIDs) { _, _ in
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: snapshotTimestamp)
+        }
+        .onChange(of: collapsedProjects) { _, _ in
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: snapshotTimestamp)
+        }
+        .onChange(of: snapshotTimestamp) { _, newTimestamp in
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: newTimestamp)
+        }
+        .onChange(of: activeEnabled) { _, _ in
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: snapshotTimestamp)
+        }
+        .onHover { hovering in
+            guard isCompact else { return }
+            withAnimation(.easeInOut(duration: 0.14)) {
+                isCompactWindowHovered = hovering
+            }
+        }
+        .applyIf(isCompact) { view in
+            view.ignoresSafeArea(.container, edges: .top)
+        }
+    }
+
+    private func configuredHUDContent(snapshot: HUDRowsSnapshot,
+                                      displayState: HUDPresentationState,
+                                      showsCompactToolbar: Bool) -> AnyView {
+        AnyView(
+            hudStack(
+                snapshot: snapshot,
+                displayState: displayState,
+                showsCompactToolbar: showsCompactToolbar
+            )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(.ultraThinMaterial)
         .background(
             AgentCockpitHUDWindowConfigurator(
                 isPinned: isPinned,
-                shownSessionCount: shownSessionCount,
+                shownSessionCount: displayState.shownSessionCount,
                 isCompact: isCompact,
                 activeEnabled: activeEnabled,
                 compactToolbarVisible: showsCompactToolbar,
@@ -346,59 +608,60 @@ struct AgentCockpitHUDView: View {
         )
         .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
         .animation(.easeInOut(duration: 0.18), value: isCompact)
-        .onAppear {
-            let now = Date()
-            synchronizeOrderedRows(
-                with: canonicalRows,
-                previousRows: [],
-                previousSnapshotAt: now,
-                incomingSnapshotAt: now
-            )
-            latestCanonicalRows = canonicalRows
-            latestCanonicalRowsSnapshotAt = now
-            synchronizeCollapsedProjectsForStaleGroups(with: groupedRowsForCollapseSync)
-        }
-        .onChange(of: canonicalRows) { oldRows, rows in
-            let now = Date()
-            synchronizeOrderedRows(
-                with: rows,
-                previousRows: oldRows,
-                previousSnapshotAt: latestCanonicalRowsSnapshotAt,
-                incomingSnapshotAt: now
-            )
-            latestCanonicalRows = rows
-            latestCanonicalRowsSnapshotAt = now
-            synchronizeCollapsedProjectsForStaleGroups(with: groupedRowsForCollapseSync)
-        }
-        .onChange(of: isWindowVisibleForOrdering) { _, isVisible in
-            guard isVisible else { return }
-            let now = Date()
-            synchronizeOrderedRows(
-                with: latestCanonicalRows,
-                previousRows: latestCanonicalRows,
-                previousSnapshotAt: latestCanonicalRowsSnapshotAt,
-                incomingSnapshotAt: now
-            )
-            latestCanonicalRowsSnapshotAt = now
-        }
-        .onChange(of: groupedRowsForCollapseSync.map(\.collapseSyncKey)) { _, _ in
-            synchronizeCollapsedProjectsForStaleGroups(with: groupedRowsForCollapseSync)
-        }
-        .onChange(of: groupByProject) { _, _ in
-            synchronizeCollapsedProjectsForStaleGroups(with: groupedRowsForCollapseSync)
-        }
-        .onChange(of: isCompact) { _, _ in
-            synchronizeCollapsedProjectsForStaleGroups(with: groupedRowsForCollapseSync)
-        }
-        .onHover { hovering in
-            guard isCompact else { return }
-            withAnimation(.easeInOut(duration: 0.14)) {
-                isCompactWindowHovered = hovering
+        )
+    }
+
+    @ViewBuilder
+    private func hudStack(snapshot: HUDRowsSnapshot,
+                          displayState: HUDPresentationState,
+                          showsCompactToolbar: Bool) -> some View {
+        VStack(spacing: 0) {
+            if showsCompactToolbar {
+                header(activeCount: snapshot.activeCount, idleCount: snapshot.idleCount)
+                    .background(Color.primary.opacity(0.04))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                Rectangle()
+                    .fill(Color.primary.opacity(0.10))
+                    .frame(height: 0.5)
+                    .transition(.opacity)
             }
+
+            if !activeEnabled {
+                disabledCallout
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+            }
+
+            bodyList(
+                visibleRows: displayState.visibleRows,
+                groupedRows: displayState.groupedVisibleRows,
+                shortcutIndexMap: displayState.shortcutIndexMap,
+                totalRowsCount: displayState.rowsForDisplay.count,
+                showsCompactToolbar: showsCompactToolbar,
+                fullListLayoutSignature: displayState.fullListLayoutSignature
+            )
+            .background(Color.clear)
+            .disabled(!activeEnabled)
+
+            hiddenShortcuts(renderedRows: displayState.renderedRows)
         }
-        .applyIf(isCompact) { view in
-            view.ignoresSafeArea(.container, edges: .top)
-        }
+    }
+
+    private func refreshPresentationState(canonicalRows: [HUDRow],
+                                          snapshotTimestamp: Date) {
+        presentationState = Self.makePresentationState(
+            from: HUDPresentationInputs(
+                canonicalRows: canonicalRows,
+                snapshotTimestamp: snapshotTimestamp,
+                isCompact: isCompact,
+                sessionFilterMode: sessionFilterMode,
+                filterText: filterText,
+                groupByProject: groupByProject,
+                collapsedProjects: collapsedProjects,
+                orderedRowIDs: orderedRowIDs,
+                isWindowVisibleForOrdering: isWindowVisibleForOrdering
+            )
+        )
     }
 
     @ViewBuilder
@@ -685,7 +948,10 @@ struct AgentCockpitHUDView: View {
         }
     }
 
-    private func renderedRows(visibleRows: [HUDRow], groupedRows: [HUDGroup]) -> [HUDRow] {
+    private static func renderedRows(visibleRows: [HUDRow],
+                                     groupedRows: [HUDGroup],
+                                     groupByProject: Bool,
+                                     collapsedProjects: Set<String>) -> [HUDRow] {
         guard groupByProject else { return visibleRows }
         return groupedRows.flatMap { group in
             collapsedProjects.contains(group.id) ? [] : group.rows
@@ -775,7 +1041,62 @@ struct AgentCockpitHUDView: View {
         return hasher.finalize()
     }
 
-    private func rowsOrderedForDisplay(from canonicalRows: [HUDRow]) -> [HUDRow] {
+    private static func makePresentationState(from inputs: HUDPresentationInputs) -> HUDPresentationState {
+        let rowsForDisplay = rowsOrderedForDisplay(
+            orderedRowIDs: inputs.orderedRowIDs,
+            canonicalRows: inputs.canonicalRows
+        )
+        let visibleRows = filteredRows(
+            rowsForDisplay,
+            mode: inputs.sessionFilterMode,
+            query: inputs.filterText
+        )
+        let fullListLayoutSignature = fullUngroupedLayoutSignature(
+            rows: visibleRows,
+            isCompact: inputs.isCompact,
+            groupByProject: inputs.groupByProject
+        )
+        let groupedVisibleRows = inputs.groupByProject
+            ? groupedRowsForPresentation(
+                visibleRows,
+                now: inputs.snapshotTimestamp,
+                isWindowVisibleForOrdering: inputs.isWindowVisibleForOrdering
+            )
+            : []
+        let groupedRowsForCollapseSync = inputs.groupByProject
+            ? groupedRowsForPresentation(
+                rowsForDisplay,
+                now: inputs.snapshotTimestamp,
+                isWindowVisibleForOrdering: inputs.isWindowVisibleForOrdering
+            )
+            : []
+        let renderedRows = renderedRows(
+            visibleRows: visibleRows,
+            groupedRows: groupedVisibleRows,
+            groupByProject: inputs.groupByProject,
+            collapsedProjects: inputs.collapsedProjects
+        )
+        let shortcutIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
+            let (index, row) = pair
+            if partial[row.id] == nil {
+                partial[row.id] = index + 1
+            }
+        }
+        return HUDPresentationState(
+            inputs: inputs,
+            rowsForDisplay: rowsForDisplay,
+            visibleRows: visibleRows,
+            fullListLayoutSignature: fullListLayoutSignature,
+            shownSessionCount: visibleRows.count,
+            groupedVisibleRows: groupedVisibleRows,
+            groupedRowsForCollapseSync: groupedRowsForCollapseSync,
+            renderedRows: renderedRows,
+            shortcutIndexMap: shortcutIndexMap
+        )
+    }
+
+    private static func rowsOrderedForDisplay(orderedRowIDs: [String],
+                                              canonicalRows: [HUDRow]) -> [HUDRow] {
         guard !orderedRowIDs.isEmpty else { return canonicalRows }
 
         let byID = Dictionary(uniqueKeysWithValues: canonicalRows.map { ($0.id, $0) })
@@ -786,6 +1107,34 @@ struct AgentCockpitHUDView: View {
         }
         let trailing = canonicalRows.filter { !orderedSet.contains($0.id) }
         return ordered + trailing
+    }
+
+    private static func fullUngroupedLayoutSignature(rows: [HUDRow],
+                                                     isCompact: Bool,
+                                                     groupByProject: Bool) -> Int {
+        guard !isCompact, !groupByProject else { return 0 }
+        var hasher = Hasher()
+        hasher.combine(rows.count)
+        for row in rows {
+            hasher.combine(row.id)
+            hasher.combine(row.projectName)
+            hasher.combine(row.displayName)
+            hasher.combine(row.cleanedTabTitle ?? "")
+        }
+        return hasher.finalize()
+    }
+
+    private static func groupedRowsForPresentation(_ rows: [HUDRow],
+                                                   now: Date,
+                                                   isWindowVisibleForOrdering: Bool) -> [HUDGroup] {
+        if isWindowVisibleForOrdering {
+            return groupedRowsPreservingOrder(rows, now: now)
+        }
+        return groupedRows(rows, now: now)
+    }
+
+    private func rowsOrderedForDisplay(from canonicalRows: [HUDRow]) -> [HUDRow] {
+        Self.rowsOrderedForDisplay(orderedRowIDs: orderedRowIDs, canonicalRows: canonicalRows)
     }
 
     private func synchronizeOrderedRows(with canonicalRows: [HUDRow],
@@ -1089,15 +1438,6 @@ struct AgentCockpitHUDView: View {
         }
     }
 
-    private func makeRowsSnapshot() -> HUDRowsSnapshot {
-        Self.makeRowsSnapshot(
-            codexIndexer: codexIndexer,
-            claudeIndexer: claudeIndexer,
-            activeCodex: activeCodex,
-            isCompact: isCompact
-        )
-    }
-
     static func liveSessionSummary(activeCodex: CodexActiveSessionsModel) -> HUDLiveSessionSummary {
         let presences = displayableLiveSummaryPresences(from: activeCodex.presences, lookupIndexes: nil)
         let activeCount = presences.reduce(into: 0) { count, presence in
@@ -1110,9 +1450,7 @@ struct AgentCockpitHUDView: View {
     }
 
     static func liveSessionSummary(activeCodex: CodexActiveSessionsModel,
-                                   codexIndexer: SessionIndexer,
-                                   claudeIndexer: ClaudeSessionIndexer) -> HUDLiveSessionSummary {
-        let lookupIndexes = buildSessionLookupIndexes(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer)
+                                   lookupIndexes: SessionLookupIndexes?) -> HUDLiveSessionSummary {
         let presences = displayableLiveSummaryPresences(from: activeCodex.presences, lookupIndexes: lookupIndexes)
         let activeCount = presences.reduce(into: 0) { count, presence in
             if activeCodex.liveState(for: presence) == .activeWorking {
@@ -1121,6 +1459,18 @@ struct AgentCockpitHUDView: View {
         }
         let waitingCount = max(0, presences.count - activeCount)
         return HUDLiveSessionSummary(activeCount: activeCount, waitingCount: waitingCount)
+    }
+
+    static func liveSessionSummary(activeCodex: CodexActiveSessionsModel,
+                                   codexIndexer: SessionIndexer,
+                                   claudeIndexer: ClaudeSessionIndexer) -> HUDLiveSessionSummary {
+        liveSessionSummary(
+            activeCodex: activeCodex,
+            lookupIndexes: buildSessionLookupIndexes(
+                codexSessions: codexIndexer.allSessions,
+                claudeSessions: claudeIndexer.allSessions
+            )
+        )
     }
 
     private static func displayableLiveSummaryPresences(from presences: [CodexActivePresence],
@@ -1202,17 +1552,18 @@ struct AgentCockpitHUDView: View {
         return existing
     }
 
-    private static func makeRowsSnapshot(codexIndexer: SessionIndexer,
-                                         claudeIndexer: ClaudeSessionIndexer,
-                                         activeCodex: CodexActiveSessionsModel,
-                                         isCompact: Bool,
-                                         now: Date = Date()) -> HUDRowsSnapshot {
-        let lookupIndexes = buildSessionLookupIndexes(codexIndexer: codexIndexer, claudeIndexer: claudeIndexer)
+    fileprivate static func makeRowsSnapshot(codexSessions: [Session],
+                                             claudeSessions: [Session],
+                                             presences: [CodexActivePresence],
+                                             activeCodex: CodexActiveSessionsModel,
+                                             isCompact: Bool,
+                                             lookupIndexes: SessionLookupIndexes,
+                                             now: Date = Date()) -> HUDRowsSnapshot {
         let supportedSources: Set<SessionSource> = [.codex, .claude]
-        let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions
+        let allSessions = codexSessions + claudeSessions
         let fallbackBySessionKey = UnifiedSessionsView.buildFallbackPresenceMap(
             sessions: allSessions,
-            presences: activeCodex.presences
+            presences: presences
         ) { candidate in
             activeCodex.presence(for: candidate) != nil
         }
@@ -1231,7 +1582,7 @@ struct AgentCockpitHUDView: View {
             )
         }
 
-        let mappedRows: [LegacyMappedRow] = activeCodex.presences.compactMap { presence in
+        let mappedRows: [LegacyMappedRow] = presences.compactMap { presence in
             guard supportedSources.contains(presence.source) else { return nil }
             let logNorm = presence.sessionLogPath.map(CodexActiveSessionsModel.normalizePath)
             let presenceKey = CodexActiveSessionsModel.presenceKey(for: presence)
@@ -1901,10 +2252,10 @@ struct AgentCockpitHUDView: View {
         return Self.codexRolloutTimestampFormatter.date(from: ts)
     }
 
-    private static func buildSessionLookupIndexes(codexIndexer: SessionIndexer,
-                                                  claudeIndexer: ClaudeSessionIndexer) -> SessionLookupIndexes {
+    static func buildSessionLookupIndexes(codexSessions: [Session],
+                                          claudeSessions: [Session]) -> SessionLookupIndexes {
         let supportedSources: Set<SessionSource> = [.codex, .claude]
-        let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions
+        let allSessions = codexSessions + claudeSessions
 
         var byLogPath: [String: Session] = [:]
         var bySessionID: [String: Session] = [:]
@@ -1995,9 +2346,7 @@ private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.onVisibilityChanged = onVisibilityChanged
         context.coordinator.onKeyWindowChanged = onKeyWindowChanged
-        DispatchQueue.main.async { [weak nsView] in
-            context.coordinator.attach(to: nsView?.window)
-        }
+        context.coordinator.attach(to: nsView.window)
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
@@ -2005,6 +2354,50 @@ private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
     }
 
     final class Coordinator {
+#if DEBUG
+        private struct DebugAttachmentState {
+            var attachedWindowCount: Int = 0
+            var activeObserverSetCount: Int = 0
+            var maxAttachedWindowCount: Int = 0
+            var maxActiveObserverSetCount: Int = 0
+        }
+        private static let debugAttachmentLock = NSLock()
+        private static var debugAttachmentState = DebugAttachmentState()
+
+        static func debugAttachmentSnapshot() -> (attachedWindows: Int, activeObserverSets: Int, maxAttachedWindows: Int, maxActiveObserverSets: Int) {
+            debugAttachmentLock.lock()
+            let state = debugAttachmentState
+            debugAttachmentLock.unlock()
+            return (
+                attachedWindows: state.attachedWindowCount,
+                activeObserverSets: state.activeObserverSetCount,
+                maxAttachedWindows: state.maxAttachedWindowCount,
+                maxActiveObserverSets: state.maxActiveObserverSetCount
+            )
+        }
+
+        private static func recordAttach() {
+            debugAttachmentLock.lock()
+            debugAttachmentState.attachedWindowCount += 1
+            debugAttachmentState.activeObserverSetCount += 1
+            debugAttachmentState.maxAttachedWindowCount = max(
+                debugAttachmentState.maxAttachedWindowCount,
+                debugAttachmentState.attachedWindowCount
+            )
+            debugAttachmentState.maxActiveObserverSetCount = max(
+                debugAttachmentState.maxActiveObserverSetCount,
+                debugAttachmentState.activeObserverSetCount
+            )
+            debugAttachmentLock.unlock()
+        }
+
+        private static func recordDetach() {
+            debugAttachmentLock.lock()
+            debugAttachmentState.attachedWindowCount = max(0, debugAttachmentState.attachedWindowCount - 1)
+            debugAttachmentState.activeObserverSetCount = max(0, debugAttachmentState.activeObserverSetCount - 1)
+            debugAttachmentLock.unlock()
+        }
+#endif
         var onVisibilityChanged: (Bool) -> Void
         var onKeyWindowChanged: ((Bool) -> Void)?
         private weak var window: NSWindow?
@@ -2026,6 +2419,9 @@ private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
             guard window !== newWindow else { return }
             detach()
             window = newWindow
+#if DEBUG
+            Self.recordAttach()
+#endif
 
             miniObserver = NotificationCenter.default.addObserver(
                 forName: NSWindow.didMiniaturizeNotification,
@@ -2108,6 +2504,11 @@ private struct CockpitWindowVisibilityObserver: NSViewRepresentable {
             closeObserver = nil
             becameKeyObserver = nil
             resignedKeyObserver = nil
+            if window != nil {
+#if DEBUG
+                Self.recordDetach()
+#endif
+            }
             window = nil
         }
 
@@ -2140,10 +2541,8 @@ private struct CockpitScrollViewScrollerConfigurator: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { [weak nsView] in
-            context.coordinator.attachIfNeeded(to: nsView)
-            context.coordinator.apply(alwaysVisible: alwaysVisible)
-        }
+        context.coordinator.attachIfNeeded(to: nsView)
+        context.coordinator.apply(alwaysVisible: alwaysVisible)
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {

@@ -1,5 +1,80 @@
 import SwiftUI
 import AppKit
+import Combine
+
+@MainActor
+private final class UsageMenuBarLiveSummaryModel: ObservableObject {
+    @Published private(set) var summary = HUDLiveSessionSummary(activeCount: 0, waitingCount: 0)
+
+    private var activeCodexID: ObjectIdentifier?
+    private var codexIndexerID: ObjectIdentifier?
+    private var claudeIndexerID: ObjectIdentifier?
+    private weak var activeCodex: CodexActiveSessionsModel?
+    private weak var codexIndexer: SessionIndexer?
+    private weak var claudeIndexer: ClaudeSessionIndexer?
+    private var lookupIndexes = SessionLookupIndexes(byLogPath: [:], bySessionID: [:], byWorkspace: [:])
+    private var cancellables: Set<AnyCancellable> = []
+
+    func connect(activeCodex: CodexActiveSessionsModel,
+                 codexIndexer: SessionIndexer,
+                 claudeIndexer: ClaudeSessionIndexer) {
+        let nextActiveCodexID = ObjectIdentifier(activeCodex)
+        let nextCodexIndexerID = ObjectIdentifier(codexIndexer)
+        let nextClaudeIndexerID = ObjectIdentifier(claudeIndexer)
+        guard activeCodexID != nextActiveCodexID
+            || codexIndexerID != nextCodexIndexerID
+            || claudeIndexerID != nextClaudeIndexerID else {
+            return
+        }
+
+        activeCodexID = nextActiveCodexID
+        codexIndexerID = nextCodexIndexerID
+        claudeIndexerID = nextClaudeIndexerID
+        self.activeCodex = activeCodex
+        self.codexIndexer = codexIndexer
+        self.claudeIndexer = claudeIndexer
+        cancellables.removeAll()
+
+        activeCodex.$activeMembershipVersion
+            .sink { [weak self] _ in self?.rebuild() }
+            .store(in: &cancellables)
+
+        codexIndexer.$allSessions
+            .sink { [weak self] sessions in
+                guard let self else { return }
+                guard let claudeIndexer = self.claudeIndexer else { return }
+                self.lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
+                    codexSessions: sessions,
+                    claudeSessions: claudeIndexer.allSessions
+                )
+                self.rebuild()
+            }
+            .store(in: &cancellables)
+
+        claudeIndexer.$allSessions
+            .sink { [weak self] sessions in
+                guard let self else { return }
+                guard let codexIndexer = self.codexIndexer else { return }
+                self.lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
+                    codexSessions: codexIndexer.allSessions,
+                    claudeSessions: sessions
+                )
+                self.rebuild()
+            }
+            .store(in: &cancellables)
+
+        lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
+            codexSessions: codexIndexer.allSessions,
+            claudeSessions: claudeIndexer.allSessions
+        )
+        rebuild()
+    }
+
+    private func rebuild() {
+        guard let activeCodex else { return }
+        summary = AgentCockpitHUDView.liveSessionSummary(activeCodex: activeCodex, lookupIndexes: lookupIndexes)
+    }
+}
 
 struct UsageMenuBarLabel: View {
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
@@ -12,17 +87,12 @@ struct UsageMenuBarLabel: View {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
+    @StateObject private var liveSummaryModel = UsageMenuBarLiveSummaryModel()
 
     var body: some View {
         HStack(spacing: 10) {
             if liveSessionsEnabled {
-                LiveSessionMenuBarLabel(
-                    summary: AgentCockpitHUDView.liveSessionSummary(
-                        activeCodex: activeCodex,
-                        codexIndexer: codexIndexer,
-                        claudeIndexer: claudeIndexer
-                    )
-                )
+                LiveSessionMenuBarLabel(summary: liveSummaryModel.summary)
             }
             if hasAnyUsageSource {
                 UsageMeterMenuBarLabel()
@@ -35,6 +105,13 @@ struct UsageMenuBarLabel: View {
         }
         .frame(height: NSStatusBar.system.thickness)
         .fixedSize(horizontal: true, vertical: false)
+        .onAppear {
+            liveSummaryModel.connect(
+                activeCodex: activeCodex,
+                codexIndexer: codexIndexer,
+                claudeIndexer: claudeIndexer
+            )
+        }
     }
 
     private var hasAnyUsageSource: Bool {

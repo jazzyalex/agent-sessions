@@ -147,6 +147,13 @@ actor ClaudeStatusService {
     private var refresherLoopGeneration: UInt64 = 0
     private var tmuxPathCache: ClaudeTmuxPathCache
     private var terminalPathCache: ClaudeTerminalPathCache
+    private var claudeUsageEnabledPreference: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "ClaudeUsageEnabled") == nil {
+            return defaults.bool(forKey: "ShowClaudeUsageStrip")
+        }
+        return defaults.bool(forKey: "ClaudeUsageEnabled")
+    }
 
     init(updateHandler: @escaping @Sendable (ClaudeUsageSnapshot) -> Void,
          availabilityHandler: @escaping @Sendable (ClaudeServiceAvailability) -> Void) {
@@ -162,6 +169,10 @@ actor ClaudeStatusService {
     }
 
     func start() async {
+        guard claudeUsageEnabledPreference else {
+            shouldRun = false
+            return
+        }
         shouldRun = true
 
         // Check dependencies once at startup
@@ -187,10 +198,16 @@ actor ClaudeStatusService {
         refresherTask?.cancel()
         refresherTask = nil
         refresherLoopGeneration &+= 1
+        tmuxCleanupFollowUpTask?.cancel()
+        tmuxCleanupFollowUpTask = nil
         if let label = activeProbeLabel {
             await cleanupTmuxProbe(label: label, session: Self.probeSessionName)
             activeProbeLabel = nil
         }
+        await cleanupOrphanedProbeProcesses()
+        await cleanupOrphanedTmuxLabels()
+        didRunOrphanCleanup = false
+        didRunMenuBarOrphanCleanup = false
         if state == .running {
             state = .idle
         }
@@ -202,6 +219,12 @@ actor ClaudeStatusService {
     }
 
     func setVisibility(menuVisible: Bool, stripVisible: Bool, appIsActive: Bool) {
+        guard claudeUsageEnabledPreference else {
+            visibilityContext = VisibilityContext(menuVisible: false, stripVisible: false, appIsActive: appIsActive)
+            visible = false
+            restartRefresherLoopIfNeeded()
+            return
+        }
         let previousContext = visibilityContext
         let previousMode = visibilityMode
         let wasVisible = visible
@@ -758,6 +781,18 @@ actor ClaudeStatusService {
                     staleRemoved += 1
                     continue
                 }
+                let fallbackPIDs = managedProbePIDs(for: label)
+                if !fallbackPIDs.isEmpty {
+                    for pid in fallbackPIDs {
+                        await terminateProcessGroup(pid: pid)
+                    }
+                    if tmuxSocketState(for: label) != .live {
+                        removeTmuxSocketFiles(label: label)
+                        tmuxCleanupRetryCounts.removeValue(forKey: label)
+                        staleRemoved += 1
+                        continue
+                    }
+                }
                 tmuxCleanupRetryCounts[label, default: 0] += 1
                 skipped += 1
             }
@@ -778,6 +813,60 @@ actor ClaudeStatusService {
             return false
         }
         return true
+    }
+
+    private func managedProbePIDs(for label: String) -> [pid_t] {
+        let snapshot = scanProcessSnapshot()
+        return Self.parseManagedProbePIDs(
+            from: snapshot,
+            label: label,
+            uid: getuid()
+        )
+    }
+
+    nonisolated static func parseManagedProbePIDs(from processSnapshot: String,
+                                                  label: String,
+                                                  uid: uid_t) -> [pid_t] {
+        guard tmuxCleanupPlanner.isManagedProbeLabel(label) else { return [] }
+        guard !processSnapshot.isEmpty else { return [] }
+        var pids: [pid_t] = []
+        let socketMarkers = tmuxCleanupPlanner.socketPaths(uid: uid, label: label)
+        for line in processSnapshot.split(separator: "\n") {
+            let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let splitIndex = trimmed.firstIndex(where: { $0.isWhitespace }) else { continue }
+            let pidString = String(trimmed[..<splitIndex])
+            let command = String(trimmed[splitIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let pidValue = Int32(pidString) else { continue }
+            let commandTokens = command.split(separator: " ").map(String.init)
+            let isManagedTmux =
+                commandTokens.contains(where: { ($0 as NSString).lastPathComponent == "tmux" }) &&
+                command.contains(" -L \(label) ")
+            let isManagedClaudeProbe =
+                command.contains("claude --model sonnet") &&
+                socketMarkers.contains(where: { command.contains($0) })
+            if isManagedTmux || isManagedClaudeProbe {
+                pids.append(pid_t(pidValue))
+            }
+        }
+        return Array(Set(pids)).sorted()
+    }
+
+    private func scanProcessSnapshot() -> String {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/ps")
+        task.arguments = ["-A", "-o", "pid=", "-o", "command="]
+        let out = Pipe()
+        task.standardOutput = out
+        task.standardError = FileHandle.nullDevice
+        do {
+            try task.run()
+        } catch {
+            return ""
+        }
+        task.waitUntilExit()
+        guard task.terminationStatus == 0 else { return "" }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     private func workDirMarkers(_ workDir: String) -> [String] {

@@ -724,6 +724,63 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testITermProbeMinIntervalSeconds_keepsPinnedBackgroundProbeSteady() {
+        XCTAssertEqual(
+            CodexActiveSessionsModel.itermProbeMinIntervalSeconds(
+                appIsActive: false,
+                isCockpitVisible: true,
+                isPinnedCockpitVisible: true
+            ),
+            CodexActiveSessionsModel.pinnedBackgroundITermProbeMinInterval
+        )
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.itermProbeMinIntervalSeconds(
+                appIsActive: true,
+                isCockpitVisible: true,
+                isPinnedCockpitVisible: true
+            ),
+            0
+        )
+    }
+
+    func testProcessProbeMinIntervalSeconds_usesLongerPinnedBackgroundCadence() {
+        XCTAssertEqual(
+            CodexActiveSessionsModel.processProbeMinIntervalSeconds(
+                registryHasPresences: false,
+                hasVisibleConsumer: true,
+                appIsActive: false,
+                isCockpitVisible: true,
+                isPinnedCockpitVisible: true
+            ),
+            CodexActiveSessionsModel.pinnedBackgroundProcessProbeMinInterval
+        )
+
+        XCTAssertEqual(
+            CodexActiveSessionsModel.processProbeMinIntervalSeconds(
+                registryHasPresences: false,
+                hasVisibleConsumer: true,
+                appIsActive: true,
+                isCockpitVisible: true,
+                isPinnedCockpitVisible: true
+            ),
+            CodexActiveSessionsModel.processProbeMinIntervalRegistryEmptyForeground
+        )
+    }
+
+    func testResolveLiveState_preservesPreviousStateWhenITermProbeWasDeferred() {
+        XCTAssertEqual(
+            CodexActiveSessionsModel.resolveLiveState(
+                probedState: nil,
+                previousState: .activeWorking,
+                heuristic: .openIdle,
+                attemptedITermProbe: false,
+                preservePreviousWhenProbeDeferred: true
+            ),
+            .activeWorking
+        )
+    }
+
     func testNextITermProbeBudget_progressesThenFallsBackToSteadyState() {
         var index: Int? = 0
         let first = CodexActiveSessionsModel.nextITermProbeBudget(resumeIndex: index)
@@ -753,6 +810,34 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(second.nextCursor, 0)
     }
 
+    func testSelectPinnedBackgroundITermProbeKeys_preservesActiveRowsAndRotatesWaitingRows() {
+        let previous: [String: CodexLiveState] = [
+            "a": .activeWorking,
+            "b": .openIdle,
+            "c": .openIdle,
+            "d": .activeWorking,
+            "e": .openIdle
+        ]
+
+        let first = CodexActiveSessionsModel.selectPinnedBackgroundITermProbeKeys(
+            sortedCandidateKeys: ["a", "b", "c", "d", "e"],
+            previousLiveStates: previous,
+            waitingBudget: 2,
+            start: 0
+        )
+        XCTAssertEqual(first.selected, ["a", "d", "b", "c"])
+        XCTAssertEqual(first.nextCursor, 2)
+
+        let second = CodexActiveSessionsModel.selectPinnedBackgroundITermProbeKeys(
+            sortedCandidateKeys: ["a", "b", "c", "d", "e"],
+            previousLiveStates: previous,
+            waitingBudget: 2,
+            start: first.nextCursor
+        )
+        XCTAssertEqual(second.selected, ["a", "d", "e", "b"])
+        XCTAssertEqual(second.nextCursor, 1)
+    }
+
     func testITermProbeCandidateKeys_filtersToProbeableCodexAndClaudeRows() {
         var codex = CodexActivePresence()
         codex.source = .codex
@@ -775,6 +860,48 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(keys.count, 2)
         XCTAssertTrue(keys.contains("codex|sid:sid-codex"))
         XCTAssertTrue(keys.contains("claude|sid:sid-claude"))
+    }
+
+    func testShouldSuppressTransientEmptyPublish_requiresVisibleCockpitAndFullConfirmation() {
+        XCTAssertTrue(
+            CodexActiveSessionsModel.shouldSuppressTransientEmptyPublish(
+                ui: [],
+                cockpitVisible: true,
+                didProbeProcesses: false,
+                didProbeITerm: false,
+                registryHadPresences: false
+            )
+        )
+
+        XCTAssertTrue(
+            CodexActiveSessionsModel.shouldSuppressTransientEmptyPublish(
+                ui: [],
+                cockpitVisible: true,
+                didProbeProcesses: true,
+                didProbeITerm: true,
+                registryHadPresences: true
+            )
+        )
+
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldSuppressTransientEmptyPublish(
+                ui: [],
+                cockpitVisible: true,
+                didProbeProcesses: true,
+                didProbeITerm: true,
+                registryHadPresences: false
+            )
+        )
+
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldSuppressTransientEmptyPublish(
+                ui: [],
+                cockpitVisible: false,
+                didProbeProcesses: false,
+                didProbeITerm: false,
+                registryHadPresences: false
+            )
+        )
     }
 
     func testResolveLiveState_prefersPreviousStateWhenProbeSkipped() {
@@ -1127,6 +1254,38 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let parsed = CodexActiveSessionsModel.parseITermProbeMetadata("falsetabtrue")
         XCTAssertEqual(parsed.isProcessing, false)
         XCTAssertEqual(parsed.isAtShellPrompt, true)
+    }
+
+    func testParseBatchedITermProbeOutput_preservesTailAndMetadataPerPresence() {
+        let rowSeparator = String(UnicodeScalar(0x1E)!)
+        let fieldSeparator = String(UnicodeScalar(0x1F)!)
+        let text = [
+            ["codex|sid:a", "true", "false", "first line\nsecond line"].joined(separator: fieldSeparator),
+            ["claude|sid:b", "false", "true", ""].joined(separator: fieldSeparator)
+        ].joined(separator: rowSeparator)
+
+        let parsed = CodexActiveSessionsModel.parseBatchedITermProbeOutput(
+            text,
+            rowSeparator: rowSeparator,
+            fieldSeparator: fieldSeparator
+        )
+
+        XCTAssertEqual(
+            parsed["codex|sid:a"],
+            CodexActiveSessionsModel.ITermProbeResult(
+                tail: "first line\nsecond line",
+                isProcessing: true,
+                isAtShellPrompt: false
+            )
+        )
+        XCTAssertEqual(
+            parsed["claude|sid:b"],
+            CodexActiveSessionsModel.ITermProbeResult(
+                tail: nil,
+                isProcessing: false,
+                isAtShellPrompt: true
+            )
+        )
     }
 
     func testResolveClaudeStateFromITermProbe_prefersProcessingFlag() {
