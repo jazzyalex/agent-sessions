@@ -40,7 +40,7 @@ enum AppWindowRouter {
 
     @MainActor static func showAgentSessionsWindow() {
         NSApp.activate(ignoringOtherApps: true)
-        if let main = existingWindow(title: "Agent Sessions") ?? NSApp.mainWindow {
+        if let main = existingWindow(title: "Agent Sessions") {
             main.makeKeyAndOrderFront(nil)
             return
         }
