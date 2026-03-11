@@ -5,24 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
-- Navigation: Fixed `Open Agent Sessions` from Cockpit after app relaunch with only Cockpit restored; it now opens the main Agent Sessions window instead of re-focusing the Cockpit window.
-- Sessions (Agent Cockpit): Pinned Cockpit now uses a high status-bar window level that keeps it on top while allowing macOS tooltips to appear above the HUD instead of rendering behind it.
-- Menu Bar: Added a dedicated `Show Active/Waiting sessions` toggle in the menu and a `Show menu bar icons` toggle in Settings → Menu Bar so live session dots can be shown/hidden independently of usage meters.
-- Sessions (Agent Cockpit): Pinned background Cockpit refreshes now retain process-backed live rows until the next deferred process probe window completes, eliminating recurring partial-list flicker when the cockpit is unfocused.
-- Sessions (Agent Cockpit): Live-state reconciliation now treats selected-but-missing batched iTerm probe rows as probe misses (heuristic/open-idle fallback) instead of preserving stale prior activity states, preventing stuck `active`/`waiting` status after tab/session disappearance or partial probe output.
-- Sessions (Agent Cockpit): Fixed a queued-refresh task lifecycle leak in pinned Cockpit mode by tracking and canceling deferred follow-up refresh tasks, and reduced long-run probe overhead with lower-frequency wait polling plus bounded session lookup cache pruning to prevent gradual CPU climb under steady workloads.
-- Sessions (Agent Cockpit): Pinned Cockpit background updates now reuse cached HUD snapshots and back off expensive iTerm/process probes, cutting CPU use while preserving live row motion and status visibility.
-- Sessions (Agent Cockpit): Pinned/open Cockpit refreshes now keep the last confirmed rows visible until a full empty refresh is confirmed, eliminating transient all-row flicker while the HUD is updating in the background; pinned background tail probes now prioritize previously active rows and sample fewer waiting rows per cycle to reduce long-run CPU climb.
-- Sessions (Agent Cockpit / Usage Tracking): Pinned Cockpit refreshes now batch iTerm live-state probes per cycle instead of spawning per-row AppleScript probes, and Claude usage tracking now cleans up managed `as-cc-*` tmux probe sessions on app startup and service stop so long-running pinned sessions no longer accumulate stale helper work.
-- Sessions (Agent Cockpit / Usage Tracking): Live-session refreshes now bind iTerm/process probes to a single refresh generation, cancel stale in-flight work before newer refreshes replace it, and expose debug counters for Cockpit/window attachment lifetimes so long pinned sessions do not accumulate hidden probe or observer work.
-- Sessions (Agent Cockpit): HUD derived-state recomputation now reuses cached session lookup indexes for presence-only refreshes, Cockpit representable updates no longer enqueue redundant main-queue hops, and repo-label git-root resolution is memoized so pinned Cockpit CPU remains stable over long constant-workload runs without reducing live cadence.
-- Sessions (Agent Cockpit): Cockpit HUD labels now use `Waiting` instead of `Idle` for non-active live sessions, including filter pills, grouped counts, empty states, and accessibility labels.
-- Sessions (Agent Cockpit): Pinned compact HUD mode now keeps its toolbar always visible, eliminating hover overlays and preventing row targets from shifting under the cursor during quick session switching.
-- Sessions (Agent Cockpit): Grouped project headers now keep repo names on a single truncated line instead of wrapping to two rows in compact/full HUD layouts.
-- Sessions (Agent Cockpit): Grouped HUD projects with only 4h+ waiting sessions now sink below current work, auto-collapse by default in compact grouped mode, and are separated by a divider so long-postponed sessions stay visible without competing equally for attention.
-- Sessions (Agent Cockpit): 4h+ waiting rows now keep the `Waiting` label but render with dimmer same-hue waiting styling in compact and full modes, while mixed projects keep recent waiting/active rows ahead of stale waiting rows.
-- Menu Bar / Agent Cockpit: The cockpit toolbar now includes a direct `Open Agent Sessions` action, and the menu bar item now shows live active/waiting counts first with quick links to Agent Cockpit and the main Agent Sessions window.
-- Sessions / Menu Bar: Fixed regressions where unresolved Codex live presences could disappear from Agent Cockpit, the menu bar item could stay hidden despite being enabled, and cockpit `Open Agent Sessions` could fail with a missing scene id.
+- Agent Cockpit: Major stability update. Fixed the Cockpit CPU/energy leak, eliminating long-run resource creep while pinned or backgrounded, while also reducing full-list/partial-row flicker and improving handling for disappearing probe rows.
+- Agent Cockpit: Navigation and pinned-window behavior are more reliable after relaunch and while backgrounded, including correct `Open Agent Sessions` routing and tooltip layering above the HUD.
+- Menu Bar: Added a dedicated `Show Active/Waiting sessions` toggle plus a `Show menu bar icons` setting so live session dots can be shown independently from usage meters.
+- Agent Cockpit: Non-active live sessions now use `Waiting` terminology, grouped headers stay single-line, compact pinned mode keeps its toolbar visible, and long-waiting projects are visually deprioritized.
+- Menu Bar / Agent Cockpit: Live active/waiting counts and quick actions are surfaced more clearly, and follow-up fixes restored hidden menu bar items and unresolved Codex live presences.
 
 ## [3.0.1] - 2026-03-04
 
