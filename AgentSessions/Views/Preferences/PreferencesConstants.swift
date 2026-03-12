@@ -76,6 +76,7 @@ enum PreferencesKey {
         static let enableDeepToolOutputSearch = "EnableDeepToolOutputSearch"
         static let enableRecentToolIOIndex = "EnableRecentToolIOIndex"
         static let includeOpenClawDeletedSessions = "OpenClawIncludeDeletedSessions"
+        static let hideDockIcon = "HideDockIcon"
     }
 
     enum Paths {
