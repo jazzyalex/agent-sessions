@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Window restoration: Relaunch now restores the primary `Agent Sessions` window reliably even when its autosave name was already set, and auto-reopens `Agent Cockpit` when it was pinned.
 - Agent Cockpit: Major stability update. Fixed the Cockpit CPU/energy leak, eliminating long-run resource creep while pinned or backgrounded, while also reducing full-list/partial-row flicker and improving handling for disappearing probe rows.
+- Agent Cockpit: Follow-up CPU stabilization now suppresses redundant HUD snapshot invalidations, pauses idle-dot pulse animation while the app is inactive, and applies stable-cycle pinned-background cadence backoff up to `5s` to reduce long-run CPU accumulation without changing foreground responsiveness.
 - Agent Cockpit: Navigation and pinned-window behavior are more reliable after relaunch and while backgrounded, including correct `Open Agent Sessions` routing and tooltip layering above the HUD.
 - Menu Bar: Added a dedicated `Show Active/Waiting sessions` toggle plus a `Show menu bar icons` setting so live session dots can be shown independently from usage meters.
 - Preferences: Added an `Advanced` toggle to hide the Dock icon by switching Agent Sessions into accessory app mode; default remains off.

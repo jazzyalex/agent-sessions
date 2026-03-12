@@ -101,6 +101,30 @@ struct HUDRow: Identifiable, Equatable {
         self.lastActivityAt = lastActivityAt
         self.lastActivityTooltip = lastActivityTooltip
     }
+
+    static func == (lhs: HUDRow, rhs: HUDRow) -> Bool {
+        lhs.id == rhs.id
+            && lhs.source == rhs.source
+            && lhs.agentType == rhs.agentType
+            && lhs.projectName == rhs.projectName
+            && lhs.displayName == rhs.displayName
+            && lhs.liveState == rhs.liveState
+            && lhs.preview == rhs.preview
+            && lhs.lastSeenAt == rhs.lastSeenAt
+            && lhs.itermSessionId == rhs.itermSessionId
+            && lhs.revealURL == rhs.revealURL
+            && lhs.tty == rhs.tty
+            && lhs.termProgram == rhs.termProgram
+            && lhs.tabTitle == rhs.tabTitle
+            && lhs.cleanedTabTitle == rhs.cleanedTabTitle
+            && lhs.resolvedSessionID == rhs.resolvedSessionID
+            && lhs.runtimeSessionID == rhs.runtimeSessionID
+            && lhs.logPath == rhs.logPath
+            && lhs.workingDirectory == rhs.workingDirectory
+            && lhs.lastActivityAt == rhs.lastActivityAt
+            && lhs.elapsed == rhs.elapsed
+            && lhs.lastActivityTooltip == rhs.lastActivityTooltip
+    }
 }
 
 private enum AgentCockpitHUDTheme {
@@ -198,6 +222,17 @@ private struct HUDPresentationInputs: Equatable {
     let collapsedProjects: Set<String>
     let orderedRowIDs: [String]
     let isWindowVisibleForOrdering: Bool
+
+    static func == (lhs: HUDPresentationInputs, rhs: HUDPresentationInputs) -> Bool {
+        lhs.canonicalRows == rhs.canonicalRows
+            && lhs.isCompact == rhs.isCompact
+            && lhs.sessionFilterMode == rhs.sessionFilterMode
+            && lhs.filterText == rhs.filterText
+            && lhs.groupByProject == rhs.groupByProject
+            && lhs.collapsedProjects == rhs.collapsedProjects
+            && lhs.orderedRowIDs == rhs.orderedRowIDs
+            && lhs.isWindowVisibleForOrdering == rhs.isWindowVisibleForOrdering
+    }
 }
 
 private struct HUDPresentationState {
@@ -360,8 +395,8 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         )
         if nextSnapshot != snapshot {
             snapshot = nextSnapshot
+            snapshotTimestamp = now
         }
-        snapshotTimestamp = now
 #if DEBUG
         Self.recordDebugRebuild()
 #endif
@@ -389,6 +424,7 @@ struct AgentCockpitHUDView: View {
     @State private var orderedRowIDs: [String] = []
     @State private var latestCanonicalRows: [HUDRow] = []
     @State private var latestCanonicalRowsSnapshotAt: Date = Date()
+    @State private var presentationClockNow: Date = Date()
     @State private var isWindowVisibleForOrdering: Bool = true
     @State private var wasWindowHiddenSinceLastVisible: Bool = false
     @State private var hiddenMembershipChurnDetected: Bool = false
@@ -407,6 +443,12 @@ struct AgentCockpitHUDView: View {
     private let compactBodyMinRowsWhenToolbarHidden: CGFloat = 3
     private let compactBodyMaxRowsWhenToolbarVisible: CGFloat = 10
     private static let staleWaitingThreshold: TimeInterval = 4 * 60 * 60
+    private static let presentationClockInterval: TimeInterval = 30
+    private let presentationClock = Timer.publish(
+        every: AgentCockpitHUDView.presentationClockInterval,
+        on: .main,
+        in: .common
+    ).autoconnect()
 
     private static let codexRolloutTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -465,10 +507,11 @@ struct AgentCockpitHUDView: View {
     private var hudContent: some View {
         let snapshot = derivedState.snapshot
         let snapshotTimestamp = derivedState.snapshotTimestamp
+        let presentationTimestamp = max(snapshotTimestamp, presentationClockNow)
         let canonicalRows = activeEnabled ? snapshot.rows : []
         let currentPresentationInputs = HUDPresentationInputs(
             canonicalRows: canonicalRows,
-            snapshotTimestamp: snapshotTimestamp,
+            snapshotTimestamp: presentationTimestamp,
             isCompact: isCompact,
             sessionFilterMode: sessionFilterMode,
             filterText: filterText,
@@ -490,41 +533,47 @@ struct AgentCockpitHUDView: View {
         .onAppear {
             derivedState.bind(activeCodex: activeCodex)
             derivedState.setCompact(isCompact, activeCodex: activeCodex)
+            presentationClockNow = max(presentationClockNow, snapshotTimestamp)
             presentationState = Self.makePresentationState(from: currentPresentationInputs)
             synchronizeOrderedRows(
                 with: canonicalRows,
                 previousRows: [],
-                previousSnapshotAt: snapshotTimestamp,
-                incomingSnapshotAt: snapshotTimestamp
+                previousSnapshotAt: presentationTimestamp,
+                incomingSnapshotAt: presentationTimestamp
             )
             latestCanonicalRows = canonicalRows
-            latestCanonicalRowsSnapshotAt = snapshotTimestamp
+            latestCanonicalRowsSnapshotAt = presentationTimestamp
             synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
         .onChange(of: canonicalRows) { oldRows, rows in
+            let presentationTimestamp = max(presentationClockNow, derivedState.snapshotTimestamp)
             synchronizeOrderedRows(
                 with: rows,
                 previousRows: oldRows,
                 previousSnapshotAt: latestCanonicalRowsSnapshotAt,
-                incomingSnapshotAt: derivedState.snapshotTimestamp
+                incomingSnapshotAt: presentationTimestamp
             )
             latestCanonicalRows = rows
-            latestCanonicalRowsSnapshotAt = derivedState.snapshotTimestamp
+            latestCanonicalRowsSnapshotAt = presentationTimestamp
             refreshPresentationState(
                 canonicalRows: rows,
-                snapshotTimestamp: derivedState.snapshotTimestamp
+                snapshotTimestamp: presentationTimestamp
             )
             synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
         .onChange(of: isWindowVisibleForOrdering) { _, isVisible in
             guard isVisible else { return }
+            let now = Date()
+            presentationClockNow = now
+            refreshPresentationState(canonicalRows: latestCanonicalRows, snapshotTimestamp: now)
             synchronizeOrderedRows(
                 with: latestCanonicalRows,
                 previousRows: latestCanonicalRows,
                 previousSnapshotAt: latestCanonicalRowsSnapshotAt,
-                incomingSnapshotAt: derivedState.snapshotTimestamp
+                incomingSnapshotAt: now
             )
-            latestCanonicalRowsSnapshotAt = derivedState.snapshotTimestamp
+            latestCanonicalRowsSnapshotAt = now
+            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
         .onChange(of: displayState.groupedRowsForCollapseSync.map(\.collapseSyncKey)) { _, _ in
             synchronizeCollapsedProjectsForStaleGroups(with: displayState.groupedRowsForCollapseSync)
@@ -532,7 +581,7 @@ struct AgentCockpitHUDView: View {
         .onChange(of: groupByProject) { _, _ in
             refreshPresentationState(
                 canonicalRows: canonicalRows,
-                snapshotTimestamp: snapshotTimestamp
+                snapshotTimestamp: presentationTimestamp
             )
             synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
@@ -541,22 +590,33 @@ struct AgentCockpitHUDView: View {
             synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
         .onChange(of: sessionFilterMode) { _, _ in
-            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: snapshotTimestamp)
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: presentationTimestamp)
         }
         .onChange(of: filterText) { _, _ in
-            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: snapshotTimestamp)
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: presentationTimestamp)
         }
         .onChange(of: orderedRowIDs) { _, _ in
-            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: snapshotTimestamp)
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: presentationTimestamp)
         }
         .onChange(of: collapsedProjects) { _, _ in
-            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: snapshotTimestamp)
-        }
-        .onChange(of: snapshotTimestamp) { _, newTimestamp in
-            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: newTimestamp)
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: presentationTimestamp)
         }
         .onChange(of: activeEnabled) { _, _ in
-            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: snapshotTimestamp)
+            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: presentationTimestamp)
+        }
+        .onReceive(presentationClock) { now in
+            guard isWindowVisibleForOrdering else { return }
+            presentationClockNow = now
+            let presentationTimestamp = max(now, derivedState.snapshotTimestamp)
+            synchronizeOrderedRows(
+                with: latestCanonicalRows,
+                previousRows: latestCanonicalRows,
+                previousSnapshotAt: latestCanonicalRowsSnapshotAt,
+                incomingSnapshotAt: presentationTimestamp
+            )
+            latestCanonicalRowsSnapshotAt = presentationTimestamp
+            refreshPresentationState(canonicalRows: latestCanonicalRows, snapshotTimestamp: presentationTimestamp)
+            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
         .onHover { hovering in
             guard isCompact else { return }
