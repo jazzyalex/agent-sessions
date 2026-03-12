@@ -27,6 +27,7 @@ struct PendingCockpitNavigationRequest {
 enum AppWindowRouter {
     @MainActor static var openAgentSessionsWindow: (() -> Void)?
     @MainActor static var openAgentCockpitWindow: (() -> Void)?
+    @MainActor private static var didAttemptPinnedCockpitLaunchRestore: Bool = false
 
     @MainActor private static func existingWindow(title: String, identifier: String? = nil) -> NSWindow? {
         if let identifier {
@@ -36,6 +37,10 @@ enum AppWindowRouter {
         }
 
         return NSApp.windows.first(where: { $0.title == title })
+    }
+
+    @MainActor private static func existingWindow(identifier: String) -> NSWindow? {
+        NSApp.windows.first(where: { $0.identifier?.rawValue == identifier })
     }
 
     @MainActor static func showAgentSessionsWindow() {
@@ -52,7 +57,7 @@ enum AppWindowRouter {
 
     @MainActor static func showAgentCockpitWindow() {
         NSApp.activate(ignoringOtherApps: true)
-        if let cockpit = existingWindow(title: "", identifier: "AgentCockpit") {
+        if let cockpit = existingWindow(identifier: "AgentCockpit") {
             cockpit.makeKeyAndOrderFront(nil)
             return
         }
@@ -60,6 +65,23 @@ enum AppWindowRouter {
             openAgentCockpitWindow()
             return
         }
+    }
+
+    @MainActor
+    static func shouldRestorePinnedCockpitOnLaunch(defaults: UserDefaults = .standard) -> Bool {
+        let liveSessionsEnabled = defaults.object(forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled) as? Bool ?? true
+        guard liveSessionsEnabled else { return false }
+        return defaults.object(forKey: PreferencesKey.Cockpit.hudPinned) as? Bool ?? false
+    }
+
+    @MainActor
+    static func maybeRestorePinnedCockpitOnLaunch(openWindow: () -> Void) {
+        guard !didAttemptPinnedCockpitLaunchRestore else { return }
+        didAttemptPinnedCockpitLaunchRestore = true
+        guard !AppRuntime.isRunningTests else { return }
+        guard shouldRestorePinnedCockpitOnLaunch() else { return }
+        guard existingWindow(identifier: "AgentCockpit") == nil else { return }
+        openWindow()
     }
 }
 
@@ -159,6 +181,7 @@ struct AgentSessionsApp: App {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Advanced.hideDockIcon) private var hideDockIcon: Bool = false
     @AppStorage("UnifiedLegacyNoticeShown") private var unifiedNoticeShown: Bool = false
     @State private var selectedSessionID: String?
     @State private var selectedEventID: String?
@@ -173,6 +196,10 @@ struct AgentSessionsApp: App {
 
     init() {
         AgentEnablement.seedIfNeeded()
+        let defaults = UserDefaults.standard
+        let hideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
+        let menuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
+        Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
     }
 
     var body: some Scene {
@@ -270,9 +297,13 @@ struct AgentSessionsApp: App {
                 }
                 .onChange(of: menuBarEnabled) { _, newValue in
                     updateUsageModels()
+                    Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: newValue)
                 }
                 .onChange(of: liveSessionsEnabled) { _, _ in
                     updateUsageModels()
+                }
+                .onChange(of: hideDockIcon) { _, newValue in
+                    Self.applyActivationPolicy(hideDockIcon: newValue, menuBarEnabled: menuBarEnabled)
                 }
                 .onChange(of: codexAgentEnabled) { _, _ in handleAgentEnablementChange() }
                 .onChange(of: claudeAgentEnabled) { _, _ in handleAgentEnablementChange() }
@@ -280,6 +311,7 @@ struct AgentSessionsApp: App {
                 .onChange(of: openCodeAgentEnabled) { _, _ in handleAgentEnablementChange() }
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
+                    Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
                     ensureStatusItemController()
                     updateUsageModels()
                 }
@@ -463,6 +495,20 @@ extension AgentSessionsApp {
 
     private static let crashSupportRecipient = "jazzyalex@gmail.com"
     private static let crashIssueURL = URL(string: "https://github.com/jazzyalex/agent-sessions/issues/new?title=Crash%20Report&body=Please%20attach%20the%20exported%20crash%20report%20JSON%20file%20and%20steps%20to%20reproduce.")!
+
+    private static func applyActivationPolicy(hideDockIcon: Bool, menuBarEnabled: Bool) {
+        let apply: () -> Void = {
+            // Safety: never allow accessory mode without a persistent reopen path.
+            let shouldHideDockIcon = hideDockIcon && menuBarEnabled
+            let policy: NSApplication.ActivationPolicy = shouldHideDockIcon ? .accessory : .regular
+            NSApplication.shared.setActivationPolicy(policy)
+        }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
+        }
+    }
 
     private func setupMainWindowCloseObserverIfNeeded() {
         guard !AppRuntime.isRunningTests else { return }
@@ -688,9 +734,13 @@ private struct WindowOpenRegistrationView: View {
                 AppWindowRouter.openAgentSessionsWindow = {
                     openWindow(id: "Agent Sessions")
                 }
-                AppWindowRouter.openAgentCockpitWindow = {
+                let openCockpitWindow = {
                     openWindow(id: "AgentCockpit")
                 }
+                AppWindowRouter.openAgentCockpitWindow = {
+                    openCockpitWindow()
+                }
+                AppWindowRouter.maybeRestorePinnedCockpitOnLaunch(openWindow: openCockpitWindow)
             }
     }
 }

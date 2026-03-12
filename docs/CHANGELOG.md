@@ -5,9 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- Window restoration: Relaunch now restores the primary `Agent Sessions` window reliably even when its autosave name was already set, and auto-reopens `Agent Cockpit` when it was pinned.
 - Agent Cockpit: Major stability update. Fixed the Cockpit CPU/energy leak, eliminating long-run resource creep while pinned or backgrounded, while also reducing full-list/partial-row flicker and improving handling for disappearing probe rows.
 - Agent Cockpit: Navigation and pinned-window behavior are more reliable after relaunch and while backgrounded, including correct `Open Agent Sessions` routing and tooltip layering above the HUD.
 - Menu Bar: Added a dedicated `Show Active/Waiting sessions` toggle plus a `Show menu bar icons` setting so live session dots can be shown independently from usage meters.
+- Preferences: Added an `Advanced` toggle to hide the Dock icon by switching Agent Sessions into accessory app mode; default remains off.
+- Preferences: `Hide Dock icon` now keeps a reopen path by auto-enabling the menu bar item, and app activation policy falls back to Dock-visible mode if no persistent reopen affordance is available.
+- Menu Bar: `Open Agent Cockpit` now routes by the cockpit window identifier only, avoiding false matches against unrelated untitled windows.
 - Agent Cockpit: Non-active live sessions now use `Waiting` terminology, grouped headers stay single-line, compact pinned mode keeps its toolbar visible, and long-waiting projects are visually deprioritized.
 - Menu Bar / Agent Cockpit: Live active/waiting counts and quick actions are surfaced more clearly, and follow-up fixes restored hidden menu bar items and unresolved Codex live presences.
 
