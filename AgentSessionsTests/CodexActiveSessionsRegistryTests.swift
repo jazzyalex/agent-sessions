@@ -687,6 +687,59 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testEffectiveStableBackoffPollInterval_appliesAfterStableThreshold() {
+        let interval = CodexActiveSessionsModel.effectiveStableBackoffPollInterval(
+            baseInterval: CodexActiveSessionsModel.pinnedBackgroundPollInterval,
+            consecutiveStableCycles: 3,
+            appIsActive: false,
+            isCockpitVisible: true,
+            isPinnedCockpitVisible: true
+        )
+        XCTAssertEqual(interval, CodexActiveSessionsModel.stablePinnedBackgroundPollInterval)
+    }
+
+    func testEffectiveStableBackoffPollInterval_doesNotApplyBeforeThreshold() {
+        let interval = CodexActiveSessionsModel.effectiveStableBackoffPollInterval(
+            baseInterval: CodexActiveSessionsModel.pinnedBackgroundPollInterval,
+            consecutiveStableCycles: 2,
+            appIsActive: false,
+            isCockpitVisible: true,
+            isPinnedCockpitVisible: true
+        )
+        XCTAssertEqual(interval, CodexActiveSessionsModel.pinnedBackgroundPollInterval)
+    }
+
+    func testEffectiveStableBackoffPollInterval_doesNotApplyWhenActive() {
+        let interval = CodexActiveSessionsModel.effectiveStableBackoffPollInterval(
+            baseInterval: CodexActiveSessionsModel.defaultPollInterval,
+            consecutiveStableCycles: 20,
+            appIsActive: true,
+            isCockpitVisible: true,
+            isPinnedCockpitVisible: true
+        )
+        XCTAssertEqual(interval, CodexActiveSessionsModel.defaultPollInterval)
+    }
+
+    func testShouldResetStablePollBackoff_falseWhenNoMembershipLiveOrMetadataChange() {
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldResetStablePollBackoff(
+                membershipChanged: false,
+                liveStateChanged: false,
+                metadataChanged: false
+            )
+        )
+    }
+
+    func testShouldResetStablePollBackoff_trueWhenMetadataChanges() {
+        XCTAssertTrue(
+            CodexActiveSessionsModel.shouldResetStablePollBackoff(
+                membershipChanged: false,
+                liveStateChanged: false,
+                metadataChanged: true
+            )
+        )
+    }
+
     func testShouldProbeITermSessions_requiresVisibleConsumer() {
         XCTAssertFalse(
             CodexActiveSessionsModel.shouldProbeITermSessions(
@@ -1952,6 +2005,58 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
 
         let idleWithQuery = AgentCockpitHUDView.filteredRows(rows, mode: .idle, query: "alpha")
         XCTAssertEqual(idleWithQuery.map(\.id), ["idle-two"])
+    }
+
+    func testAgentCockpitHUDRowEquality_includesElapsedAndLastActivityTooltip() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let a = HUDRow(
+            id: "row-1",
+            source: .codex,
+            agentType: .codex,
+            projectName: "Alpha",
+            displayName: "Build feature",
+            liveState: .idle,
+            preview: "Build feature",
+            elapsed: "1m",
+            lastSeenAt: now,
+            itermSessionId: "guid-1",
+            revealURL: URL(string: "iterm2:///reveal?sessionid=guid-1"),
+            tty: "/dev/ttys001",
+            termProgram: "iTerm.app",
+            tabTitle: "Build",
+            cleanedTabTitle: "Build",
+            resolvedSessionID: "session-1",
+            runtimeSessionID: "runtime-1",
+            logPath: "/tmp/log.jsonl",
+            workingDirectory: "/tmp",
+            lastActivityAt: now,
+            lastActivityTooltip: "Mar 1, 2026 at 12:00:00 PM"
+        )
+        let b = HUDRow(
+            id: "row-1",
+            source: .codex,
+            agentType: .codex,
+            projectName: "Alpha",
+            displayName: "Build feature",
+            liveState: .idle,
+            preview: "Build feature",
+            elapsed: "8m",
+            lastSeenAt: now,
+            itermSessionId: "guid-1",
+            revealURL: URL(string: "iterm2:///reveal?sessionid=guid-1"),
+            tty: "/dev/ttys001",
+            termProgram: "iTerm.app",
+            tabTitle: "Build",
+            cleanedTabTitle: "Build",
+            resolvedSessionID: "session-1",
+            runtimeSessionID: "runtime-1",
+            logPath: "/tmp/log.jsonl",
+            workingDirectory: "/tmp",
+            lastActivityAt: now,
+            lastActivityTooltip: "Mar 1, 2026 at 12:08:00 PM"
+        )
+
+        XCTAssertNotEqual(a, b)
     }
 
     func testAgentCockpitHUD_displayPriority_marksWaitingRowsStaleAfterThreshold() {

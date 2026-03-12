@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct CodexLiveStatusDot: View {
     let state: CodexLiveState
@@ -9,6 +10,7 @@ struct CodexLiveStatusDot: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @State private var animatePulse: Bool = false
+    @State private var isAppActive: Bool = NSApp.isActive
 
     var body: some View {
         Group {
@@ -19,15 +21,29 @@ struct CodexLiveStatusDot: View {
             }
         }
         .onChange(of: state) { _, newState in
-            if newState != .openIdle {
+            if newState == .openIdle {
+                updateAnimation()
+            } else {
                 stopPulseAnimation()
             }
+        }
+        .onAppear {
+            isAppActive = NSApp.isActive
+            updateAnimation()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            isAppActive = true
+            updateAnimation()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            isAppActive = false
+            stopPulseAnimation()
         }
         .accessibilityLabel(Text(accessibilityLabel))
     }
 
     private var shouldPulse: Bool {
-        state == .openIdle && !reduceMotion
+        state == .openIdle && !reduceMotion && isAppActive
     }
 
     private var idleBaseColor: Color {
@@ -59,9 +75,9 @@ struct CodexLiveStatusDot: View {
             .scaleEffect(pulseScale)
             .opacity(pulseOpacity)
             .shadow(color: idleBaseColor.opacity(haloOpacity), radius: haloRadius)
-            .onAppear { updateAnimation() }
             .onChange(of: lastSeenAt) { _, _ in updateAnimation() }
             .onChange(of: reduceMotion) { _, _ in updateAnimation() }
+            .onChange(of: isAppActive) { _, _ in updateAnimation() }
     }
 
     private var haloOpacity: Double {

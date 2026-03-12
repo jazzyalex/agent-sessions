@@ -123,8 +123,10 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated static let defaultStaleTTL: TimeInterval = 10
     nonisolated static let backgroundPollInterval: TimeInterval = 15
     nonisolated static let pinnedBackgroundPollInterval: TimeInterval = 3
+    nonisolated static let stablePinnedBackgroundPollInterval: TimeInterval = 5
     nonisolated static let pinnedBackgroundITermProbeMinInterval: TimeInterval = 9
     nonisolated static let pinnedBackgroundProcessProbeMinInterval: TimeInterval = 12
+    nonisolated private static let stableBackoffActivationCycles: Int = 3
     nonisolated private static let codexInconclusiveTailActiveGraceWindow: TimeInterval = 6
     nonisolated private static let processProbeTimeout: TimeInterval = 0.75
     nonisolated static let processProbeMinIntervalRegistryEmptyForeground: TimeInterval = 6
@@ -195,6 +197,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     private var resumeProbeBudgetIndex: Int? = nil
     private var itermProbeRoundRobinCursor: Int = 0
     private var forceFullProbeNextRefresh: Bool = false
+    private var consecutiveStableCycles: Int = 0
     private enum ManagedProbeKind: String, Hashable {
         case processDiscovery
         case iTermInventory
@@ -346,6 +349,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         if visible { unifiedVisibleConsumerIDs.insert(consumerID) }
         else { unifiedVisibleConsumerIDs.remove(consumerID) }
         guard hasVisibleConsumer != hadVisibleConsumer else { return }
+        resetStablePollBackoff()
         if !hadVisibleConsumer, hasVisibleConsumer, appIsActive {
             armForegroundProbeRamp()
         }
@@ -360,6 +364,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             cockpitWindowVisibleConsumerIDs.remove(consumerID)
         }
         guard hasVisibleConsumer != hadVisibleConsumer else { return }
+        resetStablePollBackoff()
         if !hadVisibleConsumer, hasVisibleConsumer, appIsActive {
             armForegroundProbeRamp()
         }
@@ -375,6 +380,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             cockpitWindowVisibleConsumerIDs.remove(consumerID)
         }
         guard hasVisibleCockpitWindow != hadVisibleCockpitWindow else { return }
+        resetStablePollBackoff()
         if !hadVisibleCockpitWindow, hasVisibleCockpitWindow, appIsActive {
             armForegroundProbeRamp()
         }
@@ -384,6 +390,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     func setAppActive(_ active: Bool) {
         guard appIsActive != active else { return }
         appIsActive = active
+        resetStablePollBackoff()
         if active { armForegroundProbeRamp() }
         refreshSoon()
     }
@@ -418,6 +425,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         cachedITermTabTitleByTTY = [:]
         cachedITermTabTitleBySessionGuid = [:]
         forceFullProbeNextRefresh = true
+        resetStablePollBackoff()
         armForegroundProbeRamp()
         refreshTask?.cancel()
         cancelAllInFlightProbeCommands(reason: "manual-refresh")
@@ -449,6 +457,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         cancelAllInFlightProbeCommands(reason: clear ? "stop-clear" : "stop")
         refreshInFlight = false
         refreshQueued = false
+        resetStablePollBackoff()
         if clear {
             presences = []
             bySessionID = [:]
@@ -1142,11 +1151,22 @@ final class CodexActiveSessionsModel: ObservableObject {
         // Ignore lastSeenAt-only churn; only publish when stable fields that affect UI change.
         let nextSignatures = Self.stablePresenceSignatures(for: ui)
         let metadataChanged = nextSignatures != lastPublishedPresenceSignatures
+        let stateChanged = Self.shouldResetStablePollBackoff(
+            membershipChanged: membershipChanged,
+            liveStateChanged: liveStateChanged,
+            metadataChanged: metadataChanged
+        )
 
         if !shouldSuppressEmptyPublish, (membershipChanged || metadataChanged || liveStateChanged) {
             presences = ui.sorted(by: { ($0.lastSeenAt ?? .distantPast) > ($1.lastSeenAt ?? .distantPast) })
             lastPublishedPresenceSignatures = nextSignatures
             activeMembershipVersion &+= 1
+        }
+
+        if stateChanged {
+            resetStablePollBackoff()
+        } else {
+            consecutiveStableCycles = min(consecutiveStableCycles + 1, 1_000_000)
         }
 #if DEBUG
         let refreshDurationMs = Date().timeIntervalSince(refreshStartedAt) * 1000.0
@@ -1576,6 +1596,11 @@ final class CodexActiveSessionsModel: ObservableObject {
     private func armForegroundProbeRamp() {
         guard hasVisibleConsumer else { return }
         resumeProbeBudgetIndex = 0
+        resetStablePollBackoff()
+    }
+
+    private func resetStablePollBackoff() {
+        consecutiveStableCycles = 0
     }
 
     private func plannedITermProbePresenceKeys(for presences: [CodexActivePresence],
@@ -1623,9 +1648,16 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     private func pollIntervalSeconds() -> TimeInterval {
-        Self.effectivePollIntervalSeconds(
+        let baseInterval = Self.effectivePollIntervalSeconds(
             appIsActive: appIsActive,
             hasVisibleConsumer: hasVisibleConsumer,
+            isCockpitVisible: isCockpitVisible,
+            isPinnedCockpitVisible: isPinnedCockpitVisible
+        )
+        return Self.effectiveStableBackoffPollInterval(
+            baseInterval: baseInterval,
+            consecutiveStableCycles: consecutiveStableCycles,
+            appIsActive: appIsActive,
             isCockpitVisible: isCockpitVisible,
             isPinnedCockpitVisible: isPinnedCockpitVisible
         )
@@ -1650,6 +1682,25 @@ final class CodexActiveSessionsModel: ObservableObject {
                                                      isPinnedCockpitVisible: Bool) -> Bool {
         guard hasVisibleConsumer else { return false }
         return appIsActive || isPinnedCockpitVisible || isCockpitVisible
+    }
+
+    nonisolated static func effectiveStableBackoffPollInterval(baseInterval: TimeInterval,
+                                                               consecutiveStableCycles: Int,
+                                                               appIsActive: Bool,
+                                                               isCockpitVisible: Bool,
+                                                               isPinnedCockpitVisible: Bool) -> TimeInterval {
+        guard !appIsActive, (isPinnedCockpitVisible || isCockpitVisible) else { return baseInterval }
+        guard consecutiveStableCycles >= Self.stableBackoffActivationCycles else { return baseInterval }
+        return max(
+            Self.stablePinnedBackgroundPollInterval,
+            baseInterval
+        )
+    }
+
+    nonisolated static func shouldResetStablePollBackoff(membershipChanged: Bool,
+                                                         liveStateChanged: Bool,
+                                                         metadataChanged: Bool) -> Bool {
+        membershipChanged || liveStateChanged || metadataChanged
     }
 
     nonisolated static func nextITermProbeBudget(resumeIndex: Int?) -> (budget: Int, nextResumeIndex: Int?) {
