@@ -61,6 +61,21 @@
     - Agent-assisted rename: user can trigger rename suggestion/application flow.
     - Renames persist across refresh/reindex/restart and do not break sorting/filtering/search.
 
+- [ ] [2026-03-11] [Feature] Session bookmarks / collections
+  - Goal:
+    - Let users save important sessions for quick return.
+    - Support lightweight organization beyond a flat session list.
+  - Inputs:
+    - User feedback requests bookmark-style saving and collections/grouping for frequently revisited sessions.
+  - Dependencies:
+    - Stable persisted metadata keyed by session identity.
+    - UX entry points in Session list and/or detail views for add/remove/manage actions.
+    - Clear model choice for v1: simple bookmarks first vs full user-defined collections.
+  - Definition of done:
+    - Users can mark sessions as saved/bookmarked and find them quickly later.
+    - If collections ship in v1, users can assign a saved session to at least one named collection.
+    - Behavior persists across refresh/reindex/restart.
+
 - [ ] [2026-02-28] [Bug] Session handoff after restart is delayed until first prompt (Codex + Claude)
   - Goal:
     - Ensure a newly started session B is recognized immediately after restart, even before first user prompt.
