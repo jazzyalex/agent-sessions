@@ -198,18 +198,26 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
             }
 
-            sectionHeader("Git Context")
-            VStack(alignment: .leading, spacing: 12) {
-                Toggle("Show Git Context button", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector) },
-                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableGitInspector) }
-                ))
-                .help("Show the Git Context toolbar button in Sessions (⌘⇧G)")
+            Toggle("Hide Dock icon", isOn: Binding(
+                get: { UserDefaults.standard.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false },
+                set: { newValue in
+                    if newValue {
+                        // Ensure there is always a persistent way to reopen app windows.
+                        let menuBarEnabled = UserDefaults.standard.bool(forKey: PreferencesKey.menuBarEnabled)
+                        if !menuBarEnabled {
+                            UserDefaults.standard.set(true, forKey: PreferencesKey.menuBarEnabled)
+                        }
+                    }
+                    UserDefaults.standard.set(newValue, forKey: PreferencesKey.Advanced.hideDockIcon)
+                }
+            ))
+            .help("Removes Agent Sessions from the Dock by switching the app to accessory activation mode. When enabled, Agent Sessions automatically keeps the menu bar item enabled so the app remains accessible.")
 
-                Text("Adds a Git Context button to the Sessions toolbar and context menus.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Toggle("Show Git Context button", isOn: Binding(
+                get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector) },
+                set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableGitInspector) }
+            ))
+            .help("Show the Git Context toolbar button in Sessions (⌘⇧G)")
         }
     }
 

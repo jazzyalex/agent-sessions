@@ -10,11 +10,11 @@ struct WindowAutosave: NSViewRepresentable {
         let v = NSView()
         DispatchQueue.main.async {
             guard let win = v.window else { return }
-            // Configure once
+            // Configure autosave name once, but always keep restoration enabled.
             if win.frameAutosaveName != name {
                 win.setFrameAutosaveName(name)
-                win.isRestorable = true
             }
+            win.isRestorable = true
         }
         return v
     }
@@ -23,4 +23,3 @@ struct WindowAutosave: NSViewRepresentable {
         // No-op
     }
 }
-

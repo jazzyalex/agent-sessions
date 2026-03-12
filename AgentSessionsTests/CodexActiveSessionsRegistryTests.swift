@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import SwiftUI
 @testable import AgentSessions
 
 final class CodexActiveSessionsRegistryTests: XCTestCase {
@@ -2279,6 +2280,81 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(grouped.first?.rows.map(\.id), ["r1", "r3"])
     }
 
+    @MainActor
+    func testWindowAutosave_marksWindowRestorableWhenAutosaveNameAlreadySet() {
+        let autosaveName = "WindowAutosaveTests.\(UUID().uuidString)"
+        let window = NSWindow(
+            contentRect: NSRect(x: 40, y: 40, width: 320, height: 240),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.setFrameAutosaveName(autosaveName)
+        window.isRestorable = false
+
+        let host = NSHostingView(rootView: WindowAutosave(name: autosaveName))
+        host.frame = .zero
+        window.contentView = NSView(frame: window.frame)
+        window.contentView?.addSubview(host)
+
+        drainMainRunLoop()
+        XCTAssertTrue(window.isRestorable)
+    }
+
+    @MainActor
+    func testWindowAutosave_setsAutosaveNameWhenMissing() {
+        let autosaveName = "WindowAutosaveTests.\(UUID().uuidString)"
+        let window = NSWindow(
+            contentRect: NSRect(x: 50, y: 50, width: 320, height: 240),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        XCTAssertEqual(window.frameAutosaveName, "")
+
+        let host = NSHostingView(rootView: WindowAutosave(name: autosaveName))
+        host.frame = .zero
+        window.contentView = NSView(frame: window.frame)
+        window.contentView?.addSubview(host)
+
+        drainMainRunLoop()
+        XCTAssertEqual(window.frameAutosaveName, autosaveName)
+        XCTAssertTrue(window.isRestorable)
+    }
+
+    @MainActor
+    func testShouldRestorePinnedCockpitOnLaunch_trueWhenPinnedAndEnabled() {
+        let suite = "AppWindowRouterTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            XCTFail("Unable to create defaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(true, forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled)
+        defaults.set(true, forKey: PreferencesKey.Cockpit.hudPinned)
+
+        XCTAssertTrue(AppWindowRouter.shouldRestorePinnedCockpitOnLaunch(defaults: defaults))
+    }
+
+    @MainActor
+    func testShouldRestorePinnedCockpitOnLaunch_falseWhenUnpinnedOrDisabled() {
+        let suite = "AppWindowRouterTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            XCTFail("Unable to create defaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(false, forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled)
+        defaults.set(true, forKey: PreferencesKey.Cockpit.hudPinned)
+        XCTAssertFalse(AppWindowRouter.shouldRestorePinnedCockpitOnLaunch(defaults: defaults))
+
+        defaults.set(true, forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled)
+        defaults.set(false, forKey: PreferencesKey.Cockpit.hudPinned)
+        XCTAssertFalse(AppWindowRouter.shouldRestorePinnedCockpitOnLaunch(defaults: defaults))
+    }
+
     private func makeHUDRow(id: String,
                             project: String,
                             name: String,
@@ -2350,5 +2426,11 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         p.tty = tty
         p.pid = pid
         return p
+    }
+
+    @MainActor
+    private func drainMainRunLoop() {
+        let until = Date().addingTimeInterval(0.06)
+        while Date() < until && RunLoop.main.run(mode: .default, before: until) {}
     }
 }
