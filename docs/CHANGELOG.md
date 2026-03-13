@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- Onboarding: Session visible/hidden counts now refresh on any live session-data update (not just total-count deltas), and DB snapshot fallback now evaluates session visibility with the same active filter logic used by onboarding counts.
 - Window restoration: Relaunch now restores the primary `Agent Sessions` window reliably even when its autosave name was already set, and auto-reopens `Agent Cockpit` when it was pinned.
 - Agent Cockpit: Major stability update. Fixed the Cockpit CPU/energy leak, eliminating long-run resource creep while pinned or backgrounded, while also reducing full-list/partial-row flicker and improving handling for disappearing probe rows.
 - Agent Cockpit: Follow-up CPU stabilization now suppresses redundant HUD snapshot invalidations, pauses idle-dot pulse animation while the app is inactive, and applies stable-cycle pinned-background cadence backoff up to `5s` to reduce long-run CPU accumulation without changing foreground responsiveness.

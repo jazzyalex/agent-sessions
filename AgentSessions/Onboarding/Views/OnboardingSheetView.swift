@@ -35,9 +35,10 @@ struct OnboardingSheetView: View {
 
     @State private var slideIndex: Int = 0
     @State private var isForward: Bool = true
-    @State private var showSkipConfirm: Bool = false
+    @State private var slideAppeared: Bool = false
     @State private var animatedPrimarySessions: Double = 0
     @State private var indexedSessionsSnapshot: [SessionSource: [Session]] = [:]
+    @State private var cachedSessionCounts: [SessionSource: (total: Int, visible: Int)] = [:]
     @State private var didLoadIndexedSessionsSnapshot: Bool = false
     @StateObject private var agentAvailabilityModel = OnboardingAgentAvailabilityModel()
 
@@ -87,32 +88,42 @@ struct OnboardingSheetView: View {
         }
         .frame(minWidth: 820, minHeight: 700)
         .interactiveDismissDisabled(true)
+        .onKeyPress(.leftArrow) {
+            if !isFirst { goToSlide(slideIndex - 1) }
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            if !isLast { goToSlide(slideIndex + 1) }
+            return .handled
+        }
         .task {
             await agentAvailabilityModel.refreshIfNeeded()
         }
         .onAppear {
             loadIndexedSessionsSnapshotIfNeeded()
-            updateAnimatedCount(animated: !reduceMotion)
+            handleSessionDataUpdate()
+            triggerSlideAppear()
         }
-        .onChange(of: totalSessions) { _, _ in
-            updateAnimatedCount(animated: !reduceMotion)
-        }
-        .onChange(of: visibleSessionsTotal) { _, _ in
-            updateAnimatedCount(animated: !reduceMotion)
-        }
+        .onReceive(codexIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(claudeIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(geminiIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(opencodeIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(copilotIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(droidIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(openclawIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onChange(of: hideZeroMessageSessionsPref) { _, _ in handleSessionDataUpdate() }
+        .onChange(of: hideLowMessageSessionsPref) { _, _ in handleSessionDataUpdate() }
+        .onChange(of: showHousekeepingSessionsPref) { _, _ in handleSessionDataUpdate() }
+        .onChange(of: hasCommandsOnlyPref) { _, _ in handleSessionDataUpdate() }
+        .onChange(of: showSystemProbeSessions) { _, _ in handleSessionDataUpdate() }
         .onChange(of: content.versionMajorMinor) { _, _ in
             slideIndex = 0
         }
         .onChange(of: content.kind) { _, _ in
             slideIndex = 0
         }
-        .alert("Skip onboarding?", isPresented: $showSkipConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("Skip", role: .destructive) {
-                coordinator.skip()
-            }
-        } message: {
-            Text("You can reopen this tour from the Help menu.")
+        .onChange(of: slideIndex) { _, _ in
+            triggerSlideAppear()
         }
     }
 
@@ -134,6 +145,8 @@ struct OnboardingSheetView: View {
             }
         }
         .id(slideIndex)
+        .opacity(slideAppeared ? 1 : 0)
+        .offset(y: slideAppeared ? 0 : 8)
     }
 
     private var slideTransition: AnyTransition {
@@ -163,7 +176,7 @@ struct OnboardingSheetView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("sessions visible")
-                            .font(.system(size: 16, weight: .semibold, design: .default))
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
                             .foregroundStyle(.primary)
                     }
                 }
@@ -412,23 +425,31 @@ struct OnboardingSheetView: View {
 
     private var footer: some View {
         HStack(alignment: .center) {
-            Button("Skip") {
-                showSkipConfirm = true
+            Button("Later") {
+                coordinator.skip()
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
+            .help("Reopen from Help → Show Onboarding")
 
             Spacer()
 
-            OnboardingProgressDots(
-                count: slides.count,
-                index: slideIndex,
-                palette: palette,
-                onSelect: { target in
-                    goToSlide(target)
-                }
-            )
-            .accessibilityLabel("Step \(slideIndex + 1) of \(slides.count)")
+            VStack(spacing: 6) {
+                OnboardingProgressDots(
+                    count: slides.count,
+                    index: slideIndex,
+                    palette: palette,
+                    onSelect: { target in
+                        goToSlide(target)
+                    }
+                )
+                .accessibilityLabel("Step \(slideIndex + 1) of \(slides.count)")
+
+                Text("Step \(slideIndex + 1) of \(slides.count)")
+                    .font(.system(size: 11, weight: .medium, design: .default))
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+            }
 
             Spacer()
 
@@ -440,7 +461,7 @@ struct OnboardingSheetView: View {
                     .buttonStyle(OnboardingSecondaryButtonStyle(palette: palette))
                 }
 
-                Button(isLast ? "Get Started" : "Next") {
+                Button(isLast ? lastSlideButtonLabel : "Next") {
                     if isLast {
                         coordinator.complete()
                     } else {
@@ -453,6 +474,14 @@ struct OnboardingSheetView: View {
         }
     }
 
+    private var lastSlideButtonLabel: String {
+        switch slides.last {
+        case .analyticsUsage: return "Start Exploring"
+        case .feedbackSupport: return "Get Started"
+        default: return "Get Started"
+        }
+    }
+
     private func goToSlide(_ index: Int) {
         guard index != slideIndex else { return }
         isForward = index > slideIndex
@@ -461,6 +490,19 @@ struct OnboardingSheetView: View {
         } else {
             withAnimation(.easeOut(duration: 0.4)) {
                 slideIndex = index
+            }
+        }
+    }
+
+    private func triggerSlideAppear() {
+        slideAppeared = false
+        guard !reduceMotion else {
+            slideAppeared = true
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            withAnimation(.easeOut(duration: 0.35)) {
+                slideAppeared = true
             }
         }
     }
@@ -516,15 +558,11 @@ struct OnboardingSheetView: View {
         }
     }
 
+    // Cheap computed property — reads from cached counts, no session iteration.
     private var agentCounts: [AgentCount] {
         SessionSource.allCases.map { source in
-            let sessions = sessionsForCounts(source: source)
-            return AgentCount(
-                source: source,
-                totalCount: sessions.count,
-                visibleCount: visibleCount(in: sessions),
-                isEnabled: isAgentEnabled(source)
-            )
+            let c = cachedSessionCounts[source] ?? (total: 0, visible: 0)
+            return AgentCount(source: source, totalCount: c.total, visibleCount: c.visible, isEnabled: isAgentEnabled(source))
         }
     }
 
@@ -560,11 +598,26 @@ struct OnboardingSheetView: View {
         }
     }
 
-    private func sessionsForCounts(source: SessionSource) -> [Session] {
-        let live = sessionsFromIndexer(source)
-        if !live.isEmpty { return live }
-        if let snapshot = indexedSessionsSnapshot[source], !snapshot.isEmpty { return snapshot }
-        return live
+    /// Recompute cached session counts from live indexers (preferred) or DB snapshot fallback.
+    /// Called only when session data actually changes — not on every render.
+    private func handleSessionDataUpdate() {
+        refreshSessionCounts()
+        updateAnimatedCount(animated: !reduceMotion)
+    }
+
+    private func refreshSessionCounts() {
+        var counts: [SessionSource: (total: Int, visible: Int)] = [:]
+        for source in SessionSource.allCases {
+            let live = sessionsFromIndexer(source)
+            if !live.isEmpty {
+                counts[source] = (total: live.count, visible: visibleCount(in: live))
+            } else if let snapshotSessions = indexedSessionsSnapshot[source] {
+                counts[source] = (total: snapshotSessions.count, visible: visibleCount(in: snapshotSessions))
+            } else {
+                counts[source] = (total: 0, visible: 0)
+            }
+        }
+        cachedSessionCounts = counts
     }
 
     private func sessionsFromIndexer(_ source: SessionSource) -> [Session] {
@@ -608,26 +661,23 @@ struct OnboardingSheetView: View {
 
         Task(priority: .utility) {
             do {
-                let snapshot = try await buildIndexedSessionsSnapshot()
+                let db = try IndexDB()
+                let repo = SessionMetaRepository(db: db)
+                var snapshot: [SessionSource: [Session]] = [:]
+                for source in SessionSource.allCases {
+                    if let sessions = try? await repo.fetchSessions(for: source) {
+                        snapshot[source] = sessions
+                    }
+                }
                 await MainActor.run {
                     self.indexedSessionsSnapshot = snapshot
+                    self.refreshSessionCounts()
+                    self.updateAnimatedCount(animated: !reduceMotion)
                 }
             } catch {
-                // Best-effort: onboarding can still render live counts from active indexers.
+                // Best-effort: onboarding renders live counts from active indexers.
             }
         }
-    }
-
-    private func buildIndexedSessionsSnapshot() async throws -> [SessionSource: [Session]] {
-        let db = try IndexDB()
-        let repo = SessionMetaRepository(db: db)
-        var snapshot: [SessionSource: [Session]] = [:]
-        for source in SessionSource.allCases {
-            if let sessions = try? await repo.fetchSessions(for: source) {
-                snapshot[source] = sessions
-            }
-        }
-        return snapshot
     }
 
     private var weeklyActivity: [WeeklyActivityDay] {
@@ -752,18 +802,18 @@ private struct SlideHeader: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            SlideIconView(icon: icon, gradient: iconGradient)
+            SlideIconView(icon: icon, gradient: iconGradient, palette: palette)
 
             if let title, !title.isEmpty {
                 Text(title)
-                    .font(.system(size: 24, weight: .semibold, design: .default))
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.center)
             }
 
             Text(subtitle)
-                .font(.system(size: 14, weight: .regular, design: .default))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 15, weight: .medium, design: .default))
+                .foregroundStyle(.primary.opacity(0.7))
                 .multilineTextAlignment(.center)
         }
     }
@@ -777,6 +827,7 @@ private enum SlideIcon {
 private struct SlideIconView: View {
     let icon: SlideIcon
     let gradient: LinearGradient
+    let palette: OnboardingPalette
 
     var body: some View {
         ZStack {
@@ -796,6 +847,7 @@ private struct SlideIconView: View {
                     .foregroundStyle(.white)
             }
         }
+        .shadow(color: palette.slideIconShadow, radius: 10, y: 4)
     }
 }
 
@@ -807,7 +859,8 @@ private struct AgentPill: View {
         HStack(spacing: 8) {
             Circle()
                 .fill(palette.agentAccent(for: agent.source))
-                .frame(width: 8, height: 8)
+                .frame(width: 10, height: 10)
+                .shadow(color: palette.agentAccent(for: agent.source).opacity(0.5), radius: 4)
 
             Text(agent.source.displayName)
                 .font(.system(size: 13, weight: .semibold, design: .default))
@@ -902,7 +955,12 @@ private struct AgentBadge: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.28)
-                .fill(palette.agentAccent(for: source))
+                .fill(
+                    LinearGradient(
+                        colors: [palette.agentAccent(for: source).opacity(0.9), palette.agentAccent(for: source)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                )
                 .frame(width: size, height: size)
 
             Text(initials(for: source))
@@ -1126,7 +1184,7 @@ private struct CockpitQuickRow: View {
                 .padding(7)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(iconColor.opacity(0.18))
+                        .fill(iconColor.opacity(palette.colorScheme == .dark ? 0.22 : 0.14))
                 )
 
             VStack(alignment: .leading, spacing: 2) {
@@ -1165,7 +1223,7 @@ private struct CockpitBetaScopeRow: View {
                 .padding(7)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(palette.accentBlue.opacity(0.18))
+                        .fill(palette.accentBlue.opacity(palette.colorScheme == .dark ? 0.22 : 0.14))
                 )
 
             VStack(alignment: .leading, spacing: 2) {
@@ -1212,7 +1270,7 @@ private struct FeatureRow: View {
         HStack(alignment: .top, spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(iconColor.opacity(0.18))
+                    .fill(iconColor.opacity(palette.colorScheme == .dark ? 0.22 : 0.14))
                     .frame(width: 36, height: 36)
                 Image(systemName: icon)
                     .font(.system(size: 16, weight: .semibold))
@@ -1272,8 +1330,8 @@ private struct WeeklyActivityCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Sessions by Agent")
-                    .font(.system(size: 13, weight: .semibold, design: .default))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11, weight: .semibold).uppercaseSmallCaps())
+                    .foregroundStyle(.tertiary)
                 Spacer()
                 Text("Last 7 days")
                     .font(.system(size: 11, weight: .regular, design: .default))
@@ -1542,6 +1600,7 @@ private struct OnboardingProgressDots: View {
                     Capsule()
                         .fill(i == index ? palette.dotActive : palette.dotInactive)
                         .frame(width: i == index ? 22 : 6, height: 6)
+                        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: index)
                 }
                 .buttonStyle(.plain)
             }
@@ -1577,7 +1636,9 @@ private struct OnboardingPrimaryButtonStyle: ButtonStyle {
                     .stroke(palette.primaryButtonStroke, lineWidth: 1)
             )
             .shadow(color: palette.primaryButtonShadow, radius: 6, x: 0, y: 2)
-            .opacity(configuration.isPressed ? 0.85 : 1.0)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .opacity(configuration.isPressed ? 0.9 : 1.0)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 
@@ -1598,7 +1659,9 @@ private struct OnboardingSecondaryButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(palette.secondaryButtonStroke, lineWidth: 1)
             )
-            .opacity(configuration.isPressed ? 0.8 : 1.0)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .opacity(configuration.isPressed ? 0.9 : 1.0)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 
@@ -1750,8 +1813,8 @@ private struct OnboardingPalette {
 
     var rowFill: Color {
         colorScheme == .dark
-            ? Color.white.opacity(0.05)
-            : Color.black.opacity(0.03)
+            ? Color.white.opacity(0.07)
+            : Color.black.opacity(0.035)
     }
 
     var rowStroke: Color {
@@ -1768,7 +1831,7 @@ private struct OnboardingPalette {
 
     var pillStroke: Color {
         colorScheme == .dark
-            ? Color.white.opacity(0.1)
+            ? Color.white.opacity(0.14)
             : Color.black.opacity(0.08)
     }
 
@@ -1923,19 +1986,33 @@ private struct OnboardingPalette {
     }
 
     var accentOrange: Color {
-        Color(red: 0.95, green: 0.58, blue: 0.25)
+        colorScheme == .dark
+            ? Color(red: 1.0, green: 0.62, blue: 0.30)
+            : Color(red: 0.90, green: 0.54, blue: 0.22)
     }
 
     var accentGreen: Color {
-        Color(red: 0.30, green: 0.78, blue: 0.56)
+        colorScheme == .dark
+            ? Color(red: 0.34, green: 0.84, blue: 0.60)
+            : Color(red: 0.26, green: 0.72, blue: 0.50)
     }
 
     var accentBlue: Color {
-        Color(red: 0.36, green: 0.62, blue: 0.96)
+        colorScheme == .dark
+            ? Color(red: 0.40, green: 0.66, blue: 1.0)
+            : Color(red: 0.30, green: 0.56, blue: 0.90)
     }
 
     var accentPurple: Color {
-        Color(red: 0.64, green: 0.45, blue: 0.95)
+        colorScheme == .dark
+            ? Color(red: 0.68, green: 0.50, blue: 1.0)
+            : Color(red: 0.58, green: 0.40, blue: 0.90)
+    }
+
+    var slideIconShadow: Color {
+        colorScheme == .dark
+            ? Color.black.opacity(0.4)
+            : Color.black.opacity(0.15)
     }
 
     var blurMaterial: NSVisualEffectView.Material {
