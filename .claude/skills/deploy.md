@@ -27,7 +27,7 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 
 ## Before Starting (Ask the User)
 
-1. Target version (prefer `X.Y` or `X.Y.Z`, avoid trailing `.0` unless the repo uses it for that release)
+1. Target version (`X.Y` for major/minor releases, `X.Y.Z` only for patch releases; never ship `X.Y.0`)
 2. Any headline changes (new agents, major features) that must be reflected in `docs/CHANGELOG.md`
 3. Whether this is a major release that requires onboarding updates
 4. Public copy updates needed for README/GitHub Pages (major changes to highlight, renamed features, or outdated wording to fix)

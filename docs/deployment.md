@@ -15,6 +15,11 @@ This runbook provides a **fully automated deployment process** with comprehensiv
 - Do not use temporary clones or alternate worktrees to bypass a dirty tree.
 - If `git status --short` is not clean, stop and ask the user to clean/stash/commit before any deploy command.
 
+**Version format rule**:
+- Major and minor releases use `X.Y` (for example `3.1`).
+- Patch releases use `X.Y.Z` (for example `3.1.1`).
+- Never publish `X.Y.0`.
+
 **Core commands** (run from repo root):
 - `tools/release/deploy changelog [FROM_TAG]`
 - `tools/release/deploy bump [patch|minor|major]`
@@ -59,10 +64,10 @@ tools/release/deploy bump minor
 git push origin main
 
 # 4. Deploy the release
-tools/release/deploy release 2.8.0
+tools/release/deploy release 2.8
 
 # 5. Verify deployment (runs automatically, but can re-run)
-tools/release/deploy verify 2.8.0
+tools/release/deploy verify 2.8
 ```
 
 ### Quick Patch Release
@@ -241,7 +246,7 @@ All operations log to timestamped files:
 - Format: `/tmp/<subcommand>-<VERSION>-<timestamp>.log`
 - Includes ISO timestamps and severity levels
 - Captures all output for debugging
-- Example: `/tmp/release-2.8.0-1732652300.log`
+- Example: `/tmp/release-2.8-1732652300.log`
 
 **Benefit**: Easy to debug failed deployments, share logs with team
 
@@ -560,10 +565,10 @@ xcrun notarytool submit dist/AgentSessions-{VERSION}.dmg --keychain-profile Agen
 
 ## Docs sanity check (for agents)
 
-Before changing deployment scripts, do a quick paper dry run using a fake version (for example, 2.9.0):
+Before changing deployment scripts, do a quick paper dry run using a fake version (for example, 2.9):
 - Walk through the cheat sheet commands and confirm each one is documented with required flags and environment variables.
 - Verify that `docs/deployment.md` and `.claude/skills/deploy.md` reference the same entrypoints (`tools/release/deploy`).
-- Treat this as a documentation validation step only; do not actually tag or publish 2.9.0.
+- Treat this as a documentation validation step only; do not actually tag or publish 2.9.
 
 ### Sparkle EdDSA signature errors
 

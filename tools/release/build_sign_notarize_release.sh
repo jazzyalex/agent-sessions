@@ -15,7 +15,7 @@ cd "$REPO_ROOT"
 APP_NAME_DEFAULT=$(sed -n 's/.*BuildableName = "\([^"]\+\)\.app".*/\1/p' AgentSessions.xcodeproj/xcshareddata/xcschemes/AgentSessions.xcscheme | head -n1)
 APP_NAME=${APP_NAME:-${APP_NAME_DEFAULT:-AgentSessions}}
 VERSION_DEFAULT=$(sed -n 's/.*MARKETING_VERSION = \([0-9.][0-9.]*\).*/\1/p' AgentSessions.xcodeproj/project.pbxproj | head -n1)
-VERSION=${VERSION:-${VERSION_DEFAULT:-0.1.0}}
+VERSION=${VERSION:-${VERSION_DEFAULT:-0.1}}
 TAG=${TAG:-v$VERSION}
 
 NOTARY_PROFILE=${NOTARY_PROFILE:-AgentSessionsNotary}
