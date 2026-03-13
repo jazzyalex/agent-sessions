@@ -48,7 +48,7 @@ usage() {
   echo "Pre-deployment validation for Agent Sessions."
   echo ""
   echo "Checks:"
-  echo "  - Version format (warns on trailing .0)"
+  echo "  - Version format (rejects trailing .0)"
   echo "  - README.md download links and content"
   echo "  - docs/index.html download links and meta tags"
   echo "  - docs/CHANGELOG.md version section"
@@ -78,7 +78,7 @@ echo ""
 echo "==> Checking version format..."
 
 if [[ "$VERSION" =~ \.0$ ]]; then
-  warn "Version '$VERSION' ends with .0 - prefer format without trailing zero (e.g., '2.9' not '2.9.0')"
+  error "Version '$VERSION' ends with .0 - minor/major releases must use two-part format (e.g., '2.9', not '2.9.0')"
 else
   pass "Version format OK: $VERSION"
 fi

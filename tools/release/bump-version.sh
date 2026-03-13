@@ -7,10 +7,10 @@ set -euo pipefail
 #
 # Options:
 #   --format two-part    Output version as X.Y (e.g., 2.9)
-#   --format three-part  Output version as X.Y.Z (e.g., 2.9.0)
+#   --format three-part  Output version as X.Y.Z (e.g., 2.9.1)
 #
 # By default, preserves the input format. If input is "2.8", output will be "2.9".
-# If input is "2.8.0", output will be "2.9.0".
+# Minor and major bumps always default to two-part output (for example, 2.8.1 -> 2.9).
 
 REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$REPO_ROOT"
@@ -69,14 +69,14 @@ CURR_BUILD=$(grep -m1 "CURRENT_PROJECT_VERSION = " AgentSessions.xcodeproj/proje
 
 echo "Current version: $CURR_MARKETING (build $CURR_BUILD)"
 
-# 2. Calculate new version using Python (preserves format by default)
+# 2. Calculate new version using Python (minor/major default to two-part; patch uses three-part)
 NEW_VERSION=$(python3 << PYEOF
 import sys
 version = "$CURR_MARKETING".split('.')
 major, minor = int(version[0]), int(version[1])
 patch = int(version[2]) if len(version) > 2 else 0
 
-# Detect input format: two-part (2.9) vs three-part (2.9.0)
+# Detect input format: two-part (2.9) vs three-part (2.9.1)
 input_is_three_part = len(version) == 3
 format_override = "$FORMAT_OVERRIDE"
 
@@ -96,11 +96,10 @@ if format_override == "two-part":
 elif format_override == "three-part":
     use_three_part = True
 else:
-    # Preserve input format, but for patch bumps on two-part input, we need three-part
-    if not input_is_three_part and "$BUMP_TYPE" == "patch":
+    if "$BUMP_TYPE" == "patch":
         use_three_part = True
     else:
-        use_three_part = input_is_three_part
+        use_three_part = False
 
 # Output version
 if use_three_part:
@@ -222,4 +221,4 @@ echo "  1. Review commit: git show HEAD"
 echo "  2. Push to GitHub: git push origin main"
 echo "  3. Deploy: tools/release/deploy release $NEW_VERSION"
 echo ""
-yellow "Note: Prefer two-part versions (2.9, 2.10) over three-part (2.9.0, 2.10.0)"
+yellow "Note: Minor/major releases use two-part versions (2.9, 2.10); patch releases use three-part versions (2.9.1, 2.10.2)"

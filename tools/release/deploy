@@ -246,7 +246,7 @@ cmd_bump() {
 
   echo "Current version: $CURR_MARKETING (build $CURR_BUILD)"
 
-  # Calculate new version using Python
+  # Calculate new version using Python (minor/major default to two-part; patch uses three-part)
   local NEW_VERSION=$(python3 << PYEOF
 import sys
 version = "$CURR_MARKETING".split('.')
@@ -263,7 +263,10 @@ elif "$BUMP_TYPE" == "minor":
 elif "$BUMP_TYPE" == "patch":
     patch += 1
 
-print(f"{major}.{minor}.{patch}")
+if "$BUMP_TYPE" == "patch":
+    print(f"{major}.{minor}.{patch}")
+else:
+    print(f"{major}.{minor}")
 PYEOF
 )
 
