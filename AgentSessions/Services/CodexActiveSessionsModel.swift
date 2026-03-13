@@ -2165,6 +2165,7 @@ final class CodexActiveSessionsModel: ObservableObject {
 
         let strongBusyMarkers = [
             "esc to interrupt",
+            "esc interrupt",      // OpenCode TUI omits "to"
             "re-connecting",
             "reconnecting"
         ]
@@ -2451,10 +2452,14 @@ final class CodexActiveSessionsModel: ObservableObject {
                 }
             } else if shouldProbeThisPresence, presence.source == .opencode {
                 if let probe = matchedBatchProbe {
-                    if let tail = probe.tail {
+                    // iTerm2 `is processing` is the most reliable signal for
+                    // TUI apps running in the alternate screen buffer.
+                    if probe.isProcessing == true {
+                        state = .activeWorking
+                    } else if let tail = probe.tail {
                         state = classifyGenericITermTail(tail)
                     }
-                    // No tail or nil classification → fall through to heuristic
+                    // No match → fall through to mtime heuristic
                 }
             }
 
