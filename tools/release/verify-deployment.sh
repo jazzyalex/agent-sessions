@@ -67,6 +67,19 @@ check_output() {
     fi
 }
 
+extract_appcast_item() {
+    local appcast_file="$1"
+    local version="$2"
+
+    awk -v version="$version" '
+        BEGIN { RS="</item>"; ORS="</item>\n" }
+        index($0, "<sparkle:shortVersionString>" version "</sparkle:shortVersionString>") {
+            print
+            exit
+        }
+    ' "$appcast_file"
+}
+
 echo "==> Verifying deployment for Agent Sessions $VERSION"
 echo ""
 
@@ -81,17 +94,59 @@ echo ""
 
 # 2. Sparkle appcast checks
 echo "Sparkle Appcast:"
-check "Appcast is accessible" "curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml"
-check_output "Appcast has correct version" "curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -o '<sparkle:shortVersionString>[^<]*' | head -1" "$VERSION"
-check "Appcast has EdDSA signature" "curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -q 'sparkle:edSignature'"
-check_output "Appcast URL points to GitHub Releases" "curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml | grep 'enclosure url'" "github.com/jazzyalex/agent-sessions/releases"
-check_output "Appcast has release notes" "curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml" "<description"
+APPCAST_URL="https://jazzyalex.github.io/agent-sessions/appcast.xml"
+APPCAST_TMP=$(mktemp)
+trap 'rm -f "$APPCAST_TMP"' EXIT
+
+if curl -sf "$APPCAST_URL" >"$APPCAST_TMP"; then
+    green "Appcast is accessible"
+else
+    red "Appcast is accessible"
+    ((ERRORS++))
+fi
+
+APPCAST_ITEM=""
+if [[ -s "$APPCAST_TMP" ]]; then
+    APPCAST_ITEM=$(extract_appcast_item "$APPCAST_TMP" "$VERSION")
+fi
+
+if [[ -n "$APPCAST_ITEM" ]]; then
+    green "Appcast has exact release item for $VERSION"
+else
+    red "Appcast has exact release item for $VERSION"
+    ((ERRORS++))
+fi
+
+if [[ -n "$APPCAST_ITEM" ]] && grep -q 'sparkle:edSignature=' <<<"$APPCAST_ITEM"; then
+    green "Appcast item has EdDSA signature"
+else
+    red "Appcast item has EdDSA signature"
+    ((ERRORS++))
+fi
+
+EXPECTED_APPCAST_URL="https://github.com/jazzyalex/agent-sessions/releases/download/v$VERSION/AgentSessions-$VERSION.dmg"
+if [[ -n "$APPCAST_ITEM" ]] && grep -Fq "$EXPECTED_APPCAST_URL" <<<"$APPCAST_ITEM"; then
+    green "Appcast item points to GitHub Releases"
+else
+    red "Appcast item points to GitHub Releases"
+    ((ERRORS++))
+fi
+
+if [[ -n "$APPCAST_ITEM" ]] && grep -q '<description' <<<"$APPCAST_ITEM"; then
+    green "Appcast item has release notes"
+else
+    red "Appcast item has release notes"
+    ((ERRORS++))
+fi
 
 echo ""
 
 # 3. Build number check
 echo "Build Number:"
-BUILD_NUMBER=$(curl -sf https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -o '<sparkle:version>[^<]*' | head -1 | cut -d'>' -f2)
+BUILD_NUMBER=""
+if [[ -n "$APPCAST_ITEM" ]]; then
+    BUILD_NUMBER=$(grep -o '<sparkle:version>[^<]*' <<<"$APPCAST_ITEM" | head -1 | cut -d'>' -f2)
+fi
 if [[ -n "$BUILD_NUMBER" ]] && [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
     green "Build number is $BUILD_NUMBER"
 else

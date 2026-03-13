@@ -138,20 +138,30 @@ check_dependencies() {
   green "✓ All required dependencies available"
 }
 
-# Improved cache wait with timeout
+# Improved appcast wait with timeout. GitHub Pages can briefly serve a stale feed
+# after the docs commit is live, so match the exact release item instead of any
+# occurrence of the version string.
 wait_for_cache() {
   local url="$1"
-  local expected="$2"
-  local max_wait="${3:-120}"  # seconds
+  local expected_version="$2"
+  local expected_dmg_url="${3:-}"
+  local max_wait="${4:-120}"  # seconds
   local interval=3
+  local expected_version_tag="<sparkle:shortVersionString>${expected_version}</sparkle:shortVersionString>"
 
   log INFO "Waiting for cache propagation: $url"
 
   for ((i=0; i<max_wait; i+=interval)); do
-    if curl -sf "$url" 2>/dev/null | grep -q "$expected"; then
-      green "✓ Cache propagated after ${i}s"
-      return 0
+    local body
+    body=$(curl -sf "$url" 2>/dev/null || true)
+
+    if [[ -n "$body" ]] && grep -Fq "$expected_version_tag" <<<"$body"; then
+      if [[ -z "$expected_dmg_url" ]] || grep -Fq "$expected_dmg_url" <<<"$body"; then
+        green "✓ Cache propagated after ${i}s"
+        return 0
+      fi
     fi
+
     sleep $interval
   done
 
@@ -640,7 +650,11 @@ else
 
     # Wait for GitHub Pages cache invalidation
     echo "Waiting for GitHub Pages to serve new appcast..."
-    if ! wait_for_cache "https://jazzyalex.github.io/agent-sessions/appcast.xml" "$VERSION" 120; then
+    if ! wait_for_cache \
+      "https://jazzyalex.github.io/agent-sessions/appcast.xml" \
+      "$VERSION" \
+      "https://github.com/jazzyalex/agent-sessions/releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg" \
+      120; then
       yellow "WARNING: Appcast cache did not propagate, but continuing..."
     fi
 
