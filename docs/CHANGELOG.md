@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-03-12
+
 ### Changed
 - Onboarding: Session visible/hidden counts now refresh on any live session-data update (not just total-count deltas), and DB snapshot fallback now evaluates session visibility with the same active filter logic used by onboarding counts.
 - Window restoration: Relaunch now restores the primary `Agent Sessions` window reliably even when its autosave name was already set, and auto-reopens `Agent Cockpit` when it was pinned.
