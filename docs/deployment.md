@@ -205,7 +205,7 @@ All network operations retry automatically (3 attempts, 5s backoff):
 
 ### 5. Improved Cache Propagation Waits
 Smart timeout-based waiting instead of hardcoded loops:
-- **GitHub Pages**: Waits up to 120s for appcast.xml to be live
+- **GitHub Pages**: Waits up to 120s for the exact target appcast item and DMG URL to be live, not just any matching version text
 - **Homebrew cask**: Waits up to 40s for cask version to propagate
 - Shows elapsed time when cache propagates
 - Non-blocking warnings if timeout exceeded
@@ -421,15 +421,18 @@ gh release view v{VERSION} --json name,assets | jq '.assets[] | .name'
 # Expected: AgentSessions-{VERSION}.dmg and AgentSessions-{VERSION}.dmg.sha256
 
 # 2. Verify Sparkle appcast.xml published on GitHub Pages
-curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -E "(sparkle:version|sparkle:edSignature|enclosure url)"
-# Expected:
-#   <sparkle:version>1</sparkle:version>
+curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | \
+  awk 'BEGIN { RS="</item>"; ORS="</item>\n" } index($0, "<sparkle:shortVersionString>{VERSION}</sparkle:shortVersionString>")'
+# Expected: the item for {VERSION} is present and includes:
+#   <sparkle:version>{BUILD}</sparkle:version>
 #   <sparkle:shortVersionString>{VERSION}</sparkle:shortVersionString>
 #   <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v{VERSION}/AgentSessions-{VERSION}.dmg" ... sparkle:edSignature="..."/>
 
-# 3. Verify `<description>` (release notes) is present for the latest item
-curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep -A2 "<title>2.5.1" | grep -n "<description>"
-# Expected: a `<description><![CDATA[` block immediately after `<pubDate>`
+# 3. Verify `<description>` (release notes) is present for the target item
+curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | \
+  awk 'BEGIN { RS="</item>"; ORS="</item>\n" } index($0, "<sparkle:shortVersionString>{VERSION}</sparkle:shortVersionString>")' | \
+  grep -n "<description"
+# Expected: a `<description><![CDATA[` block inside the {VERSION} item
 
 # 4. Verify EdDSA signature is present in appcast
 curl -s https://jazzyalex.github.io/agent-sessions/appcast.xml | grep "sparkle:edSignature" | wc -l
