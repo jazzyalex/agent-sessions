@@ -46,7 +46,7 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 ## Agent Cockpit (Beta)
 
-Agent Cockpit is the 3.0 live command center for active iTerm2 Codex CLI and Claude Code sessions.
+Agent Cockpit is the 3.1 live command center for active iTerm2 Codex CLI and Claude Code sessions, with steadier long-running behavior and clearer menu bar controls.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
@@ -111,14 +111,18 @@ open "/Applications/Agent Sessions.app"
 
 ---
 
-## What's New in 3.0
+## What's New in 3.1
 
-Short version:
-- Major update: Agent Cockpit is now the primary live command center, with faster access and refined HUD interactions.
-- Major update: Onboarding now introduces Agent Cockpit early for new users, and update onboarding is streamlined to a cockpit explainer plus direct feedback/support links.
-- Beta scope note: Live Agent Cockpit detection is currently limited to iTerm2 sessions from Codex CLI and Claude Code.
-- Major bug fix: Cockpit and session-list live indicators now stay more consistent during focus changes and refresh churn.
-- Quality and usability improvements across cockpit row actions, subtitle handling, compact/full sizing, and stability.
+TL;DR:
+- Agent Cockpit is more stable during long pinned and backgrounded runs, with lower CPU drift and less flicker.
+- Live status controls are clearer, with independent menu bar toggles for session icons and better active vs waiting language.
+- Relaunch and reopen flows are more reliable, including main-window restoration, pinned cockpit recovery, and safer Dock-icon hiding.
+
+Highlights:
+- Agent Cockpit now suppresses redundant refresh churn, pauses idle animations while inactive, and backs off background polling after stable cycles.
+- Menu bar settings now let you show active/waiting session icons separately from usage meters.
+- Preferences now include a safer `Hide Dock icon` flow that preserves a reopen path through the menu bar.
+- Onboarding session counts now stay in sync with live session visibility changes instead of updating only when total counts move.
 
 Details: `docs/CHANGELOG.md` and `docs/summaries/`.
 
