@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- OpenCode live sessions now participate in Agent Cockpit and menu bar active/waiting summaries, including background session lookup and iTerm-based presence detection alongside Codex and Claude.
+
 ## [3.1] - 2026-03-12
 
 ### Changed

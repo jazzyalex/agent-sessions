@@ -211,6 +211,8 @@ struct AgentCockpitHUDRowView: View {
                 base = Color(hex: "2b56b8")
             case .claude:
                 base = Color(hex: "b86a1d")
+            case .opencode:
+                base = Color(hex: "1a7a4a")
             case .shell:
                 base = Color(hex: "7a7a80")
             }

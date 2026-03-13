@@ -16,12 +16,14 @@ enum HUDDisplayPriority: Int, Equatable {
 enum HUDAgentType: Equatable {
     case codex
     case claude
+    case opencode
     case shell
 
     var label: String {
         switch self {
         case .codex: return "Codex"
         case .claude: return "Claude"
+        case .opencode: return "OpenCode"
         case .shell: return "Shell"
         }
     }
@@ -30,6 +32,7 @@ enum HUDAgentType: Equatable {
         switch self {
         case .codex: return .agentCodex
         case .claude: return .agentClaude
+        case .opencode: return .agentOpenCode
         case .shell: return .secondary
         }
     }
@@ -277,6 +280,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     private weak var activeCodex: CodexActiveSessionsModel?
     private var codexSessions: [Session]
     private var claudeSessions: [Session]
+    private var opencodeSessions: [Session]
     private var lookupIndexes: SessionLookupIndexes
     private var presences: [CodexActivePresence] = []
     private var isCompact: Bool
@@ -314,12 +318,14 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     }
 #endif
 
-    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, initialCompact: Bool) {
+    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer, initialCompact: Bool) {
         codexSessions = codexIndexer.allSessions
         claudeSessions = claudeIndexer.allSessions
+        opencodeSessions = opencodeIndexer.allSessions
         lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
             codexSessions: codexSessions,
-            claudeSessions: claudeSessions
+            claudeSessions: claudeSessions,
+            opencodeSessions: opencodeSessions
         )
         isCompact = initialCompact
 
@@ -336,6 +342,15 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
             .sink { [weak self] sessions in
                 guard let self else { return }
                 claudeSessions = sessions
+                rebuildLookupIndexes()
+                scheduleRebuild()
+            }
+            .store(in: &cancellables)
+
+        opencodeIndexer.$allSessions
+            .sink { [weak self] sessions in
+                guard let self else { return }
+                opencodeSessions = sessions
                 rebuildLookupIndexes()
                 scheduleRebuild()
             }
@@ -363,7 +378,8 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     private func rebuildLookupIndexes() {
         lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
             codexSessions: codexSessions,
-            claudeSessions: claudeSessions
+            claudeSessions: claudeSessions,
+            opencodeSessions: opencodeSessions
         )
 #if DEBUG
         Self.recordDebugLookupRebuild()
@@ -387,6 +403,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         let nextSnapshot = AgentCockpitHUDView.makeRowsSnapshot(
             codexSessions: codexSessions,
             claudeSessions: claudeSessions,
+            opencodeSessions: opencodeSessions,
             presences: presences,
             activeCodex: activeCodex,
             isCompact: isCompact,
@@ -406,6 +423,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
 struct AgentCockpitHUDView: View {
     let codexIndexer: SessionIndexer
     let claudeIndexer: ClaudeSessionIndexer
+    let opencodeIndexer: OpenCodeSessionIndexer
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
 
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
@@ -471,13 +489,15 @@ struct AgentCockpitHUDView: View {
         min(max(compactBaselineRows, 3), Int(compactBodyMaxRowsWhenToolbarVisible))
     }
 
-    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer) {
+    init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
+        self.opencodeIndexer = opencodeIndexer
         _derivedState = StateObject(
             wrappedValue: AgentCockpitHUDDerivedStateModel(
                 codexIndexer: codexIndexer,
                 claudeIndexer: claudeIndexer,
+                opencodeIndexer: opencodeIndexer,
                 initialCompact: UserDefaults.standard.object(forKey: PreferencesKey.Cockpit.hudCompact) as? Bool ?? false
             )
         )
@@ -1523,19 +1543,21 @@ struct AgentCockpitHUDView: View {
 
     static func liveSessionSummary(activeCodex: CodexActiveSessionsModel,
                                    codexIndexer: SessionIndexer,
-                                   claudeIndexer: ClaudeSessionIndexer) -> HUDLiveSessionSummary {
+                                   claudeIndexer: ClaudeSessionIndexer,
+                                   opencodeIndexer: OpenCodeSessionIndexer) -> HUDLiveSessionSummary {
         liveSessionSummary(
             activeCodex: activeCodex,
             lookupIndexes: buildSessionLookupIndexes(
                 codexSessions: codexIndexer.allSessions,
-                claudeSessions: claudeIndexer.allSessions
+                claudeSessions: claudeIndexer.allSessions,
+                opencodeSessions: opencodeIndexer.allSessions
             )
         )
     }
 
     private static func displayableLiveSummaryPresences(from presences: [CodexActivePresence],
                                                         lookupIndexes: SessionLookupIndexes?) -> [CodexActivePresence] {
-        let supportedSources: Set<SessionSource> = [.codex, .claude]
+        let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
         let filtered = presences.filter { presence in
             guard supportedSources.contains(presence.source) else { return false }
             let hasWorkspaceMatch = hasWorkspaceMatchForSummary(presence, lookupIndexes: lookupIndexes)
@@ -1614,13 +1636,14 @@ struct AgentCockpitHUDView: View {
 
     fileprivate static func makeRowsSnapshot(codexSessions: [Session],
                                              claudeSessions: [Session],
+                                             opencodeSessions: [Session],
                                              presences: [CodexActivePresence],
                                              activeCodex: CodexActiveSessionsModel,
                                              isCompact: Bool,
                                              lookupIndexes: SessionLookupIndexes,
                                              now: Date = Date()) -> HUDRowsSnapshot {
-        let supportedSources: Set<SessionSource> = [.codex, .claude]
-        let allSessions = codexSessions + claudeSessions
+        let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
+        let allSessions = codexSessions + claudeSessions + opencodeSessions
         let fallbackBySessionKey = UnifiedSessionsView.buildFallbackPresenceMap(
             sessions: allSessions,
             presences: presences
@@ -2045,6 +2068,8 @@ struct AgentCockpitHUDView: View {
             return .codex
         case .claude:
             return .claude
+        case .opencode:
+            return .opencode
         default:
             return .shell
         }
@@ -2313,9 +2338,10 @@ struct AgentCockpitHUDView: View {
     }
 
     static func buildSessionLookupIndexes(codexSessions: [Session],
-                                          claudeSessions: [Session]) -> SessionLookupIndexes {
-        let supportedSources: Set<SessionSource> = [.codex, .claude]
-        let allSessions = codexSessions + claudeSessions
+                                          claudeSessions: [Session],
+                                          opencodeSessions: [Session] = []) -> SessionLookupIndexes {
+        let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
+        let allSessions = codexSessions + claudeSessions + opencodeSessions
 
         var byLogPath: [String: Session] = [:]
         var bySessionID: [String: Session] = [:]
@@ -2879,7 +2905,8 @@ private struct HUDSearchTextField: NSViewRepresentable {
 #Preview("Agent Cockpit HUD") {
     AgentCockpitHUDView(
         codexIndexer: SessionIndexer(),
-        claudeIndexer: ClaudeSessionIndexer()
+        claudeIndexer: ClaudeSessionIndexer(),
+        opencodeIndexer: OpenCodeSessionIndexer()
     )
     .environmentObject(CodexActiveSessionsModel())
     .frame(width: 760, height: 420)

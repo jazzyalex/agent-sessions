@@ -8,6 +8,7 @@ final class StatusItemController: NSObject {
     private var hosting: NSHostingView<AnyView>?
     private let indexer: SessionIndexer
     private let claudeIndexer: ClaudeSessionIndexer
+    private let opencodeIndexer: OpenCodeSessionIndexer
     private let activeSessions: CodexActiveSessionsModel
     private let codexStatus: CodexUsageModel
     private let claudeStatus: ClaudeUsageModel
@@ -16,11 +17,13 @@ final class StatusItemController: NSObject {
 
     init(indexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
+         opencodeIndexer: OpenCodeSessionIndexer,
          activeSessions: CodexActiveSessionsModel,
          codexStatus: CodexUsageModel,
          claudeStatus: ClaudeUsageModel) {
         self.indexer = indexer
         self.claudeIndexer = claudeIndexer
+        self.opencodeIndexer = opencodeIndexer
         self.activeSessions = activeSessions
         self.codexStatus = codexStatus
         self.claudeStatus = claudeStatus
@@ -48,6 +51,7 @@ final class StatusItemController: NSObject {
                 .environmentObject(activeSessions)
                 .environmentObject(indexer)
                 .environmentObject(claudeIndexer)
+                .environmentObject(opencodeIndexer)
                 .environmentObject(codexStatus)
                 .environmentObject(claudeStatus)
             let hv = NSHostingView(rootView: AnyView(labelView))
@@ -149,7 +153,8 @@ final class StatusItemController: NSObject {
             let summary = AgentCockpitHUDView.liveSessionSummary(
                 activeCodex: activeSessions,
                 codexIndexer: indexer,
-                claudeIndexer: claudeIndexer
+                claudeIndexer: claudeIndexer,
+                opencodeIndexer: opencodeIndexer
             )
             menu.addItem(makeTitleItem("Live Sessions"))
             menu.addItem(makeTitleItem("\(summary.activeCount) active • \(summary.waitingCount) waiting"))

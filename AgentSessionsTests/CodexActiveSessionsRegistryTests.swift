@@ -1122,11 +1122,11 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
     }
 
     @MainActor
-    func testSupportsLiveSessions_excludesOpenCodeForCurrentRelease() {
+    func testSupportsLiveSessions_includesCodexClaudeAndOpenCode() {
         let model = CodexActiveSessionsModel()
         XCTAssertTrue(model.supportsLiveSessions(for: .codex))
         XCTAssertTrue(model.supportsLiveSessions(for: .claude))
-        XCTAssertFalse(model.supportsLiveSessions(for: .opencode))
+        XCTAssertTrue(model.supportsLiveSessions(for: .opencode))
     }
 
     func testLiveSessionIDCandidates_extractsClaudeRuntimeUUIDFromPath() {
