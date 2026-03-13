@@ -406,7 +406,8 @@ struct AgentSessionsApp: App {
         Window("Agent Cockpit", id: "AgentCockpit") {
             AgentCockpitHUDView(
                 codexIndexer: indexer,
-                claudeIndexer: claudeIndexer
+                claudeIndexer: claudeIndexer,
+                opencodeIndexer: opencodeIndexer
             )
                 .environmentObject(activeCodexSessions)
                 .background(WindowOpenRegistrationView())
@@ -578,6 +579,7 @@ extension AgentSessionsApp {
         guard statusItemController == nil else { return }
         statusItemController = StatusItemController(indexer: indexer,
                                                     claudeIndexer: claudeIndexer,
+                                                    opencodeIndexer: opencodeIndexer,
                                                     activeSessions: activeCodexSessions,
                                                     codexStatus: codexUsageModel,
                                                     claudeStatus: claudeUsageModel)

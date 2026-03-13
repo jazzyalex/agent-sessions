@@ -9,30 +9,37 @@ private final class UsageMenuBarLiveSummaryModel: ObservableObject {
     private var activeCodexID: ObjectIdentifier?
     private var codexIndexerID: ObjectIdentifier?
     private var claudeIndexerID: ObjectIdentifier?
+    private var opencodeIndexerID: ObjectIdentifier?
     private weak var activeCodex: CodexActiveSessionsModel?
     private weak var codexIndexer: SessionIndexer?
     private weak var claudeIndexer: ClaudeSessionIndexer?
+    private weak var opencodeIndexer: OpenCodeSessionIndexer?
     private var lookupIndexes = SessionLookupIndexes(byLogPath: [:], bySessionID: [:], byWorkspace: [:])
     private var cancellables: Set<AnyCancellable> = []
 
     func connect(activeCodex: CodexActiveSessionsModel,
                  codexIndexer: SessionIndexer,
-                 claudeIndexer: ClaudeSessionIndexer) {
+                 claudeIndexer: ClaudeSessionIndexer,
+                 opencodeIndexer: OpenCodeSessionIndexer) {
         let nextActiveCodexID = ObjectIdentifier(activeCodex)
         let nextCodexIndexerID = ObjectIdentifier(codexIndexer)
         let nextClaudeIndexerID = ObjectIdentifier(claudeIndexer)
+        let nextOpenCodeIndexerID = ObjectIdentifier(opencodeIndexer)
         guard activeCodexID != nextActiveCodexID
             || codexIndexerID != nextCodexIndexerID
-            || claudeIndexerID != nextClaudeIndexerID else {
+            || claudeIndexerID != nextClaudeIndexerID
+            || opencodeIndexerID != nextOpenCodeIndexerID else {
             return
         }
 
         activeCodexID = nextActiveCodexID
         codexIndexerID = nextCodexIndexerID
         claudeIndexerID = nextClaudeIndexerID
+        opencodeIndexerID = nextOpenCodeIndexerID
         self.activeCodex = activeCodex
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
+        self.opencodeIndexer = opencodeIndexer
         cancellables.removeAll()
 
         activeCodex.$activeMembershipVersion
@@ -45,7 +52,8 @@ private final class UsageMenuBarLiveSummaryModel: ObservableObject {
                 guard let claudeIndexer = self.claudeIndexer else { return }
                 self.lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
                     codexSessions: sessions,
-                    claudeSessions: claudeIndexer.allSessions
+                    claudeSessions: claudeIndexer.allSessions,
+                    opencodeSessions: self.opencodeIndexer?.allSessions ?? []
                 )
                 self.rebuild()
             }
@@ -57,7 +65,22 @@ private final class UsageMenuBarLiveSummaryModel: ObservableObject {
                 guard let codexIndexer = self.codexIndexer else { return }
                 self.lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
                     codexSessions: codexIndexer.allSessions,
-                    claudeSessions: sessions
+                    claudeSessions: sessions,
+                    opencodeSessions: self.opencodeIndexer?.allSessions ?? []
+                )
+                self.rebuild()
+            }
+            .store(in: &cancellables)
+
+        opencodeIndexer.$allSessions
+            .sink { [weak self] sessions in
+                guard let self else { return }
+                guard let codexIndexer = self.codexIndexer,
+                      let claudeIndexer = self.claudeIndexer else { return }
+                self.lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
+                    codexSessions: codexIndexer.allSessions,
+                    claudeSessions: claudeIndexer.allSessions,
+                    opencodeSessions: sessions
                 )
                 self.rebuild()
             }
@@ -65,7 +88,8 @@ private final class UsageMenuBarLiveSummaryModel: ObservableObject {
 
         lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
             codexSessions: codexIndexer.allSessions,
-            claudeSessions: claudeIndexer.allSessions
+            claudeSessions: claudeIndexer.allSessions,
+            opencodeSessions: opencodeIndexer.allSessions
         )
         rebuild()
     }
@@ -80,6 +104,7 @@ struct UsageMenuBarLabel: View {
     @EnvironmentObject var activeCodex: CodexActiveSessionsModel
     @EnvironmentObject var codexIndexer: SessionIndexer
     @EnvironmentObject var claudeIndexer: ClaudeSessionIndexer
+    @EnvironmentObject var opencodeIndexer: OpenCodeSessionIndexer
     @EnvironmentObject var codexStatus: CodexUsageModel
     @EnvironmentObject var claudeStatus: ClaudeUsageModel
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsEnabled: Bool = true
@@ -110,7 +135,8 @@ struct UsageMenuBarLabel: View {
             liveSummaryModel.connect(
                 activeCodex: activeCodex,
                 codexIndexer: codexIndexer,
-                claudeIndexer: claudeIndexer
+                claudeIndexer: claudeIndexer,
+                opencodeIndexer: opencodeIndexer
             )
         }
     }

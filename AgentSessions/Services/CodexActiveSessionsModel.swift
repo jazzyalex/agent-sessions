@@ -658,6 +658,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                                          rootPaths: [String],
                                          codexSessionRoots: [String],
                                          claudeSessionRoots: [String],
+                                         opencodeSessionRoots: [String],
                                          lastProcessProbeAtSnapshot: Date?,
                                          lastITermProbeAtSnapshot: Date?,
                                          cachedProcessProbeSnapshot: [CodexActivePresence],
@@ -716,6 +717,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                 now: now,
                 codexSessionRoots: codexSessionRoots,
                 claudeSessionRoots: claudeSessionRoots,
+                opencodeSessionRoots: opencodeSessionRoots,
                 timeout: Self.processProbeTimeout
             )
             guard isCurrentRefreshGeneration(generation) else {
@@ -743,6 +745,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                 itermTabTitleBySessionGuid = Self.itermTabTitleBySessionGuid(sessions)
                 itermPresences = Self.presencesFromITermSessions(sessions, source: .codex, now: now)
                 itermPresences += Self.presencesFromITermSessions(sessions, source: .claude, now: now)
+                itermPresences += Self.presencesFromITermSessions(sessions, source: .opencode, now: now)
                 out.append(contentsOf: itermPresences)
             }
         } else if shouldUseITermSnapshot {
@@ -769,6 +772,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                                           now: Date,
                                           codexSessionRoots: [String],
                                           claudeSessionRoots: [String],
+                                          opencodeSessionRoots: [String],
                                           timeout: TimeInterval) async -> [CodexActivePresence] {
         let user = NSUserName()
         let psData = await runManagedCommand(
@@ -790,6 +794,16 @@ final class CodexActiveSessionsModel: ObservableObject {
                     .filter { info in
                         guard info.tty != nil else { return false }
                         return Self.commandContainsNeedle(info.command, needles: ["claude", "claude-code"])
+                    }
+                    .map(\.pid)
+            )
+        ).sorted()
+        let opencodeCommandPIDs = Array(
+            Set(
+                commandInfos
+                    .filter { info in
+                        guard info.tty != nil else { return false }
+                        return Self.commandContainsNeedle(info.command, needles: ["opencode"])
                     }
                     .map(\.pid)
             )
@@ -821,13 +835,33 @@ final class CodexActiveSessionsModel: ObservableObject {
                 timeout: timeout
             )
         }
+        let opencodeInfos = await discoverLsofPIDInfos(
+            generation: generation,
+            source: .opencode,
+            queryArguments: ["-w", "-a", "-c", "opencode", "-u", user, "-nP", "-F", "pftn"],
+            sessionsRoots: opencodeSessionRoots,
+            timeout: timeout
+        )
+        let opencodeCommandInfos: [Int: LsofPIDInfo]
+        if opencodeCommandPIDs.isEmpty {
+            opencodeCommandInfos = [:]
+        } else {
+            opencodeCommandInfos = await discoverLsofPIDInfos(
+                generation: generation,
+                source: .opencode,
+                queryArguments: ["-w", "-a", "-p", opencodeCommandPIDs.map(String.init).joined(separator: ","), "-u", user, "-nP", "-F", "pftn"],
+                sessionsRoots: opencodeSessionRoots,
+                timeout: timeout
+            )
+        }
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
             return []
         }
         let pidInfoBySource: [SessionSource: [Int: LsofPIDInfo]] = [
             .codex: codexInfos,
-            .claude: Self.mergePIDInfos(claudeInfos, with: claudeCommandInfos)
+            .claude: Self.mergePIDInfos(claudeInfos, with: claudeCommandInfos),
+            .opencode: Self.mergePIDInfos(opencodeInfos, with: opencodeCommandInfos)
         ]
         let allPIDs = Array(pidInfoBySource.values.flatMap(\.keys)).sorted()
         var envByPID: [Int: PSProcessEnvMeta] = [:]
@@ -982,6 +1016,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         let rootPaths = registryRoots().map(\.path)
         let codexSessionRoots = codexSessionsRoots().map(\.path)
         let claudeSessionRoots = claudeSessionsRoots().map(\.path)
+        let opencodeSessionRoots = opencodeSessionsRoots().map(\.path)
         let previousLogKeys = Set(byLogPath.keys)
         let previousSessionKeys = Set(bySessionID.keys)
         let previousLiveStates = liveStateByPresenceKey
@@ -1019,6 +1054,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             rootPaths: rootPaths,
             codexSessionRoots: codexSessionRoots,
             claudeSessionRoots: claudeSessionRoots,
+            opencodeSessionRoots: opencodeSessionRoots,
             lastProcessProbeAtSnapshot: lastProcessProbeAtSnapshot,
             lastITermProbeAtSnapshot: lastITermProbeAtSnapshot,
             cachedProcessProbeSnapshot: cachedProcessProbeSnapshot,
@@ -1095,7 +1131,12 @@ final class CodexActiveSessionsModel: ObservableObject {
             }
             ui.append(p)
         }
-        ui = Self.reconcileFallbackPresences(Array(fallbackMap.values), into: ui)
+        let sortedFallbacks = Array(fallbackMap.values).sorted { a, b in
+            // Process-discovered presences (with pid) come first so they're indexed in baseUI
+            // before iTerm tty-only presences try to merge into them.
+            (a.pid != nil ? 0 : 1) < (b.pid != nil ? 0 : 1)
+        }
+        ui = Self.reconcileFallbackPresences(sortedFallbacks, into: ui)
         ui = Self.enrichPresencesWithITermTabTitles(
             ui,
             tabTitleByTTY: probeResult.itermTabTitleByTTY,
@@ -1252,6 +1293,15 @@ final class CodexActiveSessionsModel: ObservableObject {
         return dedupRoots([discovery.sessionsRoot()])
     }
 
+    private func opencodeSessionsRoots() -> [URL] {
+        let defaults = UserDefaults.standard
+        let override = defaults.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
+            ?? defaults.string(forKey: "OpenCodeSessionsRootOverride")
+            ?? ""
+        let discovery = OpenCodeSessionDiscovery(customRoot: override.isEmpty ? nil : override)
+        return dedupRoots([discovery.sessionsRoot()])
+    }
+
     private func dedupRoots(_ candidates: [URL]) -> [URL] {
         var out: [URL] = []
         var seen: Set<String> = []
@@ -1264,7 +1314,7 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     nonisolated private static func supportsLiveSessionSource(_ source: SessionSource) -> Bool {
         switch source {
-        case .codex, .claude:
+        case .codex, .claude, .opencode:
             return true
         default:
             return false
@@ -1756,7 +1806,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         var out: [String] = []
         out.reserveCapacity(presences.count)
         for presence in presences {
-            guard presence.source == .codex || presence.source == .claude else { continue }
+            guard presence.source == .codex || presence.source == .claude || presence.source == .opencode else { continue }
             guard canAttemptITerm2TailProbe(
                 itermSessionId: presence.terminal?.itermSessionId,
                 tty: presence.tty,
@@ -2399,6 +2449,13 @@ final class CodexActiveSessionsModel: ObservableObject {
                         tail: probe.tail
                     )
                 }
+            } else if shouldProbeThisPresence, presence.source == .opencode {
+                if let probe = matchedBatchProbe {
+                    if let tail = probe.tail {
+                        state = classifyGenericITermTail(tail)
+                    }
+                    // No tail or nil classification → fall through to heuristic
+                }
             }
 
             var activeWriteWindow = activeWriteWindow(for: presence.source)
@@ -2470,7 +2527,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         for presence in presences {
             let key = presenceKey(for: presence)
             guard selectedPresenceKeys.contains(key), seenKeys.insert(key).inserted else { continue }
-            guard presence.source == .codex || presence.source == .claude else { continue }
+            guard presence.source == .codex || presence.source == .claude || presence.source == .opencode else { continue }
             let guid = itermSessionGuid(from: presence.terminal?.itermSessionId) ?? ""
             let tty = (presence.tty ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !guid.isEmpty || !tty.isEmpty else { continue }
@@ -2503,6 +2560,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             return 2.5
         case .claude:
             return 15.0
+        case .opencode:
+            return 30.0
         default:
             return 2.5
         }

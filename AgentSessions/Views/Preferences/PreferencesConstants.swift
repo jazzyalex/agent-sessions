@@ -81,6 +81,7 @@ enum PreferencesKey {
 
     enum Paths {
         static let claudeSessionsRootOverride = "ClaudeSessionsRootOverride"
+        static let opencodeSessionsRootOverride = "OpenCodeSessionsRootOverride"
         static let copilotSessionsRootOverride = "CopilotSessionsRootOverride"
         static let droidSessionsRootOverride = "DroidSessionsRootOverride"
         static let droidProjectsRootOverride = "DroidProjectsRootOverride"
