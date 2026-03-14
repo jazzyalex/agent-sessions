@@ -5,7 +5,7 @@ import AppKit
 import IOKit.ps
 #endif
 
-// Snapshot of parsed values from Claude CLI /usage
+// Snapshot of parsed values from Claude CLI /usage (kept for tmux path compatibility)
 struct ClaudeUsageSnapshot: Equatable {
     var sessionRemainingPercent: Int = 0
     var sessionResetText: String = ""
@@ -49,7 +49,15 @@ final class ClaudeUsageModel: ObservableObject {
     @Published var setupHint: String? = nil
     @Published var isUpdating: Bool = false
     @Published var lastSuccessAt: Date? = nil
+    @Published var dataIsStale: Bool = false
 
+    // Current source info for debug display
+    @Published var currentSourceLabel: String = ""
+    @Published var currentHealthLabel: String = ""
+    @Published var lastRawOAuthPayload: String? = nil
+
+    private var sourceManager: ClaudeUsageSourceManager?
+    // Kept for hard-probe diagnostics that need direct tmux access
     private var service: ClaudeStatusService?
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
@@ -93,12 +101,12 @@ final class ClaudeUsageModel: ObservableObject {
         // Treat the in-app strip as non-visible while the app is inactive to avoid
         // background polling. Menu bar visibility should remain effective even when
         // the app is inactive so the user can still read live usage in the menu bar.
-        let svc = self.service
+        let mgr = self.sourceManager
         let menuVisible = self.menuVisible
         let stripVisible = self.stripVisible
         let appIsActive = self.appIsActive
         Task.detached {
-            await svc?.setVisibility(menuVisible: menuVisible, stripVisible: stripVisible, appIsActive: appIsActive)
+            await mgr?.setVisibility(menuVisible: menuVisible, stripVisible: stripVisible, appIsActive: appIsActive)
         }
     }
 
@@ -106,9 +114,9 @@ final class ClaudeUsageModel: ObservableObject {
         guard isEnabled else { return }
         if isUpdating { return }
         isUpdating = true
-        let svc = self.service
+        let mgr = self.sourceManager
         Task.detached {
-            await svc?.refreshNow()
+            await mgr?.refreshNow()
             try? await Task.sleep(nanoseconds: 65 * 1_000_000_000)
             await MainActor.run {
                 if ClaudeUsageModel.shared.isUpdating { ClaudeUsageModel.shared.isUpdating = false }
@@ -116,14 +124,19 @@ final class ClaudeUsageModel: ObservableObject {
         }
     }
 
+    private func usageMode() -> ClaudeUsageMode {
+        let raw = UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? ClaudeUsageMode.auto.rawValue
+        return ClaudeUsageMode(rawValue: raw) ?? .auto
+    }
+
     private func start() {
         let model = self
-        let handler: @Sendable (ClaudeUsageSnapshot) -> Void = { snapshot in
+        let snapshotHandler: @Sendable (ClaudeLimitSnapshot) -> Void = { snapshot in
             Task { @MainActor in
                 // Avoid publishing changes during SwiftUI view updates (can happen when the menu bar
                 // or strip visibility flips and the service immediately delivers a snapshot).
                 await Task.yield()
-                model.apply(snapshot)
+                model.applyLimitSnapshot(snapshot)
             }
         }
         let availabilityHandler: @Sendable (ClaudeServiceAvailability) -> Void = { availability in
@@ -137,19 +150,24 @@ final class ClaudeUsageModel: ObservableObject {
                 model.setupHint = availability.setupHint
             }
         }
-        let service = ClaudeStatusService(updateHandler: handler, availabilityHandler: availabilityHandler)
-        self.service = service
+
+        let mode = usageMode()
+        let mgr = ClaudeUsageSourceManager()
+        self.sourceManager = mgr
+
         installWakeObservers()
         Task.detached {
-            await service.start()
+            await mgr.start(mode: mode, handler: snapshotHandler, availabilityHandler: availabilityHandler)
         }
         propagateVisibility()
     }
 
     private func stop() {
-        Task.detached { [service] in
-            await service?.stop()
+        let mgr = sourceManager
+        Task.detached {
+            await mgr?.stop()
         }
+        sourceManager = nil
         service = nil
         removeWakeObservers()
     }
@@ -203,7 +221,10 @@ final class ClaudeUsageModel: ObservableObject {
         return true
     }
 
-    // Hard-probe entry: run a one-off /usage probe and return diagnostics
+    // MARK: - Hard probe (tmux path, for diagnostics)
+
+    // Hard-probe entry: run a one-off /usage probe and return diagnostics.
+    // Bypasses the source manager to always use the tmux path for direct diagnostics.
     func hardProbeNowDiagnostics(completion: @escaping (ClaudeProbeDiagnostics) -> Void) {
         guard isEnabled else {
             let diag = ClaudeProbeDiagnostics(
@@ -224,28 +245,15 @@ final class ClaudeUsageModel: ObservableObject {
         isUpdating = true
         Task { [weak self] in
             guard let self else { return }
-            if let svc = self.service {
-                let diag = await svc.forceProbeNow()
-                await MainActor.run {
-                    if diag.success {
-                        self.lastSuccessAt = Date()
-                        setFreshUntil(for: .claude, until: Date().addingTimeInterval(60 * 60))
-                    }
-                    self.isUpdating = false
-                    completion(diag)
-                }
-                return
-            }
+            // Create a short-lived service for the forced probe
             let handler: @Sendable (ClaudeUsageSnapshot) -> Void = { snapshot in
                 Task { @MainActor in
-                    // Avoid publishing changes during SwiftUI view updates.
                     await Task.yield()
                     self.apply(snapshot)
                 }
             }
             let availability: @Sendable (ClaudeServiceAvailability) -> Void = { availability in
                 Task { @MainActor in
-                    // Avoid publishing changes during SwiftUI view updates.
                     await Task.yield()
                     self.cliUnavailable = availability.cliUnavailable
                     self.tmuxUnavailable = availability.tmuxUnavailable
@@ -267,6 +275,36 @@ final class ClaudeUsageModel: ObservableObject {
         }
     }
 
+    // MARK: - Snapshot application
+
+    func fetchRawOAuthPayload() {
+        let mgr = sourceManager
+        Task.detached { [weak self] in
+            let payload = await mgr?.lastRawOAuthPayload
+            await MainActor.run { self?.lastRawOAuthPayload = payload }
+        }
+    }
+
+    /// Apply a normalized ClaudeLimitSnapshot from the source manager.
+    private func applyLimitSnapshot(_ s: ClaudeLimitSnapshot) {
+        sessionRemainingPercent = clampPercent(s.fiveHourRemainingPercent)
+        weekAllModelsRemainingPercent = clampPercent(s.weeklyRemainingPercent)
+        weekOpusRemainingPercent = s.weekOpusRemainingPercent.map(clampPercent)
+
+        // Reset texts: store raw string so UsageResetText can parse at display time
+        sessionResetText = s.fiveHourResetText
+        weekAllModelsResetText = s.weeklyResetText
+        weekOpusResetText = s.weekOpusResetText
+
+        lastUpdate = Date()
+        currentSourceLabel = s.source.description
+        currentHealthLabel = s.health.description
+        dataIsStale = (s.health == .stale || s.health == .degraded)
+        if isUpdating { isUpdating = false }
+        if s.source == .oauthEndpoint { fetchRawOAuthPayload() }
+    }
+
+    /// Apply a ClaudeUsageSnapshot from the legacy tmux path (used for hard-probe results).
     private func apply(_ s: ClaudeUsageSnapshot) {
         sessionRemainingPercent = clampPercent(s.sessionRemainingPercent)
         weekAllModelsRemainingPercent = clampPercent(s.weekAllModelsRemainingPercent)

@@ -1345,8 +1345,8 @@ actor CodexStatusService {
             if !Self.onACPower() {
                 return 10 * 60 * 1_000_000_000
             }
-            // Clamp to at least 5 minutes to avoid high-frequency wakeups when hidden.
-            return max(UInt64(300), userInterval) * 1_000_000_000
+            // Clamp to at least 60s on AC power; JSONL parse is mtime-guarded so fast ticks are cheap.
+            return max(UInt64(60), userInterval) * 1_000_000_000
         }
 
         // Policy when visible or urgent:

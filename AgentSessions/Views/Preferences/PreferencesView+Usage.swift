@@ -41,6 +41,20 @@ extension PreferencesView {
                         .disabled(!claudeUsageEnabled || !claudeAgentEnabled)
                 }
                 .disabled(!claudeAgentEnabled)
+                labeledRow("Data source") {
+                    Picker("", selection: Binding(
+                        get: { ClaudeUsageMode(rawValue: UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? "auto") ?? .auto },
+                        set: { UserDefaults.standard.set($0.rawValue, forKey: PreferencesKey.claudeUsageMode) }
+                    )) {
+                        ForEach(ClaudeUsageMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 520)
+                    .help("Auto: uses the OAuth endpoint (60s), falls back to tmux /usage on failure. tmux only: legacy behavior.")
+                }
+                .disabled(!claudeAgentEnabled || !claudeUsageEnabled)
                 labeledRow("Refresh every") {
                     Picker("", selection: $claudePollingInterval) {
                         Text("3 minutes").tag(180)
@@ -49,9 +63,9 @@ extension PreferencesView {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 520)
-                    .help("How often to refresh Claude usage")
+                    .help("How often to refresh Claude usage (applies to tmux path; OAuth always refreshes every 60s)")
                 }
-                .disabled(!claudeAgentEnabled)
+                .disabled(!claudeAgentEnabled || !claudeUsageEnabled)
             }
 
             // Strip options (shared)
