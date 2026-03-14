@@ -326,7 +326,13 @@ struct UnifiedSessionsView: View {
             .opencode: .init(
                 transcriptCache: opencodeIndexer.searchTranscriptCache,
                 update: { opencodeIndexer.updateSession($0) },
-                parseFull: { url, _ in OpenCodeSessionParser.parseFileFull(at: url) }
+                parseFull: { [opencodeIndexer] url, forcedID in
+                    if url.lastPathComponent == "opencode.db", !forcedID.isEmpty {
+                        let customRoot = opencodeIndexer.sessionsRootOverride.isEmpty ? nil : opencodeIndexer.sessionsRootOverride
+                        return OpenCodeSqliteReader.loadFullSession(customRoot: customRoot, sessionID: forcedID)
+                    }
+                    return OpenCodeSessionParser.parseFileFull(at: url)
+                }
             ),
             .copilot: .init(
                 transcriptCache: copilotIndexer.searchTranscriptCache,
