@@ -1999,7 +1999,7 @@ struct UnifiedSessionsView: View {
     static func buildFallbackPresenceMap(sessions: [Session],
                                          presences: [CodexActivePresence],
                                          hasDirectJoin: (Session) -> Bool) -> [String: CodexActivePresence] {
-        let supportedSources: Set<SessionSource> = [.claude]
+        let supportedSources: Set<SessionSource> = [.claude, .opencode]
         var fallbackBySessionKey: [String: CodexActivePresence] = [:]
         var fallbackEligibleBySource: [SessionSource: [Session]] = [:]
         var fallbackEligibleByWorkspace: [String: [Session]] = [:]
