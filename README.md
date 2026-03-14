@@ -53,6 +53,28 @@ Agent Cockpit is the 3.2 live command center for active iTerm2 Codex CLI, Claude
   <img src="docs/assets/screenshot-cockpit-light.png" alt="Agent Cockpit in light mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>
 </div>
 
+## Agent Cockpit Setup
+
+### Prerequisites
+
+- Agent Sessions with Live Sessions enabled
+- iTerm2
+- Agents running in iTerm2
+
+### Ideal Setup
+
+- Set the iTerm window title to the repo name
+- Run that repo's agents in that window
+- Give each tab/session its own clear name
+- Use the same name for the tab, session, and badge
+
+### Layout
+
+- One repo per desktop/Space if possible
+- Or keep several on one desktop if you prefer
+- Keep Agent Cockpit pinned in a corner so you can always see activity
+- Click from the cockpit to jump straight to a session
+
 ## Core Features
 
 - Agent Cockpit live HUD for active Codex CLI, Claude Code, and OpenCode iTerm2 sessions.
