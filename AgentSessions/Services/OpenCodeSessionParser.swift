@@ -331,10 +331,12 @@ final class OpenCodeSessionParser {
             let hasTextParts = !partEvents.text.isEmpty
 
             let rawJSON: String = {
-                if let str = String(data: data, encoding: .utf8) {
-                    return str
+                // Re-serialize via JSONSerialization to guarantee valid JSON, then cap at 8 KB.
+                if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    return cappedPartJSON(obj: obj, source: data)
                 }
-                return ""
+                guard let str = String(data: data, encoding: .utf8) else { return "" }
+                return str.count > 8192 ? String(str.prefix(8192)) : str
             }()
 
             // Treat messages with tools flags as command/tool-call events for terminal view + filters
@@ -456,7 +458,7 @@ final class OpenCodeSessionParser {
                   let typeAny = obj["type"] as? String else {
                 continue
             }
-            let rawJSON = String(data: data, encoding: .utf8) ?? ""
+            let rawJSON = cappedPartJSON(obj: obj, source: data)
             let type = typeAny.lowercased()
             let start = dateFromMillis((obj["time"] as? [String: Any])?["start"])
                 ?? dateFromMillis(((obj["state"] as? [String: Any])?["time"] as? [String: Any])?["start"])
@@ -802,6 +804,20 @@ final class OpenCodeSessionParser {
         }
 
         return result
+    }
+
+    /// Returns a rawJSON string for a parsed part object, capped at 8 KB.
+    /// Re-serializes from the already-parsed `obj` to guarantee valid JSON.
+    /// Falls back to the original `source` data (hard-truncated) only if re-serialization fails.
+    static func cappedPartJSON(obj: [String: Any], source: Data?, limit: Int = 8192) -> String {
+        if JSONSerialization.isValidJSONObject(obj),
+           let reencoded = try? JSONSerialization.data(withJSONObject: obj),
+           let str = String(data: reencoded, encoding: .utf8) {
+            return str.count > limit ? String(str.prefix(limit)) : str
+        }
+        // Fallback: use source bytes; hard truncation may yield invalid JSON but is safe.
+        guard let source, let str = String(data: source, encoding: .utf8) else { return "" }
+        return str.count > limit ? String(str.prefix(limit)) : str
     }
 
     static func stringifyJSON(_ any: Any?) -> String? {
