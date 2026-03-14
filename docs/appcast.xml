@@ -7,27 +7,19 @@
             <pubDate>Fri, 13 Mar 2026 18:12:42 -0700</pubDate>
             <description><![CDATA[
 <h2>What&#x27;s New in 3.2</h2>
-<h3>Features</h3>
 <ul>
-<li>OpenCode: Added read-only SQLite backend support for OpenCode v1.2+, including automatic detection between `~/.local/share/opencode/opencode.db` and legacy per-file JSON session storage. Preferences → OpenCode now shows the detected backend.</li>
+<li><strong>Added:</strong> OpenCode support in Agent Cockpit for live iTerm2 sessions.</li>
+<li><strong>Added:</strong> OpenCode support for newer SQLite-backed session storage.</li>
+<li><strong>Added:</strong> OpenCode live dots, busy-state detection, and search hydration for active sessions.</li>
+<li><strong>Fixed:</strong> Oversized OpenCode raw JSON previews causing noisy rendering.</li>
 </ul>
-<h3>Improvements</h3>
+<h2>What&#x27;s New in 3.1</h2>
 <ul>
-<li>Agent Cockpit / Menu Bar: OpenCode live sessions now participate in shared active/waiting summaries, background session lookup, and iTerm-based presence detection alongside Codex and Claude.</li>
-</ul>
-<h3>Bug Fixes</h3>
-<ul>
-<li>OpenCode: Main-window session rows now show live-state dots for active and waiting OpenCode sessions.</li>
-<li>OpenCode: iTerm busy-state detection is more reliable, reducing false idle/open classification while a session is still working.</li>
-<li>OpenCode: Search hydration and direct session-directory overrides now work correctly for SQLite-backed storage.</li>
-<li>OpenCode: Raw JSON previews are capped at `8 KB` with valid-JSON truncation to avoid oversized payload rendering.</li>
-</ul>
-<h3>Reminder: What You Got in 3.1</h3>
-<ul>
-<li>Onboarding: Session visible/hidden counts now refresh on any live session-data update (not just total-count deltas), and DB snapshot fallback now evaluates session visibility with the same active filter logic used by onboarding counts.</li>
-<li>Window restoration: Relaunch now restores the primary `Agent Sessions` window reliably even when its autosave name was already set, and auto-reopens `Agent Cockpit` when it was pinned.</li>
-<li>Agent Cockpit: Major stability update. Fixed the Cockpit CPU/energy leak, eliminating long-run resource creep while pinned or backgrounded, while also reducing full-list/partial-row flicker and improving handling for disappearing probe rows.</li>
-<li>Agent Cockpit: Follow-up CPU stabilization now suppresses redundant HUD snapshot invalidations, pauses idle-dot pulse animation while the app is inactive, and applies stable-cycle pinned-background cadence backoff up to `5s` to reduce long-run CPU accumulation without changing foreground responsiveness.</li>
+<li><strong>Added:</strong> Menu bar toggles for active and waiting session icons.</li>
+<li><strong>Added:</strong> An advanced option to hide the Dock icon while keeping a reopen path.</li>
+<li><strong>Fixed:</strong> Agent Cockpit CPU and energy usage while pinned or backgrounded.</li>
+<li><strong>Fixed:</strong> Agent Cockpit flicker, missing rows, and pinned-window refresh stability.</li>
+<li><strong>Fixed:</strong> Relaunch behavior for the main Agent Sessions window and pinned Agent Cockpit.</li>
 </ul>
 <p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.2</a></p>
             ]]></description>
