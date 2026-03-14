@@ -21,7 +21,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.1/AgentSessions-3.1.dmg"><b>Download Agent Sessions 3.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.2/AgentSessions-3.2.dmg"><b>Download Agent Sessions 3.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -46,7 +46,7 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 ## Agent Cockpit (Beta)
 
-Agent Cockpit is the 3.1 live command center for active iTerm2 Codex CLI and Claude Code sessions, with steadier long-running behavior and clearer menu bar controls.
+Agent Cockpit is the 3.2 live command center for active iTerm2 Codex CLI, Claude Code, and OpenCode sessions, with shared active/waiting summaries and steadier OpenCode live-state detection.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
@@ -55,7 +55,7 @@ Agent Cockpit is the 3.1 live command center for active iTerm2 Codex CLI and Cla
 
 ## Core Features
 
-- Agent Cockpit live HUD for active Codex CLI and Claude Code iTerm2 sessions.
+- Agent Cockpit live HUD for active Codex CLI, Claude Code, and OpenCode iTerm2 sessions.
 - Unified browsing across supported agents, with strict filtering and a single session list.
 - Unified Search across all sessions plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
@@ -72,7 +72,7 @@ Agent Cockpit is the 3.1 live command center for active iTerm2 Codex CLI and Cla
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.1/AgentSessions-3.1.dmg)
+1. [Download AgentSessions-3.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.2/AgentSessions-3.2.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
@@ -106,23 +106,23 @@ open "/Applications/Agent Sessions.app"
   - `~/.gemini/tmp`
   - `~/.copilot/session-state`
   - `~/.factory/sessions` and `~/.factory/projects`
-  - `~/.local/share/opencode/storage/session`
+  - `~/.local/share/opencode/opencode.db` and `~/.local/share/opencode/storage/session`
 - Details: `docs/PRIVACY.md` and `docs/security.md`
 
 ---
 
-## What's New in 3.1
+## What's New in 3.2
 
 TL;DR:
-- Agent Cockpit is more stable during long pinned and backgrounded runs, with lower CPU drift and less flicker.
-- Live status controls are clearer, with independent menu bar toggles for session icons and better active vs waiting language.
-- Relaunch and reopen flows are more reliable, including main-window restoration, pinned cockpit recovery, and safer Dock-icon hiding.
+- Agent Cockpit now includes OpenCode in the same live active/waiting HUD and menu bar summaries used for Codex and Claude.
+- OpenCode v1.2+ sessions now load from the new SQLite backend automatically, while legacy JSON storage remains supported.
+- OpenCode live dots, busy-state detection, and SQLite-backed search hydration were tightened for a cleaner `3.2` release.
 
 Highlights:
-- Agent Cockpit now suppresses redundant refresh churn, pauses idle animations while inactive, and backs off background polling after stable cycles.
-- Menu bar settings now let you show active/waiting session icons separately from usage meters.
-- Preferences now include a safer `Hide Dock icon` flow that preserves a reopen path through the menu bar.
-- Onboarding session counts now stay in sync with live session visibility changes instead of updating only when total counts move.
+- Agent Cockpit and the menu bar now surface OpenCode sessions in shared active/waiting counts and quick live-session summaries.
+- OpenCode storage detection now auto-selects SQLite when `~/.local/share/opencode/opencode.db` is present and falls back to legacy per-session JSON files otherwise.
+- Main-window OpenCode live dots now stay visible more reliably, and iTerm busy-state heuristics are less likely to show active sessions as idle.
+- SQLite-backed OpenCode sessions now hydrate correctly in search, direct session-directory overrides work again, and large raw JSON previews are safely truncated.
 
 Details: `docs/CHANGELOG.md` and `docs/summaries/`.
 

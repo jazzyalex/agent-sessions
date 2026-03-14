@@ -343,7 +343,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertNotNil(map[fallbackKey])
     }
 
-    func testBuildFallbackPresenceMap_ignoresUnsupportedSources() {
+    func testBuildFallbackPresenceMap_supportsClaudeAndOpenCodeSources() {
         let now = Date()
         let sharedID = "shared-session-id"
         let sessions = [
@@ -374,7 +374,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let claudeKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: sharedID)
         let openCodeKey = UnifiedSessionsView.fallbackPresenceKey(source: .opencode, sessionID: sharedID)
         XCTAssertEqual(map[claudeKey]?.source, .claude)
-        XCTAssertNil(map[openCodeKey])
+        XCTAssertEqual(map[openCodeKey]?.source, .opencode)
     }
 
     func testParseLsofMachineOutput_matchesClaudeSessionFilesAndSkipsHistory() {
