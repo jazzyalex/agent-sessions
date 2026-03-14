@@ -51,6 +51,17 @@ final class OpenCodeSessionDiscovery: SessionDiscovery {
             .appendingPathComponent("session", isDirectory: true)
     }
 
+    /// The top-level OpenCode data directory (~/.local/share/opencode or custom).
+    func openCodeRoot() -> URL {
+        OpenCodeBackendDetector.openCodeRoot(customRoot: customRoot)
+    }
+
+    /// Returns the opencode.db URL if the file exists on disk.
+    func databaseURL() -> URL? {
+        let url = OpenCodeBackendDetector.dbURL(customRoot: customRoot)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     func discoverSessionFiles() -> [URL] {
         let root = sessionsRoot()
         let fm = FileManager.default

@@ -111,6 +111,10 @@ extension PreferencesView {
                 }
             }
 
+            // Storage backend indicator
+            sectionHeader("Session Storage")
+            openCodeStorageBackendRow
+
             // Sessions Directory (OpenCode)
             sectionHeader("Sessions Directory")
             VStack(alignment: .leading, spacing: 12) {
@@ -156,6 +160,53 @@ extension PreferencesView {
         }
         .onAppear {
             scheduleOpenCodeProbe()
+        }
+    }
+
+    // MARK: - Storage backend row
+
+    @ViewBuilder
+    var openCodeStorageBackendRow: some View {
+        let customRoot = opencodeSessionsPath.isEmpty ? nil : opencodeSessionsPath
+        let backend = OpenCodeBackendDetector.detect(customRoot: customRoot)
+        VStack(alignment: .leading, spacing: 4) {
+            switch backend {
+            case .sqlite:
+                let dbURL = OpenCodeBackendDetector.dbURL(customRoot: customRoot)
+                let size = (try? FileManager.default.attributesOfItem(atPath: dbURL.path)[.size] as? Int) ?? 0
+                let sizeMB = String(format: "%.1f MB", Double(size) / 1_000_000.0)
+                HStack(spacing: 6) {
+                    Image(systemName: "cylinder.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
+                    Text("SQLite (\(sizeMB))")
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                }
+                Text(dbURL.path)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            case .json:
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.text.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                    Text("JSON (legacy)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            case .none:
+                HStack(spacing: 6) {
+                    Image(systemName: "questionmark.circle")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                    Text("Not found")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 

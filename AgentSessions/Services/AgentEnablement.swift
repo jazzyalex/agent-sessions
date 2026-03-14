@@ -139,6 +139,8 @@ enum AgentEnablement {
             root = GeminiSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         case .opencode:
             let custom = defaults.string(forKey: "OpenCodeSessionsRootOverride") ?? ""
+            // Check opencode.db first (v1.2+ SQLite backend)
+            if OpenCodeBackendDetector.isSQLiteAvailable(customRoot: custom.isEmpty ? nil : custom) { return true }
             root = OpenCodeSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         case .copilot:
             let custom = defaults.string(forKey: PreferencesKey.Paths.copilotSessionsRootOverride) ?? ""

@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- OpenCode: Added read-only SQLite backend for OpenCode v1.2+ which stores sessions in `~/.local/share/opencode/opencode.db`. The app now auto-detects and reads sessions from either the new SQLite database or the legacy per-file JSON storage, with SQLite taking priority when present. The Preferences → OpenCode tab now shows the detected storage backend.
+
 ### Changed
 - OpenCode live sessions now participate in Agent Cockpit and menu bar active/waiting summaries, including background session lookup and iTerm-based presence detection alongside Codex and Claude.
 

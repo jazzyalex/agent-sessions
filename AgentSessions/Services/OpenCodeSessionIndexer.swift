@@ -48,6 +48,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
+    private var detectedBackend: OpenCodeStorageBackend = .none
 
     init() {
         let initialOverride = UserDefaults.standard.string(forKey: "OpenCodeSessionsRootOverride") ?? ""
@@ -91,22 +92,28 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
 
     func refresh() {
         if !AgentEnablement.isEnabled(.opencode) { return }
-        let root = discovery.sessionsRoot()
-        let storageRoot = (root.lastPathComponent == "session") ? root.deletingLastPathComponent() : root
-        let migrationURL = storageRoot.appendingPathComponent("migration", isDirectory: false)
-        #if DEBUG
-        if let data = try? Data(contentsOf: migrationURL),
-           let str = String(data: data, encoding: .utf8) {
-            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-            let version = trimmed.isEmpty ? "(empty)" : trimmed
-            print("OpenCode storage schema: migration=\(version)")
-        } else {
-            print("OpenCode storage schema: migration=(missing)")
-        }
 
-        print("\n🟣 OPENCode INDEXING START: root=\(root.path)")
+        let customRoot = sessionsRootOverride.isEmpty ? nil : sessionsRootOverride
+        let backend = OpenCodeBackendDetector.detect(customRoot: customRoot)
+        detectedBackend = backend
+
+        #if DEBUG
+        if backend == .json {
+            let root = discovery.sessionsRoot()
+            let storageRoot = (root.lastPathComponent == "session") ? root.deletingLastPathComponent() : root
+            let migrationURL = storageRoot.appendingPathComponent("migration", isDirectory: false)
+            if let data = try? Data(contentsOf: migrationURL),
+               let str = String(data: data, encoding: .utf8) {
+                let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                let version = trimmed.isEmpty ? "(empty)" : trimmed
+                print("OpenCode storage schema: migration=\(version)")
+            } else {
+                print("OpenCode storage schema: migration=(missing)")
+            }
+        }
+        print("\n🟣 OPENCode INDEXING START: backend=\(backend.rawValue)")
         #endif
-        LaunchProfiler.log("OpenCode.refresh: start")
+        LaunchProfiler.log("OpenCode.refresh: start (backend=\(backend.rawValue))")
 
         let token = UUID()
         refreshToken = token
@@ -120,41 +127,74 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
         hasEmptyDirectory = false
 
         let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
-	        Task.detached(priority: prio) { [weak self, token] in
-	            guard let self else { return }
 
-		            let config = SessionIndexingEngine.ScanConfig(
-		                source: .opencode,
-		                discoverFiles: { self.discovery.discoverSessionFiles() },
-		                parseLightweight: { OpenCodeSessionParser.parseFile(at: $0) },
-		                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
-		                throttler: self.progressThrottler,
-		                onProgress: { processed, total in
-		                    guard self.refreshToken == token else { return }
-		                    self.totalFiles = total
-		                    self.filesProcessed = processed
-		                    self.hasEmptyDirectory = (total == 0)
-		                    if total > 0 {
-		                        self.progressText = "Indexed \(processed)/\(total)"
-		                    }
-		                    if self.launchPhase == .hydrating {
-		                        self.launchPhase = .scanning
-		                    }
-		                }
-		            )
-
-            let result = await SessionIndexingEngine.hydrateOrScan(config: config)
-            await MainActor.run {
-                guard self.refreshToken == token else { return }
-                LaunchProfiler.log("OpenCode.refresh: sessions merged (total=\(result.sessions.count))")
-                self.allSessions = result.sessions
-                self.isIndexing = false
-                if FeatureFlags.throttleIndexingUIUpdates {
-                    self.filesProcessed = self.totalFiles
-                    if self.totalFiles > 0 {
-                        self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"
-                    }
+        switch backend {
+        case .sqlite:
+            let capturedCustomRoot = customRoot
+            Task.detached(priority: prio) { [weak self, token] in
+                guard let self else { return }
+                LaunchProfiler.log("OpenCode.refresh: reading SQLite sessions")
+                let sessions = OpenCodeSqliteReader.listSessions(customRoot: capturedCustomRoot)
+                let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
+                let merged = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sorted, source: .opencode)
+                await MainActor.run {
+                    guard self.refreshToken == token else { return }
+                    LaunchProfiler.log("OpenCode.refresh: SQLite sessions loaded (total=\(merged.count))")
+                    self.allSessions = merged
+                    self.isIndexing = false
+                    self.hasEmptyDirectory = merged.isEmpty
+                    self.progressText = "Ready"
+                    self.launchPhase = .ready
                 }
+            }
+
+        case .json:
+            Task.detached(priority: prio) { [weak self, token] in
+                guard let self else { return }
+
+                let config = SessionIndexingEngine.ScanConfig(
+                    source: .opencode,
+                    discoverFiles: { self.discovery.discoverSessionFiles() },
+                    parseLightweight: { OpenCodeSessionParser.parseFile(at: $0) },
+                    shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+                    throttler: self.progressThrottler,
+                    onProgress: { processed, total in
+                        guard self.refreshToken == token else { return }
+                        self.totalFiles = total
+                        self.filesProcessed = processed
+                        self.hasEmptyDirectory = (total == 0)
+                        if total > 0 {
+                            self.progressText = "Indexed \(processed)/\(total)"
+                        }
+                        if self.launchPhase == .hydrating {
+                            self.launchPhase = .scanning
+                        }
+                    }
+                )
+
+                let result = await SessionIndexingEngine.hydrateOrScan(config: config)
+                await MainActor.run {
+                    guard self.refreshToken == token else { return }
+                    LaunchProfiler.log("OpenCode.refresh: JSON sessions merged (total=\(result.sessions.count))")
+                    self.allSessions = result.sessions
+                    self.isIndexing = false
+                    if FeatureFlags.throttleIndexingUIUpdates {
+                        self.filesProcessed = self.totalFiles
+                        if self.totalFiles > 0 {
+                            self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"
+                        }
+                    }
+                    self.progressText = "Ready"
+                    self.launchPhase = .ready
+                }
+            }
+
+        case .none:
+            Task { @MainActor [weak self, token] in
+                guard let self, self.refreshToken == token else { return }
+                self.allSessions = []
+                self.isIndexing = false
+                self.hasEmptyDirectory = true
                 self.progressText = "Ready"
                 self.launchPhase = .ready
             }
@@ -218,6 +258,8 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
         }()
 
         let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        let capturedBackend = detectedBackend
+        let capturedCustomRoot = sessionsRootOverride.isEmpty ? nil : sessionsRootOverride
         ioQueue.async {
             defer {
                 self.reloadLock.lock()
@@ -225,13 +267,55 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                 self.reloadLock.unlock()
             }
 
-            guard let existing = existingSnapshot,
-                  FileManager.default.fileExists(atPath: existing.filePath) else {
+            guard let existing = existingSnapshot else { return }
+            let hasLoadedEvents = !existing.events.isEmpty
+            if hasLoadedEvents && !force { return }
+
+            if capturedBackend == .sqlite {
+                // SQLite path: no file on disk, load from DB directly
+                let shouldSurfaceLoadingState = reason == .manualRefresh || !hasLoadedEvents
+                if shouldSurfaceLoadingState {
+                    Task { @MainActor [weak self] in
+                        self?.isLoadingSession = true
+                        self?.loadingSessionID = id
+                    }
+                }
+
+                let parsed = OpenCodeSqliteReader.loadFullSession(customRoot: capturedCustomRoot, sessionID: id) ?? existing
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    defer {
+                        if shouldSurfaceLoadingState, self.loadingSessionID == id {
+                            self.isLoadingSession = false
+                            self.loadingSessionID = nil
+                        }
+                    }
+                    if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
+                        let current = self.allSessions[idx]
+                        let merged = Session(
+                            id: parsed.id,
+                            source: parsed.source,
+                            startTime: parsed.startTime ?? current.startTime,
+                            endTime: parsed.endTime ?? current.endTime,
+                            model: parsed.model ?? current.model,
+                            filePath: parsed.filePath,
+                            fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
+                            eventCount: max(current.eventCount, parsed.nonMetaCount),
+                            events: parsed.events,
+                            cwd: current.lightweightCwd ?? parsed.cwd,
+                            repoName: current.repoName,
+                            lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
+                            lightweightCommands: current.lightweightCommands
+                        )
+                        self.allSessions[idx] = merged
+                    }
+                    self.recomputeNow()
+                }
                 return
             }
 
-            let hasLoadedEvents = !existing.events.isEmpty
-            if hasLoadedEvents && !force { return }
+            // JSON path
+            guard FileManager.default.fileExists(atPath: existing.filePath) else { return }
 
             let url = URL(fileURLWithPath: existing.filePath)
             let preParseStat = Self.fileStat(for: url)
