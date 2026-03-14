@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.3] - 2026-03-13
+
+## [3.2] - 2026-03-13
+
 ### Added
 - OpenCode: Added read-only SQLite backend support for OpenCode v1.2+, including automatic detection between `~/.local/share/opencode/opencode.db` and legacy per-file JSON session storage. Preferences → OpenCode now shows the detected backend.
 
