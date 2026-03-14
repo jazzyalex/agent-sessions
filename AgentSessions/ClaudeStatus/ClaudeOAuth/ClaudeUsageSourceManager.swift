@@ -34,8 +34,12 @@ actor ClaudeUsageSourceManager {
 
     private let tokenResolver = ClaudeOAuthTokenResolver()
     private let usageClient = ClaudeOAuthUsageClient()
-    private let store = ClaudeUsageSnapshotStore()
+    private let store: ClaudeUsageSnapshotStore
     private var tmuxAdapter: ClaudeTmuxUsageFallbackAdapter?
+
+    init(store: ClaudeUsageSnapshotStore = ClaudeUsageSnapshotStore()) {
+        self.store = store
+    }
 
     private struct OAuthVisibilityContext {
         var menuVisible: Bool = false
