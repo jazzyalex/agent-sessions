@@ -34,7 +34,6 @@ struct ClaudeOAuthRawUsageResponse: Decodable {
 // MARK: - OAuth Usage Client
 
 enum ClaudeOAuthUsageClientError: Error {
-    case noToken
     case networkError(Error)
     case httpError(Int)
     case decodingError(Error)

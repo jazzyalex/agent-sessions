@@ -313,6 +313,7 @@ final class ClaudeUsageModel: ObservableObject {
         weekAllModelsResetText = s.weekAllModelsResetText
         weekOpusResetText = s.weekOpusResetText
         lastUpdate = Date()
+        dataIsStale = false
         if isUpdating { isUpdating = false }
     }
 
