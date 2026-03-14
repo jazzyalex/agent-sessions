@@ -18,6 +18,11 @@ actor ClaudeUsageSnapshotStore {
         self.fileURL = dir.appendingPathComponent("claude_usage_latest.json")
     }
 
+    /// Test-only: use a custom file path to avoid touching real app data.
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
     func save(_ snapshot: ClaudeLimitSnapshot) {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
