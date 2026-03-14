@@ -25,7 +25,6 @@ actor ClaudeUsageSourceManager {
     private static let oauthRefreshInterval: TimeInterval = 60
     private static let cacheStaleThreshold: TimeInterval = 3 * 60   // 3 minutes
     private static let cacheHardExpire: TimeInterval = 10 * 60      // 10 minutes
-    private static let failureThreshold = 3                          // failures before tmux fallback
     private static let backoffSequence: [TimeInterval] = [30, 60, 120]
 
     // MARK: - State

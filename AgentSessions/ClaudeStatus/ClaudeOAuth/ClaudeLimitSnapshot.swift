@@ -43,7 +43,6 @@ enum ClaudeUsageSource: String, Codable, CustomStringConvertible {
     case oauthEndpoint   // Live fetch from api.anthropic.com/api/oauth/usage
     case tmuxUsage       // Active tmux /usage probe
     case cachedOAuth     // Served from disk/memory cache of a prior OAuth fetch
-    case cachedTmux      // Served from memory cache of a prior tmux probe
     case unavailable     // No data source could produce a result
 
     var description: String {
@@ -51,7 +50,6 @@ enum ClaudeUsageSource: String, Codable, CustomStringConvertible {
         case .oauthEndpoint: return "OAuth"
         case .tmuxUsage: return "tmux"
         case .cachedOAuth: return "OAuth (cached)"
-        case .cachedTmux: return "tmux (cached)"
         case .unavailable: return "unavailable"
         }
     }
