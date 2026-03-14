@@ -3,32 +3,38 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.1</title>
-            <pubDate>Thu, 12 Mar 2026 17:57:10 -0700</pubDate>
+            <title>3.2</title>
+            <pubDate>Fri, 13 Mar 2026 18:12:42 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.1</h2>
+<h2>What&#x27;s New in 3.2</h2>
+<h3>Features</h3>
+<ul>
+<li>OpenCode: Added read-only SQLite backend support for OpenCode v1.2+, including automatic detection between `~/.local/share/opencode/opencode.db` and legacy per-file JSON session storage. Preferences → OpenCode now shows the detected backend.</li>
+</ul>
 <h3>Improvements</h3>
+<ul>
+<li>Agent Cockpit / Menu Bar: OpenCode live sessions now participate in shared active/waiting summaries, background session lookup, and iTerm-based presence detection alongside Codex and Claude.</li>
+</ul>
+<h3>Bug Fixes</h3>
+<ul>
+<li>OpenCode: Main-window session rows now show live-state dots for active and waiting OpenCode sessions.</li>
+<li>OpenCode: iTerm busy-state detection is more reliable, reducing false idle/open classification while a session is still working.</li>
+<li>OpenCode: Search hydration and direct session-directory overrides now work correctly for SQLite-backed storage.</li>
+<li>OpenCode: Raw JSON previews are capped at `8 KB` with valid-JSON truncation to avoid oversized payload rendering.</li>
+</ul>
+<h3>Reminder: What You Got in 3.1</h3>
 <ul>
 <li>Onboarding: Session visible/hidden counts now refresh on any live session-data update (not just total-count deltas), and DB snapshot fallback now evaluates session visibility with the same active filter logic used by onboarding counts.</li>
 <li>Window restoration: Relaunch now restores the primary `Agent Sessions` window reliably even when its autosave name was already set, and auto-reopens `Agent Cockpit` when it was pinned.</li>
 <li>Agent Cockpit: Major stability update. Fixed the Cockpit CPU/energy leak, eliminating long-run resource creep while pinned or backgrounded, while also reducing full-list/partial-row flicker and improving handling for disappearing probe rows.</li>
 <li>Agent Cockpit: Follow-up CPU stabilization now suppresses redundant HUD snapshot invalidations, pauses idle-dot pulse animation while the app is inactive, and applies stable-cycle pinned-background cadence backoff up to `5s` to reduce long-run CPU accumulation without changing foreground responsiveness.</li>
-<li>Agent Cockpit: Navigation and pinned-window behavior are more reliable after relaunch and while backgrounded, including correct `Open Agent Sessions` routing and tooltip layering above the HUD.</li>
-<li>Menu Bar: Added a dedicated `Show Active/Waiting sessions` toggle plus a `Show menu bar icons` setting so live session dots can be shown independently from usage meters.</li>
 </ul>
-<h3>Reminder: What You Got in 3.0</h3>
-<ul>
-<li>Agent Cockpit (Beta) is now the primary live command center for active iTerm2 Codex CLI and Claude Code sessions.</li>
-<li>Onboarding was redesigned around cockpit-first workflows so new and upgrading users reach live session controls faster.</li>
-<li>Cockpit gained direct row actions (`Go to Session`, terminal focus, log/workdir reveal, and copy helpers) for quick workflow handoffs.</li>
-<li>Live session tracking now better reflects real activity with clearer active vs idle states and steadier HUD indicators.</li>
-</ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.1</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.2</a></p>
             ]]></description>
-            <sparkle:version>25</sparkle:version>
-            <sparkle:shortVersionString>3.1</sparkle:shortVersionString>
+            <sparkle:version>26</sparkle:version>
+            <sparkle:shortVersionString>3.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.1/AgentSessions-3.1.dmg" length="14176902" type="application/octet-stream" sparkle:edSignature="crxicrgN66IjjXEt1MZnI+k5mxTXn0LpUV1GbIO3Sx9buZgQ4hELqLcREQ6chVB7Q/mFa+M24fN+LVsET2Z2Aw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.2/AgentSessions-3.2.dmg" length="14278965" type="application/octet-stream" sparkle:edSignature="/omH2vIuzHDCIg9meDniCloIddRvVfaq56e5yDyvZ2E+35pY0kaUc4xJhJwQRrT1m8WPeJRR3WJ4rDI+AyW+CQ=="/>
         </item>
     </channel>
 </rss>
