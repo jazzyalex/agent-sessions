@@ -74,9 +74,12 @@ actor ClaudeOAuthUsageClient {
                 throw ClaudeOAuthUsageClientError.unauthorized
             }
             if http.statusCode == 429 {
-                let retryAfter = (http.value(forHTTPHeaderField: "Retry-After"))
-                    .flatMap(TimeInterval.init) ?? 300
-                os_log("ClaudeOAuth: 429 rate limited, retry-after=%.0fs", log: log, type: .info, retryAfter)
+                // Clamp to minimum 5 minutes — server sometimes returns 0 which
+                // is not actionable and causes rapid retry loops that extend the window.
+                let raw = (http.value(forHTTPHeaderField: "Retry-After"))
+                    .flatMap(TimeInterval.init) ?? 0
+                let retryAfter = max(raw, 300)
+                os_log("ClaudeOAuth: 429 rate limited, retry-after=%.0fs (raw=%.0f)", log: log, type: .info, retryAfter, raw)
                 throw ClaudeOAuthUsageClientError.rateLimited(retryAfter: retryAfter)
             }
             guard (200..<300).contains(http.statusCode) else {
