@@ -79,7 +79,7 @@ Agent Cockpit is the 3.2 live command center for active iTerm2 Codex CLI, Claude
 
 - Agent Cockpit live HUD for active Codex CLI, Claude Code, and OpenCode iTerm2 sessions.
 - Unified browsing across supported agents, with strict filtering and a single session list.
-- Unified Search across all sessions plus in-session Find for fast transcript navigation.
+- Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
 - Local-only indexing designed for large histories.
 
