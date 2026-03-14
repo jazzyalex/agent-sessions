@@ -5,10 +5,16 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- OpenCode: Added read-only SQLite backend for OpenCode v1.2+ which stores sessions in `~/.local/share/opencode/opencode.db`. The app now auto-detects and reads sessions from either the new SQLite database or the legacy per-file JSON storage, with SQLite taking priority when present. The Preferences → OpenCode tab now shows the detected storage backend.
+- OpenCode: Added read-only SQLite backend support for OpenCode v1.2+, including automatic detection between `~/.local/share/opencode/opencode.db` and legacy per-file JSON session storage. Preferences → OpenCode now shows the detected backend.
 
 ### Changed
-- OpenCode live sessions now participate in Agent Cockpit and menu bar active/waiting summaries, including background session lookup and iTerm-based presence detection alongside Codex and Claude.
+- Agent Cockpit / Menu Bar: OpenCode live sessions now participate in shared active/waiting summaries, background session lookup, and iTerm-based presence detection alongside Codex and Claude.
+
+### Fixed
+- OpenCode: Main-window session rows now show live-state dots for active and waiting OpenCode sessions.
+- OpenCode: iTerm busy-state detection is more reliable, reducing false idle/open classification while a session is still working.
+- OpenCode: Search hydration and direct session-directory overrides now work correctly for SQLite-backed storage.
+- OpenCode: Raw JSON previews are capped at `8 KB` with valid-JSON truncation to avoid oversized payload rendering.
 
 ## [3.1] - 2026-03-12
 
