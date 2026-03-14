@@ -70,6 +70,7 @@
 		5041C1BFD54BD7738DB1B116 /* ClaudeProbeProjectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCAF2FBE83AB906E7AE27B14 /* ClaudeProbeProjectTests.swift */; };
 		53736755F3AD431D8FD488AF /* UpdaterController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF31F563529F4552B7B205FD /* UpdaterController.swift */; };
 		55BA818013EFF41E692C7AE8 /* PreferencesView+About.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E0F0666E60EE2819FD7BF5B /* PreferencesView+About.swift */; };
+		55CE4EFF834602231E7283EE /* OpenCodeSqliteReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31E40F1B3349DE1F939CFCF0 /* OpenCodeSqliteReader.swift */; };
 		5648330A0957544AC6A3C299 /* DroidTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADAFE9DA5E86250005634F7A /* DroidTranscriptView.swift */; };
 		5731AD7A25CF4B4DAA9BDF27 /* UpdateDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = B903187D9D8D4EDF9FAB0BBA /* UpdateDefaults.swift */; };
 		580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */; };
@@ -135,6 +136,7 @@
 		A8891085C7123E3360E6513C /* OpenClawBase64ImageScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6505213F3D72B128BB972BA3 /* OpenClawBase64ImageScanner.swift */; };
 		A8B49E614242407C854A3463 /* CodexResumeLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD535A048F4C41ECA4435F9A /* CodexResumeLauncher.swift */; };
 		A9BAC4A46E953DF0B8B146C3 /* SessionIndexingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 654BD9FEF4DBAEA20EBC1254 /* SessionIndexingEngine.swift */; };
+		A9D49F2A967D8DD12C2FD3FE /* OpenCodeBackendDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFE880E8C4F8CEFBE7FD3B6 /* OpenCodeBackendDetector.swift */; };
 		AAD67C266F144F9C0EEC24CB /* TranscriptColorSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F13DE3D3808C990779216E4 /* TranscriptColorSystem.swift */; };
 		ABE8604AC7ECD25304634C7C /* CrashReportingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2171D0501F372B5E76925ADA /* CrashReportingServiceTests.swift */; };
 		AF0E81FF8E234498C1F05F56 /* ClaudeProbeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD66FC176CB54B298244DDB /* ClaudeProbeConfig.swift */; };
@@ -341,6 +343,7 @@
 		2F6805E3FC0FA8057A9B7BB0 /* OpenClawSessionParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/OpenClawSessionParser.swift; sourceTree = SOURCE_ROOT; };
 		2FA042F1425EBB612ADCEA08 /* AgentSessionsLogicTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgentSessionsLogicTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3100554C4A8E408F8E20AE34 /* GeminiCLISettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GeminiCLISettings.swift; path = AgentSessions/Services/GeminiCLISettings.swift; sourceTree = SOURCE_ROOT; };
+		31E40F1B3349DE1F939CFCF0 /* OpenCodeSqliteReader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/OpenCode/OpenCodeSqliteReader.swift; sourceTree = SOURCE_ROOT; };
 		35186F4194824F3250DE3B8E /* AppRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppRuntime.swift; path = AgentSessions/Support/AppRuntime.swift; sourceTree = SOURCE_ROOT; };
 		37006C856FBE4448A658887B /* CommandExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CommandExecutor.swift; path = AgentSessions/Resume/CommandExecutor.swift; sourceTree = SOURCE_ROOT; };
 		372394B7F3B77108C9FEAFC8 /* AgentEnablement.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/AgentEnablement.swift; sourceTree = SOURCE_ROOT; };
@@ -425,6 +428,7 @@
 		A62B8D98322763D14AF6ACF7 /* ColumnVisibilityStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColumnVisibilityStore.swift; path = AgentSessions/Support/ColumnVisibilityStore.swift; sourceTree = SOURCE_ROOT; };
 		A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeTests.swift; path = AgentSessionsTests/CodexResumeTests.swift; sourceTree = SOURCE_ROOT; };
 		ABFD9C178275CA23FCE6B3DE /* codex_052_raw.jsonl */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = codex_052_raw.jsonl; path = Resources/Fixtures/codex_052_raw.jsonl; sourceTree = SOURCE_ROOT; };
+		ACFE880E8C4F8CEFBE7FD3B6 /* OpenCodeBackendDetector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/OpenCode/OpenCodeBackendDetector.swift; sourceTree = SOURCE_ROOT; };
 		ADAFE9DA5E86250005634F7A /* DroidTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/DroidTranscriptView.swift; sourceTree = SOURCE_ROOT; };
 		ADE6E4EC02F20236FB460314 /* CopilotSessionParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/CopilotSessionParser.swift; sourceTree = SOURCE_ROOT; };
 		AE23383CC2E40A25D6F8DACB /* OnboardingCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Onboarding/Models/OnboardingCoordinator.swift; sourceTree = SOURCE_ROOT; };
@@ -713,6 +717,15 @@
 			name = Models;
 			sourceTree = "<group>";
 		};
+		2B5D6593A4F3627C07BD4536 /* OpenCode */ = {
+			isa = PBXGroup;
+			children = (
+				ACFE880E8C4F8CEFBE7FD3B6 /* OpenCodeBackendDetector.swift */,
+				31E40F1B3349DE1F939CFCF0 /* OpenCodeSqliteReader.swift */,
+			);
+			name = OpenCode;
+			sourceTree = "<group>";
+		};
 		3A3E3C477D90E9B6F39B36A7 /* Views */ = {
 			isa = PBXGroup;
 			children = (
@@ -840,6 +853,7 @@
 				3A769EA92EA08FFE008A7EC2 /* Recovered References */,
 				A9663DCBB6D027932E3982FF /* Frameworks */,
 				9B8DC429DB26DAC7502EA5D9 /* AgentSessionsLogicTests */,
+				2B5D6593A4F3627C07BD4536 /* OpenCode */,
 			);
 			sourceTree = "<group>";
 		};
@@ -1643,6 +1657,8 @@
 				EA6B3DE2F27F8FECF6357AAF /* AgentCockpitHUDRowView.swift in Sources */,
 				18812A0672D21BA1E8724896 /* AgentCockpitHUDGroupHeader.swift in Sources */,
 				BD838E8E186BBAF043CCAAA1 /* AgentCockpitHUDWindow.swift in Sources */,
+				A9D49F2A967D8DD12C2FD3FE /* OpenCodeBackendDetector.swift in Sources */,
+				55CE4EFF834602231E7283EE /* OpenCodeSqliteReader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
