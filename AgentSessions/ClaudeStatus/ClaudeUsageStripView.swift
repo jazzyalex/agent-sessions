@@ -44,9 +44,9 @@ struct ClaudeUsageStripView: View {
             } else if status.tmuxUnavailable {
                 Text("tmux not found").font(.caption).foregroundStyle(.red)
             } else if let update = status.lastUpdate {
-                // Show a gentle "last updated" note only after 30 minutes
-                if Date().timeIntervalSince(update) > 30 * 60 {
-                    Text("Last updated: \(timeAgo(update))")
+                // Show immediately when stale/degraded; otherwise only after 30 minutes
+                if status.dataIsStale || Date().timeIntervalSince(update) > 30 * 60 {
+                    Text("Updated \(timeAgo(update))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

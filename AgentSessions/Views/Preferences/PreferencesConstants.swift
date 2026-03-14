@@ -9,6 +9,7 @@ enum PreferencesKey {
     static let codexAllowStatusProbe = "CodexAllowStatusProbe"
     static let codexProbeCleanupMode = "CodexProbeCleanupMode"
     static let claudeUsageEnabled = "ClaudeUsageEnabled"
+    static let claudeUsageMode = "ClaudeUsageMode"       // ClaudeUsageMode.rawValue, default "auto"
     static let claudeProbeCleanupMode = "ClaudeProbeCleanupMode"
     static let showSystemProbeSessions = "ShowSystemProbeSessions"
     static let showHousekeepingSessions = "ShowHousekeepingSessions"

@@ -243,6 +243,7 @@ extension PreferencesView {
 	                    .multilineTextAlignment(.leading)
 	            }
 
+
 	            // Debug visibility
 	            sectionHeader("Debug")
 	            Toggle("Show system probe sessions for debugging", isOn: $showSystemProbeSessions)
