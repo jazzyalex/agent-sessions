@@ -266,7 +266,8 @@ struct OpenCodeSqliteReader {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 continue
             }
-            results.append((id: partID, dict: obj, rawJSON: dataStr))
+            let rawJSON = OpenCodeSessionParser.cappedPartJSON(obj: obj, source: dataStr.data(using: .utf8))
+            results.append((id: partID, dict: obj, rawJSON: rawJSON))
         }
         return results
     }
