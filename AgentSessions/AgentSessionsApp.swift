@@ -421,7 +421,7 @@ struct AgentSessionsApp: App {
                     // Without this, session names in the Cockpit stay generic when the main
                     // window is closed on startup (indexers never leave .idle).
                     if indexer.launchPhase == .idle { indexer.refresh() }
-                    if claudeIndexer.launchPhase == .idle { claudeIndexer.refresh() }
+                    if claudeIndexer.launchPhase == .idle { claudeIndexer.refresh(mode: .fullReconcile) }
                     if opencodeIndexer.launchPhase == .idle { opencodeIndexer.refresh() }
                 }
         }
