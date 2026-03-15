@@ -288,21 +288,21 @@ private struct IndexingIndicator: View {
 	            }
 	        }()
 
-	        let fiveResetDate = fiveIsStale ? nil : data.resetDate(kind: "5h", raw: data.fiveHourResetText)
-	        let weekResetDate = weekIsStale ? nil : data.resetDate(kind: "Wk", raw: data.weekResetText)
+	        let fiveResetDate = data.resetDate(kind: "5h", raw: data.fiveHourResetText)
+	        let weekResetDate = data.resetDate(kind: "Wk", raw: data.weekResetText)
 
 	        let fiveResetDisplayText: String = {
 	            let rel = formatRelativeTimeUntil(fiveResetDate)
-	            if fiveIsStale { return "n/a" }
 	            if rel != "—" { return rel }
+	            if fiveIsStale { return "n/a" }
 	            let fallback = data.resetDisplayFallback(kind: "5h", raw: data.fiveHourResetText)
 	            return fallback.isEmpty ? "—" : fallback
 	        }()
 
 	        let weekResetDisplayText: String = {
 	            let s = formatWeeklyReset(weekResetDate)
-	            if weekIsStale { return "n/a" }
 	            if s != "—" { return s }
+	            if weekIsStale { return "n/a" }
 	            let fallback = data.resetDisplayFallback(kind: "Wk", raw: data.weekResetText)
 	            return fallback.isEmpty ? "—" : fallback
 	        }()

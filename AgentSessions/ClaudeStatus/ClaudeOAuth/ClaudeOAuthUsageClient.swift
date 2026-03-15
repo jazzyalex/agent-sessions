@@ -10,23 +10,25 @@ private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "Claude
 // Uses optional fields throughout — fail closed in the normalizer, not here.
 
 struct ClaudeOAuthRawUsageResponse: Decodable {
-    let session5h: RawWindow?
-    let weekAllModels: RawWindow?
-    let weekOpus: RawWindow?
+    let fiveHour: RawWindow?
+    let sevenDay: RawWindow?
+    let sevenDayOpus: RawWindow?
+    let sevenDaySonnet: RawWindow?  // decoded but not yet surfaced in ClaudeLimitSnapshot
 
     enum CodingKeys: String, CodingKey {
-        case session5h = "session_5h"
-        case weekAllModels = "week_all_models"
-        case weekOpus = "week_opus"
+        case fiveHour = "five_hour"
+        case sevenDay = "seven_day"
+        case sevenDayOpus = "seven_day_opus"
+        case sevenDaySonnet = "seven_day_sonnet"
     }
 
     struct RawWindow: Decodable {
-        let pctLeft: Int?
-        let resets: String?
+        let utilization: Double?   // percent used (0-100)
+        let resetsAt: String?      // ISO 8601 timestamp
 
         enum CodingKeys: String, CodingKey {
-            case pctLeft = "pct_left"
-            case resets
+            case utilization
+            case resetsAt = "resets_at"
         }
     }
 }
