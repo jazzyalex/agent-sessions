@@ -28,6 +28,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) var cockpitCompactBaselineRows: Int = 4
     @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) var cockpitCompactAutoFitEnabled: Bool = false
     @AppStorage(PreferencesKey.Cockpit.showTabSubtitleInFullMode) var cockpitShowTabSubtitleInFullMode: Bool = true
+    @AppStorage(PreferencesKey.Cockpit.hudShowLimits) var cockpitShowLimitsFooter: Bool = true
     // Codex probe cleanup prefs
     @AppStorage(PreferencesKey.codexProbeCleanupMode) var codexProbeCleanupMode: String = "none" // none | auto
     @State var showConfirmCodexAutoDelete: Bool = false

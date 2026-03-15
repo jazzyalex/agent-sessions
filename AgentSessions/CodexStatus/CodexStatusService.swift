@@ -137,6 +137,8 @@ final class CodexUsageModel: ObservableObject {
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
+    private var cockpitVisible: Bool = false
+    private var cockpitPinned: Bool = false
     // Avoid touching NSApp during singleton initialization at app launch.
     // NSApp is an IUO and can be nil this early in startup.
     private var appIsActive: Bool = false
@@ -171,12 +173,21 @@ final class CodexUsageModel: ObservableObject {
         propagateVisibility()
     }
 
+    /// Called by the cockpit HUD window. When `pinned`, the cockpit is always on top
+    /// and should poll even when the app loses focus (treated like menu bar visibility).
+    func setCockpitVisible(_ visible: Bool, pinned: Bool) {
+        cockpitVisible = visible
+        cockpitPinned = visible && pinned
+        propagateVisibility()
+    }
+
     private func propagateVisibility() {
         // Treat the in-app strip as non-visible while the app is inactive to avoid
         // background polling. Menu bar visibility should remain effective even when
         // the app is inactive so the user can still read live usage in the menu bar.
-        let menuVisible = self.menuVisible
-        let stripVisible = self.stripVisible
+        // A pinned cockpit window is treated like the menu bar (always-on polls).
+        let menuVisible = self.menuVisible || self.cockpitPinned
+        let stripVisible = self.stripVisible || self.cockpitVisible
         let appIsActive = self.appIsActive
         Task.detached { [weak self] in
             await self?.service?.setVisibility(menuVisible: menuVisible, stripVisible: stripVisible, appIsActive: appIsActive)

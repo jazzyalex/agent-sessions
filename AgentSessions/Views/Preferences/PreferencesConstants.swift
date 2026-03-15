@@ -123,6 +123,7 @@ enum PreferencesKey {
         static let hudGroupByProject = "CockpitHUDGroupByProject"
         static let hudCompact = "CockpitHUDCompact"
         static let hudPinned = "CockpitHUDPinned"
+        static let hudShowLimits = "CockpitHUDShowLimits"
     }
 }
 

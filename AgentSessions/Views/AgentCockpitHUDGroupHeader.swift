@@ -22,23 +22,25 @@ struct AgentCockpitHUDGroupHeader: View {
                     .help(projectName)
 
                 if activeCount > 0 {
-                    Text("\(activeCount) active")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color(hex: "30d158"))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(Color(hex: "30d158").opacity(colorScheme == .dark ? 0.18 : 0.12))
-                        .clipShape(Capsule())
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Color(hex: "30d158"))
+                            .frame(width: 7, height: 7)
+                        Text("\(activeCount)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color(hex: "30d158"))
+                    }
                 }
 
                 if idleCount > 0 {
-                    Text("\(idleCount) waiting")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(waitingBadgeTextColor)
-                        .padding(.vertical, 2)
-                        .padding(.horizontal, 8)
-                        .background(waitingBadgeBackgroundColor)
-                        .clipShape(Capsule())
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(waitingDotColor)
+                            .frame(width: 7, height: 7)
+                        Text("\(idleCount)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(waitingDotColor)
+                    }
                 }
 
                 Rectangle()
@@ -58,17 +60,8 @@ struct AgentCockpitHUDGroupHeader: View {
         .buttonStyle(.plain)
     }
 
-    private var waitingBadgeBaseColor: Color {
-        colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
-    }
-
-    private var waitingBadgeTextColor: Color {
-        isStaleOnly ? waitingBadgeBaseColor.opacity(0.78) : waitingBadgeBaseColor
-    }
-
-    private var waitingBadgeBackgroundColor: Color {
-        let baseOpacity = colorScheme == .dark ? 0.16 : 0.12
-        let adjustedOpacity = isStaleOnly ? baseOpacity * 0.62 : baseOpacity
-        return waitingBadgeBaseColor.opacity(adjustedOpacity)
+    private var waitingDotColor: Color {
+        let base = colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
+        return isStaleOnly ? base.opacity(0.5) : base
     }
 }
