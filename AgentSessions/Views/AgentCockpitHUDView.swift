@@ -7,6 +7,18 @@ enum HUDLiveState: Equatable {
     case idle
 }
 
+enum HUDIdleReason: String, Equatable, Sendable {
+    case generic      // Idle — waiting at prompt or unknown state
+    case errorOrStuck // No prompt detected for >30 minutes
+
+    var label: String {
+        switch self {
+        case .generic:      return "Waiting"
+        case .errorOrStuck: return "Stuck"
+        }
+    }
+}
+
 enum HUDDisplayPriority: Int, Equatable {
     case active = 0
     case waitingFresh = 1
@@ -60,6 +72,7 @@ struct HUDRow: Identifiable, Equatable {
     let workingDirectory: String?
     let lastActivityAt: Date?
     let lastActivityTooltip: String?
+    let idleReason: HUDIdleReason?
 
     init(id: String,
          source: SessionSource,
@@ -81,7 +94,8 @@ struct HUDRow: Identifiable, Equatable {
          logPath: String? = nil,
          workingDirectory: String? = nil,
          lastActivityAt: Date? = nil,
-         lastActivityTooltip: String? = nil) {
+         lastActivityTooltip: String? = nil,
+         idleReason: HUDIdleReason? = nil) {
         self.id = id
         self.source = source
         self.agentType = agentType
@@ -103,6 +117,7 @@ struct HUDRow: Identifiable, Equatable {
         self.workingDirectory = workingDirectory
         self.lastActivityAt = lastActivityAt
         self.lastActivityTooltip = lastActivityTooltip
+        self.idleReason = idleReason
     }
 
     static func == (lhs: HUDRow, rhs: HUDRow) -> Bool {
@@ -127,6 +142,7 @@ struct HUDRow: Identifiable, Equatable {
             && lhs.lastActivityAt == rhs.lastActivityAt
             && lhs.elapsed == rhs.elapsed
             && lhs.lastActivityTooltip == rhs.lastActivityTooltip
+            && lhs.idleReason == rhs.idleReason
     }
 }
 
@@ -194,6 +210,7 @@ private struct LegacyMappedRow: Identifiable {
     let logPath: String?
     let workingDirectory: String?
     let lastActivityAt: Date?
+    let idleReason: HUDIdleReason?
 }
 
 struct SessionLookupIndexes {
@@ -1721,6 +1738,7 @@ struct AgentCockpitHUDView: View {
             let date = session?.modifiedAt ?? Self.parseSessionTimestamp(from: presence)
             let lastActivityAt = activeCodex.lastActivityAt(for: presence) ?? date
             let liveState = activeCodex.liveState(for: presence)
+            let idleReason = activeCodex.idleReason(for: presence)
 
             let stableID: String =
                 "\(presence.source.rawValue)|" + (logNorm
@@ -1747,7 +1765,8 @@ struct AgentCockpitHUDView: View {
                 sessionID: Self.authoritativeSessionID(for: presence, resolvedSession: session),
                 logPath: presence.sessionLogPath,
                 workingDirectory: session?.cwd ?? presence.workspaceRoot,
-                lastActivityAt: lastActivityAt
+                lastActivityAt: lastActivityAt,
+                idleReason: idleReason
             )
         }
 
@@ -1794,7 +1813,8 @@ struct AgentCockpitHUDView: View {
                 logPath: row.logPath,
                 workingDirectory: row.workingDirectory,
                 lastActivityAt: row.lastActivityAt,
-                lastActivityTooltip: activityTooltip
+                lastActivityTooltip: activityTooltip,
+                idleReason: row.idleReason
             )
         }
 
@@ -2333,7 +2353,8 @@ struct AgentCockpitHUDView: View {
             sessionID: winner.sessionID ?? loser.sessionID,
             logPath: winner.logPath ?? loser.logPath,
             workingDirectory: winner.workingDirectory ?? loser.workingDirectory,
-            lastActivityAt: winner.lastActivityAt ?? loser.lastActivityAt
+            lastActivityAt: winner.lastActivityAt ?? loser.lastActivityAt,
+            idleReason: winner.idleReason
         )
     }
 

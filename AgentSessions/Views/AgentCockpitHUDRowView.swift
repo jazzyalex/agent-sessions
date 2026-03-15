@@ -58,9 +58,10 @@ struct AgentCockpitHUDRowView: View {
             state: codexLiveState,
             color: statusDotColor,
             size: 7,
-            lastSeenAt: row.lastSeenAt
+            lastSeenAt: row.lastSeenAt,
+            idleReason: row.idleReason
         )
-        .accessibilityLabel(row.liveState == .active ? "Active" : "Waiting")
+        .accessibilityLabel(row.liveState == .active ? "Active" : (row.idleReason?.label ?? "Waiting"))
         .frame(width: 9, alignment: .center)
     }
 
@@ -231,6 +232,9 @@ struct AgentCockpitHUDRowView: View {
         case .active:
             return Color(hex: "30d158")
         case .idle:
+            if row.idleReason == .errorOrStuck {
+                return colorScheme == .dark ? Color(hex: "ff453a") : Color(hex: "d70015")
+            }
             if isStaleWaiting {
                 return colorScheme == .dark ? Color(hex: "c79033") : Color(hex: "b37512")
             }
@@ -264,3 +268,74 @@ struct AgentCockpitHUDRowView: View {
         return .clear
     }
 }
+
+#if DEBUG
+private func previewRow(
+    id: String,
+    agentType: HUDAgentType,
+    source: SessionSource,
+    project: String,
+    preview: String,
+    idleReason: HUDIdleReason?
+) -> HUDRow {
+    HUDRow(
+        id: id,
+        source: source,
+        agentType: agentType,
+        projectName: project,
+        displayName: preview,
+        liveState: .idle,
+        preview: preview,
+        elapsed: "2m",
+        lastSeenAt: Date(),
+        itermSessionId: nil,
+        revealURL: nil,
+        tty: nil,
+        termProgram: nil,
+        lastActivityTooltip: "Just now",
+        idleReason: idleReason
+    )
+}
+
+private struct IdleReasonPreviewMatrix: View {
+    private let rows: [HUDRow] = [
+        previewRow(id: "1", agentType: .claude, source: .claude, project: "my-app",   preview: "implement auth module", idleReason: .generic),
+        previewRow(id: "2", agentType: .codex,  source: .codex,  project: "frontend", preview: "fix layout bug",        idleReason: .generic),
+        previewRow(id: "3", agentType: .claude, source: .claude, project: "legacy",   preview: "migrate to swift 6",   idleReason: .errorOrStuck),
+        HUDRow(id: "4", source: .claude, agentType: .claude, projectName: "active-proj",
+               displayName: "refactor db layer", liveState: .active, preview: "refactor db layer",
+               elapsed: "12s", lastSeenAt: Date(), itermSessionId: nil, revealURL: nil, tty: nil, termProgram: nil),
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(rows) { row in
+                AgentCockpitHUDRowView(
+                    row: row,
+                    shortcutIndex: nil,
+                    isSelected: false,
+                    filterText: "",
+                    isGrouped: false,
+                    isCompact: false,
+                    isNewlyInserted: false,
+                    onTap: {}
+                )
+            }
+        }
+        .frame(width: 640)
+        .padding(8)
+    }
+}
+
+#Preview("Idle Reason States – Light") {
+    IdleReasonPreviewMatrix()
+        .preferredColorScheme(.light)
+        .background(Color(NSColor.windowBackgroundColor))
+}
+
+#Preview("Idle Reason States – Dark") {
+    IdleReasonPreviewMatrix()
+        .preferredColorScheme(.dark)
+        .background(Color(NSColor.windowBackgroundColor))
+}
+#endif

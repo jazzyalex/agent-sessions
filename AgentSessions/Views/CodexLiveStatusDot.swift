@@ -6,6 +6,7 @@ struct CodexLiveStatusDot: View {
     var color: Color
     var size: CGFloat = 7
     var lastSeenAt: Date? = nil
+    var idleReason: HUDIdleReason? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -47,7 +48,10 @@ struct CodexLiveStatusDot: View {
     }
 
     private var idleBaseColor: Color {
-        colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
+        if idleReason == .errorOrStuck {
+            return colorScheme == .dark ? Color(hex: "ff453a") : Color(hex: "d70015")
+        }
+        return colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
     }
 
     private var pulseScale: CGFloat {
@@ -112,7 +116,7 @@ struct CodexLiveStatusDot: View {
     private var accessibilityLabel: String {
         switch state {
         case .activeWorking: return "Active session"
-        case .openIdle: return "Open session"
+        case .openIdle: return idleReason?.label ?? "Open session"
         }
     }
 }
