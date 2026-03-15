@@ -234,7 +234,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             LaunchProfiler.log("Claude.refresh: DB hydrate complete (existing=\(existingSessions.count))")
             #endif
 
-            let deltaScope: SessionDeltaScope = (mode == .fullReconcile) ? .full : .recent
+            let deltaScope: SessionDeltaScope = (mode == .fullReconcile || trigger == .manual) ? .full : .recent
             let previousStats = self.knownFileStatsByPathSnapshot()
             let initialDelta = self.discovery.discoverDelta(previousByPath: previousStats, scope: deltaScope)
             let shouldEscalate = Self.shouldEscalateRecentDeltaToFullReconcile(mode: mode, delta: initialDelta)
