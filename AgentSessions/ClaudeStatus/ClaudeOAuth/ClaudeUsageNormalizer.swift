@@ -13,8 +13,8 @@ struct ClaudeUsageNormalizer {
         bodyHash: String,
         fetchedAt: Date = Date()
     ) -> ClaudeLimitSnapshot? {
-        let fiveHour = ratio(from: raw.session5h)
-        let weekly = ratio(from: raw.weekAllModels)
+        let fiveHour = usedRatio(from: raw.fiveHour)
+        let weekly = usedRatio(from: raw.sevenDay)
 
         // Require at least one usable window
         guard fiveHour != nil || weekly != nil else { return nil }
@@ -24,20 +24,20 @@ struct ClaudeUsageNormalizer {
             source: .oauthEndpoint,
             health: .live,
             fiveHourUsedRatio: fiveHour,
-            fiveHourResetText: raw.session5h?.resets ?? "",
+            fiveHourResetText: raw.fiveHour?.resetsAt ?? "",
             weeklyUsedRatio: weekly,
-            weeklyResetText: raw.weekAllModels?.resets ?? "",
-            weekOpusUsedRatio: ratio(from: raw.weekOpus),
-            weekOpusResetText: raw.weekOpus?.resets,
+            weeklyResetText: raw.sevenDay?.resetsAt ?? "",
+            weekOpusUsedRatio: usedRatio(from: raw.sevenDayOpus),
+            weekOpusResetText: raw.sevenDayOpus?.resetsAt,
             rawPayloadHash: bodyHash
         )
     }
 
     // MARK: - Private
 
-    /// Convert pctLeft (0-100 remaining) to a used ratio (0...1), clamped.
-    private static func ratio(from window: ClaudeOAuthRawUsageResponse.RawWindow?) -> Double? {
-        guard let window, let pctLeft = window.pctLeft else { return nil }
-        return max(0.0, min(1.0, Double(100 - pctLeft) / 100.0))
+    /// Convert utilization (0-100 percent used) to a used ratio (0...1), clamped.
+    private static func usedRatio(from window: ClaudeOAuthRawUsageResponse.RawWindow?) -> Double? {
+        guard let window, let utilization = window.utilization else { return nil }
+        return max(0.0, min(1.0, utilization / 100.0))
     }
 }

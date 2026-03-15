@@ -36,6 +36,9 @@ enum UsageResetText {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return nil }
 
+        // 0) ISO 8601 (OAuth endpoint: "2026-03-14T09:00:00.397911+00:00")
+        if let d = parseISO8601(trimmed) { return d }
+
         // Extract a timezone suffix like "(America/Los_Angeles)" when present, so Codex legacy
         // strings can be interpreted in the correct timezone.
         let split = splitTimezoneIdentifier(trimmed)
@@ -55,6 +58,17 @@ enum UsageResetText {
         if let d = parseTimeOnly(base, now: now, tz: tz) { return d }
 
         return nil
+    }
+
+    private static func parseISO8601(_ text: String) -> Date? {
+        // Fast reject: ISO 8601 datetime always contains 'T'.
+        guard text.contains("T") else { return nil }
+        let frac = ISO8601DateFormatter()
+        frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = frac.date(from: text) { return d }
+        let std = ISO8601DateFormatter()
+        std.formatOptions = [.withInternetDateTime]
+        return std.date(from: text)
     }
 
     private static func parseLocalizedNumericDateTime(_ text: String, tz: TimeZone) -> Date? {

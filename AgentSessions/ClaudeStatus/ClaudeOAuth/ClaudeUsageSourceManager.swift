@@ -22,10 +22,14 @@ actor ClaudeUsageSourceManager {
     typealias AvailabilityHandler = @Sendable (ClaudeServiceAvailability) -> Void
 
     // MARK: - Thresholds
-    private static let oauthRefreshInterval: TimeInterval = 60
-    private static let cacheStaleThreshold: TimeInterval = 3 * 60   // 3 minutes
-    private static let cacheHardExpire: TimeInterval = 10 * 60      // 10 minutes
-    private static let backoffSequence: [TimeInterval] = [30, 60, 120]
+    // The OAuth endpoint has a tight per-account quota (~few requests per 20 min).
+    // Polling too fast blocks both AS and Claude Code /usage (same endpoint).
+    // ClaudeUsageSourceManager is owned by ClaudeUsageModel.shared (singleton),
+    // so only one instance polls — the 5-min interval stays within quota.
+    private static let oauthRefreshInterval: TimeInterval = 5 * 60  // 5 minutes
+    private static let cacheStaleThreshold: TimeInterval = 10 * 60  // 10 minutes
+    private static let cacheHardExpire: TimeInterval = 30 * 60      // 30 minutes
+    private static let backoffSequence: [TimeInterval] = [5 * 60, 10 * 60, 15 * 60]
 
     // MARK: - State
     private var mode: ClaudeUsageMode = .auto
@@ -186,15 +190,21 @@ actor ClaudeUsageSourceManager {
             await tokenResolver.invalidateCache()
             await handleOAuthFailure(reason: "401 unauthorized")
         } catch ClaudeOAuthUsageClientError.rateLimited(let retryAfter) {
-            // Rate limited — honor Retry-After, don't count toward tmux failover threshold.
-            // Add a 10s buffer to avoid hitting the boundary.
             let delay = retryAfter + 10
             os_log("ClaudeOAuth: rate limited, retrying in %.0fs", log: log, type: .info, delay)
             if var snap = lastOAuthSnapshot {
                 snap.health = .stale
                 publish(snap)
+                // Have cached data to show — just wait for retry, don't fall back
+                scheduleOAuthRefresh(delay: delay)
+            } else if mode == .auto && !usingTmuxFallback {
+                // No cached data AND rate limited — fall back to tmux so user sees something
+                os_log("ClaudeOAuth: no cached data during rate limit, activating tmux fallback", log: log, type: .info)
+                await activateTmuxFallback(reason: "rate limited with no cache")
+                scheduleOAuthRefresh(delay: delay)
+            } else {
+                scheduleOAuthRefresh(delay: delay)
             }
-            scheduleOAuthRefresh(delay: delay)
         } catch {
             os_log("ClaudeOAuth: fetch error: %{public}@", log: log, type: .error, error.localizedDescription)
             await handleOAuthFailure(reason: error.localizedDescription)
