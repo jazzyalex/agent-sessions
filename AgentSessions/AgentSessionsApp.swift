@@ -417,6 +417,12 @@ struct AgentSessionsApp: App {
                     guard !AppRuntime.isRunningTests else { return }
                     ensureStatusItemController()
                     updateUsageModels()
+                    // Kick off session indexing if the unified window hasn't already done it.
+                    // Without this, session names in the Cockpit stay generic when the main
+                    // window is closed on startup (indexers never leave .idle).
+                    if indexer.launchPhase == .idle { indexer.refresh() }
+                    if claudeIndexer.launchPhase == .idle { claudeIndexer.refresh() }
+                    if opencodeIndexer.launchPhase == .idle { opencodeIndexer.refresh() }
                 }
         }
         .defaultSize(width: 644, height: 320)

@@ -2732,6 +2732,7 @@ private struct HUDLimitsProviderEntry {
     let weekLeft: Int
     let fiveHourResetText: String
     let weekResetText: String
+    let isInitialLoading: Bool
 }
 
 /// An isolated view that observes usage models independently so that
@@ -2756,7 +2757,8 @@ private struct HUDLimitsBar: View {
                 fiveHourLeft: codexUsageModel.fiveHourRemainingPercent,
                 weekLeft: codexUsageModel.weekRemainingPercent,
                 fiveHourResetText: codexUsageModel.fiveHourResetText,
-                weekResetText: codexUsageModel.weekResetText
+                weekResetText: codexUsageModel.weekResetText,
+                isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -2765,7 +2767,8 @@ private struct HUDLimitsBar: View {
                 fiveHourLeft: claudeUsageModel.sessionRemainingPercent,
                 weekLeft: claudeUsageModel.weekAllModelsRemainingPercent,
                 fiveHourResetText: claudeUsageModel.sessionResetText,
-                weekResetText: claudeUsageModel.weekAllModelsResetText
+                weekResetText: claudeUsageModel.weekAllModelsResetText,
+                isInitialLoading: claudeUsageModel.isUpdating && claudeUsageModel.lastSuccessAt == nil
             ))
         }
         return out
@@ -2879,32 +2882,51 @@ private struct HUDLimitsProviderText: View {
                     .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
             }
 
-            HStack(spacing: 6) {
-                HStack(spacing: 4) {
-                    HStack(spacing: 0) {
-                        Text("5h: ")
-                        Text("\(pct(entry.fiveHourLeft))%")
-                            .foregroundStyle(pctColor(entry.fiveHourLeft))
+            if entry.isInitialLoading {
+                HUDLimitsLoadingSpinner()
+                    .transition(.opacity)
+            } else {
+                HStack(spacing: 6) {
+                    HStack(spacing: 4) {
+                        HStack(spacing: 0) {
+                            Text("5h: ")
+                            Text("\(pct(entry.fiveHourLeft))%")
+                                .foregroundStyle(pctColor(entry.fiveHourLeft))
+                        }
+                        if let r = fiveHourResetLabel() {
+                            Text("↻ \(r)")
+                        }
                     }
-                    if let r = fiveHourResetLabel() {
-                        Text("↻ \(r)")
+                    Text("|").foregroundStyle(Color.primary.opacity(0.25))
+                    HStack(spacing: 4) {
+                        HStack(spacing: 0) {
+                            Text("Wk: ")
+                            Text("\(pct(entry.weekLeft))%")
+                                .foregroundStyle(pctColor(entry.weekLeft))
+                        }
+                        if let r = weekResetLabel() {
+                            Text("↻ \(r)")
+                        }
                     }
                 }
-                Text("|").foregroundStyle(Color.primary.opacity(0.25))
-                HStack(spacing: 4) {
-                    HStack(spacing: 0) {
-                        Text("Wk: ")
-                        Text("\(pct(entry.weekLeft))%")
-                            .foregroundStyle(pctColor(entry.weekLeft))
-                    }
-                    if let r = weekResetLabel() {
-                        Text("↻ \(r)")
-                    }
-                }
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.primary)
+                .transition(.opacity)
             }
-            .font(.system(size: 12, weight: .medium, design: .monospaced))
-            .foregroundStyle(Color.primary)
         }
+        .animation(.easeIn(duration: 0.2), value: entry.isInitialLoading)
+    }
+}
+
+private struct HUDLimitsLoadingSpinner: View {
+    @State private var rotate: Bool = false
+    var body: some View {
+        Image(systemName: "arrow.triangle.2.circlepath")
+            .foregroundStyle(Color.primary.opacity(0.5))
+            .font(.system(size: 11, weight: .semibold))
+            .rotationEffect(.degrees(rotate ? 360 : 0))
+            .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: rotate)
+            .onAppear { rotate = true }
     }
 }
 
