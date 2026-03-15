@@ -183,6 +183,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     private var bySessionID: [String: CodexActivePresence] = [:]
     private var byLogPath: [String: CodexActivePresence] = [:]
     private var liveStateByPresenceKey: [String: CodexLiveState] = [:]
+    private var idleReasonByPresenceKey: [String: HUDIdleReason] = [:]
     private var lastActivityByPresenceKey: [String: Date] = [:]
     private var cachedProcessPresences: [CodexActivePresence] = []
     private var cachedITermPresences: [CodexActivePresence] = []
@@ -310,6 +311,11 @@ final class CodexActiveSessionsModel: ObservableObject {
         guard enabled, supportsLiveSessions(for: session.source) else { return nil }
         guard let presence = presence(for: session) else { return nil }
         return liveState(for: presence)
+    }
+
+    func idleReason(for presence: CodexActivePresence) -> HUDIdleReason? {
+        let key = Self.presenceKey(for: presence)
+        return idleReasonByPresenceKey[key]
     }
 
     func liveState(for presence: CodexActivePresence) -> CodexLiveState {
@@ -463,6 +469,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             bySessionID = [:]
             byLogPath = [:]
             liveStateByPresenceKey = [:]
+            idleReasonByPresenceKey = [:]
             lastActivityByPresenceKey = [:]
             cachedProcessPresences = []
             cachedITermPresences = []
@@ -956,7 +963,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                                          probeITerm: Bool,
                                          timeout: TimeInterval,
                                          previousLiveStates: [String: CodexLiveState],
-                                         probedITermPresenceKeys: Set<String>) async -> [String: CodexLiveState] {
+                                         probedITermPresenceKeys: Set<String>) async -> LiveStateClassification {
         let probeTargets = Self.itermProbeTargets(
             from: presences,
             selectedPresenceKeys: probedITermPresenceKeys,
@@ -969,7 +976,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         )
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
-            return previousLiveStates
+            return LiveStateClassification(liveStates: previousLiveStates, idleReasons: [:])
         }
         return Self.classifyLiveStates(
             for: presences,
@@ -1152,7 +1159,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
         )
 
-        let nextLiveStates = await classifyLiveStatesAsync(
+        let classification = await classifyLiveStatesAsync(
             for: ui,
             generation: generation,
             now: now,
@@ -1161,6 +1168,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             previousLiveStates: previousLiveStates,
             probedITermPresenceKeys: probedITermPresenceKeys
         )
+        let nextLiveStates = classification.liveStates
+        let rawIdleReasons = classification.idleReasons
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
             return
@@ -1182,6 +1191,15 @@ final class CodexActiveSessionsModel: ObservableObject {
             byLogPath = logMap
             liveStateByPresenceKey = nextLiveStates
             lastActivityByPresenceKey = nextLastActivityByPresenceKey
+
+            // Sync idle reasons: remove stale entries, update current ones.
+            let idleKeys = Set(rawIdleReasons.keys)
+            for key in Array(idleReasonByPresenceKey.keys) where !idleKeys.contains(key) {
+                idleReasonByPresenceKey.removeValue(forKey: key)
+            }
+            for (key, reason) in rawIdleReasons {
+                idleReasonByPresenceKey[key] = reason
+            }
         }
 
         let nextLogKeys = Set(logMap.keys)
@@ -2110,6 +2128,43 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     // MARK: - Live State Classification
 
+    private struct LiveStateClassification {
+        let liveStates: [String: CodexLiveState]
+        let idleReasons: [String: HUDIdleReason]
+    }
+
+    nonisolated static func classifyIdleReason(
+        tail: String?,
+        source: SessionSource,
+        lastActivityAt: Date?,
+        now: Date
+    ) -> HUDIdleReason {
+        // Error/stuck: idle for >30 minutes with no detected prompt
+        if let lastActivity = lastActivityAt,
+           now.timeIntervalSince(lastActivity) > 30 * 60 {
+            let hasPrompt = tailHasPrompt(tail, source: source)
+            if !hasPrompt {
+                return .errorOrStuck
+            }
+        }
+        return .generic
+    }
+
+    nonisolated private static func tailHasPrompt(_ tail: String?, source: SessionSource) -> Bool {
+        guard let tail, !tail.isEmpty else { return false }
+        if source == .claude {
+            return hasLikelyClaudePromptNearBottom(tail)
+        }
+        let normalized = sanitizeITermTail(tail)
+        guard !normalized.isEmpty else { return false }
+        let lines = normalized
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        let nonEmptyLines = lines.filter { !$0.isEmpty }
+        guard !nonEmptyLines.isEmpty else { return false }
+        return nonEmptyLines.suffix(8).contains(where: { isLikelyPromptLine($0) })
+    }
+
     nonisolated static func classifyITermTail(_ tail: String) -> CodexLiveState? {
         let normalized = sanitizeITermTail(tail)
         guard !normalized.isEmpty else { return nil }
@@ -2416,8 +2471,9 @@ final class CodexActiveSessionsModel: ObservableObject {
                                                        probeITerm: Bool,
                                                        previousLiveStates: [String: CodexLiveState],
                                                        probedITermPresenceKeys: Set<String>,
-                                                       batchProbeResults: [String: ITermProbeResult]) -> [String: CodexLiveState] {
+                                                       batchProbeResults: [String: ITermProbeResult]) -> LiveStateClassification {
         var out: [String: CodexLiveState] = [:]
+        var idleOut: [String: HUDIdleReason] = [:]
         out.reserveCapacity(presences.count)
 
         for presence in presences {
@@ -2491,9 +2547,26 @@ final class CodexActiveSessionsModel: ObservableObject {
             } else {
                 out[key] = resolved
             }
+
+            // Classify idle reason for presences that resolved as idle.
+            if resolved == .openIdle {
+                let tail = matchedBatchProbe?.tail
+                let activityAt = lastActivityAt(logPath: presence.sessionLogPath, sourceFilePath: presence.sourceFilePath)
+                idleOut[key] = classifyIdleReason(
+                    tail: tail,
+                    source: presence.source,
+                    lastActivityAt: activityAt,
+                    now: now
+                )
+            }
         }
 
-        return out
+        // Remove idle reasons for any key that ended up as active due to priority resolution.
+        for key in Array(idleOut.keys) where out[key] == .activeWorking {
+            idleOut.removeValue(forKey: key)
+        }
+
+        return LiveStateClassification(liveStates: out, idleReasons: idleOut)
     }
 
     // Internal for targeted unit tests.
@@ -2510,7 +2583,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             previousLiveStates: previousLiveStates,
             probedITermPresenceKeys: probedITermPresenceKeys,
             batchProbeResults: batchProbeResults
-        )
+        ).liveStates
     }
 
     private struct ITermProbeTarget {
