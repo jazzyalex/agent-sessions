@@ -433,6 +433,7 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.Cockpit.hudPinned) private var isPinned: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) private var compactBaselineRows: Int = 4
     @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) private var compactAutoFitEnabled: Bool = false
+    @AppStorage(PreferencesKey.Cockpit.hudShowLimits) private var showLimits: Bool = true
 
     @State private var sessionFilterMode: HUDSessionFilterMode = .all
     @State private var filterText: String = ""
@@ -516,11 +517,29 @@ struct AgentCockpitHUDView: View {
             activeCodex.setCockpitConsumerVisible(true, consumerID: activeConsumerID)
             activeCodex.setCockpitWindowVisible(true, consumerID: activeConsumerID)
             UserDefaults.standard.set(true, forKey: PreferencesKey.Cockpit.hudOpen)
+            CodexUsageModel.shared.setAppActive(NSApp.isActive)
+            CodexUsageModel.shared.setCockpitVisible(true, pinned: isPinned)
+            ClaudeUsageModel.shared.setAppActive(NSApp.isActive)
+            ClaudeUsageModel.shared.setCockpitVisible(true, pinned: isPinned)
         }
         .onDisappear {
             activeCodex.setCockpitWindowVisible(false, consumerID: activeConsumerID)
             activeCodex.setCockpitConsumerVisible(false, consumerID: activeConsumerID)
             UserDefaults.standard.set(false, forKey: PreferencesKey.Cockpit.hudOpen)
+            CodexUsageModel.shared.setCockpitVisible(false, pinned: false)
+            ClaudeUsageModel.shared.setCockpitVisible(false, pinned: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            CodexUsageModel.shared.setAppActive(true)
+            ClaudeUsageModel.shared.setAppActive(true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            CodexUsageModel.shared.setAppActive(false)
+            ClaudeUsageModel.shared.setAppActive(false)
+        }
+        .onChange(of: isPinned) { _, newPinned in
+            CodexUsageModel.shared.setCockpitVisible(true, pinned: newPinned)
+            ClaudeUsageModel.shared.setCockpitVisible(true, pinned: newPinned)
         }
     }
 
@@ -723,6 +742,10 @@ struct AgentCockpitHUDView: View {
             .background(Color.clear)
             .disabled(!activeEnabled)
 
+            if showLimits {
+                HUDLimitsBar()
+            }
+
             hiddenShortcuts(renderedRows: displayState.renderedRows)
         }
     }
@@ -762,7 +785,12 @@ struct AgentCockpitHUDView: View {
                         guard activeEnabled else { return }
                         sessionFilterMode = .active
                     } label: {
-                        Text("Active \(activeCount)")
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(Color(hex: "30d158"))
+                                .frame(width: 7, height: 7)
+                            Text("\(activeCount)")
+                        }
                     }
                     .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .active, kind: .active))
                     .help("Show active working sessions only.")
@@ -771,7 +799,12 @@ struct AgentCockpitHUDView: View {
                         guard activeEnabled else { return }
                         sessionFilterMode = .idle
                     } label: {
-                        Text("Waiting \(idleCount)")
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(Color(hex: "ffb340"))
+                                .frame(width: 7, height: 7)
+                            Text("\(idleCount)")
+                        }
                     }
                     .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .idle, kind: .idle))
                     .help("Show waiting sessions only.")
@@ -792,15 +825,6 @@ struct AgentCockpitHUDView: View {
                     .help("Open Agent Sessions")
 
                     Button {
-                        isPinned.toggle()
-                    } label: {
-                        Image(systemName: isPinned ? "pin.fill" : "pin")
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    .buttonStyle(HUDIconButtonStyle(isOn: isPinned, tint: isPinned ? .orange : nil))
-                    .help(isPinned ? "Unpin — stop keeping on top" : "Pin — keep above all windows")
-
-                    Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             isCompact.toggle()
                         }
@@ -810,6 +834,15 @@ struct AgentCockpitHUDView: View {
                     }
                     .buttonStyle(HUDIconButtonStyle(isOn: isCompact, tint: nil))
                     .help(isCompact ? "Show filter and navigation" : "Compact mode")
+
+                    Button {
+                        isPinned.toggle()
+                    } label: {
+                        Image(systemName: isPinned ? "pin.fill" : "pin")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(HUDIconButtonStyle(isOn: isPinned, tint: isPinned ? .orange : nil))
+                    .help(isPinned ? "Unpin — stop keeping on top" : "Pin — keep above all windows")
                 }
             }
             .padding(.horizontal, 14)
@@ -2690,6 +2723,272 @@ private struct CockpitScrollViewScrollerConfigurator: NSViewRepresentable {
         }
     }
 }
+
+// MARK: - HUD Limits Bar
+
+private struct HUDLimitsProviderEntry {
+    let source: UsageTrackingSource
+    let fiveHourLeft: Int
+    let weekLeft: Int
+    let fiveHourResetText: String
+    let weekResetText: String
+}
+
+/// An isolated view that observes usage models independently so that
+/// polling updates don't cause the entire AgentCockpitHUDView to re-render.
+private struct HUDLimitsBar: View {
+    @EnvironmentObject private var codexUsageModel: CodexUsageModel
+    @EnvironmentObject private var claudeUsageModel: ClaudeUsageModel
+    @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled = false
+    @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled = false
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled = true
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
+    @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
+
+    private var entries: [HUDLimitsProviderEntry] {
+        var out: [HUDLimitsProviderEntry] = []
+        if codexAgentEnabled && codexUsageEnabled {
+            out.append(HUDLimitsProviderEntry(
+                source: .codex,
+                fiveHourLeft: codexUsageModel.fiveHourRemainingPercent,
+                weekLeft: codexUsageModel.weekRemainingPercent,
+                fiveHourResetText: codexUsageModel.fiveHourResetText,
+                weekResetText: codexUsageModel.weekResetText
+            ))
+        }
+        if claudeAgentEnabled && claudeUsageEnabled {
+            out.append(HUDLimitsProviderEntry(
+                source: .claude,
+                fiveHourLeft: claudeUsageModel.sessionRemainingPercent,
+                weekLeft: claudeUsageModel.weekAllModelsRemainingPercent,
+                fiveHourResetText: claudeUsageModel.sessionResetText,
+                weekResetText: claudeUsageModel.weekAllModelsResetText
+            ))
+        }
+        return out
+    }
+
+    var body: some View {
+        if entries.isEmpty {
+            EmptyView()
+        } else {
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.10))
+                    .frame(height: 0.5)
+                HUDLimitsBarContent(entries: entries, mode: mode, reduceMotion: reduceMotion)
+                    .frame(height: 22)
+                    .clipped()
+            }
+        }
+    }
+}
+
+private struct HUDLimitsBarContent: View {
+    let entries: [HUDLimitsProviderEntry]
+    let mode: UsageDisplayMode
+    let reduceMotion: Bool
+
+    var body: some View {
+        HUDLimitsMarquee(reduceMotion: reduceMotion) {
+            HStack(spacing: 10) {
+                ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                    if index > 0 {
+                        Text("|")
+                            .foregroundStyle(Color.primary.opacity(0.25))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    }
+                    HUDLimitsProviderText(entry: entry, mode: mode)
+                }
+            }
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 10)
+        }
+    }
+}
+
+private struct HUDLimitsProviderText: View {
+    let entry: HUDLimitsProviderEntry
+    let mode: UsageDisplayMode
+    @Environment(\.colorScheme) private var colorScheme
+
+    private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
+
+    private func pctColor(_ left: Int) -> Color {
+        if left <= 10 { return .red }
+        if left < 30 { return Color.orange }
+        return .primary
+    }
+
+    private func fiveHourResetLabel() -> String? {
+        guard entry.fiveHourLeft < 30 else { return nil }
+        let date = UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText)
+        return formatRelativeTimeUntil(date)
+    }
+
+    private func weekResetLabel() -> String? {
+        guard entry.weekLeft < 30 else { return nil }
+        let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText)
+        return formatWeeklyReset(date)
+    }
+
+    // Matches CockpitFooterView.QuotaWidget.formatRelativeTimeUntil exactly
+    private func formatRelativeTimeUntil(_ date: Date?, now: Date = Date()) -> String? {
+        guard let date else { return nil }
+        let interval = max(0, date.timeIntervalSince(now))
+        if interval == 0 { return nil }
+        if interval < 60 { return "<1m" }
+        let totalMinutes = Int(ceil(interval / 60.0))
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours <= 0 { return "\(minutes)m" }
+        if minutes <= 0 { return "\(hours)h" }
+        return "\(hours)h \(minutes)m"
+    }
+
+    // Matches CockpitFooterView.QuotaWidget.formatWeeklyReset exactly
+    private func formatWeeklyReset(_ date: Date?, now: Date = Date()) -> String? {
+        guard let date else { return nil }
+        let interval = date.timeIntervalSince(now)
+        guard interval > 0 else { return nil }
+        if interval < 24 * 60 * 60 {
+            return hudWeeklyResetFormatter.string(from: date)
+        }
+        return AppDateFormatting.weekdayAbbrev(date)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Provider icon — matches CockpitFooterView ProviderIcon exactly
+            if entry.source == .claude {
+                Image("FooterIconClaude")
+                    .renderingMode(.original)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+            } else {
+                Image("FooterIconCodex")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+            }
+
+            HStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    HStack(spacing: 0) {
+                        Text("5h: ")
+                        Text("\(pct(entry.fiveHourLeft))%")
+                            .foregroundStyle(pctColor(entry.fiveHourLeft))
+                    }
+                    if let r = fiveHourResetLabel() {
+                        Text("↻ \(r)")
+                    }
+                }
+                Text("|").foregroundStyle(Color.primary.opacity(0.25))
+                HStack(spacing: 4) {
+                    HStack(spacing: 0) {
+                        Text("Wk: ")
+                        Text("\(pct(entry.weekLeft))%")
+                            .foregroundStyle(pctColor(entry.weekLeft))
+                    }
+                    if let r = weekResetLabel() {
+                        Text("↻ \(r)")
+                    }
+                }
+            }
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .foregroundStyle(Color.primary)
+        }
+    }
+}
+
+private let hudWeeklyResetFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = .current
+    f.timeZone = .autoupdatingCurrent
+    f.dateFormat = "HH:mm"
+    return f
+}()
+
+// MARK: - Marquee
+
+private struct HUDLimitsMarquee<Content: View>: View {
+    let reduceMotion: Bool
+    @ViewBuilder let content: () -> Content
+
+    @State private var contentWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var offset: CGFloat = 0
+
+    private let speed: CGFloat = 25  // pt per second
+    private let gap: CGFloat = 60    // gap before loop repeats
+
+    private var needsScroll: Bool {
+        !reduceMotion && contentWidth > 0 && containerWidth > 0 && contentWidth > containerWidth
+    }
+    private var loopWidth: CGFloat { contentWidth + gap }
+    // Task ID — restart animation whenever dimensions or motion preference change
+    private var taskID: String { "\(contentWidth)-\(containerWidth)-\(reduceMotion)" }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                // Render path also measures content width via background GeometryReader,
+                // eliminating the need for a separate hidden copy.
+                if needsScroll {
+                    HStack(spacing: 0) {
+                        content()
+                            .background(GeometryReader { inner in
+                                Color.clear.preference(key: HUDLimitsWidthKey.self,
+                                                       value: inner.size.width)
+                            })
+                        Spacer(minLength: gap)
+                        content()
+                    }
+                    .offset(x: offset)
+                } else {
+                    content()
+                        .background(GeometryReader { inner in
+                            Color.clear.preference(key: HUDLimitsWidthKey.self,
+                                                   value: inner.size.width)
+                        })
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
+            .onPreferenceChange(HUDLimitsWidthKey.self) { w in contentWidth = w }
+            .onAppear { containerWidth = geo.size.width }
+            .onChange(of: geo.size.width) { _, w in containerWidth = w }
+        }
+        .task(id: taskID) {
+            // Snap to start without animation, cancelling any prior repeatForever.
+            offset = 0
+            guard needsScroll else { return }
+            // One layout pass before kicking off the animation.
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            withAnimation(.linear(duration: Double(loopWidth) / Double(speed))
+                .repeatForever(autoreverses: false)) {
+                offset = -loopWidth
+            }
+        }
+    }
+}
+
+private struct HUDLimitsWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+// MARK: - HUD button style
 
 private struct HUDIconButtonStyle: ButtonStyle {
     let isOn: Bool

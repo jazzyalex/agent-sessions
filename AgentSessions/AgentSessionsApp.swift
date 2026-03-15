@@ -410,6 +410,8 @@ struct AgentSessionsApp: App {
                 opencodeIndexer: opencodeIndexer
             )
                 .environmentObject(activeCodexSessions)
+                .environmentObject(codexUsageModel)
+                .environmentObject(claudeUsageModel)
                 .background(WindowOpenRegistrationView())
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
