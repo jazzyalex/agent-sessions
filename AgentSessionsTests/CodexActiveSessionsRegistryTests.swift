@@ -2608,6 +2608,114 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         return p
     }
 
+    func testMergeMetadata_doesNotInheritLoserGUIDWhenWinnerHasTTY() {
+        // Winner has a TTY but no itermSessionId; loser has a GUID but no TTY.
+        // The loser's GUID belongs to a different terminal session — it must not be inherited,
+        // because the two-pass AppleScript will correctly use TTY-based focusing for the winner.
+        let winner = makeMappedRow(tty: "/dev/ttys010", itermSessionId: nil)
+        let loser  = makeMappedRow(tty: nil, itermSessionId: "GUID-FROM-OTHER-SESSION")
+        let merged = AgentCockpitHUDView.mergeMetadata(into: winner, from: loser)
+        XCTAssertNil(merged.itermSessionId)
+        XCTAssertEqual(merged.tty, "/dev/ttys010")
+    }
+
+    func testMergeMetadata_inheritsLoserTerminalIdentityWhenWinnerHasNeither() {
+        // Winner has neither TTY nor GUID; loser has both. The loser is the sole source
+        // of terminal identity so both should be inherited together.
+        let winner = makeMappedRow(tty: nil, itermSessionId: nil)
+        let loser  = makeMappedRow(tty: "/dev/ttys020", itermSessionId: "GUID-LOSER")
+        let merged = AgentCockpitHUDView.mergeMetadata(into: winner, from: loser)
+        XCTAssertEqual(merged.itermSessionId, "GUID-LOSER")
+        XCTAssertEqual(merged.tty, "/dev/ttys020")
+    }
+
+    func testMergeMetadata_winnerGUIDTakesPrecedenceOverLoser() {
+        // Winner already has both TTY and GUID — loser values must not override either.
+        let winner = makeMappedRow(tty: "/dev/ttys030", itermSessionId: "GUID-WINNER")
+        let loser  = makeMappedRow(tty: "/dev/ttys031", itermSessionId: "GUID-LOSER")
+        let merged = AgentCockpitHUDView.mergeMetadata(into: winner, from: loser)
+        XCTAssertEqual(merged.itermSessionId, "GUID-WINNER")
+        XCTAssertEqual(merged.tty, "/dev/ttys030")
+    }
+
+    // MARK: - mergeMetadata helpers
+
+    private func makeMappedRow(tty: String?, itermSessionId: String?) -> LegacyMappedRow {
+        LegacyMappedRow(
+            id: UUID().uuidString,
+            source: .claude,
+            title: "Test",
+            liveState: .openIdle,
+            lastSeenAt: nil,
+            repo: "",
+            date: nil,
+            focusURL: nil,
+            itermSessionId: itermSessionId,
+            tty: tty,
+            termProgram: nil,
+            tabTitle: nil,
+            resolvedSessionID: nil,
+            sessionID: nil,
+            logPath: nil,
+            workingDirectory: nil,
+            lastActivityAt: nil,
+            idleReason: nil
+        )
+    }
+
+    func testShouldSuppressTransientEmptyPublish_suppressesWhenRecentlyVisibleEvenIfCurrentlyHidden() {
+        // When cockpit was recently visible but is now hidden (e.g. user switched apps),
+        // an empty publish should still be suppressed to prevent a "No sessions" flash.
+        XCTAssertTrue(
+            CodexActiveSessionsModel.shouldSuppressTransientEmptyPublish(
+                ui: [],
+                cockpitVisible: false,
+                cockpitRecentlyVisible: true,
+                didProbeProcesses: false,
+                didProbeITerm: false,
+                registryHadPresences: false
+            )
+        )
+
+        // When cockpit was neither visible nor recently visible, empty publish must not be suppressed.
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldSuppressTransientEmptyPublish(
+                ui: [],
+                cockpitVisible: false,
+                cockpitRecentlyVisible: false,
+                didProbeProcesses: false,
+                didProbeITerm: false,
+                registryHadPresences: false
+            )
+        )
+    }
+
+    func testClaudeSessionLogCandidates_excludesFilesOlderThanRecencyCutoff() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let projectDir = tmp.appendingPathComponent("projects/-Users-test-MyProject")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let now = Date()
+        let recentFile = projectDir.appendingPathComponent("recent00-0000-0000-0000-000000000001.jsonl")
+        let oldFile    = projectDir.appendingPathComponent("oldfiled-0000-0000-0000-000000000002.jsonl")
+        for file in [recentFile, oldFile] {
+            try Data("{}".utf8).write(to: file)
+        }
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-30)],  ofItemAtPath: recentFile.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-120)], ofItemAtPath: oldFile.path)
+
+        // With a 60 s cutoff only the recently-modified file should be returned.
+        let candidates = CodexActiveSessionsModel.claudeSessionLogCandidates(
+            cwd: "/Users/test/MyProject",
+            claudeRoot: tmp.path,
+            recencyCutoff: now.addingTimeInterval(-60)
+        )
+
+        XCTAssertEqual(candidates.count, 1)
+        XCTAssertTrue(candidates[0].path.hasSuffix("recent00-0000-0000-0000-000000000001.jsonl"))
+    }
+
     @MainActor
     private func drainMainRunLoop() {
         let until = Date().addingTimeInterval(0.06)

@@ -152,6 +152,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     private(set) var lastRefreshAt: Date? = nil
 
     private var lastPublishedPresenceSignatures: [String: String] = [:]
+    private var lastCockpitVisibleAt: Date?
 
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled)
     private var enabled: Bool = true {
@@ -384,6 +385,9 @@ final class CodexActiveSessionsModel: ObservableObject {
             cockpitWindowVisibleConsumerIDs.insert(consumerID)
         } else {
             cockpitWindowVisibleConsumerIDs.remove(consumerID)
+        }
+        if hasVisibleCockpitWindow {
+            lastCockpitVisibleAt = Date()
         }
         guard hasVisibleCockpitWindow != hadVisibleCockpitWindow else { return }
         resetStablePollBackoff()
@@ -903,7 +907,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                 // Track assigned paths so two processes in the same cwd get different files.
                 if presence.sessionLogPath == nil, source == .claude, let cwd = info.cwd {
                     let root = claudeSessionRoots.first ?? (NSHomeDirectory() + "/.claude")
-                    let candidates = Self.claudeSessionLogCandidates(cwd: cwd, claudeRoot: root)
+                    let candidates = Self.claudeSessionLogCandidates(cwd: cwd, claudeRoot: root, recencyCutoff: now.addingTimeInterval(-60))
                     if let match = candidates.first(where: { !assignedLogPaths.contains($0.path) }) {
                         presence.sessionLogPath = match.path
                         presence.sessionId = match.sessionID
@@ -1188,9 +1192,11 @@ final class CodexActiveSessionsModel: ObservableObject {
 
         lastRefreshAt = now
 
+        let cockpitRecentlyVisible = lastCockpitVisibleAt.map { now.timeIntervalSince($0) < 10 } ?? false
         let shouldSuppressEmptyPublish = Self.shouldSuppressTransientEmptyPublish(
             ui: ui,
             cockpitVisible: isCockpitVisibleSnapshot || isPinnedCockpitVisibleSnapshot,
+            cockpitRecentlyVisible: cockpitRecentlyVisible,
             didProbeProcesses: probeResult.didProbeProcesses,
             didProbeITerm: probeResult.didProbeITerm,
             registryHadPresences: probeResult.registryHadPresences
@@ -1849,10 +1855,11 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     nonisolated static func shouldSuppressTransientEmptyPublish(ui: [CodexActivePresence],
                                                                 cockpitVisible: Bool,
+                                                                cockpitRecentlyVisible: Bool = false,
                                                                 didProbeProcesses: Bool,
                                                                 didProbeITerm: Bool,
                                                                 registryHadPresences: Bool) -> Bool {
-        guard cockpitVisible else { return false }
+        guard cockpitVisible || cockpitRecentlyVisible else { return false }
         guard ui.isEmpty else { return false }
         guard !registryHadPresences else { return true }
         return !(didProbeProcesses && didProbeITerm)
@@ -2086,14 +2093,12 @@ final class CodexActiveSessionsModel: ObservableObject {
             "if targetTTYBase starts with \"/dev/\" then set targetTTYBase to text 6 thru -1 of targetTTYBase",
             "tell application \"iTerm2\"",
             "activate",
+            // Pass 1: GUID match only — exact session, no ambiguity
+            "if targetGuid is not \"\" then",
             "repeat with w in windows",
             "repeat with t in tabs of w",
             "repeat with s in sessions of t",
-            "set sid to id of s",
-            "set stty to tty of s",
-            "set sttyBase to stty",
-            "if sttyBase starts with \"/dev/\" then set sttyBase to text 6 thru -1 of sttyBase",
-            "if ((targetGuid is not \"\" and sid is targetGuid) or (targetTTYBase is not \"\" and (stty is targetTTY or stty is targetTTYBase or sttyBase is targetTTYBase))) then",
+            "if id of s is targetGuid then",
             "try",
             "select w",
             "end try",
@@ -2106,6 +2111,29 @@ final class CodexActiveSessionsModel: ObservableObject {
             "end repeat",
             "end repeat",
             "end repeat",
+            "end if",
+            // Pass 2: TTY fallback — only reached when GUID is absent or stale
+            "if targetTTYBase is not \"\" then",
+            "repeat with w in windows",
+            "repeat with t in tabs of w",
+            "repeat with s in sessions of t",
+            "set stty to tty of s",
+            "set sttyBase to stty",
+            "if sttyBase starts with \"/dev/\" then set sttyBase to text 6 thru -1 of sttyBase",
+            "if (stty is targetTTY or stty is targetTTYBase or sttyBase is targetTTYBase) then",
+            "try",
+            "select w",
+            "end try",
+            "try",
+            "select t",
+            "end try",
+            "select s",
+            "return \"ok\"",
+            "end if",
+            "end repeat",
+            "end repeat",
+            "end repeat",
+            "end if",
             "end tell",
             "return \"not found\"",
             "end run"
@@ -3602,7 +3630,7 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     /// Scan the Claude project directory for JSONL session files, sorted newest-first.
     /// Used to infer session log paths when lsof can't find the file open.
-    nonisolated static func claudeSessionLogCandidates(cwd: String, claudeRoot: String) -> [(path: String, sessionID: String?)] {
+    nonisolated static func claudeSessionLogCandidates(cwd: String, claudeRoot: String, recencyCutoff: Date? = nil) -> [(path: String, sessionID: String?)] {
         let encoded = cwd.replacingOccurrences(of: "/", with: "-")
         let projectDir = URL(fileURLWithPath: claudeRoot)
             .appendingPathComponent("projects")
@@ -3623,6 +3651,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             guard ext == "jsonl" || ext == "ndjson" else { continue }
             guard file.lastPathComponent.lowercased() != "history.jsonl" else { continue }
             let mdate = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if let cutoff = recencyCutoff, mdate < cutoff { continue }
             candidates.append((file, mdate))
         }
 

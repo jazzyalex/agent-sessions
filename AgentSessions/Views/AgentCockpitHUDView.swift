@@ -192,7 +192,7 @@ struct HUDLiveSessionSummary: Equatable {
     let waitingCount: Int
 }
 
-private struct LegacyMappedRow: Identifiable {
+struct LegacyMappedRow: Identifiable {
     let id: String
     let source: SessionSource
     let title: String
@@ -2380,7 +2380,7 @@ struct AgentCockpitHUDView: View {
         return Self.mergeMetadata(into: existing, from: incoming)
     }
 
-    private static func mergeMetadata(into winner: LegacyMappedRow, from loser: LegacyMappedRow) -> LegacyMappedRow {
+    static func mergeMetadata(into winner: LegacyMappedRow, from loser: LegacyMappedRow) -> LegacyMappedRow {
         LegacyMappedRow(
             id: winner.id,
             source: winner.source,
@@ -2390,7 +2390,12 @@ struct AgentCockpitHUDView: View {
             repo: winner.repo,
             date: winner.date ?? loser.date,
             focusURL: winner.focusURL ?? loser.focusURL,
-            itermSessionId: winner.itermSessionId ?? loser.itermSessionId,
+            // iTerm session GUID and TTY must stay paired to the same terminal session.
+            // A winner with a TTY but no GUID should use TTY-based focusing (the two-pass
+            // AppleScript falls through to the TTY pass). Inheriting a GUID from the loser
+            // would be wrong — that GUID belongs to a different terminal session and would
+            // navigate to the wrong tab.
+            itermSessionId: winner.itermSessionId ?? (winner.tty == nil ? loser.itermSessionId : nil),
             tty: winner.tty ?? loser.tty,
             termProgram: winner.termProgram ?? loser.termProgram,
             tabTitle: winner.tabTitle ?? loser.tabTitle,
