@@ -39,6 +39,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.claudeProbeCleanupMode) var claudeProbeCleanupMode: String = "none" // none | auto
     // Debug: show probe sessions in lists
     @AppStorage(PreferencesKey.showSystemProbeSessions) var showSystemProbeSessions: Bool = false
+    @AppStorage(PreferencesKey.Cockpit.showProbeSessionsInHUD) var showProbeSessionsInHUD: Bool = false
     @State var showConfirmAutoDelete: Bool = false
     @State var showConfirmDeleteNow: Bool = false
     @State var showClaudeCleanupResult: Bool = false

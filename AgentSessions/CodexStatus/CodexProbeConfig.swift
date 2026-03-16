@@ -60,6 +60,12 @@ enum CodexProbeConfig {
         return false
     }
 
+    /// Returns true if the given path is the Codex probe working directory.
+    static func isProbeWorkingDirectory(_ path: String?) -> Bool {
+        guard let path, !path.isEmpty else { return false }
+        return normalizePath(path) == normalizePath(probeWorkingDirectory())
+    }
+
     private static func normalizePath(_ path: String) -> String {
         let expanded = (path as NSString).expandingTildeInPath
         return (expanded as NSString).standardizingPath

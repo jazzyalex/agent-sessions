@@ -479,7 +479,7 @@ actor CodexStatusService {
     private var lastAppliedEventTimestamp: Date? = nil
     private var lastParseWasStaleOrFailed: Bool = false
     private let unchangedParseSkipFreshnessSeconds: TimeInterval = 12 * 60
-    private let automaticProbeCooldownSeconds: TimeInterval = 20 * 60
+    private let automaticProbeCooldownSeconds: TimeInterval = 4 * 60 * 60
     private let preferredLogProbeCandidateLimit: Int = 8
     private let fallbackLogProbeCandidateLimit: Int = 32
     private let logTailReadMaxBytes: Int = 192 * 1024
@@ -984,6 +984,9 @@ actor CodexStatusService {
         merged.eventTimestamp = now
         snapshot = merged
         updateHandler(merged)
+        // Persist a freshness TTL so re-probing is blocked for 4 hours even across restarts
+        // and even if CodexProbeCleanup deletes the probe JSONL (leaving no recent event timestamp).
+        setFreshUntil(for: .codex, until: now.addingTimeInterval(4 * 3600))
         _ = CodexProbeCleanup.cleanupNowIfAuto()
     }
 
@@ -1116,6 +1119,13 @@ actor CodexStatusService {
                 _ = kill(process.processIdentifier, SIGKILL)
             }
             return false
+        }
+        // Belt-and-suspenders: even on clean script exit, verify the tmux server
+        // is gone. The shell EXIT trap should handle it, but may silently fail.
+        Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            await self.cleanupTmuxProbe(label: label, session: session)
         }
         return true
     }
@@ -1284,6 +1294,12 @@ actor CodexStatusService {
         _ = await runProcess(executable: tmuxPath,
                              arguments: ["-L", label, "kill-server"],
                              timeoutSeconds: 2)
+        // Remove orphaned socket files (parity with claude_usage_capture.sh)
+        let uid = getuid()
+        for root in ["/private/tmp/tmux-\(uid)", "/tmp/tmux-\(uid)"] {
+            let socketPath = "\(root)/\(label)"
+            try? FileManager.default.removeItem(atPath: socketPath)
+        }
     }
 
     private func tmuxPanePID(tmuxPath: String, label: String, session: String) async -> pid_t? {

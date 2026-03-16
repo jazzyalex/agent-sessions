@@ -301,6 +301,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     private var lookupIndexes: SessionLookupIndexes
     private var presences: [CodexActivePresence] = []
     private var isCompact: Bool
+    private var lastShowProbeInHUD: Bool = UserDefaults.standard.bool(forKey: PreferencesKey.Cockpit.showProbeSessionsInHUD)
     private var cancellables: Set<AnyCancellable> = []
     private var activeCancellable: AnyCancellable?
     private var rebuildScheduled: Bool = false
@@ -372,6 +373,18 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
                 scheduleRebuild()
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let showProbes = UserDefaults.standard.bool(forKey: PreferencesKey.Cockpit.showProbeSessionsInHUD)
+                if showProbes != self.lastShowProbeInHUD {
+                    self.lastShowProbeInHUD = showProbes
+                    self.scheduleRebuild()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     func bind(activeCodex: CodexActiveSessionsModel) {
@@ -417,6 +430,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         let activeCodex = activeCodex ?? self.activeCodex
         guard let activeCodex else { return }
         let now = Date()
+        let showProbes = UserDefaults.standard.bool(forKey: PreferencesKey.Cockpit.showProbeSessionsInHUD)
         let nextSnapshot = AgentCockpitHUDView.makeRowsSnapshot(
             codexSessions: codexSessions,
             claudeSessions: claudeSessions,
@@ -425,6 +439,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
             activeCodex: activeCodex,
             isCompact: isCompact,
             lookupIndexes: lookupIndexes,
+            showProbePresences: showProbes,
             now: now
         )
         if nextSnapshot != snapshot {
@@ -1608,8 +1623,15 @@ struct AgentCockpitHUDView: View {
     private static func displayableLiveSummaryPresences(from presences: [CodexActivePresence],
                                                         lookupIndexes: SessionLookupIndexes?) -> [CodexActivePresence] {
         let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
+        let showProbes = UserDefaults.standard.bool(forKey: PreferencesKey.Cockpit.showProbeSessionsInHUD)
         let filtered = presences.filter { presence in
             guard supportedSources.contains(presence.source) else { return false }
+            if !showProbes {
+                if CodexProbeConfig.isProbeWorkingDirectory(presence.workspaceRoot)
+                    || ClaudeProbeConfig.isProbeWorkingDirectory(presence.workspaceRoot) {
+                    return false
+                }
+            }
             let hasWorkspaceMatch = hasWorkspaceMatchForSummary(presence, lookupIndexes: lookupIndexes)
             return !Self.shouldHideUnresolvedPresencePlaceholder(
                 presence,
@@ -1691,6 +1713,7 @@ struct AgentCockpitHUDView: View {
                                              activeCodex: CodexActiveSessionsModel,
                                              isCompact: Bool,
                                              lookupIndexes: SessionLookupIndexes,
+                                             showProbePresences: Bool = false,
                                              now: Date = Date()) -> HUDRowsSnapshot {
         let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
         let allSessions = codexSessions + claudeSessions + opencodeSessions
@@ -1733,6 +1756,12 @@ struct AgentCockpitHUDView: View {
         mappedRows.reserveCapacity(presences.count)
         for presence in presences {
             guard supportedSources.contains(presence.source) else { continue }
+            if !showProbePresences {
+                if CodexProbeConfig.isProbeWorkingDirectory(presence.workspaceRoot)
+                    || ClaudeProbeConfig.isProbeWorkingDirectory(presence.workspaceRoot) {
+                    continue
+                }
+            }
             let logNorm = presence.sessionLogPath.map(CodexActiveSessionsModel.normalizePath)
             let presenceKey = CodexActiveSessionsModel.presenceKey(for: presence)
 
