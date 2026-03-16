@@ -1715,6 +1715,19 @@ struct AgentCockpitHUDView: View {
             )
         }
 
+        // Build per-workspace session pools so multiple presences in the same
+        // directory can each resolve to a different session (sorted newest-first).
+        var workspaceSessionPool: [String: [Session]] = [:]
+        for session in allSessions where supportedSources.contains(session.source) {
+            if let cwd = Self.normalizedWorkingDirectory(session.cwd), !cwd.isEmpty {
+                let key = Self.workspaceLookupKey(source: session.source, normalizedPath: cwd)
+                workspaceSessionPool[key, default: []].append(session)
+            }
+        }
+        for key in workspaceSessionPool.keys {
+            workspaceSessionPool[key]?.sort { ($0.modifiedAt) > ($1.modifiedAt) }
+        }
+
         var claimedSessionIDs: Set<String> = []
         var mappedRows: [LegacyMappedRow] = []
         mappedRows.reserveCapacity(presences.count)
@@ -1732,12 +1745,24 @@ struct AgentCockpitHUDView: View {
                 ?? fallbackSessionByPresenceKey[presenceKey]
 
             // Prevent multiple workspace-only matches from claiming the same session.
-            // Without a log path or session ID, the workspace match is ambiguous —
-            // a second presence in the same directory is likely a different session.
+            // When the first-choice workspace match is already claimed, try to find
+            // another unclaimed session in the same workspace from the pool.
             let session: Session?
             if let candidate, !isDefinitiveMatch {
                 if claimedSessionIDs.contains(candidate.id) {
-                    session = nil
+                    // First choice taken — find another session in the same workspace
+                    if let workspace = Self.normalizedWorkingDirectory(presence.workspaceRoot), !workspace.isEmpty {
+                        let poolKey = Self.workspaceLookupKey(source: presence.source, normalizedPath: workspace)
+                        let alternate = workspaceSessionPool[poolKey]?.first { !claimedSessionIDs.contains($0.id) }
+                        if let alternate {
+                            claimedSessionIDs.insert(alternate.id)
+                            session = alternate
+                        } else {
+                            session = nil
+                        }
+                    } else {
+                        session = nil
+                    }
                 } else {
                     claimedSessionIDs.insert(candidate.id)
                     session = candidate
