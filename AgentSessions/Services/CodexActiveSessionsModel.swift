@@ -1102,11 +1102,16 @@ final class CodexActiveSessionsModel: ObservableObject {
             Self.filterSupportedPresences(probeResult.loaded)
         )
         if probeResult.didProbeITerm {
-            // Treat empty probe results as authoritative so stale titles do not stick.
             cachedITermPresences = probeResult.itermPresences
             self.lastITermProbeAt = now
-            cachedITermTabTitleByTTY = probeResult.itermTabTitleByTTY
-            cachedITermTabTitleBySessionGuid = probeResult.itermTabTitleBySessionGuid
+            // Only update cached title maps when the probe returned data.
+            // An empty result is most likely a transient AppleScript failure, not a genuine
+            // "no iTerm sessions" state. Caching empty maps overwrites valid titles for all
+            // subsequent enrichment passes, producing a brief "—" flash for every Cockpit row.
+            if !probeResult.itermTabTitleByTTY.isEmpty {
+                cachedITermTabTitleByTTY = probeResult.itermTabTitleByTTY
+                cachedITermTabTitleBySessionGuid = probeResult.itermTabTitleBySessionGuid
+            }
         } else if shouldUseITermSnapshot {
             cachedITermPresences = cachedITermPresences.filter { !$0.isStale(now: now, ttl: ttl) }
         }
