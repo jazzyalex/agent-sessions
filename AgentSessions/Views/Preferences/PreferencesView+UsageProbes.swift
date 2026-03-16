@@ -249,6 +249,9 @@ extension PreferencesView {
 	            Toggle("Show system probe sessions for debugging", isOn: $showSystemProbeSessions)
 	                .toggleStyle(.switch)
 	                .help("Reveal probe sessions in the Sessions list. Leave OFF for normal use to avoid noise.")
+	            Toggle("Show probe sessions in Cockpit HUD (debug)", isOn: $showProbeSessionsInHUD)
+	                .toggleStyle(.switch)
+	                .help("Reveal internal probe sessions in the Cockpit HUD. Leave OFF for normal use to avoid noise.")
 
 	        }
 	        .onReceive(NotificationCenter.default.publisher(for: CodexProbeCleanup.didRunCleanupNotification)) { note in

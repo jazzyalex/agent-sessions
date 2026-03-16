@@ -38,6 +38,30 @@ PANE_PID=""
 
 error_json() { local code="$1"; local hint="$2"; echo "{\"ok\":false,\"error\":\"$code\",\"hint\":\"$hint\"}"; }
 
+is_managed_probe_label() {
+    local label="$1"
+    # Accept any 12-char alphanumeric suffix after "as-cx-".
+    # Swift-generated tokens start with alpha and end with digit, but bash-generated
+    # UUID fallbacks may start with a hex digit — so we match the full set here.
+    # The "as-cx-" prefix itself is the meaningful guard against removing unrelated sockets.
+    [[ "$label" =~ ^as-cx-[A-Za-z0-9]{12}$ ]]
+}
+
+remove_managed_socket_files() {
+    local label="$1"
+    if ! is_managed_probe_label "$label"; then return; fi
+    local uid
+    uid="$(id -u 2>/dev/null || echo "")"
+    if [[ -z "$uid" ]]; then return; fi
+    local roots=("/private/tmp/tmux-$uid" "/tmp/tmux-$uid")
+    for root in "${roots[@]}"; do
+        local socket_path="${root}/${label}"
+        if [[ -e "$socket_path" ]]; then
+            rm -f -- "$socket_path" 2>/dev/null || true
+        fi
+    done
+}
+
 cleanup() {
   set +e
   set +o pipefail
@@ -63,6 +87,7 @@ cleanup() {
     "$tmux_cmd" -L "$LABEL" kill-session -t "$SESSION" 2>/dev/null || true
     "$tmux_cmd" -L "$LABEL" kill-server 2>/dev/null || true
   fi
+  remove_managed_socket_files "$LABEL"
 }
 trap cleanup EXIT INT TERM HUP
 
