@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-03-16
+
+### Added
+- Agent Cockpit HUD: Usage limits footer now shows Claude API reset time and rate-limit state, with idle reason classification surfaced on the status dot.
+- Agent Cockpit HUD: Claude OAuth usage tracking with tmux socket fallback for probe-less environments.
+
+### Fixed
+- Agent Cockpit HUD: Eliminated transient "—" flash when iTerm2 probe returns an empty result.
+- Agent Cockpit: Three probe stability fixes — tmux socket leak on teardown, excessive re-probe on focus change, and HUD visibility loss after backgrounding.
+- Agent Cockpit HUD: Three display fixes — stale session titles after tab switch, empty-state flash on first load, and wrong-tab focus on direct open.
+- Session discovery: Prevent two processes sharing the same working directory from claiming the same session log.
+- Session discovery: Infer Claude session log from project directory when `lsof` socket lookup misses it.
+- Session discovery: Assign distinct sessions to multiple presences in the same workspace.
+- Session discovery (Claude Code): Improved Cockpit HUD session matching for Claude Code processes.
+- Session discovery (Claude Code): Use `fullReconcile` on Cockpit-only launch to surface sessions that skipped the normal indexing path.
+- Agent Cockpit HUD: Bootstrap indexers from Cockpit and show a spinner while usage limits are loading.
+- Usage probe: Parse ISO 8601 reset timestamps correctly and display reset time even when the limit data is stale.
+- Usage probe: Enforce a 5-minute minimum on `429 Retry-After` to prevent rapid retry loops.
+
 ## [3.2] - 2026-03-13
 
 ### Added
