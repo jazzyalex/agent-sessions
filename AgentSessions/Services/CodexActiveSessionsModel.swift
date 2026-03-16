@@ -823,18 +823,13 @@ final class CodexActiveSessionsModel: ObservableObject {
             sessionsRoots: codexSessionRoots,
             timeout: timeout
         )
-        let claudeInfos = await discoverLsofPIDInfos(
-            generation: generation,
-            source: .claude,
-            queryArguments: ["-w", "-a", "-c", "claude", "-u", user, "-nP", "-F", "pftn"],
-            sessionsRoots: claudeSessionRoots,
-            timeout: timeout
-        )
-        let claudeCommandInfos: [Int: LsofPIDInfo]
+        // Claude Code sets process.title to its version string (e.g. "2.1.76"),
+        // so `lsof -c claude` never matches. Discover via ps-based PID query only.
+        let claudeInfos: [Int: LsofPIDInfo]
         if claudeCommandPIDs.isEmpty {
-            claudeCommandInfos = [:]
+            claudeInfos = [:]
         } else {
-            claudeCommandInfos = await discoverLsofPIDInfos(
+            claudeInfos = await discoverLsofPIDInfos(
                 generation: generation,
                 source: .claude,
                 queryArguments: ["-w", "-a", "-p", claudeCommandPIDs.map(String.init).joined(separator: ","), "-u", user, "-nP", "-F", "pftn"],
@@ -867,7 +862,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         }
         let pidInfoBySource: [SessionSource: [Int: LsofPIDInfo]] = [
             .codex: codexInfos,
-            .claude: Self.mergePIDInfos(claudeInfos, with: claudeCommandInfos),
+            .claude: claudeInfos,
             .opencode: Self.mergePIDInfos(opencodeInfos, with: opencodeCommandInfos)
         ]
         let allPIDs = Array(pidInfoBySource.values.flatMap(\.keys)).sorted()
