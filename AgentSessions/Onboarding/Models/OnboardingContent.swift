@@ -73,7 +73,7 @@ extension OnboardingContent {
         OnboardingContent(
             versionMajorMinor: majorMinor,
             kind: .updateTour,
-            screens: fullTourScreens()
+            screens: release3UpdateTourScreens()
         )
     }
 
@@ -105,17 +105,17 @@ extension OnboardingContent {
             Screen(
                 symbolName: "sparkles.tv",
                 title: "Agent Cockpit (Beta)",
-                body: "Open a live HUD for active sessions in iTerm2. Beta scope currently covers Codex CLI and Claude Code."
-            ),
-            Screen(
-                symbolName: "list.bullet",
-                title: "Work With Sessions",
-                body: "Quick actions to navigate and manage your work."
+                body: "Open a live HUD for active sessions in iTerm2. Beta scope currently covers Codex CLI, Claude Code, and OpenCode."
             ),
             Screen(
                 symbolName: "chart.bar.xaxis",
                 title: "Analytics & Usage",
                 body: "See your coding patterns and track usage limits."
+            ),
+            Screen(
+                symbolName: "heart.text.square",
+                title: "Feedback & Community Support",
+                body: "Share feedback in the Google Form, star the GitHub repository, and support ongoing development via GitHub Sponsors or Buy Me a Coffee."
             )
         ]
     }
@@ -150,7 +150,7 @@ extension OnboardingContent {
             Screen(
                 symbolName: "sparkles.tv",
                 title: "Agent Cockpit (Beta)",
-                body: "Live session HUD for iTerm2, currently scoped to Codex CLI and Claude Code."
+                body: "Live session HUD for iTerm2, currently scoped to Codex CLI, Claude Code, and OpenCode."
             ),
             Screen(
                 symbolName: "heart.text.square",
