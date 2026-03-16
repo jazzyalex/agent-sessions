@@ -1715,19 +1715,39 @@ struct AgentCockpitHUDView: View {
             )
         }
 
-        let mappedRows: [LegacyMappedRow] = presences.compactMap { presence in
-            guard supportedSources.contains(presence.source) else { return nil }
+        var claimedSessionIDs: Set<String> = []
+        var mappedRows: [LegacyMappedRow] = []
+        mappedRows.reserveCapacity(presences.count)
+        for presence in presences {
+            guard supportedSources.contains(presence.source) else { continue }
             let logNorm = presence.sessionLogPath.map(CodexActiveSessionsModel.normalizePath)
             let presenceKey = CodexActiveSessionsModel.presenceKey(for: presence)
 
-            let session = logNorm.flatMap { normalized in
+            let resolvedByLogOrID = logNorm.flatMap { normalized in
                 lookupIndexes.byLogPath[CodexActiveSessionsModel.logLookupKey(source: presence.source, normalizedPath: normalized)]
             } ?? Self.resolveBySessionID(presence.sessionId, source: presence.source, lookupIndexes: lookupIndexes)
+            let isDefinitiveMatch = resolvedByLogOrID != nil
+            let candidate = resolvedByLogOrID
                 ?? Self.resolveByWorkspace(presence.workspaceRoot, source: presence.source, lookupIndexes: lookupIndexes)
                 ?? fallbackSessionByPresenceKey[presenceKey]
 
+            // Prevent multiple workspace-only matches from claiming the same session.
+            // Without a log path or session ID, the workspace match is ambiguous —
+            // a second presence in the same directory is likely a different session.
+            let session: Session?
+            if let candidate, !isDefinitiveMatch {
+                if claimedSessionIDs.contains(candidate.id) {
+                    session = nil
+                } else {
+                    claimedSessionIDs.insert(candidate.id)
+                    session = candidate
+                }
+            } else {
+                session = candidate
+            }
+
             if Self.shouldHideUnresolvedPresencePlaceholder(presence, resolvedSession: session, lookupIndexes: lookupIndexes) {
-                return nil
+                continue
             }
 
             let title = session?.title
@@ -1748,7 +1768,7 @@ struct AgentCockpitHUDView: View {
                 ?? presence.tty
                 ?? "\(presence.sessionLogPath ?? "unknown")|\(presence.pid ?? -1)")
 
-            return LegacyMappedRow(
+            mappedRows.append(LegacyMappedRow(
                 id: stableID,
                 source: presence.source,
                 title: title,
@@ -1767,7 +1787,7 @@ struct AgentCockpitHUDView: View {
                 workingDirectory: session?.cwd ?? presence.workspaceRoot,
                 lastActivityAt: lastActivityAt,
                 idleReason: idleReason
-            )
+            ))
         }
 
         let deduped = Self.dedupeRowsByResolvedSession(mappedRows)

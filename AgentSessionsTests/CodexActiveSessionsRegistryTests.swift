@@ -430,6 +430,35 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testClaudeSessionDiscoveredViaPIDBasedLsofQuery() {
+        // Simulates the output from `lsof -p {PID}` (the ps fallback path),
+        // NOT from `lsof -c claude` (which returns nothing because Claude Code
+        // sets process.title to its version string).
+        let root = "/Users/test/.claude"
+        let text = """
+        p42001
+        fcwd
+        tDIR
+        n/Users/test/Repository/MyProject
+        f0
+        tCHR
+        n/dev/ttys015
+        f26w
+        tREG
+        n/Users/test/.claude/projects/-Users-test-Repository-MyProject/abc12345-6789-abcd-ef01-234567890abc.jsonl
+        """
+
+        let out = CodexActiveSessionsModel.parseLsofMachineOutput(text, sessionsRoots: [root], source: .claude)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[42001]?.cwd, "/Users/test/Repository/MyProject")
+        XCTAssertEqual(out[42001]?.tty, "/dev/ttys015")
+        XCTAssertEqual(
+            out[42001]?.sessionLogPath,
+            "/Users/test/.claude/projects/-Users-test-Repository-MyProject/abc12345-6789-abcd-ef01-234567890abc.jsonl"
+        )
+        XCTAssertEqual(out[42001]?.sessionID, "abc12345-6789-abcd-ef01-234567890abc")
+    }
+
     func testParseLsofMachineOutput_matchesClaudeSessionWhenRootNormalizationDiffers() throws {
         let lexicalRoot = URL(fileURLWithPath: "/var/tmp", isDirectory: true).standardized.path
         let canonicalRoot = URL(fileURLWithPath: "/var/tmp", isDirectory: true).standardizedFileURL.path
