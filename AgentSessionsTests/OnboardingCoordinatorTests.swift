@@ -95,12 +95,16 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(defaults.onboardingLastSeenAppMajorMinor, "2.12")
     }
 
-    func testReleaseThreeFullTourIncludesAgentCockpitAsThirdScreen() {
+    func testFullTourScreenSequence() {
         let fullTour = OnboardingContent.fullTour(for: "3.0")
         let titles = fullTour.screens.map(\.title)
 
         XCTAssertEqual(titles.count, 5)
+        XCTAssertEqual(titles[0], "Sessions Found")
+        XCTAssertEqual(titles[1], "Connect Your Agents")
         XCTAssertEqual(titles[2], "Agent Cockpit (Beta)")
+        XCTAssertEqual(titles[3], "Analytics & Usage")
+        XCTAssertEqual(titles[4], "Feedback & Community Support")
     }
 
     func testReleaseThreeUpdateCatalogHasTwoScreenTour() {
@@ -132,6 +136,15 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertTrue(result.isPresented)
         XCTAssertEqual(result.kind, .updateTour)
         XCTAssertEqual(result.screens, 2)
+    }
+
+    func testFallbackUpdateTourLeadsWithCockpit() {
+        let fallback = OnboardingContent.fallbackUpdateTour(for: "9.9")
+
+        XCTAssertEqual(fallback.kind, .updateTour)
+        XCTAssertEqual(fallback.screens.count, 2)
+        XCTAssertEqual(fallback.screens.first?.title, "Agent Cockpit (Beta)")
+        XCTAssertEqual(fallback.screens.last?.title, "Feedback & Community Support")
     }
 
     func testSkipRecordsVersionAndDismisses() async {

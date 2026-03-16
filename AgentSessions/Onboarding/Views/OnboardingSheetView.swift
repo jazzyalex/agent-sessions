@@ -51,7 +51,7 @@ struct OnboardingSheetView: View {
     private var slides: [OnboardingSlide] {
         switch content.kind {
         case .fullTour:
-            return [.sessionsFound, .connectAgents, .agentCockpit, .workWithSessions, .analyticsUsage]
+            return [.sessionsFound, .connectAgents, .agentCockpit, .analyticsUsage, .feedbackSupport]
         case .updateTour:
             return [.agentCockpit, .feedbackSupport]
         }
@@ -193,13 +193,6 @@ struct OnboardingSheetView: View {
                 }
             }
 
-            if let onboardingFeedbackFormURL {
-                FeedbackRequestCard(
-                    palette: palette,
-                    formURL: onboardingFeedbackFormURL,
-                    repositoryURL: githubRepositoryURL
-                )
-            }
         }
     }
 
@@ -250,8 +243,8 @@ struct OnboardingSheetView: View {
                 iconGradient: palette.iconGradientBlue,
                 title: "Agent Cockpit (Beta)",
                 subtitle: isUpdateTour
-                    ? "A focused live HUD for active iTerm2 sessions from Codex CLI and Claude Code."
-                    : "A focused live HUD for active iTerm2 sessions from Codex CLI and Claude Code."
+                    ? "A focused live HUD for active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode."
+                    : "A focused live HUD for active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode."
             )
 
             GeometryReader { rowGeometry in
@@ -1237,7 +1230,7 @@ private struct CockpitBetaScopeRow: View {
                     + Text("iTerm2")
                         .fontWeight(.semibold)
                         .foregroundStyle(.primary)
-                    + Text(" sessions from Codex CLI and Claude Code.")
+                    + Text(" sessions from Codex CLI, Claude Code, and OpenCode.")
                         .foregroundStyle(.secondary)
                 )
                 .font(.system(size: 11, weight: .regular, design: .default))
