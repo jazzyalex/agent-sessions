@@ -897,6 +897,15 @@ final class CodexActiveSessionsModel: ObservableObject {
                 presence.sessionId = info.sessionID
                 presence.sessionLogPath = info.sessionLogPath
                 presence.workspaceRoot = info.cwd
+                // Claude Code doesn't keep the JSONL open, so lsof usually misses it.
+                // Infer the session log from the project directory's newest JSONL file.
+                if presence.sessionLogPath == nil, source == .claude, let cwd = info.cwd {
+                    let root = claudeSessionRoots.first ?? (NSHomeDirectory() + "/.claude")
+                    if let (path, sid) = Self.inferClaudeSessionLog(cwd: cwd, claudeRoot: root) {
+                        presence.sessionLogPath = path
+                        presence.sessionId = sid
+                    }
+                }
                 presence.pid = info.pid
                 presence.tty = Self.normalizedTTY(info.tty)
                 presence.lastSeenAt = now
@@ -3583,6 +3592,39 @@ final class CodexActiveSessionsModel: ObservableObject {
         default:
             return nil
         }
+    }
+
+    /// Infer the Claude session log path from the process's cwd by scanning the
+    /// corresponding project directory for the most recently modified JSONL file.
+    /// Returns (logPath, sessionID) or nil if no suitable file is found.
+    nonisolated private static func inferClaudeSessionLog(cwd: String, claudeRoot: String) -> (String, String?)? {
+        let encoded = cwd.replacingOccurrences(of: "/", with: "-")
+        let projectDir = URL(fileURLWithPath: claudeRoot)
+            .appendingPathComponent("projects")
+            .appendingPathComponent(encoded)
+
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: projectDir.path, isDirectory: &isDir), isDir.boolValue else { return nil }
+        guard let contents = try? fm.contentsOfDirectory(
+            at: projectDir,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+
+        var newest: (url: URL, date: Date)?
+        for file in contents {
+            let ext = file.pathExtension.lowercased()
+            guard ext == "jsonl" || ext == "ndjson" else { continue }
+            guard file.lastPathComponent.lowercased() != "history.jsonl" else { continue }
+            let mdate = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if newest == nil || mdate > newest!.date {
+                newest = (file, mdate)
+            }
+        }
+
+        guard let best = newest else { return nil }
+        return (best.url.path, extractSessionID(fromLogPath: best.url.path, source: .claude))
     }
 
     nonisolated static func parsePSEnvironmentOutput(_ text: String) -> [Int: PSProcessEnvMeta] {
