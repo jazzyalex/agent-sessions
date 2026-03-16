@@ -459,6 +459,52 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out[42001]?.sessionID, "abc12345-6789-abcd-ef01-234567890abc")
     }
 
+    func testClaudeSessionLogCandidates_returnsNewestFirst() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let projectDir = tmp.appendingPathComponent("projects/-Users-test-MyProject")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        // Create three JSONL files with different modification times
+        let oldFile = projectDir.appendingPathComponent("aaaa1111-0000-0000-0000-000000000001.jsonl")
+        let midFile = projectDir.appendingPathComponent("bbbb2222-0000-0000-0000-000000000002.jsonl")
+        let newFile = projectDir.appendingPathComponent("cccc3333-0000-0000-0000-000000000003.jsonl")
+        // Also a non-JSONL file and history.jsonl that should be excluded
+        let txtFile = projectDir.appendingPathComponent("notes.txt")
+        let historyFile = projectDir.appendingPathComponent("history.jsonl")
+
+        for file in [oldFile, midFile, newFile, txtFile, historyFile] {
+            try Data("{}".utf8).write(to: file)
+        }
+
+        // Set modification times: old < mid < new
+        let now = Date()
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-3600)], ofItemAtPath: oldFile.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-60)], ofItemAtPath: midFile.path)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: newFile.path)
+
+        let candidates = CodexActiveSessionsModel.claudeSessionLogCandidates(
+            cwd: "/Users/test/MyProject",
+            claudeRoot: tmp.path
+        )
+
+        // Should return 3 candidates (excluding .txt and history.jsonl), newest first.
+        // Standardize paths to handle /var → /private/var symlinks on macOS.
+        XCTAssertEqual(candidates.count, 3)
+        XCTAssertTrue(candidates[0].path.hasSuffix("cccc3333-0000-0000-0000-000000000003.jsonl"))
+        XCTAssertEqual(candidates[0].sessionID, "cccc3333-0000-0000-0000-000000000003")
+        XCTAssertTrue(candidates[1].path.hasSuffix("bbbb2222-0000-0000-0000-000000000002.jsonl"))
+        XCTAssertTrue(candidates[2].path.hasSuffix("aaaa1111-0000-0000-0000-000000000001.jsonl"))
+    }
+
+    func testClaudeSessionLogCandidates_returnsEmptyForMissingDir() {
+        let candidates = CodexActiveSessionsModel.claudeSessionLogCandidates(
+            cwd: "/nonexistent/path",
+            claudeRoot: "/nonexistent/root"
+        )
+        XCTAssertTrue(candidates.isEmpty)
+    }
+
     func testParseLsofMachineOutput_matchesClaudeSessionWhenRootNormalizationDiffers() throws {
         let lexicalRoot = URL(fileURLWithPath: "/var/tmp", isDirectory: true).standardized.path
         let canonicalRoot = URL(fileURLWithPath: "/var/tmp", isDirectory: true).standardizedFileURL.path

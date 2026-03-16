@@ -1725,7 +1725,7 @@ struct AgentCockpitHUDView: View {
             }
         }
         for key in workspaceSessionPool.keys {
-            workspaceSessionPool[key]?.sort { ($0.modifiedAt) > ($1.modifiedAt) }
+            workspaceSessionPool[key]?.sort { $0.modifiedAt > $1.modifiedAt }
         }
 
         var claimedSessionIDs: Set<String> = []
