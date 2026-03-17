@@ -292,7 +292,8 @@ final class ClaudeUsageModel: ObservableObject {
         let mgr = sourceManager
         Task.detached { [weak self] in
             let payload = await mgr?.lastRawOAuthPayload
-            await MainActor.run { self?.lastRawOAuthPayload = payload }
+            guard let self else { return }
+            await MainActor.run { self.lastRawOAuthPayload = payload }
         }
     }
 
