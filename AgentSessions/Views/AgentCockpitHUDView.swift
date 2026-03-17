@@ -2938,18 +2938,19 @@ private struct HUDLimitsDetailPanel: View {
     }
 }
 
+/// Shared percent color used by both HUDLimitsDetailRow and HUDLimitsProviderText.
+private func hudPctColor(_ left: Int) -> Color {
+    if left <= 10 { return .red }
+    if left < 30 { return .orange }
+    return .primary
+}
+
 private struct HUDLimitsDetailRow: View {
     let entry: HUDLimitsProviderEntry
     let mode: UsageDisplayMode
     @Environment(\.colorScheme) private var colorScheme
 
     private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
-
-    private func pctColor(_ left: Int) -> Color {
-        if left <= 10 { return .red }
-        if left < 30 { return .orange }
-        return .primary
-    }
 
     private var isDataStale: Bool {
         switch entry.source {
@@ -2960,8 +2961,8 @@ private struct HUDLimitsDetailRow: View {
         }
     }
 
-    private func dataAgeText(_ date: Date) -> String {
-        let interval = Date().timeIntervalSince(date)
+    private func dataAgeText(_ date: Date, now: Date = Date()) -> String {
+        let interval = now.timeIntervalSince(date)
         if interval < 60 { return "just now" }
         if interval < 3600 { return "\(Int(interval / 60))m ago" }
         return "\(Int(interval / 3600))h ago"
@@ -3007,7 +3008,7 @@ private struct HUDLimitsDetailRow: View {
                     HStack(spacing: 0) {
                         Text("5h: ")
                         Text("\(pct(entry.fiveHourLeft))%")
-                            .foregroundStyle(pctColor(entry.fiveHourLeft))
+                            .foregroundStyle(hudPctColor(entry.fiveHourLeft))
                     }
                     Text("↻ \(fiveResetText)")
                         .foregroundStyle(.secondary)
@@ -3018,7 +3019,7 @@ private struct HUDLimitsDetailRow: View {
                     HStack(spacing: 0) {
                         Text("Wk: ")
                         Text("\(pct(entry.weekLeft))%")
-                            .foregroundStyle(pctColor(entry.weekLeft))
+                            .foregroundStyle(hudPctColor(entry.weekLeft))
                     }
                     Text("↻ \(weekResetText)")
                         .foregroundStyle(.secondary)
@@ -3028,9 +3029,11 @@ private struct HUDLimitsDetailRow: View {
             .foregroundStyle(Color.primary)
             if isDataStale, let ts = entry.lastDataTimestamp {
                 Spacer(minLength: 8)
-                Text("Updated \(dataAgeText(ts))")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text("Updated \(dataAgeText(ts, now: context.date))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .lineLimit(1)
@@ -3077,16 +3080,10 @@ private struct HUDLimitsProviderText: View {
     var onlyBottleneck: Bool = false
     @Environment(\.colorScheme) private var colorScheme
 
-    // True when 5h is more constrained (fewer % remaining)
+    // 5h wins ties (<=): it's the shorter window, so equally constrained favours showing the tighter limit.
     private var bottleneckIs5h: Bool { entry.fiveHourLeft <= entry.weekLeft }
 
     private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
-
-    private func pctColor(_ left: Int) -> Color {
-        if left <= 10 { return .red }
-        if left < 30 { return Color.orange }
-        return .primary
-    }
 
     private func fiveHourResetLabel() -> String? {
         guard entry.fiveHourLeft < 30 else { return nil }
@@ -3153,7 +3150,7 @@ private struct HUDLimitsProviderText: View {
                             HStack(spacing: 0) {
                                 Text("5h: ")
                                 Text("\(pct(entry.fiveHourLeft))%")
-                                    .foregroundStyle(pctColor(entry.fiveHourLeft))
+                                    .foregroundStyle(hudPctColor(entry.fiveHourLeft))
                             }
                             if showResets, let r = fiveHourResetLabel() {
                                 Text("↻ \(r)")
@@ -3168,7 +3165,7 @@ private struct HUDLimitsProviderText: View {
                             HStack(spacing: 0) {
                                 Text("Wk: ")
                                 Text("\(pct(entry.weekLeft))%")
-                                    .foregroundStyle(pctColor(entry.weekLeft))
+                                    .foregroundStyle(hudPctColor(entry.weekLeft))
                             }
                             if showResets, let r = weekResetLabel() {
                                 Text("↻ \(r)")

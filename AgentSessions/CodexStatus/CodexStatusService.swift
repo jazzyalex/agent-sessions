@@ -955,10 +955,11 @@ actor CodexStatusService {
         let stale5h = isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
         let staleWeek = isResetInfoStale(kind: "week", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
 
-        // Auto probes are intentionally strict to avoid energy spikes from low-value tmux launches.
+        // Auto probes run whenever data is stale, even during active sessions.
+        // The 4-hour cooldown + user opt-in gate keep token cost negligible (≤1-2 msgs/4h).
         let shouldProbe = userInitiated
             ? (noRecentSessions || stale5h || staleWeek)
-            : (noRecentSessions && (stale5h || staleWeek))
+            : (stale5h || staleWeek)
         guard shouldProbe else { return }
 
         // Additional gates for automatic/background path only
