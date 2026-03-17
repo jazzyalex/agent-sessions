@@ -91,15 +91,29 @@ cleanup() {
             pane_pid=$("$tmux_cmd" -L "$LABEL" display-message -p -t "$SESSION:0.0" "#{pane_pid}" 2>/dev/null || true)
         fi
         if [[ -n "$pane_pid" ]]; then
+            # Kill all descendants first (catches Node.js children that may have
+            # moved to their own process group via setsid)
+            local children=""
+            children=$(pgrep -P "$pane_pid" 2>/dev/null || true)
+            for cpid in $children; do
+                kill -TERM "$cpid" 2>/dev/null || true
+            done
+            # Then kill the process group
             local pgid=""
             pgid=$(ps -o pgid= -p "$pane_pid" 2>/dev/null | tr -d ' ')
             if [[ -n "$pgid" ]]; then
                 kill -TERM -"$pgid" 2>/dev/null || true
-                sleep 0.4
-                kill -KILL -"$pgid" 2>/dev/null || true
             else
                 kill -TERM "$pane_pid" 2>/dev/null || true
-                sleep 0.4
+            fi
+            sleep 0.4
+            # SIGKILL everything
+            for cpid in $children; do
+                kill -KILL "$cpid" 2>/dev/null || true
+            done
+            if [[ -n "$pgid" ]]; then
+                kill -KILL -"$pgid" 2>/dev/null || true
+            else
                 kill -KILL "$pane_pid" 2>/dev/null || true
             fi
         fi
