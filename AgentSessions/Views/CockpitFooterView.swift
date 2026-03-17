@@ -418,11 +418,7 @@ private struct IndexingIndicator: View {
         guard let date else { return "—" }
         let interval = date.timeIntervalSince(now)
         if interval >= 0, interval < 24 * 60 * 60 {
-            let formatter = DateFormatter()
-            formatter.locale = .current
-            formatter.timeZone = .autoupdatingCurrent
-            formatter.dateFormat = "HH:mm"
-            return formatter.string(from: date)
+            return "\(AppDateFormatting.timeShort(date)) \(AppDateFormatting.weekdayAbbrev(date))"
         }
         return AppDateFormatting.weekdayAbbrev(date)
     }
