@@ -330,7 +330,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             window.styleMask = restoredMask
             window.titlebarSeparatorStyle = .automatic
             window.isOpaque = true
-            window.backgroundColor = .windowBackground
+            window.backgroundColor = .windowBackgroundColor
             let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
             for buttonType in buttons {
                 guard let button = window.standardWindowButton(buttonType) else { continue }
