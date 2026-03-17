@@ -305,6 +305,11 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.titlebarSeparatorStyle = .none
+            // Make the window transparent so the SwiftUI clipShape's rounded corners
+            // are the only visible boundary — eliminates the double-corner artifact
+            // caused by the NSWindow frame's own corner radius overlapping the view clip.
+            window.isOpaque = false
+            window.backgroundColor = .clear
             let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
             for buttonType in buttons {
                 guard let button = window.standardWindowButton(buttonType) else { continue }
@@ -324,6 +329,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             }
             window.styleMask = restoredMask
             window.titlebarSeparatorStyle = .automatic
+            window.isOpaque = true
+            window.backgroundColor = .windowBackground
             let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
             for buttonType in buttons {
                 guard let button = window.standardWindowButton(buttonType) else { continue }
