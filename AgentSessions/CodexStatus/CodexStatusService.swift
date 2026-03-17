@@ -487,7 +487,8 @@ actor CodexStatusService {
     private var cachedTerminalPATH: String? = nil
     private var hasResolvedTmuxPath: Bool = false
     private var cachedTmuxPath: String? = nil
-    private var didRunOrphanCleanup: Bool = false
+    private var lastOrphanCleanupAt: Date? = nil
+    private let orphanCleanupMinInterval: TimeInterval = 3600 // 1 hour
     private var didRunMenuBarOrphanCleanup: Bool = false
 
     init(updateHandler: @escaping @Sendable (CodexUsageSnapshot) -> Void,
@@ -975,8 +976,12 @@ actor CodexStatusService {
             if let last = lastStatusProbe, now.timeIntervalSince(last) < automaticProbeCooldownSeconds { return }
         }
 
-        guard let tmuxSnap = await runCodexStatusViaTMUX() else { return }
+        let tmuxSnap = await runCodexStatusViaTMUX()
+        // Set cooldown timestamp unconditionally so a failed probe doesn't allow
+        // an immediate retry on the next tick.
         lastStatusProbe = now
+        _ = CodexProbeCleanup.cleanupNowIfAuto()
+        guard let tmuxSnap else { return }
         var merged = snapshot
         if tmuxSnap.fiveHourRemainingPercent > 0 { merged.fiveHourRemainingPercent = clampPercent(tmuxSnap.fiveHourRemainingPercent) }
         if !tmuxSnap.fiveHourResetText.isEmpty { merged.fiveHourResetText = tmuxSnap.fiveHourResetText }
@@ -988,7 +993,6 @@ actor CodexStatusService {
         // Persist a freshness TTL so re-probing is blocked for 4 hours even across restarts
         // and even if CodexProbeCleanup deletes the probe JSONL (leaving no recent event timestamp).
         setFreshUntil(for: .codex, until: now.addingTimeInterval(4 * 3600))
-        _ = CodexProbeCleanup.cleanupNowIfAuto()
     }
 
     // Hard-probe entry point: forces a tmux /status probe regardless of staleness or prefs.
@@ -998,6 +1002,7 @@ actor CodexStatusService {
             return CodexProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Probes disabled by feature flag")
         }
         let (snap, diag) = await runCodexStatusViaTMUXAndCollect()
+        _ = CodexProbeCleanup.cleanupNowIfAuto()
         if let tmuxSnap = snap {
             var merged = snapshot
             if tmuxSnap.fiveHourRemainingPercent > 0 { merged.fiveHourRemainingPercent = clampPercent(tmuxSnap.fiveHourRemainingPercent) }
@@ -1007,7 +1012,6 @@ actor CodexStatusService {
             merged.eventTimestamp = Date()
             snapshot = merged
             updateHandler(merged)
-            _ = CodexProbeCleanup.cleanupNowIfAuto()
         }
         return diag
     }
@@ -1078,6 +1082,10 @@ actor CodexStatusService {
         }
         let snap = parseStatusJSON(stdout)
         let d = CodexProbeDiagnostics(success: snap != nil, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, codexBin: codexBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s grace for shell trap
+            await self?.cleanupOrphanedTmuxLabels()
+        }
         return (snap, d)
     }
 
@@ -1187,6 +1195,30 @@ actor CodexStatusService {
                 labels.insert(label)
             }
         }
+        // Secondary: find codex processes whose CWD matches the probe working directory.
+        // The ps-eww check above misses processes inside tmux (no inherited env markers).
+        // "-c codex" is a prefix match and may capture unrelated processes (e.g. codex-something),
+        // but the CWD equality check below provides a sufficient safety filter.
+        let lsofResult = await runProcess(
+            executable: "/usr/sbin/lsof",
+            arguments: ["-w", "-a", "-c", "codex", "-d", "cwd", "-nP", "-F", "pn"],
+            timeoutSeconds: 3
+        )
+        if !lsofResult.stdout.isEmpty {
+            let normalizedWD = Self.normalizeProbePath(workDir)
+            var cwdPID: Int32? = nil
+            for line in lsofResult.stdout.split(separator: "\n") {
+                let s = String(line)
+                if s.hasPrefix("p"), let pid = Int32(s.dropFirst()) {
+                    cwdPID = pid
+                } else if s.hasPrefix("n"), let pid = cwdPID {
+                    if Self.normalizeProbePath(String(s.dropFirst())) == normalizedWD,
+                       !pids.contains(pid_t(pid)) {
+                        pids.append(pid_t(pid))
+                    }
+                }
+            }
+        }
         labels.formUnion(scanTmuxLabels(prefix: Self.probeLabelPrefix))
         for label in labels {
             if await tmuxServerLooksLikeProbe(label: label,
@@ -1197,6 +1229,37 @@ actor CodexStatusService {
         }
         for pid in pids {
             await terminateProcessGroup(pid: pid)
+        }
+        // Kill socketless probe tmux servers: these survive when kill-server can't reach
+        // them because the socket was already deleted by a prior partial cleanup.
+        // Reuse the snapshot already captured above to avoid a redundant ps -A call.
+        await terminateSocketlessProbeServers(labelPrefix: Self.probeLabelPrefix,
+                                              psOutput: snapshot.stdout)
+    }
+
+    private func terminateSocketlessProbeServers(labelPrefix: String, psOutput: String) async {
+        guard !psOutput.isEmpty else { return }
+        let uid = getuid()
+        let socketDirs = ["/private/tmp/tmux-\(uid)", "/tmp/tmux-\(uid)"]
+        for line in psOutput.split(separator: "\n") {
+            let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let parts = trimmed.split(whereSeparator: { $0.isWhitespace }, maxSplits: 1)
+            guard parts.count == 2, let tmuxPID = Int32(parts[0]) else { continue }
+            let command = String(parts[1])
+            guard command.contains("tmux"), command.contains(labelPrefix) else { continue }
+            // Extract label from the -L <label> argument
+            guard let lRange = command.range(of: "-L ") else { continue }
+            let afterL = command[lRange.upperBound...]
+            let labelEnd = afterL.firstIndex(where: { $0.isWhitespace }) ?? afterL.endIndex
+            let label = String(afterL[..<labelEnd])
+            guard label.hasPrefix(labelPrefix) else { continue }
+            // Only kill if the socket file is gone: tmux kill-server cannot reach a
+            // socketless server, so direct SIGKILL is the only remaining option.
+            let hasSocket = socketDirs.contains { FileManager.default.fileExists(atPath: "\($0)/\(label)") }
+            if !hasSocket {
+                _ = kill(pid_t(tmuxPID), SIGKILL)
+            }
         }
     }
 
@@ -1220,6 +1283,10 @@ actor CodexStatusService {
         guard let socketPath else { return nil }
         let label = URL(fileURLWithPath: String(socketPath)).lastPathComponent
         return label.hasPrefix(expectedPrefix) ? label : nil
+    }
+
+    private static func normalizeProbePath(_ path: String) -> String {
+        ((path as NSString).expandingTildeInPath as NSString).standardizingPath
     }
 
     private func workDirMarkers(_ workDir: String) -> [String] {
@@ -1396,13 +1463,13 @@ actor CodexStatusService {
     }
 
     private func ensureOrphanCleanupIfNeeded() async {
-        guard !didRunOrphanCleanup else { return }
-        didRunOrphanCleanup = true
+        if let last = lastOrphanCleanupAt, Date().timeIntervalSince(last) < orphanCleanupMinInterval { return }
+        lastOrphanCleanupAt = Date()
         await cleanupOrphanedProbeProcesses()
     }
 
     private func ensureMenuBarOrphanCleanupIfNeeded() async {
-        if didRunOrphanCleanup { return }
+        if let last = lastOrphanCleanupAt, Date().timeIntervalSince(last) < orphanCleanupMinInterval { return }
         guard !didRunMenuBarOrphanCleanup else { return }
         didRunMenuBarOrphanCleanup = true
 
