@@ -1244,7 +1244,7 @@ actor CodexStatusService {
         for line in psOutput.split(separator: "\n") {
             let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            let parts = trimmed.split(whereSeparator: { $0.isWhitespace }, maxSplits: 1)
+            let parts = trimmed.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
             guard parts.count == 2, let tmuxPID = Int32(parts[0]) else { continue }
             let command = String(parts[1])
             guard command.contains("tmux"), command.contains(labelPrefix) else { continue }
