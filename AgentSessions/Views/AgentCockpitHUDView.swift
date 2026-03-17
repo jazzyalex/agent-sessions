@@ -2833,6 +2833,8 @@ private struct HUDLimitsProviderEntry {
     let fiveHourResetText: String
     let weekResetText: String
     let isInitialLoading: Bool
+    /// For Codex: the JSONL event timestamp. For Claude: the last poll time.
+    let lastDataTimestamp: Date?
 }
 
 /// An isolated view that observes usage models independently so that
@@ -2845,7 +2847,7 @@ private struct HUDLimitsBar: View {
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
 
@@ -2858,7 +2860,8 @@ private struct HUDLimitsBar: View {
                 weekLeft: codexUsageModel.weekRemainingPercent,
                 fiveHourResetText: codexUsageModel.fiveHourResetText,
                 weekResetText: codexUsageModel.weekResetText,
-                isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil
+                isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil,
+                lastDataTimestamp: codexUsageModel.lastEventTimestamp
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -2868,7 +2871,8 @@ private struct HUDLimitsBar: View {
                 weekLeft: claudeUsageModel.weekAllModelsRemainingPercent,
                 fiveHourResetText: claudeUsageModel.sessionResetText,
                 weekResetText: claudeUsageModel.weekAllModelsResetText,
-                isInitialLoading: claudeUsageModel.isUpdating && claudeUsageModel.lastSuccessAt == nil
+                isInitialLoading: claudeUsageModel.isUpdating && claudeUsageModel.lastSuccessAt == nil,
+                lastDataTimestamp: claudeUsageModel.lastUpdate
             ))
         }
         return out
@@ -2882,42 +2886,199 @@ private struct HUDLimitsBar: View {
                 Rectangle()
                     .fill(Color.primary.opacity(0.10))
                     .frame(height: 0.5)
-                HUDLimitsBarContent(entries: entries, mode: mode, reduceMotion: reduceMotion)
+                HUDLimitsBarContent(entries: entries, mode: mode)
                     .frame(height: 22)
                     .clipped()
             }
+            .onHover { isHovering = $0 }
+            .onTapGesture(count: 2) {
+                if codexAgentEnabled && codexUsageEnabled && !codexUsageModel.isUpdating {
+                    codexUsageModel.hardProbeNow { _ in }
+                }
+                if claudeAgentEnabled && claudeUsageEnabled && !claudeUsageModel.isUpdating {
+                    claudeUsageModel.hardProbeNowDiagnostics { _ in }
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if isHovering {
+                    HUDLimitsDetailPanel(entries: entries, mode: mode)
+                        .frame(maxWidth: .infinity)
+                        .alignmentGuide(.bottom) { d in d[.bottom] + 22.5 }
+                        .allowsHitTesting(false)
+                        .transition(.opacity.animation(.easeIn(duration: 0.05)))
+                }
+            }
         }
+    }
+}
+
+private struct HUDLimitsDetailPanel: View {
+    let entries: [HUDLimitsProviderEntry]
+    let mode: UsageDisplayMode
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.10))
+                .frame(height: 0.5)
+            ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                if index > 0 {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.06))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 0.5)
+                }
+                HUDLimitsDetailRow(entry: entry, mode: mode)
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+            }
+        }
+        .background(.regularMaterial)
+        .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: -3)
+    }
+}
+
+private struct HUDLimitsDetailRow: View {
+    let entry: HUDLimitsProviderEntry
+    let mode: UsageDisplayMode
+    @Environment(\.colorScheme) private var colorScheme
+
+    private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
+
+    private func pctColor(_ left: Int) -> Color {
+        if left <= 10 { return .red }
+        if left < 30 { return .orange }
+        return .primary
+    }
+
+    private var isDataStale: Bool {
+        switch entry.source {
+        case .codex:
+            return isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: entry.lastDataTimestamp)
+        case .claude:
+            return isResetInfoStale(kind: "5h", source: .claude, lastUpdate: entry.lastDataTimestamp, eventTimestamp: nil)
+        }
+    }
+
+    private func dataAgeText(_ date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        if interval < 60 { return "just now" }
+        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        return "\(Int(interval / 3600))h ago"
+    }
+
+    private var fiveResetText: String {
+        guard let date = UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText) else { return "—" }
+        let interval = max(0, date.timeIntervalSince(Date()))
+        if interval < 60 { return "<1m" }
+        let mins = Int(ceil(interval / 60.0))
+        let h = mins / 60, m = mins % 60
+        if h == 0 { return "\(m)m" }
+        if m == 0 { return "\(h)h" }
+        return "\(h)h \(m)m"
+    }
+
+    private var weekResetText: String {
+        guard let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText) else { return "—" }
+        let interval = date.timeIntervalSince(Date())
+        guard interval > 0 else { return "—" }
+        if interval < 24 * 60 * 60 { return "\(hudWeeklyResetFormatter.string(from: date)) \(AppDateFormatting.weekdayAbbrev(date))" }
+        return AppDateFormatting.weekdayAbbrev(date)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if entry.source == .claude {
+                Image("FooterIconClaude")
+                    .renderingMode(.original)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+            } else {
+                Image("FooterIconCodex")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+            }
+            HStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    HStack(spacing: 0) {
+                        Text("5h: ")
+                        Text("\(pct(entry.fiveHourLeft))%")
+                            .foregroundStyle(pctColor(entry.fiveHourLeft))
+                    }
+                    Text("↻ \(fiveResetText)")
+                        .foregroundStyle(.secondary)
+                }
+                Text("|")
+                    .foregroundStyle(Color.primary.opacity(0.25))
+                HStack(spacing: 4) {
+                    HStack(spacing: 0) {
+                        Text("Wk: ")
+                        Text("\(pct(entry.weekLeft))%")
+                            .foregroundStyle(pctColor(entry.weekLeft))
+                    }
+                    Text("↻ \(weekResetText)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .foregroundStyle(Color.primary)
+            if isDataStale, let ts = entry.lastDataTimestamp {
+                Spacer(minLength: 8)
+                Text("Updated \(dataAgeText(ts))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .lineLimit(1)
     }
 }
 
 private struct HUDLimitsBarContent: View {
     let entries: [HUDLimitsProviderEntry]
     let mode: UsageDisplayMode
-    let reduceMotion: Bool
 
     var body: some View {
-        HUDLimitsMarquee(reduceMotion: reduceMotion) {
-            HStack(spacing: 10) {
-                ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
-                    if index > 0 {
-                        Text("|")
-                            .foregroundStyle(Color.primary.opacity(0.25))
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    }
-                    HUDLimitsProviderText(entry: entry, mode: mode)
-                }
-            }
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 10)
+        ViewThatFits(in: .horizontal) {
+            // Variant 1: Full — both windows with reset times
+            entriesRow(showResets: true, onlyBottleneck: false)
+            // Variant 2: No resets — both windows, percent only
+            entriesRow(showResets: false, onlyBottleneck: false)
+            // Variant 3: Bottleneck only — whichever window has fewer % left
+            entriesRow(showResets: false, onlyBottleneck: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+    }
+
+    @ViewBuilder private func entriesRow(showResets: Bool, onlyBottleneck: Bool) -> some View {
+        HStack(spacing: 10) {
+            ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                if index > 0 {
+                    Text("|")
+                        .foregroundStyle(Color.primary.opacity(0.25))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                }
+                HUDLimitsProviderText(entry: entry, mode: mode, showResets: showResets, onlyBottleneck: onlyBottleneck)
+            }
+        }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
 private struct HUDLimitsProviderText: View {
     let entry: HUDLimitsProviderEntry
     let mode: UsageDisplayMode
+    var showResets: Bool = true
+    var onlyBottleneck: Bool = false
     @Environment(\.colorScheme) private var colorScheme
+
+    // True when 5h is more constrained (fewer % remaining)
+    private var bottleneckIs5h: Bool { entry.fiveHourLeft <= entry.weekLeft }
 
     private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
 
@@ -2959,7 +3120,7 @@ private struct HUDLimitsProviderText: View {
         let interval = date.timeIntervalSince(now)
         guard interval > 0 else { return nil }
         if interval < 24 * 60 * 60 {
-            return hudWeeklyResetFormatter.string(from: date)
+            return "\(hudWeeklyResetFormatter.string(from: date)) \(AppDateFormatting.weekdayAbbrev(date))"
         }
         return AppDateFormatting.weekdayAbbrev(date)
     }
@@ -2987,25 +3148,31 @@ private struct HUDLimitsProviderText: View {
                     .transition(.opacity)
             } else {
                 HStack(spacing: 6) {
-                    HStack(spacing: 4) {
-                        HStack(spacing: 0) {
-                            Text("5h: ")
-                            Text("\(pct(entry.fiveHourLeft))%")
-                                .foregroundStyle(pctColor(entry.fiveHourLeft))
-                        }
-                        if let r = fiveHourResetLabel() {
-                            Text("↻ \(r)")
+                    if !onlyBottleneck || bottleneckIs5h {
+                        HStack(spacing: 4) {
+                            HStack(spacing: 0) {
+                                Text("5h: ")
+                                Text("\(pct(entry.fiveHourLeft))%")
+                                    .foregroundStyle(pctColor(entry.fiveHourLeft))
+                            }
+                            if showResets, let r = fiveHourResetLabel() {
+                                Text("↻ \(r)")
+                            }
                         }
                     }
-                    Text("|").foregroundStyle(Color.primary.opacity(0.25))
-                    HStack(spacing: 4) {
-                        HStack(spacing: 0) {
-                            Text("Wk: ")
-                            Text("\(pct(entry.weekLeft))%")
-                                .foregroundStyle(pctColor(entry.weekLeft))
-                        }
-                        if let r = weekResetLabel() {
-                            Text("↻ \(r)")
+                    if !onlyBottleneck {
+                        Text("|").foregroundStyle(Color.primary.opacity(0.25))
+                    }
+                    if !onlyBottleneck || !bottleneckIs5h {
+                        HStack(spacing: 4) {
+                            HStack(spacing: 0) {
+                                Text("Wk: ")
+                                Text("\(pct(entry.weekLeft))%")
+                                    .foregroundStyle(pctColor(entry.weekLeft))
+                            }
+                            if showResets, let r = weekResetLabel() {
+                                Text("↻ \(r)")
+                            }
                         }
                     }
                 }
@@ -3034,81 +3201,10 @@ private let hudWeeklyResetFormatter: DateFormatter = {
     let f = DateFormatter()
     f.locale = .current
     f.timeZone = .autoupdatingCurrent
-    f.dateFormat = "HH:mm"
+    f.timeStyle = .short
+    f.dateStyle = .none
     return f
 }()
-
-// MARK: - Marquee
-
-private struct HUDLimitsMarquee<Content: View>: View {
-    let reduceMotion: Bool
-    @ViewBuilder let content: () -> Content
-
-    @State private var contentWidth: CGFloat = 0
-    @State private var containerWidth: CGFloat = 0
-    @State private var offset: CGFloat = 0
-
-    private let speed: CGFloat = 25  // pt per second
-    private let gap: CGFloat = 60    // gap before loop repeats
-
-    private var needsScroll: Bool {
-        !reduceMotion && contentWidth > 0 && containerWidth > 0 && contentWidth > containerWidth
-    }
-    private var loopWidth: CGFloat { contentWidth + gap }
-    // Task ID — restart animation whenever dimensions or motion preference change
-    private var taskID: String { "\(contentWidth)-\(containerWidth)-\(reduceMotion)" }
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                // Render path also measures content width via background GeometryReader,
-                // eliminating the need for a separate hidden copy.
-                if needsScroll {
-                    HStack(spacing: 0) {
-                        content()
-                            .background(GeometryReader { inner in
-                                Color.clear.preference(key: HUDLimitsWidthKey.self,
-                                                       value: inner.size.width)
-                            })
-                        Spacer(minLength: gap)
-                        content()
-                    }
-                    .offset(x: offset)
-                } else {
-                    content()
-                        .background(GeometryReader { inner in
-                            Color.clear.preference(key: HUDLimitsWidthKey.self,
-                                                   value: inner.size.width)
-                        })
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .clipped()
-            .onPreferenceChange(HUDLimitsWidthKey.self) { w in contentWidth = w }
-            .onAppear { containerWidth = geo.size.width }
-            .onChange(of: geo.size.width) { _, w in containerWidth = w }
-        }
-        .task(id: taskID) {
-            // Snap to start without animation, cancelling any prior repeatForever.
-            offset = 0
-            guard needsScroll else { return }
-            // One layout pass before kicking off the animation.
-            try? await Task.sleep(for: .milliseconds(100))
-            guard !Task.isCancelled else { return }
-            withAnimation(.linear(duration: Double(loopWidth) / Double(speed))
-                .repeatForever(autoreverses: false)) {
-                offset = -loopWidth
-            }
-        }
-    }
-}
-
-private struct HUDLimitsWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
 
 // MARK: - HUD button style
 
