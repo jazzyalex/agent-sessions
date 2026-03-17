@@ -473,6 +473,7 @@ actor CodexStatusService {
     private var visibilityMode: VisibilityMode { visibilityContext.mode }
     private var backoffSeconds: UInt64 = 1
     private var refresherTask: Task<Void, Never>?
+    private var deferredTmuxCleanupTask: Task<Void, Never>?
     private var lastStatusProbe: Date? = nil
     private var lastAppliedSourceFilePath: String? = nil
     private var lastAppliedSourceFileMTime: Date? = nil
@@ -935,6 +936,11 @@ actor CodexStatusService {
         } else {
             lastParseWasStaleOrFailed = true
         }
+
+        // Run probe in menu-background mode too (e.g. cockpit pinned, app inactive).
+        if !FeatureFlags.disableCodexProbes {
+            await maybeProbeStatusViaTMUX(userInitiated: false)
+        }
     }
 
     // MARK: - Optional tmux /status probe
@@ -987,6 +993,7 @@ actor CodexStatusService {
         if !tmuxSnap.fiveHourResetText.isEmpty { merged.fiveHourResetText = tmuxSnap.fiveHourResetText }
         if tmuxSnap.weekRemainingPercent > 0 { merged.weekRemainingPercent = clampPercent(tmuxSnap.weekRemainingPercent) }
         if !tmuxSnap.weekResetText.isEmpty { merged.weekResetText = tmuxSnap.weekResetText }
+        merged.usageLine = nil  // probe data is fresh; clear any stale marker
         merged.eventTimestamp = now
         snapshot = merged
         updateHandler(merged)
@@ -1009,6 +1016,7 @@ actor CodexStatusService {
             if !tmuxSnap.fiveHourResetText.isEmpty { merged.fiveHourResetText = tmuxSnap.fiveHourResetText }
             if tmuxSnap.weekRemainingPercent > 0 { merged.weekRemainingPercent = clampPercent(tmuxSnap.weekRemainingPercent) }
             if !tmuxSnap.weekResetText.isEmpty { merged.weekResetText = tmuxSnap.weekResetText }
+            merged.usageLine = nil  // probe data is fresh; clear any stale marker
             merged.eventTimestamp = Date()
             snapshot = merged
             updateHandler(merged)
@@ -1082,8 +1090,9 @@ actor CodexStatusService {
         }
         let snap = parseStatusJSON(stdout)
         let d = CodexProbeDiagnostics(success: snap != nil, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, codexBin: codexBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s grace for shell trap
+        deferredTmuxCleanupTask?.cancel()
+        deferredTmuxCleanupTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return } // 2s grace for shell trap
             await self?.cleanupOrphanedTmuxLabels()
         }
         return (snap, d)
@@ -1205,14 +1214,14 @@ actor CodexStatusService {
             timeoutSeconds: 3
         )
         if !lsofResult.stdout.isEmpty {
-            let normalizedWD = Self.normalizeProbePath(workDir)
+            let normalizedWD = normalizeProbePath(workDir)
             var cwdPID: Int32? = nil
             for line in lsofResult.stdout.split(separator: "\n") {
                 let s = String(line)
                 if s.hasPrefix("p"), let pid = Int32(s.dropFirst()) {
                     cwdPID = pid
                 } else if s.hasPrefix("n"), let pid = cwdPID {
-                    if Self.normalizeProbePath(String(s.dropFirst())) == normalizedWD,
+                    if normalizeProbePath(String(s.dropFirst())) == normalizedWD,
                        !pids.contains(pid_t(pid)) {
                         pids.append(pid_t(pid))
                     }
@@ -1233,34 +1242,8 @@ actor CodexStatusService {
         // Kill socketless probe tmux servers: these survive when kill-server can't reach
         // them because the socket was already deleted by a prior partial cleanup.
         // Reuse the snapshot already captured above to avoid a redundant ps -A call.
-        await terminateSocketlessProbeServers(labelPrefix: Self.probeLabelPrefix,
-                                              psOutput: snapshot.stdout)
-    }
-
-    private func terminateSocketlessProbeServers(labelPrefix: String, psOutput: String) async {
-        guard !psOutput.isEmpty else { return }
-        let uid = getuid()
-        let socketDirs = ["/private/tmp/tmux-\(uid)", "/tmp/tmux-\(uid)"]
-        for line in psOutput.split(separator: "\n") {
-            let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            let parts = trimmed.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
-            guard parts.count == 2, let tmuxPID = Int32(parts[0]) else { continue }
-            let command = String(parts[1])
-            guard command.contains("tmux"), command.contains(labelPrefix) else { continue }
-            // Extract label from the -L <label> argument
-            guard let lRange = command.range(of: "-L ") else { continue }
-            let afterL = command[lRange.upperBound...]
-            let labelEnd = afterL.firstIndex(where: { $0.isWhitespace }) ?? afterL.endIndex
-            let label = String(afterL[..<labelEnd])
-            guard label.hasPrefix(labelPrefix) else { continue }
-            // Only kill if the socket file is gone: tmux kill-server cannot reach a
-            // socketless server, so direct SIGKILL is the only remaining option.
-            let hasSocket = socketDirs.contains { FileManager.default.fileExists(atPath: "\($0)/\(label)") }
-            if !hasSocket {
-                _ = kill(pid_t(tmuxPID), SIGKILL)
-            }
-        }
+        terminateSocketlessProbeServers(labelPrefix: Self.probeLabelPrefix,
+                                       psOutput: snapshot.stdout)
     }
 
     private func cleanupOrphanedTmuxLabels() async {
@@ -1283,10 +1266,6 @@ actor CodexStatusService {
         guard let socketPath else { return nil }
         let label = URL(fileURLWithPath: String(socketPath)).lastPathComponent
         return label.hasPrefix(expectedPrefix) ? label : nil
-    }
-
-    private static func normalizeProbePath(_ path: String) -> String {
-        ((path as NSString).expandingTildeInPath as NSString).standardizingPath
     }
 
     private func workDirMarkers(_ workDir: String) -> [String] {
@@ -1470,6 +1449,9 @@ actor CodexStatusService {
 
     private func ensureMenuBarOrphanCleanupIfNeeded() async {
         if let last = lastOrphanCleanupAt, Date().timeIntervalSince(last) < orphanCleanupMinInterval { return }
+        // didRunMenuBarOrphanCleanup is intentionally one-shot per session: the menu-bar
+        // path only needs to run once on launch. Periodic re-runs are handled by
+        // ensureOrphanCleanupIfNeeded (which calls cleanupOrphanedProbeProcesses).
         guard !didRunMenuBarOrphanCleanup else { return }
         didRunMenuBarOrphanCleanup = true
 

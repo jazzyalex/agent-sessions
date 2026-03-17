@@ -2955,9 +2955,11 @@ private struct HUDLimitsDetailRow: View {
     private var isDataStale: Bool {
         switch entry.source {
         case .codex:
-            return isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: entry.lastDataTimestamp)
+            let effective = effectiveEventTimestamp(source: .codex, eventTimestamp: entry.lastDataTimestamp, lastUpdate: nil)
+            return isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: effective)
         case .claude:
-            return isResetInfoStale(kind: "5h", source: .claude, lastUpdate: entry.lastDataTimestamp, eventTimestamp: nil)
+            let effective = effectiveEventTimestamp(source: .claude, eventTimestamp: nil, lastUpdate: entry.lastDataTimestamp)
+            return isResetInfoStale(kind: "5h", source: .claude, lastUpdate: effective, eventTimestamp: nil)
         }
     }
 
