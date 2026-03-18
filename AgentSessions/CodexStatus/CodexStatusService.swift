@@ -1292,18 +1292,29 @@ actor CodexStatusService {
             }
         }
         // 2. Kill orphaned codex processes by CWD. When another probe is active,
-        // restrict to orphans (ppid ≤ 1) to avoid killing the active probe's children.
-        // Step 1 above killed the old tmux server, so its codex children are now
-        // reparented to launchd (PID 1) while the active probe's children are not.
-        await killProbeProcessesByCWD(orphansOnly: activeProbeLabel != nil)
+        // find its tmux server PID and protect its entire process tree.
+        var activeTmuxPID: Int32? = nil
+        if let currentLabel = activeProbeLabel {
+            let currentLabelArg = "-L \(currentLabel)"
+            for line in psSnap.stdout.split(separator: "\n") {
+                let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+                let parts = trimmed.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
+                guard parts.count == 2, let pid = Int32(parts[0]) else { continue }
+                if String(parts[1]).contains("tmux"), String(parts[1]).contains(currentLabelArg) {
+                    activeTmuxPID = pid
+                    break
+                }
+            }
+        }
+        await killProbeProcessesByCWD(protectDescendantsOf: activeTmuxPID)
         // 3. Remove socket files
         removeOrphanedSocketFiles(label: label)
     }
 
     /// Kill codex processes whose CWD matches the probe working directory.
-    /// When `orphansOnly` is true, restricts to processes whose parent has exited
-    /// (ppid ≤ 1, reparented to launchd), protecting any active probe's children.
-    private func killProbeProcessesByCWD(orphansOnly: Bool = false) async {
+    /// When `protectDescendantsOf` is set, skips any process whose ancestor chain
+    /// includes that PID (i.e., belongs to the active probe's tmux tree).
+    private func killProbeProcessesByCWD(protectDescendantsOf protectedRootPID: Int32? = nil) async {
         let workDir = CodexProbeConfig.probeWorkingDirectory()
         let normalizedWD = normalizeProbePath(workDir)
         let lsofResult = await runProcess(
@@ -1312,6 +1323,21 @@ actor CodexStatusService {
             timeoutSeconds: 3
         )
         guard !lsofResult.stdout.isEmpty else { return }
+
+        // Build a pid→ppid map once (avoids per-process ps calls).
+        var ppidMap: [Int32: Int32] = [:]
+        if protectedRootPID != nil {
+            let psSnap = await runProcess(executable: "/bin/ps",
+                                          arguments: ["-A", "-o", "pid=", "-o", "ppid="],
+                                          timeoutSeconds: 2)
+            for line in psSnap.stdout.split(separator: "\n") {
+                let cols = line.split(whereSeparator: { $0.isWhitespace })
+                if cols.count >= 2, let pid = Int32(cols[0]), let ppid = Int32(cols[1]) {
+                    ppidMap[pid] = ppid
+                }
+            }
+        }
+
         var cwdPID: Int32? = nil
         for line in lsofResult.stdout.split(separator: "\n") {
             let s = String(line)
@@ -1319,17 +1345,25 @@ actor CodexStatusService {
                 cwdPID = pid
             } else if s.hasPrefix("n"), let pid = cwdPID {
                 if normalizeProbePath(String(s.dropFirst())) == normalizedWD {
-                    if orphansOnly {
-                        let ppidSnap = await runProcess(executable: "/bin/ps",
-                                                        arguments: ["-o", "ppid=", "-p", "\(pid)"],
-                                                        timeoutSeconds: 2)
-                        let ppid = Int32(ppidSnap.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-                        guard ppid <= 1 else { continue }
+                    if let root = protectedRootPID, isDescendant(pid, of: root, ppidMap: ppidMap) {
+                        continue
                     }
                     await terminateProcessGroup(pid: pid_t(pid))
                 }
             }
         }
+    }
+
+    /// Walk the ppid chain to check if `pid` is a descendant of `ancestorPID`.
+    private func isDescendant(_ pid: Int32, of ancestorPID: Int32, ppidMap: [Int32: Int32]) -> Bool {
+        var current = pid
+        var hops = 0
+        while let parent = ppidMap[current], parent > 1, hops < 20 {
+            if parent == ancestorPID { return true }
+            current = parent
+            hops += 1
+        }
+        return false
     }
 
     private func removeOrphanedSocketFiles(label: String) {
