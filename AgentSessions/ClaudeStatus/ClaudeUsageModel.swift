@@ -261,6 +261,8 @@ final class ClaudeUsageModel: ObservableObject {
                 Task { @MainActor in
                     await Task.yield()
                     self.apply(snapshot)
+                    // Persist immediately — the snapshot is right here, no ordering dependency
+                    self.persistHardProbeSnapshot(snapshot)
                 }
             }
             let availability: @Sendable (ClaudeServiceAvailability) -> Void = { availability in
@@ -283,6 +285,27 @@ final class ClaudeUsageModel: ObservableObject {
                 self.isUpdating = false
                 completion(diag)
             }
+        }
+    }
+
+    /// Convert a tmux snapshot and persist it for cold-start restore.
+    /// Accepts the snapshot directly to avoid ordering dependency on model state.
+    private func persistHardProbeSnapshot(_ s: ClaudeUsageSnapshot) {
+        let snapshot = ClaudeLimitSnapshot(
+            fetchedAt: Date(),
+            source: .tmuxUsage,
+            health: .live,
+            fiveHourUsedRatio: Double(100 - max(0, min(100, s.sessionRemainingPercent))) / 100.0,
+            fiveHourResetText: s.sessionResetText,
+            weeklyUsedRatio: Double(100 - max(0, min(100, s.weekAllModelsRemainingPercent))) / 100.0,
+            weeklyResetText: s.weekAllModelsResetText,
+            weekOpusUsedRatio: s.weekOpusRemainingPercent.map { Double(100 - max(0, min(100, $0))) / 100.0 },
+            weekOpusResetText: s.weekOpusResetText,
+            rawPayloadHash: nil
+        )
+        let mgr = self.sourceManager
+        Task.detached {
+            await mgr?.saveSnapshot(snapshot)
         }
     }
 
