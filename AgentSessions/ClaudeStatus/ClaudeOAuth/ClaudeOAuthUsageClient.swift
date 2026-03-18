@@ -52,6 +52,7 @@ actor ClaudeOAuthUsageClient {
     // same file so the per-account API quota (~few requests per 20 min) is
     // shared across all consumers rather than each one burning quota independently.
     private static let sharedCacheURL = URL(fileURLWithPath: "/tmp/claude/statusline-usage-cache.json")
+    private static let sharedCacheTokenURL = URL(fileURLWithPath: "/tmp/claude/statusline-usage-cache.token")
     private static let cacheMaxAge: TimeInterval = 60  // seconds
 
     init() {
@@ -62,16 +63,14 @@ actor ClaudeOAuthUsageClient {
     }
 
     func fetch(token: String) async throws -> (response: ClaudeOAuthRawUsageResponse, bodyHash: String, rawBody: String) {
+        let tokenFP = tokenFingerprint(token)
+
         // Check shared file cache first — avoids redundant API calls across
         // AgentSessions restarts and external tools (ClaudeCodeStatusLine).
-        if let cached = readSharedCache() {
+        if let cached = readSharedCache(tokenFingerprint: tokenFP) {
             os_log("ClaudeOAuth: serving from shared cache (age %.0fs)", log: log, type: .debug, cached.age)
             return cached.result
         }
-
-        // Touch the cache file before fetching so concurrent consumers see
-        // a fresh mtime and skip their own fetch (same pattern as ClaudeCodeStatusLine).
-        touchSharedCache()
 
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "GET"
@@ -128,7 +127,7 @@ actor ClaudeOAuthUsageClient {
         }
 
         // Write successful response to shared cache for other consumers
-        writeSharedCache(data: data)
+        writeSharedCache(data: data, tokenFingerprint: tokenFP)
 
         os_log("ClaudeOAuth: fetch succeeded", log: log, type: .debug)
         return (parsed, bodyHash, rawBody)
@@ -141,8 +140,13 @@ actor ClaudeOAuthUsageClient {
         let age: TimeInterval
     }
 
-    /// Read from the shared cache file if it exists and is fresh.
-    private func readSharedCache() -> CachedResult? {
+    /// Stable 8-hex-char fingerprint of a token for per-account cache scoping.
+    private func tokenFingerprint(_ token: String) -> String {
+        SHA256.hash(data: Data(token.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Read from the shared cache file if it exists, is fresh, and was produced by the same account.
+    private func readSharedCache(tokenFingerprint fp: String) -> CachedResult? {
         let url = Self.sharedCacheURL
         let fm = FileManager.default
         guard fm.fileExists(atPath: url.path) else { return nil }
@@ -152,6 +156,11 @@ actor ClaudeOAuthUsageClient {
               let mtime = attrs[.modificationDate] as? Date else { return nil }
         let age = Date().timeIntervalSince(mtime)
         guard age < Self.cacheMaxAge else { return nil }
+
+        // Verify the cache was produced by the same account
+        if let storedFP = try? String(contentsOf: Self.sharedCacheTokenURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           storedFP != fp { return nil }
 
         // Parse the cached JSON
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -174,22 +183,11 @@ actor ClaudeOAuthUsageClient {
         return CachedResult(result: (parsed, bodyHash, rawBody), age: age)
     }
 
-    /// Touch the cache file to claim the fetch slot (prevents concurrent fetches).
-    private func touchSharedCache() {
-        let url = Self.sharedCacheURL
-        let fm = FileManager.default
-        try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if fm.fileExists(atPath: url.path) {
-            try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
-        } else {
-            fm.createFile(atPath: url.path, contents: nil)
-        }
-    }
-
-    /// Write a successful API response to the shared cache.
-    private func writeSharedCache(data: Data) {
-        let url = Self.sharedCacheURL
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
+    /// Write a successful API response to the shared cache with token fingerprint.
+    private func writeSharedCache(data: Data, tokenFingerprint fp: String) {
+        let dir = Self.sharedCacheURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: Self.sharedCacheURL, options: .atomic)
+        try? fp.write(to: Self.sharedCacheTokenURL, atomically: true, encoding: .utf8)
     }
 }

@@ -1291,8 +1291,12 @@ actor CodexStatusService {
                 _ = kill(pid_t(pid), SIGKILL)
             }
         }
-        // 2. Kill codex processes whose CWD is the probe working directory
-        await killProbeProcessesByCWD()
+        // 2. Kill codex processes by CWD only when no newer probe is running.
+        // If a new probe started (activeProbeLabel != nil), the CWD-based kill
+        // would terminate it since all probes share the same working directory.
+        if activeProbeLabel == nil {
+            await killProbeProcessesByCWD()
+        }
         // 3. Remove socket files
         removeOrphanedSocketFiles(label: label)
     }
