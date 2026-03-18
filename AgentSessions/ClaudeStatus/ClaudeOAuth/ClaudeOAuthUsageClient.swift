@@ -157,13 +157,22 @@ actor ClaudeOAuthUsageClient {
         let age = Date().timeIntervalSince(mtime)
         guard age < Self.cacheMaxAge else { return nil }
 
-        // Verify the cache was produced by the same account
-        if let storedFP = try? String(contentsOf: Self.sharedCacheTokenURL, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           storedFP != fp { return nil }
+        // Verify the cache was produced by the same account.
+        // Missing sidecar (e.g., written by ClaudeCodeStatusLine or older build) → cache miss.
+        // Sidecar format: "{tokenFingerprint}:{contentHash}" — the content hash detects
+        // partially-updated pairs (JSON and sidecar are two independent writes).
+        guard let sidecar = try? String(contentsOf: Self.sharedCacheTokenURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        let sidecarParts = sidecar.split(separator: ":", maxSplits: 1)
+        guard sidecarParts.count == 2, String(sidecarParts[0]) == fp else { return nil }
+        let expectedContentHash = String(sidecarParts[1])
 
         // Parse the cached JSON
         guard let data = try? Data(contentsOf: url) else { return nil }
+
+        // Verify content hash to detect a stale JSON/sidecar pairing
+        let actualContentHash = SHA256.hash(data: data).prefix(4).map { String(format: "%02x", $0) }.joined()
+        guard actualContentHash == expectedContentHash else { return nil }
 
         // Validate it's a real usage response (has five_hour key), not an error
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -184,10 +193,14 @@ actor ClaudeOAuthUsageClient {
     }
 
     /// Write a successful API response to the shared cache with token fingerprint.
+    /// Sidecar is written AFTER the JSON so readers that see a new sidecar are
+    /// guaranteed the JSON is at least as new. Content hash in the sidecar lets
+    /// readers detect the reverse race (new JSON, old sidecar).
     private func writeSharedCache(data: Data, tokenFingerprint fp: String) {
         let dir = Self.sharedCacheURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try? data.write(to: Self.sharedCacheURL, options: .atomic)
-        try? fp.write(to: Self.sharedCacheTokenURL, atomically: true, encoding: .utf8)
+        let contentHash = SHA256.hash(data: data).prefix(4).map { String(format: "%02x", $0) }.joined()
+        try? "\(fp):\(contentHash)".write(to: Self.sharedCacheTokenURL, atomically: true, encoding: .utf8)
     }
 }
