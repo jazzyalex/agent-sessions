@@ -1,0 +1,117 @@
+<h2>Design Section 3: Name Display Modes</h2>
+<p class="subtitle">How the session list looks in "Custom Names" mode vs "Original Names" mode. Note the visual indicator on unrenamed sessions.</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Toggle ON: Custom Names Mode</div>
+    <div class="mockup-body" style="padding: 0;">
+      <div style="font-family: 'SF Mono', Menlo, monospace; font-size: 13px; background: #1e1e1e;">
+        <!-- Header row -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #333; color: #8e8e93; font-size: 11px;">
+          <span style="width: 36px; text-align: center;">★</span>
+          <span style="width: 100px;">CLI Agent</span>
+          <span style="flex: 1;">Session</span>
+          <span style="width: 120px;">Date</span>
+        </div>
+        <!-- Row 1: HAS custom name -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; align-items: center; background: #252525;">
+          <span style="width: 36px; text-align: center; color: #ffcc00;">★</span>
+          <span style="width: 100px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #f97316; margin-right: 6px;"></span><span style="color: #f97316;">Claude</span></span>
+          <span style="flex: 1; color: #e0e0e0; font-weight: 500;">Auth middleware refactor</span>
+          <span style="width: 120px; color: #8e8e93;">2 hours ago</span>
+        </div>
+        <!-- Row 2: HAS custom name -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; align-items: center;">
+          <span style="width: 36px; text-align: center; color: #555;">☆</span>
+          <span style="width: 100px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #3b82f6; margin-right: 6px;"></span><span style="color: #3b82f6;">Codex</span></span>
+          <span style="flex: 1; color: #e0e0e0; font-weight: 500;">Fix CI pipeline timeout</span>
+          <span style="width: 120px; color: #8e8e93;">5 hours ago</span>
+        </div>
+        <!-- Row 3: NO custom name - visual indicator -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; align-items: center; background: #252525;">
+          <span style="width: 36px; text-align: center; color: #555;">☆</span>
+          <span style="width: 100px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #f97316; margin-right: 6px;"></span><span style="color: #f97316;">Claude</span></span>
+          <span style="flex: 1; color: #8e8e93; font-style: italic;">can you help me debug the login...</span>
+          <span style="width: 120px; color: #8e8e93;">Yesterday</span>
+        </div>
+        <!-- Row 4: NO custom name - visual indicator -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; align-items: center;">
+          <span style="width: 36px; text-align: center; color: #555;">☆</span>
+          <span style="width: 100px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #10b981; margin-right: 6px;"></span><span style="color: #10b981;">Gemini</span></span>
+          <span style="flex: 1; color: #8e8e93; font-style: italic;">write unit tests for the payment...</span>
+          <span style="width: 120px; color: #8e8e93;">2 days ago</span>
+        </div>
+        <!-- Row 5: HAS custom name -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; align-items: center; background: #252525;">
+          <span style="width: 36px; text-align: center; color: #555;">☆</span>
+          <span style="width: 100px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #3b82f6; margin-right: 6px;"></span><span style="color: #3b82f6;">Codex</span></span>
+          <span style="flex: 1; color: #e0e0e0; font-weight: 500;">Dashboard responsive layout</span>
+          <span style="width: 120px; color: #8e8e93;">3 days ago</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Toggle OFF: Original Names Mode (current behavior)</div>
+    <div class="mockup-body" style="padding: 0;">
+      <div style="font-family: 'SF Mono', Menlo, monospace; font-size: 13px; background: #1e1e1e;">
+        <!-- Header row -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #333; color: #8e8e93; font-size: 11px;">
+          <span style="width: 36px; text-align: center;">★</span>
+          <span style="width: 100px;">CLI Agent</span>
+          <span style="flex: 1;">Session</span>
+          <span style="width: 120px;">Date</span>
+        </div>
+        <!-- Row 1 -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; align-items: center; background: #252525;">
+          <span style="width: 36px; text-align: center; color: #ffcc00;">★</span>
+          <span style="width: 100px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #f97316; margin-right: 6px;"></span><span style="color: #f97316;">Claude</span></span>
+          <span style="flex: 1; color: #e0e0e0;">can you refactor the auth middleware to use...</span>
+          <span style="width: 120px; color: #8e8e93;">2 hours ago</span>
+        </div>
+        <!-- Row 2 -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; align-items: center;">
+          <span style="width: 36px; text-align: center; color: #555;">☆</span>
+          <span style="width: 100px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #3b82f6; margin-right: 6px;"></span><span style="color: #3b82f6;">Codex</span></span>
+          <span style="flex: 1; color: #e0e0e0;">the CI pipeline keeps timing out on the...</span>
+          <span style="width: 120px; color: #8e8e93;">5 hours ago</span>
+        </div>
+        <!-- Row 3 -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; align-items: center; background: #252525;">
+          <span style="width: 36px; text-align: center; color: #555;">☆</span>
+          <span style="width: 100px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #f97316; margin-right: 6px;"></span><span style="color: #f97316;">Claude</span></span>
+          <span style="flex: 1; color: #e0e0e0;">can you help me debug the login...</span>
+          <span style="width: 120px; color: #8e8e93;">Yesterday</span>
+        </div>
+        <!-- Row 4 -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; align-items: center;">
+          <span style="width: 36px; text-align: center; color: #555;">☆</span>
+          <span style="width: 100px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #10b981; margin-right: 6px;"></span><span style="color: #10b981;">Gemini</span></span>
+          <span style="flex: 1; color: #e0e0e0;">write unit tests for the payment...</span>
+          <span style="width: 120px; color: #8e8e93;">2 days ago</span>
+        </div>
+        <!-- Row 5 -->
+        <div style="display: flex; padding: 6px 12px; border-bottom: 1px solid #2a2a2a; align-items: center; background: #252525;">
+          <span style="width: 36px; text-align: center; color: #555;">☆</span>
+          <span style="width: 100px;"><span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #3b82f6; margin-right: 6px;"></span><span style="color: #3b82f6;">Codex</span></span>
+          <span style="flex: 1; color: #e0e0e0;">make the dashboard layout responsive for...</span>
+          <span style="width: 120px; color: #8e8e93;">3 days ago</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top: 24px; padding: 16px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+  <h3 style="margin-top: 0;">Visual Indicator Key</h3>
+  <p style="margin: 8px 0;"><strong>Custom Names ON (left):</strong></p>
+  <ul style="margin: 4px 0;">
+    <li><span style="color: #e0e0e0; font-weight: 500;">White, medium weight</span> = has custom name (rows 1, 2, 5)</li>
+    <li><span style="color: #8e8e93; font-style: italic;">Gray, italic</span> = no custom name yet, showing heuristic title (rows 3, 4)</li>
+  </ul>
+  <p style="margin: 8px 0;"><strong>Original Names OFF (right):</strong></p>
+  <ul style="margin: 4px 0;">
+    <li>All rows look identical — standard white text, showing heuristic titles (today's behavior)</li>
+  </ul>
+</div>
