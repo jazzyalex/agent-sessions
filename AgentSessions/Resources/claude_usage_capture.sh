@@ -81,6 +81,27 @@ remove_managed_socket_files() {
 # ============================================================================
 # Cleanup trap
 # ============================================================================
+# Iteratively collect ALL descendant PIDs of $1 (children, grandchildren, etc.)
+# Needed because Node.js/claude may setsid into its own process group,
+# making process-group kills miss grandchild processes.
+collect_descendants() {
+    local queue="$1"
+    local all=""
+    while [[ -n "$queue" ]]; do
+        local next_queue=""
+        for pid in $queue; do
+            all="$all $pid"
+            local ch
+            ch=$(pgrep -P "$pid" 2>/dev/null || true)
+            if [[ -n "$ch" ]]; then
+                next_queue="$next_queue $ch"
+            fi
+        done
+        queue="$next_queue"
+    done
+    echo "$all"
+}
+
 cleanup() {
     set +e
     set +o pipefail
@@ -91,14 +112,15 @@ cleanup() {
             pane_pid=$("$tmux_cmd" -L "$LABEL" display-message -p -t "$SESSION:0.0" "#{pane_pid}" 2>/dev/null || true)
         fi
         if [[ -n "$pane_pid" ]]; then
-            # Kill all descendants first (catches Node.js children that may have
-            # moved to their own process group via setsid)
-            local children=""
-            children=$(pgrep -P "$pane_pid" 2>/dev/null || true)
-            for cpid in $children; do
-                kill -TERM "$cpid" 2>/dev/null || true
+            # Collect ALL descendants recursively (catches grandchildren in separate
+            # process groups, e.g. Node.js native binary after setsid)
+            local all_desc=""
+            all_desc=$(collect_descendants "$pane_pid")
+            # SIGTERM every descendant individually
+            for dpid in $all_desc; do
+                kill -TERM "$dpid" 2>/dev/null || true
             done
-            # Then kill the process group
+            # Also SIGTERM the pane's process group as a belt-and-suspenders measure
             local pgid=""
             pgid=$(ps -o pgid= -p "$pane_pid" 2>/dev/null | tr -d ' ')
             if [[ -n "$pgid" ]]; then
@@ -107,9 +129,9 @@ cleanup() {
                 kill -TERM "$pane_pid" 2>/dev/null || true
             fi
             sleep 0.4
-            # SIGKILL everything
-            for cpid in $children; do
-                kill -KILL "$cpid" 2>/dev/null || true
+            # SIGKILL every descendant
+            for dpid in $all_desc; do
+                kill -KILL "$dpid" 2>/dev/null || true
             done
             if [[ -n "$pgid" ]]; then
                 kill -KILL -"$pgid" 2>/dev/null || true

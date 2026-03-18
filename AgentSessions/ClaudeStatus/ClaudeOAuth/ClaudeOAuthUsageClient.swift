@@ -47,6 +47,13 @@ actor ClaudeOAuthUsageClient {
     private let session: URLSession
     private static let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
 
+    // Shared file cache compatible with ClaudeCodeStatusLine
+    // (github.com/daniel3303/ClaudeCodeStatusLine). Both tools read/write the
+    // same file so the per-account API quota (~few requests per 20 min) is
+    // shared across all consumers rather than each one burning quota independently.
+    private static let sharedCacheURL = URL(fileURLWithPath: "/tmp/claude/statusline-usage-cache.json")
+    private static let cacheMaxAge: TimeInterval = 60  // seconds
+
     init() {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
@@ -55,6 +62,17 @@ actor ClaudeOAuthUsageClient {
     }
 
     func fetch(token: String) async throws -> (response: ClaudeOAuthRawUsageResponse, bodyHash: String, rawBody: String) {
+        // Check shared file cache first — avoids redundant API calls across
+        // AgentSessions restarts and external tools (ClaudeCodeStatusLine).
+        if let cached = readSharedCache() {
+            os_log("ClaudeOAuth: serving from shared cache (age %.0fs)", log: log, type: .debug, cached.age)
+            return cached.result
+        }
+
+        // Touch the cache file before fetching so concurrent consumers see
+        // a fresh mtime and skip their own fetch (same pattern as ClaudeCodeStatusLine).
+        touchSharedCache()
+
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -109,7 +127,69 @@ actor ClaudeOAuthUsageClient {
             throw ClaudeOAuthUsageClientError.decodingError(error)
         }
 
+        // Write successful response to shared cache for other consumers
+        writeSharedCache(data: data)
+
         os_log("ClaudeOAuth: fetch succeeded", log: log, type: .debug)
         return (parsed, bodyHash, rawBody)
+    }
+
+    // MARK: - Shared File Cache
+
+    private struct CachedResult {
+        let result: (response: ClaudeOAuthRawUsageResponse, bodyHash: String, rawBody: String)
+        let age: TimeInterval
+    }
+
+    /// Read from the shared cache file if it exists and is fresh.
+    private func readSharedCache() -> CachedResult? {
+        let url = Self.sharedCacheURL
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return nil }
+
+        // Check mtime freshness
+        guard let attrs = try? fm.attributesOfItem(atPath: url.path),
+              let mtime = attrs[.modificationDate] as? Date else { return nil }
+        let age = Date().timeIntervalSince(mtime)
+        guard age < Self.cacheMaxAge else { return nil }
+
+        // Parse the cached JSON
+        guard let data = try? Data(contentsOf: url) else { return nil }
+
+        // Validate it's a real usage response (has five_hour key), not an error
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              obj["five_hour"] != nil else { return nil }
+
+        guard let parsed = try? JSONDecoder().decode(ClaudeOAuthRawUsageResponse.self, from: data) else { return nil }
+
+        let bodyHash = SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
+        let rawBody: String
+        if let pretty = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted),
+           let str = String(data: pretty, encoding: .utf8) {
+            rawBody = str
+        } else {
+            rawBody = String(data: data, encoding: .utf8) ?? "<undecodable>"
+        }
+
+        return CachedResult(result: (parsed, bodyHash, rawBody), age: age)
+    }
+
+    /// Touch the cache file to claim the fetch slot (prevents concurrent fetches).
+    private func touchSharedCache() {
+        let url = Self.sharedCacheURL
+        let fm = FileManager.default
+        try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if fm.fileExists(atPath: url.path) {
+            try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        } else {
+            fm.createFile(atPath: url.path, contents: nil)
+        }
+    }
+
+    /// Write a successful API response to the shared cache.
+    private func writeSharedCache(data: Data) {
+        let url = Self.sharedCacheURL
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
     }
 }
