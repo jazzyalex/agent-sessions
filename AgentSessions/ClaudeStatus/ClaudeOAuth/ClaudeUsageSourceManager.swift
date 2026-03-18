@@ -30,6 +30,10 @@ actor ClaudeUsageSourceManager {
     private static let cacheStaleThreshold: TimeInterval = 10 * 60  // 10 minutes
     private static let cacheHardExpire: TimeInterval = 30 * 60      // 30 minutes
     private static let backoffSequence: [TimeInterval] = [5 * 60, 10 * 60, 15 * 60]
+    // Fast retries during cold start (first 90s after start) to close the blank-screen gap.
+    // At most 2 extra API calls; self-limiting once the window closes.
+    private static let coldStartWindow: TimeInterval = 90
+    private static let coldStartRetryDelays: [TimeInterval] = [10, 30]
 
     // MARK: - State
     private var mode: ClaudeUsageMode = .auto
@@ -61,6 +65,7 @@ actor ClaudeUsageSourceManager {
     private(set) var lastRawOAuthPayload: String?
     private var refreshTask: Task<Void, Never>?
     private var shouldRun = false
+    private var startedAt: Date?
 
     // MARK: - Lifecycle
 
@@ -73,6 +78,7 @@ actor ClaudeUsageSourceManager {
         self.snapshotHandler = handler
         self.availabilityHandler = availabilityHandler
         self.shouldRun = true
+        self.startedAt = Date()
 
         os_log("ClaudeOAuth: source manager starting, mode=%{public}@", log: log, type: .info, mode.rawValue)
 
@@ -223,6 +229,10 @@ actor ClaudeUsageSourceManager {
             if var snap = lastOAuthSnapshot {
                 snap.health = .degraded
                 publish(snap)
+            } else if mode == .auto && !usingTmuxFallback {
+                // No cached data at all — activate tmux immediately so user sees something
+                os_log("ClaudeOAuth: no cached data on first failure, activating tmux fallback early", log: log, type: .info)
+                await activateTmuxFallback(reason: "first failure with no cache")
             }
 
         case 2:
@@ -243,10 +253,18 @@ actor ClaudeUsageSourceManager {
             }
         }
 
-        // Schedule retry with backoff
+        // Schedule retry with backoff (fast retries during cold-start window)
         if mode != .tmuxOnly {
-            let backoffIndex = min(oauthFailureCount - 1, Self.backoffSequence.count - 1)
-            let delay = Self.backoffSequence[max(0, backoffIndex)]
+            let delay: TimeInterval
+            if !usingTmuxFallback,
+               let started = startedAt,
+               Date().timeIntervalSince(started) < Self.coldStartWindow,
+               oauthFailureCount <= Self.coldStartRetryDelays.count {
+                delay = Self.coldStartRetryDelays[oauthFailureCount - 1]
+            } else {
+                let backoffIndex = min(oauthFailureCount - 1, Self.backoffSequence.count - 1)
+                delay = Self.backoffSequence[max(0, backoffIndex)]
+            }
             os_log("ClaudeOAuth: retry in %.0fs", log: log, type: .info, delay)
             scheduleOAuthRefresh(delay: delay)
         }
@@ -265,9 +283,13 @@ actor ClaudeUsageSourceManager {
         let handler = self.snapshotHandler
         let availHandler = self.availabilityHandler
         let ctx = visibilityContext
+        let store = self.store
 
         await adapter.start(
-            handler: { snap in handler?(snap) },
+            handler: { snap in
+                handler?(snap)
+                Task { await store.save(snap) }
+            },
             availabilityHandler: { a in availHandler?(a) }
         )
         await adapter.setVisibility(
@@ -319,6 +341,11 @@ actor ClaudeUsageSourceManager {
             lines += "\n\n--- raw OAuth payload ---\n\(raw)"
         }
         return lines
+    }
+
+    /// Persist a snapshot produced outside the normal OAuth/tmux loop (e.g., hard probe).
+    func saveSnapshot(_ snapshot: ClaudeLimitSnapshot) async {
+        await store.save(snapshot)
     }
 
     // MARK: - Private
