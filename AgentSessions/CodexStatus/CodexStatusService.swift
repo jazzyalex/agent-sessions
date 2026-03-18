@@ -1291,18 +1291,19 @@ actor CodexStatusService {
                 _ = kill(pid_t(pid), SIGKILL)
             }
         }
-        // 2. Kill codex processes by CWD only when no newer probe is running.
-        // If a new probe started (activeProbeLabel != nil), the CWD-based kill
-        // would terminate it since all probes share the same working directory.
-        if activeProbeLabel == nil {
-            await killProbeProcessesByCWD()
-        }
+        // 2. Kill orphaned codex processes by CWD. When another probe is active,
+        // restrict to orphans (ppid ≤ 1) to avoid killing the active probe's children.
+        // Step 1 above killed the old tmux server, so its codex children are now
+        // reparented to launchd (PID 1) while the active probe's children are not.
+        await killProbeProcessesByCWD(orphansOnly: activeProbeLabel != nil)
         // 3. Remove socket files
         removeOrphanedSocketFiles(label: label)
     }
 
-    /// Kill any codex processes whose CWD matches the probe working directory.
-    private func killProbeProcessesByCWD() async {
+    /// Kill codex processes whose CWD matches the probe working directory.
+    /// When `orphansOnly` is true, restricts to processes whose parent has exited
+    /// (ppid ≤ 1, reparented to launchd), protecting any active probe's children.
+    private func killProbeProcessesByCWD(orphansOnly: Bool = false) async {
         let workDir = CodexProbeConfig.probeWorkingDirectory()
         let normalizedWD = normalizeProbePath(workDir)
         let lsofResult = await runProcess(
@@ -1318,6 +1319,13 @@ actor CodexStatusService {
                 cwdPID = pid
             } else if s.hasPrefix("n"), let pid = cwdPID {
                 if normalizeProbePath(String(s.dropFirst())) == normalizedWD {
+                    if orphansOnly {
+                        let ppidSnap = await runProcess(executable: "/bin/ps",
+                                                        arguments: ["-o", "ppid=", "-p", "\(pid)"],
+                                                        timeoutSeconds: 2)
+                        let ppid = Int32(ppidSnap.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+                        guard ppid <= 1 else { continue }
+                    }
                     await terminateProcessGroup(pid: pid_t(pid))
                 }
             }
