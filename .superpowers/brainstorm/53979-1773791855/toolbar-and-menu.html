@@ -1,0 +1,104 @@
+<h2>Design Section 4: Toolbar Toggle & Context Menu</h2>
+<p class="subtitle">Where the name toggle lives in the toolbar, and how "Rename" appears in the context menu.</p>
+
+<div class="section">
+  <h3>Toolbar Toggle Placement</h3>
+  <div class="mockup">
+    <div class="mockup-header">Toolbar — name toggle added next to favorites star</div>
+    <div class="mockup-body" style="padding: 12px 16px;">
+      <div style="font-family: -apple-system, SF Pro, system-ui; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+        <!-- Active sessions dot -->
+        <div style="display: flex; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.06); border-radius: 20px; border: 1px solid rgba(255,255,255,0.1);">
+          <div style="width: 8px; height: 8px; border-radius: 50%; background: #555;"></div>
+        </div>
+        <!-- Agent tabs -->
+        <div style="display: flex; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.06); border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); gap: 6px;">
+          <div style="width: 8px; height: 8px; border-radius: 50%; background: #3b82f6;"></div>
+          <span style="font-size: 12px; font-weight: 500; color: #e0e0e0;">Codex</span>
+        </div>
+        <div style="display: flex; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.06); border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); gap: 6px;">
+          <div style="width: 8px; height: 8px; border-radius: 50%; background: #f97316;"></div>
+          <span style="font-size: 12px; font-weight: 500; color: #e0e0e0;">Claude</span>
+        </div>
+        <div style="display: flex; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.06); border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); gap: 6px;">
+          <div style="width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></div>
+          <span style="font-size: 12px; font-weight: 500; color: #e0e0e0;">Gemini</span>
+        </div>
+        <!-- Search -->
+        <div style="margin-left: 4px; padding: 6px 10px; background: rgba(255,255,255,0.06); border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); min-width: 120px;">
+          <span style="font-size: 12px; color: #6e6e73;">Search...</span>
+        </div>
+        <!-- Spacer -->
+        <div style="flex: 1;"></div>
+        <!-- Favorites star toggle -->
+        <div style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;" title="Favorites">
+          <span style="font-size: 16px; color: #8e8e93;">☆</span>
+        </div>
+        <!-- NAME TOGGLE - NEW -->
+        <div style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; background: rgba(0,122,204,0.15);" title="Show Custom Names">
+          <span style="font-size: 15px; color: #007acc;">🏷</span>
+        </div>
+        <!-- Divider -->
+        <div style="width: 1px; height: 20px; background: rgba(255,255,255,0.1); margin: 0 4px;"></div>
+        <!-- Other toolbar icons -->
+        <div style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px;">
+          <span style="font-size: 14px; color: #e0e0e0;">▶</span>
+        </div>
+        <div style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px;">
+          <span style="font-size: 14px; color: #e0e0e0;">📁</span>
+        </div>
+        <div style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px;">
+          <span style="font-size: 14px; color: #e0e0e0;">↻</span>
+        </div>
+      </div>
+      <div style="margin-top: 8px; font-size: 11px; color: #6e6e73; text-align: center;">
+        ↑ Tag icon (SF Symbol: <code style="background: #2a2a2a; padding: 2px 6px; border-radius: 4px;">tag.fill</code> / <code style="background: #2a2a2a; padding: 2px 6px; border-radius: 4px;">tag</code>) placed next to the star toggle — same <code style="background: #2a2a2a; padding: 2px 6px; border-radius: 4px;">ToolbarIconToggle</code> pattern. Blue = active (showing custom names).
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Context Menu — "Rename" Placement</h3>
+  <div style="display: flex; gap: 24px; justify-content: center;">
+    <div class="mockup" style="max-width: 280px;">
+      <div class="mockup-header">Right-click on session row</div>
+      <div class="mockup-body" style="padding: 0;">
+        <div style="font-family: -apple-system, SF Pro, system-ui; font-size: 13px; background: #2a2a2e; border-radius: 8px; padding: 4px 0; color: #e0e0e0;">
+          <div style="padding: 4px 12px; cursor: pointer;">Save</div>
+          <div style="padding: 4px 12px; cursor: pointer; background: #007acc; color: white; font-weight: 500;">Rename...</div>
+          <div style="height: 1px; background: #3a3a3e; margin: 4px 8px;"></div>
+          <div style="padding: 4px 12px; cursor: pointer;">Resume in Claude (Terminal)</div>
+          <div style="height: 1px; background: #3a3a3e; margin: 4px 8px;"></div>
+          <div style="padding: 4px 12px; cursor: pointer;">Open Working Directory</div>
+          <div style="padding: 4px 12px; cursor: pointer;">Reveal Session Log</div>
+          <div style="padding: 4px 12px; cursor: pointer;">Copy Session ID</div>
+          <div style="height: 1px; background: #3a3a3e; margin: 4px 8px;"></div>
+          <div style="padding: 4px 12px; cursor: pointer;">Filter by Project: myapp</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mockup" style="max-width: 280px;">
+      <div class="mockup-header">Cockpit HUD right-click</div>
+      <div class="mockup-body" style="padding: 0;">
+        <div style="font-family: -apple-system, SF Pro, system-ui; font-size: 13px; background: #2a2a2e; border-radius: 8px; padding: 4px 0; color: #e0e0e0;">
+          <div style="padding: 4px 12px; cursor: pointer;">Go to Session</div>
+          <div style="padding: 4px 12px; cursor: pointer;">Focus in iTerm2</div>
+          <div style="padding: 4px 12px; cursor: pointer; background: #007acc; color: white; font-weight: 500;">Rename...</div>
+          <div style="height: 1px; background: #3a3a3e; margin: 4px 8px;"></div>
+          <div style="padding: 4px 12px; cursor: pointer;">Reveal Log</div>
+          <div style="padding: 4px 12px; cursor: pointer;">Open Working Directory</div>
+          <div style="height: 1px; background: #3a3a3e; margin: 4px 8px;"></div>
+          <div style="padding: 4px 12px; cursor: pointer;">Copy Session ID</div>
+          <div style="padding: 4px 12px; cursor: pointer;">Copy Tab Title</div>
+          <div style="padding: 4px 12px; cursor: pointer;">Copy Working Directory Path</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="margin-top: 12px; font-size: 12px; color: #6e6e73; text-align: center;">
+    "Rename..." placed right after Save (unified) or after Focus (cockpit) — high in the menu near identity-related actions.
+    <br>Ellipsis indicates it opens a popover.
+  </div>
+</div>

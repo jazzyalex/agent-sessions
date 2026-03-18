@@ -1,0 +1,64 @@
+<h2>Design Section 2: Rename Popover</h2>
+<p class="subtitle">The popover appears when selecting "Rename" from the context menu. Which layout feels right?</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background: #1e1e1e; border-radius: 8px; padding: 16px; font-family: -apple-system, SF Pro, system-ui; color: #e0e0e0;">
+        <div style="font-size: 11px; color: #8e8e93; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">Rename Session</div>
+        <input type="text" value="Auth middleware refactor" style="width: 100%; box-sizing: border-box; background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px; padding: 8px 10px; color: #e0e0e0; font-family: 'SF Mono', Menlo, monospace; font-size: 13px; outline: none;" readonly>
+        <div style="margin-top: 8px; font-size: 11px; color: #6e6e73;">
+          Original: "can you refactor the auth middleware to use..."
+        </div>
+        <div style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
+          <button style="background: transparent; border: 1px solid #3a3a3a; border-radius: 6px; padding: 5px 12px; color: #8e8e93; font-size: 12px; cursor: pointer;">Reset to Original</button>
+          <button style="background: #007acc; border: none; border-radius: 6px; padding: 5px 16px; color: white; font-size: 12px; cursor: pointer;">Save</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A: Compact with Original Preview</h3>
+      <p>Label, text field, original name shown below as reference, Reset + Save buttons. Clean, everything visible at once.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background: #1e1e1e; border-radius: 8px; padding: 16px; font-family: -apple-system, SF Pro, system-ui; color: #e0e0e0;">
+        <div style="font-size: 11px; color: #8e8e93; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">Rename Session</div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="text" value="Auth middleware refactor" style="flex: 1; background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px; padding: 8px 10px; color: #e0e0e0; font-family: 'SF Mono', Menlo, monospace; font-size: 13px; outline: none;" readonly>
+          <button style="background: transparent; border: 1px solid #3a3a3a; border-radius: 6px; padding: 7px 10px; color: #8e8e93; font-size: 11px; cursor: pointer; white-space: nowrap;">Reset</button>
+        </div>
+        <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 10px; color: #6e6e73;">Press Return to save, Esc to cancel</span>
+          <button style="background: #007acc; border: none; border-radius: 6px; padding: 5px 14px; color: white; font-size: 12px; cursor: pointer;">Save</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B: Minimal with Keyboard Hints</h3>
+      <p>Text field + inline Reset button, keyboard hints below. No original name preview. Faster for power users, more compact.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background: #1e1e1e; border-radius: 8px; padding: 16px; font-family: -apple-system, SF Pro, system-ui; color: #e0e0e0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <span style="font-size: 11px; color: #8e8e93; text-transform: uppercase; letter-spacing: 0.5px;">Rename Session</span>
+          <button style="background: transparent; border: none; color: #007acc; font-size: 11px; cursor: pointer;">Reset to Original</button>
+        </div>
+        <input type="text" value="Auth middleware refactor" style="width: 100%; box-sizing: border-box; background: #2a2a2a; border: 1px solid #007acc; border-radius: 6px; padding: 8px 10px; color: #e0e0e0; font-family: 'SF Mono', Menlo, monospace; font-size: 13px; outline: none;" readonly>
+        <div style="margin-top: 6px; font-size: 11px; color: #6e6e73; font-style: italic;">
+          was: "can you refactor the auth middleware to use..."
+        </div>
+        <div style="margin-top: 10px; font-size: 10px; color: #6e6e73; text-align: center;">Return to save &middot; Esc to cancel</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C: Hybrid</h3>
+      <p>Header row with label + Reset link, focused text field with blue border, original name below in italic, keyboard hints centered. Best of both worlds.</p>
+    </div>
+  </div>
+</div>
