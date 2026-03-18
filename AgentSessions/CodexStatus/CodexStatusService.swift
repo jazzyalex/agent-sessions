@@ -1074,6 +1074,18 @@ actor CodexStatusService {
         let didExit = await waitForProcessExit(process, timeoutSeconds: scriptTimeoutSeconds, label: probeLabel, session: Self.probeSessionName)
         let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+
+        // Schedule force-cleanup on ALL exit paths (success, error, timeout).
+        // Waits 2s for shell EXIT trap, then kills by ps scanning — works even
+        // when the socket was already deleted by the shell cleanup.
+        let capturedLabel = probeLabel
+        deferredTmuxCleanupTask?.cancel()
+        deferredTmuxCleanupTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            await self?.forceCleanupProbeByLabel(capturedLabel)
+            await self?.cleanupOrphanedTmuxLabels()
+        }
+
         if !didExit {
             let d = CodexProbeDiagnostics(success: false, exitCode: 124, scriptPath: scriptURL.path, workdir: workDir, codexBin: codexBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr.isEmpty ? "Script timed out" : stderr)
             return (nil, d)
@@ -1090,11 +1102,6 @@ actor CodexStatusService {
         }
         let snap = parseStatusJSON(stdout)
         let d = CodexProbeDiagnostics(success: snap != nil, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, codexBin: codexBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
-        deferredTmuxCleanupTask?.cancel()
-        deferredTmuxCleanupTask = Task { [weak self] in
-            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return } // 2s grace for shell trap
-            await self?.cleanupOrphanedTmuxLabels()
-        }
         return (snap, d)
     }
 
@@ -1253,7 +1260,71 @@ actor CodexStatusService {
                                               session: Self.probeSessionName,
                                               expectedCommandToken: "codex") {
                 await cleanupTmuxProbe(label: label, session: Self.probeSessionName)
+            } else {
+                // Server is dead/unreachable — socket is an orphan. Remove it.
+                // The as-cx- prefix is unique to our probes, so this is always safe.
+                removeOrphanedSocketFiles(label: label)
             }
+        }
+        // Also kill socketless probe tmux servers (socket deleted but process alive).
+        let psSnap = await runProcess(executable: "/bin/ps",
+                                      arguments: ["-A", "-o", "pid=", "-o", "command="],
+                                      timeoutSeconds: 2)
+        terminateSocketlessProbeServers(labelPrefix: Self.probeLabelPrefix,
+                                       psOutput: psSnap.stdout)
+    }
+
+    /// Forcefully clean up a probe by scanning the process table.
+    /// Does NOT rely on tmux socket/commands — works even when socket is already deleted.
+    private func forceCleanupProbeByLabel(_ label: String) async {
+        // 1. Find and kill the tmux server process by its command-line label argument
+        let psSnap = await runProcess(executable: "/bin/ps",
+                                      arguments: ["-A", "-o", "pid=", "-o", "command="],
+                                      timeoutSeconds: 2)
+        let labelArg = "-L \(label)"
+        for line in psSnap.stdout.split(separator: "\n") {
+            let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            let parts = trimmed.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
+            guard parts.count == 2, let pid = Int32(parts[0]) else { continue }
+            let command = String(parts[1])
+            if command.contains("tmux"), command.contains(labelArg) {
+                _ = kill(pid_t(pid), SIGKILL)
+            }
+        }
+        // 2. Kill codex processes whose CWD is the probe working directory
+        await killProbeProcessesByCWD()
+        // 3. Remove socket files
+        removeOrphanedSocketFiles(label: label)
+    }
+
+    /// Kill any codex processes whose CWD matches the probe working directory.
+    private func killProbeProcessesByCWD() async {
+        let workDir = CodexProbeConfig.probeWorkingDirectory()
+        let normalizedWD = normalizeProbePath(workDir)
+        let lsofResult = await runProcess(
+            executable: "/usr/sbin/lsof",
+            arguments: ["-w", "-a", "-c", "codex", "-d", "cwd", "-nP", "-F", "pn"],
+            timeoutSeconds: 3
+        )
+        guard !lsofResult.stdout.isEmpty else { return }
+        var cwdPID: Int32? = nil
+        for line in lsofResult.stdout.split(separator: "\n") {
+            let s = String(line)
+            if s.hasPrefix("p"), let pid = Int32(s.dropFirst()) {
+                cwdPID = pid
+            } else if s.hasPrefix("n"), let pid = cwdPID {
+                if normalizeProbePath(String(s.dropFirst())) == normalizedWD {
+                    await terminateProcessGroup(pid: pid_t(pid))
+                }
+            }
+        }
+    }
+
+    private func removeOrphanedSocketFiles(label: String) {
+        guard label.hasPrefix(Self.probeLabelPrefix) else { return }
+        let uid = getuid()
+        for root in ["/private/tmp/tmux-\(uid)", "/tmp/tmux-\(uid)"] {
+            try? FileManager.default.removeItem(atPath: "\(root)/\(label)")
         }
     }
 
