@@ -78,7 +78,9 @@ extension PreferencesView {
                             Text("Web API reads the Safari session cookie for claude.ai. On macOS 14+, this requires Full Disk Access.")
                                 .font(.caption)
                             Button("Open Full Disk Access Settings") {
-                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                                    NSWorkspace.shared.open(url)
+                                }
                             }
                             .buttonStyle(.link)
                             .font(.caption)
