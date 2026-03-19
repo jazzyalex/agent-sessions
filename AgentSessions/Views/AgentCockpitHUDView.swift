@@ -3101,27 +3101,12 @@ private struct HUDLimitsProviderText: View {
 
     // Matches CockpitFooterView.QuotaWidget.formatRelativeTimeUntil exactly
     private func formatRelativeTimeUntil(_ date: Date?, now: Date = Date()) -> String? {
-        guard let date else { return nil }
-        let interval = max(0, date.timeIntervalSince(now))
-        if interval == 0 { return nil }
-        if interval < 60 { return "<1m" }
-        let totalMinutes = Int(ceil(interval / 60.0))
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        if hours <= 0 { return "\(minutes)m" }
-        if minutes <= 0 { return "\(hours)h" }
-        return "\(hours)h \(minutes)m"
+        formatUsageRelativeTimeLabel(date, now: now)
     }
 
     // Matches CockpitFooterView.QuotaWidget.formatWeeklyReset exactly
     private func formatWeeklyReset(_ date: Date?, now: Date = Date()) -> String? {
-        guard let date else { return nil }
-        let interval = date.timeIntervalSince(now)
-        guard interval > 0 else { return nil }
-        if interval < 24 * 60 * 60 {
-            return "\(hudWeeklyResetFormatter.string(from: date)) \(AppDateFormatting.weekdayAbbrev(date))"
-        }
-        return AppDateFormatting.weekdayAbbrev(date)
+        formatUsageWeeklyResetLabel(date, now: now)
     }
 
     var body: some View {

@@ -5,6 +5,10 @@ enum FreshUntilKeys {
     static let claude = "FreshUntilClaude"
 }
 
+enum UsageProbeCooldownKeys {
+    static let codexAutoProbe = "CodexAutoProbeCooldownUntil"
+}
+
 func setFreshUntil(for source: UsageTrackingSource, until: Date) {
     let key = (source == .codex) ? FreshUntilKeys.codex : FreshUntilKeys.claude
     UserDefaults.standard.set(until.timeIntervalSince1970, forKey: key)
@@ -13,6 +17,16 @@ func setFreshUntil(for source: UsageTrackingSource, until: Date) {
 func freshUntil(for source: UsageTrackingSource, now: Date = Date()) -> Date? {
     let key = (source == .codex) ? FreshUntilKeys.codex : FreshUntilKeys.claude
     let ts = UserDefaults.standard.double(forKey: key)
+    guard ts > 0 else { return nil }
+    return Date(timeIntervalSince1970: ts)
+}
+
+func setCodexAutoProbeCooldown(until: Date) {
+    UserDefaults.standard.set(until.timeIntervalSince1970, forKey: UsageProbeCooldownKeys.codexAutoProbe)
+}
+
+func codexAutoProbeCooldownUntil(now: Date = Date()) -> Date? {
+    let ts = UserDefaults.standard.double(forKey: UsageProbeCooldownKeys.codexAutoProbe)
     guard ts > 0 else { return nil }
     return Date(timeIntervalSince1970: ts)
 }

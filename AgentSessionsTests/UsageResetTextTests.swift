@@ -2,6 +2,12 @@ import XCTest
 @testable import AgentSessions
 
 final class UsageResetTextTests: XCTestCase {
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: FreshUntilKeys.codex)
+        UserDefaults.standard.removeObject(forKey: FreshUntilKeys.claude)
+        UserDefaults.standard.removeObject(forKey: UsageProbeCooldownKeys.codexAutoProbe)
+        super.tearDown()
+    }
 
     // MARK: - ISO 8601 parsing
 
@@ -71,5 +77,155 @@ final class UsageResetTextTests: XCTestCase {
         let raw = "Mar 19 at 8pm"
         let date = UsageResetText.resetDate(kind: "Wk", source: .claude, raw: raw)
         XCTAssertNotNil(date, "Claude human-readable format should still parse")
+    }
+
+    func testCodexAutoProbeCooldownDoesNotAffectEffectiveEventTimestamp() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let eventTimestamp = now.addingTimeInterval(-2 * 60 * 60)
+        setCodexAutoProbeCooldown(until: now.addingTimeInterval(4 * 60 * 60))
+
+        let effective = effectiveEventTimestamp(
+            source: .codex,
+            eventTimestamp: eventTimestamp,
+            lastUpdate: nil,
+            now: now
+        )
+
+        XCTAssertEqual(effective, eventTimestamp)
+    }
+
+    func testCodexFreshUntilStillSmoothsEffectiveEventTimestamp() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let eventTimestamp = now.addingTimeInterval(-2 * 60 * 60)
+        setFreshUntil(for: .codex, until: now.addingTimeInterval(60 * 60))
+
+        let effective = effectiveEventTimestamp(
+            source: .codex,
+            eventTimestamp: eventTimestamp,
+            lastUpdate: nil,
+            now: now
+        )
+
+        XCTAssertEqual(effective, now)
+    }
+
+    func testFormatUsageWeeklyResetLabelIncludesTimeBeyondTwentyFourHours() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(49 * 60 * 60)
+
+        let label = formatUsageWeeklyResetLabel(reset, now: now)
+
+        XCTAssertEqual(label, "\(AppDateFormatting.timeShort(reset)) \(AppDateFormatting.weekdayAbbrev(reset))")
+    }
+
+    func testCodexStatusServiceStartClearsPersistedAutoProbeCooldown() async {
+        let now = Date()
+        setCodexAutoProbeCooldown(until: now.addingTimeInterval(4 * 60 * 60))
+
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        await service.start()
+        await service.stop()
+
+        let cooldown = codexAutoProbeCooldownUntil(now: now)
+        XCTAssertNotNil(cooldown)
+        XCTAssertLessThanOrEqual(cooldown!, Date())
+    }
+
+    func testClaudeEffectiveEventTimestampUsesLastUpdateWithoutFreshTTL() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let lastUpdate = now.addingTimeInterval(-2 * 60 * 60)
+
+        let effective = effectiveEventTimestamp(
+            source: .claude,
+            eventTimestamp: nil,
+            lastUpdate: lastUpdate,
+            now: now
+        )
+
+        XCTAssertEqual(effective, lastUpdate)
+    }
+
+    func testClaudeFreshUntilSmoothsEffectiveEventTimestamp() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let lastUpdate = now.addingTimeInterval(-2 * 60 * 60)
+        setFreshUntil(for: .claude, until: now.addingTimeInterval(60 * 60))
+
+        let effective = effectiveEventTimestamp(
+            source: .claude,
+            eventTimestamp: nil,
+            lastUpdate: lastUpdate,
+            now: now
+        )
+
+        XCTAssertEqual(effective, now)
+    }
+
+    func testFormatResetDisplayForMenuShowsOutdatedCopyWhenClaudeDataIsStale() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let lastUpdate = now.addingTimeInterval(-(UsageStaleThresholds.claudeWeekly + 60))
+
+        let text = formatResetDisplayForMenu(
+            kind: "Wk",
+            source: .claude,
+            raw: "2026-03-19T20:00:00Z",
+            lastUpdate: lastUpdate,
+            eventTimestamp: nil,
+            now: now
+        )
+
+        XCTAssertEqual(text, UsageStaleThresholds.outdatedCopy)
+    }
+
+    func testFormatResetDisplayForMenuIncludesRelativeAndAbsoluteForFreshClaudeData() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(49 * 60 * 60)
+        let raw = ISO8601DateFormatter().string(from: reset)
+
+        let text = formatResetDisplayForMenu(
+            kind: "Wk",
+            source: .claude,
+            raw: raw,
+            lastUpdate: now,
+            eventTimestamp: nil,
+            now: now
+        )
+
+        XCTAssertTrue(text.contains("("))
+        XCTAssertTrue(text.contains(AppDateFormatting.weekdayAbbrev(reset)))
+        XCTAssertTrue(text.contains(AppDateFormatting.timeShort(reset)))
+    }
+
+    func testFormatResetDisplayUsesOutdatedCopyWhenCodexDataIsStale() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let eventTimestamp = now.addingTimeInterval(-(UsageStaleThresholds.codexWeekly + 60))
+
+        let text = formatResetDisplay(
+            kind: "Wk",
+            source: .codex,
+            raw: "resets 14:00 on 15 Mar (UTC)",
+            lastUpdate: nil,
+            eventTimestamp: eventTimestamp,
+            now: now
+        )
+
+        XCTAssertEqual(text, UsageStaleThresholds.outdatedCopy)
+    }
+
+    func testFormatResetDisplayReturnsNormalizedResetTextForFreshClaudeData() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let raw = "2026-03-19T20:00:00Z"
+
+        let text = formatResetDisplay(
+            kind: "Wk",
+            source: .claude,
+            raw: raw,
+            lastUpdate: now,
+            eventTimestamp: nil,
+            now: now
+        )
+
+        XCTAssertFalse(text.isEmpty)
+        XCTAssertFalse(text.contains("T"))
+        XCTAssertNotEqual(text, UsageStaleThresholds.outdatedCopy)
     }
 }

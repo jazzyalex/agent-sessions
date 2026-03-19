@@ -403,24 +403,11 @@ private struct IndexingIndicator: View {
     }
 
     private func formatRelativeTimeUntil(_ date: Date?, now: Date = Date()) -> String {
-        guard let date else { return "—" }
-        let interval = max(0, date.timeIntervalSince(now))
-        if interval < 60 { return "<1m" }
-        let totalMinutes = Int(ceil(interval / 60.0))
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        if hours <= 0 { return "\(minutes)m" }
-        if minutes <= 0 { return "\(hours)h" }
-        return "\(hours)h \(minutes)m"
+        formatUsageRelativeTimeLabel(date, now: now) ?? "—"
     }
 
     private func formatWeeklyReset(_ date: Date?, now: Date = Date()) -> String {
-        guard let date else { return "—" }
-        let interval = date.timeIntervalSince(now)
-        if interval >= 0, interval < 24 * 60 * 60 {
-            return "\(AppDateFormatting.timeShort(date)) \(AppDateFormatting.weekdayAbbrev(date))"
-        }
-        return AppDateFormatting.weekdayAbbrev(date)
+        formatUsageWeeklyResetLabel(date, now: now) ?? "—"
     }
 	}
 

@@ -52,48 +52,61 @@ func trimResetCopy(_ text: String) -> String {
     return result
 }
 
+func formatUsageRelativeTimeLabel(_ date: Date?, now: Date = Date()) -> String? {
+    guard let date else { return nil }
+    return relativeTimeUntilReset(date, now: now)
+}
+
+func formatUsageWeeklyResetLabel(_ date: Date?, now: Date = Date()) -> String? {
+    guard let date else { return nil }
+    guard date.timeIntervalSince(now) > 0 else { return nil }
+    return "\(AppDateFormatting.timeShort(date)) \(AppDateFormatting.weekdayAbbrev(date))"
+}
+
 func formatResetDisplay(kind: String,
                         source: UsageTrackingSource,
                         raw: String,
                         lastUpdate: Date?,
-                        eventTimestamp: Date?) -> String {
-    let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate)
+                        eventTimestamp: Date?,
+                        now: Date = Date()) -> String {
+    let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate, now: now)
     let isStale: Bool = {
         switch source {
         case .codex:
-            return isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff)
+            return isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff, now: now)
         case .claude:
-            return isResetInfoStale(kind: kind, source: source, lastUpdate: eff)
+            return isResetInfoStale(kind: kind, source: source, lastUpdate: eff, now: now)
         }
     }()
     if isStale || raw.isEmpty { return UsageStaleThresholds.outdatedCopy }
-    return UsageResetText.displayText(kind: kind, source: source, raw: raw, now: Date())
+    return UsageResetText.displayText(kind: kind, source: source, raw: raw, now: now)
 }
 
 func formatResetDisplayForMenu(kind: String,
                                source: UsageTrackingSource,
                                raw: String,
                                lastUpdate: Date?,
-                               eventTimestamp: Date?) -> String {
-    let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate)
+                               eventTimestamp: Date?,
+                               now: Date = Date()) -> String {
+    let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate, now: now)
     let isStale: Bool = {
         switch source {
         case .codex:
-            return isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff)
+            return isResetInfoStale(kind: kind, source: source, lastUpdate: lastUpdate, eventTimestamp: eff, now: now)
         case .claude:
-            return isResetInfoStale(kind: kind, source: source, lastUpdate: eff)
+            return isResetInfoStale(kind: kind, source: source, lastUpdate: eff, now: now)
         }
     }()
     guard !isStale, !raw.isEmpty else { return UsageStaleThresholds.outdatedCopy }
 
     // Prefer a parsed reset date so we can show relative time (matches the cockpit widgets)
     // and also include weekday + numeric date in the menu.
-    if let date = UsageResetText.resetDate(kind: kind, source: source, raw: raw, now: Date()) {
-        let relative = relativeTimeUntilReset(date)
+    if let date = UsageResetText.resetDate(kind: kind, source: source, raw: raw, now: now) {
+        let relative = relativeTimeUntilReset(date, now: now)
         let absolute = menuDateTimeWithWeekday(date)
         return "\(relative) (\(absolute))"
     }
 
     // Fallback to the existing formatter (may omit weekday if parsing fails).
-    return UsageResetText.displayText(kind: kind, source: source, raw: raw, now: Date())
+    return UsageResetText.displayText(kind: kind, source: source, raw: raw, now: now)
 }
