@@ -52,9 +52,19 @@ extension PreferencesView {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 520)
-                    .help("Auto: uses the OAuth endpoint (60s), falls back to tmux /usage on failure. tmux only: legacy behavior.")
+                    .help("Auto: OAuth endpoint (60s), falls back to tmux on failure. Web API only: claude.ai session cookie. tmux only: legacy behavior.")
                 }
                 .disabled(!claudeAgentEnabled || !claudeUsageEnabled)
+                toggleRow(
+                    "Include Web API in Auto fallback",
+                    isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled) },
+                        set: { UserDefaults.standard.set($0, forKey: PreferencesKey.claudeWebApiEnabled) }
+                    ),
+                    help: "When enabled, Auto mode falls back to the claude.ai Web API before tmux. Reads Safari session cookie. May require Full Disk Access on macOS 14+."
+                )
+                .disabled(!claudeAgentEnabled || !claudeUsageEnabled ||
+                          (ClaudeUsageMode(rawValue: UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? "auto") ?? .auto) != .auto)
                 labeledRow("Refresh every") {
                     Picker("", selection: $claudePollingInterval) {
                         Text("3 minutes").tag(180)
