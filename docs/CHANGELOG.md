@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Usage (Codex): When recent rollout logs contain `token_count` events with `rate_limits: null`, the app now treats limits as unavailable in recent logs instead of reusing older session-file percentages that can be wrong after resets. This also allows the `/status` probe fallback to engage for that newer Codex session behavior.
 - Agent Cockpit: The pinned HUD limits footer now rebuilds from live Codex/Claude usage-model changes the same way the main window footer does, preventing stale percentages from sticking in Cockpit after the underlying usage snapshot updates.
 - Agent Cockpit: The hover-expanded limits footer now formats weekly reset times consistently as `Day 1:34 PM` for both Codex and Claude.
+- Agent Cockpit: Cockpit-only (including pinned) launch now runs the same one-time startup/bootstrap path as the unified window, so Claude session names resolve without requiring the main window to open first.
 
 ## [3.2.1] - 2026-03-16
 
