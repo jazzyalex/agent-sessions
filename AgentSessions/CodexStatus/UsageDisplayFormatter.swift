@@ -69,6 +69,7 @@ func formatResetDisplay(kind: String,
                         lastUpdate: Date?,
                         eventTimestamp: Date?,
                         now: Date = Date()) -> String {
+    if isResetInfoUnavailable(raw: raw) { return UsageStaleThresholds.unavailableCopy }
     let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate, now: now)
     let isStale: Bool = {
         switch source {
@@ -88,6 +89,7 @@ func formatResetDisplayForMenu(kind: String,
                                lastUpdate: Date?,
                                eventTimestamp: Date?,
                                now: Date = Date()) -> String {
+    if isResetInfoUnavailable(raw: raw) { return UsageStaleThresholds.unavailableCopy }
     let eff = effectiveEventTimestamp(source: source, eventTimestamp: eventTimestamp, lastUpdate: lastUpdate, now: now)
     let isStale: Bool = {
         switch source {

@@ -342,10 +342,13 @@ final class StatusItemController: NSObject {
     }
     // Lightweight replica of reset line
     private func resetLine(label: String, percent: Int, reset: String) -> String {
+        let trimmed = reset.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == UsageStaleThresholds.unavailableCopy {
+            return "\(label) --  \(trimmed)"
+        }
         let mode = UsageDisplayMode.current()
         let clampedLeft = max(0, min(100, percent))
         let displayPercent = mode.numericPercent(fromLeft: clampedLeft)
-        let trimmed = reset.trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(label) \(displayPercent)% \(mode.suffix)  \(trimmed.isEmpty ? "—" : trimmed)"
     }
 }

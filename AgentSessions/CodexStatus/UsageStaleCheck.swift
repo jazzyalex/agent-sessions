@@ -22,6 +22,11 @@ enum UsageStaleThresholds {
     static let claudeWeekly: TimeInterval = 6 * 60 * 60 // 6 hours
 
     static let outdatedCopy = "Data is old. Check manually for latest"
+    static let unavailableCopy = "Unavailable in recent logs"
+}
+
+func isResetInfoUnavailable(raw: String) -> Bool {
+    raw.trimmingCharacters(in: .whitespacesAndNewlines) == UsageStaleThresholds.unavailableCopy
 }
 
 // MARK: - Stale Check
