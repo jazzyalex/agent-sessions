@@ -240,51 +240,13 @@ struct AgentSessionsApp: App {
                 .background(WindowAutosave(name: "MainWindow"))
                 .background(WindowOpenRegistrationView())
                 .onAppear {
-                    guard !AppRuntime.isRunningTests else { return }
-                    if UpdaterController.shared == nil || UpdaterController.shared !== updaterController {
-                        UpdaterController.shared = updaterController
-                    }
-                    setupMainWindowCloseObserverIfNeeded()
-
-                    if !didRunStartupTasks {
-                        didRunStartupTasks = true
-                        LaunchProfiler.reset("Unified main window")
-                        LaunchProfiler.log("Window appeared")
-                        LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
-                        Task.detached(priority: .utility) {
-                            await CodexStatusService.cleanupOrphansOnLaunch()
-                            await ClaudeStatusService.cleanupOrphansOnLaunch()
-                        }
-                        Task {
-                            let detectedCount = await CrashReportingService.shared.detectAndQueueOnLaunch()
-                            if detectedCount > 0 {
-                                await presentCrashRecoveryPrompt(newCrashCount: detectedCount)
-                            }
-                        }
-                        onboardingCoordinator.checkAndPresentIfNeeded()
-                        unifiedIndexerHolder.unified?.refresh()
-                        setupAnalytics()
-                    }
-
-                    let isAppActive = NSApp?.isActive ?? true
-                    unifiedIndexerHolder.unified?.setAppActive(isAppActive)
-                    activeCodexSessions.setAppActive(isAppActive)
-                    codexUsageModel.setAppActive(isAppActive)
-                    claudeUsageModel.setAppActive(isAppActive)
-                    updateUsageModels()
+                    runSharedLaunchBootstrap(windowLabel: "Unified main window")
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                    unifiedIndexerHolder.unified?.setAppActive(true)
-                    activeCodexSessions.setAppActive(true)
-                    codexUsageModel.setAppActive(true)
-                    claudeUsageModel.setAppActive(true)
-                    archiveManager.syncPinnedSessionsNow()
+                    handleAppDidBecomeActive()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-                    unifiedIndexerHolder.unified?.setAppActive(false)
-                    activeCodexSessions.setAppActive(false)
-                    codexUsageModel.setAppActive(false)
-                    claudeUsageModel.setAppActive(false)
+                    handleAppDidResignActive()
                 }
                 .onChange(of: showUsageStrip) { _, _ in
                     updateUsageModels()
@@ -312,8 +274,6 @@ struct AgentSessionsApp: App {
                 .onAppear {
                     guard !AppRuntime.isRunningTests else { return }
                     Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
-                    ensureStatusItemController()
-                    updateUsageModels()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .showOnboardingFromMenu)) { _ in
                     onboardingCoordinator.presentManually()
@@ -414,15 +374,13 @@ struct AgentSessionsApp: App {
                 .environmentObject(claudeUsageModel)
                 .background(WindowOpenRegistrationView())
                 .onAppear {
-                    guard !AppRuntime.isRunningTests else { return }
-                    ensureStatusItemController()
-                    updateUsageModels()
-                    // Kick off session indexing if the unified window hasn't already done it.
-                    // Without this, session names in the Cockpit stay generic when the main
-                    // window is closed on startup (indexers never leave .idle).
-                    if indexer.launchPhase == .idle { indexer.refresh() }
-                    if claudeIndexer.launchPhase == .idle { claudeIndexer.refresh(mode: .fullReconcile) }
-                    if opencodeIndexer.launchPhase == .idle { opencodeIndexer.refresh() }
+                    runSharedLaunchBootstrap(windowLabel: "Agent Cockpit window")
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    handleAppDidBecomeActive()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                    handleAppDidResignActive()
                 }
         }
         .defaultSize(width: 644, height: 320)
@@ -517,6 +475,82 @@ extension AgentSessionsApp {
         } else {
             DispatchQueue.main.async(execute: apply)
         }
+    }
+
+    @MainActor
+    private func unifiedIndexer() -> UnifiedSessionIndexer {
+        unifiedIndexerHolder.makeUnified(
+            codexIndexer: indexer,
+            claudeIndexer: claudeIndexer,
+            geminiIndexer: geminiIndexer,
+            opencodeIndexer: opencodeIndexer,
+            copilotIndexer: copilotIndexer,
+            droidIndexer: droidIndexer,
+            openclawIndexer: openclawIndexer
+        )
+    }
+
+    @MainActor
+    private func runSharedLaunchBootstrap(windowLabel: String) {
+        guard !AppRuntime.isRunningTests else { return }
+        if UpdaterController.shared == nil || UpdaterController.shared !== updaterController {
+            UpdaterController.shared = updaterController
+        }
+        ensureStatusItemController()
+        updateUsageModels()
+        setupMainWindowCloseObserverIfNeeded()
+
+        let unified = unifiedIndexer()
+        runStartupTasksIfNeeded(unified: unified, windowLabel: windowLabel)
+        synchronizeLiveModelsWithCurrentAppActiveState(unified: unified)
+    }
+
+    @MainActor
+    private func runStartupTasksIfNeeded(unified: UnifiedSessionIndexer, windowLabel: String) {
+        guard !didRunStartupTasks else { return }
+        didRunStartupTasks = true
+        LaunchProfiler.reset(windowLabel)
+        LaunchProfiler.log("Window appeared")
+        LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
+        Task.detached(priority: .utility) {
+            await CodexStatusService.cleanupOrphansOnLaunch()
+            await ClaudeStatusService.cleanupOrphansOnLaunch()
+        }
+        Task {
+            let detectedCount = await CrashReportingService.shared.detectAndQueueOnLaunch()
+            if detectedCount > 0 {
+                await presentCrashRecoveryPrompt(newCrashCount: detectedCount)
+            }
+        }
+        onboardingCoordinator.checkAndPresentIfNeeded()
+        unified.refresh()
+        setupAnalytics()
+    }
+
+    @MainActor
+    private func synchronizeLiveModelsWithCurrentAppActiveState(unified: UnifiedSessionIndexer) {
+        let isAppActive = NSApp?.isActive ?? true
+        unified.setAppActive(isAppActive)
+        activeCodexSessions.setAppActive(isAppActive)
+        codexUsageModel.setAppActive(isAppActive)
+        claudeUsageModel.setAppActive(isAppActive)
+    }
+
+    @MainActor
+    private func handleAppDidBecomeActive() {
+        unifiedIndexerHolder.unified?.setAppActive(true)
+        activeCodexSessions.setAppActive(true)
+        codexUsageModel.setAppActive(true)
+        claudeUsageModel.setAppActive(true)
+        archiveManager.syncPinnedSessionsNow()
+    }
+
+    @MainActor
+    private func handleAppDidResignActive() {
+        unifiedIndexerHolder.unified?.setAppActive(false)
+        activeCodexSessions.setAppActive(false)
+        codexUsageModel.setAppActive(false)
+        claudeUsageModel.setAppActive(false)
     }
 
     private func setupMainWindowCloseObserverIfNeeded() {
