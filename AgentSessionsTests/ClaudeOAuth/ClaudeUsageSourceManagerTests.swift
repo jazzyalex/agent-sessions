@@ -93,6 +93,37 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         if case .httpError   = httpError   {} else { XCTFail("Expected .httpError") }
     }
 
+    // MARK: - Web API mode
+
+    func testWebOnlyMode_doesNotAttemptOAuth() async {
+        let mgr = ClaudeUsageSourceManager()
+        await mgr.start(mode: .webOnly, handler: { _ in }, availabilityHandler: { _ in })
+        let source = await mgr.currentSourceDescription()
+        XCTAssertTrue(source.contains("Web API"), "webOnly mode should report Web API source, got: \(source)")
+        await mgr.stop()
+    }
+
+    func testAutoMode_credentialGating_diagnosticsReflectWatchState() async {
+        let mgr = ClaudeUsageSourceManager()
+        await mgr.start(mode: .auto, handler: { _ in }, availabilityHandler: { _ in })
+        // Give a brief moment for OAuth attempt to fail and enter credential-gated mode
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        let diag = await mgr.diagnosticsSnapshot()
+        XCTAssertTrue(diag.contains("credentialWatchActive"))
+        XCTAssertTrue(diag.contains("oauthFailureCount"))
+        await mgr.stop()
+    }
+
+    func testAutoMode_webApiFallback_stateTrackedInDiagnostics() async {
+        let mgr = ClaudeUsageSourceManager()
+        await mgr.start(mode: .auto, handler: { _ in }, availabilityHandler: { _ in })
+        let diag = await mgr.diagnosticsSnapshot()
+        XCTAssertTrue(diag.contains("usingWebFallback"))
+        XCTAssertTrue(diag.contains("webApiEnabled"))
+        XCTAssertTrue(diag.contains("webFailureCount"))
+        await mgr.stop()
+    }
+
     // MARK: - Cold-start restore
 
     /// On start, a recently-saved snapshot must be published immediately so the

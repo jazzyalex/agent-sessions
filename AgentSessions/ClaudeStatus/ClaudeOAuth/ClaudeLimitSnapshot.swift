@@ -43,6 +43,8 @@ enum ClaudeUsageSource: String, Codable, CustomStringConvertible {
     case oauthEndpoint   // Live fetch from api.anthropic.com/api/oauth/usage
     case tmuxUsage       // Active tmux /usage probe
     case cachedOAuth     // Served from disk/memory cache of a prior OAuth fetch
+    case webEndpoint     // Live fetch from claude.ai/api/organizations/{id}/usage
+    case cachedWeb       // Served from cache of a prior Web API fetch
     case unavailable     // No data source could produce a result
 
     var description: String {
@@ -50,6 +52,8 @@ enum ClaudeUsageSource: String, Codable, CustomStringConvertible {
         case .oauthEndpoint: return "OAuth"
         case .tmuxUsage: return "tmux"
         case .cachedOAuth: return "OAuth (cached)"
+        case .webEndpoint: return "Web API"
+        case .cachedWeb: return "Web API (cached)"
         case .unavailable: return "unavailable"
         }
     }
@@ -68,12 +72,14 @@ enum ClaudeUsageMode: String, CaseIterable {
     case auto       // Prefer OAuth, fall back to tmux on repeated failure (default)
     case oauthOnly  // OAuth endpoint only, no tmux fallback
     case tmuxOnly   // Existing tmux /usage probing only (pre-OAuth behavior)
+    case webOnly    // claude.ai Web API only, no OAuth or tmux
 
     var displayName: String {
         switch self {
-        case .auto: return "Auto (OAuth + tmux fallback)"
+        case .auto: return "Auto (OAuth + tmux)"
         case .oauthOnly: return "OAuth only"
         case .tmuxOnly: return "tmux only"
+        case .webOnly: return "Web API only"
         }
     }
 }

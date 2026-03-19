@@ -5,37 +5,42 @@ private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "Claude
 
 // MARK: - Source Manager
 //
-// Orchestrates Claude usage data collection across OAuth and tmux paths.
+// Orchestrates Claude usage data collection across OAuth, Web API, and tmux paths.
 //
-// auto mode:
+// auto mode (Web API disabled, default):
 //   - Primary: OAuth endpoint (60s cadence)
 //   - 1 failure  → health = degraded
-//   - 2 failures → serve last cached OAuth snapshot if <3min old
-//   - 3 failures → activate tmux fallback; OAuth retry on backoff (30s→60s→120s)
+//   - 2 failures → serve last cached OAuth snapshot if <10min old
+//   - 3 failures → activate tmux fallback; OAuth retries when credentials change
 //   - When OAuth recovers → switch back automatically
 //
-// oauthOnly: OAuth only, no tmux fallback
+// auto mode (Web API enabled via claudeWebApiEnabled pref):
+//   OAuth → [credential-gated retry] → Web API → [3 web failures] → tmux
+//
+// oauthOnly: OAuth only, no web or tmux fallback
 // tmuxOnly:  Existing ClaudeStatusService behavior, no OAuth
+// webOnly:   claude.ai Web API only, no OAuth or tmux
+//
+// Credential gating replaces blind time-based backoff after the cold-start
+// window. The credential watcher polls every 30s and retries OAuth only when
+// the Keychain mtime or .credentials.json hash changes.
 
 actor ClaudeUsageSourceManager {
     typealias SnapshotHandler = @Sendable (ClaudeLimitSnapshot) -> Void
     typealias AvailabilityHandler = @Sendable (ClaudeServiceAvailability) -> Void
 
     // MARK: - Thresholds
-    // The OAuth endpoint has a tight per-account quota (~few requests per 20 min).
-    // Polling too fast blocks both AS and Claude Code /usage (same endpoint).
-    // ClaudeUsageSourceManager is owned by ClaudeUsageModel.shared (singleton),
-    // so only one instance polls — the 5-min interval stays within quota.
-    private static let oauthRefreshInterval: TimeInterval = 5 * 60  // 5 minutes
-    private static let cacheStaleThreshold: TimeInterval = 10 * 60  // 10 minutes
-    private static let cacheHardExpire: TimeInterval = 30 * 60      // 30 minutes
-    private static let backoffSequence: [TimeInterval] = [5 * 60, 10 * 60, 15 * 60]
-    // Fast retries during cold start (first 90s after start) to close the blank-screen gap.
-    // At most 2 extra API calls; self-limiting once the window closes.
+
+    private static let oauthRefreshInterval: TimeInterval = 5 * 60    // 5 minutes
+    private static let cacheStaleThreshold: TimeInterval = 10 * 60    // 10 minutes
+    private static let cacheHardExpire: TimeInterval = 30 * 60        // 30 minutes
+    private static let credentialWatchInterval: TimeInterval = 30     // 30s watch poll
+    // Fast retries during cold start (first 90s) to close the blank-screen gap.
     private static let coldStartWindow: TimeInterval = 90
     private static let coldStartRetryDelays: [TimeInterval] = [10, 30]
 
     // MARK: - State
+
     private var mode: ClaudeUsageMode = .auto
     private var snapshotHandler: SnapshotHandler?
     private var availabilityHandler: AvailabilityHandler?
@@ -59,6 +64,7 @@ actor ClaudeUsageSourceManager {
     private var visibilityContext = OAuthVisibilityContext()
     private var visible: Bool { visibilityContext.effectiveVisible }
 
+    // OAuth
     private var oauthFailureCount = 0
     private var usingTmuxFallback = false
     private var lastOAuthSnapshot: ClaudeLimitSnapshot?
@@ -66,6 +72,26 @@ actor ClaudeUsageSourceManager {
     private var refreshTask: Task<Void, Never>?
     private var shouldRun = false
     private var startedAt: Date?
+    private var didAttemptDelegatedRefresh = false
+
+    // Credential gating
+    private let credentialWatcher = ClaudeCredentialFingerprint()
+    private var lastFailureFingerprint: ClaudeCredentialFingerprint.Fingerprint?
+    private var credentialWatchTask: Task<Void, Never>?
+
+    // Delegated refresh
+    private let delegatedRefresh = ClaudeDelegatedTokenRefresh()
+
+    // Web API
+    private let webCookieResolver = ClaudeWebCookieResolver()
+    private let webUsageClient = ClaudeWebUsageClient()
+    private var webFailureCount = 0
+    private var usingWebFallback = false
+    private var webRefreshTask: Task<Void, Never>?
+
+    private var webApiEnabled: Bool {
+        UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled)
+    }
 
     // MARK: - Lifecycle
 
@@ -100,6 +126,9 @@ actor ClaudeUsageSourceManager {
             scheduleOAuthRefresh(delay: 0)
         case .tmuxOnly:
             await activateTmuxFallback(reason: "tmuxOnly mode")
+        case .webOnly:
+            usingWebFallback = true
+            scheduleWebRefresh(delay: 0)
         }
     }
 
@@ -107,6 +136,10 @@ actor ClaudeUsageSourceManager {
         shouldRun = false
         refreshTask?.cancel()
         refreshTask = nil
+        credentialWatchTask?.cancel()
+        credentialWatchTask = nil
+        webRefreshTask?.cancel()
+        webRefreshTask = nil
         await tmuxAdapter?.stop()
         tmuxAdapter = nil
         os_log("ClaudeOAuth: source manager stopped", log: log, type: .info)
@@ -125,9 +158,15 @@ actor ClaudeUsageSourceManager {
             return
         }
 
-        // When transitioning hidden → visible, trigger an immediate refresh
+        // When transitioning hidden → visible, bypass credential gate
         if !wasVisible && visible {
-            scheduleOAuthRefresh(delay: 0)
+            if mode == .webOnly {
+                scheduleWebRefresh(delay: 0)
+            } else {
+                credentialWatchTask?.cancel()
+                credentialWatchTask = nil
+                scheduleOAuthRefresh(delay: 0)
+            }
         }
     }
 
@@ -136,6 +175,13 @@ actor ClaudeUsageSourceManager {
             await tmuxAdapter?.refreshNow()
             return
         }
+        if mode == .webOnly {
+            await performWebFetch()
+            return
+        }
+        // Bypass credential gate — cancel watch and retry OAuth immediately
+        credentialWatchTask?.cancel()
+        credentialWatchTask = nil
         await performOAuthFetch()
     }
 
@@ -145,12 +191,11 @@ actor ClaudeUsageSourceManager {
         refreshTask?.cancel()
         guard shouldRun else { return }
 
-        refreshTask = Task { [weak self] in
-            guard let self else { return }
+        refreshTask = Task {
             if delay > 0 {
                 do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }
             }
-            guard await self.shouldRun else { return }
+            guard self.shouldRun else { return }
             await self.performOAuthFetch()
         }
     }
@@ -158,14 +203,12 @@ actor ClaudeUsageSourceManager {
     private func performOAuthFetch() async {
         guard shouldRun else { return }
 
-        // Resolve token
         guard let resolved = await tokenResolver.resolve() else {
             os_log("ClaudeOAuth: no token available", log: log, type: .info)
             await handleOAuthFailure(reason: "no token")
             return
         }
 
-        // Fetch from endpoint
         do {
             let (raw, bodyHash, rawBody) = try await usageClient.fetch(token: resolved.token)
             lastRawOAuthPayload = rawBody
@@ -175,11 +218,22 @@ actor ClaudeUsageSourceManager {
                 return
             }
 
-            // Success
+            // Success — reset all failure state
             oauthFailureCount = 0
+            didAttemptDelegatedRefresh = false
+            lastFailureFingerprint = nil
+            credentialWatchTask?.cancel()
+            credentialWatchTask = nil
             lastOAuthSnapshot = snapshot
             await store.save(snapshot)
 
+            if usingWebFallback && mode != .webOnly {
+                os_log("ClaudeOAuth: OAuth recovered, deactivating web API fallback", log: log, type: .info)
+                usingWebFallback = false
+                webRefreshTask?.cancel()
+                webRefreshTask = nil
+                webFailureCount = 0
+            }
             if usingTmuxFallback {
                 os_log("ClaudeOAuth: OAuth recovered, deactivating tmux fallback", log: log, type: .info)
                 await deactivateTmuxFallback()
@@ -187,30 +241,45 @@ actor ClaudeUsageSourceManager {
 
             publish(snapshot)
             os_log("ClaudeOAuth: fetch succeeded, source=%{public}@", log: log, type: .info, resolved.source.rawValue)
-
-            // Schedule next fetch
             scheduleOAuthRefresh(delay: Self.oauthRefreshInterval)
 
         } catch ClaudeOAuthUsageClientError.unauthorized {
             os_log("ClaudeOAuth: 401, invalidating token cache", log: log, type: .info)
             await tokenResolver.invalidateCache()
+
+            // Attempt delegated refresh once per failure cycle
+            if !didAttemptDelegatedRefresh {
+                didAttemptDelegatedRefresh = true
+                os_log("ClaudeOAuth: attempting delegated token refresh via CLI", log: log, type: .info)
+                let result = await delegatedRefresh.attemptRefresh()
+                if case .refreshed = result {
+                    os_log("ClaudeOAuth: delegated refresh succeeded, retrying OAuth", log: log, type: .info)
+                    await tokenResolver.invalidateCache()
+                    await performOAuthFetch()
+                    return
+                }
+                os_log("ClaudeOAuth: delegated refresh result = no change, entering credential-gated mode",
+                       log: log, type: .info)
+            }
             await handleOAuthFailure(reason: "401 unauthorized")
+
         } catch ClaudeOAuthUsageClientError.rateLimited(let retryAfter) {
             let delay = retryAfter + 10
             os_log("ClaudeOAuth: rate limited, retrying in %.0fs", log: log, type: .info, delay)
             if var snap = lastOAuthSnapshot {
                 snap.health = .stale
                 publish(snap)
-                // Have cached data to show — just wait for retry, don't fall back
+                // Have cached data — just wait, don't fall back
                 scheduleOAuthRefresh(delay: delay)
             } else if mode == .auto && !usingTmuxFallback {
-                // No cached data AND rate limited — fall back to tmux so user sees something
-                os_log("ClaudeOAuth: no cached data during rate limit, activating tmux fallback", log: log, type: .info)
+                os_log("ClaudeOAuth: no cached data during rate limit, activating tmux fallback",
+                       log: log, type: .info)
                 await activateTmuxFallback(reason: "rate limited with no cache")
                 scheduleOAuthRefresh(delay: delay)
             } else {
                 scheduleOAuthRefresh(delay: delay)
             }
+
         } catch {
             os_log("ClaudeOAuth: fetch error: %{public}@", log: log, type: .error, error.localizedDescription)
             await handleOAuthFailure(reason: error.localizedDescription)
@@ -225,18 +294,23 @@ actor ClaudeUsageSourceManager {
 
         switch oauthFailureCount {
         case 1:
-            // Degraded — keep current display but mark health
             if var snap = lastOAuthSnapshot {
                 snap.health = .degraded
                 publish(snap)
-            } else if mode == .auto && !usingTmuxFallback {
-                // No cached data at all — activate tmux immediately so user sees something
-                os_log("ClaudeOAuth: no cached data on first failure, activating tmux fallback early", log: log, type: .info)
-                await activateTmuxFallback(reason: "first failure with no cache")
+            } else if mode == .auto {
+                if webApiEnabled && !usingWebFallback {
+                    os_log("ClaudeOAuth: no cache on first failure, activating web API fallback",
+                           log: log, type: .info)
+                    usingWebFallback = true
+                    scheduleWebRefresh(delay: 0)
+                } else if !webApiEnabled && !usingTmuxFallback {
+                    os_log("ClaudeOAuth: no cache on first failure, activating tmux fallback early",
+                           log: log, type: .info)
+                    await activateTmuxFallback(reason: "first failure with no cache")
+                }
             }
 
         case 2:
-            // Serve cache if fresh enough
             if let cached = lastOAuthSnapshot, now.timeIntervalSince(cached.fetchedAt) < Self.cacheStaleThreshold {
                 var serving = cached
                 serving.source = .cachedOAuth
@@ -247,26 +321,125 @@ actor ClaudeUsageSourceManager {
             }
 
         default:
-            // 3+ failures: activate tmux fallback (auto mode only)
-            if mode == .auto && !usingTmuxFallback {
-                await activateTmuxFallback(reason: "OAuth failure #\(oauthFailureCount)")
+            if mode == .auto {
+                if webApiEnabled && !usingWebFallback {
+                    os_log("ClaudeOAuth: activating web API fallback after failure #%d",
+                           log: log, type: .info, oauthFailureCount)
+                    usingWebFallback = true
+                    scheduleWebRefresh(delay: 0)
+                } else if !webApiEnabled && !usingTmuxFallback {
+                    await activateTmuxFallback(reason: "OAuth failure #\(oauthFailureCount)")
+                }
             }
         }
 
-        // Schedule retry with backoff (fast retries during cold-start window)
-        if mode != .tmuxOnly {
-            let delay: TimeInterval
-            if !usingTmuxFallback,
-               let started = startedAt,
-               Date().timeIntervalSince(started) < Self.coldStartWindow,
-               oauthFailureCount <= Self.coldStartRetryDelays.count {
-                delay = Self.coldStartRetryDelays[oauthFailureCount - 1]
-            } else {
-                let backoffIndex = min(oauthFailureCount - 1, Self.backoffSequence.count - 1)
-                delay = Self.backoffSequence[max(0, backoffIndex)]
-            }
-            os_log("ClaudeOAuth: retry in %.0fs", log: log, type: .info, delay)
+        if mode != .tmuxOnly && mode != .webOnly {
+            scheduleOAuthRetry()
+        }
+    }
+
+    private func scheduleOAuthRetry() {
+        // Fast retries during cold-start window (unchanged behavior)
+        if !usingTmuxFallback,
+           let started = startedAt,
+           Date().timeIntervalSince(started) < Self.coldStartWindow,
+           oauthFailureCount <= Self.coldStartRetryDelays.count {
+            let delay = Self.coldStartRetryDelays[oauthFailureCount - 1]
+            os_log("ClaudeOAuth: cold-start retry in %.0fs", log: log, type: .info, delay)
             scheduleOAuthRefresh(delay: delay)
+            return
+        }
+        // After cold-start window: credential-gated retry replaces blind backoff
+        os_log("ClaudeOAuth: entering credential-gated retry mode", log: log, type: .info)
+        startCredentialWatch()
+    }
+
+    // MARK: - Credential Watch
+
+    private func startCredentialWatch() {
+        credentialWatchTask?.cancel()
+        guard shouldRun else { return }
+
+        credentialWatchTask = Task {
+            let fp = await self.credentialWatcher.capture()
+            self.lastFailureFingerprint = fp
+
+            while self.shouldRun {
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(Self.credentialWatchInterval * 1_000_000_000))
+                } catch { return }
+                guard self.shouldRun else { return }
+
+                if await self.credentialWatcher.hasChanged(since: fp) {
+                    os_log("ClaudeOAuth: credential change detected, retrying OAuth", log: log, type: .info)
+                    self.credentialWatchTask = nil
+                    await self.performOAuthFetch()
+                    return
+                }
+            }
+        }
+    }
+
+    // MARK: - Web API Path
+
+    private func scheduleWebRefresh(delay: TimeInterval) {
+        webRefreshTask?.cancel()
+        guard shouldRun else { return }
+
+        webRefreshTask = Task {
+            if delay > 0 {
+                do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }
+            }
+            guard self.shouldRun else { return }
+            await self.performWebFetch()
+        }
+    }
+
+    private func performWebFetch() async {
+        guard shouldRun, usingWebFallback || mode == .webOnly else { return }
+
+        guard let cookie = await webCookieResolver.resolve() else {
+            os_log("ClaudeOAuth: web API — no session cookie available", log: log, type: .info)
+            await handleWebFailure(reason: "no session cookie")
+            return
+        }
+
+        do {
+            let (raw, bodyHash, fromCache) = try await webUsageClient.fetch(sessionKey: cookie.sessionKey)
+            guard var snapshot = ClaudeWebUsageNormalizer.normalize(raw, bodyHash: bodyHash) else {
+                os_log("ClaudeOAuth: web normalizer returned nil", log: log, type: .error)
+                await handleWebFailure(reason: "empty web payload")
+                return
+            }
+            if fromCache { snapshot.source = .cachedWeb }
+
+            webFailureCount = 0
+            publish(snapshot)
+            await store.save(snapshot)
+            os_log("ClaudeOAuth: web API fetch succeeded (fromCache=%{public}@)",
+                   log: log, type: .info, fromCache ? "true" : "false")
+            scheduleWebRefresh(delay: Self.oauthRefreshInterval)
+
+        } catch ClaudeOAuthUsageClientError.rateLimited(let retryAfter) {
+            let delay = retryAfter + 10
+            os_log("ClaudeOAuth: web API rate limited, retry in %.0fs", log: log, type: .info, delay)
+            scheduleWebRefresh(delay: delay)
+        } catch {
+            os_log("ClaudeOAuth: web API error: %{public}@", log: log, type: .error, error.localizedDescription)
+            await handleWebFailure(reason: error.localizedDescription)
+        }
+    }
+
+    private func handleWebFailure(reason: String) async {
+        webFailureCount += 1
+        os_log("ClaudeOAuth: web failure #%d: %{public}@", log: log, type: .info, webFailureCount, reason)
+
+        if webFailureCount >= 3, mode == .auto, !usingTmuxFallback {
+            os_log("ClaudeOAuth: web API failed %d times, activating tmux fallback",
+                   log: log, type: .info, webFailureCount)
+            await activateTmuxFallback(reason: "web API failure #\(webFailureCount)")
+        } else {
+            scheduleWebRefresh(delay: Self.oauthRefreshInterval)
         }
     }
 
@@ -314,18 +487,18 @@ actor ClaudeUsageSourceManager {
         switch mode {
         case .tmuxOnly: return "tmux"
         case .oauthOnly: return "OAuth only"
+        case .webOnly: return "Web API"
         case .auto:
-            if let snap = lastOAuthSnapshot {
-                return "\(snap.source) / \(snap.health)"
-            }
+            if usingWebFallback { return "Web API (OAuth fallback)" }
+            if let snap = lastOAuthSnapshot { return "\(snap.source) / \(snap.health)" }
             return "OAuth (no data)"
         }
     }
 
     func currentHealthDescription() -> String {
         if usingTmuxFallback { return "fallback" }
-        if oauthFailureCount >= 2 { return "degraded" }
-        if oauthFailureCount == 1 { return "degraded" }
+        if usingWebFallback { return "web fallback" }
+        if oauthFailureCount >= 1 { return "degraded" }
         return lastOAuthSnapshot != nil ? "live" : "pending"
     }
 
@@ -333,7 +506,11 @@ actor ClaudeUsageSourceManager {
         var lines = """
         mode: \(mode.rawValue)
         usingTmuxFallback: \(usingTmuxFallback)
+        usingWebFallback: \(usingWebFallback)
+        webApiEnabled: \(webApiEnabled)
+        webFailureCount: \(webFailureCount)
         oauthFailureCount: \(oauthFailureCount)
+        credentialWatchActive: \(credentialWatchTask != nil)
         lastOAuthSnapshotAge: \(lastOAuthSnapshot.map { String(format: "%.0fs", Date().timeIntervalSince($0.fetchedAt)) } ?? "n/a")
         visible: \(visible)
         """
