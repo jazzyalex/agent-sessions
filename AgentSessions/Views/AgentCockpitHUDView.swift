@@ -3069,7 +3069,7 @@ private struct HUDLimitsDetailRow: View {
             if isDataStale, let ts = entry.lastDataTimestamp {
                 Spacer(minLength: 8)
                 TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text("Updated \(dataAgeText(ts, now: context.date))")
+                    Text(dataAgeText(ts, now: context.date))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
