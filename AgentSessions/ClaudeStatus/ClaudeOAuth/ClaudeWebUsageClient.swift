@@ -126,10 +126,11 @@ actor ClaudeWebUsageClient {
 
         struct OrgEntry: Decodable { let uuid: String }
         guard let orgs = try? JSONDecoder().decode([OrgEntry].self, from: data),
-              let first = orgs.first else {
+              let first = orgs.first,
+              UUID(uuidString: first.uuid) != nil else {
             throw ClaudeOAuthUsageClientError.decodingError(
                 NSError(domain: "ClaudeWeb", code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "No organizations found in response"]))
+                        userInfo: [NSLocalizedDescriptionKey: "No valid organization UUID in response"]))
         }
         cachedOrgId = first.uuid
         return first.uuid
@@ -157,7 +158,8 @@ actor ClaudeWebUsageClient {
 
     private func writeSharedCache(data: Data) {
         let dir = Self.sharedCacheURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                  attributes: [.posixPermissions: 0o700])
         try? data.write(to: Self.sharedCacheURL, options: .atomic)
     }
 }
