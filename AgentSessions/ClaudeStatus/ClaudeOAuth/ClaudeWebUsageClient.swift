@@ -57,6 +57,10 @@ actor ClaudeWebUsageClient {
         self.session = URLSession(configuration: config)
     }
 
+    func invalidateOrgId() {
+        cachedOrgId = nil
+    }
+
     func fetch(sessionKey: String) async throws -> (response: ClaudeWebRawUsageResponse, bodyHash: String, fromCache: Bool) {
         if let cached = readSharedCache() {
             os_log("ClaudeOAuth: web API — serving from cache", log: log, type: .debug)

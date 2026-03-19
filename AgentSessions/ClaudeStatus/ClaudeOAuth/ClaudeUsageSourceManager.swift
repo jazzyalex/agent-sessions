@@ -272,9 +272,16 @@ actor ClaudeUsageSourceManager {
                 // Have cached data — just wait, don't fall back
                 scheduleOAuthRefresh(delay: delay)
             } else if mode == .auto && !usingTmuxFallback {
-                os_log("ClaudeOAuth: no cached data during rate limit, activating tmux fallback",
-                       log: log, type: .info)
-                await activateTmuxFallback(reason: "rate limited with no cache")
+                if webApiEnabled && !usingWebFallback {
+                    os_log("ClaudeOAuth: no cached data during rate limit, activating web API fallback",
+                           log: log, type: .info)
+                    usingWebFallback = true
+                    scheduleWebRefresh(delay: 0)
+                } else if !usingWebFallback {
+                    os_log("ClaudeOAuth: no cached data during rate limit, activating tmux fallback",
+                           log: log, type: .info)
+                    await activateTmuxFallback(reason: "rate limited with no cache")
+                }
                 scheduleOAuthRefresh(delay: delay)
             } else {
                 scheduleOAuthRefresh(delay: delay)
@@ -424,6 +431,11 @@ actor ClaudeUsageSourceManager {
             let delay = retryAfter + 10
             os_log("ClaudeOAuth: web API rate limited, retry in %.0fs", log: log, type: .info, delay)
             scheduleWebRefresh(delay: delay)
+        } catch ClaudeOAuthUsageClientError.unauthorized {
+            os_log("ClaudeOAuth: web API 401, invalidating cookie and org caches", log: log, type: .info)
+            await webCookieResolver.invalidateCache()
+            await webUsageClient.invalidateOrgId()
+            await handleWebFailure(reason: "401 unauthorized")
         } catch {
             os_log("ClaudeOAuth: web API error: %{public}@", log: log, type: .error, error.localizedDescription)
             await handleWebFailure(reason: error.localizedDescription)
