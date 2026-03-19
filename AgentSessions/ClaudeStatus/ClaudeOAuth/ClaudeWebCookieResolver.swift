@@ -46,15 +46,26 @@ actor ClaudeWebCookieResolver {
 
     // MARK: - Binary Cookie Parser
 
+    /// Search paths for Safari's binarycookies file.
+    /// Legacy (pre-macOS 14): ~/Library/Cookies/
+    /// Sandboxed (macOS 14+): ~/Library/Containers/com.apple.Safari/.../Cookies/
+    private static let cookiePaths: [String] = [
+        "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
+        "Library/Cookies/Cookies.binarycookies",
+    ]
+
     private func parseSafariCookies() -> ResolvedCookie? {
-        let path = (NSHomeDirectory() as NSString)
-            .appendingPathComponent("Library/Cookies/Cookies.binarycookies")
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
-            os_log("ClaudeOAuth: web cookie — cannot read Cookies.binarycookies (TCC or absent)",
-                   log: log, type: .info)
-            return nil
+        let home = NSHomeDirectory() as NSString
+        for relative in Self.cookiePaths {
+            let path = home.appendingPathComponent(relative)
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: path)) {
+                os_log("ClaudeOAuth: web cookie — reading from %{public}@", log: log, type: .info, relative)
+                if let cookie = extractSessionKey(from: data) { return cookie }
+            }
         }
-        return extractSessionKey(from: data)
+        os_log("ClaudeOAuth: web cookie — no readable Cookies.binarycookies found",
+               log: log, type: .info)
+        return nil
     }
 
     private func extractSessionKey(from data: Data) -> ResolvedCookie? {
