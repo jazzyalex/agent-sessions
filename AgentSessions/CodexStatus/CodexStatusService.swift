@@ -505,6 +505,12 @@ actor CodexStatusService {
 
     func start() async {
         shouldRun = true
+        // Clear persisted auto-probe cooldown from a prior app session. The UI
+        // freshness TTL is separate and should survive hard probes, but a stale
+        // launch-time cooldown can incorrectly block the first eligible auto-probe.
+        if let cooldown = codexAutoProbeCooldownUntil(), cooldown > Date() {
+            setCodexAutoProbeCooldown(until: Date())
+        }
         // Orphan cleanup is deferred until a usage surface becomes visible
         // to avoid heavy background work when the app is inactive/hidden.
         restartRefresherLoop()
@@ -823,7 +829,6 @@ actor CodexStatusService {
                 // When either side lacks a timestamp, prefer applying the update.
                 shouldApply = true
             }
-
             if shouldApply {
                 var s = snapshot
                 if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
@@ -971,9 +976,9 @@ actor CodexStatusService {
 
         // Additional gates for automatic/background path only
         if !userInitiated {
-            // If a recent hard /status probe ran, respect its freshness TTL and
-            // avoid firing an additional automatic probe until it expires.
-            if let ttl = freshUntil(for: .codex, now: now), ttl > now {
+            // Respect persisted auto-probe cooldown across restarts without
+            // coupling that cooldown to UI freshness indicators.
+            if let cooldown = codexAutoProbeCooldownUntil(now: now), cooldown > now {
                 return
             }
             let allowAuto = UserDefaults.standard.bool(forKey: "CodexAllowStatusProbe")
@@ -997,9 +1002,9 @@ actor CodexStatusService {
         merged.eventTimestamp = now
         snapshot = merged
         updateHandler(merged)
-        // Persist a freshness TTL so re-probing is blocked for 4 hours even across restarts
-        // and even if CodexProbeCleanup deletes the probe JSONL (leaving no recent event timestamp).
-        setFreshUntil(for: .codex, until: now.addingTimeInterval(4 * 3600))
+        // Persist auto-probe cooldown separately from UI freshness so a successful
+        // probe does not make old data appear freshly updated for the whole window.
+        setCodexAutoProbeCooldown(until: now.addingTimeInterval(4 * 3600))
     }
 
     // Hard-probe entry point: forces a tmux /status probe regardless of staleness or prefs.

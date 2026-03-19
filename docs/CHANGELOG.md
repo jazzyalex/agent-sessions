@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness, so the Cockpit and in-app usage surfaces age data correctly after `/status` probes while still suppressing redundant background probes.
+
 ## [3.2.1] - 2026-03-16
 
 ### Added
