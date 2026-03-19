@@ -115,7 +115,7 @@ final class UsageResetTextTests: XCTestCase {
 
         let label = formatUsageWeeklyResetLabel(reset, now: now)
 
-        XCTAssertEqual(label, "\(AppDateFormatting.timeShort(reset)) \(AppDateFormatting.weekdayAbbrev(reset))")
+        XCTAssertEqual(label, "\(AppDateFormatting.weekdayAbbrev(reset)) \(AppDateFormatting.timeShort(reset))")
     }
 
     func testCodexStatusServiceStartClearsPersistedAutoProbeCooldown() async {

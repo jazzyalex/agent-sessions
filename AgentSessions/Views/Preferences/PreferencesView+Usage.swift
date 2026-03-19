@@ -2,6 +2,13 @@ import SwiftUI
 
 extension PreferencesView {
 
+    private var webApiEffectivelyEnabled: Bool {
+        let mode = ClaudeUsageMode(rawValue: UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? "auto") ?? .auto
+        if mode == .webOnly { return true }
+        if mode == .auto && UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled) { return true }
+        return false
+    }
+
     var usageTrackingTab: some View {
         VStack(alignment: .leading, spacing: 24) {
             Text("Usage Tracking")
@@ -10,7 +17,7 @@ extension PreferencesView {
 
             // Sources
             sectionHeader("Usage Sources")
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 // Codex
                 HStack(spacing: 12) {
                     toggleRow("Enable Codex tracking", isOn: $codexUsageEnabled, help: "Turn Codex usage tracking on or off (independent of strip/menu bar)")
@@ -26,7 +33,7 @@ extension PreferencesView {
                         Text("15 minutes").tag(900)
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 360)
+                    .frame(maxWidth: 520)
                     .help("How often to refresh Codex usage")
                 }
                 .disabled(!codexAgentEnabled)
@@ -65,6 +72,19 @@ extension PreferencesView {
                 )
                 .disabled(!claudeAgentEnabled || !claudeUsageEnabled ||
                           (ClaudeUsageMode(rawValue: UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? "auto") ?? .auto) != .auto)
+                if webApiEffectivelyEnabled {
+                    PreferenceCallout(iconName: "lock.shield", tint: .blue) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Web API reads the Safari session cookie for claude.ai. On macOS 14+, this requires Full Disk Access.")
+                                .font(.caption)
+                            Button("Open Full Disk Access Settings") {
+                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                            }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                        }
+                    }
+                }
                 labeledRow("Refresh every") {
                     Picker("", selection: $claudePollingInterval) {
                         Text("3 minutes").tag(180)
@@ -80,7 +100,7 @@ extension PreferencesView {
 
             // Strip options (shared)
             sectionHeader("Strip Options")
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
                     toggleRow("Show Codex strip", isOn: Binding(
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showCodexStrip) },
@@ -100,7 +120,7 @@ extension PreferencesView {
 
             // Display style (shared across Codex & Claude)
             sectionHeader("Display Style")
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 labeledRow("Limits display") {
                     Picker("", selection: Binding(
                         get: { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left },
