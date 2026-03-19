@@ -1293,18 +1293,11 @@ actor CodexStatusService {
         }
         // 2. Kill orphaned codex processes by CWD. When another probe is active,
         // find its tmux server PID and protect its entire process tree.
+        // Fresh ps snapshot is required: the active probe may have started after
+        // the snapshot used for step 1, so its tmux server wouldn't appear there.
         var activeTmuxPID: Int32? = nil
         if let currentLabel = activeProbeLabel {
-            let currentLabelArg = "-L \(currentLabel)"
-            for line in psSnap.stdout.split(separator: "\n") {
-                let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
-                let parts = trimmed.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
-                guard parts.count == 2, let pid = Int32(parts[0]) else { continue }
-                if String(parts[1]).contains("tmux"), String(parts[1]).contains(currentLabelArg) {
-                    activeTmuxPID = pid
-                    break
-                }
-            }
+            activeTmuxPID = await findTmuxServerPID(label: currentLabel)
         }
         await killProbeProcessesByCWD(protectDescendantsOf: activeTmuxPID)
         // 3. Remove socket files
@@ -1364,6 +1357,36 @@ actor CodexStatusService {
             hops += 1
         }
         return false
+    }
+
+    /// Find the tmux **server** PID for a given label from a fresh ps snapshot.
+    /// Filters out short-lived tmux client processes (capture-pane, send-keys, etc.)
+    /// by requiring the command to contain "new-session" or "start-server", or by
+    /// falling back to the process with the lowest PID (the server starts first).
+    private func findTmuxServerPID(label: String) async -> Int32? {
+        let snap = await runProcess(executable: "/bin/ps",
+                                    arguments: ["-A", "-o", "pid=", "-o", "command="],
+                                    timeoutSeconds: 2)
+        let labelArg = "-L \(label)"
+        var serverPID: Int32? = nil
+        var lowestPID: Int32? = nil
+        for line in snap.stdout.split(separator: "\n") {
+            let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            let parts = trimmed.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
+            guard parts.count == 2, let pid = Int32(parts[0]) else { continue }
+            let command = String(parts[1])
+            guard command.contains("tmux"), command.contains(labelArg) else { continue }
+            // Prefer the server process (new-session or start-server in command)
+            if command.contains("new-session") || command.contains("start-server") {
+                serverPID = pid
+                break
+            }
+            // Track lowest PID as fallback (server starts before clients)
+            if lowestPID == nil || pid < (lowestPID ?? Int32.max) {
+                lowestPID = pid
+            }
+        }
+        return serverPID ?? lowestPID
     }
 
     private func removeOrphanedSocketFiles(label: String) {
