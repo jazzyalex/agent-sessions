@@ -484,6 +484,12 @@ private func resetLine(label: String, percent: Int, reset: String) -> Attributed
     var labelAttr = AttributedString(label + " ")
     labelAttr.font = .system(size: 13, weight: .semibold)
     line.append(labelAttr)
+    if reset.trimmingCharacters(in: .whitespacesAndNewlines) == UsageStaleThresholds.unavailableCopy {
+        var unavailableAttr = AttributedString("--  \(UsageStaleThresholds.unavailableCopy)")
+        unavailableAttr.font = .system(size: 13)
+        line.append(unavailableAttr)
+        return line
+    }
     let mode = UsageDisplayMode.current()
     let clampedLeft = max(0, min(100, percent))
     // Bar always shows "used" (filled = used) for consistency

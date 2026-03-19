@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness, so the Cockpit and in-app usage surfaces age data correctly after `/status` probes while still suppressing redundant background probes.
+- Usage (Codex): When recent rollout logs contain `token_count` events with `rate_limits: null`, the app now treats limits as unavailable in recent logs instead of reusing older session-file percentages that can be wrong after resets. This also allows the `/status` probe fallback to engage for that newer Codex session behavior.
 
 ## [3.2.1] - 2026-03-16
 

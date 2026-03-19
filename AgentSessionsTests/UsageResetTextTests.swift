@@ -228,4 +228,34 @@ final class UsageResetTextTests: XCTestCase {
         XCTAssertFalse(text.contains("T"))
         XCTAssertNotEqual(text, UsageStaleThresholds.outdatedCopy)
     }
+
+    func testFormatResetDisplayPreservesUnavailableCopy() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let text = formatResetDisplay(
+            kind: "Wk",
+            source: .codex,
+            raw: UsageStaleThresholds.unavailableCopy,
+            lastUpdate: nil,
+            eventTimestamp: now,
+            now: now
+        )
+
+        XCTAssertEqual(text, UsageStaleThresholds.unavailableCopy)
+    }
+
+    func testFormatResetDisplayForMenuPreservesUnavailableCopy() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let text = formatResetDisplayForMenu(
+            kind: "Wk",
+            source: .codex,
+            raw: UsageStaleThresholds.unavailableCopy,
+            lastUpdate: nil,
+            eventTimestamp: now,
+            now: now
+        )
+
+        XCTAssertEqual(text, UsageStaleThresholds.unavailableCopy)
+    }
 }

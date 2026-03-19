@@ -2951,6 +2951,9 @@ private struct HUDLimitsDetailRow: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
+    private var fiveUnavailable: Bool { isResetInfoUnavailable(raw: entry.fiveHourResetText) }
+    private var weekUnavailable: Bool { isResetInfoUnavailable(raw: entry.weekResetText) }
+    private func pctLabel(_ left: Int, unavailable: Bool) -> String { unavailable ? "--" : "\(pct(left))%" }
 
     private var isDataStale: Bool {
         switch entry.source {
@@ -2971,6 +2974,7 @@ private struct HUDLimitsDetailRow: View {
     }
 
     private var fiveResetText: String {
+        if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
         guard let date = UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText) else { return "—" }
         let interval = max(0, date.timeIntervalSince(Date()))
         if interval < 60 { return "<1m" }
@@ -2982,6 +2986,7 @@ private struct HUDLimitsDetailRow: View {
     }
 
     private var weekResetText: String {
+        if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
         guard let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText) else { return "—" }
         let interval = date.timeIntervalSince(Date())
         guard interval > 0 else { return "—" }
@@ -3009,7 +3014,7 @@ private struct HUDLimitsDetailRow: View {
                 HStack(spacing: 4) {
                     HStack(spacing: 0) {
                         Text("5h: ")
-                        Text("\(pct(entry.fiveHourLeft))%")
+                        Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
                             .foregroundStyle(hudPctColor(entry.fiveHourLeft))
                     }
                     Text("↻ \(fiveResetText)")
@@ -3020,7 +3025,7 @@ private struct HUDLimitsDetailRow: View {
                 HStack(spacing: 4) {
                     HStack(spacing: 0) {
                         Text("Wk: ")
-                        Text("\(pct(entry.weekLeft))%")
+                        Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
                             .foregroundStyle(hudPctColor(entry.weekLeft))
                     }
                     Text("↻ \(weekResetText)")
@@ -3084,16 +3089,21 @@ private struct HUDLimitsProviderText: View {
 
     // 5h wins ties (<=): it's the shorter window, so equally constrained favours showing the tighter limit.
     private var bottleneckIs5h: Bool { entry.fiveHourLeft <= entry.weekLeft }
+    private var fiveUnavailable: Bool { isResetInfoUnavailable(raw: entry.fiveHourResetText) }
+    private var weekUnavailable: Bool { isResetInfoUnavailable(raw: entry.weekResetText) }
 
     private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
+    private func pctLabel(_ left: Int, unavailable: Bool) -> String { unavailable ? "--" : "\(pct(left))%" }
 
     private func fiveHourResetLabel() -> String? {
+        if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
         guard entry.fiveHourLeft < 30 else { return nil }
         let date = UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText)
         return formatRelativeTimeUntil(date)
     }
 
     private func weekResetLabel() -> String? {
+        if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
         guard entry.weekLeft < 30 else { return nil }
         let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText)
         return formatWeeklyReset(date)
@@ -3136,7 +3146,7 @@ private struct HUDLimitsProviderText: View {
                         HStack(spacing: 4) {
                             HStack(spacing: 0) {
                                 Text("5h: ")
-                                Text("\(pct(entry.fiveHourLeft))%")
+                                Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
                                     .foregroundStyle(hudPctColor(entry.fiveHourLeft))
                             }
                             if showResets, let r = fiveHourResetLabel() {
@@ -3151,7 +3161,7 @@ private struct HUDLimitsProviderText: View {
                         HStack(spacing: 4) {
                             HStack(spacing: 0) {
                                 Text("Wk: ")
-                                Text("\(pct(entry.weekLeft))%")
+                                Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
                                     .foregroundStyle(hudPctColor(entry.weekLeft))
                             }
                             if showResets, let r = weekResetLabel() {

@@ -379,6 +379,7 @@ struct RateLimitSummary {
     var eventTimestamp: Date?
     var stale: Bool
     var sourceFile: URL?
+    var missingRateLimits: Bool = false
 }
 
 // MARK: - Service
@@ -452,6 +453,7 @@ actor CodexStatusService {
         options: [.caseInsensitive],
         label: "resetLineRegex"
     )
+    private let missingRateLimitsUsageLine = "Recent Codex logs omitted rate limits"
 
     private nonisolated let updateHandler: @Sendable (CodexUsageSnapshot) -> Void
     private nonisolated let availabilityHandler: @Sendable (Bool) -> Void
@@ -831,12 +833,17 @@ actor CodexStatusService {
             }
             if shouldApply {
                 var s = snapshot
-                if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
-                if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
-                s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
-                s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
+                if summary.missingRateLimits {
+                    s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
+                    s.weekResetText = UsageStaleThresholds.unavailableCopy
+                } else {
+                    if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
+                    if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
+                    s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
+                    s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
+                }
                 lastFiveHourResetDate = summary.fiveHour.resetAt
-                s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
+                s.usageLine = summary.missingRateLimits ? missingRateLimitsUsageLine : (summary.stale ? "Usage is stale (>3m)" : nil)
                 s.eventTimestamp = summary.eventTimestamp
                 snapshot = s
                 updateHandler(snapshot)
@@ -924,12 +931,17 @@ actor CodexStatusService {
             }
             if shouldApply {
                 var s = snapshot
-                if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
-                if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
-                s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
-                s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
+                if summary.missingRateLimits {
+                    s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
+                    s.weekResetText = UsageStaleThresholds.unavailableCopy
+                } else {
+                    if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
+                    if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
+                    s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
+                    s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
+                }
                 lastFiveHourResetDate = summary.fiveHour.resetAt
-                s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
+                s.usageLine = summary.missingRateLimits ? missingRateLimitsUsageLine : (summary.stale ? "Usage is stale (>3m)" : nil)
                 s.eventTimestamp = summary.eventTimestamp
                 snapshot = s
                 updateHandler(snapshot)
@@ -966,12 +978,13 @@ actor CodexStatusService {
         // Also check staleness for backward compat (data age display)
         let stale5h = isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
         let staleWeek = isResetInfoStale(kind: "week", source: .codex, lastUpdate: nil, eventTimestamp: snapshot.eventTimestamp, now: now)
+        let missingRateLimits = isResetInfoUnavailable(raw: snapshot.fiveHourResetText) || isResetInfoUnavailable(raw: snapshot.weekResetText)
 
         // Auto probes run whenever data is stale, even during active sessions.
         // The 4-hour cooldown + user opt-in gate keep token cost negligible (≤1-2 msgs/4h).
         let shouldProbe = userInitiated
-            ? (noRecentSessions || stale5h || staleWeek)
-            : (stale5h || staleWeek)
+            ? (noRecentSessions || stale5h || staleWeek || missingRateLimits)
+            : (stale5h || staleWeek || missingRateLimits)
         guard shouldProbe else { return }
 
         // Additional gates for automatic/background path only
@@ -1753,6 +1766,7 @@ actor CodexStatusService {
         guard let lines = tailLines(url: url, maxBytes: logTailReadMaxBytes) else { return nil }
         var fallbackSummary: RateLimitSummary? = nil
         var didCaptureNewestUsage = false
+        var newestRelevantTimestamp: Date? = nil
         // Walk most-recent → older. Be permissive about shape; Codex logs can vary.
         for raw in lines.reversed() {
             guard let data = raw.data(using: .utf8) else { continue }
@@ -1767,6 +1781,9 @@ actor CodexStatusService {
                             decodeFlexibleDate(obj["timestamp"]) ??
                             decodeFlexibleDate(payload["timestamp"]) ??
                             Date()
+            if newestRelevantTimestamp == nil, isRelevantRateLimitOrUsageEvent(payload: payload, obj: obj) {
+                newestRelevantTimestamp = createdAt
+            }
 
             // Surface usage tokens if present (new or legacy forms)
             if !didCaptureNewestUsage {
@@ -1800,7 +1817,30 @@ actor CodexStatusService {
                 }
             }
         }
-        return fallbackSummary
+        if let fallbackSummary {
+            return fallbackSummary
+        }
+        if let newestRelevantTimestamp {
+            return RateLimitSummary(
+                fiveHour: RateLimitWindowInfo(remainingPercent: nil, resetAt: nil, windowMinutes: nil),
+                weekly: RateLimitWindowInfo(remainingPercent: nil, resetAt: nil, windowMinutes: nil),
+                eventTimestamp: newestRelevantTimestamp,
+                stale: true,
+                sourceFile: url,
+                missingRateLimits: true
+            )
+        }
+        return nil
+    }
+
+    private func isRelevantRateLimitOrUsageEvent(payload: [String: Any], obj: [String: Any]) -> Bool {
+        if (payload["rate_limits"] as? [String: Any]) != nil || (obj["rate_limits"] as? [String: Any]) != nil {
+            return true
+        }
+        let kind = (payload["type"] as? String)?.lowercased() ?? ""
+        if kind == "token_count" { return true }
+        if kind == "turn.completed" || kind == "turn_completed" || kind == "turn-completed" { return true }
+        return false
     }
 
     // MARK: - Usage extraction (new + legacy)

@@ -242,9 +242,11 @@ private struct IndexingIndicator: View {
 	    }
 
 	    private var presentation: Presentation {
-	        let fiveResetRaw = data.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
-	        let weekResetRaw = data.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
-	        let hasResetInfo = !(fiveResetRaw.isEmpty && weekResetRaw.isEmpty)
+		        let fiveResetRaw = data.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
+		        let weekResetRaw = data.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
+		        let fiveUnavailable = isResetInfoUnavailable(raw: fiveResetRaw)
+		        let weekUnavailable = isResetInfoUnavailable(raw: weekResetRaw)
+		        let hasResetInfo = !((fiveResetRaw.isEmpty || fiveUnavailable) && (weekResetRaw.isEmpty || weekUnavailable))
 
         let fiveLeft = clampPercent(data.fiveHourRemainingPercent)
         let weekLeft = clampPercent(data.weekRemainingPercent)
@@ -292,6 +294,7 @@ private struct IndexingIndicator: View {
 	        let weekResetDate = data.resetDate(kind: "Wk", raw: data.weekResetText)
 
 	        let fiveResetDisplayText: String = {
+	            if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
 	            let rel = formatRelativeTimeUntil(fiveResetDate)
 	            if rel != "—" { return rel }
 	            if fiveIsStale { return "n/a" }
@@ -300,6 +303,7 @@ private struct IndexingIndicator: View {
 	        }()
 
 	        let weekResetDisplayText: String = {
+	            if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
 	            let s = formatWeeklyReset(weekResetDate)
 	            if s != "—" { return s }
 	            if weekIsStale { return "n/a" }
@@ -307,16 +311,16 @@ private struct IndexingIndicator: View {
 	            return fallback.isEmpty ? "—" : fallback
 	        }()
 
-	        return Presentation(
-	            barFillPercent: barFillPercent,
-	            barFillColor: isCritical ? .red : .white,
-	            bottleneckUsedPercent: hasResetInfo ? bottleneckUsed : 0,
-	            fiveHourPercentLabelText: "\(mode.numericPercent(fromLeft: fiveLeft))%",
-	            weekPercentLabelText: "\(mode.numericPercent(fromLeft: weekLeft))%",
-	            fiveHourResetLabelText: fiveResetDisplayText,
-	            weekResetLabelText: weekResetDisplayText
-	        )
-	    }
+		        return Presentation(
+		            barFillPercent: barFillPercent,
+		            barFillColor: isCritical ? .red : .white,
+		            bottleneckUsedPercent: hasResetInfo ? bottleneckUsed : 0,
+		            fiveHourPercentLabelText: fiveUnavailable ? "--" : "\(mode.numericPercent(fromLeft: fiveLeft))%",
+		            weekPercentLabelText: weekUnavailable ? "--" : "\(mode.numericPercent(fromLeft: weekLeft))%",
+		            fiveHourResetLabelText: fiveResetDisplayText,
+		            weekResetLabelText: weekResetDisplayText
+		        )
+		    }
 
 	    @ViewBuilder
 	    private func resetIndicator(labelText: String) -> some View {

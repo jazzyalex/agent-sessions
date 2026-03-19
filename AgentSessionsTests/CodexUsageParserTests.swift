@@ -661,6 +661,73 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(usageSnapshot?.lastTotalTokens, 1980)
     }
 
+    func testNullOnlyRecentSessionDoesNotFallBackToOlderFileRateLimits() async throws {
+        let now = Date()
+        let olderTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-4 * 60 * 60))
+        let newerTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-60))
+        let resetAt = Int(now.addingTimeInterval(3600).timeIntervalSince1970)
+
+        let olderCodexLine: [String: Any] = [
+            "timestamp": olderTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex",
+                    "primary": [
+                        "used_percent": 13.0,
+                        "window_minutes": 300,
+                        "resets_at": resetAt
+                    ],
+                    "secondary": [
+                        "used_percent": 4.0,
+                        "window_minutes": 10080,
+                        "resets_at": resetAt + 5000
+                    ]
+                ]
+            ]
+        ]
+
+        let newerNullOnlyLine: [String: Any] = [
+            "timestamp": newerTimestamp,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "info": [
+                    "last_token_usage": [
+                        "input_tokens": 1200,
+                        "cached_input_tokens": 300,
+                        "output_tokens": 240,
+                        "reasoning_output_tokens": 60,
+                        "total_tokens": 1440
+                    ]
+                ],
+                "rate_limits": NSNull()
+            ]
+        ]
+
+        let olderURL = try writeTempJSONL([olderCodexLine])
+        let newerURL = try writeTempJSONL([newerNullOnlyLine])
+        defer {
+            try? FileManager.default.removeItem(at: olderURL)
+            try? FileManager.default.removeItem(at: newerURL)
+        }
+
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        let olderSummary = await service.parseTokenCountTailForTesting(url: olderURL)
+        let newerSummary = await service.parseTokenCountTailForTesting(url: newerURL)
+
+        XCTAssertNotNil(olderSummary)
+        XCTAssertEqual(olderSummary?.fiveHour.remainingPercent, 87)
+        XCTAssertFalse(olderSummary?.missingRateLimits ?? true)
+
+        XCTAssertNotNil(newerSummary)
+        XCTAssertTrue(newerSummary?.missingRateLimits ?? false, "Null-only recent files should be treated as unavailable, not as a cue to reuse older file limits")
+        XCTAssertNil(newerSummary?.fiveHour.remainingPercent)
+        XCTAssertNil(newerSummary?.weekly.remainingPercent)
+        XCTAssertEqual(newerSummary?.eventTimestamp, ISO8601DateFormatter().date(from: newerTimestamp))
+    }
+
     // MARK: - Integration Tests
 
     func testComputesNonCachedInputTokens() throws {
