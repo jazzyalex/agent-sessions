@@ -31,7 +31,7 @@ actor ClaudeUsageSourceManager {
 
     // MARK: - Thresholds
 
-    private static let oauthRefreshInterval: TimeInterval = 5 * 60    // 5 minutes
+    private static let refreshInterval: TimeInterval = 5 * 60         // 5 minutes (OAuth + Web)
     private static let cacheStaleThreshold: TimeInterval = 10 * 60    // 10 minutes
     private static let cacheHardExpire: TimeInterval = 30 * 60        // 30 minutes
     private static let credentialWatchInterval: TimeInterval = 30     // 30s watch poll
@@ -241,7 +241,7 @@ actor ClaudeUsageSourceManager {
 
             publish(snapshot)
             os_log("ClaudeOAuth: fetch succeeded, source=%{public}@", log: log, type: .info, resolved.source.rawValue)
-            scheduleOAuthRefresh(delay: Self.oauthRefreshInterval)
+            scheduleOAuthRefresh(delay: Self.refreshInterval)
 
         } catch ClaudeOAuthUsageClientError.unauthorized {
             os_log("ClaudeOAuth: 401, invalidating token cache", log: log, type: .info)
@@ -418,7 +418,7 @@ actor ClaudeUsageSourceManager {
             await store.save(snapshot)
             os_log("ClaudeOAuth: web API fetch succeeded (fromCache=%{public}@)",
                    log: log, type: .info, fromCache ? "true" : "false")
-            scheduleWebRefresh(delay: Self.oauthRefreshInterval)
+            scheduleWebRefresh(delay: Self.refreshInterval)
 
         } catch ClaudeOAuthUsageClientError.rateLimited(let retryAfter) {
             let delay = retryAfter + 10
@@ -439,7 +439,7 @@ actor ClaudeUsageSourceManager {
                    log: log, type: .info, webFailureCount)
             await activateTmuxFallback(reason: "web API failure #\(webFailureCount)")
         } else {
-            scheduleWebRefresh(delay: Self.oauthRefreshInterval)
+            scheduleWebRefresh(delay: Self.refreshInterval)
         }
     }
 
