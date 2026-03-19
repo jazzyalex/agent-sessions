@@ -60,7 +60,7 @@ func formatUsageRelativeTimeLabel(_ date: Date?, now: Date = Date()) -> String? 
 func formatUsageWeeklyResetLabel(_ date: Date?, now: Date = Date()) -> String? {
     guard let date else { return nil }
     guard date.timeIntervalSince(now) > 0 else { return nil }
-    return "\(AppDateFormatting.timeShort(date)) \(AppDateFormatting.weekdayAbbrev(date))"
+    return "\(AppDateFormatting.weekdayAbbrev(date)) \(AppDateFormatting.timeShort(date))"
 }
 
 func formatResetDisplay(kind: String,
