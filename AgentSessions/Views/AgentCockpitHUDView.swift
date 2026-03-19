@@ -3023,10 +3023,7 @@ private struct HUDLimitsDetailRow: View {
     private var weekResetText: String {
         if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
         guard let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText) else { return "—" }
-        let interval = date.timeIntervalSince(Date())
-        guard interval > 0 else { return "—" }
-        if interval < 24 * 60 * 60 { return "\(hudWeeklyResetFormatter.string(from: date)) \(AppDateFormatting.weekdayAbbrev(date))" }
-        return AppDateFormatting.weekdayAbbrev(date)
+        return formatUsageWeeklyResetLabel(date) ?? "—"
     }
 
     var body: some View {
