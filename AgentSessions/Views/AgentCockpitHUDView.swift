@@ -2851,6 +2851,39 @@ private struct HUDLimitsBar: View {
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
 
+    private var contentRefreshID: String {
+        var parts: [String] = [mode.rawValue]
+        if codexAgentEnabled && codexUsageEnabled {
+            parts.append(
+                [
+                    "codex",
+                    String(codexUsageModel.fiveHourRemainingPercent),
+                    codexUsageModel.fiveHourResetText,
+                    String(codexUsageModel.weekRemainingPercent),
+                    codexUsageModel.weekResetText,
+                    codexUsageModel.lastEventTimestamp?.timeIntervalSinceReferenceDate.description ?? "nil",
+                    codexUsageModel.lastUpdate?.timeIntervalSinceReferenceDate.description ?? "nil",
+                    codexUsageModel.isUpdating ? "updating" : "idle"
+                ].joined(separator: "|")
+            )
+        }
+        if claudeAgentEnabled && claudeUsageEnabled {
+            parts.append(
+                [
+                    "claude",
+                    String(claudeUsageModel.sessionRemainingPercent),
+                    claudeUsageModel.sessionResetText,
+                    String(claudeUsageModel.weekAllModelsRemainingPercent),
+                    claudeUsageModel.weekAllModelsResetText,
+                    claudeUsageModel.lastUpdate?.timeIntervalSinceReferenceDate.description ?? "nil",
+                    claudeUsageModel.isUpdating ? "updating" : "idle"
+                ].joined(separator: "|")
+            )
+        }
+        parts.append(isHovering ? "hover" : "rest")
+        return parts.joined(separator: "||")
+    }
+
     private var entries: [HUDLimitsProviderEntry] {
         var out: [HUDLimitsProviderEntry] = []
         if codexAgentEnabled && codexUsageEnabled {
@@ -2887,6 +2920,7 @@ private struct HUDLimitsBar: View {
                     .fill(Color.primary.opacity(0.10))
                     .frame(height: 0.5)
                 HUDLimitsBarContent(entries: entries, mode: mode)
+                    .id(contentRefreshID)
                     .frame(height: 22)
                     .clipped()
             }
@@ -2902,6 +2936,7 @@ private struct HUDLimitsBar: View {
             .overlay(alignment: .bottom) {
                 if isHovering {
                     HUDLimitsDetailPanel(entries: entries, mode: mode)
+                        .id(contentRefreshID)
                         .frame(maxWidth: .infinity)
                         .alignmentGuide(.bottom) { d in d[.bottom] + 22.5 }
                         .allowsHitTesting(false)
