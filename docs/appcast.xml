@@ -4,54 +4,26 @@
         <title>AgentSessions</title>
         <item>
             <title>3.3</title>
-            <pubDate>Thu, 19 Mar 2026 00:00:00 -0700</pubDate>
+            <pubDate>Thu, 19 Mar 2026 20:16:16 -0700</pubDate>
             <description><![CDATA[
 <h2>What&#x27;s New in 3.3</h2>
 <h3>Features</h3>
 <ul>
-<li><strong>Multi-tier Claude usage tracking</strong>: Live token counts now flow from the OAuth endpoint (60-second refresh), fall back to the tmux socket probe, and can optionally read from the claude.ai Web API using a browser session cookie. Full Disk Access guidance surfaces in Preferences when Web API mode is active.</li>
+<li>Claude Usage: Multi-tier tracking with credential gating and Web API fallback. Reads live token usage via the OAuth endpoint (60-second refresh cycle), falls back to the tmux socket probe, and optionally fetches from the claude.ai Web API using a session cookie — with clear Full Disk Access guidance surfaced in Preferences when Web API mode is active.</li>
+</ul>
+<h3>Improvements</h3>
+<ul>
+<li>Claude Usage: Unified the refresh-interval constant across all tracking tiers and hardened org UUID validation to prevent bad identifiers from poisoning the cache across sessions.</li>
+<li>Preferences: Usage Tracking pane layout overhauled — data-source picker converted to a popup menu, segmented controls fill available width without overflow, and strip-option toggles stacked vertically for consistency.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li>Claude Usage: Stale OAuth caches are now invalidated on 401 responses; 429 rate-limit responses are routed through the Web API fallback instead of blocking the refresh cycle.</li>
-<li>Claude Usage: Safari cookie path corrected for sandboxed and legacy macOS filesystem layouts.</li>
-<li>Claude Usage: Guarded system-preferences URL construction to eliminate a force-unwrap crash path.</li>
-<li>Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness — Cockpit and in-app surfaces now age correctly after <code>/status</code> probes.</li>
-<li>Usage (Codex): Rollout logs with <code>rate_limits: null</code> are treated as limit-unavailable instead of reusing stale session-file percentages, re-enabling the <code>/status</code> probe fallback for newer Codex session formats.</li>
-<li>Agent Cockpit: Pinned HUD limits footer rebuilds from live usage-model changes, preventing stale percentages from persisting.</li>
-<li>Agent Cockpit: Weekly reset times now format consistently as <code>Day H:MM AM/PM</code> for both Codex and Claude.</li>
-<li>Agent Cockpit: Cockpit-only and pinned-mode launch now runs the full startup bootstrap, so Claude session names resolve without the main window.</li>
-</ul>
-<h3>Changes</h3>
-<ul>
-<li>Preferences: Usage Tracking pane overhauled — popup data-source picker, overflow-free segmented controls, vertically stacked option toggles.</li>
-<li>Claude Usage: Refresh-interval constant unified across all tracking tiers; org UUID validation hardened to prevent bad identifiers from poisoning the cache.</li>
-</ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3</a></p>
-            ]]></description>
-            <sparkle:version>28</sparkle:version>
-            <sparkle:shortVersionString>3.3</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3/AgentSessions-3.3.dmg" length="PLACEHOLDER" type="application/octet-stream" sparkle:edSignature="PLACEHOLDER"/>
-        </item>
-        <item>
-            <title>3.2.1</title>
-            <pubDate>Mon, 16 Mar 2026 15:26:03 -0700</pubDate>
-            <description><![CDATA[
-<h2>What&#x27;s New in 3.2.1</h2>
-<h3>Features</h3>
-<ul>
-<li>Agent Cockpit HUD: Usage limits footer now shows Claude API reset time and rate-limit state, with idle reason classification surfaced on the status dot.</li>
-<li>Agent Cockpit HUD: Claude OAuth usage tracking with tmux socket fallback for probe-less environments.</li>
-</ul>
-<h3>Bug Fixes</h3>
-<ul>
-<li>Agent Cockpit HUD: Eliminated transient &quot;—&quot; flash when iTerm2 probe returns an empty result.</li>
-<li>Agent Cockpit: Three probe stability fixes — tmux socket leak on teardown, excessive re-probe on focus change, and HUD visibility loss after backgrounding.</li>
-<li>Agent Cockpit HUD: Three display fixes — stale session titles after tab switch, empty-state flash on first load, and wrong-tab focus on direct open.</li>
-<li>Session discovery: Prevent two processes sharing the same working directory from claiming the same session log.</li>
-<li>Session discovery: Infer Claude session log from project directory when `lsof` socket lookup misses it.</li>
-<li>Session discovery: Assign distinct sessions to multiple presences in the same workspace.</li>
+<li>Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness. Cockpit and in-app usage surfaces now age data correctly after `/status` probes while still suppressing redundant background probes.</li>
+<li>Usage (Codex): Rollout logs that emit `token_count` events with `rate_limits: null` are now treated as limit-unavailable rather than reusing stale session-file percentages from before the last reset. This also re-enables the `/status` probe fallback for that newer Codex session format.</li>
+<li>Agent Cockpit: The pinned HUD limits footer now rebuilds from live usage-model updates the same way the main window footer does, preventing stale percentages from persisting after the underlying snapshot changes.</li>
+<li>Agent Cockpit: Weekly reset times in the hover-expanded limits footer now format consistently as `Day H:MM AM/PM` for both Codex and Claude.</li>
+<li>Agent Cockpit: Cockpit-only launch (including pinned mode) now runs the same one-time startup/bootstrap path as the unified window, so Claude session names resolve without needing the main window open first.</li>
+<li>Claude Usage: Safari cookie path corrected for both sandboxed and legacy macOS filesystem layouts; TCC Full Disk Access guidance now surfaces in Preferences when Web API mode is active.</li>
 </ul>
 <h3>Reminder: What You Got in 3.2</h3>
 <ul>
@@ -60,12 +32,12 @@
 <li>OpenCode: Main-window session rows now show live-state dots for active and waiting OpenCode sessions.</li>
 <li>OpenCode: iTerm busy-state detection is more reliable, reducing false idle/open classification while a session is still working.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.2.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.2.1</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3</a></p>
             ]]></description>
-            <sparkle:version>27</sparkle:version>
-            <sparkle:shortVersionString>3.2.1</sparkle:shortVersionString>
+            <sparkle:version>28</sparkle:version>
+            <sparkle:shortVersionString>3.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.2.1/AgentSessions-3.2.1.dmg" length="14646315" type="application/octet-stream" sparkle:edSignature="+jzVz2cVMYiFt85XQ+vPL+X+R6KQfSygui/76TnA7Sd/Yd1DG84fxmtPKRgMu9eYnldtWbKkISA878JJmhfCDw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3/AgentSessions-3.3.dmg" length="14854269" type="application/octet-stream" sparkle:edSignature="J87gs4TP9DCFiGCtfoqEUm+SkkkHBH3FKLl4koa37F14cQrkKsFrOXpI9TTWE7WGvI4U+PPjOpvkkJKv7F4QAg=="/>
         </item>
     </channel>
 </rss>
