@@ -3,6 +3,38 @@
     <channel>
         <title>AgentSessions</title>
         <item>
+            <title>3.3</title>
+            <pubDate>Thu, 19 Mar 2026 00:00:00 -0700</pubDate>
+            <description><![CDATA[
+<h2>What&#x27;s New in 3.3</h2>
+<h3>Features</h3>
+<ul>
+<li><strong>Multi-tier Claude usage tracking</strong>: Live token counts now flow from the OAuth endpoint (60-second refresh), fall back to the tmux socket probe, and can optionally read from the claude.ai Web API using a browser session cookie. Full Disk Access guidance surfaces in Preferences when Web API mode is active.</li>
+</ul>
+<h3>Bug Fixes</h3>
+<ul>
+<li>Claude Usage: Stale OAuth caches are now invalidated on 401 responses; 429 rate-limit responses are routed through the Web API fallback instead of blocking the refresh cycle.</li>
+<li>Claude Usage: Safari cookie path corrected for sandboxed and legacy macOS filesystem layouts.</li>
+<li>Claude Usage: Guarded system-preferences URL construction to eliminate a force-unwrap crash path.</li>
+<li>Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness — Cockpit and in-app surfaces now age correctly after <code>/status</code> probes.</li>
+<li>Usage (Codex): Rollout logs with <code>rate_limits: null</code> are treated as limit-unavailable instead of reusing stale session-file percentages, re-enabling the <code>/status</code> probe fallback for newer Codex session formats.</li>
+<li>Agent Cockpit: Pinned HUD limits footer rebuilds from live usage-model changes, preventing stale percentages from persisting.</li>
+<li>Agent Cockpit: Weekly reset times now format consistently as <code>Day H:MM AM/PM</code> for both Codex and Claude.</li>
+<li>Agent Cockpit: Cockpit-only and pinned-mode launch now runs the full startup bootstrap, so Claude session names resolve without the main window.</li>
+</ul>
+<h3>Changes</h3>
+<ul>
+<li>Preferences: Usage Tracking pane overhauled — popup data-source picker, overflow-free segmented controls, vertically stacked option toggles.</li>
+<li>Claude Usage: Refresh-interval constant unified across all tracking tiers; org UUID validation hardened to prevent bad identifiers from poisoning the cache.</li>
+</ul>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3</a></p>
+            ]]></description>
+            <sparkle:version>28</sparkle:version>
+            <sparkle:shortVersionString>3.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3/AgentSessions-3.3.dmg" length="PLACEHOLDER" type="application/octet-stream" sparkle:edSignature="PLACEHOLDER"/>
+        </item>
+        <item>
             <title>3.2.1</title>
             <pubDate>Mon, 16 Mar 2026 15:26:03 -0700</pubDate>
             <description><![CDATA[

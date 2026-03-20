@@ -21,7 +21,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.2.1/AgentSessions-3.2.1.dmg"><b>Download Agent Sessions 3.2.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3/AgentSessions-3.3.dmg"><b>Download Agent Sessions 3.3 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -46,7 +46,7 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 ## Agent Cockpit (Beta)
 
-Agent Cockpit is the 3.2 live command center for active iTerm2 Codex CLI, Claude Code, and OpenCode sessions, with shared active/waiting summaries and steadier OpenCode live-state detection.
+Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Code, and OpenCode sessions, with shared active/waiting summaries and live Claude usage tracking.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
@@ -94,7 +94,7 @@ Agent Cockpit is the 3.2 live command center for active iTerm2 Codex CLI, Claude
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.2.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.2.1/AgentSessions-3.2.1.dmg)
+1. [Download AgentSessions-3.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.3/AgentSessions-3.3.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
@@ -133,18 +133,19 @@ open "/Applications/Agent Sessions.app"
 
 ---
 
-## What's New in 3.2
+## What's New in 3.3
 
 TL;DR:
-- Agent Cockpit now includes OpenCode in the same live active/waiting HUD and menu bar summaries used for Codex and Claude.
-- OpenCode v1.2+ sessions now load from the new SQLite backend automatically, while legacy JSON storage remains supported.
-- OpenCode live dots, busy-state detection, and SQLite-backed search hydration were tightened for a cleaner `3.2` release.
+- Claude usage tracking is now multi-tier: OAuth live endpoint → tmux probe → optional Web API via session cookie — with Full Disk Access guidance built into Preferences.
+- Critical fixes to OAuth cache correctness, probe freshness, and Cockpit HUD stability.
 
 Highlights:
-- Agent Cockpit and the menu bar now surface OpenCode sessions in shared active/waiting counts and quick live-session summaries.
-- OpenCode storage detection now auto-selects SQLite when `~/.local/share/opencode/opencode.db` is present and falls back to legacy per-session JSON files otherwise.
-- Main-window OpenCode live dots now stay visible more reliably, and iTerm busy-state heuristics are less likely to show active sessions as idle.
-- SQLite-backed OpenCode sessions now hydrate correctly in search, direct session-directory overrides work again, and large raw JSON previews are safely truncated.
+- **Multi-tier Claude usage tracking**: Live token counts now flow from the OAuth endpoint (60-second refresh), fall back to the tmux socket probe, and can optionally read from the claude.ai Web API using a browser session cookie. Full Disk Access guidance appears in-app when Web API mode is active.
+- **OAuth cache hardening**: 401 responses now invalidate the stale cache immediately; 429 rate-limit responses are routed to the Web API fallback instead of stalling the refresh cycle.
+- **Preferences layout**: The Usage Tracking pane is fully overhauled — popup data-source picker, overflow-free segmented controls, and vertically stacked option toggles.
+- **Probe freshness fix**: Codex auto-probe cooldown no longer reports as UI data freshness. Usage age is now accurate on all surfaces after `/status` probes run.
+- **Cockpit HUD fixes**: Pinned-mode limits footer rebuilds from live data; weekly reset times format consistently; Cockpit-only launch bootstraps correctly without the main window.
+- **Safari cookie path**: Corrected for sandboxed and legacy macOS layouts.
 
 Details: `docs/CHANGELOG.md` and `docs/summaries/`.
 
