@@ -178,8 +178,8 @@ struct ClaudeSessionsView: View {
                                                       builder: ClaudeResumeCommandBuilder(),
                                                       launcher: launcher)
 
-            let sid = deriveClaudeSessionID(from: session)
-            let wd = claudeResumeSettings.effectiveWorkingDirectory(for: session)
+            let sid = ClaudeSessionIDHelper.deriveSessionID(from: session)
+            let wd = ClaudeSessionIDHelper.projectRoot(for: session)
             let bin = claudeResumeSettings.binaryPath.isEmpty ? nil : claudeResumeSettings.binaryPath
             let input = ClaudeResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
             let policy = claudeResumeSettings.fallbackPolicy
@@ -191,24 +191,6 @@ struct ClaudeSessionsView: View {
                 resumeAlert = DirectoryAlert(title: "Resume Failed", message: msg)
             }
         }
-    }
-
-    private func deriveClaudeSessionID(from session: Session) -> String? {
-        // Try to recover from filename: ~/.claude/projects/.../<UUID>.jsonl
-        let url = URL(fileURLWithPath: session.filePath)
-        let base = url.deletingPathExtension().lastPathComponent
-        if base.count >= 8 { return base }
-        // As a last resort, scan head events for a sessionId field
-        let limit = min(session.events.count, 2000)
-        for e in session.events.prefix(limit) {
-            let raw = e.rawJSON
-            if let data = Data(base64Encoded: raw),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let sid = json["sessionId"] as? String, !sid.isEmpty {
-                return sid
-            }
-        }
-        return nil
     }
 
     private var isClaudeResumeEnabled: Bool {
@@ -385,6 +367,10 @@ private struct ClaudeSessionsListView: View {
                 copySessionID(id)
             }
             .help("Copy the session ID to the clipboard")
+            Button("Copy Resume Command") {
+                copyResumeCommand(session)
+            }
+            .help("Copy a terminal-agnostic resume command to the clipboard")
 
             // Git Inspector for Claude (current-only)
             if isGitInspectorEnabled {
@@ -406,6 +392,7 @@ private struct ClaudeSessionsListView: View {
         } else {
             Button("Open Working Directory") {}.disabled(true)
             Button("Copy Session ID") {}.disabled(true)
+            Button("Copy Resume Command") {}.disabled(true)
             Button("Filter by Project") {}.disabled(true)
         }
     }
@@ -422,6 +409,27 @@ private struct ClaudeSessionsListView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(id, forType: .string)
+    }
+
+    private func copyResumeCommand(_ session: Session) {
+        let settings = ClaudeResumeSettings.shared
+        let sid = ClaudeSessionIDHelper.deriveSessionID(from: session)
+        let wd = ClaudeSessionIDHelper.projectRoot(for: session)
+        let binary = settings.binaryPath.isEmpty ? "claude" : settings.binaryPath
+        let builder = ClaudeResumeCommandBuilder()
+
+        let core: String
+        if let id = sid, !id.isEmpty {
+            core = "\(builder.shellQuoteIfNeeded(binary)) --resume \(builder.shellQuoteIfNeeded(id))"
+        } else {
+            core = "\(builder.shellQuoteIfNeeded(binary)) --continue"
+        }
+
+        let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(command, forType: .string)
     }
 }
 

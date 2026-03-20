@@ -784,6 +784,9 @@ struct UnifiedSessionsView: View {
                     .help("Show session log file in Finder (⌥⌘L)")
                 Button("Copy Session ID") { copySessionID(id) }
                     .help("Copy the session ID to the clipboard")
+                Button("Copy Resume Command") { copyResumeCommand(s) }
+                    .disabled(!canCopyResumeCommand(s))
+                    .help("Copy a terminal-agnostic resume command to the clipboard")
                 // Git Context Inspector (Codex + Claude; feature-flagged)
                 if isGitInspectorEnabled, (s.source == .codex || s.source == .claude) {
                     Divider()
@@ -808,6 +811,9 @@ struct UnifiedSessionsView: View {
                 Button("Copy Session ID") {}
                     .disabled(true)
                     .help("Select exactly one session to copy its ID")
+                Button("Copy Resume Command") {}
+                    .disabled(true)
+                    .help("Select exactly one session to copy its resume command")
                 Button("Filter by Project") {}
                     .disabled(true)
                     .help("Select a session with project metadata to filter")
@@ -963,6 +969,52 @@ struct UnifiedSessionsView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(id, forType: .string)
+    }
+
+    private func canCopyResumeCommand(_ session: Session) -> Bool {
+        switch session.source {
+        case .claude:
+            return true // falls back to --continue
+        case .codex:
+            return session.codexInternalSessionID != nil || session.codexFilenameUUID != nil
+        default:
+            return false
+        }
+    }
+
+    private func copyResumeCommand(_ session: Session) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+
+        switch session.source {
+        case .claude:
+            let settings = ClaudeResumeSettings.shared
+            let sid = ClaudeSessionIDHelper.deriveSessionID(from: session)
+            let wd = ClaudeSessionIDHelper.projectRoot(for: session)
+            let binary = settings.binaryPath.isEmpty ? "claude" : settings.binaryPath
+            let builder = ClaudeResumeCommandBuilder()
+            let core: String
+            if let id = sid, !id.isEmpty {
+                core = "\(builder.shellQuoteIfNeeded(binary)) --resume \(builder.shellQuoteIfNeeded(id))"
+            } else {
+                core = "\(builder.shellQuoteIfNeeded(binary)) --continue"
+            }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+            pb.setString(command, forType: .string)
+
+        case .codex:
+            let settings = CodexResumeSettings.shared
+            guard let sid = session.codexInternalSessionID ?? session.codexFilenameUUID else { return }
+            let wd = settings.effectiveWorkingDirectory(for: session)
+            let binary = settings.binaryOverride.isEmpty ? "codex" : settings.binaryOverride
+            let builder = CodexResumeCommandBuilder()
+            let core = "\(builder.shellQuoteIfNeeded(binary)) resume \(builder.shellQuoteIfNeeded(sid))"
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0)) && \(core)" } ?? core
+            pb.setString(command, forType: .string)
+
+        default:
+            break
+        }
     }
 
 	    private var transcriptPane: some View {
@@ -1877,8 +1929,8 @@ struct UnifiedSessionsView: View {
             }
         } else {
             let settings = ClaudeResumeSettings.shared
-            let sid = deriveClaudeSessionID(from: s)
-            let wd = settings.effectiveWorkingDirectory(for: s)
+            let sid = ClaudeSessionIDHelper.deriveSessionID(from: s)
+            let wd = ClaudeSessionIDHelper.projectRoot(for: s)
             let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
             let input = ClaudeResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
             Task { @MainActor in
@@ -1887,19 +1939,6 @@ struct UnifiedSessionsView: View {
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
         }
-    }
-
-    private func deriveClaudeSessionID(from session: Session) -> String? {
-        let base = URL(fileURLWithPath: session.filePath).deletingPathExtension().lastPathComponent
-        if base.count >= 8 { return base }
-        let limit = min(session.events.count, 2000)
-        for e in session.events.prefix(limit) {
-            let raw = e.rawJSON
-            if let data = Data(base64Encoded: raw), let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let sid = json["sessionId"] as? String, !sid.isEmpty {
-                return sid
-            }
-        }
-        return nil
     }
 
     // Match Codex window message display policy
