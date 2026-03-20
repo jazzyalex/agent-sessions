@@ -10,9 +10,11 @@ Do not declare a format change unless two independent signals agree, for example
 ## Common Signals
 - New or renamed session directories.
 - New file extensions or patterns (jsonl -> json, ndjson, etc).
+- New storage backends (sqlite, bolt/bbolt, badger, or other embedded databases).
 - Migration flags (e.g., `migration=2`).
 - Renamed keys in events (`message`, `content`, `summary`, `toolCalls`).
 - New nested structures for tool results or multimodal content.
+- Changes to usage/billing/token/rate-limit response formats.
 
 ## Agent-Specific Paths
 - Codex CLI: `~/.codex/sessions/**/rollout-*.jsonl`
@@ -26,3 +28,5 @@ Do not declare a format change unless two independent signals agree, for example
 Search for:
 - `jsonl`, `ndjson`, `session`, `history`, `migration`, `schema`, `message`, `summary`
 - `sessionId`, `parentId`, `toolCalls`, `tool_use`, `tool_result`
+- `sqlite`, `bolt`, `bbolt`, `badger`, `database`, `.db`
+- `usage`, `token`, `tokens`, `rate_limit`, `quota`, `billing`

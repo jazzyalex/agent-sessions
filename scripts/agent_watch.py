@@ -800,6 +800,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--timeout", type=int, default=12)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--skip-update", action="store_true",
+                        help="Skip installed-version and upstream-fetch checks (agents already updated locally)")
     args = parser.parse_args(argv)
 
     cfg_path = Path(args.config)
@@ -875,17 +877,20 @@ def main(argv: list[str]) -> int:
         verified_semver = _extract_semver(verified or "") if verified else None
 
         installed_cmd = agent_cfg.get("installed_version_cmd")
-        installed_rc, installed_stdout, installed_stderr = (127, "", "missing installed_version_cmd")
-        if isinstance(installed_cmd, list) and all(isinstance(x, str) for x in installed_cmd):
-            installed_rc, installed_stdout, installed_stderr = _run_cmd(installed_cmd, timeout=10)
-        installed = _extract_semver(installed_stdout) or (installed_stdout.split()[0] if installed_stdout else None)
+        installed_rc, installed_stdout, installed_stderr = (0, "", "skipped")
+        installed: str | None = None
+        if not args.skip_update:
+            installed_rc, installed_stdout, installed_stderr = (127, "", "missing installed_version_cmd")
+            if isinstance(installed_cmd, list) and all(isinstance(x, str) for x in installed_cmd):
+                installed_rc, installed_stdout, installed_stderr = _run_cmd(installed_cmd, timeout=10)
+            installed = _extract_semver(installed_stdout) or (installed_stdout.split()[0] if installed_stdout else None)
 
         upstream_sources = agent_cfg.get("upstream") or []
         upstream: str | None = None
         upstream_source_used: dict[str, Any] | None = None
         upstream_errors: list[dict[str, Any]] = []
 
-        if isinstance(upstream_sources, list):
+        if not args.skip_update and isinstance(upstream_sources, list):
             for s in upstream_sources:
                 if not isinstance(s, dict):
                     continue
@@ -913,7 +918,7 @@ def main(argv: list[str]) -> int:
             installed_newer_than_verified = (cmp_iv == 1)
 
         monitoring_failed = False
-        if upstream_sources and upstream is None:
+        if not args.skip_update and upstream_sources and upstream is None:
             monitoring_failed = True
 
         weekly_details: dict[str, Any] | None = None
