@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.3.1] - 2026-03-20
+
+### Added
+- Codex Usage: OAuth API and CLI RPC fallback for rate limits — when the Codex CLI hits a rate limit, usage tracking automatically falls back to the OAuth endpoint so token data keeps flowing without interruption.
+- Resume: Copy Resume Command added to the context menu for Claude, Codex, and OpenCode sessions — right-click any active session to copy the exact CLI resume command to the clipboard.
+- OpenCode: Session resume support — OpenCode sessions can now be resumed directly from the context menu, matching Claude and Codex.
+
+### Fixed
+- **Critical — Codex Usage:** Fixed a 0% token display bug and a blocking-pipe issue that prevented Codex usage tracking from working at all. **This update is required for Codex usage tracking to function correctly.**
+- Resume (OpenCode): Corrected OpenCode CLI flags and inherit the user's iTerm preference when generating resume commands.
+- Resume (Claude): Fixed Claude session ID resolution so Copy Resume Command produces the correct command for active Claude sessions.
+
 ## [3.3] - 2026-03-19
 
 ### Added

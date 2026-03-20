@@ -17,7 +17,7 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 
 ## Workspace Policy (Hard Rule)
 
-- Always run deployment from the user’s current local repository checkout.
+- Always run deployment from the user's current local repository checkout.
 - Do not clone to temporary directories and do not switch to alternate worktrees as a deployment workaround.
 - If the local worktree is dirty, stop and tell the user to clean the tree first (commit, stash, or discard), then continue in the same local repo.
 
@@ -37,15 +37,36 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 3. Whether this is a major release that requires onboarding updates
 4. Public copy updates needed for README/GitHub Pages (major changes to highlight, renamed features, or outdated wording to fix)
 
-## Public Copy Update (Required for Releases)
+## Public Copy Update (Required for All Releases)
 
-- Update `README.md` with a short **TL;DR** and major highlights under “What’s New in X.Y”.
-- Ensure README feature copy matches current naming (for example, **Session view** instead of Color view) and agent list.
-- Update `docs/index.html` feature/hero copy to reflect major changes and avoid outdated references.
-- Do not add a versioned `What's New in X.Y` section to `docs/index.html` (GitHub Pages main page).
-- Keep detailed release notes in `docs/CHANGELOG.md` (README/GH Pages should stay concise).
-- For major feature/UI releases, update README/index narrative copy (not just the download link/version).
-- After pushing, verify GitHub Pages reflects the updated `docs/index.html`.
+### Always update (every release)
+- `README.md` download link: `v{VERSION}/AgentSessions-{VERSION}.dmg` and label `Download Agent Sessions {VERSION} (DMG)`
+- `README.md` Option A download link (second occurrence under Install section)
+- `docs/index.html` download button URL and label
+- `docs/index.html` `<meta name="description">` content (mention current version + key change)
+- `docs/index.html` `<meta property="og:description">` content
+- `docs/index.html` `<meta name="twitter:description">` content
+
+### Update for minor/major or user-visible feature releases
+- `README.md` "What's New in X.Y" section: update heading to new version, rewrite TL;DR and Highlights to reflect this release's key changes (do not keep old version's copy)
+- `docs/index.html` hero/feature copy if features were renamed or new agents added
+
+### Never add
+- Versioned "What's New in X.Y" section to `docs/index.html`
+- Detailed release notes to README or website (those live in `docs/CHANGELOG.md`)
+
+### After pushing
+- Verify GitHub Pages reflects updated `docs/index.html` (check meta description and download button)
+
+## Pre-Deploy Checklist (Run Before Bump)
+
+- [ ] `docs/CHANGELOG.md` `[Unreleased]` section has full, accurate content for this release
+- [ ] `CHANGELOG.md` (root, if present) mirrors `docs/CHANGELOG.md` content
+- [ ] README.md download links updated to new version (both occurrences)
+- [ ] README.md "What's New" section updated to new version heading + rewritten highlights
+- [ ] `docs/index.html` download button URL and label updated
+- [ ] `docs/index.html` meta description, og:description, twitter:description updated with version + key change
+- [ ] All above files committed before running `deploy bump` (or bump will overwrite)
 
 ## Sparkle Release Notes (Approval Gate)
 
