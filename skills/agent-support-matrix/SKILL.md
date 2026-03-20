@@ -35,3 +35,10 @@ regressions are avoided.
 - `references/matrix-schema.md` for matrix fields and update rules.
 - `references/impact-scan.md` for format change detection heuristics.
 - `references/update-checklist.md` for the evidence checklist.
+
+## Related Skills
+
+- `agent-session-format-check` — detection and evidence collection for session format
+  drift, usage/limits tracking changes, OpenCode storage backend shifts, and discovery
+  path contract failures. Use that skill for *monitoring and diagnosis*; use this skill
+  for *recording and gating version bumps*.

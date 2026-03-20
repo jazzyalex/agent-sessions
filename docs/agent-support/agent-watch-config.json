@@ -84,7 +84,7 @@
         { "kind": "github_latest_release", "repo": "anomalyco/opencode" }
       ],
       "risk_keywords": {
-        "schema": ["storage", "migration", "schema", "format", "json", "jsonl", "session"],
+        "schema": ["storage", "migration", "schema", "format", "json", "jsonl", "session", "sqlite", "bolt", "bbolt", "badger", "database", "db"],
         "usage": ["usage", "token", "tokens", "limit", "quota"]
       },
       "weekly": {
@@ -214,7 +214,7 @@
       ],
       "risk_keywords": {
         "schema": ["session", "jsonl", "transcript", "storage", "format", "schema", "model", "tool"],
-        "usage": ["token", "quota", "limit"]
+        "usage": ["usage", "token", "tokens", "quota", "limit"]
       },
       "weekly": {
         "local_schema": {
