@@ -477,8 +477,9 @@ actor CodexStatusService {
     private var backoffSeconds: UInt64 = 1
     private var refresherTask: Task<Void, Never>?
     private var deferredTmuxCleanupTask: Task<Void, Never>?
-    private let codexOAuthCredentials = CodexOAuthCredentials()
-    private lazy var codexOAuthFetcher = CodexOAuthUsageFetcher(credentials: codexOAuthCredentials)
+    private let codexOAuthFetcher: CodexOAuthUsageFetcher = {
+        CodexOAuthUsageFetcher(credentials: CodexOAuthCredentials())
+    }()
     private let codexRPCProbe = CodexCLIRPCProbe()
     private var lastStatusProbe: Date? = nil
     private var lastAppliedSourceFilePath: String? = nil
@@ -841,9 +842,11 @@ actor CodexStatusService {
                     // JSONL lacks rate limits — try OAuth API, then CLI RPC before
                     // falling through to "Unavailable" and the tmux probe.
                     if let altSnap = await fetchRateLimitsFromAlternateSources() {
-                        if altSnap.fiveHourRemainingPercent > 0 { s.fiveHourRemainingPercent = clampPercent(altSnap.fiveHourRemainingPercent) }
+                        // Alt-source returned data — apply unconditionally (including 0%
+                        // remaining, which is valid "fully rate-limited" state).
+                        s.fiveHourRemainingPercent = clampPercent(altSnap.fiveHourRemainingPercent)
                         if !altSnap.fiveHourResetText.isEmpty { s.fiveHourResetText = altSnap.fiveHourResetText }
-                        if altSnap.weekRemainingPercent > 0 { s.weekRemainingPercent = clampPercent(altSnap.weekRemainingPercent) }
+                        s.weekRemainingPercent = clampPercent(altSnap.weekRemainingPercent)
                         if !altSnap.weekResetText.isEmpty { s.weekResetText = altSnap.weekResetText }
                         s.usageLine = nil
                         s.eventTimestamp = Date()

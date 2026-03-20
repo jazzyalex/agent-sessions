@@ -63,6 +63,14 @@ func formatUsageWeeklyResetLabel(_ date: Date?, now: Date = Date()) -> String? {
     return "\(AppDateFormatting.weekdayAbbrev(date)) \(AppDateFormatting.timeShort(date))"
 }
 
+/// Formats a reset date as ISO 8601 with "resets " prefix.
+/// Used by OAuth and CLI RPC sources so UsageResetText.parse() can round-trip it.
+func formatResetISO8601(_ date: Date) -> String {
+    let fmt = ISO8601DateFormatter()
+    fmt.formatOptions = [.withInternetDateTime]
+    return "resets \(fmt.string(from: date))"
+}
+
 func formatResetDisplay(kind: String,
                         source: UsageTrackingSource,
                         raw: String,
