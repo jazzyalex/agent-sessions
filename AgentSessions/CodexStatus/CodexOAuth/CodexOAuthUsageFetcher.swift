@@ -158,34 +158,31 @@ actor CodexOAuthUsageFetcher {
     private func normalize(_ raw: CodexOAuthRawUsageResponse) -> CodexUsageSnapshot? {
         guard let rl = raw.rateLimit else { return nil }
         var snap = CodexUsageSnapshot()
+        var hasData = false
 
         if let primary = rl.primaryWindow {
             if let used = primary.usedPercent {
                 snap.fiveHourRemainingPercent = max(0, min(100, 100 - used))
+                hasData = true
             }
             if let epoch = primary.resetAt {
-                snap.fiveHourResetText = formatOAuthReset(Date(timeIntervalSince1970: TimeInterval(epoch)))
+                snap.fiveHourResetText = formatResetISO8601(Date(timeIntervalSince1970: TimeInterval(epoch)))
+                hasData = true
             }
         }
         if let secondary = rl.secondaryWindow {
             if let used = secondary.usedPercent {
                 snap.weekRemainingPercent = max(0, min(100, 100 - used))
+                hasData = true
             }
             if let epoch = secondary.resetAt {
-                snap.weekResetText = formatOAuthReset(Date(timeIntervalSince1970: TimeInterval(epoch)))
+                snap.weekResetText = formatResetISO8601(Date(timeIntervalSince1970: TimeInterval(epoch)))
+                hasData = true
             }
         }
 
-        // Only return if we got at least one window
-        guard rl.primaryWindow != nil || rl.secondaryWindow != nil else { return nil }
+        guard hasData else { return nil }
         snap.eventTimestamp = Date()
         return snap
-    }
-
-    private func formatOAuthReset(_ date: Date) -> String {
-        // Use ISO 8601 so UsageResetText.parse() can round-trip it correctly.
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime]
-        return "resets \(fmt.string(from: date))"
     }
 }

@@ -88,29 +88,25 @@ actor CodexCLIRPCProbe {
             throw RPCError.unsupported
         }
 
+        let pid = process.processIdentifier
         defer {
             if process.isRunning {
                 process.terminate()
-                // Give it a moment to shut down
                 DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
-                    if process.isRunning { process.interrupt() }
+                    if process.isRunning { kill(pid, SIGKILL) }
                 }
             }
         }
 
         // 1. Send initialize
-        let initReq = """
-        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"AgentSessions","version":"1.0"}}}\n
-        """
+        let initReq = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"AgentSessions\",\"version\":\"1.0\"}}}\n"
         stdinPipe.fileHandleForWriting.write(Data(initReq.utf8))
 
         // 2. Wait for initialize response
         _ = try await readResponse(from: stdoutPipe, timeout: 8)
 
         // 3. Send account/rateLimits/read
-        let rateLimitReq = """
-        {"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read"}\n
-        """
+        let rateLimitReq = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"account/rateLimits/read\"}\n"
         stdinPipe.fileHandleForWriting.write(Data(rateLimitReq.utf8))
 
         // 4. Read rate limits response
@@ -122,35 +118,62 @@ actor CodexCLIRPCProbe {
         return parseRateLimitsResponse(responseData)
     }
 
-    /// Read a single JSON-RPC response (a complete JSON object followed by newline).
+    /// Read a single JSON-RPC response using async readability handler.
+    /// Avoids blocking the actor executor with synchronous `availableData`.
     private func readResponse(from pipe: Pipe, timeout: TimeInterval) async throws -> Data {
         let handle = pipe.fileHandleForReading
-        var accumulated = Data()
-        let deadline = Date().addingTimeInterval(timeout)
 
-        while Date() < deadline {
-            let available = handle.availableData
-            if available.isEmpty {
-                try await Task.sleep(nanoseconds: 50_000_000)  // 50ms
-                continue
+        return try await withCheckedThrowingContinuation { continuation in
+            var accumulated = Data()
+            var resolved = false
+            let lock = NSLock()
+
+            // Set up a timeout watchdog
+            let timeoutItem = DispatchWorkItem { [weak handle] in
+                lock.lock()
+                defer { lock.unlock() }
+                guard !resolved else { return }
+                resolved = true
+                handle?.readabilityHandler = nil
+                continuation.resume(throwing: RPCError.timeout)
             }
-            accumulated.append(available)
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutItem)
 
-            // Check if we have a complete JSON-RPC response.
-            // Responses are newline-delimited; look for a complete JSON object
-            // that parses successfully. Skip notifications (no "id" field).
-            if let lines = String(data: accumulated, encoding: .utf8) {
-                for line in lines.components(separatedBy: "\n") {
-                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty,
-                          let lineData = trimmed.data(using: .utf8),
-                          let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                          json["id"] != nil else { continue }
-                    return lineData
+            handle.readabilityHandler = { fileHandle in
+                let data = fileHandle.availableData
+                lock.lock()
+                guard !resolved else { lock.unlock(); return }
+
+                if data.isEmpty {
+                    // EOF — no response received
+                    resolved = true
+                    lock.unlock()
+                    timeoutItem.cancel()
+                    fileHandle.readabilityHandler = nil
+                    continuation.resume(throwing: RPCError.timeout)
+                    return
                 }
+
+                accumulated.append(data)
+                // Check for a complete JSON-RPC response (line with "id" field)
+                if let lines = String(data: accumulated, encoding: .utf8) {
+                    for line in lines.components(separatedBy: "\n") {
+                        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty,
+                              let lineData = trimmed.data(using: .utf8),
+                              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                              json["id"] != nil else { continue }
+                        resolved = true
+                        lock.unlock()
+                        timeoutItem.cancel()
+                        fileHandle.readabilityHandler = nil
+                        continuation.resume(returning: lineData)
+                        return
+                    }
+                }
+                lock.unlock()
             }
         }
-        throw RPCError.timeout
     }
 
     private func parseRateLimitsResponse(_ data: Data) -> CodexUsageSnapshot? {
@@ -161,41 +184,41 @@ actor CodexCLIRPCProbe {
         let rateLimits = (result["rateLimits"] as? [String: Any]) ?? result
 
         var snap = CodexUsageSnapshot()
+        var hasData = false
 
         if let primary = rateLimits["primary"] as? [String: Any] {
             if let usedPercent = primary["usedPercent"] as? Int {
                 snap.fiveHourRemainingPercent = max(0, min(100, 100 - usedPercent))
+                hasData = true
             } else if let usedPercent = primary["usedPercent"] as? Double {
                 snap.fiveHourRemainingPercent = max(0, min(100, 100 - Int(usedPercent.rounded())))
+                hasData = true
             }
             if let resetsAt = primary["resetsAt"] as? Int {
                 let date = Date(timeIntervalSince1970: TimeInterval(resetsAt))
-                snap.fiveHourResetText = formatRPCReset(date)
+                snap.fiveHourResetText = formatResetISO8601(date)
+                hasData = true
             }
         }
 
         if let secondary = rateLimits["secondary"] as? [String: Any] {
             if let usedPercent = secondary["usedPercent"] as? Int {
                 snap.weekRemainingPercent = max(0, min(100, 100 - usedPercent))
+                hasData = true
             } else if let usedPercent = secondary["usedPercent"] as? Double {
                 snap.weekRemainingPercent = max(0, min(100, 100 - Int(usedPercent.rounded())))
+                hasData = true
             }
             if let resetsAt = secondary["resetsAt"] as? Int {
                 let date = Date(timeIntervalSince1970: TimeInterval(resetsAt))
-                snap.weekResetText = formatRPCReset(date)
+                snap.weekResetText = formatResetISO8601(date)
+                hasData = true
             }
         }
 
-        guard snap.fiveHourRemainingPercent > 0 || snap.weekRemainingPercent > 0 ||
-              !snap.fiveHourResetText.isEmpty || !snap.weekResetText.isEmpty else { return nil }
+        guard hasData else { return nil }
 
         snap.eventTimestamp = Date()
         return snap
-    }
-
-    private func formatRPCReset(_ date: Date) -> String {
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime]
-        return "resets \(fmt.string(from: date))"
     }
 }
