@@ -40,9 +40,18 @@ Agent Sessions helps you search across large session histories, quickly find the
   <p style="margin:0 0 0px 0;"><em>Transcript view with search (Dark Mode)</em></p>
   <img src="docs/assets/screenshot-H.png" alt="Transcript view with search (Dark Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
 
-  <p style="margin:0 0 0px 0;"><em>Resume Codex CLI and Claude Code sessions</em></p>
-  <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI and Claude Code sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
+  <p style="margin:0 0 0px 0;"><em>Resume Codex CLI, Claude Code, and OpenCode sessions</em></p>
+  <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI, Claude Code, and OpenCode sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
+
+## Core Features
+
+- Agent Cockpit live HUD for active Codex CLI, Claude Code, and OpenCode iTerm2 sessions.
+- Unified browsing across supported agents, with strict filtering and a single session list.
+- Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
+- Readable tool calls/outputs and navigation between prompts, tools, and errors.
+- Right-click Copy Resume Command for Claude, Codex, and OpenCode sessions.
+- Local-only indexing designed for large histories.
 
 ## Agent Cockpit (Beta)
 
@@ -75,22 +84,6 @@ Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Cod
 - Keep Agent Cockpit pinned in a corner so you can always see activity
 - Click from the cockpit to jump straight to a session
 
-## Core Features
-
-- Agent Cockpit live HUD for active Codex CLI, Claude Code, and OpenCode iTerm2 sessions.
-- Unified browsing across supported agents, with strict filtering and a single session list.
-- Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
-- Readable tool calls/outputs and navigation between prompts, tools, and errors.
-- Local-only indexing designed for large histories.
-
-## Documentation
-
-- Release notes: `docs/CHANGELOG.md`
-- Monthly summaries: `docs/summaries/`
-- Privacy: `docs/PRIVACY.md`
-- Security: `docs/security.md`
-- Maintainers: `docs/deployment.md`
-
 ## Install
 
 ### Option A — Download DMG
@@ -113,10 +106,18 @@ defaults delete com.triada.AgentSessions SULastCheckTime
 open "/Applications/Agent Sessions.app"
 ```
 
+## Documentation
+
+- Release notes: `docs/CHANGELOG.md`
+- Monthly summaries: `docs/summaries/`
+- Privacy: `docs/PRIVACY.md`
+- Security: `docs/security.md`
+- Maintainers: `docs/deployment.md`
+
 ## Resume Workflows
 
+- Right-click any Claude, Codex, or OpenCode session and choose **Copy Resume Command** to get the exact CLI command for that session.
 - Open a session in your preferred terminal (Terminal.app or iTerm).
-- Copy a session ID, command, or snippet to reuse in a new run.
 - Use Unified Search (across sessions) and Find (within a session) to jump to relevant tool calls and outputs quickly.
 
 ## Privacy & Security
@@ -130,23 +131,6 @@ open "/Applications/Agent Sessions.app"
   - `~/.factory/sessions` and `~/.factory/projects`
   - `~/.local/share/opencode/opencode.db` and `~/.local/share/opencode/storage/session`
 - Details: `docs/PRIVACY.md` and `docs/security.md`
-
----
-
-## What's New in 3.3.1
-
-TL;DR:
-- **Critical update** for Codex users: fixes a 0% usage display bug and blocking-pipe issue that prevented Codex token tracking from working. Update immediately if you rely on Codex usage tracking.
-- Copy Resume Command now available in the context menu for Claude, Codex, and OpenCode sessions.
-- OpenCode session resume support added.
-
-Highlights:
-- **Critical Codex usage fix**: A 0% token display bug and blocking-pipe issue prevented Codex usage data from reaching the UI at all. This patch restores correct tracking.
-- **Rate-limit resilience**: When the Codex CLI hits a rate limit, usage tracking now automatically falls back to the OAuth endpoint — data keeps flowing without interruption.
-- **Copy Resume Command**: Right-click any Claude, Codex, or OpenCode session to copy the exact CLI command needed to resume it.
-- **OpenCode resume**: OpenCode sessions now support resume from the context menu, matching Claude and Codex.
-
-Details: `docs/CHANGELOG.md` and `docs/summaries/`.
 
 ## Development
 
