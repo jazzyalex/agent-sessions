@@ -762,7 +762,7 @@ struct UnifiedSessionsView: View {
 			                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
 			                Divider()
 	                if s.source == .codex || s.source == .claude || s.source == .opencode {
-	                    Button("Resume in \(s.source == .codex ? "Codex CLI" : s.source == .opencode ? "OpenCode" : "Claude Code") (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
+	                    Button("Resume in \(resumeAgentLabel(s.source)) (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
 	                        .keyboardShortcut("r", modifiers: [.command, .control])
 	                        .help("Resume the selected session in its original CLI (⌃⌘R)")
 	                    Divider()
@@ -1936,6 +1936,15 @@ struct UnifiedSessionsView: View {
         let url = URL(fileURLWithPath: s.filePath)
         let dir = url.deletingLastPathComponent()
         NSWorkspace.shared.open(dir)
+    }
+
+    private func resumeAgentLabel(_ source: SessionSource) -> String {
+        switch source {
+        case .codex: return "Codex CLI"
+        case .opencode: return "OpenCode"
+        case .claude: return "Claude Code"
+        default: return "CLI"
+        }
     }
 
     private func resume(_ s: Session) {

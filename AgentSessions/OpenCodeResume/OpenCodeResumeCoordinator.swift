@@ -27,8 +27,8 @@ final class OpenCodeResumeCoordinator {
         let canResume = info.supportsResume && hasID
         let canContinue = info.supportsContinue
 
-        var strategy: OpenCodeResumeCommandBuilder.Strategy?
-        var used: OpenCodeStrategyUsed = .none
+        let strategy: OpenCodeResumeCommandBuilder.Strategy
+        let used: OpenCodeStrategyUsed
 
         if canResume {
             strategy = .resumeByID(id: input.sessionID!)
@@ -46,10 +46,6 @@ final class OpenCodeResumeCoordinator {
                 reason = "OpenCode CLI does not advertise required flags (--resume/--continue)."
             }
             return OpenCodeResumeResult(launched: false, strategy: .none, error: reason, command: nil)
-        }
-
-        guard let strategy else {
-            return OpenCodeResumeResult(launched: false, strategy: .none, error: "No strategy selected.", command: nil)
         }
 
         let pkg: OpenCodeResumeCommandBuilder.CommandPackage
