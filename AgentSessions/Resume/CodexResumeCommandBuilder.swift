@@ -74,7 +74,7 @@ struct CodexResumeCommandBuilder {
                               workingDirectory: workingDirURL)
     }
 
-    private func shellQuote(_ string: String) -> String {
+    func shellQuote(_ string: String) -> String {
         // Wrap in single quotes and escape existing single quotes using POSIX convention
         if string.isEmpty { return "''" }
         if !string.contains("'") {
@@ -82,6 +82,16 @@ struct CodexResumeCommandBuilder {
         }
         let escaped = string.replacingOccurrences(of: "'", with: "'\\''")
         return "'\(escaped)'"
+    }
+
+    /// Quotes only when the string contains shell metacharacters.
+    /// Produces cleaner output for copy-paste commands.
+    private static let safeChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_./~+@:"))
+
+    func shellQuoteIfNeeded(_ string: String) -> String {
+        if string.isEmpty { return "''" }
+        if string.unicodeScalars.allSatisfy({ Self.safeChars.contains($0) }) { return string }
+        return shellQuote(string)
     }
 
     private func expandedPath(_ path: String?) -> String? {

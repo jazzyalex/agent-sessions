@@ -276,6 +276,13 @@ struct SessionsListView: View {
                 copySessionID(id)
             }
             .help("Copy the session ID to the clipboard")
+            Button("Copy Resume Command") {
+                tableSelection = [id]
+                selection = id
+                copyResumeCommand(session)
+            }
+            .disabled(session.codexInternalSessionID == nil && session.codexFilenameUUID == nil)
+            .help("Copy a terminal-agnostic resume command to the clipboard")
 
             // Git Context Inspector (Codex only, feature-flagged)
             if isGitInspectorEnabled && session.source == .codex {
@@ -314,6 +321,9 @@ struct SessionsListView: View {
             Button("Copy Session ID") {}
                 .disabled(true)
                 .help("Select exactly one session to copy its ID")
+            Button("Copy Resume Command") {}
+                .disabled(true)
+                .help("Select exactly one session to copy its resume command")
             Button("Filter by Project") {}
                 .disabled(true)
                 .help("Select a session that has project metadata to filter by")
@@ -324,6 +334,21 @@ struct SessionsListView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(id, forType: .string)
+    }
+
+    private func copyResumeCommand(_ session: Session) {
+        let settings = CodexResumeSettings.shared
+        guard let sid = session.codexInternalSessionID ?? session.codexFilenameUUID else { return }
+        let wd = settings.effectiveWorkingDirectory(for: session)
+        let binary = settings.binaryOverride.isEmpty ? "codex" : settings.binaryOverride
+        let builder = CodexResumeCommandBuilder()
+
+        let core = "\(builder.shellQuoteIfNeeded(binary)) resume \(builder.shellQuoteIfNeeded(sid))"
+        let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0)) && \(core)" } ?? core
+
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(command, forType: .string)
     }
 }
 
