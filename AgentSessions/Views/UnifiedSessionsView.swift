@@ -761,8 +761,8 @@ struct UnifiedSessionsView: View {
 			            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
 			                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
 			                Divider()
-	                if s.source == .codex || s.source == .claude {
-	                    Button("Resume in \(s.source == .codex ? "Codex CLI" : "Claude Code") (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
+	                if s.source == .codex || s.source == .claude || s.source == .opencode {
+	                    Button("Resume in \(s.source == .codex ? "Codex CLI" : s.source == .opencode ? "OpenCode" : "Claude Code") (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
 	                        .keyboardShortcut("r", modifiers: [.command, .control])
 	                        .help("Resume the selected session in its original CLI (⌃⌘R)")
 	                    Divider()
@@ -977,6 +977,8 @@ struct UnifiedSessionsView: View {
             return true // falls back to --continue
         case .codex:
             return session.codexInternalSessionID != nil || session.codexFilenameUUID != nil
+        case .opencode:
+            return true // session.id is the SQLite session ID; falls back to --continue
         default:
             return false
         }
@@ -1010,6 +1012,21 @@ struct UnifiedSessionsView: View {
             let builder = CodexResumeCommandBuilder()
             let core = "\(builder.shellQuoteIfNeeded(binary)) resume \(builder.shellQuoteIfNeeded(sid))"
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0)) && \(core)" } ?? core
+            pb.setString(command, forType: .string)
+
+        case .opencode:
+            let settings = OpenCodeSettings.shared
+            let sid = session.id
+            let wd = settings.effectiveWorkingDirectory(for: session)
+            let binary = settings.binaryPath.isEmpty ? "opencode" : settings.binaryPath
+            let builder = OpenCodeResumeCommandBuilder()
+            let core: String
+            if !sid.isEmpty {
+                core = "\(builder.shellQuoteIfNeeded(binary)) --resume \(builder.shellQuoteIfNeeded(sid))"
+            } else {
+                core = "\(builder.shellQuoteIfNeeded(binary)) --continue"
+            }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
 
         default:
@@ -1926,6 +1943,17 @@ struct UnifiedSessionsView: View {
         if s.source == .codex {
             Task { @MainActor in
                 _ = await CodexResumeCoordinator.shared.quickLaunchInTerminal(session: s)
+            }
+        } else if s.source == .opencode {
+            let settings = OpenCodeSettings.shared
+            let sid = s.id
+            let wd = settings.effectiveWorkingDirectory(for: s)
+            let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
+            let input = OpenCodeResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
+            Task { @MainActor in
+                let launcher: OpenCodeTerminalLaunching = settings.preferITerm ? OpenCodeITermLauncher() : OpenCodeTerminalLauncher()
+                let coord = OpenCodeResumeCoordinator(env: OpenCodeCLIEnvironment(), builder: OpenCodeResumeCommandBuilder(), launcher: launcher)
+                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
         } else {
             let settings = ClaudeResumeSettings.shared

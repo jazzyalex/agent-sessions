@@ -9,11 +9,13 @@ final class OpenCodeSettings: ObservableObject {
         static let binaryPath = "OpenCodeBinaryPath"
         static let defaultWorkingDirectory = "OpenCodeDefaultWorkingDirectory"
         static let preferITerm = "OpenCodePreferITerm"
+        static let fallbackPolicy = "OpenCodeFallbackPolicy"
     }
 
     @Published var binaryPath: String
     @Published var defaultWorkingDirectory: String
     @Published var preferITerm: Bool
+    @Published var fallbackPolicy: OpenCodeFallbackPolicy
 
     private let defaults: UserDefaults
 
@@ -22,6 +24,11 @@ final class OpenCodeSettings: ObservableObject {
         binaryPath = defaults.string(forKey: Keys.binaryPath) ?? ""
         defaultWorkingDirectory = defaults.string(forKey: Keys.defaultWorkingDirectory) ?? ""
         preferITerm = defaults.object(forKey: Keys.preferITerm) as? Bool ?? false
+        if let raw = defaults.string(forKey: Keys.fallbackPolicy), let v = OpenCodeFallbackPolicy(rawValue: raw) {
+            fallbackPolicy = v
+        } else {
+            fallbackPolicy = .resumeThenContinue
+        }
     }
 
     func setBinaryPath(_ path: String) {
@@ -37,6 +44,11 @@ final class OpenCodeSettings: ObservableObject {
     func setPreferITerm(_ value: Bool) {
         preferITerm = value
         defaults.set(value, forKey: Keys.preferITerm)
+    }
+
+    func setFallbackPolicy(_ policy: OpenCodeFallbackPolicy) {
+        fallbackPolicy = policy
+        defaults.set(policy.rawValue, forKey: Keys.fallbackPolicy)
     }
 
     func effectiveWorkingDirectory(for session: Session) -> URL? {
