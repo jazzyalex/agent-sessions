@@ -99,7 +99,7 @@ struct OpenCodeCLIEnvironment {
 
         let hres = runAndCapture([shell, "-lic", helpCmd], useSafeHome: false, homeOverride: resolvedUserHomeDirectory())
         let helpOut = (hres.out ?? "") + (hres.err ?? "")
-        let supportsResume = helpOut.contains("--resume")
+        let supportsResume = helpOut.contains("--session")
         let supportsContinue = helpOut.contains("--continue")
 
         return .success(ProbeResult(versionString: versionStr, binaryURL: binary, supportsResume: supportsResume, supportsContinue: supportsContinue))

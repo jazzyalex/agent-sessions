@@ -1022,7 +1022,7 @@ struct UnifiedSessionsView: View {
             let builder = OpenCodeResumeCommandBuilder()
             let core: String
             if !sid.isEmpty {
-                core = "\(builder.shellQuoteIfNeeded(binary)) --resume \(builder.shellQuoteIfNeeded(sid))"
+                core = "\(builder.shellQuoteIfNeeded(binary)) --session \(builder.shellQuoteIfNeeded(sid))"
             } else {
                 core = "\(builder.shellQuoteIfNeeded(binary)) --continue"
             }

@@ -39,7 +39,8 @@ enum ClaudeSessionIDHelper {
     /// so we read `originalPath` from the project's sessions-index.json.
     /// Falls back to session.cwd, then to ClaudeResumeSettings.defaultWorkingDirectory.
     @MainActor
-    static func projectRoot(for session: Session, settings: ClaudeResumeSettings = .shared) -> URL? {
+    static func projectRoot(for session: Session, settings: ClaudeResumeSettings? = nil) -> URL? {
+        let settings = settings ?? .shared
         let url = URL(fileURLWithPath: session.filePath)
         var projectDir = url.deletingLastPathComponent()
         if projectDir.lastPathComponent == "subagents" {

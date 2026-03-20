@@ -41,9 +41,9 @@ final class OpenCodeResumeCoordinator {
             if !hasID && policy == .resumeOnly {
                 reason = "No session ID available, and fallback is disabled."
             } else if hasID && !info.supportsResume && policy == .resumeOnly {
-                reason = "Installed OpenCode CLI does not support --resume."
+                reason = "Installed OpenCode CLI does not support --session."
             } else {
-                reason = "OpenCode CLI does not advertise required flags (--resume/--continue)."
+                reason = "OpenCode CLI does not advertise required flags (--session/--continue)."
             }
             return OpenCodeResumeResult(launched: false, strategy: .none, error: reason, command: nil)
         }
