@@ -153,6 +153,16 @@ extension PreferencesView {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
+
+            // Resume
+            sectionHeader("Resume")
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("If resume fails, try continue in working directory", isOn: Binding(
+                    get: { opencodeSettings.fallbackPolicy == .resumeThenContinue },
+                    set: { opencodeSettings.setFallbackPolicy($0 ? .resumeThenContinue : .resumeOnly) }
+                ))
+                .help("When enabled, falls back to opencode --continue if --resume is unavailable")
+            }
             }
             .disabled(!openCodeAgentEnabled)
 

@@ -6,6 +6,8 @@ struct OpenCodeCLIEnvironment {
     struct ProbeResult {
         let versionString: String
         let binaryURL: URL
+        let supportsResume: Bool
+        let supportsContinue: Bool
     }
 
     enum ProbeError: Error, LocalizedError {
@@ -87,6 +89,7 @@ struct OpenCodeCLIEnvironment {
         // clobbering the shell's HOME (which would prevent dotfiles from loading).
         let safeHome = makeSafeHomeDirectory()
         let versionCmd = "HOME=\(escapeForShell(safeHome)) \(escapeForShell(binary.path)) --version"
+        let helpCmd = "HOME=\(escapeForShell(safeHome)) \(escapeForShell(binary.path)) --help"
 
         let vres = runAndCapture([shell, "-lic", versionCmd], useSafeHome: false, homeOverride: resolvedUserHomeDirectory())
         guard vres.status == 0 else {
@@ -94,7 +97,12 @@ struct OpenCodeCLIEnvironment {
         }
         let versionStr = (vres.out ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return .success(ProbeResult(versionString: versionStr, binaryURL: binary))
+        let hres = runAndCapture([shell, "-lic", helpCmd], useSafeHome: false, homeOverride: resolvedUserHomeDirectory())
+        let helpOut = (hres.out ?? "") + (hres.err ?? "")
+        let supportsResume = helpOut.range(of: "--resume", options: .regularExpression) != nil
+        let supportsContinue = helpOut.range(of: "--continue", options: .regularExpression) != nil
+
+        return .success(ProbeResult(versionString: versionStr, binaryURL: binary, supportsResume: supportsResume, supportsContinue: supportsContinue))
     }
 
     // MARK: - Helpers
