@@ -4,12 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Claude Usage: Multi-tier tracking with credential gating and Web API fallback. OAuth endpoint (60s refresh), tmux fallback, and optional claude.ai session-cookie Web API mode with Full Disk Access guidance.
+
+### Changed
+- Claude Usage: Unified refresh interval constant; hardened org UUID validation to prevent caching invalid identifiers.
+- Preferences: Usage Tracking pane content now fits within the available width. Data source picker uses a popup menu; segmented pickers fill available space without overflow. Strip option toggles stacked vertically for consistency.
+
 ### Fixed
 - Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness, so the Cockpit and in-app usage surfaces age data correctly after `/status` probes while still suppressing redundant background probes.
 - Usage (Codex): When recent rollout logs contain `token_count` events with `rate_limits: null`, the app now treats limits as unavailable in recent logs instead of reusing older session-file percentages that can be wrong after resets. This also allows the `/status` probe fallback to engage for that newer Codex session behavior.
 - Agent Cockpit: The pinned HUD limits footer now rebuilds from live Codex/Claude usage-model changes the same way the main window footer does, preventing stale percentages from sticking in Cockpit after the underlying usage snapshot updates.
 - Agent Cockpit: The hover-expanded limits footer now formats weekly reset times consistently as `Day 1:34 PM` for both Codex and Claude.
 - Agent Cockpit: Cockpit-only (including pinned) launch now runs the same one-time startup/bootstrap path as the unified window, so Claude session names resolve without requiring the main window to open first.
+- Claude Usage: Safari cookie path corrected for sandboxed and legacy macOS layouts; TCC Full Disk Access guidance added when Web API is active.
+- Claude Usage: Guarded system preferences URL construction instead of force-unwrap.
+- Claude Usage: Stale OAuth caches invalidated on 401; 429 rate-limit responses routed through Web API fallback.
 
 ## [3.2.1] - 2026-03-16
 

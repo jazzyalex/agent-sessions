@@ -39,11 +39,10 @@ import IOKit.ps
 // - CodexUsageSnapshot.weekRemainingPercent: Stores "% remaining"
 // - UI displays use helper methods to convert between used/remaining as needed
 //
-// TODO (Future Work - Quota Tracking):
-// - Add absolute quota tracking (e.g., "127 of 500 requests remaining")
-// - Implement "buy credits" feature detection and UI
-// - Support mobile subscription quota display
-// - See original plan step 7 for detailed requirements
+// Future Work — Quota Tracking:
+// - Absolute quota tracking (e.g., "127 of 500 requests remaining")
+// - "Buy credits" feature detection and UI
+// - Mobile subscription quota display
 //
 // ## Staleness Semantics
 //
@@ -419,7 +418,9 @@ actor CodexStatusService {
         if let regex = try? NSRegularExpression(pattern: pattern, options: options) {
             return regex
         }
+        #if DEBUG
         print("[CodexStatus] Regex compile failed for \(label); using never-match fallback.")
+        #endif
         return try? NSRegularExpression(pattern: "(?!)", options: [])
     }
 
@@ -1086,7 +1087,9 @@ actor CodexStatusService {
         process.standardOutput = out; process.standardError = err
         do { try process.run() } catch {
             let d = CodexProbeDiagnostics(success: false, exitCode: 127, scriptPath: scriptURL.path, workdir: workDir, codexBin: codexBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: "", stderr: error.localizedDescription)
+            #if DEBUG
             print("[CodexProbe] Failed to launch capture script: \(error.localizedDescription)")
+            #endif
             return (nil, d)
         }
         let didExit = await waitForProcessExit(process, timeoutSeconds: scriptTimeoutSeconds, label: probeLabel, session: Self.probeSessionName)
@@ -1109,12 +1112,14 @@ actor CodexStatusService {
             return (nil, d)
         }
         if process.terminationStatus != 0 {
+            #if DEBUG
             if !stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 print("[CodexProbe] Script non-zero (\(process.terminationStatus)). stdout: \n\(stdout)")
             }
             if !stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 print("[CodexProbe] Script stderr: \n\(stderr)")
             }
+            #endif
             let d = CodexProbeDiagnostics(success: false, exitCode: process.terminationStatus, scriptPath: scriptURL.path, workdir: workDir, codexBin: codexBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
             return (nil, d)
         }

@@ -33,11 +33,10 @@ import IOKit.ps
 // - ClaudeUsageSnapshot.weekOpusRemainingPercent: Stores "% remaining"
 // - UI displays use helper methods to convert between used/remaining as needed
 //
-// TODO (Future Work - Quota Tracking):
-// - Add absolute quota tracking (e.g., "42 of 200 messages remaining")
-// - Implement quota-based feature gating if needed
-// - Support mobile/team subscription quota display
-// - See original plan step 7 for detailed requirements
+// Future Work — Quota Tracking:
+// - Absolute quota tracking (e.g., "42 of 200 messages remaining")
+// - Quota-based feature gating
+// - Mobile/team subscription quota display
 //
 // ## Staleness Semantics
 //
@@ -312,10 +311,14 @@ actor ClaudeStatusService {
                 }
                 updateHandler(snapshot)
             } else {
+                #if DEBUG
                 print("ClaudeStatusService: Failed to parse JSON: \(json)")
+                #endif
             }
         } catch {
+            #if DEBUG
             print("ClaudeStatusService: Script execution failed: \(error)")
+            #endif
             // Silent failure - keep last known good data
         }
     }
@@ -469,7 +472,9 @@ actor ClaudeStatusService {
         activeProbeLabel = probeLabel
         defer { activeProbeLabel = nil }
 
+        #if DEBUG
         print("ClaudeStatusService: Executing script with WORKDIR=\(workDir), CLAUDE_BIN=\(env["CLAUDE_BIN"] ?? "not set"), TMUX_BIN=\(env["TMUX_BIN"] ?? "not set")")
+        #endif
 
         process.environment = env
         let timeoutValue = Int(env["TIMEOUT_SECS"] ?? "") ?? Self.defaultScriptBootTimeoutSeconds
@@ -484,7 +489,9 @@ actor ClaudeStatusService {
 
         let didExit = await waitForProcessExit(process, timeoutSeconds: scriptTimeoutSeconds, label: probeLabel, session: Self.probeSessionName)
         if !didExit {
+            #if DEBUG
             print("ClaudeStatusService: Script timed out after \(scriptTimeoutSeconds)s, terminating")
+            #endif
             throw ClaudeServiceError.scriptFailed(exitCode: 124, output: "Script timed out")
         }
         deferredTmuxCleanupTask?.cancel()
@@ -498,9 +505,11 @@ actor ClaudeStatusService {
         let output = String(data: outputData, encoding: .utf8) ?? ""
         let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
 
+        #if DEBUG
         if !errorOutput.isEmpty {
             print("ClaudeStatusService: Script stderr: \(errorOutput)")
         }
+        #endif
 
         // Check exit code
         let exitCode = process.terminationStatus
@@ -801,7 +810,9 @@ actor ClaudeStatusService {
 
         if !liveCandidates.isEmpty {
             guard let tmuxPath = resolveTmuxPathCached() else {
+                #if DEBUG
                 print("ClaudeStatusService: tmux cleanup skipped; tmux path unavailable")
+                #endif
                 clearTmuxCleanupQueue()
                 return false
             }
@@ -844,14 +855,18 @@ actor ClaudeStatusService {
 
         if invalidPath {
             invalidateTmuxPathCache()
+            #if DEBUG
             print("ClaudeStatusService: tmux cleanup invalidated cached tmux path after status=127")
+            #endif
             clearTmuxCleanupQueue()
             return false
         }
 
         tmuxCleanupNextIndex = end
         let remaining = max(0, tmuxCleanupPendingLabels.count - tmuxCleanupNextIndex)
+        #if DEBUG
         print("ClaudeStatusService: tmux cleanup pass processed=\(batch.count) liveCandidates=\(liveCandidates.count) removed=\(removed) staleRemoved=\(staleRemoved) skipped=\(skipped) remaining=\(remaining)")
+        #endif
         if remaining == 0 {
             clearTmuxCleanupQueue()
             return false
