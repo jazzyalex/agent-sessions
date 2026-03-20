@@ -3,41 +3,35 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.3</title>
-            <pubDate>Thu, 19 Mar 2026 20:16:16 -0700</pubDate>
+            <title>3.3.1</title>
+            <pubDate>Fri, 20 Mar 2026 15:37:21 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.3</h2>
+<h2>What&#x27;s New in 3.3.1</h2>
 <h3>Features</h3>
 <ul>
-<li>Claude Usage: Multi-tier tracking with credential gating and Web API fallback. Reads live token usage via the OAuth endpoint (60-second refresh cycle), falls back to the tmux socket probe, and optionally fetches from the claude.ai Web API using a session cookie — with clear Full Disk Access guidance surfaced in Preferences when Web API mode is active.</li>
-</ul>
-<h3>Improvements</h3>
-<ul>
-<li>Claude Usage: Unified the refresh-interval constant across all tracking tiers and hardened org UUID validation to prevent bad identifiers from poisoning the cache across sessions.</li>
-<li>Preferences: Usage Tracking pane layout overhauled — data-source picker converted to a popup menu, segmented controls fill available width without overflow, and strip-option toggles stacked vertically for consistency.</li>
+<li>Codex Usage: OAuth API and CLI RPC fallback for rate limits — when the Codex CLI hits a rate limit, usage tracking automatically falls back to the OAuth endpoint so token data keeps flowing without interruption.</li>
+<li>Resume: Copy Resume Command added to the context menu for Claude, Codex, and OpenCode sessions — right-click any active session to copy the exact CLI resume command to the clipboard.</li>
+<li>OpenCode: Session resume support — OpenCode sessions can now be resumed directly from the context menu, matching Claude and Codex.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li>Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness. Cockpit and in-app usage surfaces now age data correctly after `/status` probes while still suppressing redundant background probes.</li>
-<li>Usage (Codex): Rollout logs that emit `token_count` events with `rate_limits: null` are now treated as limit-unavailable rather than reusing stale session-file percentages from before the last reset. This also re-enables the `/status` probe fallback for that newer Codex session format.</li>
-<li>Agent Cockpit: The pinned HUD limits footer now rebuilds from live usage-model updates the same way the main window footer does, preventing stale percentages from persisting after the underlying snapshot changes.</li>
-<li>Agent Cockpit: Weekly reset times in the hover-expanded limits footer now format consistently as `Day H:MM AM/PM` for both Codex and Claude.</li>
-<li>Agent Cockpit: Cockpit-only launch (including pinned mode) now runs the same one-time startup/bootstrap path as the unified window, so Claude session names resolve without needing the main window open first.</li>
-<li>Claude Usage: Safari cookie path corrected for both sandboxed and legacy macOS filesystem layouts; TCC Full Disk Access guidance now surfaces in Preferences when Web API mode is active.</li>
+<li>**Critical — Codex Usage:** Fixed a 0% token display bug and a blocking-pipe issue that prevented Codex usage tracking from working at all. **This update is required for Codex usage tracking to function correctly.**</li>
+<li>Resume (OpenCode): Corrected OpenCode CLI flags and inherit the user&#x27;s iTerm preference when generating resume commands.</li>
+<li>Resume (Claude): Fixed Claude session ID resolution so Copy Resume Command produces the correct command for active Claude sessions.</li>
 </ul>
-<h3>Reminder: What You Got in 3.2</h3>
+<h3>Reminder: What You Got in 3.3</h3>
 <ul>
-<li>OpenCode: Added read-only SQLite backend support for OpenCode v1.2+, including automatic detection between `~/.local/share/opencode/opencode.db` and legacy per-file JSON session storage. Preferences → OpenCode now shows the detected backend.</li>
-<li>Agent Cockpit / Menu Bar: OpenCode live sessions now participate in shared active/waiting summaries, background session lookup, and iTerm-based presence detection alongside Codex and Claude.</li>
-<li>OpenCode: Main-window session rows now show live-state dots for active and waiting OpenCode sessions.</li>
-<li>OpenCode: iTerm busy-state detection is more reliable, reducing false idle/open classification while a session is still working.</li>
+<li>Claude Usage: Multi-tier tracking with credential gating and Web API fallback. Reads live token usage via the OAuth endpoint (60-second refresh cycle), falls back to the tmux socket probe, and optionally fetches from the claude.ai Web API using a session cookie — with clear Full Disk Access guidance surfaced in Preferences when Web API mode is active.</li>
+<li>Claude Usage: Unified the refresh-interval constant across all tracking tiers and hardened org UUID validation to prevent bad identifiers from poisoning the cache across sessions.</li>
+<li>Preferences: Usage Tracking pane layout overhauled — data-source picker converted to a popup menu, segmented controls fill available width without overflow, and strip-option toggles stacked vertically for consistency.</li>
+<li>Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness. Cockpit and in-app usage surfaces now age data correctly after `/status` probes while still suppressing redundant background probes.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.1</a></p>
             ]]></description>
-            <sparkle:version>28</sparkle:version>
-            <sparkle:shortVersionString>3.3</sparkle:shortVersionString>
+            <sparkle:version>29</sparkle:version>
+            <sparkle:shortVersionString>3.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3/AgentSessions-3.3.dmg" length="14854269" type="application/octet-stream" sparkle:edSignature="J87gs4TP9DCFiGCtfoqEUm+SkkkHBH3FKLl4koa37F14cQrkKsFrOXpI9TTWE7WGvI4U+PPjOpvkkJKv7F4QAg=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.1/AgentSessions-3.3.1.dmg" length="14966905" type="application/octet-stream" sparkle:edSignature="FYqx0JLsFkXKqLIR+yrCDg9up+zWuaeTxfqeFUNKqzIBxyBUDPLGMQHBag3rNFsRGAIn7HHyAaPbiU9/AaoQBA=="/>
         </item>
     </channel>
 </rss>
