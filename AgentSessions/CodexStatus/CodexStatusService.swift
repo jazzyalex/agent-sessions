@@ -477,6 +477,9 @@ actor CodexStatusService {
     private var backoffSeconds: UInt64 = 1
     private var refresherTask: Task<Void, Never>?
     private var deferredTmuxCleanupTask: Task<Void, Never>?
+    private let codexOAuthCredentials = CodexOAuthCredentials()
+    private lazy var codexOAuthFetcher = CodexOAuthUsageFetcher(credentials: codexOAuthCredentials)
+    private let codexRPCProbe = CodexCLIRPCProbe()
     private var lastStatusProbe: Date? = nil
     private var lastAppliedSourceFilePath: String? = nil
     private var lastAppliedSourceFileMTime: Date? = nil
@@ -835,6 +838,22 @@ actor CodexStatusService {
             if shouldApply {
                 var s = snapshot
                 if summary.missingRateLimits {
+                    // JSONL lacks rate limits — try OAuth API, then CLI RPC before
+                    // falling through to "Unavailable" and the tmux probe.
+                    if let altSnap = await fetchRateLimitsFromAlternateSources() {
+                        if altSnap.fiveHourRemainingPercent > 0 { s.fiveHourRemainingPercent = clampPercent(altSnap.fiveHourRemainingPercent) }
+                        if !altSnap.fiveHourResetText.isEmpty { s.fiveHourResetText = altSnap.fiveHourResetText }
+                        if altSnap.weekRemainingPercent > 0 { s.weekRemainingPercent = clampPercent(altSnap.weekRemainingPercent) }
+                        if !altSnap.weekResetText.isEmpty { s.weekResetText = altSnap.weekResetText }
+                        s.usageLine = nil
+                        s.eventTimestamp = Date()
+                        snapshot = s
+                        updateHandler(snapshot)
+                        setFreshUntil(for: .codex, until: Date().addingTimeInterval(60 * 60))
+                        lastAppliedEventTimestamp = s.eventTimestamp
+                        lastParseWasStaleOrFailed = false
+                        return
+                    }
                     s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
                     s.weekResetText = UsageStaleThresholds.unavailableCopy
                 } else {
@@ -961,6 +980,22 @@ actor CodexStatusService {
         }
     }
 
+    // MARK: - Alternate rate-limit sources (OAuth API → CLI RPC)
+
+    /// Fallback chain when JSONL logs lack rate_limits (upstream bug openai/codex#14880).
+    /// Returns a snapshot on success, nil when all sources fail (caller falls through to tmux probe).
+    private func fetchRateLimitsFromAlternateSources() async -> CodexUsageSnapshot? {
+        // 1. OAuth API — cheapest, fastest, no token cost
+        if let snap = await codexOAuthFetcher.fetchUsage() {
+            return snap
+        }
+        // 2. CLI RPC via app-server stdio — no token cost, needs codex binary
+        if let snap = await codexRPCProbe.fetchRateLimits() {
+            return snap
+        }
+        return nil
+    }
+
     // MARK: - Optional tmux /status probe
     private func maybeProbeStatusViaTMUX(userInitiated: Bool) async {
         // Probes are strictly secondary: only run when we have NO recent local sessions.
@@ -990,15 +1025,23 @@ actor CodexStatusService {
 
         // Additional gates for automatic/background path only
         if !userInitiated {
-            // Respect persisted auto-probe cooldown across restarts without
-            // coupling that cooldown to UI freshness indicators.
-            if let cooldown = codexAutoProbeCooldownUntil(now: now), cooldown > now {
-                return
+            // When rate limits are completely missing (no JSONL data AND OAuth/RPC
+            // both failed), bypass cooldowns and visibility gates — the user has NO
+            // usable data and the probe is the last resort.
+            let needsProbeOverride = missingRateLimits || (stale5h && staleWeek)
+
+            if !needsProbeOverride {
+                // Normal path: respect all gates
+                if let cooldown = codexAutoProbeCooldownUntil(now: now), cooldown > now { return }
+                let allowAuto = UserDefaults.standard.bool(forKey: "CodexAllowStatusProbe")
+                guard allowAuto else { return }
+                guard visible else { return }
+                if let last = lastStatusProbe, now.timeIntervalSince(last) < automaticProbeCooldownSeconds { return }
+            } else {
+                // Override path: only respect in-memory cooldown (shorter, 30 min)
+                // to prevent retry storms, but skip persisted cooldown and visibility.
+                if let last = lastStatusProbe, now.timeIntervalSince(last) < 30 * 60 { return }
             }
-            let allowAuto = UserDefaults.standard.bool(forKey: "CodexAllowStatusProbe")
-            guard allowAuto else { return }
-            guard visible else { return }
-            if let last = lastStatusProbe, now.timeIntervalSince(last) < automaticProbeCooldownSeconds { return }
         }
 
         let tmuxSnap = await runCodexStatusViaTMUX()
