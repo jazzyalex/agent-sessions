@@ -26,7 +26,7 @@ struct OpenCodeResumeCommandBuilder {
         case .resumeByID(let id):
             guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw BuildError.missingSessionID }
             let quotedID = shellQuote(id)
-            command = "\(opencodePath) --resume \(quotedID)"
+            command = "\(opencodePath) --session \(quotedID)"
         case .continueMostRecent:
             command = "\(opencodePath) --continue"
         }
