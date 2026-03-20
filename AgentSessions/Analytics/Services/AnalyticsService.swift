@@ -530,11 +530,11 @@ final class AnalyticsService: ObservableObject {
             case .day:
                 return calendar.startOfDay(for: date)
             case .weekOfYear:
-                return calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date))!
+                return calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)) ?? calendar.startOfDay(for: date)
             case .month:
-                return calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
+                return calendar.date(from: calendar.dateComponents([.year, .month], from: date)) ?? calendar.startOfDay(for: date)
             case .hour:
-                return calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: date))!
+                return calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: date)) ?? calendar.startOfDay(for: date)
             default:
                 return calendar.startOfDay(for: date)
             }

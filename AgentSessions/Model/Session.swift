@@ -584,7 +584,7 @@ extension Array where Element == Session {
     func groupedBySection(now: Date = Date(), calendar: Calendar = .current) -> [(SessionDateSection, [Session])] {
         let cal = calendar
         let today = cal.startOfDay(for: now)
-        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
+        let yesterday = cal.date(byAdding: .day, value: -1, to: today) ?? today
         var buckets: [SessionDateSection: [Session]] = [:]
         for s in self {
             guard let start = s.startTime else {

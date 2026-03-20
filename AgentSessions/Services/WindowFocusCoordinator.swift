@@ -68,24 +68,4 @@ final class WindowFocusCoordinator: ObservableObject {
         activeFocus = newFocus
     }
 
-    /// Legacy API for compatibility (deprecated)
-    @available(*, deprecated, message: "Use perform(_:) instead")
-    func requestFocus(_ target: FocusTarget) {
-        switch target {
-        case .sessionSearch:
-            perform(.openSessionSearch)
-        case .transcriptFind:
-            perform(.openTranscriptFind)
-        case .sessionsList:
-            perform(.focusSessionsList)
-        case .none:
-            perform(.closeAllSearch)
-        }
-    }
-
-    /// Legacy API for compatibility (deprecated)
-    @available(*, deprecated, message: "Use perform(.closeAllSearch) instead")
-    func clearFocus() {
-        perform(.closeAllSearch)
-    }
 }
