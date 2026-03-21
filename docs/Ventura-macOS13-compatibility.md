@@ -46,11 +46,9 @@ All other SwiftUI features used in the app are **already compatible** with macOS
 2. `AgentSessions/Views/UnifiedSessionsView.swift`
 3. `AgentSessions/Views/TranscriptPlainView.swift`
 4. `AgentSessions/Views/SearchFiltersView.swift` (uses `oldValue`)
-5. `AgentSessions/Views/ClaudeSessionsView.swift` (uses `oldValue`)
-6. `AgentSessions/AgentSessionsApp.swift`
-7. `AgentSessions/Views/SessionsListView.swift`
-8. `AgentSessions/MenuBar/SettingsUpdateProxy.swift`
-9. `AgentSessions/Resume/CodexResumeSheet.swift`
+5. `AgentSessions/AgentSessionsApp.swift`
+6. `AgentSessions/MenuBar/SettingsUpdateProxy.swift`
+7. `AgentSessions/Resume/CodexResumeSheet.swift`
 
 ## Benefits of Supporting macOS 13 Ventura
 

@@ -1330,7 +1330,7 @@ struct UnifiedSessionsView: View {
         return "Show images for the selected session"
     }
 
-    // Local helper mirrors SessionsListView absolute time formatting
+    // Local helper for absolute time formatting
     private func absoluteTimeUnified(_ date: Date?) -> String {
         guard let date else { return "" }
         return AppDateFormatting.dateTimeShort(date)

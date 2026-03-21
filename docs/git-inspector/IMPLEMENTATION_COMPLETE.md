@@ -32,7 +32,7 @@ All code has been implemented according to the spec. The feature is **feature-fl
 - `AgentSessions/GitInspector/Views/GitInspectorWindowController.swift` - Window management
 
 ### ✅ Integration
-- **Modified:** `AgentSessions/Views/SessionsListView.swift`
+- **Modified:** `AgentSessions/Views/SessionsListView.swift` [removed]
   - Added context menu item: "Show Git Context"
   - Added feature flag check
   - Added window controller integration

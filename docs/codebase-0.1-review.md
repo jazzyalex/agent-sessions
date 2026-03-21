@@ -41,7 +41,7 @@ Sessions directory
   - `JSONLReader`: Chunked streaming line reader for large JSONL files.
   - `PrettyJSON`: Best‑effort pretty printer for JSON strings.
 - `Views/`
-  - `SessionsListView`: Sortable sessions list with metadata columns and Finder/ID context actions.
+  - `SessionsListView` [removed]: Sortable sessions list with metadata columns and Finder/ID context actions.
   - `TranscriptPlainView`: Read‑only monospaced transcript viewer with in‑view find, copy, and a Raw/Pretty sheet.
   - `SearchFiltersView`: Search bar only.
   - `PreferencesView`: Sessions root override + appearance (theme) selection.
