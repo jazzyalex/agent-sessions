@@ -1,7 +1,7 @@
 import Foundation
 
 /// Shared helpers for deriving Claude session IDs and project roots.
-/// Used by ClaudeSessionsView and UnifiedSessionsView for resume and copy-resume-command.
+/// Used by UnifiedSessionsView for resume and copy-resume-command.
 enum ClaudeSessionIDHelper {
 
     /// Extracts the Claude session UUID suitable for `claude --resume`.

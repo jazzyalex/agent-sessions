@@ -180,8 +180,6 @@ Attach a single `.popover` to the table container (or an overlay), keyed on `ren
 
 These surfaces also use `session.title` or `session.codexDisplayTitle` and should use `displayTitle(preferCustom:)`:
 
-- `SessionsListView.swift` — uses `s.codexDisplayTitle`
-- `ClaudeSessionsView.swift` — uses `s.title`
 - `CodexResumeSheet.swift` — uses `session.codexDisplayTitle` (in resume picker, show custom name if available)
 
 ---
@@ -225,8 +223,6 @@ Add rename methods on `UnifiedSessionIndexer` (not a separate store — keeps se
 | `AgentSessions/Views/AgentCockpitHUDView.swift` | Context menu, popover state |
 | `AgentSessions/Views/AgentCockpitHUDRowView.swift` | Display logic, customName on HUDRow |
 | `AgentSessions/Views/PinnedSessionsView.swift` | Context menu, display logic |
-| `AgentSessions/Views/SessionsListView.swift` | Use `displayTitle()` instead of `codexDisplayTitle` |
-| `AgentSessions/Views/ClaudeSessionsView.swift` | Use `displayTitle()` instead of `title` |
 | `AgentSessions/Resume/CodexResumeSheet.swift` | Use `displayTitle()` instead of `codexDisplayTitle` |
 | `AgentSessions/Services/UnifiedSessionIndexer.swift` | Rename/clear methods, hydration |
 | `AgentSessionsApp.swift` | View menu toggle item |
