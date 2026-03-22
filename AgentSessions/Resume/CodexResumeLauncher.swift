@@ -93,80 +93,11 @@ final class CodexResumeLauncher: ObservableObject {
     }
 
     func launchInTerminal(_ package: CodexResumeCommandBuilder.CommandPackage) throws {
-        let escaped = package.shellCommand
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-
-        let scriptLines = [
-            "tell application \"Terminal\"",
-            "activate",
-            // Run the command and capture the newly created tab
-            "set newTab to do script \"\(escaped)\"",
-            // Give Terminal a brief moment to create/select the UI elements
-            "delay 0.1",
-            // Try to bring the window containing newTab to the front and select the tab
-            "try",
-            "  set newWin to (first window whose tabs contains newTab)",
-            "  set front window to newWin",
-            "  set selected tab of newWin to newTab",
-            "end try",
-            "end tell"
-        ]
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = scriptLines.flatMap { ["-e", $0] }
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let data = stderr.fileHandleForReading.readDataToEndOfFile()
-            let err = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let message = err?.isEmpty == false ? err! : "Terminal rejected the launch command (status \(process.terminationStatus))."
-            throw NSError(domain: "CodexResumeLauncher", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
-        }
+        try AgentTerminalLauncher.launchInTerminal(shellCommand: package.shellCommand, domain: "CodexResumeLauncher")
     }
 
     func launchInITerm(_ package: CodexResumeCommandBuilder.CommandPackage) throws {
-        let escaped = package.shellCommand
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-
-        let scriptLines = [
-            "tell application \"iTerm2\"",
-            "activate",
-            // Always create a new window to run the command
-            "set newWin to (create window with default profile)",
-            "tell newWin",
-            "  tell current session",
-            "    write text \"\(escaped)\"",
-            "  end tell",
-            "end tell",
-            "end tell"
-        ]
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = scriptLines.flatMap { ["-e", $0] }
-
-        let stderr = Pipe()
-        process.standardError = stderr
-        process.standardOutput = Pipe()
-
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let data = stderr.fileHandleForReading.readDataToEndOfFile()
-            let err = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let message = err?.isEmpty == false ? err! : "iTerm2 rejected the launch command (status \(process.terminationStatus))."
-            throw NSError(domain: "CodexResumeLauncher", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
-        }
+        try AgentTerminalLauncher.launchInITerm(shellCommand: package.shellCommand, domain: "CodexResumeLauncher")
     }
 
     private func appendConsole(text: String, kind: ConsoleLine.Kind) {

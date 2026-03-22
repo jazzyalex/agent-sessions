@@ -18,13 +18,7 @@ final class GeminiCLISettings: ObservableObject {
     fileprivate init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         binaryOverride = defaults.string(forKey: Keys.binaryOverride) ?? ""
-        if let explicit = defaults.object(forKey: Keys.preferITerm) as? Bool {
-            preferITerm = explicit
-        } else {
-            let claudeITerm = defaults.object(forKey: "ClaudeResumePreferITerm") as? Bool ?? false
-            let codexITerm = (defaults.string(forKey: "CodexResumeLaunchMode") == "iterm")
-            preferITerm = claudeITerm || codexITerm
-        }
+        preferITerm = ResumePreferenceHelpers.resolvePreferITerm(ownKey: Keys.preferITerm, defaults: defaults)
     }
 
     func setBinaryOverride(_ path: String) {
