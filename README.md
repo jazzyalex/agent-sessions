@@ -21,7 +21,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.1/AgentSessions-3.3.1.dmg"><b>Download Agent Sessions 3.3.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.2/AgentSessions-3.3.2.dmg"><b>Download Agent Sessions 3.3.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -50,7 +50,7 @@ Agent Sessions helps you search across large session histories, quickly find the
 - Unified browsing across supported agents, with strict filtering and a single session list.
 - Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
-- Right-click Copy Resume Command for Claude, Codex, and OpenCode sessions.
+- Right-click Copy Resume Command for Claude, Codex, OpenCode, Copilot, and Gemini sessions.
 - Local-only indexing designed for large histories.
 
 ## Agent Cockpit (Beta)
@@ -87,7 +87,7 @@ Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Cod
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.3.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.1/AgentSessions-3.3.1.dmg)
+1. [Download AgentSessions-3.3.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.2/AgentSessions-3.3.2.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
@@ -116,7 +116,7 @@ open "/Applications/Agent Sessions.app"
 
 ## Resume Workflows
 
-- Right-click any Claude, Codex, or OpenCode session and choose **Copy Resume Command** to get the exact CLI command for that session.
+- Right-click any Claude, Codex, OpenCode, Copilot, or Gemini session and choose **Copy Resume Command** to get the exact CLI command for that session.
 - Open a session in your preferred terminal (Terminal.app or iTerm).
 - Use Unified Search (across sessions) and Find (within a session) to jump to relevant tool calls and outputs quickly.
 

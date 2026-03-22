@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.3.2] - 2026-03-21
+
+### Added
+- Resume: Session resume support for GitHub Copilot CLI and Gemini CLI — right-click any active Copilot or Gemini session to copy the exact CLI resume command. Safe to skip this update if you don't use either agent.
+
 ## [3.3.1] - 2026-03-20
 
 ### Added
