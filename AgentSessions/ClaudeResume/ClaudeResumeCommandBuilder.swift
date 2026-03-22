@@ -42,21 +42,7 @@ struct ClaudeResumeCommandBuilder {
     }
 
     // MARK: - Helpers
-    func shellQuote(_ string: String) -> String {
-        if string.isEmpty { return "''" }
-        if !string.contains("'") { return "'\(string)'" }
-        let escaped = string.replacingOccurrences(of: "'", with: "'\\''")
-        return "'\(escaped)'"
-    }
-
-    /// Quotes only when the string contains shell metacharacters.
-    /// Produces cleaner output for copy-paste commands.
-    private static let safeChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_./~+@:"))
-
-    func shellQuoteIfNeeded(_ string: String) -> String {
-        if string.isEmpty { return "''" }
-        if string.unicodeScalars.allSatisfy({ Self.safeChars.contains($0) }) { return string }
-        return shellQuote(string)
-    }
+    func shellQuote(_ string: String) -> String { ShellQuoting.quote(string) }
+    func shellQuoteIfNeeded(_ string: String) -> String { ShellQuoting.quoteIfNeeded(string) }
 }
 

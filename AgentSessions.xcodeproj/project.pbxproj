@@ -83,6 +83,7 @@
 		55BA818013EFF41E692C7AE8 /* PreferencesView+About.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E0F0666E60EE2819FD7BF5B /* PreferencesView+About.swift */; };
 		55CE4EFF834602231E7283EE /* OpenCodeSqliteReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31E40F1B3349DE1F939CFCF0 /* OpenCodeSqliteReader.swift */; };
 		5648330A0957544AC6A3C299 /* DroidTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADAFE9DA5E86250005634F7A /* DroidTranscriptView.swift */; };
+		56AD86C6AA6FFF1B55F9905D /* AgentTerminalLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2A3071BF27FDFC2D3389F3 /* AgentTerminalLauncher.swift */; };
 		5731AD7A25CF4B4DAA9BDF27 /* UpdateDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = B903187D9D8D4EDF9FAB0BBA /* UpdateDefaults.swift */; };
 		580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */; };
 		58948563F2E9CEE4A0163C91 /* CockpitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F62C87416A0A968C73E08595 /* CockpitView.swift */; };
@@ -123,6 +124,7 @@
 		7DA61EECFA82D4549A55FE64 /* CodexCLIRPCProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8AE132426FD113E4564562 /* CodexCLIRPCProbe.swift */; };
 		7DEC6F1AF64D4A61B0B11AFD /* UpdateCheckModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B29B924375946728A9EC1BF /* UpdateCheckModel.swift */; };
 		7DFB34C2A8424B979CF51CAB /* AnalyticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */; };
+		7E01E6D22E9328A7E8E7723A /* ShellQuoting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6206426BD3DC4FFDF004295 /* ShellQuoting.swift */; };
 		7E6B9F3E2F8E4C05A0E9B6D1 /* UsageMenuBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */; };
 		80D8ADEC3F33AFADF7EEDF49 /* ClaudeProbeConfigShim.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52D83CAFFA2389FC14E88853 /* ClaudeProbeConfigShim.swift */; };
 		818A50149DF28322F2FAA3A0 /* OnboardingDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CDC79D6AFA017C507F99EDB /* OnboardingDefaults.swift */; };
@@ -143,6 +145,7 @@
 		94C53CFCD97AC88BDDCC69F9 /* CopilotResumeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7CFEE3CB8F153D862869DA6 /* CopilotResumeTypes.swift */; };
 		94C634230B294225B894EC66 /* PreferencesView+OpenCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A54A306BCA0B6CAF2152FA /* PreferencesView+OpenCode.swift */; };
 		95A7BF4CDFFEF52BFBD76994 /* CopilotSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4ECF214EB1FA1A7D37628AA /* CopilotSettings.swift */; };
+		966CB97B11644A808CAE17D4 /* ResumePreferenceHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD76AE362A94366A989622FA /* ResumePreferenceHelpers.swift */; };
 		96B87202DA151979911BE71C /* ClaudeProbeProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5612FE92135230B461DA0E59 /* ClaudeProbeProject.swift */; };
 		98F981841A99410B940D88EE /* CodexLaunchMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979E7E3D0E14477885B20675 /* CodexLaunchMode.swift */; };
 		99EB62C538162E26BFF9AFB9 /* OpenCodeResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00EB359188CF008B152FDA3B /* OpenCodeResumeCommandBuilder.swift */; };
@@ -552,6 +555,7 @@
 		C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ResumeHealthCheck.swift; path = AgentSessions/Resume/ResumeHealthCheck.swift; sourceTree = SOURCE_ROOT; };
 		CA6631A5EDD11CEF9D72312F /* SessionTerminalView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SessionTerminalView.swift; path = AgentSessions/Views/SessionTerminalView.swift; sourceTree = SOURCE_ROOT; };
 		CB280BE020BB9F72E43A5F6E /* GeminiResumeCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/GeminiResume/GeminiResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
+		CD76AE362A94366A989622FA /* ResumePreferenceHelpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Resume/ResumePreferenceHelpers.swift; sourceTree = SOURCE_ROOT; };
 		CDA913FF55A1E3CE8A9586FF /* TerminalModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TerminalModels.swift; path = AgentSessions/Services/TerminalModels.swift; sourceTree = SOURCE_ROOT; };
 		CF23433C19A198F51A627A65 /* OpenCodeSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OpenCodeSessionDiscovery.swift; path = AgentSessions/Services/OpenCodeSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		CFA900010000000000000001 /* SessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
@@ -604,12 +608,14 @@
 		EB8AE132426FD113E4564562 /* CodexCLIRPCProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CodexStatus/CodexCLIRPCProbe.swift; sourceTree = SOURCE_ROOT; };
 		EC634024CF768951D08698DC /* ClaudeUsageSnapshotStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeOAuth/ClaudeUsageSnapshotStoreTests.swift; sourceTree = SOURCE_ROOT; };
 		EE51E91DDB45FF63A7579B6B /* ImageBrowserIndexCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ImageBrowserIndexCache.swift; sourceTree = SOURCE_ROOT; };
+		EF2A3071BF27FDFC2D3389F3 /* AgentTerminalLauncher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Resume/AgentTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
 		F0FEAC403FCBFFD9BC241618 /* TranscriptGoldenFixtureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TranscriptGoldenFixtureTests.swift; sourceTree = SOURCE_ROOT; };
 		F14273196C77AAA12FFDF3CE /* PreferencesView+General.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "PreferencesView+General.swift"; path = "AgentSessions/Views/Preferences/PreferencesView+General.swift"; sourceTree = SOURCE_ROOT; };
 		F188663773714C61A568F7AA /* LoadingAnimationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LoadingAnimationView.swift; path = AgentSessions/Views/LoadingAnimationView.swift; sourceTree = SOURCE_ROOT; };
 		F225C8CF6DF509A4B264E2D0 /* ClaudeWebUsageNormalizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeWebUsageNormalizer.swift; sourceTree = SOURCE_ROOT; };
 		F44619A4C965B379AD2122BB /* DroidSessionParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/DroidSessionParser.swift; sourceTree = SOURCE_ROOT; };
 		F52F2293074D78CFD6FDF0D3 /* CodexOAuthCredentials.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CodexStatus/CodexOAuth/CodexOAuthCredentials.swift; sourceTree = SOURCE_ROOT; };
+		F6206426BD3DC4FFDF004295 /* ShellQuoting.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Resume/ShellQuoting.swift; sourceTree = SOURCE_ROOT; };
 		F62C87416A0A968C73E08595 /* CockpitView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/CockpitView.swift; sourceTree = SOURCE_ROOT; };
 		F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCoordinatorTests.swift; path = AgentSessionsTests/CodexResumeCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
 		F8197ECC58E4179BF266E576 /* ClaudeUsageSourceManagerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeOAuth/ClaudeUsageSourceManagerTests.swift; sourceTree = SOURCE_ROOT; };
@@ -747,6 +753,9 @@
 				7E8EFD200FFA4B90BCCF3434 /* CodexResumeSheet.swift */,
 				46DF05EC4F8049DA9AF9E5CD /* CodexResumeCoordinator.swift */,
 				C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */,
+				F6206426BD3DC4FFDF004295 /* ShellQuoting.swift */,
+				EF2A3071BF27FDFC2D3389F3 /* AgentTerminalLauncher.swift */,
+				CD76AE362A94366A989622FA /* ResumePreferenceHelpers.swift */,
 			);
 			path = Resume;
 			sourceTree = "<group>";
@@ -1846,6 +1855,9 @@
 				B6B4CD8995E7002195567281 /* GeminiResumeCommandBuilder.swift in Sources */,
 				60A55CFD5E92483F7E7B15A8 /* GeminiTerminalLauncher.swift in Sources */,
 				021137CE9BE36C49B03A7B24 /* GeminiResumeCoordinator.swift in Sources */,
+				7E01E6D22E9328A7E8E7723A /* ShellQuoting.swift in Sources */,
+				56AD86C6AA6FFF1B55F9905D /* AgentTerminalLauncher.swift in Sources */,
+				966CB97B11644A808CAE17D4 /* ResumePreferenceHelpers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

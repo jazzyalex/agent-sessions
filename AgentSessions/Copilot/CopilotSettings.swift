@@ -23,13 +23,7 @@ final class CopilotSettings: ObservableObject {
         self.defaults = defaults
         binaryPath = defaults.string(forKey: Keys.binaryPath) ?? ""
         defaultWorkingDirectory = defaults.string(forKey: Keys.defaultWorkingDirectory) ?? ""
-        if let explicit = defaults.object(forKey: Keys.preferITerm) as? Bool {
-            preferITerm = explicit
-        } else {
-            let claudeITerm = defaults.object(forKey: "ClaudeResumePreferITerm") as? Bool ?? false
-            let codexITerm = (defaults.string(forKey: "CodexResumeLaunchMode") == "iterm")
-            preferITerm = claudeITerm || codexITerm
-        }
+        preferITerm = ResumePreferenceHelpers.resolvePreferITerm(ownKey: Keys.preferITerm, defaults: defaults)
         if let raw = defaults.string(forKey: Keys.fallbackPolicy), let v = CopilotFallbackPolicy(rawValue: raw) {
             fallbackPolicy = v
         } else {
