@@ -761,7 +761,9 @@ struct UnifiedSessionsView: View {
 			            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
 			                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
 			                Divider()
-	                if s.source == .codex || s.source == .claude || s.source == .opencode {
+	                // Derive Gemini CLI session ID once to avoid repeated disk reads
+	                let geminiCLISessionID = (s.source == .gemini) ? GeminiSessionIDHelper.deriveSessionID(from: s) : nil
+	                if canResumeSession(s, geminiCLISessionID: geminiCLISessionID) {
 	                    Button("Resume in \(resumeAgentLabel(s.source)) (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
 	                        .keyboardShortcut("r", modifiers: [.command, .control])
 	                        .help("Resume the selected session in its original CLI (⌃⌘R)")
@@ -784,8 +786,8 @@ struct UnifiedSessionsView: View {
                     .help("Show session log file in Finder (⌥⌘L)")
                 Button("Copy Session ID") { copySessionID(id) }
                     .help("Copy the session ID to the clipboard")
-                Button("Copy Resume Command") { copyResumeCommand(s) }
-                    .disabled(!canCopyResumeCommand(s))
+                Button("Copy Resume Command") { copyResumeCommand(s, geminiCLISessionID: geminiCLISessionID) }
+                    .disabled(!canCopyResumeCommand(s, geminiCLISessionID: geminiCLISessionID))
                     .help("Copy a terminal-agnostic resume command to the clipboard")
                 // Git Context Inspector (Codex + Claude; feature-flagged)
                 if isGitInspectorEnabled, (s.source == .codex || s.source == .claude) {
@@ -971,7 +973,7 @@ struct UnifiedSessionsView: View {
         pasteboard.setString(id, forType: .string)
     }
 
-    private func canCopyResumeCommand(_ session: Session) -> Bool {
+    private func canCopyResumeCommand(_ session: Session, geminiCLISessionID: String? = nil) -> Bool {
         switch session.source {
         case .claude:
             return true // falls back to --continue
@@ -979,12 +981,16 @@ struct UnifiedSessionsView: View {
             return session.codexInternalSessionID != nil || session.codexFilenameUUID != nil
         case .opencode:
             return true // session.id is the SQLite session ID; falls back to --continue
+        case .copilot:
+            return true // session.id from session.start; falls back to --continue
+        case .gemini:
+            return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: session)) != nil
         default:
             return false
         }
     }
 
-    private func copyResumeCommand(_ session: Session) {
+    private func copyResumeCommand(_ session: Session, geminiCLISessionID: String? = nil) {
         let pb = NSPasteboard.general
         pb.clearContents()
 
@@ -1026,6 +1032,31 @@ struct UnifiedSessionsView: View {
             } else {
                 core = "\(builder.shellQuoteIfNeeded(binary)) --continue"
             }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+            pb.setString(command, forType: .string)
+
+        case .copilot:
+            let settings = CopilotSettings.shared
+            let sid = session.id
+            let wd = settings.effectiveWorkingDirectory(for: session)
+            let binary = settings.binaryPath.isEmpty ? "copilot" : settings.binaryPath
+            let builder = CopilotResumeCommandBuilder()
+            let core: String
+            if !sid.isEmpty {
+                core = "\(builder.shellQuoteIfNeeded(binary)) --resume=\(builder.shellQuoteIfNeeded(sid))"
+            } else {
+                core = "\(builder.shellQuoteIfNeeded(binary)) --continue"
+            }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+            pb.setString(command, forType: .string)
+
+        case .gemini:
+            let settings = GeminiCLISettings.shared
+            guard let sid = geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: session) else { return }
+            let wd = settings.effectiveWorkingDirectory(for: session)
+            let binary = settings.binaryOverride.isEmpty ? "gemini" : settings.binaryOverride
+            let builder = GeminiResumeCommandBuilder()
+            let core = "\(builder.shellQuoteIfNeeded(binary)) --resume \(builder.shellQuoteIfNeeded(sid))"
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
 
@@ -1943,17 +1974,30 @@ struct UnifiedSessionsView: View {
         case .codex: return "Codex CLI"
         case .opencode: return "OpenCode"
         case .claude: return "Claude Code"
+        case .copilot: return "Copilot CLI"
+        case .gemini: return "Gemini CLI"
         default: return "CLI"
         }
     }
 
+    private func canResumeSession(_ s: Session, geminiCLISessionID: String? = nil) -> Bool {
+        switch s.source {
+        case .codex, .claude, .opencode, .copilot:
+            return true
+        case .gemini:
+            return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: s)) != nil
+        default:
+            return false
+        }
+    }
+
     private func resume(_ s: Session) {
-        if s.source == .gemini { return } // No resume support for Gemini
-        if s.source == .codex {
+        switch s.source {
+        case .codex:
             Task { @MainActor in
                 _ = await CodexResumeCoordinator.shared.quickLaunchInTerminal(session: s)
             }
-        } else if s.source == .opencode {
+        case .opencode:
             let settings = OpenCodeSettings.shared
             let sid = s.id
             let wd = settings.effectiveWorkingDirectory(for: s)
@@ -1964,7 +2008,29 @@ struct UnifiedSessionsView: View {
                 let coord = OpenCodeResumeCoordinator(env: OpenCodeCLIEnvironment(), builder: OpenCodeResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
-        } else {
+        case .copilot:
+            let settings = CopilotSettings.shared
+            let sid = s.id
+            let wd = settings.effectiveWorkingDirectory(for: s)
+            let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
+            let input = CopilotResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
+            Task { @MainActor in
+                let launcher: CopilotTerminalLaunching = settings.preferITerm ? CopilotITermLauncher() : CopilotTerminalLauncher()
+                let coord = CopilotResumeCoordinator(env: CopilotCLIEnvironment(), builder: CopilotResumeCommandBuilder(), launcher: launcher)
+                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+            }
+        case .gemini:
+            let settings = GeminiCLISettings.shared
+            let sid = GeminiSessionIDHelper.deriveSessionID(from: s)
+            let wd = settings.effectiveWorkingDirectory(for: s)
+            let bin = settings.binaryOverride.isEmpty ? nil : settings.binaryOverride
+            let input = GeminiResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
+            Task { @MainActor in
+                let launcher: GeminiTerminalLaunching = settings.preferITerm ? GeminiITermLauncher() : GeminiTerminalLauncher()
+                let coord = GeminiResumeCoordinator(env: GeminiCLIEnvironment(), builder: GeminiResumeCommandBuilder(), launcher: launcher)
+                _ = await coord.resumeInTerminal(input: input, dryRun: false)
+            }
+        case .claude:
             let settings = ClaudeResumeSettings.shared
             let sid = ClaudeSessionIDHelper.deriveSessionID(from: s)
             let wd = ClaudeSessionIDHelper.projectRoot(for: s)
@@ -1975,6 +2041,8 @@ struct UnifiedSessionsView: View {
                 let coord = ClaudeResumeCoordinator(env: ClaudeCLIEnvironment(), builder: ClaudeResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
+        default:
+            return
         }
     }
 

@@ -29,7 +29,7 @@ extension PreferencesView {
                 // Terminal app preference for both Codex and Claude resumes
                 labeledRow("Terminal App") {
                     Picker("", selection: Binding(
-                        get: { (resumeSettings.launchMode == .iterm || claudeSettings.preferITerm || opencodeSettings.preferITerm) ? 1 : 0 },
+                        get: { (resumeSettings.launchMode == .iterm || claudeSettings.preferITerm || opencodeSettings.preferITerm || copilotSettings.preferITerm || geminiSettings.preferITerm) ? 1 : 0 },
                         set: { idx in
                             // Apply to Codex
                             resumeSettings.setLaunchMode(idx == 1 ? .iterm : .terminal)
@@ -37,6 +37,10 @@ extension PreferencesView {
                             claudeSettings.setPreferITerm(idx == 1)
                             // Apply to OpenCode
                             opencodeSettings.setPreferITerm(idx == 1)
+                            // Apply to Copilot
+                            copilotSettings.setPreferITerm(idx == 1)
+                            // Apply to Gemini
+                            geminiSettings.setPreferITerm(idx == 1)
                         }
                     )) {
                         Text("Terminal").tag(0)
@@ -44,9 +48,9 @@ extension PreferencesView {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 260)
-                    .help("Choose which terminal application handles Resume for Codex, Claude, and OpenCode")
+                    .help("Choose which terminal application handles Resume for all CLI agents")
                 }
-                Text("Affects Resume actions in the Sessions window for Codex, Claude, and OpenCode.")
+                Text("Affects Resume actions in the Sessions window for all CLI agents.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

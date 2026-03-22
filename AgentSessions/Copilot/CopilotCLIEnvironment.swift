@@ -6,6 +6,8 @@ struct CopilotCLIEnvironment {
     struct ProbeResult {
         let versionString: String
         let binaryURL: URL
+        let supportsResume: Bool
+        let supportsContinue: Bool
     }
 
     enum ProbeError: Error, LocalizedError {
@@ -71,7 +73,14 @@ struct CopilotCLIEnvironment {
 
         let combined = ((vres.out ?? "") + (vres.err ?? "")).trimmingCharacters(in: .whitespacesAndNewlines)
         let versionStr = combined.isEmpty ? "unknown" : combined
-        return .success(ProbeResult(versionString: versionStr, binaryURL: binary))
+
+        let helpCmd = "\(escapeForShell(binary.path)) --help"
+        let hres = runAndCapture([shell, "-lic", helpCmd])
+        let helpOut = (hres.out ?? "") + (hres.err ?? "")
+        let supportsResume = helpOut.contains("--resume")
+        let supportsContinue = helpOut.contains("--continue")
+
+        return .success(ProbeResult(versionString: versionStr, binaryURL: binary, supportsResume: supportsResume, supportsContinue: supportsContinue))
     }
 
     // MARK: - Helpers

@@ -4,6 +4,7 @@ struct GeminiCLIEnvironment {
     struct ProbeResult {
         let versionString: String
         let binaryURL: URL
+        let supportsResume: Bool
     }
 
     enum ProbeError: Error {
@@ -28,7 +29,8 @@ struct GeminiCLIEnvironment {
                     let rawStderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
                     // Some npm CLIs emit version to stderr; fall back if stdout is empty.
                     let version = rawStdout.isEmpty ? rawStderr : rawStdout
-                    return .success(ProbeResult(versionString: version, binaryURL: url))
+                    let supportsResume = probeHelpForResume(binaryPath: url.path)
+                    return .success(ProbeResult(versionString: version, binaryURL: url, supportsResume: supportsResume))
                 }
                 // Non‑zero exit: fall through to shell-based probe instead of failing early.
             } catch {
@@ -70,7 +72,16 @@ struct GeminiCLIEnvironment {
         }
 
         let url = URL(fileURLWithPath: pathString)
-        return .success(ProbeResult(versionString: combined, binaryURL: url))
+        let supportsResume = probeHelpForResume(binaryPath: pathString)
+        return .success(ProbeResult(versionString: combined, binaryURL: url, supportsResume: supportsResume))
+    }
+
+    private func probeHelpForResume(binaryPath: String) -> Bool {
+        let shell = defaultShell()
+        let helpCmd = "\(escapeForShell(binaryPath)) --help"
+        let hres = runAndCapture([shell, "-lic", helpCmd])
+        let helpOut = (hres.out ?? "") + (hres.err ?? "")
+        return helpOut.contains("--resume")
     }
 
     // Resolve the Gemini binary using custom override, login shell PATH, common install locations, and local project bin.
