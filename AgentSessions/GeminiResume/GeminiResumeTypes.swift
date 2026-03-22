@@ -28,8 +28,9 @@ struct GeminiResumeResult {
 /// the regex doesn't match.
 enum GeminiSessionIDHelper {
     private static let scanLimit = 65_536
+    // Match any non-empty string value for sessionId/session_id (not just UUIDs)
     private static let pattern = try! NSRegularExpression(
-        pattern: #""(?:sessionId|session_id)"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})""#
+        pattern: #""(?:sessionId|session_id)"\s*:\s*"([^"]+)""#
     )
 
     static func deriveSessionID(from session: Session) -> String? {
