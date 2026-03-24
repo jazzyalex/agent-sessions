@@ -396,10 +396,23 @@ final class CopilotSessionDiscovery: SessionDiscovery {
         }
 
         var found: [URL] = []
-        if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]) {
+
+        // Legacy layout: flat *.jsonl files at the root
+        // Current layout (v1.0.11+): <uuid>/events.jsonl subdirectories
+        if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .contentModificationDateKey], options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]) {
             for case let url as URL in enumerator {
-                guard url.pathExtension.lowercased() == "jsonl" else { continue }
-                found.append(url)
+                let isFile = (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false
+                if isFile, url.pathExtension.lowercased() == "jsonl" {
+                    found.append(url)
+                } else {
+                    let isSubDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                    if isSubDir {
+                        let eventsFile = url.appendingPathComponent("events.jsonl")
+                        if fm.fileExists(atPath: eventsFile.path) {
+                            found.append(eventsFile)
+                        }
+                    }
+                }
             }
         }
 
