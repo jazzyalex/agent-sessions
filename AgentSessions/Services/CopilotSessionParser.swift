@@ -3,7 +3,9 @@ import CryptoKit
 
 /// Parser for GitHub Copilot CLI agent session-state JSONL files.
 ///
-/// Observed format: ~/.copilot/session-state/<sessionId>.jsonl
+/// Observed formats:
+///   Legacy:  ~/.copilot/session-state/<sessionId>.jsonl
+///   Current: ~/.copilot/session-state/<sessionId>/events.jsonl
 /// Each line is an event envelope: { type, data, id, timestamp, parentId }.
 final class CopilotSessionParser {
     private static let previewScanLimit = 2_000
@@ -447,6 +449,11 @@ final class CopilotSessionParser {
 
     private static func fallbackID(for url: URL) -> String {
         let base = url.deletingPathExtension().lastPathComponent
+        // Current layout: events.jsonl inside a UUID directory — use the directory name
+        if base == "events" {
+            let parent = url.deletingLastPathComponent().lastPathComponent
+            if !parent.isEmpty { return parent }
+        }
         if !base.isEmpty { return base }
         return sha256(path: url.path)
     }
