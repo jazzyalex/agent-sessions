@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.3.3] - 2026-03-26
+
+### Added
+- Agent Cockpit: Reduce transparency is now on by default for improved HUD readability in both docked and floating modes.
+
+### Fixed
+- Agent Cockpit: OpenCode sessions now participate in iTerm tab-title enrichment alongside Claude and Codex.
+- Agent Cockpit: Hover tooltip columns now align consistently across Claude, Codex, and Copilot providers.
+- Codex: Repaired fallback chain for limit tracking when sessions are stale or missing — percentages no longer get stuck.
+- Codex: Preserved mtime cache on menu-background alt-source early return, preventing stale timestamps.
+- Copilot: Fixed CLI session discovery for subdirectory workspace layouts.
+
 ## [3.3.2] - 2026-03-21
 
 ### Added
