@@ -3402,7 +3402,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         out.reserveCapacity(presences.count)
 
         for var presence in presences {
-            guard presence.source == .codex || presence.source == .claude else {
+            guard presence.source == .codex || presence.source == .claude || presence.source == .opencode else {
                 out.append(presence)
                 continue
             }
