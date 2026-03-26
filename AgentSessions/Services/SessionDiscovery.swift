@@ -30,31 +30,31 @@ struct SessionDiscoveryDelta {
     }
 }
 
-// MARK: - Shared Helpers
-
-/// Build a stat map from a list of files, returning changed files and the full map.
-func diffSessionFiles(_ files: [URL], against previousByPath: [String: SessionFileStat]) -> (currentByPath: [String: SessionFileStat], changedFiles: [URL]) {
-    var currentByPath: [String: SessionFileStat] = [:]
-    currentByPath.reserveCapacity(files.count)
-    var changedFiles: [URL] = []
-    changedFiles.reserveCapacity(files.count)
-    for file in files {
-        guard let stat = sessionFileStat(for: file) else { continue }
-        currentByPath[file.path] = stat
-        if previousByPath[file.path] != stat {
-            changedFiles.append(file)
-        }
+extension SessionFileStat {
+    /// Stat a single session file, returning nil for non-regular files.
+    static func from(_ url: URL) -> SessionFileStat? {
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
+        guard values?.isRegularFile == true else { return nil }
+        let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
+        let size = Int64(values?.fileSize ?? 0)
+        return SessionFileStat(mtime: mtime, size: size)
     }
-    return (currentByPath, changedFiles)
-}
 
-/// Stat a single session file, returning nil for non-regular files.
-func sessionFileStat(for url: URL) -> SessionFileStat? {
-    let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
-    guard values?.isRegularFile == true else { return nil }
-    let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
-    let size = Int64(values?.fileSize ?? 0)
-    return SessionFileStat(mtime: mtime, size: size)
+    /// Build a stat map from a list of files, returning changed files and the full map.
+    static func diff(_ files: [URL], against previousByPath: [String: SessionFileStat]) -> (currentByPath: [String: SessionFileStat], changedFiles: [URL]) {
+        var currentByPath: [String: SessionFileStat] = [:]
+        currentByPath.reserveCapacity(files.count)
+        var changedFiles: [URL] = []
+        changedFiles.reserveCapacity(files.count)
+        for file in files {
+            guard let stat = SessionFileStat.from(file) else { continue }
+            currentByPath[file.path] = stat
+            if previousByPath[file.path] != stat {
+                changedFiles.append(file)
+            }
+        }
+        return (currentByPath, changedFiles)
+    }
 }
 
 // MARK: - Codex Session Discovery
@@ -108,7 +108,7 @@ final class CodexSessionDiscovery: SessionDiscovery {
             files = discoverRecentSessionFiles(dayWindow: 3)
         }
 
-        let (currentByPath, changedFiles) = diffSessionFiles(files, against: previousByPath)
+        let (currentByPath, changedFiles) = SessionFileStat.diff(files, against: previousByPath)
 
         let removedPaths: [String]
         switch scope {
@@ -170,7 +170,6 @@ final class CodexSessionDiscovery: SessionDiscovery {
         }
         return out
     }
-
 }
 
 // MARK: - Claude Code Session Discovery
@@ -220,7 +219,7 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
         switch scope {
         case .full:
             let files = discoverSessionFiles()
-            let (currentByPath, changedFiles) = diffSessionFiles(files, against: previousByPath)
+            let (currentByPath, changedFiles) = SessionFileStat.diff(files, against: previousByPath)
             let removed = Array(Set(previousByPath.keys).subtracting(currentByPath.keys))
             return SessionDiscoveryDelta(
                 changedFiles: changedFiles.sorted { Self.mtime($0) > Self.mtime($1) },
@@ -254,7 +253,7 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
             }
         }
 
-        let (currentByPath, changedFiles) = diffSessionFiles(files, against: previousByPath)
+        let (currentByPath, changedFiles) = SessionFileStat.diff(files, against: previousByPath)
 
         let removed = previousByPath.keys.filter { oldPath in
             guard currentByPath[oldPath] == nil else { return false }
