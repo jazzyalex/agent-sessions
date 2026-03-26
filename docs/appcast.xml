@@ -3,21 +3,13 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.3.1</title>
-            <pubDate>Fri, 20 Mar 2026 15:37:21 -0700</pubDate>
+            <title>3.3.2</title>
+            <pubDate>Thu, 26 Mar 2026 13:22:33 -0400</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.3.1</h2>
+<h2>What&#x27;s New in 3.3.2</h2>
 <h3>Features</h3>
 <ul>
-<li>Codex Usage: OAuth API and CLI RPC fallback for rate limits — when the Codex CLI hits a rate limit, usage tracking automatically falls back to the OAuth endpoint so token data keeps flowing without interruption.</li>
-<li>Resume: Copy Resume Command added to the context menu for Claude, Codex, and OpenCode sessions — right-click any active session to copy the exact CLI resume command to the clipboard.</li>
-<li>OpenCode: Session resume support — OpenCode sessions can now be resumed directly from the context menu, matching Claude and Codex.</li>
-</ul>
-<h3>Bug Fixes</h3>
-<ul>
-<li>**Critical — Codex Usage:** Fixed a 0% token display bug and a blocking-pipe issue that prevented Codex usage tracking from working at all. **This update is required for Codex usage tracking to function correctly.**</li>
-<li>Resume (OpenCode): Corrected OpenCode CLI flags and inherit the user&#x27;s iTerm preference when generating resume commands.</li>
-<li>Resume (Claude): Fixed Claude session ID resolution so Copy Resume Command produces the correct command for active Claude sessions.</li>
+<li>Resume: Session resume support for GitHub Copilot CLI and Gemini CLI — right-click any active Copilot or Gemini session to copy the exact CLI resume command. Safe to skip this update if you don&#x27;t use either agent.</li>
 </ul>
 <h3>Reminder: What You Got in 3.3</h3>
 <ul>
@@ -26,12 +18,12 @@
 <li>Preferences: Usage Tracking pane layout overhauled — data-source picker converted to a popup menu, segmented controls fill available width without overflow, and strip-option toggles stacked vertically for consistency.</li>
 <li>Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness. Cockpit and in-app usage surfaces now age data correctly after `/status` probes while still suppressing redundant background probes.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.1</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.2</a></p>
             ]]></description>
-            <sparkle:version>29</sparkle:version>
-            <sparkle:shortVersionString>3.3.1</sparkle:shortVersionString>
+            <sparkle:version>30</sparkle:version>
+            <sparkle:shortVersionString>3.3.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.1/AgentSessions-3.3.1.dmg" length="14966905" type="application/octet-stream" sparkle:edSignature="FYqx0JLsFkXKqLIR+yrCDg9up+zWuaeTxfqeFUNKqzIBxyBUDPLGMQHBag3rNFsRGAIn7HHyAaPbiU9/AaoQBA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.2/AgentSessions-3.3.2.dmg" length="14997830" type="application/octet-stream" sparkle:edSignature="jXva5InQksVvajb6OBjdEsvSt+kkXhTKlHHprj7m8ccLabgAolsex6dkNHrLr6BIC3wDQhiv53x5BXQFfIAgAA=="/>
         </item>
     </channel>
 </rss>
