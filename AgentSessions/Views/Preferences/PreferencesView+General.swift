@@ -82,6 +82,15 @@ extension PreferencesView {
                 .font(.title2)
                 .fontWeight(.semibold)
 
+            sectionHeader("Appearance")
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Reduce transparency", isOn: $cockpitReduceTransparency)
+                    .help("Uses a denser window background for better readability over dark or busy wallpapers.")
+                Text("Also respects macOS System Settings > Accessibility > Display > Reduce transparency.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             sectionHeader("Live Sessions + Cockpit BETA")
             VStack(alignment: .leading, spacing: 12) {
                 Toggle("Enable live session detection + Cockpit (Beta)", isOn: $codexActiveSessionsEnabled)

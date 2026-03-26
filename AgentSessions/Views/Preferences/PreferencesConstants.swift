@@ -126,6 +126,7 @@ enum PreferencesKey {
         static let hudPinned = "CockpitHUDPinned"
         static let hudShowLimits = "CockpitHUDShowLimits"
         static let showProbeSessionsInHUD = "CockpitShowProbeSessionsInHUD"
+        static let hudReduceTransparency = "CockpitHUDReduceTransparency"
     }
 }
 
