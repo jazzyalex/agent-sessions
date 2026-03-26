@@ -5,6 +5,11 @@ enum FreshUntilKeys {
     static let claude = "FreshUntilClaude"
 }
 
+enum UsageFreshnessTTL {
+    /// After a successful hard probe or alt-source fetch, treat data as fresh for this long.
+    static let probeFreshness: TimeInterval = 60 * 60 // 1 hour
+}
+
 enum UsageProbeCooldownKeys {
     static let codexAutoProbe = "CodexAutoProbeCooldownUntil"
 }

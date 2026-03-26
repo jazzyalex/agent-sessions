@@ -280,7 +280,7 @@ final class ClaudeUsageModel: ObservableObject {
             await MainActor.run {
                 if diag.success {
                     self.lastSuccessAt = Date()
-                    setFreshUntil(for: .claude, until: Date().addingTimeInterval(60 * 60))
+                    setFreshUntil(for: .claude, until: Date().addingTimeInterval(UsageFreshnessTTL.probeFreshness))
                 }
                 self.isUpdating = false
                 completion(diag)
@@ -352,7 +352,6 @@ final class ClaudeUsageModel: ObservableObject {
         if isUpdating { isUpdating = false }
     }
 
-    private func clampPercent(_ v: Int) -> Int { max(0, min(100, v)) }
 }
 
 struct ClaudeServiceAvailability {
