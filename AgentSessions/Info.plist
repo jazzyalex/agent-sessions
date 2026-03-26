@@ -16,6 +16,12 @@
 	<string>public.app-category.developer-tools</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Agent Sessions controls Terminal to resume Codex sessions on your behalf.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Agent Sessions saves exported images and terminal recordings to your Downloads folder.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Agent Sessions needs access to read session files in this location.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Agent Sessions needs access to read session files in this location.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<!-- Sparkle 2 Update Configuration -->

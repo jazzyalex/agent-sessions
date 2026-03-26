@@ -1948,7 +1948,8 @@ struct AgentCockpitHUDView: View {
 
     private static let defaultTabTokensBySource: [SessionSource: Set<String>] = [
         .codex: ["codex"],
-        .claude: ["claude", "claude code"]
+        .claude: ["claude", "claude code"],
+        .opencode: ["opencode"]
     ]
 
     static func normalizedCockpitTabTitle(_ rawTitle: String?, source: SessionSource) -> String? {
