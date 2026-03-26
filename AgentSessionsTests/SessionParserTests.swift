@@ -609,6 +609,65 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(found.first.map(canonicalPath), canonicalPath(sessionURL))
     }
 
+    func testCopilotDiscoveryFindsSubdirectoryEventsLayout() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-Discovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let sessionStateDir = root.appendingPathComponent("session-state", isDirectory: true)
+        let uuidDir = sessionStateDir.appendingPathComponent("aaaabbbb-1111-2222-3333-ccccddddeeee", isDirectory: true)
+        try fm.createDirectory(at: uuidDir, withIntermediateDirectories: true)
+        let eventsURL = uuidDir.appendingPathComponent("events.jsonl")
+        try writeText(#"{"type":"session.start","data":{"sessionId":"aaaabbbb-1111-2222-3333-ccccddddeeee"}}"# + "\n", to: eventsURL)
+
+        let discovery = CopilotSessionDiscovery(customRoot: root.path)
+        let found = discovery.discoverSessionFiles()
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first.map(canonicalPath), canonicalPath(eventsURL))
+    }
+
+    func testCopilotDiscoveryFindsBothFlatAndSubdirectoryLayouts() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-Discovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let sessionStateDir = root.appendingPathComponent("session-state", isDirectory: true)
+        try fm.createDirectory(at: sessionStateDir, withIntermediateDirectories: true)
+
+        // Legacy flat file
+        let flatURL = sessionStateDir.appendingPathComponent("legacy-session.jsonl")
+        try writeText(#"{"type":"session"}"# + "\n", to: flatURL)
+
+        // Current subdirectory layout
+        let uuidDir = sessionStateDir.appendingPathComponent("aaaabbbb-1111-2222-3333-ccccddddeeee", isDirectory: true)
+        try fm.createDirectory(at: uuidDir, withIntermediateDirectories: true)
+        let eventsURL = uuidDir.appendingPathComponent("events.jsonl")
+        try writeText(#"{"type":"session.start","data":{"sessionId":"aaaabbbb-1111-2222-3333-ccccddddeeee"}}"# + "\n", to: eventsURL)
+
+        let discovery = CopilotSessionDiscovery(customRoot: root.path)
+        let found = discovery.discoverSessionFiles()
+        let paths = Set(found.map(canonicalPath))
+        XCTAssertEqual(found.count, 2)
+        XCTAssertTrue(paths.contains(canonicalPath(flatURL)))
+        XCTAssertTrue(paths.contains(canonicalPath(eventsURL)))
+    }
+
+    func testCopilotFallbackIDUsesParentDirForEventsFile() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-FallbackID-\(UUID().uuidString)", isDirectory: true)
+        let uuidDir = root.appendingPathComponent("aaaabbbb-1111-2222-3333-ccccddddeeee", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: uuidDir, withIntermediateDirectories: true)
+
+        // Write a session without sessionId in session.start so fallbackID is used
+        let eventsURL = uuidDir.appendingPathComponent("events.jsonl")
+        try writeText(#"{"type":"user.message","data":{"content":"hello"},"timestamp":"2025-01-01T00:00:00Z"}"# + "\n", to: eventsURL)
+
+        let session = CopilotSessionParser.parseFile(at: eventsURL)
+        XCTAssertNotNil(session)
+        XCTAssertEqual(session?.id, "aaaabbbb-1111-2222-3333-ccccddddeeee")
+    }
+
     func testDroidDiscoveryIncludesSessionStoreAndStreamJSON() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Droid-Discovery-\(UUID().uuidString)", isDirectory: true)
