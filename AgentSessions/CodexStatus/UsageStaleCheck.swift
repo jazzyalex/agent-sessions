@@ -17,6 +17,9 @@ enum UsageStaleThresholds {
     static let codexFiveHour: TimeInterval = 30 * 60 // 30 minutes
     static let codexWeekly: TimeInterval = 4 * 60 * 60 // 4 hours
 
+    // Codex: severely stale — triggers OAuth/RPC fallback even when JSONL has rate limits
+    static let codexSeverelyStale: TimeInterval = 6 * 60 * 60 // 6 hours
+
     // Claude thresholds (poll-based)
     static let claudeFiveHour: TimeInterval = 90 * 60 // 90 minutes
     static let claudeWeekly: TimeInterval = 6 * 60 * 60 // 6 hours
@@ -28,6 +31,10 @@ enum UsageStaleThresholds {
 func isResetInfoUnavailable(raw: String) -> Bool {
     raw.trimmingCharacters(in: .whitespacesAndNewlines) == UsageStaleThresholds.unavailableCopy
 }
+
+// MARK: - Shared Utilities
+
+func clampPercent(_ v: Int) -> Int { max(0, min(100, v)) }
 
 // MARK: - Stale Check
 

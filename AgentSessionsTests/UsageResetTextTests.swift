@@ -97,7 +97,7 @@ final class UsageResetTextTests: XCTestCase {
     func testCodexFreshUntilStillSmoothsEffectiveEventTimestamp() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let eventTimestamp = now.addingTimeInterval(-2 * 60 * 60)
-        setFreshUntil(for: .codex, until: now.addingTimeInterval(60 * 60))
+        setFreshUntil(for: .codex, until: now.addingTimeInterval(UsageFreshnessTTL.probeFreshness))
 
         let effective = effectiveEventTimestamp(
             source: .codex,
@@ -148,7 +148,7 @@ final class UsageResetTextTests: XCTestCase {
     func testClaudeFreshUntilSmoothsEffectiveEventTimestamp() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let lastUpdate = now.addingTimeInterval(-2 * 60 * 60)
-        setFreshUntil(for: .claude, until: now.addingTimeInterval(60 * 60))
+        setFreshUntil(for: .claude, until: now.addingTimeInterval(UsageFreshnessTTL.probeFreshness))
 
         let effective = effectiveEventTimestamp(
             source: .claude,

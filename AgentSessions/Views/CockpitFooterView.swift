@@ -402,10 +402,6 @@ private struct IndexingIndicator: View {
 	        }
 	    }
 
-    private func clampPercent(_ value: Int) -> Int {
-        max(0, min(100, value))
-    }
-
     private func formatRelativeTimeUntil(_ date: Date?, now: Date = Date()) -> String {
         formatUsageRelativeTimeLabel(date, now: now) ?? "—"
     }

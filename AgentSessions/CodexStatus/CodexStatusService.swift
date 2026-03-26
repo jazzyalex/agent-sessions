@@ -239,7 +239,7 @@ final class CodexUsageModel: ObservableObject {
                 await MainActor.run {
                     if diag.success {
                         self.lastSuccessAt = Date()
-                        setFreshUntil(for: .codex, until: Date().addingTimeInterval(60 * 60))
+                        setFreshUntil(for: .codex, until: Date().addingTimeInterval(UsageFreshnessTTL.probeFreshness))
                     }
                     self.isUpdating = false
                     completion(diag.success)
@@ -258,7 +258,7 @@ final class CodexUsageModel: ObservableObject {
             await MainActor.run {
                 if diag.success {
                     self.lastSuccessAt = Date()
-                    setFreshUntil(for: .codex, until: Date().addingTimeInterval(60 * 60))
+                    setFreshUntil(for: .codex, until: Date().addingTimeInterval(UsageFreshnessTTL.probeFreshness))
                 }
                 self.isUpdating = false
                 completion(diag.success)
@@ -290,7 +290,7 @@ final class CodexUsageModel: ObservableObject {
                 await MainActor.run {
                     if diag.success {
                         self.lastSuccessAt = Date()
-                        setFreshUntil(for: .codex, until: Date().addingTimeInterval(60 * 60))
+                        setFreshUntil(for: .codex, until: Date().addingTimeInterval(UsageFreshnessTTL.probeFreshness))
                     }
                     completion(diag)
                 }
@@ -307,7 +307,7 @@ final class CodexUsageModel: ObservableObject {
             await MainActor.run {
                 if diag.success {
                     self.lastSuccessAt = Date()
-                    setFreshUntil(for: .codex, until: Date().addingTimeInterval(60 * 60))
+                    setFreshUntil(for: .codex, until: Date().addingTimeInterval(UsageFreshnessTTL.probeFreshness))
                 }
                 self.isUpdating = false
                 completion(diag)
@@ -361,7 +361,6 @@ final class CodexUsageModel: ObservableObject {
         if isUpdating { isUpdating = false }
     }
 
-    private func clampPercent(_ v: Int) -> Int { max(0, min(100, v)) }
 }
 
 // MARK: - Rate-limit models (log probe)
@@ -838,28 +837,29 @@ actor CodexStatusService {
             }
             if shouldApply {
                 var s = snapshot
-                if summary.missingRateLimits {
-                    // JSONL lacks rate limits — try OAuth API, then CLI RPC before
-                    // falling through to "Unavailable" and the tmux probe.
+                // Try OAuth/RPC when rate limits are missing from JSONL OR when
+                // log data is severely stale (>6h) — the user has no recent sessions
+                // and the cheap API path can provide fresh data.
+                let severelyStale = summary.eventTimestamp.map {
+                    now.timeIntervalSince($0) > UsageStaleThresholds.codexSeverelyStale
+                } ?? true
+                if summary.missingRateLimits || severelyStale {
                     if let altSnap = await fetchRateLimitsFromAlternateSources() {
-                        // Alt-source returned data — apply unconditionally (including 0%
-                        // remaining, which is valid "fully rate-limited" state).
-                        s.fiveHourRemainingPercent = clampPercent(altSnap.fiveHourRemainingPercent)
-                        if !altSnap.fiveHourResetText.isEmpty { s.fiveHourResetText = altSnap.fiveHourResetText }
-                        s.weekRemainingPercent = clampPercent(altSnap.weekRemainingPercent)
-                        if !altSnap.weekResetText.isEmpty { s.weekResetText = altSnap.weekResetText }
-                        s.usageLine = nil
-                        s.eventTimestamp = Date()
-                        snapshot = s
-                        updateHandler(snapshot)
-                        setFreshUntil(for: .codex, until: Date().addingTimeInterval(60 * 60))
-                        lastAppliedEventTimestamp = s.eventTimestamp
-                        lastParseWasStaleOrFailed = false
+                        applyAlternateSnapshot(altSnap, into: &s)
+                        if let sourceFile = summary.sourceFile {
+                            lastAppliedSourceFilePath = sourceFile.path
+                            lastAppliedSourceFileMTime = fileModificationDate(sourceFile)
+                        }
                         return
                     }
-                    s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
-                    s.weekResetText = UsageStaleThresholds.unavailableCopy
-                } else {
+                    if summary.missingRateLimits {
+                        s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
+                        s.weekResetText = UsageStaleThresholds.unavailableCopy
+                    }
+                }
+                // When alt-source failed but JSONL has rate limits, apply the stale
+                // JSONL data as best-effort (showing old data beats showing nothing).
+                if !summary.missingRateLimits {
                     if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
                     if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
                     s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
@@ -954,10 +954,22 @@ actor CodexStatusService {
             }
             if shouldApply {
                 var s = snapshot
-                if summary.missingRateLimits {
-                    s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
-                    s.weekResetText = UsageStaleThresholds.unavailableCopy
-                } else {
+                let severelyStale = summary.eventTimestamp.map {
+                    Date().timeIntervalSince($0) > UsageStaleThresholds.codexSeverelyStale
+                } ?? true
+                if summary.missingRateLimits || severelyStale {
+                    if let altSnap = await fetchRateLimitsFromAlternateSources() {
+                        applyAlternateSnapshot(altSnap, into: &s)
+                        return
+                    }
+                    if summary.missingRateLimits {
+                        s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
+                        s.weekResetText = UsageStaleThresholds.unavailableCopy
+                    }
+                }
+                // When alt-source failed but JSONL has rate limits, apply the stale
+                // JSONL data as best-effort (showing old data beats showing nothing).
+                if !summary.missingRateLimits {
                     if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
                     if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
                     s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
@@ -999,6 +1011,32 @@ actor CodexStatusService {
         return nil
     }
 
+    /// Merges rate-limit fields from `source` into `dest`, commits to `snapshot`,
+    /// and notifies the UI. When `requirePositivePercent` is true (tmux probe path),
+    /// 0% values are treated as "no data" and skipped.
+    private func mergeRateLimitSnapshot(_ source: CodexUsageSnapshot, into dest: inout CodexUsageSnapshot, requirePositivePercent: Bool = false) {
+        if !requirePositivePercent || source.fiveHourRemainingPercent > 0 {
+            dest.fiveHourRemainingPercent = clampPercent(source.fiveHourRemainingPercent)
+        }
+        if !source.fiveHourResetText.isEmpty { dest.fiveHourResetText = source.fiveHourResetText }
+        if !requirePositivePercent || source.weekRemainingPercent > 0 {
+            dest.weekRemainingPercent = clampPercent(source.weekRemainingPercent)
+        }
+        if !source.weekResetText.isEmpty { dest.weekResetText = source.weekResetText }
+        dest.usageLine = nil  // Fresh data from probe/API; clear any stale marker
+        dest.eventTimestamp = Date()
+        snapshot = dest
+        updateHandler(snapshot)
+    }
+
+    /// Merges an alternate-source snapshot, sets freshness TTL, and updates bookkeeping.
+    private func applyAlternateSnapshot(_ altSnap: CodexUsageSnapshot, into s: inout CodexUsageSnapshot) {
+        mergeRateLimitSnapshot(altSnap, into: &s)
+        setFreshUntil(for: .codex, until: Date().addingTimeInterval(UsageFreshnessTTL.probeFreshness))
+        lastAppliedEventTimestamp = s.eventTimestamp
+        lastParseWasStaleOrFailed = false
+    }
+
     // MARK: - Optional tmux /status probe
     private func maybeProbeStatusViaTMUX(userInitiated: Bool) async {
         // Probes are strictly secondary: only run when we have NO recent local sessions.
@@ -1009,7 +1047,7 @@ actor CodexStatusService {
         // Check if we have NO recent JSONL events (no local sessions in last 6 hours)
         var noRecentSessions = false
         if let eventTime = snapshot.eventTimestamp {
-            if now.timeIntervalSince(eventTime) > 6 * 60 * 60 { noRecentSessions = true }
+            if now.timeIntervalSince(eventTime) > UsageStaleThresholds.codexSeverelyStale { noRecentSessions = true }
         } else {
             noRecentSessions = true  // No events at all
         }
@@ -1054,17 +1092,10 @@ actor CodexStatusService {
         _ = CodexProbeCleanup.cleanupNowIfAuto()
         guard let tmuxSnap else { return }
         var merged = snapshot
-        if tmuxSnap.fiveHourRemainingPercent > 0 { merged.fiveHourRemainingPercent = clampPercent(tmuxSnap.fiveHourRemainingPercent) }
-        if !tmuxSnap.fiveHourResetText.isEmpty { merged.fiveHourResetText = tmuxSnap.fiveHourResetText }
-        if tmuxSnap.weekRemainingPercent > 0 { merged.weekRemainingPercent = clampPercent(tmuxSnap.weekRemainingPercent) }
-        if !tmuxSnap.weekResetText.isEmpty { merged.weekResetText = tmuxSnap.weekResetText }
-        merged.usageLine = nil  // probe data is fresh; clear any stale marker
-        merged.eventTimestamp = now
-        snapshot = merged
-        updateHandler(merged)
+        mergeRateLimitSnapshot(tmuxSnap, into: &merged, requirePositivePercent: true)
         // Persist auto-probe cooldown separately from UI freshness so a successful
         // probe does not make old data appear freshly updated for the whole window.
-        setCodexAutoProbeCooldown(until: now.addingTimeInterval(4 * 3600))
+        setCodexAutoProbeCooldown(until: now.addingTimeInterval(automaticProbeCooldownSeconds))
     }
 
     // Hard-probe entry point: forces a tmux /status probe regardless of staleness or prefs.
@@ -1077,14 +1108,7 @@ actor CodexStatusService {
         _ = CodexProbeCleanup.cleanupNowIfAuto()
         if let tmuxSnap = snap {
             var merged = snapshot
-            if tmuxSnap.fiveHourRemainingPercent > 0 { merged.fiveHourRemainingPercent = clampPercent(tmuxSnap.fiveHourRemainingPercent) }
-            if !tmuxSnap.fiveHourResetText.isEmpty { merged.fiveHourResetText = tmuxSnap.fiveHourResetText }
-            if tmuxSnap.weekRemainingPercent > 0 { merged.weekRemainingPercent = clampPercent(tmuxSnap.weekRemainingPercent) }
-            if !tmuxSnap.weekResetText.isEmpty { merged.weekResetText = tmuxSnap.weekResetText }
-            merged.usageLine = nil  // probe data is fresh; clear any stale marker
-            merged.eventTimestamp = Date()
-            snapshot = merged
-            updateHandler(merged)
+            mergeRateLimitSnapshot(tmuxSnap, into: &merged, requirePositivePercent: true)
         }
         return diag
     }
@@ -1777,7 +1801,8 @@ actor CodexStatusService {
             weekly: RateLimitWindowInfo(remainingPercent: nil, resetAt: nil, windowMinutes: nil),
             eventTimestamp: nil,
             stale: true,
-            sourceFile: nil
+            sourceFile: nil,
+            missingRateLimits: true
         )
     }
 
@@ -2148,8 +2173,6 @@ actor CodexStatusService {
         }
         return "resets \(AppDateFormatting.dateTimeShort(date))"
     }
-
-    private func clampPercent(_ v: Int) -> Int { max(0, min(100, v)) }
 
     private func stripANSI(_ s: String) -> String {
         var result = s
