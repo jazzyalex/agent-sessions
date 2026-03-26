@@ -30,6 +30,33 @@ struct SessionDiscoveryDelta {
     }
 }
 
+// MARK: - Shared Helpers
+
+/// Build a stat map from a list of files, returning changed files and the full map.
+func diffSessionFiles(_ files: [URL], against previousByPath: [String: SessionFileStat]) -> (currentByPath: [String: SessionFileStat], changedFiles: [URL]) {
+    var currentByPath: [String: SessionFileStat] = [:]
+    currentByPath.reserveCapacity(files.count)
+    var changedFiles: [URL] = []
+    changedFiles.reserveCapacity(files.count)
+    for file in files {
+        guard let stat = sessionFileStat(for: file) else { continue }
+        currentByPath[file.path] = stat
+        if previousByPath[file.path] != stat {
+            changedFiles.append(file)
+        }
+    }
+    return (currentByPath, changedFiles)
+}
+
+/// Stat a single session file, returning nil for non-regular files.
+func sessionFileStat(for url: URL) -> SessionFileStat? {
+    let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
+    guard values?.isRegularFile == true else { return nil }
+    let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
+    let size = Int64(values?.fileSize ?? 0)
+    return SessionFileStat(mtime: mtime, size: size)
+}
+
 // MARK: - Codex Session Discovery
 
 final class CodexSessionDiscovery: SessionDiscovery {
@@ -81,18 +108,7 @@ final class CodexSessionDiscovery: SessionDiscovery {
             files = discoverRecentSessionFiles(dayWindow: 3)
         }
 
-        var currentByPath: [String: SessionFileStat] = [:]
-        currentByPath.reserveCapacity(files.count)
-        var changedFiles: [URL] = []
-        changedFiles.reserveCapacity(files.count)
-
-        for file in files {
-            guard let stat = Self.fileStat(for: file) else { continue }
-            currentByPath[file.path] = stat
-            if previousByPath[file.path] != stat {
-                changedFiles.append(file)
-            }
-        }
+        let (currentByPath, changedFiles) = diffSessionFiles(files, against: previousByPath)
 
         let removedPaths: [String]
         switch scope {
@@ -155,13 +171,6 @@ final class CodexSessionDiscovery: SessionDiscovery {
         return out
     }
 
-    private static func fileStat(for url: URL) -> SessionFileStat? {
-        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
-        guard values?.isRegularFile == true else { return nil }
-        let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
-        let size = Int64(values?.fileSize ?? 0)
-        return SessionFileStat(mtime: mtime, size: size)
-    }
 }
 
 // MARK: - Claude Code Session Discovery
@@ -189,17 +198,7 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
             return []
         }
 
-        // Claude Code stores sessions under ~/.claude/projects/<project>/... by default.
-        // Prefer that subtree to avoid picking up unrelated JSONL (e.g., history.jsonl).
-        let projectsRoot = root.appendingPathComponent("projects")
-        let scanRoot: URL = {
-            var isProjectsDir: ObjCBool = false
-            if fm.fileExists(atPath: projectsRoot.path, isDirectory: &isProjectsDir), isProjectsDir.boolValue {
-                return projectsRoot
-            }
-            return root
-        }()
-
+        let scanRoot = effectiveScanRoot()
         var found: [URL] = []
 
         // Scan for .jsonl and .ndjson files (sessions) under scan root
@@ -221,17 +220,7 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
         switch scope {
         case .full:
             let files = discoverSessionFiles()
-            var currentByPath: [String: SessionFileStat] = [:]
-            currentByPath.reserveCapacity(files.count)
-            var changedFiles: [URL] = []
-            changedFiles.reserveCapacity(files.count)
-            for file in files {
-                guard let stat = Self.fileStat(for: file) else { continue }
-                currentByPath[file.path] = stat
-                if previousByPath[file.path] != stat {
-                    changedFiles.append(file)
-                }
-            }
+            let (currentByPath, changedFiles) = diffSessionFiles(files, against: previousByPath)
             let removed = Array(Set(previousByPath.keys).subtracting(currentByPath.keys))
             return SessionDiscoveryDelta(
                 changedFiles: changedFiles.sorted { Self.mtime($0) > Self.mtime($1) },
@@ -247,16 +236,7 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
     private func discoverRecentDelta(previousByPath: [String: SessionFileStat],
                                      topProjectLimit: Int,
                                      fileCapPerProject: Int) -> SessionDiscoveryDelta {
-        let root = sessionsRoot()
-        let fm = FileManager.default
-        let projectsRoot = root.appendingPathComponent("projects")
-        let scanRoot: URL = {
-            var isProjectsDir: ObjCBool = false
-            if fm.fileExists(atPath: projectsRoot.path, isDirectory: &isProjectsDir), isProjectsDir.boolValue {
-                return projectsRoot
-            }
-            return root
-        }()
+        let scanRoot = effectiveScanRoot()
 
         let selectedProjects = topProjectDirectories(under: scanRoot, limit: topProjectLimit)
         var selectedRoots = selectedProjects
@@ -274,17 +254,7 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
             }
         }
 
-        var currentByPath: [String: SessionFileStat] = [:]
-        currentByPath.reserveCapacity(files.count)
-        var changedFiles: [URL] = []
-        changedFiles.reserveCapacity(files.count)
-        for file in files {
-            guard let stat = Self.fileStat(for: file) else { continue }
-            currentByPath[file.path] = stat
-            if previousByPath[file.path] != stat {
-                changedFiles.append(file)
-            }
-        }
+        let (currentByPath, changedFiles) = diffSessionFiles(files, against: previousByPath)
 
         let removed = previousByPath.keys.filter { oldPath in
             guard currentByPath[oldPath] == nil else { return false }
@@ -343,12 +313,15 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
     }
 
-    private static func fileStat(for url: URL) -> SessionFileStat? {
-        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
-        guard values?.isRegularFile == true else { return nil }
-        let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
-        let size = Int64(values?.fileSize ?? 0)
-        return SessionFileStat(mtime: mtime, size: size)
+    /// Prefer the `projects/` subtree when it exists, to avoid picking up unrelated JSONL.
+    private func effectiveScanRoot() -> URL {
+        let root = sessionsRoot()
+        let projectsRoot = root.appendingPathComponent("projects")
+        var isProjectsDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: projectsRoot.path, isDirectory: &isProjectsDir), isProjectsDir.boolValue {
+            return projectsRoot
+        }
+        return root
     }
 }
 
