@@ -960,6 +960,8 @@ actor CodexStatusService {
                 if summary.missingRateLimits || severelyStale {
                     if let altSnap = await fetchRateLimitsFromAlternateSources() {
                         applyAlternateSnapshot(altSnap, into: &s)
+                        lastAppliedSourceFilePath = sourceFile.path
+                        lastAppliedSourceFileMTime = mtime
                         return
                     }
                     if summary.missingRateLimits {
