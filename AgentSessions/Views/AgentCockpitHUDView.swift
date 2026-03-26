@@ -2959,133 +2959,98 @@ private struct HUDLimitsBar: View {
 private struct HUDLimitsDetailPanel: View {
     let entries: [HUDLimitsProviderEntry]
     let mode: UsageDisplayMode
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
             Rectangle()
                 .fill(Color.primary.opacity(0.10))
                 .frame(height: 0.5)
-            ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
-                if index > 0 {
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.06))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 0.5)
+            // Grid aligns columns across rows so "Wk:" always starts at the same x position.
+            Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 0) {
+                ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                    if index > 0 {
+                        GridRow {
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.06))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 0.5)
+                                .gridCellColumns(6)
+                        }
+                    }
+                    detailRow(entry: entry)
                 }
-                HUDLimitsDetailRow(entry: entry, mode: mode)
-                    .padding(.horizontal, 10)
-                    .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
             }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity)
         }
         .background(.regularMaterial)
         .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: -3)
     }
+
+    @ViewBuilder
+    private func detailRow(entry: HUDLimitsProviderEntry) -> some View {
+        let fiveUnavail = isResetInfoUnavailable(raw: entry.fiveHourResetText)
+        let weekUnavail = isResetInfoUnavailable(raw: entry.weekResetText)
+        GridRow {
+            Group {
+                if entry.source == .claude {
+                    Image("FooterIconClaude")
+                        .renderingMode(.original)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    Image("FooterIconCodex")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+                }
+            }
+            .frame(width: 14, height: 14)
+            HStack(spacing: 0) {
+                Text("5h: ")
+                Text(fiveUnavail ? "--" : "\(mode.numericPercent(fromLeft: entry.fiveHourLeft))%")
+                    .foregroundStyle(hudPctColor(entry.fiveHourLeft))
+            }
+            Text("↻ \(fiveResetText(entry: entry, unavailable: fiveUnavail))")
+                .foregroundStyle(.secondary)
+            Text("|")
+                .foregroundStyle(Color.primary.opacity(0.25))
+            HStack(spacing: 0) {
+                Text("Wk: ")
+                Text(weekUnavail ? "--" : "\(mode.numericPercent(fromLeft: entry.weekLeft))%")
+                    .foregroundStyle(hudPctColor(entry.weekLeft))
+            }
+            Text("↻ \(weekResetText(entry: entry, unavailable: weekUnavail))")
+                .foregroundStyle(.secondary)
+        }
+        .font(.system(size: 12, weight: .medium, design: .monospaced))
+        .foregroundStyle(Color.primary)
+        .frame(minHeight: 22)
+        .lineLimit(1)
+    }
+
+    private func fiveResetText(entry: HUDLimitsProviderEntry, unavailable: Bool) -> String {
+        if unavailable { return UsageStaleThresholds.unavailableCopy }
+        return formatUsageRelativeTimeLabel(
+            UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText)
+        ) ?? "—"
+    }
+
+    private func weekResetText(entry: HUDLimitsProviderEntry, unavailable: Bool) -> String {
+        if unavailable { return UsageStaleThresholds.unavailableCopy }
+        return formatUsageWeeklyResetLabel(
+            UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText)
+        ) ?? "—"
+    }
 }
 
-/// Shared percent color used by both HUDLimitsDetailRow and HUDLimitsProviderText.
+/// Shared percent color used by HUDLimitsDetailPanel and HUDLimitsProviderText.
 private func hudPctColor(_ left: Int) -> Color {
     if left <= 10 { return .red }
     if left < 30 { return .orange }
     return .primary
-}
-
-private struct HUDLimitsDetailRow: View {
-    let entry: HUDLimitsProviderEntry
-    let mode: UsageDisplayMode
-    @Environment(\.colorScheme) private var colorScheme
-
-    private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
-    private var fiveUnavailable: Bool { isResetInfoUnavailable(raw: entry.fiveHourResetText) }
-    private var weekUnavailable: Bool { isResetInfoUnavailable(raw: entry.weekResetText) }
-    private func pctLabel(_ left: Int, unavailable: Bool) -> String { unavailable ? "--" : "\(pct(left))%" }
-
-    private var isDataStale: Bool {
-        switch entry.source {
-        case .codex:
-            let effective = effectiveEventTimestamp(source: .codex, eventTimestamp: entry.lastDataTimestamp, lastUpdate: nil)
-            return isResetInfoStale(kind: "5h", source: .codex, lastUpdate: nil, eventTimestamp: effective)
-        case .claude:
-            let effective = effectiveEventTimestamp(source: .claude, eventTimestamp: nil, lastUpdate: entry.lastDataTimestamp)
-            return isResetInfoStale(kind: "5h", source: .claude, lastUpdate: effective, eventTimestamp: nil)
-        }
-    }
-
-    private func dataAgeText(_ date: Date, now: Date = Date()) -> String {
-        let interval = now.timeIntervalSince(date)
-        if interval < 60 { return "just now" }
-        if interval < 3600 { return "\(Int(interval / 60))m ago" }
-        return "\(Int(interval / 3600))h ago"
-    }
-
-    private var fiveResetText: String {
-        if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
-        guard let date = UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText) else { return "—" }
-        let interval = max(0, date.timeIntervalSince(Date()))
-        if interval < 60 { return "<1m" }
-        let mins = Int(ceil(interval / 60.0))
-        let h = mins / 60, m = mins % 60
-        if h == 0 { return "\(m)m" }
-        if m == 0 { return "\(h)h" }
-        return "\(h)h \(m)m"
-    }
-
-    private var weekResetText: String {
-        if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
-        guard let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText) else { return "—" }
-        return formatUsageWeeklyResetLabel(date) ?? "—"
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if entry.source == .claude {
-                Image("FooterIconClaude")
-                    .renderingMode(.original)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 14, height: 14)
-            } else {
-                Image("FooterIconCodex")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 14, height: 14)
-                    .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
-            }
-            HStack(spacing: 6) {
-                HStack(spacing: 4) {
-                    HStack(spacing: 0) {
-                        Text("5h: ")
-                        Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
-                            .foregroundStyle(hudPctColor(entry.fiveHourLeft))
-                    }
-                    Text("↻ \(fiveResetText)")
-                        .foregroundStyle(.secondary)
-                }
-                Text("|")
-                    .foregroundStyle(Color.primary.opacity(0.25))
-                HStack(spacing: 4) {
-                    HStack(spacing: 0) {
-                        Text("Wk: ")
-                        Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
-                            .foregroundStyle(hudPctColor(entry.weekLeft))
-                    }
-                    Text("↻ \(weekResetText)")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .font(.system(size: 12, weight: .medium, design: .monospaced))
-            .foregroundStyle(Color.primary)
-            if isDataStale, let ts = entry.lastDataTimestamp {
-                Spacer(minLength: 8)
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text(dataAgeText(ts, now: context.date))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .lineLimit(1)
-    }
 }
 
 private struct HUDLimitsBarContent: View {
