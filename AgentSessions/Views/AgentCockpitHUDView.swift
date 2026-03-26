@@ -466,6 +466,15 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) private var compactBaselineRows: Int = 4
     @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) private var compactAutoFitEnabled: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudShowLimits) private var showLimits: Bool = true
+    @AppStorage(PreferencesKey.Cockpit.hudReduceTransparency) private var reduceTransparency: Bool = false
+
+    @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
+
+    private var hudBackground: some ShapeStyle {
+        if systemReduceTransparency { return AnyShapeStyle(.ultraThickMaterial) }
+        if reduceTransparency { return AnyShapeStyle(.thickMaterial) }
+        return AnyShapeStyle(.regularMaterial)
+    }
 
     @State private var sessionFilterMode: HUDSessionFilterMode = .all
     @State private var filterText: String = ""
@@ -710,7 +719,7 @@ struct AgentCockpitHUDView: View {
                 showsCompactToolbar: showsCompactToolbar
             )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(.ultraThinMaterial)
+        .background(hudBackground)
         .background(
             AgentCockpitHUDWindowConfigurator(
                 isPinned: isPinned,
