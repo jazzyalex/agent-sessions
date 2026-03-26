@@ -466,7 +466,7 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) private var compactBaselineRows: Int = 4
     @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) private var compactAutoFitEnabled: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudShowLimits) private var showLimits: Bool = true
-    @AppStorage(PreferencesKey.Cockpit.hudReduceTransparency) private var reduceTransparency: Bool = false
+    @AppStorage(PreferencesKey.Cockpit.hudReduceTransparency) private var reduceTransparency: Bool = true
 
     @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
 
