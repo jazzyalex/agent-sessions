@@ -305,17 +305,26 @@ actor IndexDB {
             try exec(db, "DELETE FROM session_tool_io;")
             try exec(db, "DELETE FROM session_days;")
             try exec(db, "DELETE FROM rollups_daily;")
-            try exec(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES('\(migrationKey)');")
+            do {
+                let insertSQL = "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);"
+                var insertStmt: OpaquePointer?
+                if sqlite3_prepare_v2(db, insertSQL, -1, &insertStmt, nil) == SQLITE_OK {
+                    sqlite3_bind_text(insertStmt, 1, migrationKey, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                    sqlite3_step(insertStmt)
+                }
+                sqlite3_finalize(insertStmt)
+            }
         }
     }
 
     // MARK: - Exec helpers
     private static func migrationApplied(_ db: OpaquePointer?, key: String) -> Bool {
         guard let db else { return false }
-        let sql = "SELECT 1 FROM schema_migrations WHERE key = '\(key)' LIMIT 1;"
+        let sql = "SELECT 1 FROM schema_migrations WHERE key = ? LIMIT 1;"
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { return false }
         defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
         return sqlite3_step(stmt) == SQLITE_ROW
     }
 
