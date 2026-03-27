@@ -92,13 +92,14 @@ enum SubagentHierarchyBuilder {
         return Result(sessions: flatSessions, rowMeta: rowMeta)
     }
 
-    /// Returns a flat result with all sessions at depth 0.
+    /// Returns a flat result with subagent sessions filtered out (depth 0 for top-level only).
     private static func flatResult(sessions: [Session]) -> Result {
+        let filtered = sessions.filter { !$0.isSubagent }
         var rowMeta: [String: SubagentRowMeta] = [:]
-        rowMeta.reserveCapacity(sessions.count)
-        for s in sessions {
+        rowMeta.reserveCapacity(filtered.count)
+        for s in filtered {
             rowMeta[s.id] = SubagentRowMeta(depth: 0, hasChildren: false)
         }
-        return Result(sessions: sessions, rowMeta: rowMeta)
+        return Result(sessions: filtered, rowMeta: rowMeta)
     }
 }
