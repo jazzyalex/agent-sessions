@@ -39,7 +39,7 @@ struct OpenCodeSqliteReader {
 
     private static func querySessionList(db: OpaquePointer?, dbPath: String) -> [Session] {
         let sql = """
-            SELECT id, title, directory, time_created, time_updated
+            SELECT id, title, directory, time_created, time_updated, parent_id
             FROM session
             WHERE time_archived IS NULL
             ORDER BY time_updated DESC;
@@ -56,6 +56,7 @@ struct OpenCodeSqliteReader {
             let directory = text(stmt, 2)
             let timeCreated = sqlite3_column_int64(stmt, 3)
             let timeUpdated = sqlite3_column_int64(stmt, 4)
+            let parentID: String? = sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : text(stmt, 5)
 
             let startDate = timeCreated > 0 ? Date(timeIntervalSince1970: Double(timeCreated) / 1000.0) : nil
             let endDate = timeUpdated > 0 ? Date(timeIntervalSince1970: Double(timeUpdated) / 1000.0) : nil
@@ -63,6 +64,7 @@ struct OpenCodeSqliteReader {
             // Fetch message count and first model in a separate quick query
             let (msgCount, modelID) = lightweightMessageMeta(db: db, sessionID: id)
 
+            let subagentType = OpenCodeSessionParser.deriveSubagentTypeFromTitle(title.isEmpty ? nil : title)
             sessions.append(Session(
                 id: id,
                 source: .opencode,
@@ -76,7 +78,9 @@ struct OpenCodeSqliteReader {
                 cwd: directory.isEmpty ? nil : directory,
                 repoName: nil,
                 lightweightTitle: title.isEmpty ? nil : title,
-                lightweightCommands: nil
+                lightweightCommands: nil,
+                parentSessionID: parentID,
+                subagentType: subagentType
             ))
         }
         return sessions
@@ -114,7 +118,7 @@ struct OpenCodeSqliteReader {
 
     private static func queryFullSession(db: OpaquePointer?, sessionID: String, dbPath: String) -> Session? {
         // 1. Session metadata
-        let sesSQL = "SELECT id, title, directory, time_created, time_updated FROM session WHERE id = ? LIMIT 1;"
+        let sesSQL = "SELECT id, title, directory, time_created, time_updated, parent_id FROM session WHERE id = ? LIMIT 1;"
         var sesStmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sesSQL, -1, &sesStmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(sesStmt) }
@@ -126,6 +130,7 @@ struct OpenCodeSqliteReader {
         let directory = text(sesStmt, 2)
         let timeCreated = sqlite3_column_int64(sesStmt, 3)
         let timeUpdated = sqlite3_column_int64(sesStmt, 4)
+        let parentID: String? = sqlite3_column_type(sesStmt, 5) == SQLITE_NULL ? nil : text(sesStmt, 5)
         let startDate = timeCreated > 0 ? Date(timeIntervalSince1970: Double(timeCreated) / 1000.0) : nil
         let endDate = timeUpdated > 0 ? Date(timeIntervalSince1970: Double(timeUpdated) / 1000.0) : nil
 
@@ -234,6 +239,7 @@ struct OpenCodeSqliteReader {
         }
 
         let nonMetaCount = events.filter { $0.kind != .meta }.count
+        let subagentType = OpenCodeSessionParser.deriveSubagentTypeFromTitle(title.isEmpty ? nil : title)
         return Session(
             id: id,
             source: .opencode,
@@ -247,7 +253,9 @@ struct OpenCodeSqliteReader {
             cwd: directory.isEmpty ? nil : directory,
             repoName: nil,
             lightweightTitle: title.isEmpty ? nil : title,
-            lightweightCommands: commandCount > 0 ? commandCount : nil
+            lightweightCommands: commandCount > 0 ? commandCount : nil,
+            parentSessionID: parentID,
+            subagentType: subagentType
         )
     }
 

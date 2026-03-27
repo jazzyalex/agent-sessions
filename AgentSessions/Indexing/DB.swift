@@ -123,6 +123,42 @@ actor IndexDB {
             try exec(db, "CREATE INDEX IF NOT EXISTS idx_session_meta_housekeeping ON session_meta(is_housekeeping);")
         }
 
+        // Subagent hierarchy columns.
+        if !tableHasColumn(db, table: "session_meta", column: "parent_session_id") {
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN parent_session_id TEXT;")
+            } catch {
+                if !isDuplicateColumnError(error) { throw error }
+            }
+        }
+
+        if !tableHasColumn(db, table: "session_meta", column: "subagent_type") {
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN subagent_type TEXT;")
+            } catch {
+                if !isDuplicateColumnError(error) { throw error }
+            }
+        }
+
+        if tableHasColumn(db, table: "session_meta", column: "parent_session_id") {
+            try exec(db, "CREATE INDEX IF NOT EXISTS idx_session_meta_parent ON session_meta(parent_session_id);")
+        }
+
+        // One-time migration marker table for schema changes that require a full reindex.
+        try exec(db, "CREATE TABLE IF NOT EXISTS schema_migrations (key TEXT PRIMARY KEY);")
+
+        // Force full reindex to populate parent_session_id and subagent_type for all sessions.
+        let migrationKey = "subagent_reindex_v1"
+        if !migrationApplied(db, key: migrationKey) {
+            try exec(db, "DELETE FROM files;")
+            try exec(db, "DELETE FROM session_meta;")
+            try exec(db, "DELETE FROM session_search;")
+            try exec(db, "DELETE FROM session_tool_io;")
+            try exec(db, "DELETE FROM session_days;")
+            try exec(db, "DELETE FROM rollups_daily;")
+            try exec(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES('\(migrationKey)');")
+        }
+
         // session_days keeps per-session contributions split by day
         try exec(db,
             """
@@ -273,6 +309,15 @@ actor IndexDB {
     }
 
     // MARK: - Exec helpers
+    private static func migrationApplied(_ db: OpaquePointer?, key: String) -> Bool {
+        guard let db else { return false }
+        let sql = "SELECT 1 FROM schema_migrations WHERE key = '\(key)' LIMIT 1;"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { return false }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW
+    }
+
     private static func tableHasColumn(_ db: OpaquePointer?, table: String, column: String) -> Bool {
         guard let db else { return false }
         let escapedTable = table.replacingOccurrences(of: "'", with: "''")
@@ -417,7 +462,7 @@ actor IndexDB {
     func fetchSessionMeta(for source: String) throws -> [SessionMetaRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         let sql = """
-        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands
+        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type
         FROM session_meta
         WHERE source = ?
         ORDER BY COALESCE(end_ts, mtime) DESC
@@ -446,7 +491,9 @@ actor IndexDB {
                 codexInternalSessionID: sqlite3_column_type(stmt, 11) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 11)),
                 isHousekeeping: sqlite3_column_int64(stmt, 12) != 0,
                 messages: Int(sqlite3_column_int64(stmt, 13)),
-                commands: Int(sqlite3_column_int64(stmt, 14))
+                commands: Int(sqlite3_column_int64(stmt, 14)),
+                parentSessionID: sqlite3_column_type(stmt, 15) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 15)),
+                subagentType: sqlite3_column_type(stmt, 16) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 16))
             )
             out.append(row)
         }
@@ -1087,13 +1134,14 @@ actor IndexDB {
 
     func upsertSessionMeta(_ m: SessionMetaRow) throws {
         let sql = """
-        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
           repo=excluded.repo, title=excluded.title, codex_internal_session_id=excluded.codex_internal_session_id,
-          is_housekeeping=excluded.is_housekeeping, messages=excluded.messages, commands=excluded.commands;
+          is_housekeeping=excluded.is_housekeeping, messages=excluded.messages, commands=excluded.commands,
+          parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type;
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -1112,6 +1160,8 @@ actor IndexDB {
         sqlite3_bind_int64(stmt, 13, m.isHousekeeping ? 1 : 0)
         sqlite3_bind_int64(stmt, 14, Int64(m.messages))
         sqlite3_bind_int64(stmt, 15, Int64(m.commands))
+        if let pid = m.parentSessionID { sqlite3_bind_text(stmt, 16, pid, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 16) }
+        if let sat = m.subagentType { sqlite3_bind_text(stmt, 17, sat, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 17) }
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
@@ -1567,6 +1617,8 @@ struct SessionMetaRow {
     let isHousekeeping: Bool
     let messages: Int
     let commands: Int
+    let parentSessionID: String?
+    let subagentType: String?
 }
 
 struct SessionDayRow {

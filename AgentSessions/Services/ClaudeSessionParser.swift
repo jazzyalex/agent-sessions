@@ -36,11 +36,15 @@ final class ClaudeSessionParser {
         var events: [SessionEvent] = []
         var sessionID: String?
         var model: String?
+        var llmModel: String?
         var cwd: String?
         var gitBranch: String?
         var tmin: Date?
         var tmax: Date?
         var idx = 0
+
+        // Detect subagent from file path
+        let (parentSessionID, subagentType) = Self.detectSubagentInfo(from: url)
 
         do {
             try reader.forEachLine { rawLine in
@@ -66,6 +70,12 @@ final class ClaudeSessionParser {
                 }
                 if model == nil, let ver = obj["version"] as? String {
                     model = "Claude Code \(ver)"
+                }
+                // Prefer actual LLM model from assistant events over CLI version
+                if llmModel == nil,
+                   let message = obj["message"] as? [String: Any],
+                   let msgModel = message["model"] as? String, !msgModel.isEmpty {
+                    llmModel = msgModel
                 }
 
                 // Extract timestamp
@@ -95,7 +105,7 @@ final class ClaudeSessionParser {
             source: .claude,
             startTime: tmin,
             endTime: tmax,
-            model: model,
+            model: llmModel ?? model,
             filePath: url.path,
             fileSizeBytes: size >= 0 ? size : nil,
             eventCount: nonMetaCount,
@@ -104,7 +114,9 @@ final class ClaudeSessionParser {
             repoName: nil,
             lightweightTitle: nil,
             isHousekeeping: isHousekeeping,
-            codexInternalSessionIDHint: sessionID
+            codexInternalSessionIDHint: sessionID,
+            parentSessionID: parentSessionID,
+            subagentType: subagentType
         )
     }
 
@@ -637,6 +649,9 @@ final class ClaudeSessionParser {
             return false
         }
 
+        // Detect subagent from file path
+        let (parentSessionID, subagentType) = detectSubagentInfo(from: url)
+
         func build(headBytes: Int) -> Session? {
             guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
             defer { try? fh.close() }
@@ -667,6 +682,7 @@ final class ClaudeSessionParser {
             let tailLines = lines(from: tailData, keepHead: false)
 
             var model: String?
+            var llmModel: String?
             var cwd: String?
             var sessionID: String?
             var tmin: Date?
@@ -694,6 +710,12 @@ final class ClaudeSessionParser {
                 if model == nil, let ver = obj["version"] as? String {
                     model = "Claude Code \(ver)"
                 }
+                // Prefer actual LLM model from assistant events over CLI version
+                if llmModel == nil,
+                   let message = obj["message"] as? [String: Any],
+                   let msgModel = message["model"] as? String, !msgModel.isEmpty {
+                    llmModel = msgModel
+                }
 
                 // Extract timestamp
                 if let ts = extractTimestamp(from: obj) {
@@ -717,12 +739,13 @@ final class ClaudeSessionParser {
             let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
 
             // Extract title from sample events (temp session; ID not used downstream for UI)
+            let effectiveModel = llmModel ?? model
             let tempIsHousekeeping = Session.computeIsHousekeeping(source: .claude, events: sampleEvents)
             let tempSession = Session(id: hash(path: url.path),
                                       source: .claude,
                                       startTime: tmin,
                                       endTime: tmax,
-                                      model: model,
+                                      model: effectiveModel,
                                       filePath: url.path,
                                       fileSizeBytes: size,
                                       eventCount: estEvents,
@@ -731,7 +754,9 @@ final class ClaudeSessionParser {
                                       repoName: nil,
                                       lightweightTitle: nil,
                                       isHousekeeping: tempIsHousekeeping,
-                                      codexInternalSessionIDHint: sessionID)
+                                      codexInternalSessionIDHint: sessionID,
+                                      parentSessionID: parentSessionID,
+                                      subagentType: subagentType)
             let title = tempSession.title
 
             // Create final lightweight session with empty events
@@ -739,7 +764,7 @@ final class ClaudeSessionParser {
                            source: .claude,
                            startTime: tmin ?? mtime,
                            endTime: tmax ?? mtime,
-                           model: model,
+                           model: effectiveModel,
                            filePath: url.path,
                            fileSizeBytes: size,
                            eventCount: estEvents,
@@ -748,7 +773,9 @@ final class ClaudeSessionParser {
                            repoName: nil,
                            lightweightTitle: title,
                            isHousekeeping: tempIsHousekeeping || title == "No prompt",
-                           codexInternalSessionIDHint: sessionID)
+                           codexInternalSessionIDHint: sessionID,
+                           parentSessionID: parentSessionID,
+                           subagentType: subagentType)
         }
 
         guard let initial = build(headBytes: headBytesInitial) else { return nil }
@@ -887,6 +914,28 @@ final class ClaudeSessionParser {
         // Stable, deterministic ID based on file path (hex SHA-256)
         let d = SHA256.hash(data: Data(path.utf8))
         return d.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Detect Claude subagent session from file path layout.
+    /// Pattern: .../<parentUUID>/subagents/agent-<agentId>.jsonl
+    /// Also reads adjacent agent-<id>.meta.json for agentType.
+    static func detectSubagentInfo(from url: URL) -> (parentSessionID: String?, subagentType: String?) {
+        let parentDir = url.deletingLastPathComponent()
+        guard parentDir.lastPathComponent == "subagents" else { return (nil, nil) }
+
+        let parentSessionName = parentDir.deletingLastPathComponent().lastPathComponent
+        guard ClaudeSessionIDHelper.looksLikeUUID(parentSessionName) else { return (nil, nil) }
+
+        // Read adjacent meta.json for agentType
+        let baseName = url.deletingPathExtension().lastPathComponent
+        let metaFile = parentDir.appendingPathComponent("\(baseName).meta.json")
+        var agentType: String?
+        if let metaData = try? Data(contentsOf: metaFile),
+           let metaObj = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
+            agentType = metaObj["agentType"] as? String
+        }
+
+        return (parentSessionName, agentType)
     }
 
     private static func isValidPath(_ path: String) -> Bool {

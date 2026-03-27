@@ -228,11 +228,14 @@ struct UnifiedSessionsView: View {
     @State private var lastSelectedSource: SessionSource = .codex
 		@State private var sortOrder: [KeyPathComparator<Session>] = []
 		@State private var cachedRows: [Session] = []
+    @State private var expandedParents: Set<String> = []
+    @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
 	@State private var columnLayoutID: UUID = UUID()
 	@AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
 	@AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
 	@AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
     @AppStorage("UnifiedShowActiveSessionsOnly") private var showActiveSessionsOnly: Bool = false
+    @AppStorage(PreferencesKey.Unified.showSubagentHierarchy) private var showSubagentHierarchy: Bool = true
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
 	@AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 	@AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
@@ -464,6 +467,12 @@ struct UnifiedSessionsView: View {
                 refreshSelectionSourceFromCachedRows()
                 updateFocusedSessionIfNeeded(selectedSession)
             }
+            .onChange(of: showSubagentHierarchy) { _, _ in
+                updateCachedRows()
+            }
+            .onChange(of: expandedParents) { _, _ in
+                updateCachedRows()
+            }
 
 			let afterUsage = afterLiveFeature
 				.onChange(of: codexUsageEnabled) { _, _ in updateFooterUsageVisibility() }
@@ -681,7 +690,19 @@ struct UnifiedSessionsView: View {
                        max: showSourceColumn ? 120 : 0)
 
 	            TableColumn("Session", value: \Session.title) { s in
-	                SessionTitleCell(session: s, geminiIndexer: geminiIndexer)
+	                SessionTitleCell(
+                        session: s,
+                        geminiIndexer: geminiIndexer,
+                        rowMeta: hierarchyRowMeta[s.id],
+                        isExpanded: expandedParents.contains(s.id),
+                        onToggleExpand: { id in
+                            if expandedParents.contains(id) {
+                                expandedParents.remove(id)
+                            } else {
+                                expandedParents.insert(id)
+                            }
+                        }
+                    )
 	                    .contentShape(Rectangle())
 	                    .onTapGesture {
 	                        selectionChangeSource = .mouse
@@ -1157,6 +1178,14 @@ struct UnifiedSessionsView: View {
                             ? "Show only live sessions in the list (Codex, Claude)"
                             : "Enable Live sessions + Cockpit (Beta) in Settings → Agent Cockpit."
                     )
+
+                Button(action: { showSubagentHierarchy.toggle() }) {
+                    Image(systemName: showSubagentHierarchy ? "list.bullet.indent" : "list.bullet")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(showSubagentHierarchy ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(showSubagentHierarchy ? "Flat session list" : "Show subagent hierarchy")
 
                 if codexAgentEnabled {
                     AgentTabToggle(title: "Codex", color: Color.agentCodex, isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
@@ -1739,7 +1768,14 @@ struct UnifiedSessionsView: View {
         )
 
 	        if !(shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh) {
-	            cachedRows = nextRows
+                let searchActive = !query.isEmpty
+                let hierarchyResult = SubagentHierarchyBuilder.build(
+                    sessions: nextRows,
+                    expandedParents: expandedParents,
+                    hierarchyEnabled: showSubagentHierarchy && !searchActive
+                )
+	            cachedRows = hierarchyResult.sessions
+                hierarchyRowMeta = hierarchyResult.rowMeta
 	        }
         let heldRows = shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh
 
@@ -1882,7 +1918,11 @@ struct UnifiedSessionsView: View {
         case .droid: label = "Droid"
         case .openclaw: label = "OpenClaw"
         }
+        let isSubagentRow = hierarchyRowMeta[session.id]?.depth ?? 0 > 0 || session.isSubagent
         return HStack(spacing: 6) {
+            if isSubagentRow {
+                Spacer().frame(width: 12)
+            }
             if let liveState {
                 CodexLiveStatusDot(
                     state: liveState,
@@ -1893,8 +1933,8 @@ struct UnifiedSessionsView: View {
                     .accessibilityLabel(Text("\(label) \(liveState == .activeWorking ? "active" : "open") session"))
             }
             Text(label)
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                .foregroundStyle(rowTextColor)
+                .font(.system(size: 12, weight: isSubagentRow ? .light : .regular, design: .monospaced))
+                .foregroundStyle(isSubagentRow ? rowTextColor.opacity(0.7) : rowTextColor)
             Spacer(minLength: 4)
         }
         .opacity(liveOpacity)
@@ -2533,10 +2573,52 @@ private struct TranscriptHostView: View {
 		private struct SessionTitleCell: View {
 		    let session: Session
 		    @ObservedObject var geminiIndexer: GeminiSessionIndexer
+            let rowMeta: SubagentRowMeta?
+            let isExpanded: Bool
+            let onToggleExpand: ((String) -> Void)?
 		    @State private var hover: Bool = false
 
 	    var body: some View {
-	        HStack(spacing: 8) {
+	        HStack(spacing: 4) {
+                // Disclosure chevron for parents with children
+                if let meta = rowMeta, meta.hasChildren {
+                    Button(action: { onToggleExpand?(session.id) }) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .medium))
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 16)
+                    .foregroundStyle(.secondary)
+                } else if let meta = rowMeta, meta.depth > 0 {
+                    // Indent for subagent children
+                    Spacer().frame(width: 20)
+                }
+
+                // Subagent type badge
+                if let meta = rowMeta, meta.depth > 0 || session.isSubagent {
+                    if let agentType = session.subagentType, !agentType.isEmpty {
+                        Text(agentType)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.purple.opacity(0.15))
+                            .foregroundStyle(.purple)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+                    // Model badge
+                    if let abbreviated = ModelNameAbbreviator.abbreviate(session.model) {
+                        Text(abbreviated)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.blue.opacity(0.12))
+                            .foregroundStyle(.blue)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+                }
+
 	            Text(session.title)
 	                .font(.system(size: 13, weight: .regular, design: .monospaced))
 	                .lineLimit(1)

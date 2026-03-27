@@ -15,6 +15,7 @@
 		0422F5CD85576F5A7193A15F /* OpenCodeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A1CB8D054EBD47772E5C0B /* OpenCodeSettings.swift */; };
 		058A5BF45C6B3E1CF77F5EC3 /* CodexSessionImagePayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B14E8BFD378E6311D3E2F55 /* CodexSessionImagePayload.swift */; };
 		0607E3C9601249EB88184B34 /* SessionsChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CF78727ECB14792AD0BA9B5 /* SessionsChartView.swift */; };
+		09B8207EB33AAEC98F7BB8E9 /* ModelNameAbbreviator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49389E8BB4E189FC2B733B40 /* ModelNameAbbreviator.swift */; };
 		09C4E2A7C54B4EA3BF4473C7 /* CodexVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3233D9D6CE429AB0173B04 /* CodexVersion.swift */; };
 		0B8F72366814B2724C5536B3 /* ClaudeProbeProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602CE18FB970A465454E6CF7 /* ClaudeProbeProject.swift */; };
 		0D2C09DA2327F5507792EE1A /* TerminalSemanticSegmentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10DE434722D491647B5D368 /* TerminalSemanticSegmentationTests.swift */; };
@@ -60,6 +61,7 @@
 		35EAB2DDFC13FB3CB33A74EF /* ClaudeProbeProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5612FE92135230B461DA0E59 /* ClaudeProbeProject.swift */; };
 		35F5EDBE21C9A0C4ECDB828F /* CopyResumeCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80E2D7915DCA094DE383D10 /* CopyResumeCommandTests.swift */; };
 		368892E109E62F445F5A7302 /* ProbeCleanupHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2BB94A3759137164517CC64 /* ProbeCleanupHelpers.swift */; };
+		370F7976441B280C07A7D4A1 /* SubagentHierarchyBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39375A35205563EFBB541E55 /* SubagentHierarchyBuilder.swift */; };
 		37D93EDA993018B66B33250E /* UsageDisplayMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0637E0D51C63AE8AB3CCED8 /* UsageDisplayMode.swift */; };
 		3A769ECA2EAC3A6A008A7EC2 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = DB2E108A587C47918E9BC53D /* Sparkle */; };
 		3B12369C2D367D5D784EBFB8 /* SessionSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000SSS4A0A000100000002 /* SessionSource.swift */; };
@@ -397,6 +399,7 @@
 		35186F4194824F3250DE3B8E /* AppRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppRuntime.swift; path = AgentSessions/Support/AppRuntime.swift; sourceTree = SOURCE_ROOT; };
 		37006C856FBE4448A658887B /* CommandExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CommandExecutor.swift; path = AgentSessions/Resume/CommandExecutor.swift; sourceTree = SOURCE_ROOT; };
 		372394B7F3B77108C9FEAFC8 /* AgentEnablement.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/AgentEnablement.swift; sourceTree = SOURCE_ROOT; };
+		39375A35205563EFBB541E55 /* SubagentHierarchyBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SubagentHierarchyBuilder.swift; sourceTree = SOURCE_ROOT; };
 		3A39A36FCB3A36B34E58751E /* DroidSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/DroidSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		3EA0F64F6AA5E8913A6A87EF /* ClaudeWebCookieResolver.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeWebCookieResolver.swift; sourceTree = SOURCE_ROOT; };
 		401D8C6CC89AED7DF379FC2C /* OpenCodeResumeTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/OpenCodeResume/OpenCodeResumeTypes.swift; sourceTree = SOURCE_ROOT; };
@@ -409,6 +412,7 @@
 		46DF05EC4F8049DA9AF9E5CD /* CodexResumeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCoordinator.swift; path = AgentSessions/Resume/CodexResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		474BEB8135434CF7B71065E2 /* AnalyticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsWindowController.swift; sourceTree = "<group>"; };
 		47D27A124565438EA2EAD355 /* Base64ImageDataURLScannerLineIndexTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Base64ImageDataURLScannerLineIndexTests.swift; sourceTree = SOURCE_ROOT; };
+		49389E8BB4E189FC2B733B40 /* ModelNameAbbreviator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ModelNameAbbreviator.swift; sourceTree = SOURCE_ROOT; };
 		495C9F72C10641EC9FE0B216 /* FilterEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/FilterEngine.swift; sourceTree = SOURCE_ROOT; };
 		4B14E8BFD378E6311D3E2F55 /* CodexSessionImagePayload.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/CodexSessionImagePayload.swift; sourceTree = SOURCE_ROOT; };
 		4B1C6B3A05A32EF8AD67BBE9 /* DroidSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Droid/DroidSettings.swift; sourceTree = SOURCE_ROOT; };
@@ -1127,6 +1131,8 @@
 				A427D60CA024824068C5D6E6 /* UnifiedDiffParser.swift */,
 				E7B374DD7125FED89457B180 /* IDEOpener.swift */,
 				950A9B5B26322D59C953E73A /* CodexActiveSessionsModel.swift */,
+				39375A35205563EFBB541E55 /* SubagentHierarchyBuilder.swift */,
+				49389E8BB4E189FC2B733B40 /* ModelNameAbbreviator.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -1858,6 +1864,8 @@
 				7E01E6D22E9328A7E8E7723A /* ShellQuoting.swift in Sources */,
 				56AD86C6AA6FFF1B55F9905D /* AgentTerminalLauncher.swift in Sources */,
 				966CB97B11644A808CAE17D4 /* ResumePreferenceHelpers.swift in Sources */,
+				370F7976441B280C07A7D4A1 /* SubagentHierarchyBuilder.swift in Sources */,
+				09B8207EB33AAEC98F7BB8E9 /* ModelNameAbbreviator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
