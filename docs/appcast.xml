@@ -3,35 +3,20 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.3.3</title>
-            <pubDate>Thu, 26 Mar 2026 20:00:30 -0400</pubDate>
+            <title>3.3.3.1</title>
+            <pubDate>Thu, 26 Mar 2026 20:41:06 -0400</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.3.3</h2>
-<h3>Features</h3>
-<ul>
-<li>Agent Cockpit: Reduce transparency is now on by default for improved HUD readability in both docked and floating modes.</li>
-</ul>
+<h2>What&#x27;s New in 3.3.3.1</h2>
 <h3>Bug Fixes</h3>
 <ul>
-<li>Agent Cockpit: OpenCode sessions now participate in iTerm tab-title enrichment alongside Claude and Codex.</li>
-<li>Agent Cockpit: Hover tooltip columns now align consistently across Claude, Codex, and Copilot providers.</li>
-<li>Codex: Repaired fallback chain for limit tracking when sessions are stale or missing — percentages no longer get stuck.</li>
-<li>Codex: Preserved mtime cache on menu-background alt-source early return, preventing stale timestamps.</li>
-<li>Copilot: Fixed CLI session discovery for subdirectory workspace layouts.</li>
+<li>Codex: Reset countdown no longer exceeds the 5-hour window — reset times are now stored in ISO 8601 format, preventing a date-rollover bug that produced countdowns of up to 24 hours.</li>
 </ul>
-<h3>Reminder: What You Got in 3.3</h3>
-<ul>
-<li>Claude Usage: Multi-tier tracking with credential gating and Web API fallback. Reads live token usage via the OAuth endpoint (60-second refresh cycle), falls back to the tmux socket probe, and optionally fetches from the claude.ai Web API using a session cookie — with clear Full Disk Access guidance surfaced in Preferences when Web API mode is active.</li>
-<li>Claude Usage: Unified the refresh-interval constant across all tracking tiers and hardened org UUID validation to prevent bad identifiers from poisoning the cache across sessions.</li>
-<li>Preferences: Usage Tracking pane layout overhauled — data-source picker converted to a popup menu, segmented controls fill available width without overflow, and strip-option toggles stacked vertically for consistency.</li>
-<li>Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness. Cockpit and in-app usage surfaces now age data correctly after `/status` probes while still suppressing redundant background probes.</li>
-</ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.3</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.3.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.3.1</a></p>
             ]]></description>
-            <sparkle:version>31</sparkle:version>
-            <sparkle:shortVersionString>3.3.3</sparkle:shortVersionString>
+            <sparkle:version>32</sparkle:version>
+            <sparkle:shortVersionString>3.3.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.3/AgentSessions-3.3.3.dmg" length="15002823" type="application/octet-stream" sparkle:edSignature="LdeskHme3bvO2O3YXvwnQkaTwzQgzU45IKvzZKE5R8AZ+nK1QjglLjxOuuZjI0v+dhvfs+vE6g0gavVtbFu5Ag=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.3.1/AgentSessions-3.3.3.1.dmg" length="15005280" type="application/octet-stream" sparkle:edSignature="osmDm2Ism6cKnWXLLuBuvQn6UD+seH0WWXQFofXTUM2u3bDOL1FxhY7HXITc0j/PQEVXvPWXLBAXIxI/NTEnBw=="/>
         </item>
     </channel>
 </rss>
