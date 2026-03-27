@@ -25,11 +25,12 @@ enum SubagentHierarchyBuilder {
     ///
     /// - Parameters:
     ///   - sessions: Pre-sorted flat session list (parents sorted by active sort).
-    ///   - expandedParents: Set of session IDs whose children should be visible.
+    ///   - collapsedParents: Set of session IDs whose children should be hidden.
+    ///     When empty (the default), all parents are expanded so children are visible.
     ///   - hierarchyEnabled: When false, returns all sessions flat at depth 0 (no hierarchy nesting).
     static func build(
         sessions: [Session],
-        expandedParents: Set<String>,
+        collapsedParents: Set<String> = [],
         hierarchyEnabled: Bool
     ) -> Result {
         guard hierarchyEnabled else {
@@ -40,9 +41,23 @@ enum SubagentHierarchyBuilder {
         //    Also build a reverse lookup to resolve parentSessionID → session.id
         var parentKeyToID: [String: String] = [:]  // raw UUID/parentID → session.id
         for s in sessions {
-            // Map codexInternalSessionIDHint (raw UUID) to session.id
-            if let hint = s.codexInternalSessionIDHint, !hint.isEmpty {
-                parentKeyToID[hint] = s.id
+            // Only register hints for non-subagent sessions: subagent events
+            // carry the *parent's* sessionId, so allowing them to register would
+            // overwrite the real parent mapping and break resolution.
+            if s.parentSessionID == nil {
+                // Map codexInternalSessionIDHint (raw UUID) to session.id
+                if let hint = s.codexInternalSessionIDHint, !hint.isEmpty {
+                    parentKeyToID[hint] = s.id
+                }
+                // Derive UUID from file path for Claude sessions whose
+                // codexInternalSessionIDHint may not be persisted in the DB yet.
+                // Claude session files are named <UUID>.jsonl.
+                let fileName = URL(fileURLWithPath: s.filePath)
+                    .deletingPathExtension().lastPathComponent
+                if fileName.count == 36, fileName.contains("-"),
+                   parentKeyToID[fileName] == nil {
+                    parentKeyToID[fileName] = s.id
+                }
             }
             // Also map session.id directly
             parentKeyToID[s.id] = s.id
@@ -81,7 +96,7 @@ enum SubagentHierarchyBuilder {
             flatSessions.append(s)
             rowMeta[s.id] = SubagentRowMeta(depth: 0, hasChildren: hasChildren)
 
-            if hasChildren, expandedParents.contains(s.id) {
+            if hasChildren, !collapsedParents.contains(s.id) {
                 for child in children {
                     flatSessions.append(child)
                     rowMeta[child.id] = SubagentRowMeta(depth: 1, hasChildren: false)
