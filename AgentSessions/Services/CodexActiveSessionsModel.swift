@@ -2349,9 +2349,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         if ["›", ">", "$", "#", "%", "❯", "λ"].contains(trimmed) { return true }
-        if let range = trimmed.range(of: #".*[\$#%]$"#, options: .regularExpression),
-           range.lowerBound == trimmed.startIndex,
-           range.upperBound == trimmed.endIndex {
+        if let last = trimmed.last, last == "$" || last == "#" || last == "%" {
             return true
         }
         return false
@@ -2373,9 +2371,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             // This avoids treating status percentages like "78%" as prompt lines.
             if body.last?.isWhitespace == true { return true }
         }
-        if let range = trimmed.range(of: #".*[\$#]$"#, options: .regularExpression),
-           range.lowerBound == trimmed.startIndex,
-           range.upperBound == trimmed.endIndex {
+        if let last = trimmed.last, last == "$" || last == "#" {
             return true
         }
         return false

@@ -3194,6 +3194,7 @@ private struct HUDLimitsLoadingSpinner: View {
             .font(.system(size: 11, weight: .semibold))
             .rotationEffect(.degrees(rotate ? 360 : 0))
             .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: rotate)
+            .drawingGroup()
             .onAppear { rotate = true }
     }
 }

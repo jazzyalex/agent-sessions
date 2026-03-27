@@ -79,6 +79,7 @@ struct CodexLiveStatusDot: View {
             .scaleEffect(pulseScale)
             .opacity(pulseOpacity)
             .shadow(color: idleBaseColor.opacity(haloOpacity), radius: haloRadius)
+            .drawingGroup()
             .onChange(of: lastSeenAt) { _, _ in updateAnimation() }
             .onChange(of: reduceMotion) { _, _ in updateAnimation() }
             .onChange(of: isAppActive) { _, _ in updateAnimation() }

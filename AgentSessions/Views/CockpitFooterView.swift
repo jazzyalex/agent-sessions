@@ -210,6 +210,7 @@ private struct IndexingIndicator: View {
             .opacity(isVisible ? 1 : 0)
             .animation(isVisible ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default,
                        value: isAnimating)
+            .drawingGroup()
             .onAppear { isAnimating = true }
     }
 }
@@ -421,6 +422,7 @@ private struct RefreshSpinner: View {
             .font(.system(size: 11, weight: .semibold))
             .rotationEffect(.degrees(rotate ? 360 : 0))
             .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: rotate)
+            .drawingGroup()
             .onAppear { rotate = true }
     }
 }
@@ -461,6 +463,7 @@ private struct MiniUsageBar: View {
                 Capsule(style: .continuous)
                     .fill(tint)
                     .frame(width: max(0, 24 * clampedFill), height: 4)
+                    .drawingGroup()
                     .opacity((blinkDuration == nil) ? 1 : (isBlinking ? 0.35 : 1))
                     .task(id: blinkDuration) {
                         guard let d = blinkDuration else {
