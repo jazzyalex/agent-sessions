@@ -38,12 +38,23 @@ struct OpenCodeSqliteReader {
     // MARK: - Internal query helpers
 
     private static func querySessionList(db: OpaquePointer?, dbPath: String) -> [Session] {
-        let sql = """
-            SELECT id, title, directory, time_created, time_updated, parent_id
-            FROM session
-            WHERE time_archived IS NULL
-            ORDER BY time_updated DESC;
-            """
+        let hasParent = tableHasColumn(db, table: "session", column: "parent_id")
+        let sql: String
+        if hasParent {
+            sql = """
+                SELECT id, title, directory, time_created, time_updated, parent_id
+                FROM session
+                WHERE time_archived IS NULL
+                ORDER BY time_updated DESC;
+                """
+        } else {
+            sql = """
+                SELECT id, title, directory, time_created, time_updated
+                FROM session
+                WHERE time_archived IS NULL
+                ORDER BY time_updated DESC;
+                """
+        }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
@@ -56,7 +67,7 @@ struct OpenCodeSqliteReader {
             let directory = text(stmt, 2)
             let timeCreated = sqlite3_column_int64(stmt, 3)
             let timeUpdated = sqlite3_column_int64(stmt, 4)
-            let parentID: String? = sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : text(stmt, 5)
+            let parentID: String? = hasParent && sqlite3_column_type(stmt, 5) != SQLITE_NULL ? text(stmt, 5) : nil
 
             let startDate = timeCreated > 0 ? Date(timeIntervalSince1970: Double(timeCreated) / 1000.0) : nil
             let endDate = timeUpdated > 0 ? Date(timeIntervalSince1970: Double(timeUpdated) / 1000.0) : nil
@@ -118,7 +129,10 @@ struct OpenCodeSqliteReader {
 
     private static func queryFullSession(db: OpaquePointer?, sessionID: String, dbPath: String) -> Session? {
         // 1. Session metadata
-        let sesSQL = "SELECT id, title, directory, time_created, time_updated, parent_id FROM session WHERE id = ? LIMIT 1;"
+        let hasParent = tableHasColumn(db, table: "session", column: "parent_id")
+        let sesSQL = hasParent
+            ? "SELECT id, title, directory, time_created, time_updated, parent_id FROM session WHERE id = ? LIMIT 1;"
+            : "SELECT id, title, directory, time_created, time_updated FROM session WHERE id = ? LIMIT 1;"
         var sesStmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sesSQL, -1, &sesStmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(sesStmt) }
@@ -130,7 +144,7 @@ struct OpenCodeSqliteReader {
         let directory = text(sesStmt, 2)
         let timeCreated = sqlite3_column_int64(sesStmt, 3)
         let timeUpdated = sqlite3_column_int64(sesStmt, 4)
-        let parentID: String? = sqlite3_column_type(sesStmt, 5) == SQLITE_NULL ? nil : text(sesStmt, 5)
+        let parentID: String? = hasParent && sqlite3_column_type(sesStmt, 5) != SQLITE_NULL ? text(sesStmt, 5) : nil
         let startDate = timeCreated > 0 ? Date(timeIntervalSince1970: Double(timeCreated) / 1000.0) : nil
         let endDate = timeUpdated > 0 ? Date(timeIntervalSince1970: Double(timeUpdated) / 1000.0) : nil
 
@@ -285,5 +299,18 @@ struct OpenCodeSqliteReader {
     private static func text(_ stmt: OpaquePointer?, _ col: Int32) -> String {
         guard let cStr = sqlite3_column_text(stmt, col) else { return "" }
         return String(cString: cStr)
+    }
+
+    private static func tableHasColumn(_ db: OpaquePointer?, table: String, column: String) -> Bool {
+        var stmt: OpaquePointer?
+        let sql = "PRAGMA table_info(\(table));"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let name = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }), name == column {
+                return true
+            }
+        }
+        return false
     }
 }
