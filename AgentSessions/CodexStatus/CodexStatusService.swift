@@ -862,8 +862,8 @@ actor CodexStatusService {
                 if !summary.missingRateLimits {
                     if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
                     if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
-                    s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
-                    s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
+                    s.fiveHourResetText = summary.fiveHour.resetAt.map { formatResetISO8601($0) } ?? ""
+                    s.weekResetText = summary.weekly.resetAt.map { formatResetISO8601($0) } ?? ""
                 }
                 lastFiveHourResetDate = summary.fiveHour.resetAt
                 s.usageLine = summary.missingRateLimits ? missingRateLimitsUsageLine : (summary.stale ? "Usage is stale (>3m)" : nil)
@@ -974,8 +974,8 @@ actor CodexStatusService {
                 if !summary.missingRateLimits {
                     if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
                     if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
-                    s.fiveHourResetText = formatCodexReset(summary.fiveHour.resetAt, windowMinutes: summary.fiveHour.windowMinutes)
-                    s.weekResetText = formatCodexReset(summary.weekly.resetAt, windowMinutes: summary.weekly.windowMinutes)
+                    s.fiveHourResetText = summary.fiveHour.resetAt.map { formatResetISO8601($0) } ?? ""
+                    s.weekResetText = summary.weekly.resetAt.map { formatResetISO8601($0) } ?? ""
                 }
                 lastFiveHourResetDate = summary.fiveHour.resetAt
                 s.usageLine = summary.missingRateLimits ? missingRateLimitsUsageLine : (summary.stale ? "Usage is stale (>3m)" : nil)
@@ -2165,15 +2165,6 @@ actor CodexStatusService {
         var text = String(decoding: data, as: UTF8.self)
         if !text.hasSuffix("\n") { if let lastNL = text.lastIndex(of: "\n") { text = String(text[..<lastNL]) } }
         return text.split(separator: "\n", omittingEmptySubsequences: true).map { String($0) }
-    }
-
-    private func formatCodexReset(_ date: Date?, windowMinutes: Int?) -> String {
-        guard let date else { return "" }
-        // 5-hour window → show time-only. Weekly → show date + time.
-        if let w = windowMinutes, w <= 360 { // treat <=6h as 5h style
-            return "resets \(AppDateFormatting.timeShort(date))"
-        }
-        return "resets \(AppDateFormatting.dateTimeShort(date))"
     }
 
     private func stripANSI(_ s: String) -> String {
