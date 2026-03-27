@@ -246,7 +246,9 @@ actor AnalyticsIndexer {
             codexInternalSessionID: session.codexInternalSessionID,
             isHousekeeping: session.isHousekeeping || (session.title == "No prompt" && (session.source == .codex || session.source == .claude)),
             messages: messages,
-            commands: commands
+            commands: commands,
+            parentSessionID: session.parentSessionID,
+            subagentType: session.subagentType
         )
         let searchText = SessionSearchTextBuilder.build(session: session)
         let toolIOText: String? = {

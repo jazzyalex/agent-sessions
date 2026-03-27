@@ -21,6 +21,11 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let lightweightTitle: String?
     public let codexInternalSessionIDHint: String?
 
+    // Subagent hierarchy
+    public let parentSessionID: String?   // Raw ID of parent session (UUID for Claude/Codex, ses_ID for OpenCode)
+    public let subagentType: String?      // e.g. "Explore", "review", "thread_spawn", "general"
+    public var isSubagent: Bool { parentSessionID != nil || subagentType != nil }
+
     // Runtime UI state (not persisted in session files)
     public var isFavorite: Bool = false
 
@@ -35,7 +40,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 eventCount: Int,
                 events: [SessionEvent],
                 isHousekeeping: Bool = false,
-                codexInternalSessionIDHint: String? = nil) {
+                codexInternalSessionIDHint: String? = nil,
+                parentSessionID: String? = nil,
+                subagentType: String? = nil) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -50,6 +57,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.lightweightTitle = nil
         self.codexInternalSessionIDHint = codexInternalSessionIDHint
         self.lightweightCommands = nil
+        self.parentSessionID = parentSessionID
+        self.subagentType = subagentType
         self.isFavorite = false
     }
 
@@ -68,7 +77,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 lightweightTitle: String?,
                 lightweightCommands: Int? = nil,
                 isHousekeeping: Bool = false,
-                codexInternalSessionIDHint: String? = nil) {
+                codexInternalSessionIDHint: String? = nil,
+                parentSessionID: String? = nil,
+                subagentType: String? = nil) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -83,6 +94,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.lightweightTitle = lightweightTitle
         self.codexInternalSessionIDHint = codexInternalSessionIDHint
         self.lightweightCommands = lightweightCommands
+        self.parentSessionID = parentSessionID
+        self.subagentType = subagentType
         self.isFavorite = false
     }
 
@@ -100,6 +113,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case lightweightTitle
         case lightweightCommands
         case codexInternalSessionIDHint
+        case parentSessionID
+        case subagentType
         // isFavorite intentionally excluded (runtime only)
         // isHousekeeping intentionally excluded (derived at parse/index time)
     }

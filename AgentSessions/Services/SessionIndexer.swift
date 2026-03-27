@@ -443,7 +443,9 @@ final class SessionIndexer: ObservableObject {
                             cwd: current.lightweightCwd ?? fullSession.cwd,
                             repoName: current.repoName,
                             lightweightTitle: current.lightweightTitle,
-                            lightweightCommands: current.lightweightCommands
+                            lightweightCommands: current.lightweightCommands,
+                            parentSessionID: fullSession.parentSessionID ?? current.parentSessionID,
+                            subagentType: fullSession.subagentType ?? current.subagentType
                         )
                         var updated = self.allSessions
                         updated[idx] = merged
@@ -780,7 +782,9 @@ final class SessionIndexer: ObservableObject {
                         repoName: nil,
                         lightweightTitle: session.lightweightTitle ?? existing.lightweightTitle,
                         lightweightCommands: session.lightweightCommands ?? existing.lightweightCommands,
-                        isHousekeeping: existing.isHousekeeping
+                        isHousekeeping: existing.isHousekeeping,
+                        parentSessionID: session.parentSessionID ?? existing.parentSessionID,
+                        subagentType: session.subagentType ?? existing.subagentType
                     )
                     mergedByPath[session.filePath] = merged
                 } else {
@@ -1111,7 +1115,9 @@ final class SessionIndexer: ObservableObject {
                 lightweightTitle: session.lightweightTitle,
                 lightweightCommands: session.lightweightCommands,
                 isHousekeeping: session.isHousekeeping,
-                codexInternalSessionIDHint: internalID
+                codexInternalSessionIDHint: internalID,
+                parentSessionID: session.parentSessionID,
+                subagentType: session.subagentType
             )
             var enriched = rebuilt
             enriched.isFavorite = session.isFavorite
@@ -1149,6 +1155,8 @@ final class SessionIndexer: ObservableObject {
         let reader = JSONLReader(url: url)
         var events: [SessionEvent] = []
         var modelSeen: String? = nil
+        var parentSessionID: String? = nil
+        var subagentType: String? = nil
         var idx = 0
         DBG("    📖 parseFileFull: Starting forEachLine...")
         do {
@@ -1158,6 +1166,33 @@ final class SessionIndexer: ObservableObject {
                 let safeLine = rawLine.utf8.count > 100_000 ? Self.sanitizeLargeLine(rawLine) : rawLine
                 let (event, maybeModel) = Self.parseLine(safeLine, eventID: self.eventID(for: url, index: idx))
                 if let m = maybeModel, modelSeen == nil { modelSeen = m }
+
+                // Extract subagent info and turn_context model from early lines
+                if idx <= 20, let data = safeLine.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let objType = obj["type"] as? String
+                    let payload = obj["payload"] as? [String: Any]
+
+                    if parentSessionID == nil, objType == "session_meta", let payload {
+                        if let source = payload["source"],
+                           let sourceDict = source as? [String: Any],
+                           let subagentInfo = sourceDict["subagent"] {
+                            if let subStr = subagentInfo as? String {
+                                subagentType = subStr
+                            } else if let subDict = subagentInfo as? [String: Any],
+                                      let threadSpawn = subDict["thread_spawn"] as? [String: Any] {
+                                parentSessionID = threadSpawn["parent_thread_id"] as? String
+                                subagentType = "thread_spawn"
+                            }
+                        }
+                    }
+
+                    if objType == "turn_context", let payload,
+                       let turnModel = payload["model"] as? String, !turnModel.isEmpty {
+                        modelSeen = turnModel
+                    }
+                }
+
                 events.append(event)
             }
         } catch {
@@ -1189,7 +1224,9 @@ final class SessionIndexer: ObservableObject {
                               eventCount: nonMetaCount,
                               events: events,
                               isHousekeeping: isHousekeeping,
-                              codexInternalSessionIDHint: internalSessionIDHint)
+                              codexInternalSessionIDHint: internalSessionIDHint,
+                              parentSessionID: parentSessionID,
+                              subagentType: subagentType)
 
         if size > 5_000_000 {  // Log full parse of files >5MB
             DBG("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
@@ -1277,6 +1314,8 @@ final class SessionIndexer: ObservableObject {
         var sampleCount = 0
         var sampleEvents: [SessionEvent] = []
         var cwd: String? = nil
+        var parentSessionID: String? = nil
+        var subagentType: String? = nil
 
         func ingest(_ raw: String) {
             let line = sanitizeCodexHugeFields(sanitizeImagePayload(raw))
@@ -1286,20 +1325,52 @@ final class SessionIndexer: ObservableObject {
                 if tmax == nil || ts > tmax! { tmax = ts }
             }
             if model == nil, let m = maybeModel, !m.isEmpty { model = m }
-            // Extract cwd from session_meta or environment_context
-            if cwd == nil {
-                if let text = ev.text, text.contains("<cwd>") {
-                    if let start = text.range(of: "<cwd>"),
-                       let end = text.range(of: "</cwd>", range: start.upperBound..<text.endIndex) {
-                        cwd = String(text[start.upperBound..<end.lowerBound])
-                    }
-                } else if let data = line.data(using: .utf8),
-                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    if let payload = obj["payload"] as? [String: Any], let cwdValue = payload["cwd"] as? String, !cwdValue.isEmpty {
-                        cwd = cwdValue
+            // Extract cwd, subagent info, and turn_context model from raw JSON
+            if let data = line.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let objType = obj["type"] as? String
+                let payload = obj["payload"] as? [String: Any]
+
+                // Extract cwd from session_meta or environment_context
+                if cwd == nil {
+                    if let text = ev.text, text.contains("<cwd>") {
+                        if let start = text.range(of: "<cwd>"),
+                           let end = text.range(of: "</cwd>", range: start.upperBound..<text.endIndex) {
+                            cwd = String(text[start.upperBound..<end.lowerBound])
+                        }
+                    } else if let payload {
+                        if let cwdValue = payload["cwd"] as? String, !cwdValue.isEmpty { cwd = cwdValue }
                     } else if let cwdValue = obj["cwd"] as? String, !cwdValue.isEmpty {
                         cwd = cwdValue
                     }
+                }
+
+                // Codex session_meta: detect subagent source
+                if parentSessionID == nil, objType == "session_meta", let payload {
+                    if let source = payload["source"] {
+                        if let sourceDict = source as? [String: Any],
+                           let subagentInfo = sourceDict["subagent"] {
+                            if let subStr = subagentInfo as? String {
+                                // e.g. "review" — no parent thread ID available
+                                subagentType = subStr
+                            } else if let subDict = subagentInfo as? [String: Any],
+                                      let threadSpawn = subDict["thread_spawn"] as? [String: Any] {
+                                parentSessionID = threadSpawn["parent_thread_id"] as? String
+                                subagentType = "thread_spawn"
+                            }
+                        }
+                    }
+                }
+
+                // Codex turn_context: extract actual LLM model
+                if objType == "turn_context", let payload,
+                   let turnModel = payload["model"] as? String, !turnModel.isEmpty {
+                    model = turnModel
+                }
+            } else if cwd == nil, let text = ev.text, text.contains("<cwd>") {
+                if let start = text.range(of: "<cwd>"),
+                   let end = text.range(of: "</cwd>", range: start.upperBound..<text.endIndex) {
+                    cwd = String(text[start.upperBound..<end.lowerBound])
                 }
             }
             sampleEvents.append(ev)
@@ -1331,7 +1402,9 @@ final class SessionIndexer: ObservableObject {
                                   eventCount: estEvents,
                                   events: sampleEvents,
                                   isHousekeeping: tempIsHousekeeping,
-                                  codexInternalSessionIDHint: internalSessionIDHint)
+                                  codexInternalSessionIDHint: internalSessionIDHint,
+                                  parentSessionID: parentSessionID,
+                                  subagentType: subagentType)
 
         // Extract title from sample events using existing logic
         let title = tempSession.codexPreviewTitle ?? tempSession.title
@@ -1350,7 +1423,9 @@ final class SessionIndexer: ObservableObject {
                               repoName: nil,  // Will be computed from cwd
                               lightweightTitle: title,
                               isHousekeeping: tempIsHousekeeping || title == "No prompt",
-                              codexInternalSessionIDHint: internalSessionIDHint)
+                              codexInternalSessionIDHint: internalSessionIDHint,
+                              parentSessionID: parentSessionID,
+                              subagentType: subagentType)
         return session
     }
 

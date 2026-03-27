@@ -63,6 +63,7 @@ enum PreferencesKey {
         static let showClaudeToolbarFilter = "UnifiedShowClaudeToolbarFilter"
         static let showGeminiToolbarFilter = "UnifiedShowGeminiToolbarFilter"
         static let showOpenCodeToolbarFilter = "UnifiedShowOpenCodeToolbarFilter"
+        static let showSubagentHierarchy = "UnifiedShowSubagentHierarchy"
     }
 
     enum MenuBar {

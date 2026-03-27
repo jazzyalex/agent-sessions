@@ -140,6 +140,7 @@ final class OpenCodeSessionParser {
         // Count messages + commands cheaply by scanning the corresponding message directory, if present.
         let (eventCount, modelID, commandCount) = lightweightMessageMetadata(for: obj.id, sessionURL: url)
 
+        let subagentType = Self.deriveSubagentTypeFromTitle( obj.title)
         return Session(
             id: obj.id,
             source: .opencode,
@@ -153,7 +154,9 @@ final class OpenCodeSessionParser {
             cwd: obj.directory,
             repoName: nil,
             lightweightTitle: obj.title,
-            lightweightCommands: commandCount > 0 ? commandCount : nil
+            lightweightCommands: commandCount > 0 ? commandCount : nil,
+            parentSessionID: obj.parentID,
+            subagentType: subagentType
         )
     }
 
@@ -172,6 +175,7 @@ final class OpenCodeSessionParser {
         let allEvents = warningEvents + events
 
         let nonMetaCount = allEvents.filter { $0.kind != .meta }.count
+        let subagentType = Self.deriveSubagentTypeFromTitle( obj.title)
         return Session(
             id: obj.id,
             source: .opencode,
@@ -185,8 +189,20 @@ final class OpenCodeSessionParser {
             cwd: obj.directory,
             repoName: nil,
             lightweightTitle: obj.title,
-            lightweightCommands: commandCount > 0 ? commandCount : nil
+            lightweightCommands: commandCount > 0 ? commandCount : nil,
+            parentSessionID: obj.parentID,
+            subagentType: subagentType
         )
+    }
+
+    /// Derive subagent type from OpenCode title pattern: "... (@<agent> subagent)"
+    static func deriveSubagentTypeFromTitle(_ title: String?) -> String? {
+        guard let title else { return nil }
+        let pattern = #"\(@(\w+) subagent\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+              let captureRange = Range(match.range(at: 1), in: title) else { return nil }
+        return String(title[captureRange])
     }
 
     // MARK: - Message loading helpers
