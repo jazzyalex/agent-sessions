@@ -140,6 +140,7 @@ final class OpenCodeSessionParser {
         // Count messages + commands cheaply by scanning the corresponding message directory, if present.
         let (eventCount, modelID, commandCount) = lightweightMessageMetadata(for: obj.id, sessionURL: url)
 
+        let subagentType = Self.deriveSubagentTypeFromTitle( obj.title)
         return Session(
             id: obj.id,
             source: .opencode,
@@ -153,7 +154,9 @@ final class OpenCodeSessionParser {
             cwd: obj.directory,
             repoName: nil,
             lightweightTitle: obj.title,
-            lightweightCommands: commandCount > 0 ? commandCount : nil
+            lightweightCommands: commandCount > 0 ? commandCount : nil,
+            parentSessionID: obj.parentID,
+            subagentType: subagentType
         )
     }
 
@@ -172,6 +175,7 @@ final class OpenCodeSessionParser {
         let allEvents = warningEvents + events
 
         let nonMetaCount = allEvents.filter { $0.kind != .meta }.count
+        let subagentType = Self.deriveSubagentTypeFromTitle( obj.title)
         return Session(
             id: obj.id,
             source: .opencode,
@@ -185,8 +189,19 @@ final class OpenCodeSessionParser {
             cwd: obj.directory,
             repoName: nil,
             lightweightTitle: obj.title,
-            lightweightCommands: commandCount > 0 ? commandCount : nil
+            lightweightCommands: commandCount > 0 ? commandCount : nil,
+            parentSessionID: obj.parentID,
+            subagentType: subagentType
         )
+    }
+
+    /// Derive subagent type from OpenCode title pattern: "... (@<agent> subagent)"
+    static func deriveSubagentTypeFromTitle(_ title: String?) -> String? {
+        guard let title, let range = title.range(of: #"\(@(\w+) subagent\)"#, options: .regularExpression) else {
+            return nil
+        }
+        let match = String(title[range])
+        return String(match.dropFirst(2).dropLast(10)) // Remove "(@" prefix and " subagent)" suffix
     }
 
     // MARK: - Message loading helpers

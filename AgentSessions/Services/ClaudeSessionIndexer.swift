@@ -321,7 +321,9 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                         lightweightTitle: session.lightweightTitle ?? existing.lightweightTitle,
                         lightweightCommands: session.lightweightCommands ?? existing.lightweightCommands,
                         isHousekeeping: existing.isHousekeeping,
-                        codexInternalSessionIDHint: session.codexInternalSessionIDHint ?? existing.codexInternalSessionIDHint
+                        codexInternalSessionIDHint: session.codexInternalSessionIDHint ?? existing.codexInternalSessionIDHint,
+                        parentSessionID: session.parentSessionID ?? existing.parentSessionID,
+                        subagentType: session.subagentType ?? existing.subagentType
                     )
                     mergedByPath[session.filePath] = merged
                 } else {
@@ -556,7 +558,9 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 repoName: nil,
                 lightweightTitle: newTitle,
                 lightweightCommands: current.lightweightCommands,
-                codexInternalSessionIDHint: current.codexInternalSessionIDHint
+                codexInternalSessionIDHint: current.codexInternalSessionIDHint,
+                parentSessionID: current.parentSessionID,
+                subagentType: current.subagentType
             )
 
             do {
@@ -721,7 +725,9 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                     repoName: current.repoName,
                     lightweightTitle: current.lightweightTitle ?? fullSession.lightweightTitle,
                     lightweightCommands: current.lightweightCommands,
-                    codexInternalSessionIDHint: fullSession.codexInternalSessionIDHint ?? current.codexInternalSessionIDHint
+                    codexInternalSessionIDHint: fullSession.codexInternalSessionIDHint ?? current.codexInternalSessionIDHint,
+                    parentSessionID: fullSession.parentSessionID ?? current.parentSessionID,
+                    subagentType: fullSession.subagentType ?? current.subagentType
                 )
                 self.allSessions[idx] = merged
 

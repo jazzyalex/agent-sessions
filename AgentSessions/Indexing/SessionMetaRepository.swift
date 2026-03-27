@@ -36,7 +36,9 @@ actor SessionMetaRepository {
                 repoName: r.repo,
                 lightweightTitle: r.title,
                 isHousekeeping: r.isHousekeeping || (r.title == "No prompt" && (source == .codex || source == .claude)),
-                codexInternalSessionIDHint: r.codexInternalSessionID
+                codexInternalSessionIDHint: r.codexInternalSessionID,
+                parentSessionID: r.parentSessionID,
+                subagentType: r.subagentType
             )
             // Augment with commands count from DB for lightweight filtering
             var enriched = session
@@ -53,7 +55,9 @@ actor SessionMetaRepository {
                                cwd: session.lightweightCwd,
                                repoName: r.repo,
                                lightweightTitle: session.lightweightTitle,
-                               codexInternalSessionIDHint: session.codexInternalSessionIDHint)
+                               codexInternalSessionIDHint: session.codexInternalSessionIDHint,
+                               parentSessionID: session.parentSessionID,
+                               subagentType: session.subagentType)
             // Reconstruct with lightweightCommands via Codable? Simpler: extend Session with helper? Keep minimal by using a factory below.
             out.append(Session(id: enriched.id,
                                source: enriched.source,
@@ -69,7 +73,9 @@ actor SessionMetaRepository {
                                lightweightTitle: enriched.lightweightTitle,
                                lightweightCommands: r.commands,
                                isHousekeeping: r.isHousekeeping || (r.title == "No prompt" && (source == .codex || source == .claude)),
-                               codexInternalSessionIDHint: enriched.codexInternalSessionIDHint))
+                               codexInternalSessionIDHint: enriched.codexInternalSessionIDHint,
+                               parentSessionID: enriched.parentSessionID,
+                               subagentType: enriched.subagentType))
         }
         return out
     }
