@@ -26,7 +26,7 @@ enum SubagentHierarchyBuilder {
     /// - Parameters:
     ///   - sessions: Pre-sorted flat session list (parents sorted by active sort).
     ///   - expandedParents: Set of session IDs whose children should be visible.
-    ///   - hierarchyEnabled: When false or during search, returns the input unchanged with depth=0.
+    ///   - hierarchyEnabled: When false, returns all sessions flat at depth 0 (no hierarchy nesting).
     static func build(
         sessions: [Session],
         expandedParents: Set<String>,
@@ -92,14 +92,13 @@ enum SubagentHierarchyBuilder {
         return Result(sessions: flatSessions, rowMeta: rowMeta)
     }
 
-    /// Returns a flat result with subagent sessions filtered out (depth 0 for top-level only).
+    /// Returns a flat result with all sessions at depth 0 (no hierarchy nesting).
     private static func flatResult(sessions: [Session]) -> Result {
-        let filtered = sessions.filter { !$0.isSubagent }
         var rowMeta: [String: SubagentRowMeta] = [:]
-        rowMeta.reserveCapacity(filtered.count)
-        for s in filtered {
+        rowMeta.reserveCapacity(sessions.count)
+        for s in sessions {
             rowMeta[s.id] = SubagentRowMeta(depth: 0, hasChildren: false)
         }
-        return Result(sessions: filtered, rowMeta: rowMeta)
+        return Result(sessions: sessions, rowMeta: rowMeta)
     }
 }
