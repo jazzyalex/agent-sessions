@@ -197,11 +197,12 @@ final class OpenCodeSessionParser {
 
     /// Derive subagent type from OpenCode title pattern: "... (@<agent> subagent)"
     static func deriveSubagentTypeFromTitle(_ title: String?) -> String? {
-        guard let title, let range = title.range(of: #"\(@(\w+) subagent\)"#, options: .regularExpression) else {
-            return nil
-        }
-        let match = String(title[range])
-        return String(match.dropFirst(2).dropLast(10)) // Remove "(@" prefix and " subagent)" suffix
+        guard let title else { return nil }
+        let pattern = #"\(@(\w+) subagent\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)),
+              let captureRange = Range(match.range(at: 1), in: title) else { return nil }
+        return String(title[captureRange])
     }
 
     // MARK: - Message loading helpers
