@@ -147,18 +147,6 @@ actor IndexDB {
         // One-time migration marker table for schema changes that require a full reindex.
         try exec(db, "CREATE TABLE IF NOT EXISTS schema_migrations (key TEXT PRIMARY KEY);")
 
-        // Force full reindex to populate parent_session_id and subagent_type for all sessions.
-        let migrationKey = "subagent_reindex_v1"
-        if !migrationApplied(db, key: migrationKey) {
-            try exec(db, "DELETE FROM files;")
-            try exec(db, "DELETE FROM session_meta;")
-            try exec(db, "DELETE FROM session_search;")
-            try exec(db, "DELETE FROM session_tool_io;")
-            try exec(db, "DELETE FROM session_days;")
-            try exec(db, "DELETE FROM rollups_daily;")
-            try exec(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES('\(migrationKey)');")
-        }
-
         // session_days keeps per-session contributions split by day
         try exec(db,
             """
@@ -305,6 +293,19 @@ actor IndexDB {
             )
         } catch {
             // Optional.
+        }
+
+        // Force full reindex to populate parent_session_id and subagent_type for all sessions.
+        // Runs after all CREATE TABLE statements so fresh databases don't hit "no such table".
+        let migrationKey = "subagent_reindex_v1"
+        if !migrationApplied(db, key: migrationKey) {
+            try exec(db, "DELETE FROM files;")
+            try exec(db, "DELETE FROM session_meta;")
+            try exec(db, "DELETE FROM session_search;")
+            try exec(db, "DELETE FROM session_tool_io;")
+            try exec(db, "DELETE FROM session_days;")
+            try exec(db, "DELETE FROM rollups_daily;")
+            try exec(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES('\(migrationKey)');")
         }
     }
 
