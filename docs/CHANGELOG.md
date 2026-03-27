@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.3.3.1] - 2026-03-26
+
+### Fixed
+- Codex: Reset countdown no longer exceeds the 5-hour window — reset times are now stored in ISO 8601 format, preventing a date-rollover bug that produced countdowns of up to 24 hours.
+
 ## [3.3.3] - 2026-03-26
 
 ### Added
