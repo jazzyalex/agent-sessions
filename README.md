@@ -44,9 +44,9 @@ Agent Sessions helps you search across large session histories, quickly find the
   <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI, Claude Code, and OpenCode sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
 
-## What's New in 3.3
+## What's New in 3.3.3.1
 
-**3.3.2** — Copilot & Gemini session resume support — right-click any active Copilot or Gemini session to copy the exact CLI resume command. Safe to skip if you don't use these agents.
+**3.3.3.1** — Fixes Codex reset countdown exceeding 5 hours due to a date-rollover bug. Patch release — safe to update immediately.
 
 **Highlights:** Claude multi-tier usage tracking (OAuth + Web API fallback), Copy Resume Command for all agents (Claude, Codex, OpenCode, Copilot, Gemini), and critical Codex usage tracking fix.
 
