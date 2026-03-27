@@ -228,7 +228,7 @@ struct UnifiedSessionsView: View {
     @State private var lastSelectedSource: SessionSource = .codex
 		@State private var sortOrder: [KeyPathComparator<Session>] = []
 		@State private var cachedRows: [Session] = []
-    @State private var expandedParents: Set<String> = []
+    @State private var collapsedParents: Set<String> = []
     @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
 	@State private var columnLayoutID: UUID = UUID()
 	@AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
@@ -467,10 +467,14 @@ struct UnifiedSessionsView: View {
                 refreshSelectionSourceFromCachedRows()
                 updateFocusedSessionIfNeeded(selectedSession)
             }
-            .onChange(of: showSubagentHierarchy) { _, _ in
+            .onChange(of: showSubagentHierarchy) { _, newValue in
+                if newValue {
+                    // Reset collapsed state so all parents start expanded
+                    collapsedParents.removeAll()
+                }
                 updateCachedRows()
             }
-            .onChange(of: expandedParents) { _, _ in
+            .onChange(of: collapsedParents) { _, _ in
                 updateCachedRows()
             }
 
@@ -694,12 +698,12 @@ struct UnifiedSessionsView: View {
                         session: s,
                         geminiIndexer: geminiIndexer,
                         rowMeta: hierarchyRowMeta[s.id],
-                        isExpanded: expandedParents.contains(s.id),
+                        isExpanded: !collapsedParents.contains(s.id),
                         onToggleExpand: { id in
-                            if expandedParents.contains(id) {
-                                expandedParents.remove(id)
+                            if collapsedParents.contains(id) {
+                                collapsedParents.remove(id)
                             } else {
-                                expandedParents.insert(id)
+                                collapsedParents.insert(id)
                             }
                         }
                     )
@@ -1771,7 +1775,7 @@ struct UnifiedSessionsView: View {
                 let searchActive = !query.isEmpty
                 let hierarchyResult = SubagentHierarchyBuilder.build(
                     sessions: nextRows,
-                    expandedParents: expandedParents,
+                    collapsedParents: collapsedParents,
                     hierarchyEnabled: showSubagentHierarchy && !searchActive
                 )
 	            cachedRows = hierarchyResult.sessions
@@ -1918,7 +1922,7 @@ struct UnifiedSessionsView: View {
         case .droid: label = "Droid"
         case .openclaw: label = "OpenClaw"
         }
-        let isSubagentRow = hierarchyRowMeta[session.id]?.depth ?? 0 > 0 || session.isSubagent
+        let isSubagentRow = (hierarchyRowMeta[session.id]?.depth ?? 0) > 0
         return HStack(spacing: 6) {
             if isSubagentRow {
                 Spacer().frame(width: 12)
@@ -2596,8 +2600,8 @@ private struct TranscriptHostView: View {
                     Spacer().frame(width: 20)
                 }
 
-                // Subagent type badge
-                if let meta = rowMeta, meta.depth > 0 || session.isSubagent {
+                // Subagent type badge (only when hierarchy nesting is active)
+                if let meta = rowMeta, meta.depth > 0 {
                     if let agentType = session.subagentType, !agentType.isEmpty {
                         Text(agentType)
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
