@@ -305,15 +305,7 @@ actor IndexDB {
             try exec(db, "DELETE FROM session_tool_io;")
             try exec(db, "DELETE FROM session_days;")
             try exec(db, "DELETE FROM rollups_daily;")
-            do {
-                let insertSQL = "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);"
-                var insertStmt: OpaquePointer?
-                if sqlite3_prepare_v2(db, insertSQL, -1, &insertStmt, nil) == SQLITE_OK {
-                    sqlite3_bind_text(insertStmt, 1, migrationKey, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-                    sqlite3_step(insertStmt)
-                }
-                sqlite3_finalize(insertStmt)
-            }
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", migrationKey)
         }
     }
 
@@ -324,7 +316,7 @@ actor IndexDB {
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK { return false }
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, key, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT)
         return sqlite3_step(stmt) == SQLITE_ROW
     }
 
@@ -355,6 +347,21 @@ actor IndexDB {
             let msg: String
             if let e = err { msg = String(cString: e); sqlite3_free(e) } else { msg = "exec failed" }
             throw DBError.execFailed(msg)
+        }
+    }
+
+    /// Execute a single-parameter text-bind statement, throwing on prepare or step failure.
+    private static func execBind(_ db: OpaquePointer?, _ sql: String, _ value: String) throws {
+        guard let db else { throw DBError.openFailed("db closed") }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, value, -1, SQLITE_TRANSIENT)
+        let rc = sqlite3_step(stmt)
+        guard rc == SQLITE_DONE || rc == SQLITE_ROW else {
+            throw DBError.execFailed(String(cString: sqlite3_errmsg(db)))
         }
     }
 
