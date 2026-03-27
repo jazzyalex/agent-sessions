@@ -44,7 +44,7 @@ def _parse_changelog_sections(changelog: str) -> Dict[str, str]:
     sections: Dict[str, List[str]] = {}
     current_ver: Optional[str] = None
 
-    header_re = re.compile(r"^##\s+\[([0-9]+(?:\.[0-9]+){1,2})\](?:\s+-\s+.*)?$")
+    header_re = re.compile(r"^##\s+\[([0-9]+(?:\.[0-9]+){1,3})\](?:\s+-\s+.*)?$")
 
     for line in lines:
         m = header_re.match(line.strip())
