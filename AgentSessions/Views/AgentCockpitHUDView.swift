@@ -1804,19 +1804,47 @@ struct AgentCockpitHUDView: View {
             }
         }
 
-        // Codex/OpenCode: count open subagent file handles from lsof discovery.
-        // Each presence carries all JSONL paths open by its process. Paths other
-        // than the parent's own log are subagent sessions. The handle is open iff
-        // the subagent is still running — Codex closes the FD when it finishes.
+        // Codex/OpenCode: count actively-written subagent files from lsof discovery.
+        // Each presence carries all JSONL paths open by its process. Codex keeps
+        // ALL file handles open for the process lifetime (even finished subagents),
+        // so we check mtime to distinguish active from stale.
+        //
+        // Instead of trusting presence.sessionLogPath to identify the parent,
+        // resolve each open path through lookupIndexes and identify the parent as
+        // the one with parentSessionID == nil. This avoids miscounting when lsof
+        // picks a subagent file as the "preferred" log.
+        let fm = FileManager.default
         for presence in presences {
             guard presence.openSessionLogPaths.count > 1 else { continue }
-            guard let logPath = presence.sessionLogPath else { continue }
-            let subagentCount = presence.openSessionLogPaths.filter { $0 != logPath }.count
-            guard subagentCount > 0 else { continue }
-            let logNorm = CodexActiveSessionsModel.normalizePath(logPath)
-            let resolved = lookupIndexes.byLogPath[CodexActiveSessionsModel.logLookupKey(source: presence.source, normalizedPath: logNorm)]
-            if let sessionID = resolved?.id {
-                activeSubagentsBySessionID[sessionID] = max(activeSubagentsBySessionID[sessionID] ?? 0, subagentCount)
+            // Find the parent session among open paths: the one without a parentSessionID.
+            var parentSessionID: String?
+            var parentPath: String?
+            for path in presence.openSessionLogPaths {
+                let norm = CodexActiveSessionsModel.normalizePath(path)
+                let key = CodexActiveSessionsModel.logLookupKey(source: presence.source, normalizedPath: norm)
+                if let session = lookupIndexes.byLogPath[key], session.parentSessionID == nil {
+                    parentSessionID = session.id
+                    parentPath = path
+                    break
+                }
+            }
+            // Fallback: use presence.sessionLogPath if no non-subagent session found.
+            if parentSessionID == nil, let logPath = presence.sessionLogPath {
+                let norm = CodexActiveSessionsModel.normalizePath(logPath)
+                let key = CodexActiveSessionsModel.logLookupKey(source: presence.source, normalizedPath: norm)
+                parentSessionID = lookupIndexes.byLogPath[key]?.id
+                parentPath = logPath
+            }
+            guard let parentSessionID, let parentPath else { continue }
+            // Count non-parent paths with recent mtime as active subagents.
+            var activeCount = 0
+            for path in presence.openSessionLogPaths {
+                guard path != parentPath else { continue }
+                let mtime = (try? fm.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
+                if mtime > subagentRecencyCutoff { activeCount += 1 }
+            }
+            if activeCount > 0 {
+                activeSubagentsBySessionID[parentSessionID] = max(activeSubagentsBySessionID[parentSessionID] ?? 0, activeCount)
             }
         }
 

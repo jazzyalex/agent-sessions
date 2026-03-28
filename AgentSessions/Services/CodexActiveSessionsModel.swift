@@ -3222,6 +3222,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         var tty: String?
         var sessionID: String?
         var sessionLogPath: String?
+        var sessionLogFD: Int = Int.max       // Numeric FD of sessionLogPath (for lowest-FD selection)
         var openSessionLogPaths: [String] = []  // All JSONL files open by this PID
         var termProgram: String?
         var itermSessionId: String?
@@ -3563,12 +3564,20 @@ final class CodexActiveSessionsModel: ObservableObject {
                     continue
                 }
 
-                // Session log path: prefer Codex rollout JSONL under configured sessions roots.
+                // Session log path: pick the lowest numeric FD among matching session logs.
+                // The parent session's JSONL is typically opened first (lowest FD), while
+                // subagent files get higher FDs. This makes selection deterministic.
                 if matchesSessionLogPath(name, source: source, sessionsRoots: sessionsRoots) {
-                    // Prefer a writable fd if present (e.g., 26w).
-                    let isWrite = (currentFD?.contains("w") ?? false)
-                    info.openSessionLogPaths.append(name)
-                    if info.sessionLogPath == nil || isWrite {
+                    if !info.openSessionLogPaths.contains(name) {
+                        info.openSessionLogPaths.append(name)
+                    }
+                    let fdNum: Int = {
+                        guard let fd = currentFD else { return Int.max }
+                        let digits = fd.prefix { $0.isNumber }
+                        return Int(digits) ?? Int.max
+                    }()
+                    if fdNum < info.sessionLogFD {
+                        info.sessionLogFD = fdNum
                         info.sessionLogPath = name
                         info.sessionID = extractSessionID(fromLogPath: name, source: source)
                     }
