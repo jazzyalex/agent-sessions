@@ -1804,21 +1804,19 @@ struct AgentCockpitHUDView: View {
             }
         }
 
-        // Codex: count recently-modified subagent sessions from allSessions.
-        do {
-            // Build parent key → session.id mapping (same as SubagentHierarchyBuilder).
-            var parentKeyToID: [String: String] = [:]
-            for s in allSessions where s.parentSessionID == nil && s.source == .codex {
-                if let hint = s.codexInternalSessionIDHint, !hint.isEmpty {
-                    parentKeyToID[hint] = s.id
-                }
-                parentKeyToID[s.id] = s.id
-            }
-            for s in allSessions where s.source == .codex && s.parentSessionID != nil {
-                guard s.modifiedAt > subagentRecencyCutoff else { continue }
-                guard let rawKey = s.parentSessionID else { continue }
-                guard let resolvedID = parentKeyToID[rawKey], resolvedID != s.id else { continue }
-                activeSubagentsBySessionID[resolvedID, default: 0] += 1
+        // Codex/OpenCode: count open subagent file handles from lsof discovery.
+        // Each presence carries all JSONL paths open by its process. Paths other
+        // than the parent's own log are subagent sessions. The handle is open iff
+        // the subagent is still running — Codex closes the FD when it finishes.
+        for presence in presences {
+            guard presence.openSessionLogPaths.count > 1 else { continue }
+            guard let logPath = presence.sessionLogPath else { continue }
+            let subagentCount = presence.openSessionLogPaths.filter { $0 != logPath }.count
+            guard subagentCount > 0 else { continue }
+            let logNorm = CodexActiveSessionsModel.normalizePath(logPath)
+            let resolved = lookupIndexes.byLogPath[CodexActiveSessionsModel.logLookupKey(source: presence.source, normalizedPath: logNorm)]
+            if let sessionID = resolved?.id {
+                activeSubagentsBySessionID[sessionID] = max(activeSubagentsBySessionID[sessionID] ?? 0, subagentCount)
             }
         }
 

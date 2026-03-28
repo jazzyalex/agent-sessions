@@ -48,6 +48,8 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
 
     // Local-only metadata (not part of the on-disk schema).
     var sourceFilePath: String? = nil
+    /// All JSONL log paths open by this process (parent + subagents).
+    var openSessionLogPaths: [String] = []
 
     var itermSessionGuid: String? {
         CodexActiveSessionsModel.itermSessionGuid(from: terminal?.itermSessionId)
@@ -918,6 +920,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                 }
                 presence.pid = info.pid
                 presence.tty = Self.normalizedTTY(info.tty)
+                presence.openSessionLogPaths = info.openSessionLogPaths
                 presence.lastSeenAt = now
                 var terminal = CodexActivePresence.Terminal()
                 terminal.termProgram = info.termProgram
@@ -3219,6 +3222,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         var tty: String?
         var sessionID: String?
         var sessionLogPath: String?
+        var openSessionLogPaths: [String] = []  // All JSONL files open by this PID
         var termProgram: String?
         var itermSessionId: String?
     }
@@ -3563,6 +3567,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                 if matchesSessionLogPath(name, source: source, sessionsRoots: sessionsRoots) {
                     // Prefer a writable fd if present (e.g., 26w).
                     let isWrite = (currentFD?.contains("w") ?? false)
+                    info.openSessionLogPaths.append(name)
                     if info.sessionLogPath == nil || isWrite {
                         info.sessionLogPath = name
                         info.sessionID = extractSessionID(fromLogPath: name, source: source)
