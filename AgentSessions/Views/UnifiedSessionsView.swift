@@ -1189,7 +1189,8 @@ struct UnifiedSessionsView: View {
                         .foregroundStyle(showSubagentHierarchy ? Color.accentColor : .secondary)
                 }
                 .buttonStyle(.plain)
-                .help(showSubagentHierarchy ? "Flat session list" : "Show subagent hierarchy")
+                .help(showSubagentHierarchy ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
+                .keyboardShortcut("h", modifiers: [.command, .shift])
 
                 if codexAgentEnabled {
                     AgentTabToggle(title: "Codex", color: Color.agentCodex, isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
@@ -2595,6 +2596,9 @@ private struct TranscriptHostView: View {
                     .buttonStyle(.plain)
                     .frame(width: 16)
                     .foregroundStyle(.secondary)
+                    Text("(\(meta.childCount))")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 } else if let meta = rowMeta, meta.depth > 0 {
                     // Indent for subagent children
                     Spacer().frame(width: 20)

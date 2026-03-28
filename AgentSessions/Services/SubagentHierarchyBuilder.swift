@@ -4,6 +4,7 @@ import Foundation
 struct SubagentRowMeta {
     let depth: Int        // 0 = top-level, 1 = subagent child
     let hasChildren: Bool // true if this session has resolved subagent children
+    let childCount: Int   // number of resolved subagent children (0 for non-parents)
 }
 
 /// Builds a parent-first flattened session list from a flat `[Session]` array,
@@ -94,12 +95,12 @@ enum SubagentHierarchyBuilder {
             let hasChildren = !children.isEmpty
 
             flatSessions.append(s)
-            rowMeta[s.id] = SubagentRowMeta(depth: 0, hasChildren: hasChildren)
+            rowMeta[s.id] = SubagentRowMeta(depth: 0, hasChildren: hasChildren, childCount: children.count)
 
             if hasChildren, !collapsedParents.contains(s.id) {
                 for child in children {
                     flatSessions.append(child)
-                    rowMeta[child.id] = SubagentRowMeta(depth: 1, hasChildren: false)
+                    rowMeta[child.id] = SubagentRowMeta(depth: 1, hasChildren: false, childCount: 0)
                 }
             }
         }
@@ -112,7 +113,7 @@ enum SubagentHierarchyBuilder {
         var rowMeta: [String: SubagentRowMeta] = [:]
         rowMeta.reserveCapacity(sessions.count)
         for s in sessions {
-            rowMeta[s.id] = SubagentRowMeta(depth: 0, hasChildren: false)
+            rowMeta[s.id] = SubagentRowMeta(depth: 0, hasChildren: false, childCount: 0)
         }
         return Result(sessions: sessions, rowMeta: rowMeta)
     }
