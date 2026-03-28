@@ -73,6 +73,7 @@ struct HUDRow: Identifiable, Equatable {
     let lastActivityAt: Date?
     let lastActivityTooltip: String?
     let idleReason: HUDIdleReason?
+    let activeSubagentCount: Int
 
     init(id: String,
          source: SessionSource,
@@ -95,7 +96,8 @@ struct HUDRow: Identifiable, Equatable {
          workingDirectory: String? = nil,
          lastActivityAt: Date? = nil,
          lastActivityTooltip: String? = nil,
-         idleReason: HUDIdleReason? = nil) {
+         idleReason: HUDIdleReason? = nil,
+         activeSubagentCount: Int = 0) {
         self.id = id
         self.source = source
         self.agentType = agentType
@@ -118,6 +120,7 @@ struct HUDRow: Identifiable, Equatable {
         self.lastActivityAt = lastActivityAt
         self.lastActivityTooltip = lastActivityTooltip
         self.idleReason = idleReason
+        self.activeSubagentCount = activeSubagentCount
     }
 
     static func == (lhs: HUDRow, rhs: HUDRow) -> Bool {
@@ -143,6 +146,7 @@ struct HUDRow: Identifiable, Equatable {
             && lhs.elapsed == rhs.elapsed
             && lhs.lastActivityTooltip == rhs.lastActivityTooltip
             && lhs.idleReason == rhs.idleReason
+            && lhs.activeSubagentCount == rhs.activeSubagentCount
     }
 }
 
@@ -1760,6 +1764,64 @@ struct AgentCockpitHUDView: View {
             workspaceSessionPool[key]?.sort { $0.modifiedAt > $1.modifiedAt }
         }
 
+        // Pre-pass: count currently-active subagent files per parent session.
+        // A subagent is "active" if its file was modified within the last 60 seconds.
+        //
+        // Claude:  subagent files at <parentUUID>/subagents/agent-*.jsonl
+        // Codex:   subagent sessions are separate files with parentSessionID set,
+        //          matched via codexInternalSessionIDHint / file path UUID.
+        var activeSubagentsBySessionID: [String: Int] = [:]
+        let subagentRecencyCutoff = now.addingTimeInterval(-30)
+
+        // Claude: scan subagents/ directory for each active Claude presence.
+        for presence in presences where presence.source == .claude {
+            guard let logPath = presence.sessionLogPath else { continue }
+            let logURL = URL(fileURLWithPath: logPath)
+            let parentDir = logURL.deletingLastPathComponent()
+            let subagentsDir = parentDir.appendingPathComponent(
+                logURL.deletingPathExtension().lastPathComponent
+            ).appendingPathComponent("subagents")
+            guard FileManager.default.fileExists(atPath: subagentsDir.path) else { continue }
+            guard let contents = try? FileManager.default.contentsOfDirectory(
+                at: subagentsDir,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: .skipsHiddenFiles
+            ) else { continue }
+            var activeCount = 0
+            for file in contents where file.pathExtension == "jsonl" {
+                if let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                   mtime > subagentRecencyCutoff {
+                    activeCount += 1
+                }
+            }
+            if activeCount > 0 {
+                // Resolve the presence to a session ID for the lookup key.
+                let logNorm = CodexActiveSessionsModel.normalizePath(logPath)
+                let resolved = lookupIndexes.byLogPath[CodexActiveSessionsModel.logLookupKey(source: .claude, normalizedPath: logNorm)]
+                if let sessionID = resolved?.id {
+                    activeSubagentsBySessionID[sessionID] = activeCount
+                }
+            }
+        }
+
+        // Codex: count recently-modified subagent sessions from allSessions.
+        do {
+            // Build parent key → session.id mapping (same as SubagentHierarchyBuilder).
+            var parentKeyToID: [String: String] = [:]
+            for s in allSessions where s.parentSessionID == nil && s.source == .codex {
+                if let hint = s.codexInternalSessionIDHint, !hint.isEmpty {
+                    parentKeyToID[hint] = s.id
+                }
+                parentKeyToID[s.id] = s.id
+            }
+            for s in allSessions where s.source == .codex && s.parentSessionID != nil {
+                guard s.modifiedAt > subagentRecencyCutoff else { continue }
+                guard let rawKey = s.parentSessionID else { continue }
+                guard let resolvedID = parentKeyToID[rawKey], resolvedID != s.id else { continue }
+                activeSubagentsBySessionID[resolvedID, default: 0] += 1
+            }
+        }
+
         var claimedSessionIDs: Set<String> = []
         var mappedRows: [LegacyMappedRow] = []
         mappedRows.reserveCapacity(presences.count)
@@ -1897,7 +1959,8 @@ struct AgentCockpitHUDView: View {
                 workingDirectory: row.workingDirectory,
                 lastActivityAt: row.lastActivityAt,
                 lastActivityTooltip: activityTooltip,
-                idleReason: row.idleReason
+                idleReason: row.idleReason,
+                activeSubagentCount: row.resolvedSessionID.flatMap { activeSubagentsBySessionID[$0] } ?? 0
             )
         }
 

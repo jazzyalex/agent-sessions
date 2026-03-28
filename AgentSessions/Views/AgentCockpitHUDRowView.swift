@@ -197,10 +197,17 @@ struct AgentCockpitHUDRowView: View {
     }
 
     private var agentBadge: some View {
-        Text(row.agentType.label)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundStyle(badgeTextColor)
-            .lineLimit(1)
+        HStack(spacing: 2) {
+            Text(row.agentType.label)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(badgeTextColor)
+                .lineLimit(1)
+            if row.activeSubagentCount > 0 {
+                Text("(\(row.activeSubagentCount))")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var badgeTextColor: Color {
