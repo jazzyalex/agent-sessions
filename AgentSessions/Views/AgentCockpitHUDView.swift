@@ -308,6 +308,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     private var lastShowProbeInHUD: Bool = UserDefaults.standard.bool(forKey: PreferencesKey.Cockpit.showProbeSessionsInHUD)
     private var cancellables: Set<AnyCancellable> = []
     private var activeCancellable: AnyCancellable?
+    private var subagentBadgeCancellable: AnyCancellable?
     private var rebuildScheduled: Bool = false
 #if DEBUG
     private struct DebugRebuildState {
@@ -399,6 +400,9 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
             self.presences = presences
             scheduleRebuild()
         }
+        subagentBadgeCancellable = activeCodex.$subagentBadgeVersion.sink { [weak self] _ in
+            self?.scheduleRebuild()
+        }
         scheduleRebuild()
     }
 
@@ -435,11 +439,17 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         guard let activeCodex else { return }
         let now = Date()
         let showProbes = UserDefaults.standard.bool(forKey: PreferencesKey.Cockpit.showProbeSessionsInHUD)
+        let activeSubagentCounts = CodexActiveSessionsModel.activeSubagentCounts(
+            presences: presences,
+            sessionsByLogPath: lookupIndexes.byLogPath,
+            now: now
+        )
         let nextSnapshot = AgentCockpitHUDView.makeRowsSnapshot(
             codexSessions: codexSessions,
             claudeSessions: claudeSessions,
             opencodeSessions: opencodeSessions,
             presences: presences,
+            activeSubagentCounts: activeSubagentCounts,
             activeCodex: activeCodex,
             isCompact: isCompact,
             lookupIndexes: lookupIndexes,
@@ -1723,6 +1733,7 @@ struct AgentCockpitHUDView: View {
                                              claudeSessions: [Session],
                                              opencodeSessions: [Session],
                                              presences: [CodexActivePresence],
+                                             activeSubagentCounts: [String: Int],
                                              activeCodex: CodexActiveSessionsModel,
                                              isCompact: Bool,
                                              lookupIndexes: SessionLookupIndexes,
@@ -1762,90 +1773,6 @@ struct AgentCockpitHUDView: View {
         }
         for key in workspaceSessionPool.keys {
             workspaceSessionPool[key]?.sort { $0.modifiedAt > $1.modifiedAt }
-        }
-
-        // Pre-pass: count currently-active subagent files per parent session.
-        // A subagent is "active" if its file was modified within the last 60 seconds.
-        //
-        // Claude:  subagent files at <parentUUID>/subagents/agent-*.jsonl
-        // Codex:   subagent sessions are separate files with parentSessionID set,
-        //          matched via codexInternalSessionIDHint / file path UUID.
-        var activeSubagentsBySessionID: [String: Int] = [:]
-        let subagentRecencyCutoff = now.addingTimeInterval(-30)
-
-        // Claude: scan subagents/ directory for each active Claude presence.
-        for presence in presences where presence.source == .claude {
-            guard let logPath = presence.sessionLogPath else { continue }
-            let logURL = URL(fileURLWithPath: logPath)
-            let parentDir = logURL.deletingLastPathComponent()
-            let subagentsDir = parentDir.appendingPathComponent(
-                logURL.deletingPathExtension().lastPathComponent
-            ).appendingPathComponent("subagents")
-            guard FileManager.default.fileExists(atPath: subagentsDir.path) else { continue }
-            guard let contents = try? FileManager.default.contentsOfDirectory(
-                at: subagentsDir,
-                includingPropertiesForKeys: [.contentModificationDateKey],
-                options: .skipsHiddenFiles
-            ) else { continue }
-            var activeCount = 0
-            for file in contents where file.pathExtension == "jsonl" {
-                if let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
-                   mtime > subagentRecencyCutoff {
-                    activeCount += 1
-                }
-            }
-            if activeCount > 0 {
-                // Resolve the presence to a session ID for the lookup key.
-                let logNorm = CodexActiveSessionsModel.normalizePath(logPath)
-                let resolved = lookupIndexes.byLogPath[CodexActiveSessionsModel.logLookupKey(source: .claude, normalizedPath: logNorm)]
-                if let sessionID = resolved?.id {
-                    activeSubagentsBySessionID[sessionID] = activeCount
-                }
-            }
-        }
-
-        // Codex/OpenCode: count actively-written subagent files from lsof discovery.
-        // Each presence carries all JSONL paths open by its process. Codex keeps
-        // ALL file handles open for the process lifetime (even finished subagents),
-        // so we check mtime to distinguish active from stale.
-        //
-        // Instead of trusting presence.sessionLogPath to identify the parent,
-        // resolve each open path through lookupIndexes and identify the parent as
-        // the one with parentSessionID == nil. This avoids miscounting when lsof
-        // picks a subagent file as the "preferred" log.
-        let fm = FileManager.default
-        for presence in presences {
-            guard presence.openSessionLogPaths.count > 1 else { continue }
-            // Find the parent session among open paths: the one without a parentSessionID.
-            var parentSessionID: String?
-            var parentPath: String?
-            for path in presence.openSessionLogPaths {
-                let norm = CodexActiveSessionsModel.normalizePath(path)
-                let key = CodexActiveSessionsModel.logLookupKey(source: presence.source, normalizedPath: norm)
-                if let session = lookupIndexes.byLogPath[key], session.parentSessionID == nil {
-                    parentSessionID = session.id
-                    parentPath = path
-                    break
-                }
-            }
-            // Fallback: use presence.sessionLogPath if no non-subagent session found.
-            if parentSessionID == nil, let logPath = presence.sessionLogPath {
-                let norm = CodexActiveSessionsModel.normalizePath(logPath)
-                let key = CodexActiveSessionsModel.logLookupKey(source: presence.source, normalizedPath: norm)
-                parentSessionID = lookupIndexes.byLogPath[key]?.id
-                parentPath = logPath
-            }
-            guard let parentSessionID, let parentPath else { continue }
-            // Count non-parent paths with recent mtime as active subagents.
-            var activeCount = 0
-            for path in presence.openSessionLogPaths {
-                guard path != parentPath else { continue }
-                let mtime = (try? fm.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
-                if mtime > subagentRecencyCutoff { activeCount += 1 }
-            }
-            if activeCount > 0 {
-                activeSubagentsBySessionID[parentSessionID] = max(activeSubagentsBySessionID[parentSessionID] ?? 0, activeCount)
-            }
         }
 
         var claimedSessionIDs: Set<String> = []
@@ -1986,7 +1913,9 @@ struct AgentCockpitHUDView: View {
                 lastActivityAt: row.lastActivityAt,
                 lastActivityTooltip: activityTooltip,
                 idleReason: row.idleReason,
-                activeSubagentCount: row.resolvedSessionID.flatMap { activeSubagentsBySessionID[$0] } ?? 0
+                activeSubagentCount: row.resolvedSessionID.flatMap { activeSubagentCounts[$0] }
+                    ?? row.sessionID.flatMap { activeSubagentCounts[$0] }
+                    ?? 0
             )
         }
 
