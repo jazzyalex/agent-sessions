@@ -945,6 +945,8 @@ actor CodexStatusService {
         }
         guard let sourceFile else { return }
 
+        _ = await refreshPreferredLiveLimits(visibleFastPath: false)
+
         // Only parse when the file changes; otherwise rely on the cached snapshot.
         guard let mtime = fileModificationDate(sourceFile) else { return }
         if let lastAppliedSourceFileMTime,
@@ -970,8 +972,6 @@ actor CodexStatusService {
         } else {
             lastParseWasStaleOrFailed = true
         }
-
-        _ = await refreshPreferredLiveLimits(visibleFastPath: false)
 
         // Run probe in menu-background mode too (e.g. cockpit pinned, app inactive).
         if !FeatureFlags.disableCodexProbes {
@@ -1013,18 +1013,20 @@ actor CodexStatusService {
     /// and notifies the UI. When `requirePositivePercent` is true (tmux probe path),
     /// 0% values are treated as "no data" and skipped.
     private func mergeRateLimitSnapshot(_ source: CodexUsageSnapshot, into dest: inout CodexUsageSnapshot, requirePositivePercent: Bool = false) {
-        if source.hasFiveHourRateLimit && (!requirePositivePercent || source.fiveHourRemainingPercent > 0) {
+        let shouldMergeFiveHour = source.hasFiveHourRateLimit && (!requirePositivePercent || source.fiveHourRemainingPercent > 0)
+        if shouldMergeFiveHour {
             dest.fiveHourRemainingPercent = clampPercent(source.fiveHourRemainingPercent)
         }
-        if source.hasFiveHourRateLimit {
+        if shouldMergeFiveHour {
             dest.hasFiveHourRateLimit = true
             if !source.fiveHourResetText.isEmpty { dest.fiveHourResetText = source.fiveHourResetText }
             dest.fiveHourLimitsSource = source.fiveHourLimitsSource ?? source.limitsSource
         }
-        if source.hasWeekRateLimit && (!requirePositivePercent || source.weekRemainingPercent > 0) {
+        let shouldMergeWeek = source.hasWeekRateLimit && (!requirePositivePercent || source.weekRemainingPercent > 0)
+        if shouldMergeWeek {
             dest.weekRemainingPercent = clampPercent(source.weekRemainingPercent)
         }
-        if source.hasWeekRateLimit {
+        if shouldMergeWeek {
             dest.hasWeekRateLimit = true
             if !source.weekResetText.isEmpty { dest.weekResetText = source.weekResetText }
             dest.weekLimitsSource = source.weekLimitsSource ?? source.limitsSource
