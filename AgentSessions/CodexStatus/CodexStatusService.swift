@@ -73,9 +73,11 @@ struct CodexUsageSnapshot: Equatable {
     var fiveHourRemainingPercent: Int = 0
     var fiveHourResetText: String = ""
     var hasFiveHourRateLimit: Bool = false
+    var fiveHourLimitsSource: CodexLimitsSource? = nil
     var weekRemainingPercent: Int = 0
     var weekResetText: String = ""
     var hasWeekRateLimit: Bool = false
+    var weekLimitsSource: CodexLimitsSource? = nil
     var limitsSource: CodexLimitsSource? = nil
     var usageLine: String? = nil
     var accountLine: String? = nil
@@ -459,6 +461,24 @@ actor CodexStatusService {
 
     func parseTokenCountTailForTesting(url: URL) -> RateLimitSummary? {
         parseTokenCountTail(url: url)
+    }
+
+    func parseStatusJSONForTesting(_ json: String) -> CodexUsageSnapshot? {
+        parseStatusJSON(json)
+    }
+
+    func setSnapshotForTesting(_ snapshot: CodexUsageSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    func mergeRateLimitSnapshotForTesting(_ source: CodexUsageSnapshot, requirePositivePercent: Bool = false) -> CodexUsageSnapshot {
+        var merged = snapshot
+        mergeRateLimitSnapshot(source, into: &merged, requirePositivePercent: requirePositivePercent)
+        return self.snapshot
+    }
+
+    var hasAuthoritativeLimitsSnapshotForTesting: Bool {
+        hasAuthoritativeLimitsSnapshot
     }
 #endif
 
@@ -869,8 +889,8 @@ actor CodexStatusService {
             }
         }
 
-        if mode == .active || userInitiated {
-            _ = await refreshPreferredLiveLimits(visibleFastPath: true)
+        if mode == .active || mode == .menuBackground || userInitiated {
+            _ = await refreshPreferredLiveLimits(visibleFastPath: mode == .active || userInitiated)
         }
 
         // Optional: run a one-shot tmux /status probe only when stale (manual or auto)
@@ -951,6 +971,8 @@ actor CodexStatusService {
             lastParseWasStaleOrFailed = true
         }
 
+        _ = await refreshPreferredLiveLimits(visibleFastPath: false)
+
         // Run probe in menu-background mode too (e.g. cockpit pinned, app inactive).
         if !FeatureFlags.disableCodexProbes {
             await maybeProbeStatusViaTMUX(userInitiated: false)
@@ -960,12 +982,8 @@ actor CodexStatusService {
     // MARK: - Alternate rate-limit sources (OAuth API → CLI RPC)
 
     private var hasAuthoritativeLimitsSnapshot: Bool {
-        switch snapshot.limitsSource {
-        case .oauth?, .cliRPC?, .statusProbe?:
-            return true
-        case .jsonlFallback?, nil:
-            return false
-        }
+        isAuthoritativeLimitsSource(snapshot.fiveHourLimitsSource) &&
+        isAuthoritativeLimitsSource(snapshot.weekLimitsSource)
     }
 
     /// Primary chain for authoritative limits. JSONL is deliberately excluded here and
@@ -1001,6 +1019,7 @@ actor CodexStatusService {
         if source.hasFiveHourRateLimit {
             dest.hasFiveHourRateLimit = true
             if !source.fiveHourResetText.isEmpty { dest.fiveHourResetText = source.fiveHourResetText }
+            dest.fiveHourLimitsSource = source.fiveHourLimitsSource ?? source.limitsSource
         }
         if source.hasWeekRateLimit && (!requirePositivePercent || source.weekRemainingPercent > 0) {
             dest.weekRemainingPercent = clampPercent(source.weekRemainingPercent)
@@ -1008,8 +1027,9 @@ actor CodexStatusService {
         if source.hasWeekRateLimit {
             dest.hasWeekRateLimit = true
             if !source.weekResetText.isEmpty { dest.weekResetText = source.weekResetText }
+            dest.weekLimitsSource = source.weekLimitsSource ?? source.limitsSource
         }
-        dest.limitsSource = source.limitsSource
+        dest.limitsSource = aggregateLimitsSource(for: dest)
         dest.usageLine = nil  // Fresh data from probe/API; clear any stale marker
         dest.eventTimestamp = Date()
         snapshot = dest
@@ -1020,20 +1040,24 @@ actor CodexStatusService {
         if let p = summary.fiveHour.remainingPercent {
             s.fiveHourRemainingPercent = clampPercent(p)
             s.hasFiveHourRateLimit = true
+            s.fiveHourLimitsSource = .jsonlFallback
         }
         if let resetAt = summary.fiveHour.resetAt {
             s.fiveHourResetText = formatResetISO8601(resetAt)
             s.hasFiveHourRateLimit = true
+            s.fiveHourLimitsSource = .jsonlFallback
         }
         if let p = summary.weekly.remainingPercent {
             s.weekRemainingPercent = clampPercent(p)
             s.hasWeekRateLimit = true
+            s.weekLimitsSource = .jsonlFallback
         }
         if let resetAt = summary.weekly.resetAt {
             s.weekResetText = formatResetISO8601(resetAt)
             s.hasWeekRateLimit = true
+            s.weekLimitsSource = .jsonlFallback
         }
-        s.limitsSource = .jsonlFallback
+        s.limitsSource = aggregateLimitsSource(for: s)
         s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
         s.eventTimestamp = summary.eventTimestamp
         lastFiveHourResetDate = summary.fiveHour.resetAt
@@ -1042,8 +1066,15 @@ actor CodexStatusService {
     }
 
     private func markRateLimitsUnavailable(into s: inout CodexUsageSnapshot) {
-        s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
-        s.weekResetText = UsageStaleThresholds.unavailableCopy
+        if !isAuthoritativeLimitsSource(s.fiveHourLimitsSource) {
+            s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
+            s.fiveHourLimitsSource = nil
+        }
+        if !isAuthoritativeLimitsSource(s.weekLimitsSource) {
+            s.weekResetText = UsageStaleThresholds.unavailableCopy
+            s.weekLimitsSource = nil
+        }
+        s.limitsSource = aggregateLimitsSource(for: s)
         s.usageLine = missingRateLimitsUsageLine
     }
 
@@ -1216,14 +1247,39 @@ actor CodexStatusService {
         if let fh = obj["five_hour"] as? [String: Any] {
             if let p = fh["pct_left"] as? Int { s.fiveHourRemainingPercent = p }
             if let r = fh["resets"] as? String { s.fiveHourResetText = r }
+            if fh["pct_left"] != nil || fh["resets"] != nil {
+                s.hasFiveHourRateLimit = true
+                s.fiveHourLimitsSource = .statusProbe
+            }
         }
         if let wk = obj["weekly"] as? [String: Any] {
             if let p = wk["pct_left"] as? Int { s.weekRemainingPercent = p }
             if let r = wk["resets"] as? String { s.weekResetText = r }
+            if wk["pct_left"] != nil || wk["resets"] != nil {
+                s.hasWeekRateLimit = true
+                s.weekLimitsSource = .statusProbe
+            }
         }
-        s.limitsSource = .statusProbe
+        s.limitsSource = aggregateLimitsSource(for: s)
         s.eventTimestamp = Date()
         return s
+    }
+
+    private func isAuthoritativeLimitsSource(_ source: CodexLimitsSource?) -> Bool {
+        switch source {
+        case .oauth?, .cliRPC?, .statusProbe?:
+            return true
+        case .jsonlFallback?, nil:
+            return false
+        }
+    }
+
+    private func aggregateLimitsSource(for snapshot: CodexUsageSnapshot) -> CodexLimitsSource? {
+        let sources = [snapshot.hasFiveHourRateLimit ? snapshot.fiveHourLimitsSource : nil,
+                       snapshot.hasWeekRateLimit ? snapshot.weekLimitsSource : nil]
+            .compactMap { $0 }
+        guard let first = sources.first else { return nil }
+        return sources.allSatisfy({ $0 == first }) ? first : nil
     }
 
     private func waitForProcessExit(_ process: Process,
