@@ -180,7 +180,7 @@ extension PreferencesView {
                             .foregroundStyle(.red)
                     }
                 }
-                Text("Primary tracking remains the JSONL log parser; /status is a secondary source.")
+                Text("Auth-backed tracking is primary for Codex limits. JSONL remains fallback-only for limits, and /status is used as a last resort.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

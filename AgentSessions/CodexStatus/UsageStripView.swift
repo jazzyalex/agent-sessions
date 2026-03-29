@@ -67,6 +67,10 @@ struct UsageStripView: View {
             parts.append("Codex: Not yet updated")
         }
 
+        if let source = codexStatus.limitsSource {
+            parts.append("Limits source: \(source.displayName)")
+        }
+
         // Add token breakdown if available
         if let input = codexStatus.lastInputTokens,
            let cached = codexStatus.lastCachedInputTokens,

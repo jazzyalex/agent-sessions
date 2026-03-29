@@ -222,6 +222,86 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertTrue(foundAccountUpdate, "Should find rate limit update notification")
     }
 
+    func testOAuthNormalizerTagsSnapshotAsOAuthSource() {
+        let raw = CodexOAuthRawUsageResponse(
+            rateLimit: .init(
+                primaryWindow: .init(usedPercent: 4, resetAt: 1_800_000_000, limitWindowSeconds: 18_000),
+                secondaryWindow: .init(usedPercent: 1, resetAt: 1_800_100_000, limitWindowSeconds: 604_800)
+            )
+        )
+
+        let snapshot = CodexOAuthUsageFetcher.normalizeForTesting(raw)
+
+        XCTAssertEqual(snapshot?.limitsSource, .oauth)
+        XCTAssertEqual(snapshot?.fiveHourRemainingPercent, 96)
+        XCTAssertEqual(snapshot?.weekRemainingPercent, 99)
+    }
+
+    func testOAuthNormalizerMarksOnlyReturnedWindowAsAvailable() {
+        let raw = CodexOAuthRawUsageResponse(
+            rateLimit: .init(
+                primaryWindow: .init(usedPercent: 4, resetAt: 1_800_000_000, limitWindowSeconds: 18_000),
+                secondaryWindow: nil
+            )
+        )
+
+        let snapshot = CodexOAuthUsageFetcher.normalizeForTesting(raw)
+
+        XCTAssertEqual(snapshot?.limitsSource, .oauth)
+        XCTAssertEqual(snapshot?.fiveHourRemainingPercent, 96)
+        XCTAssertEqual(snapshot?.hasFiveHourRateLimit, true)
+        XCTAssertEqual(snapshot?.hasWeekRateLimit, false)
+    }
+
+    func testCLIRPCProbeTagsSnapshotAsCLIRPCSource() throws {
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": [
+                "rateLimits": [
+                    "primary": [
+                        "usedPercent": 4,
+                        "resetsAt": 1_800_000_000
+                    ],
+                    "secondary": [
+                        "usedPercent": 1,
+                        "resetsAt": 1_800_100_000
+                    ]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let snapshot = CodexCLIRPCProbe.parseRateLimitsResponseForTesting(data)
+
+        XCTAssertEqual(snapshot?.limitsSource, .cliRPC)
+        XCTAssertEqual(snapshot?.fiveHourRemainingPercent, 96)
+        XCTAssertEqual(snapshot?.weekRemainingPercent, 99)
+    }
+
+    func testCLIRPCProbeMarksOnlyReturnedWindowAsAvailable() throws {
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": [
+                "rateLimits": [
+                    "secondary": [
+                        "usedPercent": 1,
+                        "resetsAt": 1_800_100_000
+                    ]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let snapshot = CodexCLIRPCProbe.parseRateLimitsResponseForTesting(data)
+
+        XCTAssertEqual(snapshot?.limitsSource, .cliRPC)
+        XCTAssertEqual(snapshot?.hasFiveHourRateLimit, false)
+        XCTAssertEqual(snapshot?.hasWeekRateLimit, true)
+        XCTAssertEqual(snapshot?.weekRemainingPercent, 99)
+    }
+
     func testPrefersCodexLimitIDWhenDualLimitBucketsExist() async throws {
         let now = Date()
         let olderTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-6))

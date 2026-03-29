@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Agent Cockpit HUD: Codex active subagent badges now use the runtime `thread_spawn` state DB when available, so open worker agents stay counted even when their rollout files go quiet; passive rollout/`lsof` heuristics remain as a fallback.
 - Agent Cockpit HUD: Codex runtime subagent counts now resolve the parent session before runtime edge lookup (even when the primary log path is a child rollout), and runtime state DB discovery now honors `CODEX_HOME`/`SessionsRootOverride` before falling back to `~/.codex`.
+- Codex limits tracking: Visible usage surfaces now prefer auth-backed limits refresh first, fall back to CLI RPC and JSONL only when needed, and keep `/status` probing as a last resort. Preferences copy now reflects the new source order.
 
 ## [3.3.3.1] - 2026-03-26
 
