@@ -1182,7 +1182,7 @@ final class SessionIndexer: ObservableObject {
                             } else if let subDict = subagentInfo as? [String: Any],
                                       let threadSpawn = subDict["thread_spawn"] as? [String: Any] {
                                 parentSessionID = threadSpawn["parent_thread_id"] as? String
-                                subagentType = "thread_spawn"
+                                subagentType = threadSpawn["agent_role"] as? String
                             }
                         }
                     }
@@ -1356,7 +1356,7 @@ final class SessionIndexer: ObservableObject {
                             } else if let subDict = subagentInfo as? [String: Any],
                                       let threadSpawn = subDict["thread_spawn"] as? [String: Any] {
                                 parentSessionID = threadSpawn["parent_thread_id"] as? String
-                                subagentType = "thread_spawn"
+                                subagentType = threadSpawn["agent_role"] as? String
                             }
                         }
                     }
