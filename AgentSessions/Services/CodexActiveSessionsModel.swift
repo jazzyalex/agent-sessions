@@ -1800,6 +1800,9 @@ final class CodexActiveSessionsModel: ObservableObject {
 
         var countsByPresenceKey: [String: Int] = [:]
         for presence in presences where presence.source == .codex {
+            // This path only needs runtime thread IDs for badge counts. It runs
+            // after `runtimeSnapshot.isAvailable`, so session log path fallback is
+            // intentionally skipped here.
             let runtimeIDs = resolveCodexSubagentPresence(presence, sessionsByLogPath: [:]).runtimeLookupIDs
             guard !runtimeIDs.isEmpty else { continue }
             let activeCount = runtimeIDs.compactMap { runtimeSnapshot.countsByParentThreadID[$0] }.max() ?? 0

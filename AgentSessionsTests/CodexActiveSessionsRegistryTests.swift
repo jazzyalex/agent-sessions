@@ -5,6 +5,8 @@ import SQLite3
 @testable import AgentSessions
 
 final class CodexActiveSessionsRegistryTests: XCTestCase {
+    private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
     func testDecodePresence_buildsRevealURLFromITermSessionID() throws {
         let now = Date()
         let nowISO = iso8601(now)
@@ -3212,9 +3214,9 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         defer { sqlite3_finalize(stmt) }
 
         for edge in edges {
-            sqlite3_bind_text(stmt, 1, edge.parent, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-            sqlite3_bind_text(stmt, 2, edge.child, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-            sqlite3_bind_text(stmt, 3, edge.status, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(stmt, 1, edge.parent, -1, sqliteTransient)
+            sqlite3_bind_text(stmt, 2, edge.child, -1, sqliteTransient)
+            sqlite3_bind_text(stmt, 3, edge.status, -1, sqliteTransient)
             guard sqlite3_step(stmt) == SQLITE_DONE else {
                 throw NSError(domain: "CodexActiveSessionsRegistryTests", code: 4)
             }
