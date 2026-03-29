@@ -361,6 +361,46 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertFalse(hasAuthoritative)
     }
 
+    func testStatusProbeMergeDoesNotStampZeroPercentBucketAsAuthoritative() async {
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        await service.setSnapshotForTesting(
+            CodexUsageSnapshot(
+                fiveHourRemainingPercent: 63,
+                fiveHourResetText: "2026-03-28T18:00:00Z",
+                hasFiveHourRateLimit: true,
+                fiveHourLimitsSource: .jsonlFallback,
+                weekRemainingPercent: 41,
+                weekResetText: "2026-04-01T00:00:00Z",
+                hasWeekRateLimit: true,
+                weekLimitsSource: .jsonlFallback,
+                limitsSource: .jsonlFallback
+            )
+        )
+
+        let merged = await service.mergeRateLimitSnapshotForTesting(
+            CodexUsageSnapshot(
+                fiveHourRemainingPercent: 12,
+                fiveHourResetText: "2026-03-28T19:00:00Z",
+                hasFiveHourRateLimit: true,
+                fiveHourLimitsSource: .statusProbe,
+                weekRemainingPercent: 0,
+                weekResetText: "",
+                hasWeekRateLimit: true,
+                weekLimitsSource: .statusProbe,
+                limitsSource: .statusProbe
+            ),
+            requirePositivePercent: true
+        )
+
+        XCTAssertEqual(merged.fiveHourRemainingPercent, 12)
+        XCTAssertEqual(merged.fiveHourLimitsSource, .statusProbe)
+        XCTAssertEqual(merged.weekRemainingPercent, 41)
+        XCTAssertEqual(merged.weekLimitsSource, .jsonlFallback)
+        XCTAssertNil(merged.limitsSource)
+        let hasAuthoritative = await service.hasAuthoritativeLimitsSnapshotForTesting
+        XCTAssertFalse(hasAuthoritative)
+    }
+
     func testPrefersCodexLimitIDWhenDualLimitBucketsExist() async throws {
         let now = Date()
         let olderTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-6))
