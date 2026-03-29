@@ -95,7 +95,7 @@ actor CodexOAuthUsageFetcher {
         lastFetchAt = now
         do {
             let raw = try await fetch(token: tokenSet.accessToken, accountId: tokenSet.accountId)
-            let result = normalize(raw)
+            let result = Self.normalizeResponse(raw)
             lastFetchFailed = (result == nil)  // nil normalize = response shape changed
             return result
         } catch CodexOAuthUsageError.unauthorized {
@@ -155,7 +155,7 @@ actor CodexOAuthUsageFetcher {
         }
     }
 
-    private func normalize(_ raw: CodexOAuthRawUsageResponse) -> CodexUsageSnapshot? {
+    private nonisolated static func normalizeResponse(_ raw: CodexOAuthRawUsageResponse) -> CodexUsageSnapshot? {
         guard let rl = raw.rateLimit else { return nil }
         var snap = CodexUsageSnapshot()
         var hasData = false
@@ -163,26 +163,37 @@ actor CodexOAuthUsageFetcher {
         if let primary = rl.primaryWindow {
             if let used = primary.usedPercent {
                 snap.fiveHourRemainingPercent = max(0, min(100, 100 - used))
+                snap.hasFiveHourRateLimit = true
                 hasData = true
             }
             if let epoch = primary.resetAt {
                 snap.fiveHourResetText = formatResetISO8601(Date(timeIntervalSince1970: TimeInterval(epoch)))
+                snap.hasFiveHourRateLimit = true
                 hasData = true
             }
         }
         if let secondary = rl.secondaryWindow {
             if let used = secondary.usedPercent {
                 snap.weekRemainingPercent = max(0, min(100, 100 - used))
+                snap.hasWeekRateLimit = true
                 hasData = true
             }
             if let epoch = secondary.resetAt {
                 snap.weekResetText = formatResetISO8601(Date(timeIntervalSince1970: TimeInterval(epoch)))
+                snap.hasWeekRateLimit = true
                 hasData = true
             }
         }
 
         guard hasData else { return nil }
+        snap.limitsSource = .oauth
         snap.eventTimestamp = Date()
         return snap
     }
+
+#if DEBUG
+    nonisolated static func normalizeForTesting(_ raw: CodexOAuthRawUsageResponse) -> CodexUsageSnapshot? {
+        normalizeResponse(raw)
+    }
+#endif
 }

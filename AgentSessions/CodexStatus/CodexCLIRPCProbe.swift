@@ -115,7 +115,7 @@ actor CodexCLIRPCProbe {
         // 5. Close stdin to signal we're done
         stdinPipe.fileHandleForWriting.closeFile()
 
-        return parseRateLimitsResponse(responseData)
+        return Self.parseRateLimitsResponseData(responseData)
     }
 
     /// Read a single JSON-RPC response using async readability handler.
@@ -176,7 +176,7 @@ actor CodexCLIRPCProbe {
         }
     }
 
-    private func parseRateLimitsResponse(_ data: Data) -> CodexUsageSnapshot? {
+    private nonisolated static func parseRateLimitsResponseData(_ data: Data) -> CodexUsageSnapshot? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let result = json["result"] as? [String: Any] else { return nil }
 
@@ -189,14 +189,17 @@ actor CodexCLIRPCProbe {
         if let primary = rateLimits["primary"] as? [String: Any] {
             if let usedPercent = primary["usedPercent"] as? Int {
                 snap.fiveHourRemainingPercent = max(0, min(100, 100 - usedPercent))
+                snap.hasFiveHourRateLimit = true
                 hasData = true
             } else if let usedPercent = primary["usedPercent"] as? Double {
                 snap.fiveHourRemainingPercent = max(0, min(100, 100 - Int(usedPercent.rounded())))
+                snap.hasFiveHourRateLimit = true
                 hasData = true
             }
             if let resetsAt = primary["resetsAt"] as? Int {
                 let date = Date(timeIntervalSince1970: TimeInterval(resetsAt))
                 snap.fiveHourResetText = formatResetISO8601(date)
+                snap.hasFiveHourRateLimit = true
                 hasData = true
             }
         }
@@ -204,21 +207,31 @@ actor CodexCLIRPCProbe {
         if let secondary = rateLimits["secondary"] as? [String: Any] {
             if let usedPercent = secondary["usedPercent"] as? Int {
                 snap.weekRemainingPercent = max(0, min(100, 100 - usedPercent))
+                snap.hasWeekRateLimit = true
                 hasData = true
             } else if let usedPercent = secondary["usedPercent"] as? Double {
                 snap.weekRemainingPercent = max(0, min(100, 100 - Int(usedPercent.rounded())))
+                snap.hasWeekRateLimit = true
                 hasData = true
             }
             if let resetsAt = secondary["resetsAt"] as? Int {
                 let date = Date(timeIntervalSince1970: TimeInterval(resetsAt))
                 snap.weekResetText = formatResetISO8601(date)
+                snap.hasWeekRateLimit = true
                 hasData = true
             }
         }
 
         guard hasData else { return nil }
 
+        snap.limitsSource = .cliRPC
         snap.eventTimestamp = Date()
         return snap
     }
+
+#if DEBUG
+    nonisolated static func parseRateLimitsResponseForTesting(_ data: Data) -> CodexUsageSnapshot? {
+        parseRateLimitsResponseData(data)
+    }
+#endif
 }

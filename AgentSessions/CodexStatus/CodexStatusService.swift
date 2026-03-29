@@ -72,8 +72,11 @@ import IOKit.ps
 struct CodexUsageSnapshot: Equatable {
     var fiveHourRemainingPercent: Int = 0
     var fiveHourResetText: String = ""
+    var hasFiveHourRateLimit: Bool = false
     var weekRemainingPercent: Int = 0
     var weekResetText: String = ""
+    var hasWeekRateLimit: Bool = false
+    var limitsSource: CodexLimitsSource? = nil
     var usageLine: String? = nil
     var accountLine: String? = nil
     var modelLine: String? = nil
@@ -109,6 +112,26 @@ struct CodexProbeDiagnostics {
     let stderr: String
 }
 
+enum CodexLimitsSource: String, Equatable {
+    case oauth
+    case cliRPC = "cli_rpc"
+    case jsonlFallback = "jsonl_fallback"
+    case statusProbe = "status_probe"
+
+    var displayName: String {
+        switch self {
+        case .oauth:
+            return "OAuth"
+        case .cliRPC:
+            return "CLI RPC"
+        case .jsonlFallback:
+            return "JSONL fallback"
+        case .statusProbe:
+            return "/status probe"
+        }
+    }
+}
+
 @MainActor
 final class CodexUsageModel: ObservableObject {
     static let shared = CodexUsageModel()
@@ -117,6 +140,7 @@ final class CodexUsageModel: ObservableObject {
     @Published var fiveHourResetText: String = ""
     @Published var weekRemainingPercent: Int = 0
     @Published var weekResetText: String = ""
+    @Published var limitsSource: CodexLimitsSource? = nil
     @Published var usageLine: String? = nil
     @Published var accountLine: String? = nil
     @Published var modelLine: String? = nil
@@ -347,6 +371,7 @@ final class CodexUsageModel: ObservableObject {
         weekRemainingPercent = clampPercent(s.weekRemainingPercent)
         fiveHourResetText = s.fiveHourResetText
         weekResetText = s.weekResetText
+        limitsSource = s.limitsSource
         usageLine = s.usageLine
         accountLine = s.accountLine
         modelLine = s.modelLine
@@ -762,6 +787,7 @@ actor CodexStatusService {
             var s = snapshot
             s.fiveHourRemainingPercent = extractPercent(from: clean) ?? s.fiveHourRemainingPercent
             s.fiveHourResetText = extractResetText(from: clean) ?? s.fiveHourResetText
+            s.hasFiveHourRateLimit = true
             snapshot = s
             updateHandler(snapshot)
             return
@@ -771,6 +797,7 @@ actor CodexStatusService {
             var s = snapshot
             s.weekRemainingPercent = extractPercent(from: clean) ?? s.weekRemainingPercent
             s.weekResetText = extractResetText(from: clean) ?? s.weekResetText
+            s.hasWeekRateLimit = true
             snapshot = s
             updateHandler(snapshot)
             return
@@ -804,9 +831,7 @@ actor CodexStatusService {
     private func refreshTick(userInitiated: Bool = false) async {
         let mode = visibilityMode
         if mode == .hidden && !userInitiated { return }
-        // Log-probe path: scan latest JSONL for token_count/rate_limits across known roots
         let roots = sessionsRoots()
-        guard !roots.isEmpty else { availabilityHandler(true); return }
         availabilityHandler(false)
 
         if mode == .menuBackground && !userInitiated {
@@ -814,72 +839,38 @@ actor CodexStatusService {
             return
         }
 
-        let candidateDaysBack = lastParseWasStaleOrFailed ? 10 : 2
-        var latestCandidate = newestCandidateFile(roots: roots, daysBack: candidateDaysBack, limit: 10)
-        if latestCandidate == nil, candidateDaysBack < 10 {
-            latestCandidate = newestCandidateFile(roots: roots, daysBack: 10, limit: 10)
+        let now = Date()
+        if !roots.isEmpty {
+            let candidateDaysBack = lastParseWasStaleOrFailed ? 10 : 2
+            var latestCandidate = newestCandidateFile(roots: roots, daysBack: candidateDaysBack, limit: 10)
+            if latestCandidate == nil, candidateDaysBack < 10 {
+                latestCandidate = newestCandidateFile(roots: roots, daysBack: 10, limit: 10)
+            }
+
+            let shouldSkipParse = shouldSkipLogParse(latestCandidate: latestCandidate, now: now)
+            if !shouldSkipParse, let summary = probeLatestRateLimits(roots: roots, expandSearch: lastParseWasStaleOrFailed) {
+                var s = snapshot
+                if !summary.missingRateLimits {
+                    applyJSONLFallbackSummary(summary, into: &s)
+                } else if !hasAuthoritativeLimitsSnapshot {
+                    markRateLimitsUnavailable(into: &s)
+                    snapshot = s
+                    updateHandler(snapshot)
+                }
+
+                if let sourceFile = summary.sourceFile {
+                    lastAppliedSourceFilePath = sourceFile.path
+                    lastAppliedSourceFileMTime = fileModificationDate(sourceFile)
+                }
+                lastAppliedEventTimestamp = summary.eventTimestamp
+                lastParseWasStaleOrFailed = summary.stale
+            } else if !shouldSkipParse {
+                lastParseWasStaleOrFailed = true
+            }
         }
 
-        let now = Date()
-        let shouldSkipParse = shouldSkipLogParse(latestCandidate: latestCandidate, now: now)
-        if !shouldSkipParse, let summary = probeLatestRateLimits(roots: roots, expandSearch: lastParseWasStaleOrFailed) {
-            // Do not regress to older data after a successful /status probe.
-            // Only apply log-derived snapshots when they are at least as new
-            // as the current in-memory snapshot, or when we have no timestamp.
-            let previousEvent = snapshot.eventTimestamp
-            let newEvent = summary.eventTimestamp
-            let shouldApply: Bool
-            if let newEvent, let previousEvent {
-                shouldApply = newEvent >= previousEvent
-            } else {
-                // When either side lacks a timestamp, prefer applying the update.
-                shouldApply = true
-            }
-            if shouldApply {
-                var s = snapshot
-                // Try OAuth/RPC when rate limits are missing from JSONL OR when
-                // log data is severely stale (>6h) — the user has no recent sessions
-                // and the cheap API path can provide fresh data.
-                let severelyStale = summary.eventTimestamp.map {
-                    now.timeIntervalSince($0) > UsageStaleThresholds.codexSeverelyStale
-                } ?? true
-                if summary.missingRateLimits || severelyStale {
-                    if let altSnap = await fetchRateLimitsFromAlternateSources() {
-                        applyAlternateSnapshot(altSnap, into: &s)
-                        if let sourceFile = summary.sourceFile {
-                            lastAppliedSourceFilePath = sourceFile.path
-                            lastAppliedSourceFileMTime = fileModificationDate(sourceFile)
-                        }
-                        return
-                    }
-                    if summary.missingRateLimits {
-                        s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
-                        s.weekResetText = UsageStaleThresholds.unavailableCopy
-                    }
-                }
-                // When alt-source failed but JSONL has rate limits, apply the stale
-                // JSONL data as best-effort (showing old data beats showing nothing).
-                if !summary.missingRateLimits {
-                    if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
-                    if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
-                    s.fiveHourResetText = summary.fiveHour.resetAt.map { formatResetISO8601($0) } ?? ""
-                    s.weekResetText = summary.weekly.resetAt.map { formatResetISO8601($0) } ?? ""
-                }
-                lastFiveHourResetDate = summary.fiveHour.resetAt
-                s.usageLine = summary.missingRateLimits ? missingRateLimitsUsageLine : (summary.stale ? "Usage is stale (>3m)" : nil)
-                s.eventTimestamp = summary.eventTimestamp
-                snapshot = s
-                updateHandler(snapshot)
-            }
-
-            if let sourceFile = summary.sourceFile {
-                lastAppliedSourceFilePath = sourceFile.path
-                lastAppliedSourceFileMTime = fileModificationDate(sourceFile)
-            }
-            lastAppliedEventTimestamp = summary.eventTimestamp
-            lastParseWasStaleOrFailed = summary.stale
-        } else if !shouldSkipParse {
-            lastParseWasStaleOrFailed = true
+        if mode == .active || userInitiated {
+            _ = await refreshPreferredLiveLimits(visibleFastPath: true)
         }
 
         // Optional: run a one-shot tmux /status probe only when stale (manual or auto)
@@ -944,42 +935,11 @@ actor CodexStatusService {
         }
 
         if let summary = parseTokenCountTail(url: sourceFile) {
-            let previousEvent = snapshot.eventTimestamp
-            let newEvent = summary.eventTimestamp
-            let shouldApply: Bool
-            if let newEvent, let previousEvent {
-                shouldApply = newEvent >= previousEvent
-            } else {
-                shouldApply = true
-            }
-            if shouldApply {
-                var s = snapshot
-                let severelyStale = summary.eventTimestamp.map {
-                    Date().timeIntervalSince($0) > UsageStaleThresholds.codexSeverelyStale
-                } ?? true
-                if summary.missingRateLimits || severelyStale {
-                    if let altSnap = await fetchRateLimitsFromAlternateSources() {
-                        applyAlternateSnapshot(altSnap, into: &s)
-                        lastAppliedSourceFilePath = sourceFile.path
-                        lastAppliedSourceFileMTime = mtime
-                        return
-                    }
-                    if summary.missingRateLimits {
-                        s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
-                        s.weekResetText = UsageStaleThresholds.unavailableCopy
-                    }
-                }
-                // When alt-source failed but JSONL has rate limits, apply the stale
-                // JSONL data as best-effort (showing old data beats showing nothing).
-                if !summary.missingRateLimits {
-                    if let p = summary.fiveHour.remainingPercent { s.fiveHourRemainingPercent = clampPercent(p) }
-                    if let p = summary.weekly.remainingPercent { s.weekRemainingPercent = clampPercent(p) }
-                    s.fiveHourResetText = summary.fiveHour.resetAt.map { formatResetISO8601($0) } ?? ""
-                    s.weekResetText = summary.weekly.resetAt.map { formatResetISO8601($0) } ?? ""
-                }
-                lastFiveHourResetDate = summary.fiveHour.resetAt
-                s.usageLine = summary.missingRateLimits ? missingRateLimitsUsageLine : (summary.stale ? "Usage is stale (>3m)" : nil)
-                s.eventTimestamp = summary.eventTimestamp
+            var s = snapshot
+            if !summary.missingRateLimits {
+                applyJSONLFallbackSummary(summary, into: &s)
+            } else if !hasAuthoritativeLimitsSnapshot {
+                markRateLimitsUnavailable(into: &s)
                 snapshot = s
                 updateHandler(snapshot)
             }
@@ -999,44 +959,92 @@ actor CodexStatusService {
 
     // MARK: - Alternate rate-limit sources (OAuth API → CLI RPC)
 
-    /// Fallback chain when JSONL logs lack rate_limits (upstream bug openai/codex#14880).
-    /// Returns a snapshot on success, nil when all sources fail (caller falls through to tmux probe).
-    private func fetchRateLimitsFromAlternateSources() async -> CodexUsageSnapshot? {
-        // 1. OAuth API — cheapest, fastest, no token cost
-        if let snap = await codexOAuthFetcher.fetchUsage() {
+    private var hasAuthoritativeLimitsSnapshot: Bool {
+        switch snapshot.limitsSource {
+        case .oauth?, .cliRPC?, .statusProbe?:
+            return true
+        case .jsonlFallback?, nil:
+            return false
+        }
+    }
+
+    /// Primary chain for authoritative limits. JSONL is deliberately excluded here and
+    /// remains a fallback-only source handled by the log parsing path.
+    private func fetchPreferredRateLimits(oauthSuccessCooldown: TimeInterval) async -> CodexUsageSnapshot? {
+        if let snap = await codexOAuthFetcher.fetchUsage(cooldownSuccess: oauthSuccessCooldown) {
             return snap
         }
-        // 2. CLI RPC via app-server stdio — no token cost, needs codex binary
         if let snap = await codexRPCProbe.fetchRateLimits() {
             return snap
         }
         return nil
     }
 
+    @discardableResult
+    private func refreshPreferredLiveLimits(visibleFastPath: Bool) async -> CodexUsageSnapshot? {
+        let successCooldown: TimeInterval = visibleFastPath ? 60 : 5 * 60
+        guard let preferredSnap = await fetchPreferredRateLimits(oauthSuccessCooldown: successCooldown) else {
+            return nil
+        }
+        var merged = snapshot
+        mergeRateLimitSnapshot(preferredSnap, into: &merged)
+        return preferredSnap
+    }
+
     /// Merges rate-limit fields from `source` into `dest`, commits to `snapshot`,
     /// and notifies the UI. When `requirePositivePercent` is true (tmux probe path),
     /// 0% values are treated as "no data" and skipped.
     private func mergeRateLimitSnapshot(_ source: CodexUsageSnapshot, into dest: inout CodexUsageSnapshot, requirePositivePercent: Bool = false) {
-        if !requirePositivePercent || source.fiveHourRemainingPercent > 0 {
+        if source.hasFiveHourRateLimit && (!requirePositivePercent || source.fiveHourRemainingPercent > 0) {
             dest.fiveHourRemainingPercent = clampPercent(source.fiveHourRemainingPercent)
         }
-        if !source.fiveHourResetText.isEmpty { dest.fiveHourResetText = source.fiveHourResetText }
-        if !requirePositivePercent || source.weekRemainingPercent > 0 {
+        if source.hasFiveHourRateLimit {
+            dest.hasFiveHourRateLimit = true
+            if !source.fiveHourResetText.isEmpty { dest.fiveHourResetText = source.fiveHourResetText }
+        }
+        if source.hasWeekRateLimit && (!requirePositivePercent || source.weekRemainingPercent > 0) {
             dest.weekRemainingPercent = clampPercent(source.weekRemainingPercent)
         }
-        if !source.weekResetText.isEmpty { dest.weekResetText = source.weekResetText }
+        if source.hasWeekRateLimit {
+            dest.hasWeekRateLimit = true
+            if !source.weekResetText.isEmpty { dest.weekResetText = source.weekResetText }
+        }
+        dest.limitsSource = source.limitsSource
         dest.usageLine = nil  // Fresh data from probe/API; clear any stale marker
         dest.eventTimestamp = Date()
         snapshot = dest
         updateHandler(snapshot)
     }
 
-    /// Merges an alternate-source snapshot, sets freshness TTL, and updates bookkeeping.
-    private func applyAlternateSnapshot(_ altSnap: CodexUsageSnapshot, into s: inout CodexUsageSnapshot) {
-        mergeRateLimitSnapshot(altSnap, into: &s)
-        setFreshUntil(for: .codex, until: Date().addingTimeInterval(UsageFreshnessTTL.probeFreshness))
-        lastAppliedEventTimestamp = s.eventTimestamp
-        lastParseWasStaleOrFailed = false
+    private func applyJSONLFallbackSummary(_ summary: RateLimitSummary, into s: inout CodexUsageSnapshot) {
+        if let p = summary.fiveHour.remainingPercent {
+            s.fiveHourRemainingPercent = clampPercent(p)
+            s.hasFiveHourRateLimit = true
+        }
+        if let resetAt = summary.fiveHour.resetAt {
+            s.fiveHourResetText = formatResetISO8601(resetAt)
+            s.hasFiveHourRateLimit = true
+        }
+        if let p = summary.weekly.remainingPercent {
+            s.weekRemainingPercent = clampPercent(p)
+            s.hasWeekRateLimit = true
+        }
+        if let resetAt = summary.weekly.resetAt {
+            s.weekResetText = formatResetISO8601(resetAt)
+            s.hasWeekRateLimit = true
+        }
+        s.limitsSource = .jsonlFallback
+        s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
+        s.eventTimestamp = summary.eventTimestamp
+        lastFiveHourResetDate = summary.fiveHour.resetAt
+        snapshot = s
+        updateHandler(snapshot)
+    }
+
+    private func markRateLimitsUnavailable(into s: inout CodexUsageSnapshot) {
+        s.fiveHourResetText = UsageStaleThresholds.unavailableCopy
+        s.weekResetText = UsageStaleThresholds.unavailableCopy
+        s.usageLine = missingRateLimitsUsageLine
     }
 
     // MARK: - Optional tmux /status probe
@@ -1213,6 +1221,7 @@ actor CodexStatusService {
             if let p = wk["pct_left"] as? Int { s.weekRemainingPercent = p }
             if let r = wk["resets"] as? String { s.weekResetText = r }
         }
+        s.limitsSource = .statusProbe
         s.eventTimestamp = Date()
         return s
     }
