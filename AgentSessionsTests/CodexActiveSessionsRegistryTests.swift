@@ -1,6 +1,7 @@
 import XCTest
 import AppKit
 import SwiftUI
+import SQLite3
 @testable import AgentSessions
 
 final class CodexActiveSessionsRegistryTests: XCTestCase {
@@ -121,6 +122,36 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(out[456]?.cwd, "/Users/alexm/Repository/Codex-History")
         XCTAssertEqual(out[456]?.tty, "/dev/ttys099")
         XCTAssertNil(out[456]?.sessionLogPath)
+    }
+
+    func testParseLsofMachineOutput_prefersLowestFDAndDeduplicatesOpenLogPaths() {
+        let root = "/Users/alexm/.codex/sessions"
+        let parentLog = "/Users/alexm/.codex/sessions/2026/03/28/rollout-2026-03-28T10-00-00-00000000-0000-0000-0000-000000000001.jsonl"
+        let childLog = "/Users/alexm/.codex/sessions/2026/03/28/rollout-2026-03-28T10-01-00-00000000-0000-0000-0000-000000000002.jsonl"
+        let text = """
+        p789
+        fcwd
+        tDIR
+        n/Users/alexm/Repository/Codex-History
+        f0
+        tCHR
+        n/dev/ttys077
+        f42w
+        tREG
+        n\(childLog)
+        f40w
+        tREG
+        n\(parentLog)
+        f55w
+        tREG
+        n\(parentLog)
+        """
+
+        let out = CodexActiveSessionsModel.parseLsofMachineOutput(text, sessionsRoots: [root])
+
+        XCTAssertEqual(out[789]?.sessionLogPath, parentLog)
+        XCTAssertEqual(out[789]?.sessionLogFD, 40)
+        XCTAssertEqual(out[789]?.openSessionLogPaths, [childLog, parentLog])
     }
 
     func testParsePSEnvironmentOutput_extractsITermSessionID() throws {
@@ -2716,9 +2747,481 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertTrue(candidates[0].path.hasSuffix("recent00-0000-0000-0000-000000000001.jsonl"))
     }
 
+    func testActiveSubagentCounts_prefersResolvedParentAndIgnoresStaleCodexChildren() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let parentLog = tmp.appendingPathComponent("rollout-2026-03-28T10-00-00-00000000-0000-0000-0000-000000000001.jsonl")
+        let recentChildLog = tmp.appendingPathComponent("rollout-2026-03-28T10-01-00-00000000-0000-0000-0000-000000000002.jsonl")
+        let staleChildLog = tmp.appendingPathComponent("rollout-2026-03-28T10-02-00-00000000-0000-0000-0000-000000000003.jsonl")
+        for file in [parentLog, recentChildLog, staleChildLog] {
+            try Data("{}".utf8).write(to: file)
+        }
+
+        let now = Date()
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: parentLog.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-10)], ofItemAtPath: recentChildLog.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-90)], ofItemAtPath: staleChildLog.path)
+
+        let parentSession = Session(
+            id: "parent-session",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: parentLog.path,
+            eventCount: 0,
+            events: [],
+            codexInternalSessionIDHint: "parent-runtime-id",
+            parentSessionID: nil,
+            subagentType: nil
+        )
+        let recentChildSession = Session(
+            id: "child-recent",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: recentChildLog.path,
+            eventCount: 0,
+            events: [],
+            codexInternalSessionIDHint: "child-runtime-id-1",
+            parentSessionID: "parent-runtime-id",
+            subagentType: "thread_spawn"
+        )
+        let staleChildSession = Session(
+            id: "child-stale",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: staleChildLog.path,
+            eventCount: 0,
+            events: [],
+            codexInternalSessionIDHint: "child-runtime-id-2",
+            parentSessionID: "parent-runtime-id",
+            subagentType: "thread_spawn"
+        )
+
+        let sessions = [parentSession, recentChildSession, staleChildSession]
+        let sessionsByLogPath = Dictionary(uniqueKeysWithValues: sessions.map { session in
+            let key = CodexActiveSessionsModel.logLookupKey(
+                source: session.source,
+                normalizedPath: CodexActiveSessionsModel.normalizePath(session.filePath)
+            )
+            return (key, session)
+        })
+
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.sessionId = recentChildSession.codexInternalSessionIDHint
+        presence.sessionLogPath = recentChildLog.path
+        presence.openSessionLogPaths = [recentChildLog.path, parentLog.path, staleChildLog.path]
+
+        let counts = CodexActiveSessionsModel.activeSubagentCounts(
+            presences: [presence],
+            sessionsByLogPath: sessionsByLogPath,
+            now: now,
+            recentWriteWindow: 45,
+            codexRuntimeStateDBURL: tmp.appendingPathComponent("missing.sqlite")
+        )
+
+        XCTAssertEqual(counts[parentSession.id], 1)
+        XCTAssertNil(counts[recentChildSession.id])
+    }
+
+    func testActiveSubagentCounts_countsRecentClaudeSubagents() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let projectDir = tmp.appendingPathComponent("projects/-Users-test-MyProject")
+        let parentLog = projectDir.appendingPathComponent("90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a.jsonl")
+        let subagentsDir = projectDir
+            .appendingPathComponent("90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a")
+            .appendingPathComponent("subagents")
+        try FileManager.default.createDirectory(at: subagentsDir, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: parentLog)
+
+        let recentSubagent = subagentsDir.appendingPathComponent("agent-recent.jsonl")
+        let oldSubagent = subagentsDir.appendingPathComponent("agent-old.jsonl")
+        for file in [recentSubagent, oldSubagent] {
+            try Data("{}".utf8).write(to: file)
+        }
+
+        let now = Date()
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-10)], ofItemAtPath: recentSubagent.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-90)], ofItemAtPath: oldSubagent.path)
+
+        let parentSession = Session(
+            id: "claude-parent",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: parentLog.path,
+            eventCount: 0,
+            events: [],
+            codexInternalSessionIDHint: "90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a",
+            parentSessionID: nil,
+            subagentType: nil
+        )
+        let key = CodexActiveSessionsModel.logLookupKey(
+            source: .claude,
+            normalizedPath: CodexActiveSessionsModel.normalizePath(parentSession.filePath)
+        )
+
+        var presence = CodexActivePresence()
+        presence.source = .claude
+        presence.sessionLogPath = parentLog.path
+
+        let counts = CodexActiveSessionsModel.activeSubagentCounts(
+            presences: [presence],
+            sessionsByLogPath: [key: parentSession],
+            now: now,
+            recentWriteWindow: 45
+        )
+
+        XCTAssertEqual(counts[parentSession.id], 1)
+    }
+
+    func testActiveSubagentCounts_fallsBackToLiveCodexSessionMetaWhenIndexMissing() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let parentLog = tmp.appendingPathComponent("rollout-2026-03-28T17-59-21-019d371a-45f2-7443-a076-d68981630bf3.jsonl")
+        let childLog = tmp.appendingPathComponent("rollout-2026-03-28T18-00-11-019d371b-06c0-79d1-ad85-17ba4e23290a.jsonl")
+
+        try Data("""
+        {"timestamp":"2026-03-29T00:59:41.003Z","type":"session_meta","payload":{"id":"019d371a-45f2-7443-a076-d68981630bf3","cwd":"/Users/alexm/Repository/Codex-History","source":"cli"}}
+        """.utf8).write(to: parentLog)
+        try Data("""
+        {"timestamp":"2026-03-29T01:00:12.991Z","type":"session_meta","payload":{"id":"019d371b-06c0-79d1-ad85-17ba4e23290a","cwd":"/Users/alexm/Repository/Codex-History","source":{"subagent":{"thread_spawn":{"parent_thread_id":"019d371a-45f2-7443-a076-d68981630bf3","depth":1}}}}}
+        """.utf8).write(to: childLog)
+
+        let now = Date()
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)], ofItemAtPath: parentLog.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)], ofItemAtPath: childLog.path)
+
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.sessionId = "019d371a-45f2-7443-a076-d68981630bf3"
+        presence.sessionLogPath = parentLog.path
+        presence.openSessionLogPaths = [parentLog.path, childLog.path]
+
+        let counts = CodexActiveSessionsModel.activeSubagentCounts(
+            presences: [presence],
+            sessionsByLogPath: [:],
+            now: now,
+            recentWriteWindow: 45,
+            codexRuntimeStateDBURL: tmp.appendingPathComponent("missing.sqlite")
+        )
+
+        XCTAssertEqual(counts["019d371a-45f2-7443-a076-d68981630bf3"], 1)
+    }
+
+    func testActiveSubagentCounts_usesCodexRuntimeOpenEdgesForStaleChildren() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let parentLog = tmp.appendingPathComponent("rollout-2026-03-28T17-59-21-019d371a-45f2-7443-a076-d68981630bf3.jsonl")
+        let childLog = tmp.appendingPathComponent("rollout-2026-03-28T18-06-12-019d3720-8a6c-7561-9209-28e8b3ca1a9c.jsonl")
+        try Data("{}".utf8).write(to: parentLog)
+        try Data("{}".utf8).write(to: childLog)
+
+        let now = Date()
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-300)], ofItemAtPath: parentLog.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-300)], ofItemAtPath: childLog.path)
+
+        let parentSession = Session(
+            id: "parent-db-id",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: parentLog.path,
+            eventCount: 0,
+            events: [],
+            codexInternalSessionIDHint: "019d371a-45f2-7443-a076-d68981630bf3",
+            parentSessionID: nil,
+            subagentType: nil
+        )
+        let parentKey = CodexActiveSessionsModel.logLookupKey(
+            source: .codex,
+            normalizedPath: CodexActiveSessionsModel.normalizePath(parentSession.filePath)
+        )
+
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.sessionId = "019d371a-45f2-7443-a076-d68981630bf3"
+        presence.sessionLogPath = parentLog.path
+        presence.openSessionLogPaths = [parentLog.path, childLog.path]
+
+        let dbURL = try makeCodexRuntimeStateDB(
+            edges: [("019d371a-45f2-7443-a076-d68981630bf3", "019d3720-8a6c-7561-9209-28e8b3ca1a9c", "open")]
+        )
+
+        let counts = CodexActiveSessionsModel.activeSubagentCounts(
+            presences: [presence],
+            sessionsByLogPath: [parentKey: parentSession],
+            now: now,
+            recentWriteWindow: 45,
+            codexRuntimeStateDBURL: dbURL
+        )
+
+        XCTAssertEqual(counts[parentSession.id], 1)
+        XCTAssertEqual(counts["019d371a-45f2-7443-a076-d68981630bf3"], 1)
+    }
+
+    func testActiveSubagentCounts_usesCodexRuntimeOpenEdgesWhenPrimaryLogIsChild() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let parentRuntimeID = "019d3fff-1111-7222-8333-a11111111111"
+        let childRuntimeID = "019d3fff-2222-7333-8444-b22222222222"
+
+        let parentLog = tmp.appendingPathComponent("rollout-2026-03-28T17-59-21-\(parentRuntimeID).jsonl")
+        let childLog = tmp.appendingPathComponent("rollout-2026-03-28T18-06-12-\(childRuntimeID).jsonl")
+        try Data("{}".utf8).write(to: parentLog)
+        try Data("{}".utf8).write(to: childLog)
+
+        let parentSession = Session(
+            id: "parent-db-id",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: parentLog.path,
+            eventCount: 0,
+            events: [],
+            codexInternalSessionIDHint: parentRuntimeID,
+            parentSessionID: nil,
+            subagentType: nil
+        )
+        let childSession = Session(
+            id: "child-db-id",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: childLog.path,
+            eventCount: 0,
+            events: [],
+            codexInternalSessionIDHint: childRuntimeID,
+            parentSessionID: parentRuntimeID,
+            subagentType: "thread_spawn"
+        )
+        let sessionsByLogPath = Dictionary(uniqueKeysWithValues: [parentSession, childSession].map { session in
+            let key = CodexActiveSessionsModel.logLookupKey(
+                source: session.source,
+                normalizedPath: CodexActiveSessionsModel.normalizePath(session.filePath)
+            )
+            return (key, session)
+        })
+
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.sessionId = childRuntimeID
+        presence.sessionLogPath = childLog.path
+        presence.openSessionLogPaths = [childLog.path, parentLog.path]
+
+        let dbURL = try makeCodexRuntimeStateDB(edges: [(parentRuntimeID, childRuntimeID, "open")])
+        let counts = CodexActiveSessionsModel.activeSubagentCounts(
+            presences: [presence],
+            sessionsByLogPath: sessionsByLogPath,
+            now: Date(),
+            recentWriteWindow: 45,
+            codexRuntimeStateDBURL: dbURL
+        )
+
+        XCTAssertEqual(counts[parentSession.id], 1)
+        XCTAssertEqual(counts[parentRuntimeID], 1)
+        XCTAssertNil(counts[childSession.id])
+    }
+
+    func testActiveSubagentCounts_honorsCODEXHOMEForRuntimeStateDB() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let codexHome = tmp.appendingPathComponent("custom-codex-home")
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+
+        let parentRuntimeID = "019d3fff-aaaa-7555-8999-c33333333333"
+        let childRuntimeID = "019d3fff-bbbb-7666-8aaa-d44444444444"
+        let stateDBURL = codexHome.appendingPathComponent("state_2026-03-29.sqlite")
+        _ = try makeCodexRuntimeStateDB(at: stateDBURL, edges: [(parentRuntimeID, childRuntimeID, "open")])
+
+        let parentLog = tmp.appendingPathComponent("rollout-2026-03-28T17-59-21-\(parentRuntimeID).jsonl")
+        try Data("{}".utf8).write(to: parentLog)
+
+        let parentSession = Session(
+            id: "parent-db-id",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: parentLog.path,
+            eventCount: 0,
+            events: [],
+            codexInternalSessionIDHint: parentRuntimeID,
+            parentSessionID: nil,
+            subagentType: nil
+        )
+        let parentKey = CodexActiveSessionsModel.logLookupKey(
+            source: .codex,
+            normalizedPath: CodexActiveSessionsModel.normalizePath(parentSession.filePath)
+        )
+
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.sessionId = parentRuntimeID
+        presence.sessionLogPath = parentLog.path
+
+        let defaults = UserDefaults.standard
+        let originalSessionsRootOverride = defaults.string(forKey: "SessionsRootOverride")
+        defaults.removeObject(forKey: "SessionsRootOverride")
+        defer {
+            if let originalSessionsRootOverride {
+                defaults.set(originalSessionsRootOverride, forKey: "SessionsRootOverride")
+            } else {
+                defaults.removeObject(forKey: "SessionsRootOverride")
+            }
+        }
+
+        let counts = withEnvironmentVariable("CODEX_HOME", value: codexHome.path) {
+            CodexActiveSessionsModel.activeSubagentCounts(
+                presences: [presence],
+                sessionsByLogPath: [parentKey: parentSession],
+                now: Date(),
+                recentWriteWindow: 45,
+                codexRuntimeStateDBURL: nil
+            )
+        }
+
+        XCTAssertEqual(counts[parentSession.id], 1)
+        XCTAssertEqual(counts[parentRuntimeID], 1)
+    }
+
+    func testActiveSubagentCounts_respectsClosedCodexRuntimeEdges() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let parentLog = tmp.appendingPathComponent("rollout-2026-03-28T17-59-21-019d371a-45f2-7443-a076-d68981630bf3.jsonl")
+        let childLog = tmp.appendingPathComponent("rollout-2026-03-28T18-06-12-019d3720-8a6c-7561-9209-28e8b3ca1a9c.jsonl")
+        try Data("{}".utf8).write(to: parentLog)
+        try Data("{}".utf8).write(to: childLog)
+
+        let now = Date()
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)], ofItemAtPath: parentLog.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)], ofItemAtPath: childLog.path)
+
+        let parentSession = Session(
+            id: "parent-db-id",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: parentLog.path,
+            eventCount: 0,
+            events: [],
+            codexInternalSessionIDHint: "019d371a-45f2-7443-a076-d68981630bf3",
+            parentSessionID: nil,
+            subagentType: nil
+        )
+        let parentKey = CodexActiveSessionsModel.logLookupKey(
+            source: .codex,
+            normalizedPath: CodexActiveSessionsModel.normalizePath(parentSession.filePath)
+        )
+
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.sessionId = "019d371a-45f2-7443-a076-d68981630bf3"
+        presence.sessionLogPath = parentLog.path
+        presence.openSessionLogPaths = [parentLog.path, childLog.path]
+
+        let dbURL = try makeCodexRuntimeStateDB(
+            edges: [("019d371a-45f2-7443-a076-d68981630bf3", "019d3720-8a6c-7561-9209-28e8b3ca1a9c", "closed")]
+        )
+
+        let counts = CodexActiveSessionsModel.activeSubagentCounts(
+            presences: [presence],
+            sessionsByLogPath: [parentKey: parentSession],
+            now: now,
+            recentWriteWindow: 45,
+            codexRuntimeStateDBURL: dbURL
+        )
+
+        XCTAssertNil(counts[parentSession.id])
+        XCTAssertNil(counts["019d371a-45f2-7443-a076-d68981630bf3"])
+    }
+
     @MainActor
     private func drainMainRunLoop() {
         let until = Date().addingTimeInterval(0.06)
         while Date() < until && RunLoop.main.run(mode: .default, before: until) {}
+    }
+
+    private func withEnvironmentVariable<T>(_ key: String,
+                                            value: String,
+                                            perform: () throws -> T) rethrows -> T {
+        let previousValue = getenv(key).map { String(cString: $0) }
+        setenv(key, value, 1)
+        defer {
+            if let previousValue {
+                setenv(key, previousValue, 1)
+            } else {
+                unsetenv(key)
+            }
+        }
+        return try perform()
+    }
+
+    private func makeCodexRuntimeStateDB(at dbURL: URL? = nil,
+                                         edges: [(parent: String, child: String, status: String)]) throws -> URL {
+        let dbURL = dbURL ?? FileManager.default.temporaryDirectory.appendingPathComponent("codex-runtime-\(UUID().uuidString).sqlite")
+        var db: OpaquePointer?
+        guard sqlite3_open(dbURL.path, &db) == SQLITE_OK else {
+            sqlite3_close(db)
+            throw NSError(domain: "CodexActiveSessionsRegistryTests", code: 1)
+        }
+        defer { sqlite3_close(db) }
+
+        let schemaSQL = """
+            CREATE TABLE thread_spawn_edges (
+                parent_thread_id TEXT NOT NULL,
+                child_thread_id TEXT NOT NULL PRIMARY KEY,
+                status TEXT NOT NULL
+            );
+            """
+        guard sqlite3_exec(db, schemaSQL, nil, nil, nil) == SQLITE_OK else {
+            throw NSError(domain: "CodexActiveSessionsRegistryTests", code: 2)
+        }
+
+        let insertSQL = "INSERT INTO thread_spawn_edges(parent_thread_id, child_thread_id, status) VALUES(?, ?, ?);"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, insertSQL, -1, &stmt, nil) == SQLITE_OK else {
+            sqlite3_finalize(stmt)
+            throw NSError(domain: "CodexActiveSessionsRegistryTests", code: 3)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        for edge in edges {
+            sqlite3_bind_text(stmt, 1, edge.parent, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(stmt, 2, edge.child, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text(stmt, 3, edge.status, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            guard sqlite3_step(stmt) == SQLITE_DONE else {
+                throw NSError(domain: "CodexActiveSessionsRegistryTests", code: 4)
+            }
+            sqlite3_reset(stmt)
+            sqlite3_clear_bindings(stmt)
+        }
+
+        return dbURL
     }
 }

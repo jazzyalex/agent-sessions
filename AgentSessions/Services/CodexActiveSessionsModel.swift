@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Darwin
+import SQLite3
 
 enum CodexLiveState: String, Sendable, CaseIterable {
     case activeWorking
@@ -131,6 +132,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     nonisolated private static let stableBackoffActivationCycles: Int = 3
     nonisolated private static let codexInconclusiveTailActiveGraceWindow: TimeInterval = 6
     nonisolated private static let processProbeTimeout: TimeInterval = 0.75
+    nonisolated static let subagentRecentWriteWindow: TimeInterval = 45
     nonisolated static let processProbeMinIntervalRegistryEmptyForeground: TimeInterval = 6
     nonisolated private static let processProbeMinIntervalRegistryEmptyBackground: TimeInterval = 45
     nonisolated private static let processProbeMinIntervalRegistryPresentForeground: TimeInterval = 30
@@ -149,6 +151,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     /// Used by views that want to refresh the sessions list only when active state changes,
     /// not on every heartbeat.
     @Published private(set) var activeMembershipVersion: UInt64 = 0
+    @Published private(set) var subagentBadgeVersion: UInt64 = 0
 
     @Published private(set) var presences: [CodexActivePresence] = []
     private(set) var lastRefreshAt: Date? = nil
@@ -185,6 +188,7 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     private var bySessionID: [String: CodexActivePresence] = [:]
     private var byLogPath: [String: CodexActivePresence] = [:]
+    private var lastPublishedRuntimeSubagentCountsByPresenceKey: [String: Int] = [:]
     private var liveStateByPresenceKey: [String: CodexLiveState] = [:]
     private var idleReasonByPresenceKey: [String: HUDIdleReason] = [:]
     private var lastActivityByPresenceKey: [String: Date] = [:]
@@ -963,12 +967,32 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     private static func mergePIDInfo(_ existing: LsofPIDInfo, _ incoming: LsofPIDInfo) -> LsofPIDInfo {
-        LsofPIDInfo(
+        let preferredSessionLogPath: String?
+        let preferredSessionID: String?
+        let preferredSessionLogFD: Int
+        if incoming.sessionLogFD < existing.sessionLogFD {
+            preferredSessionLogPath = incoming.sessionLogPath
+            preferredSessionID = incoming.sessionID
+            preferredSessionLogFD = incoming.sessionLogFD
+        } else {
+            preferredSessionLogPath = existing.sessionLogPath
+            preferredSessionID = existing.sessionID
+            preferredSessionLogFD = existing.sessionLogFD
+        }
+
+        var openSessionLogPaths = existing.openSessionLogPaths
+        for path in incoming.openSessionLogPaths where !openSessionLogPaths.contains(path) {
+            openSessionLogPaths.append(path)
+        }
+
+        return LsofPIDInfo(
             pid: incoming.pid,
             cwd: incoming.cwd ?? existing.cwd,
             tty: incoming.tty ?? existing.tty,
-            sessionID: incoming.sessionID ?? existing.sessionID,
-            sessionLogPath: incoming.sessionLogPath ?? existing.sessionLogPath,
+            sessionID: preferredSessionID,
+            sessionLogPath: preferredSessionLogPath,
+            sessionLogFD: preferredSessionLogFD,
+            openSessionLogPaths: openSessionLogPaths,
             termProgram: incoming.termProgram ?? existing.termProgram,
             itermSessionId: incoming.itermSessionId ?? existing.itermSessionId
         )
@@ -1244,6 +1268,19 @@ final class CodexActiveSessionsModel: ObservableObject {
             presences = ui.sorted(by: { ($0.lastSeenAt ?? .distantPast) > ($1.lastSeenAt ?? .distantPast) })
             lastPublishedPresenceSignatures = nextSignatures
             activeMembershipVersion &+= 1
+        }
+
+        let shouldTrackRuntimeSubagentBadges = (isCockpitVisibleSnapshot || isPinnedCockpitVisibleSnapshot)
+            && ui.contains(where: { $0.source == .codex })
+        if shouldTrackRuntimeSubagentBadges {
+            let nextRuntimeSubagentCountsByPresenceKey = Self.runtimeCodexSubagentCountsByPresenceKey(
+                presences: ui,
+                stateDBURL: nil
+            )
+            if nextRuntimeSubagentCountsByPresenceKey != lastPublishedRuntimeSubagentCountsByPresenceKey {
+                lastPublishedRuntimeSubagentCountsByPresenceKey = nextRuntimeSubagentCountsByPresenceKey
+                subagentBadgeVersion &+= 1
+            }
         }
 
         if stateChanged {
@@ -1594,6 +1631,433 @@ final class CodexActiveSessionsModel: ObservableObject {
             appendUnique(session.id)
         }
 
+        return out
+    }
+
+    nonisolated static func activeSubagentCounts(
+        presences: [CodexActivePresence],
+        sessionsByLogPath: [String: Session],
+        now: Date,
+        recentWriteWindow: TimeInterval = subagentRecentWriteWindow,
+        codexRuntimeStateDBURL: URL? = nil
+    ) -> [String: Int] {
+        let cutoff = now.addingTimeInterval(-recentWriteWindow)
+        let fm = FileManager.default
+        var counts: [String: Int] = [:]
+        let codexRuntimeSnapshot = codexOpenSubagentSnapshot(stateDBURL: codexRuntimeStateDBURL)
+
+        for presence in presences where presence.source == .claude {
+            guard let logPath = presence.sessionLogPath else { continue }
+            guard let parentRef = activeSubagentSessionRef(
+                forLogPath: logPath,
+                source: .claude,
+                sessionsByLogPath: sessionsByLogPath
+            ) else {
+                continue
+            }
+
+            let logURL = URL(fileURLWithPath: logPath)
+            let subagentsDir = logURL
+                .deletingLastPathComponent()
+                .appendingPathComponent(logURL.deletingPathExtension().lastPathComponent)
+                .appendingPathComponent("subagents")
+            guard fm.fileExists(atPath: subagentsDir.path) else { continue }
+            guard let contents = try? fm.contentsOfDirectory(
+                at: subagentsDir,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: .skipsHiddenFiles
+            ) else { continue }
+
+            let activeCount = contents.reduce(into: 0) { partialResult, file in
+                guard file.pathExtension == "jsonl" else { return }
+                let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                if let mtime, mtime > cutoff {
+                    partialResult += 1
+                }
+            }
+            if activeCount > 0 {
+                for key in parentRef.lookupKeys {
+                    counts[key] = max(counts[key] ?? 0, activeCount)
+                }
+            }
+        }
+
+        for presence in presences where presence.source == .codex {
+            let resolved = resolveCodexSubagentPresence(presence, sessionsByLogPath: sessionsByLogPath)
+            let runtimeKeys = resolved.runtimeLookupIDs
+            if codexRuntimeSnapshot.isAvailable {
+                let activeCount = runtimeKeys.compactMap { codexRuntimeSnapshot.countsByParentThreadID[$0] }.max() ?? 0
+                if activeCount > 0 {
+                    let lookupKeys = resolved.parentRef?.lookupKeys ?? runtimeKeys
+                    for key in lookupKeys {
+                        counts[key] = max(counts[key] ?? 0, activeCount)
+                    }
+                }
+                continue
+            }
+
+            guard resolved.resolvedPaths.count > 1 else { continue }
+            let fallbackParentRef = resolved.parentRef
+            guard let fallbackParentRef else { continue }
+
+            let parentIDs = Set(fallbackParentRef.runtimeIDs)
+            var activeCount = 0
+
+            for resolvedPath in resolved.resolvedPaths {
+                guard let childRef = resolvedPath.ref else { continue }
+                if !fallbackParentRef.sessionID.isEmpty, childRef.sessionID == fallbackParentRef.sessionID { continue }
+                guard let rawParentID = childRef.parentSessionID, parentIDs.contains(rawParentID) else { continue }
+                let mtime = modificationDateForPath(resolvedPath.path) ?? .distantPast
+                if mtime > cutoff {
+                    activeCount += 1
+                }
+            }
+
+            if activeCount > 0 {
+                for key in fallbackParentRef.lookupKeys {
+                    counts[key] = max(counts[key] ?? 0, activeCount)
+                }
+            }
+        }
+
+        for presence in presences where presence.source == .opencode {
+            let uniquePaths = uniqueSessionLogPaths(from: presence.openSessionLogPaths)
+            guard uniquePaths.count > 1 else { continue }
+
+            let resolvedPaths = uniquePaths.map { path in
+                (
+                    path: path,
+                    ref: activeSubagentSessionRef(
+                        forLogPath: path,
+                        source: presence.source,
+                        sessionsByLogPath: sessionsByLogPath
+                    )
+                )
+            }
+
+            let parentRef = resolvedPaths.first(where: { $0.ref?.parentSessionID == nil })?.ref
+                ?? presence.sessionLogPath.flatMap {
+                    activeSubagentSessionRef(
+                        forLogPath: $0,
+                        source: presence.source,
+                        sessionsByLogPath: sessionsByLogPath
+                    )
+                }
+            guard let parentRef else { continue }
+
+            let parentIDs = Set(parentRef.runtimeIDs)
+            var activeCount = 0
+
+            for resolved in resolvedPaths {
+                guard let childRef = resolved.ref else { continue }
+                if !parentRef.sessionID.isEmpty, childRef.sessionID == parentRef.sessionID { continue }
+                guard let rawParentID = childRef.parentSessionID, parentIDs.contains(rawParentID) else { continue }
+                let mtime = modificationDateForPath(resolved.path) ?? .distantPast
+                if mtime > cutoff {
+                    activeCount += 1
+                }
+            }
+
+            if activeCount > 0 {
+                for key in parentRef.lookupKeys {
+                    counts[key] = max(counts[key] ?? 0, activeCount)
+                }
+            }
+        }
+
+        return counts
+    }
+
+    private struct CodexOpenSubagentSnapshot {
+        let isAvailable: Bool
+        let countsByParentThreadID: [String: Int]
+    }
+
+    private struct CodexRuntimeOpenSubagentEdge {
+        let parentThreadID: String
+        let childThreadID: String
+    }
+
+    nonisolated private static func codexOpenSubagentSnapshot(stateDBURL: URL? = nil) -> CodexOpenSubagentSnapshot {
+        guard let dbURL = resolvedCodexRuntimeStateDBURL(explicitURL: stateDBURL) else {
+            return CodexOpenSubagentSnapshot(isAvailable: false, countsByParentThreadID: [:])
+        }
+        guard let edges = readCodexRuntimeOpenSubagentEdges(from: dbURL) else {
+            return CodexOpenSubagentSnapshot(isAvailable: false, countsByParentThreadID: [:])
+        }
+        var counts: [String: Int] = [:]
+        for edge in edges {
+            let parentThreadID = cleanedSessionIdentifier(edge.parentThreadID) ?? edge.parentThreadID
+            counts[parentThreadID, default: 0] += 1
+        }
+        return CodexOpenSubagentSnapshot(isAvailable: true, countsByParentThreadID: counts)
+    }
+
+    nonisolated private static func runtimeCodexSubagentCountsByPresenceKey(presences: [CodexActivePresence],
+                                                                            stateDBURL: URL? = nil) -> [String: Int] {
+        let runtimeSnapshot = codexOpenSubagentSnapshot(stateDBURL: stateDBURL)
+        guard runtimeSnapshot.isAvailable else { return [:] }
+
+        var countsByPresenceKey: [String: Int] = [:]
+        for presence in presences where presence.source == .codex {
+            let runtimeIDs = resolveCodexSubagentPresence(presence, sessionsByLogPath: [:]).runtimeLookupIDs
+            guard !runtimeIDs.isEmpty else { continue }
+            let activeCount = runtimeIDs.compactMap { runtimeSnapshot.countsByParentThreadID[$0] }.max() ?? 0
+            guard activeCount > 0 else { continue }
+            countsByPresenceKey[presenceKey(for: presence)] = activeCount
+        }
+        return countsByPresenceKey
+    }
+
+    nonisolated private static func resolvedCodexRuntimeStateDBURL(explicitURL: URL?) -> URL? {
+        if let explicitURL { return explicitURL }
+        for codexRoot in codexRuntimeRoots() {
+            guard let urls = try? FileManager.default.contentsOfDirectory(
+                at: codexRoot,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+            let newestStateDB = urls
+                .filter { url in
+                    let name = url.lastPathComponent
+                    return name.hasPrefix("state_") && name.hasSuffix(".sqlite")
+                }
+                .sorted { lhs, rhs in
+                    let leftDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                    let rightDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                    if leftDate != rightDate { return leftDate > rightDate }
+                    return lhs.lastPathComponent.localizedStandardCompare(rhs.lastPathComponent) == .orderedDescending
+                }
+                .first
+            if let newestStateDB {
+                return newestStateDB
+            }
+        }
+        return nil
+    }
+
+    nonisolated private static func codexRuntimeRoots() -> [URL] {
+        var candidates: [URL] = []
+
+        if let sessionsOverride = UserDefaults.standard.string(forKey: "SessionsRootOverride"),
+           let sessionsURL = parseNonisolatedPath(sessionsOverride) {
+            candidates.append(sessionsURL.deletingLastPathComponent())
+        }
+
+        if let env = ProcessInfo.processInfo.environment["CODEX_HOME"],
+           let envURL = parseNonisolatedPath(env) {
+            candidates.append(envURL)
+        }
+
+        candidates.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true))
+        var roots: [URL] = []
+        var seen: Set<String> = []
+        for url in candidates {
+            let key = url.standardizedFileURL.path
+            if seen.insert(key).inserted {
+                roots.append(url)
+            }
+        }
+        return roots
+    }
+
+    nonisolated private static func parseNonisolatedPath(_ raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        return URL(fileURLWithPath: expanded)
+    }
+
+    nonisolated private static func readCodexRuntimeOpenSubagentEdges(from dbURL: URL) -> [CodexRuntimeOpenSubagentEdge]? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT parent_thread_id, child_thread_id
+            FROM thread_spawn_edges
+            WHERE status = 'open';
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            sqlite3_finalize(stmt)
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var edges: [CodexRuntimeOpenSubagentEdge] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let parentThreadID = textColumn(stmt, 0)
+            let childThreadID = textColumn(stmt, 1)
+            guard !parentThreadID.isEmpty, !childThreadID.isEmpty else { continue }
+            edges.append(CodexRuntimeOpenSubagentEdge(
+                parentThreadID: parentThreadID,
+                childThreadID: childThreadID
+            ))
+        }
+        return edges
+    }
+
+    nonisolated private static func textColumn(_ stmt: OpaquePointer?, _ index: Int32) -> String {
+        guard let cString = sqlite3_column_text(stmt, index) else { return "" }
+        return String(cString: cString)
+    }
+
+    nonisolated private static func cleanedSessionIdentifier(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    nonisolated private static func sessionForLogPath(_ rawPath: String,
+                                                      source: SessionSource,
+                                                      sessionsByLogPath: [String: Session]) -> Session? {
+        let normalizedPath = normalizePath(rawPath)
+        guard !normalizedPath.isEmpty else { return nil }
+        let key = logLookupKey(source: source, normalizedPath: normalizedPath)
+        return sessionsByLogPath[key]
+    }
+
+    private struct ActiveSubagentSessionRef {
+        let sessionID: String
+        let parentSessionID: String?
+        let lookupKeys: [String]
+        let runtimeIDs: [String]
+    }
+
+    private typealias ResolvedActiveSubagentPath = (path: String, ref: ActiveSubagentSessionRef?)
+
+    private struct CodexSubagentPresenceResolution {
+        let resolvedPaths: [ResolvedActiveSubagentPath]
+        let parentRef: ActiveSubagentSessionRef?
+        let runtimeLookupIDs: [String]
+    }
+
+    nonisolated private static func resolveCodexSubagentPresence(_ presence: CodexActivePresence,
+                                                                 sessionsByLogPath: [String: Session]) -> CodexSubagentPresenceResolution {
+        let primaryRef = presence.sessionLogPath.flatMap {
+            activeSubagentSessionRef(
+                forLogPath: $0,
+                source: .codex,
+                sessionsByLogPath: sessionsByLogPath
+            )
+        }
+        var candidatePaths = presence.openSessionLogPaths
+        if let primaryPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !primaryPath.isEmpty {
+            candidatePaths.insert(primaryPath, at: 0)
+        }
+
+        let uniquePaths = uniqueSessionLogPaths(from: candidatePaths)
+        let resolvedPaths: [ResolvedActiveSubagentPath] = uniquePaths.map { path in
+            (
+                path: path,
+                ref: activeSubagentSessionRef(
+                    forLogPath: path,
+                    source: .codex,
+                    sessionsByLogPath: sessionsByLogPath
+                )
+            )
+        }
+
+        let parentRef = resolvedPaths.first(where: { $0.ref?.parentSessionID == nil })?.ref
+            ?? primaryRef
+        let runtimeKeyCandidates = parentRef?.runtimeIDs
+            ?? [presence.sessionId, presence.sessionLogPath.flatMap {
+                extractSessionID(fromLogPath: $0, source: .codex)
+            }].compactMap { $0 }
+        let runtimeLookupIDs = Array(Set(runtimeKeyCandidates.compactMap { cleanedSessionIdentifier($0) }))
+
+        return CodexSubagentPresenceResolution(
+            resolvedPaths: resolvedPaths,
+            parentRef: parentRef,
+            runtimeLookupIDs: runtimeLookupIDs
+        )
+    }
+
+    nonisolated private static func activeSubagentSessionRef(forLogPath rawPath: String,
+                                                             source: SessionSource,
+                                                             sessionsByLogPath: [String: Session]) -> ActiveSubagentSessionRef? {
+        if let session = sessionForLogPath(rawPath, source: source, sessionsByLogPath: sessionsByLogPath) {
+            let runtimeIDs = liveSessionIDCandidates(for: session)
+            let lookupKeys = Array(Set([session.id] + runtimeIDs))
+            return ActiveSubagentSessionRef(
+                sessionID: session.id,
+                parentSessionID: session.parentSessionID,
+                lookupKeys: lookupKeys,
+                runtimeIDs: runtimeIDs.isEmpty ? [session.id] : runtimeIDs
+            )
+        }
+
+        guard let parsed = parseActiveSubagentSessionMeta(fromLogPath: rawPath, source: source) else {
+            return nil
+        }
+        let runtimeIDs = Array(Set([parsed.runtimeSessionID, extractSessionID(fromLogPath: rawPath, source: source)].compactMap { $0 }))
+        let lookupKeys = runtimeIDs
+        return ActiveSubagentSessionRef(
+            sessionID: parsed.runtimeSessionID,
+            parentSessionID: parsed.parentSessionID,
+            lookupKeys: lookupKeys,
+            runtimeIDs: runtimeIDs.isEmpty ? [parsed.runtimeSessionID] : runtimeIDs
+        )
+    }
+
+    private struct ParsedActiveSubagentSessionMeta {
+        let runtimeSessionID: String
+        let parentSessionID: String?
+    }
+
+    nonisolated private static func parseActiveSubagentSessionMeta(fromLogPath rawPath: String,
+                                                                   source: SessionSource) -> ParsedActiveSubagentSessionMeta? {
+        guard source == .codex || source == .opencode else { return nil }
+        let reader = JSONLReader(url: URL(fileURLWithPath: rawPath))
+        var parsed: ParsedActiveSubagentSessionMeta?
+        _ = try? reader.forEachLineWhile { line in
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = obj["type"] as? String,
+                  type == "session_meta",
+                  let payload = obj["payload"] as? [String: Any] else {
+                return true
+            }
+
+            let runtimeSessionID = (payload["id"] as? String)
+                ?? (payload["session_id"] as? String)
+                ?? (obj["session_id"] as? String)
+            guard let runtimeSessionID, !runtimeSessionID.isEmpty else { return false }
+
+            var parentSessionID: String?
+            if let sourceMeta = payload["source"] as? [String: Any],
+               let subagentInfo = sourceMeta["subagent"] as? [String: Any],
+               let threadSpawn = subagentInfo["thread_spawn"] as? [String: Any] {
+                parentSessionID = threadSpawn["parent_thread_id"] as? String
+            }
+
+            parsed = ParsedActiveSubagentSessionMeta(
+                runtimeSessionID: runtimeSessionID,
+                parentSessionID: parentSessionID
+            )
+            return false
+        }
+        return parsed
+    }
+
+    nonisolated private static func uniqueSessionLogPaths(from rawPaths: [String]) -> [String] {
+        var seen: Set<String> = []
+        var out: [String] = []
+        out.reserveCapacity(rawPaths.count)
+        for rawPath in rawPaths {
+            let normalizedPath = normalizePath(rawPath)
+            guard !normalizedPath.isEmpty else { continue }
+            if seen.insert(normalizedPath).inserted {
+                out.append(rawPath)
+            }
+        }
         return out
     }
 
