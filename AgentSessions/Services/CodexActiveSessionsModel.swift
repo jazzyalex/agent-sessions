@@ -1891,15 +1891,19 @@ final class CodexActiveSessionsModel: ObservableObject {
         defer { sqlite3_finalize(stmt) }
 
         var edges: [CodexRuntimeOpenSubagentEdge] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var stepResult = sqlite3_step(stmt)
+        while stepResult == SQLITE_ROW {
             let parentThreadID = textColumn(stmt, 0)
             let childThreadID = textColumn(stmt, 1)
-            guard !parentThreadID.isEmpty, !childThreadID.isEmpty else { continue }
-            edges.append(CodexRuntimeOpenSubagentEdge(
-                parentThreadID: parentThreadID,
-                childThreadID: childThreadID
-            ))
+            if !parentThreadID.isEmpty, !childThreadID.isEmpty {
+                edges.append(CodexRuntimeOpenSubagentEdge(
+                    parentThreadID: parentThreadID,
+                    childThreadID: childThreadID
+                ))
+            }
+            stepResult = sqlite3_step(stmt)
         }
+        guard stepResult == SQLITE_DONE else { return nil }
         return edges
     }
 
