@@ -296,8 +296,9 @@ actor IndexDB {
         }
 
         // Force full reindex to populate parent_session_id and subagent_type for all sessions.
+        // v2: extract agent_role from Codex thread_spawn instead of hardcoding "thread_spawn".
         // Runs after all CREATE TABLE statements so fresh databases don't hit "no such table".
-        let migrationKey = "subagent_reindex_v1"
+        let migrationKey = "subagent_reindex_v2"
         if !migrationApplied(db, key: migrationKey) {
             try exec(db, "DELETE FROM files;")
             try exec(db, "DELETE FROM session_meta;")
