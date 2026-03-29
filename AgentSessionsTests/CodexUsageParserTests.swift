@@ -302,6 +302,65 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.weekRemainingPercent, 99)
     }
 
+    func testStatusProbeParserMarksReturnedWindowsAsAvailable() async {
+        let json = """
+        {
+          "ok": true,
+          "five_hour": {
+            "pct_left": 82,
+            "resets": "resets in 3h"
+          }
+        }
+        """
+
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        let snapshot = await service.parseStatusJSONForTesting(json)
+
+        XCTAssertEqual(snapshot?.limitsSource, .statusProbe)
+        XCTAssertEqual(snapshot?.hasFiveHourRateLimit, true)
+        XCTAssertEqual(snapshot?.fiveHourLimitsSource, .statusProbe)
+        XCTAssertEqual(snapshot?.hasWeekRateLimit, false)
+    }
+
+    func testPartialAuthoritativeMergeDoesNotMarkWholeSnapshotAuthoritative() async {
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        await service.setSnapshotForTesting(
+            CodexUsageSnapshot(
+                fiveHourRemainingPercent: 87,
+                fiveHourResetText: "2026-03-28T18:00:00Z",
+                hasFiveHourRateLimit: true,
+                fiveHourLimitsSource: .jsonlFallback,
+                weekRemainingPercent: 64,
+                weekResetText: "2026-04-01T00:00:00Z",
+                hasWeekRateLimit: true,
+                weekLimitsSource: .jsonlFallback,
+                limitsSource: .jsonlFallback
+            )
+        )
+
+        let merged = await service.mergeRateLimitSnapshotForTesting(
+            CodexUsageSnapshot(
+                fiveHourRemainingPercent: 91,
+                fiveHourResetText: "2026-03-28T19:00:00Z",
+                hasFiveHourRateLimit: true,
+                fiveHourLimitsSource: .oauth,
+                weekRemainingPercent: 0,
+                weekResetText: "",
+                hasWeekRateLimit: false,
+                weekLimitsSource: nil,
+                limitsSource: .oauth
+            )
+        )
+
+        XCTAssertEqual(merged.fiveHourRemainingPercent, 91)
+        XCTAssertEqual(merged.fiveHourLimitsSource, .oauth)
+        XCTAssertEqual(merged.weekRemainingPercent, 64)
+        XCTAssertEqual(merged.weekLimitsSource, .jsonlFallback)
+        XCTAssertNil(merged.limitsSource)
+        let hasAuthoritative = await service.hasAuthoritativeLimitsSnapshotForTesting
+        XCTAssertFalse(hasAuthoritative)
+    }
+
     func testPrefersCodexLimitIDWhenDualLimitBucketsExist() async throws {
         let now = Date()
         let olderTimestamp = ISO8601DateFormatter().string(from: now.addingTimeInterval(-6))
