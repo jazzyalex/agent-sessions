@@ -4,11 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.4] - 2026-03-30
+
+### Added
+- Session list: Codex subagent sessions now appear as nested children under their parent in the unified session list. A toggle shows or hides the hierarchy; `Cmd+H` controls visibility from the keyboard.
+- Agent Cockpit: Active Codex subagent count badge added to HUD rows. `Cmd+Shift+S` toggles subagent display.
+
 ### Fixed
 - Agent Cockpit HUD: Codex active subagent badges now use the runtime `thread_spawn` state DB when available, so open worker agents stay counted even when their rollout files go quiet; passive rollout/`lsof` heuristics remain as a fallback.
 - Agent Cockpit HUD: Codex runtime subagent counts now resolve the parent session before runtime edge lookup (even when the primary log path is a child rollout), and runtime state DB discovery now honors `CODEX_HOME`/`SessionsRootOverride` before falling back to `~/.codex`.
 - Codex limits tracking: Visible usage surfaces now prefer auth-backed limits refresh first, fall back to CLI RPC and JSONL only when needed, and keep `/status` probing as a last resort. Preferences copy now reflects the new source order.
 - Codex limits tracking: `/status` fallback snapshots now refresh their rate-limit buckets correctly, menu-background surfaces still run the preferred OAuth/CLI refresh chain, and partial live responses no longer leave the other bucket frozen as if the whole snapshot were authoritative.
+- Performance: Eliminated a `repeatForever` animation CPU drain in session rows that caused sustained energy use even when sessions were idle.
+- Security: SQL queries throughout the indexer are now fully parameterized; regex extraction is hardened against malformed input.
+- Subagents: Subagent sessions are preserved in search results when hierarchy display is disabled, preventing sessions from going missing in filtered views.
+- OpenCode: Parent ID query is guarded for older SQLite schemas that predate the `parent_id` column.
+- Indexing: Reindex purge now runs after table creation in bootstrap, preventing failures on first-run with no prior DB.
 - Launch/TCC: Session startup now avoids implicit repo filesystem probes while deriving row project names, reducing spurious Photos/Music permission prompts after rebuild/cold launch.
 - Launch restore: `Saved Sessions` window now registers shared window-open routing callbacks, so menu-bar `Open Agent Sessions`/cockpit routing still works when only Saved Sessions is restored.
 - Launch/TCC: Preferences agent status rows and OpenCode backend badges now use stored non-probing state under build tooling, avoiding extra PATH, root-directory, and SQLite checks during metadata extraction.

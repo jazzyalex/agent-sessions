@@ -21,7 +21,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.3.1/AgentSessions-3.3.3.1.dmg"><b>Download Agent Sessions 3.3.3.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.4/AgentSessions-3.4.dmg"><b>Download Agent Sessions 3.4 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -44,11 +44,11 @@ Agent Sessions helps you search across large session histories, quickly find the
   <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI, Claude Code, and OpenCode sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
 
-## What's New in 3.3.3.1
+## What's New in 3.4
 
-**3.3.3.1** — Fixes Codex reset countdown exceeding 5 hours due to a date-rollover bug. Patch release — safe to update immediately.
+**3.4** — Subagent session hierarchy in session history and Agent Cockpit, plus important performance, security, and reliability fixes.
 
-**Highlights:** Claude multi-tier usage tracking (OAuth + Web API fallback), Copy Resume Command for all agents (Claude, Codex, OpenCode, Copilot, Gemini), and critical Codex usage tracking fix.
+**Highlights:** Codex subagent sessions now nest under their parent in the unified session list (`Cmd+H` to toggle). Agent Cockpit shows a live subagent count badge per session. Performance fix eliminates a CPU drain in session rows. SQL queries are fully parameterized throughout.
 
 ## Core Features
 
@@ -93,7 +93,7 @@ Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Cod
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.3.3.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.3.1/AgentSessions-3.3.3.1.dmg)
+1. [Download AgentSessions-3.4.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.4/AgentSessions-3.4.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
