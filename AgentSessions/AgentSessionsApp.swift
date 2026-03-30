@@ -195,6 +195,7 @@ struct AgentSessionsApp: App {
     @State private var analyticsReadyObserver: AnyCancellable?
 
     init() {
+        guard !AppRuntime.isRunningTests else { return }
         let defaults = UserDefaults.standard
         let hideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
         let menuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
@@ -208,32 +209,35 @@ struct AgentSessionsApp: App {
     var body: some Scene {
         // Default unified window
         WindowGroup("Agent Sessions", id: "Agent Sessions") {
-            let unified = unifiedIndexerHolder.makeUnified(
-                codexIndexer: indexer,
-                claudeIndexer: claudeIndexer,
-                geminiIndexer: geminiIndexer,
-                opencodeIndexer: opencodeIndexer,
-                copilotIndexer: copilotIndexer,
-                droidIndexer: droidIndexer,
-                openclawIndexer: openclawIndexer
-            )
-            let layoutMode = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
-            UnifiedSessionsView(
-                unified: unified,
-                codexIndexer: indexer,
-                claudeIndexer: claudeIndexer,
-                geminiIndexer: geminiIndexer,
-                opencodeIndexer: opencodeIndexer,
-                copilotIndexer: copilotIndexer,
-                droidIndexer: droidIndexer,
-                openclawIndexer: openclawIndexer,
-                analyticsReady: analyticsReady,
-                layoutMode: layoutMode,
-                onToggleLayout: {
-                    let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
-                    layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
-                }
-            )
+            if AppRuntime.isRunningTests {
+                EmptyView()
+            } else {
+                let unified = unifiedIndexerHolder.makeUnified(
+                    codexIndexer: indexer,
+                    claudeIndexer: claudeIndexer,
+                    geminiIndexer: geminiIndexer,
+                    opencodeIndexer: opencodeIndexer,
+                    copilotIndexer: copilotIndexer,
+                    droidIndexer: droidIndexer,
+                    openclawIndexer: openclawIndexer
+                )
+                let layoutMode = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
+                UnifiedSessionsView(
+                    unified: unified,
+                    codexIndexer: indexer,
+                    claudeIndexer: claudeIndexer,
+                    geminiIndexer: geminiIndexer,
+                    opencodeIndexer: opencodeIndexer,
+                    copilotIndexer: copilotIndexer,
+                    droidIndexer: droidIndexer,
+                    openclawIndexer: openclawIndexer,
+                    analyticsReady: analyticsReady,
+                    layoutMode: layoutMode,
+                    onToggleLayout: {
+                        let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
+                        layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
+                    }
+                )
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
                 .environmentObject(activeCodexSessions)
@@ -301,6 +305,7 @@ struct AgentSessionsApp: App {
                     }
                 }
                 // Immediate cleanup happens after each probe; no app-exit cleanup required.
+            }
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -352,30 +357,37 @@ struct AgentSessionsApp: App {
         }
 
         WindowGroup("Saved Sessions", id: "PinnedSessions") {
-            PinnedSessionsView(
-                unified: unifiedIndexerHolder.makeUnified(
-                    codexIndexer: indexer,
-                    claudeIndexer: claudeIndexer,
-                    geminiIndexer: geminiIndexer,
-                    opencodeIndexer: opencodeIndexer,
-                    copilotIndexer: copilotIndexer,
-                    droidIndexer: droidIndexer,
-                    openclawIndexer: openclawIndexer
+            if AppRuntime.isRunningTests {
+                EmptyView()
+            } else {
+                PinnedSessionsView(
+                    unified: unifiedIndexerHolder.makeUnified(
+                        codexIndexer: indexer,
+                        claudeIndexer: claudeIndexer,
+                        geminiIndexer: geminiIndexer,
+                        opencodeIndexer: opencodeIndexer,
+                        copilotIndexer: copilotIndexer,
+                        droidIndexer: droidIndexer,
+                        openclawIndexer: openclawIndexer
+                    )
                 )
-            )
-            .environmentObject(archiveManager)
-            .background(WindowOpenRegistrationView())
-            .onAppear {
-                runSharedLaunchBootstrap(windowLabel: "Saved Sessions window")
+                .environmentObject(archiveManager)
+                .background(WindowOpenRegistrationView())
+                .onAppear {
+                    runSharedLaunchBootstrap(windowLabel: "Saved Sessions window")
+                }
             }
         }
 
         Window("Agent Cockpit", id: "AgentCockpit") {
-            AgentCockpitHUDView(
-                codexIndexer: indexer,
-                claudeIndexer: claudeIndexer,
-                opencodeIndexer: opencodeIndexer
-            )
+            if AppRuntime.isRunningTests {
+                EmptyView()
+            } else {
+                AgentCockpitHUDView(
+                    codexIndexer: indexer,
+                    claudeIndexer: claudeIndexer,
+                    opencodeIndexer: opencodeIndexer
+                )
                 .environmentObject(activeCodexSessions)
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
@@ -389,6 +401,7 @@ struct AgentSessionsApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
                     handleAppDidResignActive()
                 }
+            }
         }
         .defaultSize(width: 644, height: 320)
     }

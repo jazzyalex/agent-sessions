@@ -24,6 +24,10 @@ actor ClaudeDelegatedTokenRefresh {
     private let fingerprint = ClaudeCredentialFingerprint()
 
     func attemptRefresh() async -> RefreshResult {
+        guard !AppRuntime.isRunningTests else {
+            os_log("ClaudeOAuth: delegated refresh — skipped in test mode", log: log, type: .info)
+            return .cliUnavailable
+        }
         guard let binaryURL = ClaudeCLIEnvironment().resolveBinary(customPath: nil) else {
             os_log("ClaudeOAuth: delegated refresh — claude binary not found", log: log, type: .info)
             return .cliUnavailable
