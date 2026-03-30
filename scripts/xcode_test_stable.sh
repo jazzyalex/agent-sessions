@@ -11,7 +11,7 @@ CONFIGURATION="Debug"
 DESTINATION="platform=macOS,arch=arm64"
 DERIVED_DATA_PATH="${PWD}/.deriveddata-tests"
 
-exec xcodebuild \
+exec env AGENT_SESSIONS_TEST_MODE=1 xcodebuild \
   -project "${PROJECT}" \
   -scheme "${SCHEME}" \
   -configuration "${CONFIGURATION}" \

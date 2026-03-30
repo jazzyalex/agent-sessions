@@ -5,6 +5,12 @@ enum AppRuntime {
     /// Cached on first access — the test-host environment doesn't change mid-process.
     static let isRunningTests: Bool = {
         let env = ProcessInfo.processInfo.environment
+        let forced = (env["AGENT_SESSIONS_TEST_MODE"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if forced == "1" || forced == "true" || forced == "yes" {
+            return true
+        }
         let testKeys = [
             "XCTestConfigurationFilePath",
             "XCTestBundlePath",
