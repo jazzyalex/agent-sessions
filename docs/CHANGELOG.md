@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 - Agent Cockpit HUD: Codex runtime subagent counts now resolve the parent session before runtime edge lookup (even when the primary log path is a child rollout), and runtime state DB discovery now honors `CODEX_HOME`/`SessionsRootOverride` before falling back to `~/.codex`.
 - Codex limits tracking: Visible usage surfaces now prefer auth-backed limits refresh first, fall back to CLI RPC and JSONL only when needed, and keep `/status` probing as a last resort. Preferences copy now reflects the new source order.
 - Codex limits tracking: `/status` fallback snapshots now refresh their rate-limit buckets correctly, menu-background surfaces still run the preferred OAuth/CLI refresh chain, and partial live responses no longer leave the other bucket frozen as if the whole snapshot were authoritative.
+- Launch/TCC: Session startup now avoids implicit repo filesystem probes while deriving row project names, reducing spurious Photos/Music permission prompts after rebuild/cold launch.
+- Launch restore: `Saved Sessions` window now registers shared window-open routing callbacks, so menu-bar `Open Agent Sessions`/cockpit routing still works when only Saved Sessions is restored.
 
 ## [3.3.3.1] - 2026-03-26
 

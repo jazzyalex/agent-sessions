@@ -364,6 +364,7 @@ struct AgentSessionsApp: App {
                 )
             )
             .environmentObject(archiveManager)
+            .background(WindowOpenRegistrationView())
             .onAppear {
                 runSharedLaunchBootstrap(windowLabel: "Saved Sessions window")
             }
