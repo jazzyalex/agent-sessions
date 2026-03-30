@@ -169,6 +169,10 @@ final class CodexUsageModel: ObservableObject {
     private var appIsActive: Bool = false
 
     func setEnabled(_ enabled: Bool) {
+        if AppRuntime.isRunningTests {
+            if !enabled { stop() }
+            return
+        }
         guard enabled != isEnabled else { return }
         isEnabled = enabled
         if enabled {
@@ -194,6 +198,7 @@ final class CodexUsageModel: ObservableObject {
     }
 
     func setAppActive(_ active: Bool) {
+        guard !AppRuntime.isRunningTests else { return }
         appIsActive = active
         propagateVisibility()
     }
@@ -220,6 +225,7 @@ final class CodexUsageModel: ObservableObject {
     }
 
     func refreshNow() {
+        guard !AppRuntime.isRunningTests else { return }
         guard isEnabled else { return }
         if isUpdating { return }
         isUpdating = true
@@ -342,6 +348,7 @@ final class CodexUsageModel: ObservableObject {
     }
 
     private func start() {
+        guard !AppRuntime.isRunningTests else { return }
         let model = self
         let handler: @Sendable (CodexUsageSnapshot) -> Void = { snapshot in
             Task { @MainActor in

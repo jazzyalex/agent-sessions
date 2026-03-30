@@ -392,6 +392,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func setUnifiedConsumerVisible(_ visible: Bool, consumerID: UUID) {
+        guard !AppRuntime.isRunningTests else { return }
         let hadVisibleConsumer = hasVisibleConsumer
         if visible { unifiedVisibleConsumerIDs.insert(consumerID) }
         else { unifiedVisibleConsumerIDs.remove(consumerID) }
@@ -404,6 +405,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func setCockpitConsumerVisible(_ visible: Bool, consumerID: UUID) {
+        guard !AppRuntime.isRunningTests else { return }
         let hadVisibleConsumer = hasVisibleConsumer
         if visible { cockpitVisibleConsumerIDs.insert(consumerID) }
         else {
@@ -419,6 +421,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func setCockpitWindowVisible(_ visible: Bool, consumerID: UUID) {
+        guard !AppRuntime.isRunningTests else { return }
         let hadVisibleCockpitWindow = hasVisibleCockpitWindow
         if visible {
             guard cockpitVisibleConsumerIDs.contains(consumerID) else { return }
@@ -438,6 +441,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func setAppActive(_ active: Bool) {
+        guard !AppRuntime.isRunningTests else { return }
         guard appIsActive != active else { return }
         appIsActive = active
         resetStablePollBackoff()
@@ -466,6 +470,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     }
 
     func refreshNow() {
+        guard !AppRuntime.isRunningTests else { return }
         // Manual refresh should bypass probe throttling so live state transitions
         // (active -> open and vice versa) are reflected immediately.
         lastProcessProbeAt = nil
@@ -487,6 +492,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     // MARK: - Polling
 
     private func startPollingIfNeeded() {
+        guard !AppRuntime.isRunningTests else { return }
         guard enabled else { return }
         guard pollTask == nil else { return }
 

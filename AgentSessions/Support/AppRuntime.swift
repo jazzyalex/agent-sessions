@@ -3,7 +3,32 @@ import Foundation
 enum AppRuntime {
     /// True when running under Xcode/`xcodebuild test`.
     static var isRunningTests: Bool {
-        return ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let env = ProcessInfo.processInfo.environment
+        let testKeys = [
+            "XCTestConfigurationFilePath",
+            "XCTestBundlePath",
+            "XCInjectBundle",
+            "XCInjectBundleInto",
+            "XCTestSessionIdentifier"
+        ]
+        if testKeys.contains(where: { !(env[$0] ?? "").isEmpty }) {
+            return true
+        }
+        if Bundle.main.bundlePath.contains("/.deriveddata-tests/") {
+            return true
+        }
+        if NSClassFromString("XCTestCase") != nil {
+            return true
+        }
+        return false
+    }
+
+    /// True when app code is being loaded by tooling rather than the real app process.
+    /// Build-time metadata extraction can load app types in-process, so avoid any
+    /// filesystem probing in that environment.
+    static var isHostedByTooling: Bool {
+        if isRunningTests { return true }
+        return Bundle.main.bundleIdentifier != "com.triada.AgentSessions"
     }
 }
 

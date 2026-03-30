@@ -397,12 +397,10 @@ extension PreferencesView {
 
 private extension PreferencesView {
     func agentEnableToggle(title: String, source: SessionSource, isOn: Binding<Bool>, enabledCount: Int) -> some View {
-        let installed = AgentEnablement.binaryInstalled(for: source)
-        let available = installed || AgentEnablement.isAvailable(source)
-        let statusText: String = installed ? "Installed" : (available ? "Data folder found" : "Not installed")
+        let availability = AgentEnablement.storedAvailabilityStatus(for: source)
         let isCurrentlyOn = isOn.wrappedValue
         let canDisable = !(enabledCount == 1 && isCurrentlyOn)
-        let canEnable = available || isCurrentlyOn
+        let canEnable = availability.isAvailable || isCurrentlyOn
         let accent = Color.agentColor(for: source, monochrome: stripMonochromeGlobal)
 
         return Toggle(isOn: Binding(
@@ -416,7 +414,7 @@ private extension PreferencesView {
                     .foregroundStyle(accent)
                     .opacity(isCurrentlyOn ? 1.0 : 0.6)
                 Spacer()
-                Text(statusText)
+                Text(availability.statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

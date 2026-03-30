@@ -553,6 +553,7 @@ extension AgentSessionsApp {
 
     @MainActor
     private func handleAppDidBecomeActive() {
+        guard !AppRuntime.isRunningTests else { return }
         unifiedIndexerHolder.unified?.setAppActive(true)
         activeCodexSessions.setAppActive(true)
         codexUsageModel.setAppActive(true)
@@ -562,6 +563,7 @@ extension AgentSessionsApp {
 
     @MainActor
     private func handleAppDidResignActive() {
+        guard !AppRuntime.isRunningTests else { return }
         unifiedIndexerHolder.unified?.setAppActive(false)
         activeCodexSessions.setAppActive(false)
         codexUsageModel.setAppActive(false)
@@ -597,12 +599,14 @@ extension AgentSessionsApp {
     }
 
     private func handleAgentEnablementChange() {
+        guard !AppRuntime.isRunningTests else { return }
         unifiedIndexerHolder.unified?.recomputeNow()
         analyticsService?.refreshReadiness()
         updateUsageModels()
     }
 
     private func updateUsageModels() {
+        guard !AppRuntime.isRunningTests else { return }
         let d = UserDefaults.standard
         // Migration defaults on first run of new toggles
         let codexEnabled: Bool = {
@@ -633,6 +637,7 @@ extension AgentSessionsApp {
     }
 
     private func ensureStatusItemController() {
+        guard !AppRuntime.isRunningTests else { return }
         guard statusItemController == nil else { return }
         statusItemController = StatusItemController(indexer: indexer,
                                                     claudeIndexer: claudeIndexer,
