@@ -397,7 +397,7 @@ extension PreferencesView {
 
 private extension PreferencesView {
     func agentEnableToggle(title: String, source: SessionSource, isOn: Binding<Bool>, enabledCount: Int) -> some View {
-        let availability = AgentEnablement.storedAvailabilityStatus(for: source)
+        let availability = AgentEnablement.availabilityStatus(for: source)
         let isCurrentlyOn = isOn.wrappedValue
         let canDisable = !(enabledCount == 1 && isCurrentlyOn)
         let canEnable = availability.isAvailable || isCurrentlyOn

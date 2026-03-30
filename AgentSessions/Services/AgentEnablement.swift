@@ -99,6 +99,7 @@ enum AgentEnablement {
     }
 
     static func seedIfNeeded(defaults: UserDefaults = .standard) {
+        guard !AppRuntime.isHostedByTooling else { return }
         if defaults.bool(forKey: PreferencesKey.Agents.didSeedEnabledAgents) { return }
 
         // Migration: if the old "show toolbar filter" keys exist, treat them as the initial enabled set.
@@ -240,6 +241,19 @@ enum AgentEnablement {
         if storedEnabledPreference(for: source, defaults: defaults) == true {
             return .configured
         }
+        return .unavailable
+    }
+
+    /// Live availability status using filesystem probing when running as the real app,
+    /// falling back to stored (non-probing) status under build tooling / test hosts.
+    static func availabilityStatus(for source: SessionSource, defaults: UserDefaults = .standard) -> StoredAvailabilityStatus {
+        if AppRuntime.isHostedByTooling {
+            return storedAvailabilityStatus(for: source, defaults: defaults)
+        }
+        let installed = binaryInstalled(for: source)
+        let available = installed || isAvailable(source, defaults: defaults)
+        if installed { return .installed }
+        if available { return .configured }
         return .unavailable
     }
 
