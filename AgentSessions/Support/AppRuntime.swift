@@ -2,7 +2,8 @@ import Foundation
 
 enum AppRuntime {
     /// True when running under Xcode/`xcodebuild test`.
-    static var isRunningTests: Bool {
+    /// Cached on first access — the test-host environment doesn't change mid-process.
+    static let isRunningTests: Bool = {
         let env = ProcessInfo.processInfo.environment
         let testKeys = [
             "XCTestConfigurationFilePath",
@@ -21,15 +22,16 @@ enum AppRuntime {
             return true
         }
         return false
-    }
+    }()
 
     /// True when app code is being loaded by tooling rather than the real app process.
     /// Build-time metadata extraction can load app types in-process, so avoid any
     /// filesystem probing in that environment.
-    static var isHostedByTooling: Bool {
+    /// Coupled to bundle ID `com.triada.AgentSessions` — update if the app is rebranded.
+    static let isHostedByTooling: Bool = {
         if isRunningTests { return true }
         return Bundle.main.bundleIdentifier != "com.triada.AgentSessions"
-    }
+    }()
 }
 
 /// Lightweight helper for measuring launch-time phases end-to-end.
