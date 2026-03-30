@@ -3163,6 +3163,91 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertNil(counts["019d371a-45f2-7443-a076-d68981630bf3"])
     }
 
+    func testUnifiedMergedSessions_respectsEnablementFavoritesAndSortOrder() {
+        let now = Date()
+        let codex = makeFallbackSession(id: "codex-a", source: .codex, cwd: nil, modifiedAt: now)
+        let claude = makeFallbackSession(id: "claude-z", source: .claude, cwd: nil, modifiedAt: now.addingTimeInterval(5))
+        let hiddenGemini = makeFallbackSession(id: "gemini-hidden", source: .gemini, cwd: nil, modifiedAt: now.addingTimeInterval(-60))
+        let favoriteKey = StarredSessionKey(source: .claude, id: claude.id)
+        let work = UnifiedSessionIndexer.SessionAggregationWork(
+            codexList: [codex],
+            claudeList: [claude],
+            geminiList: [hiddenGemini],
+            opencodeList: [],
+            copilotList: [],
+            droidList: [],
+            openclawList: [],
+            favoritesSnapshot: UnifiedSessionIndexer.FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: [favoriteKey]),
+            enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
+                codex: true,
+                claude: true,
+                gemini: false,
+                openCode: false,
+                copilot: false,
+                droid: false,
+                openClaw: false
+            )
+        )
+
+        let merged = UnifiedSessionIndexer.mergedSessions(from: work)
+
+        XCTAssertEqual(merged.map(\.id), ["claude-z", "codex-a"])
+        XCTAssertEqual(merged.map(\.isFavorite), [true, false])
+    }
+
+    @MainActor
+    func testDebugRunManagedCommand_returnsOutputBeforeTimeout() async {
+        let model = CodexActiveSessionsModel()
+
+        let data = await model.debugRunManagedCommand(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf ready"],
+            timeout: 1
+        )
+
+        XCTAssertEqual(data.map { String(decoding: $0, as: UTF8.self) }, "ready")
+    }
+
+    @MainActor
+    func testDebugRunManagedCommand_returnsNilAfterTimeout() async {
+        let model = CodexActiveSessionsModel()
+
+        let data = await model.debugRunManagedCommand(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "sleep 1"],
+            timeout: 0.1
+        )
+
+        XCTAssertNil(data)
+    }
+
+    @MainActor
+    func testDebugRunManagedCommand_replacedProbeDropsEarlierResult() async {
+        let model = CodexActiveSessionsModel()
+
+        let firstTask = Task { @MainActor in
+            await model.debugRunManagedCommand(
+                kind: .processDiscovery,
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "sleep 1; printf late"],
+                timeout: 2
+            )
+        }
+
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        let replacement = await model.debugRunManagedCommand(
+            kind: .processDiscovery,
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf replacement"],
+            timeout: 1
+        )
+        let first = await firstTask.value
+
+        XCTAssertNil(first)
+        XCTAssertEqual(replacement.map { String(decoding: $0, as: UTF8.self) }, "replacement")
+    }
+
     @MainActor
     private func drainMainRunLoop() {
         let until = Date().addingTimeInterval(0.06)
