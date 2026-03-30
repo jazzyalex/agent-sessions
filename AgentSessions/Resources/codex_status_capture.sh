@@ -289,8 +289,8 @@ fi
 cat <<EOF
 {
   "ok": true,
-  "five_hour": { "pct_left": ${p5:-0}, "resets": "${r5}" },
-  "weekly": { "pct_left": ${pw:-0}, "resets": "${rw}" }
+  "five_hour": { "pct_left": ${p5:-null}, "resets": "${r5}" },
+  "weekly": { "pct_left": ${pw:-null}, "resets": "${rw}" }
 }
 EOF
 
