@@ -3178,6 +3178,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             droidList: [],
             openclawList: [],
             favoritesSnapshot: UnifiedSessionIndexer.FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: [favoriteKey]),
+            favoritesVersion: 1,
             enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
                 codex: true,
                 claude: true,
@@ -3193,6 +3194,40 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
 
         XCTAssertEqual(merged.map(\.id), ["claude-z", "codex-a"])
         XCTAssertEqual(merged.map(\.isFavorite), [true, false])
+    }
+
+    func testUnifiedMergedAggregationResult_isRejectedWhenFavoritesVersionIsStale() {
+        let now = Date()
+        let session = makeFallbackSession(id: "codex-a", source: .codex, cwd: nil, modifiedAt: now)
+        let work = UnifiedSessionIndexer.SessionAggregationWork(
+            codexList: [session],
+            claudeList: [],
+            geminiList: [],
+            opencodeList: [],
+            copilotList: [],
+            droidList: [],
+            openclawList: [],
+            favoritesSnapshot: UnifiedSessionIndexer.FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: []),
+            favoritesVersion: 3,
+            enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
+                codex: true,
+                claude: false,
+                gemini: false,
+                openCode: false,
+                copilot: false,
+                droid: false,
+                openClaw: false
+            )
+        )
+
+        let result = UnifiedSessionIndexer.mergedAggregationResult(from: work)
+
+        XCTAssertFalse(
+            UnifiedSessionIndexer.shouldPublishAggregationResult(result, currentFavoritesVersion: 4)
+        )
+        XCTAssertTrue(
+            UnifiedSessionIndexer.shouldPublishAggregationResult(result, currentFavoritesVersion: 3)
+        )
     }
 
     @MainActor

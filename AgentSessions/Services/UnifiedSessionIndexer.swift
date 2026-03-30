@@ -310,6 +310,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let droidList: [Session]
         let openclawList: [Session]
         let favoritesSnapshot: FavoritesStore.Snapshot
+        let favoritesVersion: UInt64
         let enablement: AgentEnablementSnapshot
 
         static let empty = SessionAggregationWork(
@@ -321,6 +322,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             droidList: [],
             openclawList: [],
             favoritesSnapshot: FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: []),
+            favoritesVersion: 0,
             enablement: AgentEnablementSnapshot(
                 codex: false,
                 claude: false,
@@ -331,6 +333,10 @@ final class UnifiedSessionIndexer: ObservableObject {
                 openClaw: false
             )
         )
+    }
+    struct SessionAggregationResult {
+        let sessions: [Session]
+        let favoritesVersion: UInt64
     }
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
@@ -440,6 +446,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var notificationObserverTokens: [NSObjectProtocol] = []
     private var favorites = FavoritesStore()
+    private var favoritesSnapshotVersion: UInt64 = 0
     private var hasPublishedInitialSessions = false
     @Published private(set) var isAnalyticsIndexing: Bool = false
     private var lastAnalyticsRefreshStartedAt: Date? = nil
@@ -530,6 +537,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                     droidList: droidList,
                     openclawList: openclawList,
                     favoritesSnapshot: self.favorites.snapshot(),
+                    favoritesVersion: self.favoritesSnapshotVersion,
                     enablement: AgentEnablementSnapshot(
                         codex: codexEnabled,
                         claude: claudeEnabled,
@@ -542,11 +550,15 @@ final class UnifiedSessionIndexer: ObservableObject {
                 )
             }
             .receive(on: Self.aggregationQueue)
-            .map(Self.mergedSessions(from:))
+            .map(Self.mergedAggregationResult(from:))
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] value in
-                self?.publishAfterCurrentUpdate { [weak self] in
-                    self?.allSessions = value
+            .sink { [weak self] result in
+                guard let self,
+                      Self.shouldPublishAggregationResult(result, currentFavoritesVersion: self.favoritesSnapshotVersion) else { return }
+                self.publishAfterCurrentUpdate { [weak self] in
+                    guard let self,
+                          Self.shouldPublishAggregationResult(result, currentFavoritesVersion: self.favoritesSnapshotVersion) else { return }
+                    self.allSessions = result.sessions
                 }
             }
             .store(in: &cancellables)
@@ -1709,7 +1721,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
-    static func mergedSessions(from work: SessionAggregationWork) -> [Session] {
+    static func mergedAggregationResult(from work: SessionAggregationWork) -> SessionAggregationResult {
         var merged: [Session] = []
         if work.enablement.codex { merged.append(contentsOf: work.codexList) }
         if work.enablement.claude { merged.append(contentsOf: work.claudeList) }
@@ -1721,10 +1733,24 @@ final class UnifiedSessionIndexer: ObservableObject {
         for index in merged.indices {
             merged[index].isFavorite = work.favoritesSnapshot.contains(id: merged[index].id, source: merged[index].source)
         }
-        return merged.sorted { lhs, rhs in
+        let sessions = merged.sorted { lhs, rhs in
             if lhs.modifiedAt == rhs.modifiedAt { return lhs.id > rhs.id }
             return lhs.modifiedAt > rhs.modifiedAt
         }
+        return SessionAggregationResult(sessions: sessions, favoritesVersion: work.favoritesVersion)
+    }
+
+    static func mergedSessions(from work: SessionAggregationWork) -> [Session] {
+        mergedAggregationResult(from: work).sessions
+    }
+
+    static func shouldPublishAggregationResult(_ result: SessionAggregationResult,
+                                               currentFavoritesVersion: UInt64) -> Bool {
+        result.favoritesVersion == currentFavoritesVersion
+    }
+
+    private func bumpFavoritesSnapshotVersion() {
+        favoritesSnapshotVersion &+= 1
     }
 
     /// Apply current UI filters and sort preferences to a list of sessions.
@@ -1893,6 +1919,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     // MARK: - Favorites
     func toggleFavorite(_ session: Session) {
+        bumpFavoritesSnapshotVersion()
         let nowStarred = favorites.toggle(id: session.id, source: session.source)
         if let idx = allSessions.firstIndex(where: { $0.id == session.id && $0.source == session.source }) {
             allSessions[idx].isFavorite = nowStarred
@@ -1913,6 +1940,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if let s = allSessions.first(where: { $0.id == id && $0.source == source }) {
             toggleFavorite(s)
         } else {
+            bumpFavoritesSnapshotVersion()
             let nowStarred = favorites.toggle(id: id, source: source)
             if !nowStarred {
                 let removeArchive = UserDefaults.standard.bool(forKey: PreferencesKey.Archives.unstarRemovesArchive)
