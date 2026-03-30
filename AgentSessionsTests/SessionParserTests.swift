@@ -95,6 +95,24 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(s.codexInternalSessionID, "019b2ea4-2a8d-76e2-9cd8-58208e1f2837")
     }
 
+    func testRepoNamePrefersStoredLightweightRepoName() {
+        let session = Session(
+            id: "test-session",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/tmp/fake.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/alexm/Music/some/nested/path",
+            repoName: "stored-repo",
+            lightweightTitle: "t"
+        )
+
+        XCTAssertEqual(session.repoName, "stored-repo")
+    }
+
     func testCodexLightweightHandlesHugeFirstLine() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexHugeMeta-\(UUID().uuidString)", isDirectory: true)

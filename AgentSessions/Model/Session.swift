@@ -18,6 +18,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
 
     // Lightweight session metadata (when events is empty)
     public let lightweightCwd: String?
+    public let lightweightRepoName: String?
     public let lightweightTitle: String?
     public let codexInternalSessionIDHint: String?
 
@@ -54,6 +55,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.events = events
         self.isHousekeeping = isHousekeeping
         self.lightweightCwd = nil
+        self.lightweightRepoName = nil
         self.lightweightTitle = nil
         self.codexInternalSessionIDHint = codexInternalSessionIDHint
         self.lightweightCommands = nil
@@ -91,6 +93,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.events = events
         self.isHousekeeping = isHousekeeping
         self.lightweightCwd = cwd
+        self.lightweightRepoName = repoName
         self.lightweightTitle = lightweightTitle
         self.codexInternalSessionIDHint = codexInternalSessionIDHint
         self.lightweightCommands = lightweightCommands
@@ -110,6 +113,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case eventCount
         case events
         case lightweightCwd
+        case lightweightRepoName
         case lightweightTitle
         case lightweightCommands
         case codexInternalSessionIDHint
@@ -433,14 +437,15 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         return nil
     }
     public var repoName: String? {
-        guard let cwd else { return nil }
-
-        // 1. Try git repository detection first
-        if let info = Self.gitInfo(from: cwd) {
-            return URL(fileURLWithPath: info.root).lastPathComponent
+        if let stored = lightweightRepoName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !stored.isEmpty {
+            return stored
         }
 
-        // 2. Fallback: use directory name if it looks like a project
+        guard let cwd else { return nil }
+        // Avoid implicit filesystem probing here. This property is read per-row
+        // during startup/indexing and probing arbitrary cwd paths can trigger TCC prompts.
+        // Prefer lightweight metadata and path-based heuristics only.
         let url = URL(fileURLWithPath: cwd)
         let dirName = url.lastPathComponent
 
@@ -450,7 +455,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             return dirName
         }
 
-        // 3. Final fallback: try parent directory name
+        // Final fallback: try parent directory name
         let parent = url.deletingLastPathComponent()
         let parentName = parent.lastPathComponent
         if !genericNames.contains(parentName) && !parentName.isEmpty && parentName != "." {
