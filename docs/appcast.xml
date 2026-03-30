@@ -3,20 +3,37 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.3.3.1</title>
-            <pubDate>Thu, 26 Mar 2026 20:41:06 -0400</pubDate>
+            <title>3.4</title>
+            <pubDate>Mon, 30 Mar 2026 16:49:20 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.3.3.1</h2>
+<h2>What&#x27;s New in 3.4</h2>
+<h3>Features</h3>
+<ul>
+<li>Session list: Codex subagent sessions now appear as nested children under their parent in the unified session list. A toggle shows or hides the hierarchy; `Cmd+H` controls visibility from the keyboard.</li>
+<li>Agent Cockpit: Active Codex subagent count badge added to HUD rows. `Cmd+Shift+S` toggles subagent display.</li>
+</ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li>Codex: Reset countdown no longer exceeds the 5-hour window — reset times are now stored in ISO 8601 format, preventing a date-rollover bug that produced countdowns of up to 24 hours.</li>
+<li>Agent Cockpit HUD: Codex active subagent badges now use the runtime `thread_spawn` state DB when available, so open worker agents stay counted even when their rollout files go quiet; passive rollout/`lsof` heuristics remain as a fallback.</li>
+<li>Agent Cockpit HUD: Codex runtime subagent counts now resolve the parent session before runtime edge lookup (even when the primary log path is a child rollout), and runtime state DB discovery now honors `CODEX_HOME`/`SessionsRootOverride` before falling back to `~/.codex`.</li>
+<li>Codex limits tracking: Visible usage surfaces now prefer auth-backed limits refresh first, fall back to CLI RPC and JSONL only when needed, and keep `/status` probing as a last resort. Preferences copy now reflects the new source order.</li>
+<li>Codex limits tracking: `/status` fallback snapshots now refresh their rate-limit buckets correctly, menu-background surfaces still run the preferred OAuth/CLI refresh chain, and partial live responses no longer leave the other bucket frozen as if the whole snapshot were authoritative.</li>
+<li>Performance: Eliminated a `repeatForever` animation CPU drain in session rows that caused sustained energy use even when sessions were idle.</li>
+<li>Security: SQL queries throughout the indexer are now fully parameterized; regex extraction is hardened against malformed input.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.3.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.3.3.1</a></p>
+<h3>Reminder: What You Got in 3.3</h3>
+<ul>
+<li>Claude Usage: Multi-tier tracking with credential gating and Web API fallback. Reads live token usage via the OAuth endpoint (60-second refresh cycle), falls back to the tmux socket probe, and optionally fetches from the claude.ai Web API using a session cookie — with clear Full Disk Access guidance surfaced in Preferences when Web API mode is active.</li>
+<li>Claude Usage: Unified the refresh-interval constant across all tracking tiers and hardened org UUID validation to prevent bad identifiers from poisoning the cache across sessions.</li>
+<li>Preferences: Usage Tracking pane layout overhauled — data-source picker converted to a popup menu, segmented controls fill available width without overflow, and strip-option toggles stacked vertically for consistency.</li>
+<li>Usage display: Codex auto-probe cooldown no longer masquerades as UI freshness. Cockpit and in-app usage surfaces now age data correctly after `/status` probes while still suppressing redundant background probes.</li>
+</ul>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.4">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.4</a></p>
             ]]></description>
-            <sparkle:version>32</sparkle:version>
-            <sparkle:shortVersionString>3.3.3.1</sparkle:shortVersionString>
+            <sparkle:version>33</sparkle:version>
+            <sparkle:shortVersionString>3.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.3.3.1/AgentSessions-3.3.3.1.dmg" length="15005280" type="application/octet-stream" sparkle:edSignature="osmDm2Ism6cKnWXLLuBuvQn6UD+seH0WWXQFofXTUM2u3bDOL1FxhY7HXITc0j/PQEVXvPWXLBAXIxI/NTEnBw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.4/AgentSessions-3.4.dmg" length="15203510" type="application/octet-stream" sparkle:edSignature="dsciguTBP1Tljfojn+Chx61JAJDXAJ9W4/fApnQUObNHPY2MwrrZos1G/5DoRZpT5rTQdpROq66aLROXWnmkDw=="/>
         </item>
     </channel>
 </rss>
