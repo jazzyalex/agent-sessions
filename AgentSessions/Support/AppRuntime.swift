@@ -47,3 +47,44 @@ final class Locked<Value>: @unchecked Sendable {
         return body(&value)
     }
 }
+
+/// One-shot gate that opens one run-loop tick after the first window appears.
+/// Startup work that touches the filesystem should `await waitUntilReady()`
+/// so macOS TCC sees the access only after the UI is visible.
+enum AppReadyGate {
+    private static let state = Locked<GateState>(.waiting([]))
+
+    private enum GateState {
+        case waiting([CheckedContinuation<Void, Never>])
+        case ready
+    }
+
+    static func markReady() {
+        let continuations: [CheckedContinuation<Void, Never>]
+        continuations = state.withLock { s in
+            guard case .waiting(let pending) = s else { return [] }
+            s = .ready
+            return pending
+        }
+        for c in continuations { c.resume() }
+    }
+
+    static func waitUntilReady() async {
+        let needsWait: Bool = state.withLock { s in
+            if case .ready = s { return false }
+            return true
+        }
+        guard needsWait else { return }
+        await withCheckedContinuation { cont in
+            state.withLock { s in
+                switch s {
+                case .ready:
+                    cont.resume()
+                case .waiting(var pending):
+                    pending.append(cont)
+                    s = .waiting(pending)
+                }
+            }
+        }
+    }
+}

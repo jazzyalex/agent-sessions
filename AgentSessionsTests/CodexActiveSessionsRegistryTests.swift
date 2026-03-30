@@ -2531,6 +2531,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         window.contentView?.addSubview(host)
 
         drainMainRunLoop()
+        drainMainRunLoop() // second drain: subagent workload queues extra main-thread work under full suite load
         XCTAssertEqual(window.frameAutosaveName, autosaveName)
         XCTAssertTrue(window.isRestorable)
     }

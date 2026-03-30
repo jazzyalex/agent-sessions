@@ -195,11 +195,14 @@ struct AgentSessionsApp: App {
     @State private var analyticsReadyObserver: AnyCancellable?
 
     init() {
-        AgentEnablement.seedIfNeeded()
         let defaults = UserDefaults.standard
         let hideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
         let menuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
         Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
+
+        // Fallback: if no window appears within 3 seconds, open the gate anyway
+        // so startup tasks are never blocked indefinitely in a windowless launch.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { AppReadyGate.markReady() }
     }
 
     var body: some Scene {
@@ -361,6 +364,9 @@ struct AgentSessionsApp: App {
                 )
             )
             .environmentObject(archiveManager)
+            .onAppear {
+                runSharedLaunchBootstrap(windowLabel: "Saved Sessions window")
+            }
         }
 
         Window("Agent Cockpit", id: "AgentCockpit") {
@@ -493,6 +499,7 @@ extension AgentSessionsApp {
     @MainActor
     private func runSharedLaunchBootstrap(windowLabel: String) {
         guard !AppRuntime.isRunningTests else { return }
+        DispatchQueue.main.async { AppReadyGate.markReady() }
         if UpdaterController.shared == nil || UpdaterController.shared !== updaterController {
             UpdaterController.shared = updaterController
         }
@@ -512,19 +519,26 @@ extension AgentSessionsApp {
         LaunchProfiler.reset(windowLabel)
         LaunchProfiler.log("Window appeared")
         LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
+        onboardingCoordinator.checkAndPresentIfNeeded()
+        Task {
+            await AppReadyGate.waitUntilReady()
+            AgentEnablement.seedIfNeeded()
+            unified.syncAgentEnablementFromDefaults()
+            unified.refresh()
+            setupAnalytics()
+        }
         Task.detached(priority: .utility) {
+            await AppReadyGate.waitUntilReady()
             await CodexStatusService.cleanupOrphansOnLaunch()
             await ClaudeStatusService.cleanupOrphansOnLaunch()
         }
         Task {
+            await AppReadyGate.waitUntilReady()
             let detectedCount = await CrashReportingService.shared.detectAndQueueOnLaunch()
             if detectedCount > 0 {
                 await presentCrashRecoveryPrompt(newCrashCount: detectedCount)
             }
         }
-        onboardingCoordinator.checkAndPresentIfNeeded()
-        unified.refresh()
-        setupAnalytics()
     }
 
     @MainActor
