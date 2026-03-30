@@ -31,6 +31,12 @@ final class StatusItemController: NSObject {
     }
 
     func setEnabled(_ enabled: Bool) {
+        guard !AppRuntime.isRunningTests else {
+            if !enabled {
+                removeStatusItem()
+            }
+            return
+        }
         if enabled {
             ensureStatusItem()
         } else {

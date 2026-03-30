@@ -74,6 +74,9 @@ struct OpenCodeBackendDetector {
     /// Detect which backend is available.
     /// SQLite takes priority when present and valid.
     static func detect(customRoot: String?) -> OpenCodeStorageBackend {
+        if AppRuntime.isHostedByTooling {
+            return .none
+        }
         if isSQLiteAvailable(customRoot: customRoot) {
             return .sqlite
         }

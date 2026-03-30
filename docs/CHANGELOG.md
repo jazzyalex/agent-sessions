@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Codex limits tracking: `/status` fallback snapshots now refresh their rate-limit buckets correctly, menu-background surfaces still run the preferred OAuth/CLI refresh chain, and partial live responses no longer leave the other bucket frozen as if the whole snapshot were authoritative.
 - Launch/TCC: Session startup now avoids implicit repo filesystem probes while deriving row project names, reducing spurious Photos/Music permission prompts after rebuild/cold launch.
 - Launch restore: `Saved Sessions` window now registers shared window-open routing callbacks, so menu-bar `Open Agent Sessions`/cockpit routing still works when only Saved Sessions is restored.
+- Launch/TCC: Preferences agent status rows and OpenCode backend badges now use stored non-probing state under build tooling, avoiding extra PATH, root-directory, and SQLite checks during metadata extraction.
 
 ## [3.3.3.1] - 2026-03-26
 

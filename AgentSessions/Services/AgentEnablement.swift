@@ -1,6 +1,32 @@
 import Foundation
 
 enum AgentEnablement {
+    enum StoredAvailabilityStatus {
+        case installed
+        case configured
+        case unavailable
+
+        var statusText: String {
+            switch self {
+            case .installed:
+                return "Installed"
+            case .configured:
+                return "Configured"
+            case .unavailable:
+                return "Not verified"
+            }
+        }
+
+        var isAvailable: Bool {
+            switch self {
+            case .installed, .configured:
+                return true
+            case .unavailable:
+                return false
+            }
+        }
+    }
+
     static let didChangeNotification = Notification.Name("AgentEnablementDidChange")
     private static let binaryPresenceCacheCapacity: Int = 64
     private static let cachedBinaryPresence = Locked<BinaryPresenceCache>(.init(capacity: binaryPresenceCacheCapacity))
@@ -124,6 +150,10 @@ enum AgentEnablement {
     }
 
     static func isAvailable(_ source: SessionSource, defaults: UserDefaults = .standard) -> Bool {
+        if AppRuntime.isHostedByTooling {
+            return storedEnabledPreference(for: source, defaults: defaults) ?? false
+        }
+
         let fm = FileManager.default
         var isDir: ObjCBool = false
         let root: URL
@@ -167,7 +197,30 @@ enum AgentEnablement {
         return binaryInstalled(for: source)
     }
 
+    private static func storedEnabledPreference(for source: SessionSource, defaults: UserDefaults) -> Bool? {
+        switch source {
+        case .codex:
+            return defaults.object(forKey: PreferencesKey.Agents.codexEnabled) as? Bool
+        case .claude:
+            return defaults.object(forKey: PreferencesKey.Agents.claudeEnabled) as? Bool
+        case .gemini:
+            return defaults.object(forKey: PreferencesKey.Agents.geminiEnabled) as? Bool
+        case .opencode:
+            return defaults.object(forKey: PreferencesKey.Agents.openCodeEnabled) as? Bool
+        case .copilot:
+            return defaults.object(forKey: PreferencesKey.Agents.copilotEnabled) as? Bool
+        case .droid:
+            return defaults.object(forKey: PreferencesKey.Agents.droidEnabled) as? Bool
+        case .openclaw:
+            return defaults.object(forKey: PreferencesKey.Agents.openClawEnabled) as? Bool
+        }
+    }
+
     static func binaryInstalled(for source: SessionSource) -> Bool {
+        if AppRuntime.isHostedByTooling {
+            return storedBinaryPresence(for: source) ?? false
+        }
+
         switch source {
         case .codex: return binaryDetectedCached("codex")
         case .claude: return binaryDetectedCached("claude") || binaryDetectedCached("claude-code")
@@ -178,6 +231,16 @@ enum AgentEnablement {
         case .openclaw:
             return binaryDetectedCached("openclaw") || binaryDetectedCached("clawdbot")
         }
+    }
+
+    static func storedAvailabilityStatus(for source: SessionSource, defaults: UserDefaults = .standard) -> StoredAvailabilityStatus {
+        if storedBinaryPresence(for: source, defaults: defaults) == true {
+            return .installed
+        }
+        if storedEnabledPreference(for: source, defaults: defaults) == true {
+            return .configured
+        }
+        return .unavailable
     }
 
     private static func setEnabledInternal(_ source: SessionSource, enabled: Bool, defaults: UserDefaults) {
@@ -196,6 +259,25 @@ enum AgentEnablement {
             defaults.set(enabled, forKey: PreferencesKey.Agents.droidEnabled)
         case .openclaw:
             defaults.set(enabled, forKey: PreferencesKey.Agents.openClawEnabled)
+        }
+    }
+
+    private static func storedBinaryPresence(for source: SessionSource, defaults: UserDefaults = .standard) -> Bool? {
+        switch source {
+        case .codex:
+            return defaults.object(forKey: PreferencesKey.codexCLIAvailable) as? Bool
+        case .claude:
+            return defaults.object(forKey: PreferencesKey.claudeCLIAvailable) as? Bool
+        case .gemini:
+            return defaults.object(forKey: PreferencesKey.geminiCLIAvailable) as? Bool
+        case .opencode:
+            return defaults.object(forKey: PreferencesKey.openCodeCLIAvailable) as? Bool
+        case .copilot:
+            return defaults.object(forKey: PreferencesKey.copilotCLIAvailable) as? Bool
+        case .droid:
+            return defaults.object(forKey: PreferencesKey.droidCLIAvailable) as? Bool
+        case .openclaw:
+            return nil
         }
     }
 

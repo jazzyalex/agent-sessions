@@ -70,6 +70,10 @@ final class ClaudeUsageModel: ObservableObject {
     private var wakeObservers: [NSObjectProtocol] = []
 
     func setEnabled(_ enabled: Bool) {
+        if AppRuntime.isRunningTests {
+            if !enabled { stop() }
+            return
+        }
         guard enabled != isEnabled else { return }
         isEnabled = enabled
         if enabled {
@@ -95,6 +99,7 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     func setAppActive(_ active: Bool) {
+        guard !AppRuntime.isRunningTests else { return }
         appIsActive = active
         propagateVisibility()
     }
@@ -122,6 +127,7 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     func refreshNow() {
+        guard !AppRuntime.isRunningTests else { return }
         guard isEnabled else { return }
         if isUpdating { return }
         isUpdating = true
@@ -141,6 +147,7 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     private func start() {
+        guard !AppRuntime.isRunningTests else { return }
         let model = self
         let snapshotHandler: @Sendable (ClaudeLimitSnapshot) -> Void = { snapshot in
             Task { @MainActor in
@@ -211,6 +218,7 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     private func handleWake() {
+        guard !AppRuntime.isRunningTests else { return }
         guard isEnabled else { return }
         guard stripVisible || menuVisible else { return }
         if UserDefaults.standard.bool(forKey: PreferencesKey.claudeUsageEnabled) == false { return }
