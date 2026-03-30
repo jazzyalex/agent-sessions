@@ -18,6 +18,28 @@ actor CodexCLIRPCProbe {
     private var lastProbeAt: Date? = nil
     private var lastProbeFailed = false
 
+    private final class ResponseReadState {
+        private let lock = NSLock()
+        private var accumulated = Data()
+        private var resolved = false
+
+        func resolveIfNeeded() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !resolved else { return false }
+            resolved = true
+            return true
+        }
+
+        func appendAndSnapshot(_ data: Data) -> Data? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !resolved else { return nil }
+            accumulated.append(data)
+            return accumulated
+        }
+    }
+
     /// Returns a snapshot on success, nil on failure (caller falls through).
     func fetchRateLimits(cooldownSuccess: TimeInterval = 10 * 60,
                          cooldownFailure: TimeInterval = 60 * 60) async -> CodexUsageSnapshot? {
@@ -124,16 +146,11 @@ actor CodexCLIRPCProbe {
         let handle = pipe.fileHandleForReading
 
         return try await withCheckedThrowingContinuation { continuation in
-            var accumulated = Data()
-            var resolved = false
-            let lock = NSLock()
+            let state = ResponseReadState()
 
             // Set up a timeout watchdog
             let timeoutItem = DispatchWorkItem { [weak handle] in
-                lock.lock()
-                defer { lock.unlock() }
-                guard !resolved else { return }
-                resolved = true
+                guard state.resolveIfNeeded() else { return }
                 handle?.readabilityHandler = nil
                 continuation.resume(throwing: RPCError.timeout)
             }
@@ -141,37 +158,32 @@ actor CodexCLIRPCProbe {
 
             handle.readabilityHandler = { fileHandle in
                 let data = fileHandle.availableData
-                lock.lock()
-                guard !resolved else { lock.unlock(); return }
 
                 if data.isEmpty {
                     // EOF — no response received
-                    resolved = true
-                    lock.unlock()
+                    guard state.resolveIfNeeded() else { return }
                     timeoutItem.cancel()
                     fileHandle.readabilityHandler = nil
                     continuation.resume(throwing: RPCError.timeout)
                     return
                 }
 
-                accumulated.append(data)
+                guard let snapshot = state.appendAndSnapshot(data) else { return }
                 // Check for a complete JSON-RPC response (line with "id" field)
-                if let lines = String(data: accumulated, encoding: .utf8) {
+                if let lines = String(data: snapshot, encoding: .utf8) {
                     for line in lines.components(separatedBy: "\n") {
                         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !trimmed.isEmpty,
                               let lineData = trimmed.data(using: .utf8),
                               let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                               json["id"] != nil else { continue }
-                        resolved = true
-                        lock.unlock()
+                        guard state.resolveIfNeeded() else { return }
                         timeoutItem.cancel()
                         fileHandle.readabilityHandler = nil
                         continuation.resume(returning: lineData)
                         return
                     }
                 }
-                lock.unlock()
             }
         }
     }

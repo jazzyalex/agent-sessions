@@ -270,12 +270,67 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     // Lightweight favorites store (UserDefaults overlay)
     struct FavoritesStore {
+        struct Snapshot {
+            let legacyIDs: Set<String>
+            let scopedKeys: Set<StarredSessionKey>
+
+            func contains(id: String, source: SessionSource) -> Bool {
+                if scopedKeys.contains(.init(source: source, id: id)) { return true }
+                return legacyIDs.contains(id)
+            }
+        }
+
         init(defaults: UserDefaults = .standard) {
             store = StarredSessionsStore(defaults: defaults)
         }
         private(set) var store: StarredSessionsStore
         func contains(id: String, source: SessionSource) -> Bool { store.contains(id: id, source: source) }
         mutating func toggle(id: String, source: SessionSource) -> Bool { store.toggle(id: id, source: source) }
+        func snapshot() -> Snapshot {
+            Snapshot(legacyIDs: store.legacyIDs, scopedKeys: store.scopedKeys)
+        }
+    }
+
+    struct AgentEnablementSnapshot {
+        let codex: Bool
+        let claude: Bool
+        let gemini: Bool
+        let openCode: Bool
+        let copilot: Bool
+        let droid: Bool
+        let openClaw: Bool
+    }
+
+    struct SessionAggregationWork {
+        let codexList: [Session]
+        let claudeList: [Session]
+        let geminiList: [Session]
+        let opencodeList: [Session]
+        let copilotList: [Session]
+        let droidList: [Session]
+        let openclawList: [Session]
+        let favoritesSnapshot: FavoritesStore.Snapshot
+        let enablement: AgentEnablementSnapshot
+
+        static let empty = SessionAggregationWork(
+            codexList: [],
+            claudeList: [],
+            geminiList: [],
+            opencodeList: [],
+            copilotList: [],
+            droidList: [],
+            openclawList: [],
+            favoritesSnapshot: FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: []),
+            enablement: AgentEnablementSnapshot(
+                codex: false,
+                claude: false,
+                gemini: false,
+                openCode: false,
+                copilot: false,
+                droid: false,
+                openClaw: false
+            )
+        )
     }
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
@@ -381,7 +436,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let copilot: CopilotSessionIndexer
     private let droid: DroidSessionIndexer
     private let openclaw: OpenClawSessionIndexer
+    private static let aggregationQueue = DispatchQueue(label: "UnifiedSessionIndexer.Aggregation", qos: .userInitiated)
     private var cancellables = Set<AnyCancellable>()
+    private var notificationObserverTokens: [NSObjectProtocol] = []
     private var favorites = FavoritesStore()
     private var hasPublishedInitialSessions = false
     @Published private(set) var isAnalyticsIndexing: Bool = false
@@ -437,36 +494,55 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         syncAgentEnablementFromDefaults()
         // Observe UserDefaults changes to sync external toggles (Preferences) to this model
-        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: .main) { [weak self] _ in
+        notificationObserverTokens.append(NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: .main) { [weak self] _ in
             guard let self else { return }
             let v = UserDefaults.standard.bool(forKey: "UnifiedHasCommandsOnly")
             if v != self.hasCommandsOnly { self.hasCommandsOnly = v }
             self.syncAgentEnablementFromDefaults()
-        }
+        })
+
+        let agentEnabledFlags = Publishers.CombineLatest(
+            Publishers.CombineLatest4($codexAgentEnabled, $claudeAgentEnabled, $geminiAgentEnabled, $openCodeAgentEnabled),
+            Publishers.CombineLatest3($copilotAgentEnabled, $droidAgentEnabled, $openClawAgentEnabled)
+        )
 
         // Merge underlying allSessions whenever any changes
         Publishers.CombineLatest(
             Publishers.CombineLatest4(codex.$allSessions, claude.$allSessions, gemini.$allSessions, opencode.$allSessions),
             Publishers.CombineLatest3(copilot.$allSessions, droid.$allSessions, openclaw.$allSessions)
         )
-            .map { [weak self] combined, tail -> [Session] in
-                guard let self else { return [] }
+            .combineLatest(agentEnabledFlags)
+            .receive(on: DispatchQueue.main)
+            .map { [weak self] sourceLists, flags -> SessionAggregationWork in
+                guard let self else { return .empty }
+                let (combined, tail) = sourceLists
                 let (codexList, claudeList, geminiList, opencodeList) = combined
                 let (copilotList, droidList, openclawList) = tail
-                var merged: [Session] = []
-                if self.codexAgentEnabled { merged.append(contentsOf: codexList) }
-                if self.claudeAgentEnabled { merged.append(contentsOf: claudeList) }
-                if self.geminiAgentEnabled { merged.append(contentsOf: geminiList) }
-                if self.openCodeAgentEnabled { merged.append(contentsOf: opencodeList) }
-                if self.copilotAgentEnabled { merged.append(contentsOf: copilotList) }
-                if self.droidAgentEnabled { merged.append(contentsOf: droidList) }
-                if self.openClawAgentEnabled { merged.append(contentsOf: openclawList) }
-                for i in merged.indices { merged[i].isFavorite = self.favorites.contains(id: merged[i].id, source: merged[i].source) }
-                return merged.sorted { lhs, rhs in
-                    if lhs.modifiedAt == rhs.modifiedAt { return lhs.id > rhs.id }
-                    return lhs.modifiedAt > rhs.modifiedAt
-                }
+                let (enabled4, tailEnabled) = flags
+                let (codexEnabled, claudeEnabled, geminiEnabled, openCodeEnabled) = enabled4
+                let (copilotEnabled, droidEnabled, openClawEnabled) = tailEnabled
+                return SessionAggregationWork(
+                    codexList: codexList,
+                    claudeList: claudeList,
+                    geminiList: geminiList,
+                    opencodeList: opencodeList,
+                    copilotList: copilotList,
+                    droidList: droidList,
+                    openclawList: openclawList,
+                    favoritesSnapshot: self.favorites.snapshot(),
+                    enablement: AgentEnablementSnapshot(
+                        codex: codexEnabled,
+                        claude: claudeEnabled,
+                        gemini: geminiEnabled,
+                        openCode: openCodeEnabled,
+                        copilot: copilotEnabled,
+                        droid: droidEnabled,
+                        openClaw: openClawEnabled
+                    )
+                )
             }
+            .receive(on: Self.aggregationQueue)
+            .map(Self.mergedSessions(from:))
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
                 self?.publishAfterCurrentUpdate { [weak self] in
@@ -474,11 +550,6 @@ final class UnifiedSessionIndexer: ObservableObject {
                 }
             }
             .store(in: &cancellables)
-
-        let agentEnabledFlags = Publishers.CombineLatest(
-            Publishers.CombineLatest4($codexAgentEnabled, $claudeAgentEnabled, $geminiAgentEnabled, $openCodeAgentEnabled),
-            Publishers.CombineLatest3($copilotAgentEnabled, $droidAgentEnabled, $openClawAgentEnabled)
-        )
 
         // isIndexing reflects any enabled indexer working
         Publishers.CombineLatest(
@@ -747,18 +818,18 @@ final class UnifiedSessionIndexer: ObservableObject {
         updateLaunchState()
 
         // When probe cleanups succeed, refresh underlying providers and analytics rollups
-        NotificationCenter.default.addObserver(forName: CodexProbeCleanup.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
+        notificationObserverTokens.append(NotificationCenter.default.addObserver(forName: CodexProbeCleanup.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
             guard let self = self else { return }
             if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
                 self.refresh()
             }
-        }
-        NotificationCenter.default.addObserver(forName: ClaudeProbeProject.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
+        })
+        notificationObserverTokens.append(NotificationCenter.default.addObserver(forName: ClaudeProbeProject.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
             guard let self = self else { return }
             if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
                 self.refresh()
             }
-        }
+        })
     }
 
     private func syncAgentEnablementFromDefaults(defaults: UserDefaults = .standard) {
@@ -1638,6 +1709,24 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
+    static func mergedSessions(from work: SessionAggregationWork) -> [Session] {
+        var merged: [Session] = []
+        if work.enablement.codex { merged.append(contentsOf: work.codexList) }
+        if work.enablement.claude { merged.append(contentsOf: work.claudeList) }
+        if work.enablement.gemini { merged.append(contentsOf: work.geminiList) }
+        if work.enablement.openCode { merged.append(contentsOf: work.opencodeList) }
+        if work.enablement.copilot { merged.append(contentsOf: work.copilotList) }
+        if work.enablement.droid { merged.append(contentsOf: work.droidList) }
+        if work.enablement.openClaw { merged.append(contentsOf: work.openclawList) }
+        for index in merged.indices {
+            merged[index].isFavorite = work.favoritesSnapshot.contains(id: merged[index].id, source: merged[index].source)
+        }
+        return merged.sorted { lhs, rhs in
+            if lhs.modifiedAt == rhs.modifiedAt { return lhs.id > rhs.id }
+            return lhs.modifiedAt > rhs.modifiedAt
+        }
+    }
+
     /// Apply current UI filters and sort preferences to a list of sessions.
     /// Used for both unified.sessions and search results to ensure consistent filtering/sorting.
     func applyFiltersAndSort(to sessions: [Session]) -> [Session] {
@@ -1836,6 +1925,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     deinit {
         newSessionMonitorTask?.cancel()
         focusedSessionMonitorTask?.cancel()
+        for token in notificationObserverTokens {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 }
     struct LaunchState {

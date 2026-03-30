@@ -211,7 +211,9 @@ final class CodexActiveSessionsModel: ObservableObject {
         case iTermInventory
         case iTermBatchProbe
     }
-    private final class ManagedProbeCommand: @unchecked Sendable {
+    /// Main-actor confined command wrapper used by refresh/cancel paths.
+    /// Do not capture instances into detached tasks.
+    private final class ManagedProbeCommand {
         let id = UUID()
         let kind: ManagedProbeKind
         let process = Process()
@@ -297,6 +299,35 @@ final class CodexActiveSessionsModel: ObservableObject {
         pollTask?.cancel()
         refreshTask?.cancel()
     }
+
+#if DEBUG
+    enum DebugManagedProbeKind {
+        case processDiscovery
+        case iTermInventory
+        case iTermBatchProbe
+    }
+
+    func debugRunManagedCommand(kind: DebugManagedProbeKind = .processDiscovery,
+                                executable: URL,
+                                arguments: [String],
+                                timeout: TimeInterval,
+                                generation: UInt64? = nil) async -> Data? {
+        let managedKind: ManagedProbeKind
+        switch kind {
+        case .processDiscovery:
+            managedKind = .processDiscovery
+        case .iTermInventory:
+            managedKind = .iTermInventory
+        case .iTermBatchProbe:
+            managedKind = .iTermBatchProbe
+        }
+        return await runManagedCommand(kind: managedKind,
+                                       generation: generation ?? activeRefreshGeneration,
+                                       executable: executable,
+                                       arguments: arguments,
+                                       timeout: timeout)
+    }
+#endif
 
     func isActive(_ session: Session) -> Bool {
         guard enabled, supportsLiveSessions(for: session.source) else { return false }
@@ -602,6 +633,28 @@ final class CodexActiveSessionsModel: ObservableObject {
 #endif
     }
 
+    private enum ManagedProbeWaitResult {
+        case exited
+        case timedOut
+    }
+
+    private final class ManagedProbeWaitState {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<ManagedProbeWaitResult, Never>?
+
+        init(_ continuation: CheckedContinuation<ManagedProbeWaitResult, Never>) {
+            self.continuation = continuation
+        }
+
+        func resumeIfNeeded(_ result: ManagedProbeWaitResult) {
+            lock.lock()
+            let continuation = self.continuation
+            self.continuation = nil
+            lock.unlock()
+            continuation?.resume(returning: result)
+        }
+    }
+
     private func runManagedCommand(kind: ManagedProbeKind,
                                    generation: UInt64,
                                    executable: URL,
@@ -622,41 +675,64 @@ final class CodexActiveSessionsModel: ObservableObject {
             return nil
         }
 
-        let outputTask = Task(priority: .utility) { () -> Data in
-            let handle = command.stdoutPipe.fileHandleForReading
-            defer { handle.closeFile() }
-            return (try? handle.readToEnd()) ?? Data()
-        }
-
-        var timedOut = false
-        let deadline = Date().addingTimeInterval(timeout)
-        while command.process.isRunning {
-            if Task.isCancelled || !isCurrentRefreshGeneration(generation) {
-                cancelInFlightProbeCommand(kind: kind, reason: Task.isCancelled ? "task-cancelled" : "stale-generation")
-                _ = await outputTask.value
-                finishManagedProbeCommand(kind: kind, id: command.id)
-                if !isCurrentRefreshGeneration(generation) {
-                    markStaleRefreshDrop()
-                }
-                return nil
+        let stdoutHandle = command.stdoutPipe.fileHandleForReading
+        async let drainedOutput = Self.readManagedProbeOutput(from: stdoutHandle)
+        let waitResult = await withTaskCancellationHandler {
+            await waitForManagedProbeExit(command.process, timeout: timeout)
+        } onCancel: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.cancelInFlightProbeCommand(kind: kind, reason: "task-cancelled")
             }
-            if Date() >= deadline {
-                timedOut = true
-                cancelInFlightProbeCommand(kind: kind, reason: "timeout")
-                break
-            }
-            try? await Task.sleep(nanoseconds: 200_000_000)
         }
-
-        let data = await outputTask.value
+        command.process.terminationHandler = nil
+        let timedOut = waitResult == .timedOut
+        if timedOut {
+            cancelInFlightProbeCommand(kind: kind, reason: "timeout")
+        }
+        let wasCancelled = Task.isCancelled
+        let data = await drainedOutput
+        let stillOwned = inFlightProbeCommands[kind]?.id == command.id
         let stillCurrent = isCurrentRefreshGeneration(generation)
         finishManagedProbeCommand(kind: kind, id: command.id)
         if !stillCurrent {
             markStaleRefreshDrop()
             return nil
         }
-        if timedOut { return nil }
+        if wasCancelled || timedOut || !stillOwned { return nil }
         return data
+    }
+
+    private nonisolated static func readManagedProbeOutput(from handle: FileHandle) async -> Data {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                defer { try? handle.close() }
+                continuation.resume(returning: (try? handle.readToEnd()) ?? Data())
+            }
+        }
+    }
+
+    private func waitForManagedProbeExit(_ process: Process,
+                                         timeout: TimeInterval) async -> ManagedProbeWaitResult {
+        await withCheckedContinuation { continuation in
+            let state = ManagedProbeWaitState(continuation)
+            let timeoutItem = DispatchWorkItem {
+                state.resumeIfNeeded(.timedOut)
+            }
+
+            process.terminationHandler = { _ in
+                timeoutItem.cancel()
+                state.resumeIfNeeded(.exited)
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(
+                deadline: .now() + max(timeout, 0),
+                execute: timeoutItem
+            )
+
+            if !process.isRunning {
+                timeoutItem.cancel()
+                state.resumeIfNeeded(.exited)
+            }
+        }
     }
 
     private struct RefreshDiscoveryResult {
