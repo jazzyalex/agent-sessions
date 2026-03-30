@@ -292,7 +292,10 @@ final class CodexActiveSessionsModel: ObservableObject {
     init() {
         // Avoid background activity under `xcodebuild test`.
         guard !AppRuntime.isRunningTests else { return }
-        startPollingIfNeeded()
+        Task {
+            await AppReadyGate.waitUntilReady()
+            startPollingIfNeeded()
+        }
     }
 
     deinit {

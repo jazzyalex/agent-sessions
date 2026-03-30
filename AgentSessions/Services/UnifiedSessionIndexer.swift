@@ -408,7 +408,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var openCodeAgentEnabled: Bool = AgentEnablement.isEnabled(.opencode)
     @Published private(set) var copilotAgentEnabled: Bool = AgentEnablement.isEnabled(.copilot)
     @Published private(set) var droidAgentEnabled: Bool = AgentEnablement.isEnabled(.droid)
-    @Published private(set) var openClawAgentEnabled: Bool = AgentEnablement.isEnabled(.openclaw)
+    @Published private(set) var openClawAgentEnabled: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Agents.openClawEnabled) as? Bool ?? false
 
     // Sorting
     struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title, agent, size } }
@@ -845,7 +845,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         })
     }
 
-    private func syncAgentEnablementFromDefaults(defaults: UserDefaults = .standard) {
+    func syncAgentEnablementFromDefaults(defaults: UserDefaults = .standard) {
         let c1 = AgentEnablement.isEnabled(.codex, defaults: defaults)
         let c2 = AgentEnablement.isEnabled(.claude, defaults: defaults)
         let c3 = AgentEnablement.isEnabled(.gemini, defaults: defaults)
@@ -1243,6 +1243,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private func performProviderRefresh(source: SessionSource,
                                         reason: String,
                                         trigger: IndexRefreshTrigger) async {
+        await AppReadyGate.waitUntilReady()
         let context = await MainActor.run { [weak self] in
             guard let self else {
                 return (didTrigger: false,
