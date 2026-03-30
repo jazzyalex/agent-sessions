@@ -322,6 +322,32 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.hasWeekRateLimit, false)
     }
 
+    func testStatusProbeParserIgnoresResetOnlyWindowWithoutPercent() async {
+        let json = """
+        {
+          "ok": true,
+          "five_hour": {
+            "pct_left": null,
+            "resets": "resets in 3h"
+          },
+          "weekly": {
+            "pct_left": 0,
+            "resets": "resets in 2d"
+          }
+        }
+        """
+
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        let snapshot = await service.parseStatusJSONForTesting(json)
+
+        XCTAssertEqual(snapshot?.hasFiveHourRateLimit, false)
+        XCTAssertNil(snapshot?.fiveHourLimitsSource)
+        XCTAssertEqual(snapshot?.hasWeekRateLimit, true)
+        XCTAssertEqual(snapshot?.weekRemainingPercent, 0)
+        XCTAssertEqual(snapshot?.weekLimitsSource, .statusProbe)
+        XCTAssertEqual(snapshot?.limitsSource, .statusProbe)
+    }
+
     func testPartialAuthoritativeMergeDoesNotMarkWholeSnapshotAuthoritative() async {
         let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
         await service.setSnapshotForTesting(
@@ -363,6 +389,9 @@ final class CodexUsageParserTests: XCTestCase {
 
     func testJSONLFallbackDoesNotOverwriteAuthoritativeLiveLimits() async {
         let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        let previousEventTimestamp = ISO8601DateFormatter().date(from: "2026-03-28T19:05:00Z")
+        let summaryEventTimestamp = ISO8601DateFormatter().date(from: "2026-03-28T19:10:00Z")
+        let summaryFiveHourReset = ISO8601DateFormatter().date(from: "2026-03-28T17:00:00Z")
         await service.setSnapshotForTesting(
             CodexUsageSnapshot(
                 fiveHourRemainingPercent: 91,
@@ -373,7 +402,9 @@ final class CodexUsageParserTests: XCTestCase {
                 weekResetText: "2026-04-01T00:00:00Z",
                 hasWeekRateLimit: true,
                 weekLimitsSource: .cliRPC,
-                limitsSource: nil
+                limitsSource: nil,
+                usageLine: nil,
+                eventTimestamp: previousEventTimestamp
             )
         )
 
@@ -381,7 +412,7 @@ final class CodexUsageParserTests: XCTestCase {
             RateLimitSummary(
                 fiveHour: RateLimitWindowInfo(
                     remainingPercent: 32,
-                    resetAt: ISO8601DateFormatter().date(from: "2026-03-28T17:00:00Z"),
+                    resetAt: summaryFiveHourReset,
                     windowMinutes: 300
                 ),
                 weekly: RateLimitWindowInfo(
@@ -389,8 +420,8 @@ final class CodexUsageParserTests: XCTestCase {
                     resetAt: ISO8601DateFormatter().date(from: "2026-03-31T00:00:00Z"),
                     windowMinutes: nil
                 ),
-                eventTimestamp: ISO8601DateFormatter().date(from: "2026-03-28T16:30:00Z"),
-                stale: false,
+                eventTimestamp: summaryEventTimestamp,
+                stale: true,
                 sourceFile: nil
             )
         )
@@ -399,7 +430,10 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(merged.fiveHourLimitsSource, .oauth)
         XCTAssertEqual(merged.weekRemainingPercent, 44)
         XCTAssertEqual(merged.weekLimitsSource, .cliRPC)
-        XCTAssertNil(merged.usageLine)
+        XCTAssertEqual(merged.usageLine, "Usage is stale (>3m)")
+        XCTAssertEqual(merged.eventTimestamp, summaryEventTimestamp)
+        let cachedReset = await service.lastFiveHourResetDateForTesting
+        XCTAssertEqual(cachedReset, summaryFiveHourReset)
     }
 
     func testStatusProbeMergePreservesValidZeroPercentBuckets() async {

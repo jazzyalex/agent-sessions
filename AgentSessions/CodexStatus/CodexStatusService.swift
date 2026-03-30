@@ -483,6 +483,10 @@ actor CodexStatusService {
         return self.snapshot
     }
 
+    var lastFiveHourResetDateForTesting: Date? {
+        lastFiveHourResetDate
+    }
+
     var hasAuthoritativeLimitsSnapshotForTesting: Bool {
         hasAuthoritativeLimitsSnapshot
     }
@@ -1016,7 +1020,8 @@ actor CodexStatusService {
     }
 
     /// Merges rate-limit fields from `source` into `dest`, commits to `snapshot`,
-    /// and notifies the UI. 0% remains valid for exhausted buckets, including tmux probes.
+    /// and notifies the UI. 0% remains valid for exhausted buckets when the probe
+    /// actually returned a percentage, but reset-only probe fragments are ignored.
     private func mergeRateLimitSnapshot(_ source: CodexUsageSnapshot, into dest: inout CodexUsageSnapshot, requirePositivePercent: Bool = false) {
         let shouldMergeFiveHour = source.hasFiveHourRateLimit && (!requirePositivePercent || source.fiveHourRemainingPercent >= 0)
         if shouldMergeFiveHour {
@@ -1066,10 +1071,10 @@ actor CodexStatusService {
             s.hasWeekRateLimit = true
             s.weekLimitsSource = .jsonlFallback
         }
-        s.limitsSource = aggregateLimitsSource(for: s)
         s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
         s.eventTimestamp = summary.eventTimestamp
         lastFiveHourResetDate = summary.fiveHour.resetAt
+        s.limitsSource = aggregateLimitsSource(for: s)
         snapshot = s
         updateHandler(snapshot)
     }
@@ -1254,17 +1259,23 @@ actor CodexStatusService {
         if let ok = obj["ok"] as? Bool, !ok { return nil }
         var s = CodexUsageSnapshot()
         if let fh = obj["five_hour"] as? [String: Any] {
-            if let p = fh["pct_left"] as? Int { s.fiveHourRemainingPercent = p }
-            if let r = fh["resets"] as? String { s.fiveHourResetText = r }
-            if fh["pct_left"] != nil || fh["resets"] != nil {
+            let percent = statusProbePercent(from: fh)
+            if let p = percent {
+                s.fiveHourRemainingPercent = p
+            }
+            if let r = fh["resets"] as? String, percent != nil { s.fiveHourResetText = r }
+            if percent != nil {
                 s.hasFiveHourRateLimit = true
                 s.fiveHourLimitsSource = .statusProbe
             }
         }
         if let wk = obj["weekly"] as? [String: Any] {
-            if let p = wk["pct_left"] as? Int { s.weekRemainingPercent = p }
-            if let r = wk["resets"] as? String { s.weekResetText = r }
-            if wk["pct_left"] != nil || wk["resets"] != nil {
+            let percent = statusProbePercent(from: wk)
+            if let p = percent {
+                s.weekRemainingPercent = p
+            }
+            if let r = wk["resets"] as? String, percent != nil { s.weekResetText = r }
+            if percent != nil {
                 s.hasWeekRateLimit = true
                 s.weekLimitsSource = .statusProbe
             }
@@ -1272,6 +1283,19 @@ actor CodexStatusService {
         s.limitsSource = aggregateLimitsSource(for: s)
         s.eventTimestamp = Date()
         return s
+    }
+
+    private func statusProbePercent(from payload: [String: Any]) -> Int? {
+        if let percent = payload["pct_left"] as? Int {
+            return clampPercent(percent)
+        }
+        if let percent = payload["pct_left"] as? Double {
+            return clampPercent(Int(percent.rounded()))
+        }
+        if let percent = payload["pct_left"] as? NSNumber {
+            return clampPercent(percent.intValue)
+        }
+        return nil
     }
 
     private func isAuthoritativeLimitsSource(_ source: CodexLimitsSource?) -> Bool {
