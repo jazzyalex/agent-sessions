@@ -447,6 +447,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var notificationObserverTokens: [NSObjectProtocol] = []
     private var favorites = FavoritesStore()
     private var favoritesSnapshotVersion: UInt64 = 0
+    private let favoritesAggregationVersion = CurrentValueSubject<UInt64, Never>(0)
     private var hasPublishedInitialSessions = false
     @Published private(set) var isAnalyticsIndexing: Bool = false
     private var lastAnalyticsRefreshStartedAt: Date? = nil
@@ -518,9 +519,9 @@ final class UnifiedSessionIndexer: ObservableObject {
             Publishers.CombineLatest4(codex.$allSessions, claude.$allSessions, gemini.$allSessions, opencode.$allSessions),
             Publishers.CombineLatest3(copilot.$allSessions, droid.$allSessions, openclaw.$allSessions)
         )
-            .combineLatest(agentEnabledFlags)
+            .combineLatest(agentEnabledFlags, favoritesAggregationVersion)
             .receive(on: DispatchQueue.main)
-            .map { [weak self] sourceLists, flags -> SessionAggregationWork in
+            .map { [weak self] sourceLists, flags, favoritesVersion -> SessionAggregationWork in
                 guard let self else { return .empty }
                 let (combined, tail) = sourceLists
                 let (codexList, claudeList, geminiList, opencodeList) = combined
@@ -537,7 +538,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                     droidList: droidList,
                     openclawList: openclawList,
                     favoritesSnapshot: self.favorites.snapshot(),
-                    favoritesVersion: self.favoritesSnapshotVersion,
+                    favoritesVersion: favoritesVersion,
                     enablement: AgentEnablementSnapshot(
                         codex: codexEnabled,
                         claude: claudeEnabled,
@@ -1751,6 +1752,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private func bumpFavoritesSnapshotVersion() {
         favoritesSnapshotVersion &+= 1
+        favoritesAggregationVersion.send(favoritesSnapshotVersion)
     }
 
     /// Apply current UI filters and sort preferences to a list of sessions.
@@ -1919,11 +1921,11 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     // MARK: - Favorites
     func toggleFavorite(_ session: Session) {
-        bumpFavoritesSnapshotVersion()
         let nowStarred = favorites.toggle(id: session.id, source: session.source)
         if let idx = allSessions.firstIndex(where: { $0.id == session.id && $0.source == session.source }) {
             allSessions[idx].isFavorite = nowStarred
         }
+        bumpFavoritesSnapshotVersion()
 
         let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
         if nowStarred, pins {

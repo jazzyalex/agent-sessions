@@ -477,6 +477,12 @@ actor CodexStatusService {
         return self.snapshot
     }
 
+    func applyJSONLFallbackSummaryForTesting(_ summary: RateLimitSummary) -> CodexUsageSnapshot {
+        var merged = snapshot
+        applyJSONLFallbackSummary(summary, into: &merged)
+        return self.snapshot
+    }
+
     var hasAuthoritativeLimitsSnapshotForTesting: Bool {
         hasAuthoritativeLimitsSnapshot
     }
@@ -1010,10 +1016,9 @@ actor CodexStatusService {
     }
 
     /// Merges rate-limit fields from `source` into `dest`, commits to `snapshot`,
-    /// and notifies the UI. When `requirePositivePercent` is true (tmux probe path),
-    /// 0% values are treated as "no data" and skipped.
+    /// and notifies the UI. 0% remains valid for exhausted buckets, including tmux probes.
     private func mergeRateLimitSnapshot(_ source: CodexUsageSnapshot, into dest: inout CodexUsageSnapshot, requirePositivePercent: Bool = false) {
-        let shouldMergeFiveHour = source.hasFiveHourRateLimit && (!requirePositivePercent || source.fiveHourRemainingPercent > 0)
+        let shouldMergeFiveHour = source.hasFiveHourRateLimit && (!requirePositivePercent || source.fiveHourRemainingPercent >= 0)
         if shouldMergeFiveHour {
             dest.fiveHourRemainingPercent = clampPercent(source.fiveHourRemainingPercent)
         }
@@ -1022,7 +1027,7 @@ actor CodexStatusService {
             if !source.fiveHourResetText.isEmpty { dest.fiveHourResetText = source.fiveHourResetText }
             dest.fiveHourLimitsSource = source.fiveHourLimitsSource ?? source.limitsSource
         }
-        let shouldMergeWeek = source.hasWeekRateLimit && (!requirePositivePercent || source.weekRemainingPercent > 0)
+        let shouldMergeWeek = source.hasWeekRateLimit && (!requirePositivePercent || source.weekRemainingPercent >= 0)
         if shouldMergeWeek {
             dest.weekRemainingPercent = clampPercent(source.weekRemainingPercent)
         }
@@ -1039,22 +1044,24 @@ actor CodexStatusService {
     }
 
     private func applyJSONLFallbackSummary(_ summary: RateLimitSummary, into s: inout CodexUsageSnapshot) {
-        if let p = summary.fiveHour.remainingPercent {
+        let canApplyFiveHourFallback = !isAuthoritativeLimitsSource(s.fiveHourLimitsSource)
+        if canApplyFiveHourFallback, let p = summary.fiveHour.remainingPercent {
             s.fiveHourRemainingPercent = clampPercent(p)
             s.hasFiveHourRateLimit = true
             s.fiveHourLimitsSource = .jsonlFallback
         }
-        if let resetAt = summary.fiveHour.resetAt {
+        if canApplyFiveHourFallback, let resetAt = summary.fiveHour.resetAt {
             s.fiveHourResetText = formatResetISO8601(resetAt)
             s.hasFiveHourRateLimit = true
             s.fiveHourLimitsSource = .jsonlFallback
         }
-        if let p = summary.weekly.remainingPercent {
+        let canApplyWeekFallback = !isAuthoritativeLimitsSource(s.weekLimitsSource)
+        if canApplyWeekFallback, let p = summary.weekly.remainingPercent {
             s.weekRemainingPercent = clampPercent(p)
             s.hasWeekRateLimit = true
             s.weekLimitsSource = .jsonlFallback
         }
-        if let resetAt = summary.weekly.resetAt {
+        if canApplyWeekFallback, let resetAt = summary.weekly.resetAt {
             s.weekResetText = formatResetISO8601(resetAt)
             s.hasWeekRateLimit = true
             s.weekLimitsSource = .jsonlFallback
