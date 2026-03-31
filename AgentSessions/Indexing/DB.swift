@@ -316,6 +316,18 @@ actor IndexDB {
             try exec(db, "DELETE FROM rollups_daily;")
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", migrationKey)
         }
+
+        // Backfill custom_title for already-indexed sessions by forcing a full reindex.
+        let customTitleMigration = "custom_title_reindex_v1"
+        if !migrationApplied(db, key: customTitleMigration) {
+            try exec(db, "DELETE FROM files;")
+            try exec(db, "DELETE FROM session_meta;")
+            try exec(db, "DELETE FROM session_search;")
+            try exec(db, "DELETE FROM session_tool_io;")
+            try exec(db, "DELETE FROM session_days;")
+            try exec(db, "DELETE FROM rollups_daily;")
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", customTitleMigration)
+        }
     }
 
     // MARK: - Exec helpers
