@@ -2724,6 +2724,71 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testShouldSuppressEmptyTransition_suppressesWhenTransitioningFromNonEmptyToEmpty() {
+        // When cockpit previously had presences and now sees empty, suppress for up to 3 cycles.
+        XCTAssertTrue(
+            CodexActiveSessionsModel.shouldSuppressEmptyTransition(
+                uiIsEmpty: true,
+                hadPreviouslyPublishedPresences: true,
+                cockpitIsOrWasVisible: true,
+                consecutiveSuppressedCycles: 0
+            )
+        )
+        XCTAssertTrue(
+            CodexActiveSessionsModel.shouldSuppressEmptyTransition(
+                uiIsEmpty: true,
+                hadPreviouslyPublishedPresences: true,
+                cockpitIsOrWasVisible: true,
+                consecutiveSuppressedCycles: 2
+            )
+        )
+        // After 3 consecutive suppressed cycles, allow the empty publish through.
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldSuppressEmptyTransition(
+                uiIsEmpty: true,
+                hadPreviouslyPublishedPresences: true,
+                cockpitIsOrWasVisible: true,
+                consecutiveSuppressedCycles: 3
+            )
+        )
+    }
+
+    func testShouldSuppressEmptyTransition_doesNotSuppressWhenNoPriorPresences() {
+        // First launch with no sessions — don't suppress, there's nothing to protect.
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldSuppressEmptyTransition(
+                uiIsEmpty: true,
+                hadPreviouslyPublishedPresences: false,
+                cockpitIsOrWasVisible: true,
+                consecutiveSuppressedCycles: 0
+            )
+        )
+    }
+
+    func testShouldSuppressEmptyTransition_doesNotSuppressWhenCockpitHidden() {
+        // Cockpit not visible — no need to prevent visual flicker.
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldSuppressEmptyTransition(
+                uiIsEmpty: true,
+                hadPreviouslyPublishedPresences: true,
+                cockpitIsOrWasVisible: false,
+                consecutiveSuppressedCycles: 0
+            )
+        )
+    }
+
+    func testShouldSuppressEmptyTransition_doesNotSuppressWhenUIIsNonEmpty() {
+        // Non-empty ui — nothing to suppress.
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldSuppressEmptyTransition(
+                uiIsEmpty: false,
+                hadPreviouslyPublishedPresences: true,
+                cockpitIsOrWasVisible: true,
+                consecutiveSuppressedCycles: 0
+            )
+        )
+    }
+
     func testClaudeSessionLogCandidates_excludesFilesOlderThanRecencyCutoff() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let projectDir = tmp.appendingPathComponent("projects/-Users-test-MyProject")
