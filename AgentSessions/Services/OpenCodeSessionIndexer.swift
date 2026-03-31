@@ -307,7 +307,8 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                             lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
                             lightweightCommands: current.lightweightCommands,
                             parentSessionID: parsed.parentSessionID ?? current.parentSessionID,
-                            subagentType: parsed.subagentType ?? current.subagentType
+                            subagentType: parsed.subagentType ?? current.subagentType,
+                            customTitle: parsed.customTitle ?? current.customTitle
                         )
                         self.allSessions[idx] = merged
                     }
@@ -383,7 +384,8 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                         lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
                         lightweightCommands: current.lightweightCommands,
                         parentSessionID: parsed.parentSessionID ?? current.parentSessionID,
-                        subagentType: parsed.subagentType ?? current.subagentType
+                        subagentType: parsed.subagentType ?? current.subagentType,
+                        customTitle: parsed.customTitle ?? current.customTitle
                     )
                     self.allSessions[idx] = merged
                 }

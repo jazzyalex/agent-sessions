@@ -20,6 +20,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let lightweightCwd: String?
     public let lightweightRepoName: String?
     public let lightweightTitle: String?
+    public let customTitle: String?
     public let codexInternalSessionIDHint: String?
 
     // Subagent hierarchy
@@ -43,7 +44,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 isHousekeeping: Bool = false,
                 codexInternalSessionIDHint: String? = nil,
                 parentSessionID: String? = nil,
-                subagentType: String? = nil) {
+                subagentType: String? = nil,
+                customTitle: String? = nil) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -57,6 +59,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.lightweightCwd = nil
         self.lightweightRepoName = nil
         self.lightweightTitle = nil
+        self.customTitle = customTitle
         self.codexInternalSessionIDHint = codexInternalSessionIDHint
         self.lightweightCommands = nil
         self.parentSessionID = parentSessionID
@@ -81,7 +84,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 isHousekeeping: Bool = false,
                 codexInternalSessionIDHint: String? = nil,
                 parentSessionID: String? = nil,
-                subagentType: String? = nil) {
+                subagentType: String? = nil,
+                customTitle: String? = nil) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -95,6 +99,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.lightweightCwd = cwd
         self.lightweightRepoName = repoName
         self.lightweightTitle = lightweightTitle
+        self.customTitle = customTitle
         self.codexInternalSessionIDHint = codexInternalSessionIDHint
         self.lightweightCommands = lightweightCommands
         self.parentSessionID = parentSessionID
@@ -119,6 +124,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case codexInternalSessionIDHint
         case parentSessionID
         case subagentType
+        case customTitle
         // isFavorite intentionally excluded (runtime only)
         // isHousekeeping intentionally excluded (derived at parse/index time)
     }
@@ -131,6 +137,10 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // Derived human-friendly title for the session row.
     // Use improved Codex-style filtering with fallbacks for robustness
     public var title: String {
+        // Custom title from /rename takes absolute precedence
+        if let custom = customTitle, !custom.isEmpty {
+            return custom
+        }
         let defaults = UserDefaults.standard
         let skipPreamble = (defaults.object(forKey: "SkipAgentsPreamble") == nil)
             ? true

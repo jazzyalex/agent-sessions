@@ -225,6 +225,21 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
             let existingSessions = indexed.filter(exists)
 
+            // Publish hydrated sessions immediately so the UI is populated
+            // while the background file scan runs (matches Codex indexer pattern).
+            let presentedHydration = !existingSessions.isEmpty
+            if presentedHydration {
+                let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
+                let hydratedFiltered = existingSessions.filter { hideProbes ? !ClaudeProbeConfig.isProbeSession($0) : true }
+                let hydratedSorted = hydratedFiltered.sorted { $0.modifiedAt > $1.modifiedAt }
+                let hydratedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: hydratedSorted, source: .claude)
+                self.publishAfterCurrentUpdate { [weak self] in
+                    guard let self, self.isRefreshTokenCurrent(token) else { return }
+                    self.allSessions = hydratedWithArchives
+                    self.launchPhase = .scanning
+                }
+            }
+
             #if DEBUG
             if !existingSessions.isEmpty {
                 print("[Launch] Hydrated \(existingSessions.count) Claude sessions from DB (after pruning non-existent), now scanning for new files…")
@@ -323,7 +338,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                         isHousekeeping: existing.isHousekeeping,
                         codexInternalSessionIDHint: session.codexInternalSessionIDHint ?? existing.codexInternalSessionIDHint,
                         parentSessionID: session.parentSessionID ?? existing.parentSessionID,
-                        subagentType: session.subagentType ?? existing.subagentType
+                        subagentType: session.subagentType ?? existing.subagentType,
+                        customTitle: session.customTitle ?? existing.customTitle
                     )
                     mergedByPath[session.filePath] = merged
                 } else {
@@ -560,7 +576,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 lightweightCommands: current.lightweightCommands,
                 codexInternalSessionIDHint: current.codexInternalSessionIDHint,
                 parentSessionID: current.parentSessionID,
-                subagentType: current.subagentType
+                subagentType: current.subagentType,
+                customTitle: current.customTitle
             )
 
             do {
@@ -727,7 +744,8 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                     lightweightCommands: current.lightweightCommands,
                     codexInternalSessionIDHint: fullSession.codexInternalSessionIDHint ?? current.codexInternalSessionIDHint,
                     parentSessionID: fullSession.parentSessionID ?? current.parentSessionID,
-                    subagentType: fullSession.subagentType ?? current.subagentType
+                    subagentType: fullSession.subagentType ?? current.subagentType,
+                    customTitle: fullSession.customTitle ?? current.customTitle
                 )
                 self.allSessions[idx] = merged
 

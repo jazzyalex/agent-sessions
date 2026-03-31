@@ -445,7 +445,8 @@ final class SessionIndexer: ObservableObject {
                             lightweightTitle: current.lightweightTitle,
                             lightweightCommands: current.lightweightCommands,
                             parentSessionID: fullSession.parentSessionID ?? current.parentSessionID,
-                            subagentType: fullSession.subagentType ?? current.subagentType
+                            subagentType: fullSession.subagentType ?? current.subagentType,
+                            customTitle: fullSession.customTitle ?? current.customTitle
                         )
                         var updated = self.allSessions
                         updated[idx] = merged
@@ -784,7 +785,8 @@ final class SessionIndexer: ObservableObject {
                         lightweightCommands: session.lightweightCommands ?? existing.lightweightCommands,
                         isHousekeeping: existing.isHousekeeping,
                         parentSessionID: session.parentSessionID ?? existing.parentSessionID,
-                        subagentType: session.subagentType ?? existing.subagentType
+                        subagentType: session.subagentType ?? existing.subagentType,
+                        customTitle: session.customTitle ?? existing.customTitle
                     )
                     mergedByPath[session.filePath] = merged
                 } else {
@@ -1117,7 +1119,8 @@ final class SessionIndexer: ObservableObject {
                 isHousekeeping: session.isHousekeeping,
                 codexInternalSessionIDHint: internalID,
                 parentSessionID: session.parentSessionID,
-                subagentType: session.subagentType
+                subagentType: session.subagentType,
+                customTitle: session.customTitle
             )
             var enriched = rebuilt
             enriched.isFavorite = session.isFavorite
@@ -1425,7 +1428,8 @@ final class SessionIndexer: ObservableObject {
                               isHousekeeping: tempIsHousekeeping || title == "No prompt",
                               codexInternalSessionIDHint: internalSessionIDHint,
                               parentSessionID: parentSessionID,
-                              subagentType: subagentType)
+                              subagentType: subagentType,
+                              customTitle: tempSession.customTitle)
         return session
     }
 
