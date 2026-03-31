@@ -196,12 +196,15 @@
         "local_schema": {
           "kind": "jsonl_newest",
           "roots": ["~/.copilot/session-state"],
-          "glob": "*.jsonl",
+          "glob": "**/*.jsonl",
           "max_lines": 2500
         },
         "discovery_path_contract": {
-          "description": "Copilot sessions should be top-level jsonl files under ~/.copilot/session-state.",
-          "patterns": ["/\\.copilot/session-state/[^/]+\\.jsonl$"]
+          "description": "Copilot sessions: flat *.jsonl at root (legacy <1.0) OR <uuid>/events.jsonl subdirectories (1.0+) under ~/.copilot/session-state.",
+          "patterns": [
+            "/\\.copilot/session-state/[^/]+\\.jsonl$",
+            "/\\.copilot/session-state/[^/]+/events\\.jsonl$"
+          ]
         }
       }
     },

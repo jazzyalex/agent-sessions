@@ -2,4 +2,6 @@
 {"type":"tool_use","sessionId":"ses_stage0_drift","name":"bash","input":{"command":"cat README.md"},"uuid":"t1","timestamp":"2025-12-16T01:00:01.000Z"}
 {"type":"tool_result","sessionId":"ses_stage0_drift","name":"bash","output":"# Title\n\nBody\n","uuid":"r1","timestamp":"2025-12-16T01:00:02.000Z"}
 {"type":"assistant","sessionId":"ses_stage0_drift","version":"1.9.0","message":{"role":"assistant","content":"Read README and extracted the title."},"uuid":"a1","timestamp":"2025-12-16T01:00:03.000Z"}
+{"type":"system","subtype":"turn_duration","durationMs":1234,"messageCount":5,"sessionId":"ses_stage0_drift","version":"2.1.88","uuid":"s2","timestamp":"2026-03-31T00:00:04.000Z","isMeta":false,"isSidechain":false,"userType":"external","entrypoint":"cli","cwd":"/tmp/project","gitBranch":"main","slug":"stage0-drift","parentUuid":"a1"}
+{"type":"user","sessionId":"ses_stage0_drift","version":"2.1.88","message":{"role":"user","content":"List files"},"origin":{"kind":"task-notification"},"uuid":"u2","timestamp":"2026-03-31T00:00:05.000Z","promptId":"p-drift-01","isMeta":false,"isSidechain":false,"userType":"external","entrypoint":"cli","cwd":"/tmp/project","gitBranch":"main","slug":"stage0-drift","parentUuid":"s2","permissionMode":"default"}
 

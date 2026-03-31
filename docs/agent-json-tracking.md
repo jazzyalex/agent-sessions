@@ -20,6 +20,7 @@ Update this file when:
 Record every upstream check, even if no changes are needed.
 - YYYY-MM-DD: Agents checked; sources (release notes or repos); result (no change, candidate,
   or format change) and evidence path.
+- 2026-03-31: Full weekly check across all seven agents. Sources: `https://github.com/openai/codex/releases/latest` (0.117.0), `https://github.com/anthropics/claude-code/releases/latest` (2.1.88), `https://github.com/opencode-ai/opencode/releases/latest` (1.3.9), `https://docs.factory.ai/changelog/cli-updates` (0.89.0), `https://registry.npmjs.org/@google%2Fgemini-cli/latest` (0.35.3), `https://registry.npmjs.org/openclaw/latest` (2026.3.28), `https://github.com/github/copilot-cli/releases/latest` (1.0.13). Result: bumped verified sessions for Codex `0.117.0`, Claude `2.1.88`, Gemini `0.35.3`, Copilot `1.0.11` (installed; upstream is 1.0.13), OpenCode `1.3.7` (installed; upstream is 1.3.9), Droid `0.89.0`, OpenClaw `2026.3.28`. Schema drift: Claude — additive new fields `system.messageCount` and `user.origin` (origin is an object e.g. `{"kind":"task-notification"}`); schema_drift.jsonl updated with synthetic events. Gemini — additive new root-level `summary` string field; schema_drift.json updated. Copilot — MAJOR version: storage layout changed from flat `~/.copilot/session-state/<id>.jsonl` to `~/.copilot/session-state/<uuid>/events.jsonl`; runtime patched in commit f77040f; agent-watch-config.json discovery contract and glob updated; new subdirectory fixture added at `Resources/Fixtures/stage0/agents/copilot/subdir_v1/`. Evidence: `scripts/probe_scan_output/agent_watch/20260331-012056Z/report.json`, `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`, `Resources/Fixtures/stage0/agents/**`.
 - 2026-03-18: Codex rollout-format audit after usage regressions. Local evidence from `~/.codex/sessions/2026/03/**` showed many recent `payload.type=token_count` events with `payload.rate_limits = null`, while older/local mixed sessions still emitted full `rate_limits` objects. Upstream evidence: open Codex issues about `rate_limits` being null in rollout files and JSONL rate-limit omissions (`openai/codex#14880`, `#14728`, `#14489`) plus rollout/schema churn around `turn.completed`, `token_count` migration, websocket `codex.rate_limits`, and rollout JSON schema updates. Result: Agent Sessions parser now treats null-only recent Codex logs as “limits unavailable in recent logs” instead of falling back to stale older-file percentages. Evidence: local rollout samples under `~/.codex/sessions/2026/03/**`, `AgentSessions/CodexStatus/CodexStatusService.swift`, `AgentSessionsTests/CodexUsageParserTests.swift`.
 - 2026-03-01: Full weekly check across all seven agents with online upstream verification. Sources: `https://github.com/openai/codex/releases/latest`, `https://github.com/anthropics/claude-code/releases/latest`, `https://github.com/anomalyco/opencode/releases/latest`, `https://docs.factory.ai/changelog/cli-updates`, `https://registry.npmjs.org/@google%2Fgemini-cli/latest`, `https://registry.npmjs.org/openclaw/latest`, `https://github.com/github/copilot-cli/releases/latest`. Result: bumped verified sessions for Codex `0.106.0`, Claude `2.1.63`, OpenCode `1.2.10`, Droid `0.62.1`, Gemini `0.30.0`, OpenClaw `2026.2.22`; Copilot remained `0.0.411` (installed not newer). Added Droid stream `type=error` parser coverage and refreshed stage0 drift fixtures/metadata for Gemini, OpenCode, OpenClaw, and Droid. Evidence: `scripts/probe_scan_output/agent_watch/20260301-004842Z/report.json`, `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`, `Resources/Fixtures/stage0/agents/**`.
 - 2026-03-01: Follow-up after local CLI updates for Gemini/OpenCode/Copilot. Installed versions now match upstream for Gemini `0.31.0`, OpenCode `1.2.15`, Copilot `0.0.420`. Bumped verified support for all three; expanded OpenCode baseline evidence to include `part.text` keys (`messageID`, `sessionID`) so weekly schema drift checks remain additive-only. Evidence: `scripts/probe_scan_output/agent_watch/20260301-011329Z/report.json`, `docs/agent-support/agent-support-matrix.yml`, `docs/agent-support/agent-support-ledger.yml`, `Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/002.json`, `Resources/Fixtures/stage0/agents/copilot/{small,large,schema_drift}.jsonl`.
@@ -133,17 +134,22 @@ Record every upstream check, even if no changes are needed.
   - `Resources/Fixtures/stage0/agents/openclaw/{small,large,schema_drift}.jsonl`
 
 ### GitHub Copilot CLI
-- Session roots: `~/.copilot/session-state/<sessionId>.jsonl`
+- Session roots (two layouts; both supported):
+  - **Legacy (<1.0):** `~/.copilot/session-state/<sessionId>.jsonl` — flat JSONL files at the root
+  - **Current (1.0+):** `~/.copilot/session-state/<uuid>/events.jsonl` — JSONL inside a UUID subdirectory; additional metadata files (`workspace.yaml`, `checkpoints/`, etc.) in the same directory are not parsed
 - Format notes:
   - JSONL event envelope: `{ type, data, id, timestamp, parentId }`.
   - Model changes recorded via `session.model_change`.
+  - In 1.0+ sessions, the `session.start` `data.context` object includes git context (`cwd`, `gitRoot`, `branch`, `headCommit`, `repository`, `hostType`, `baseCommit`).
+  - In 1.0+ sessions, `user.message` `data` includes `interactionId`; `assistant.message` `data` includes `messageId`, `outputTokens`, `interactionId`; `assistant.turn_start/end` include `turnId` and `interactionId`.
 - Recent changes:
-  - Support added in 2025-12 summary (no format changes noted yet).
+  - 2026-03-31 (v1.0.11): Storage layout changed from flat to subdirectory. Runtime patched in commit `f77040f`. Session ID for subdirectory layout is derived from the UUID directory name.
 - Parser entry points:
   - `AgentSessions/Services/CopilotSessionParser.swift`
-  - `AgentSessions/Services/SessionDiscovery.swift` (Copilot)
+  - `AgentSessions/Services/SessionDiscovery.swift` (`CopilotSessionDiscovery`)
 - Fixtures:
-  - `Resources/Fixtures/stage0/agents/copilot/{small,large,schema_drift}.jsonl`
+  - `Resources/Fixtures/stage0/agents/copilot/{small,large,schema_drift}.jsonl` — legacy flat layout (0.0.420)
+  - `Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl` — subdirectory layout (1.0.11)
 
 ### Droid (Factory CLI)
 - Session roots:
