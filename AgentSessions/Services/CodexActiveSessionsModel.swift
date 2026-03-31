@@ -1277,17 +1277,13 @@ final class CodexActiveSessionsModel: ObservableObject {
             (a.pid != nil ? 0 : 1) < (b.pid != nil ? 0 : 1)
         }
         ui = Self.reconcileFallbackPresences(sortedFallbacks, into: ui)
-        // When the iTerm probe ran but returned empty (transient AppleScript failure),
-        // fall back to preserved cached title maps to avoid a "—" flash in Cockpit rows.
-        let effectiveTabTitleByTTY: [String: String]
-        let effectiveTabTitleBySessionGuid: [String: String]
-        if probeResult.didProbeITerm, probeResult.itermTabTitleByTTY.isEmpty, probeResult.itermTabTitleBySessionGuid.isEmpty {
-            effectiveTabTitleByTTY = cachedITermTabTitleByTTY
-            effectiveTabTitleBySessionGuid = cachedITermTabTitleBySessionGuid
-        } else {
-            effectiveTabTitleByTTY = probeResult.itermTabTitleByTTY
-            effectiveTabTitleBySessionGuid = probeResult.itermTabTitleBySessionGuid
-        }
+        let (effectiveTabTitleByTTY, effectiveTabTitleBySessionGuid) = Self.effectiveITermTitleMaps(
+            didProbeITerm: probeResult.didProbeITerm,
+            probeTitleByTTY: probeResult.itermTabTitleByTTY,
+            probeTitleBySessionGuid: probeResult.itermTabTitleBySessionGuid,
+            cachedTitleByTTY: cachedITermTabTitleByTTY,
+            cachedTitleBySessionGuid: cachedITermTabTitleBySessionGuid
+        )
         ui = Self.enrichPresencesWithITermTabTitles(
             ui,
             tabTitleByTTY: effectiveTabTitleByTTY,
@@ -2472,6 +2468,23 @@ final class CodexActiveSessionsModel: ObservableObject {
         guard hadPreviouslyPublishedPresences else { return false }
         guard cockpitIsOrWasVisible else { return false }
         return consecutiveSuppressedCycles < maxSuppressedCycles
+    }
+
+    /// When the iTerm probe ran but returned empty title maps (transient AppleScript
+    /// failure), fall back to preserved cached maps to avoid a "—" flash. A probe
+    /// that returns GUID-keyed titles but no TTY-keyed titles is NOT a failure —
+    /// only fall back when both maps are empty.
+    nonisolated static func effectiveITermTitleMaps(
+        didProbeITerm: Bool,
+        probeTitleByTTY: [String: String],
+        probeTitleBySessionGuid: [String: String],
+        cachedTitleByTTY: [String: String],
+        cachedTitleBySessionGuid: [String: String]
+    ) -> (tty: [String: String], guid: [String: String]) {
+        if didProbeITerm, probeTitleByTTY.isEmpty, probeTitleBySessionGuid.isEmpty {
+            return (cachedTitleByTTY, cachedTitleBySessionGuid)
+        }
+        return (probeTitleByTTY, probeTitleBySessionGuid)
     }
 
     nonisolated static func effectiveCachedProcessPresenceTTL(baseTTL: TimeInterval,
