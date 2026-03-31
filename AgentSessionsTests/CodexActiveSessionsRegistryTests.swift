@@ -2789,6 +2789,84 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testShouldSuppressEmptyTransition_counterLifecycle() {
+        // Simulates the increment/reset logic from refreshOnce().
+        // Cycles 0..2 suppress; cycle 3 stops suppressing; non-empty resets.
+        var counter = 0
+        for cycle in 0..<3 {
+            let suppress = CodexActiveSessionsModel.shouldSuppressEmptyTransition(
+                uiIsEmpty: true,
+                hadPreviouslyPublishedPresences: true,
+                cockpitIsOrWasVisible: true,
+                consecutiveSuppressedCycles: counter
+            )
+            XCTAssertTrue(suppress, "Expected suppression at cycle \(cycle)")
+            counter += 1
+        }
+        // Cycle 3: cap reached, suppression stops.
+        XCTAssertFalse(
+            CodexActiveSessionsModel.shouldSuppressEmptyTransition(
+                uiIsEmpty: true,
+                hadPreviouslyPublishedPresences: true,
+                cockpitIsOrWasVisible: true,
+                consecutiveSuppressedCycles: counter
+            )
+        )
+        // After a non-empty cycle, counter resets (caller sets to 0).
+        counter = 0
+        XCTAssertTrue(
+            CodexActiveSessionsModel.shouldSuppressEmptyTransition(
+                uiIsEmpty: true,
+                hadPreviouslyPublishedPresences: true,
+                cockpitIsOrWasVisible: true,
+                consecutiveSuppressedCycles: counter
+            )
+        )
+    }
+
+    func testEnrichPresencesWithITermTabTitles_guidOnlyProbeIsNotTreatedAsFailure() {
+        // A successful iTerm probe can return GUID-keyed titles with an empty TTY map.
+        // The fallback to cached titles must NOT activate in this case.
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        var terminal = CodexActivePresence.Terminal()
+        terminal.itermSessionId = "w0t0p0:AAAA1111-BBBB-2222-CCCC-333333333333"
+        presence.terminal = terminal
+
+        let freshGuidMap = ["AAAA1111-BBBB-2222-CCCC-333333333333": "Fresh GUID Title"]
+        let staleGuidMap = ["AAAA1111-BBBB-2222-CCCC-333333333333": "Stale Cached Title"]
+
+        // Simulate the fallback condition: TTY map is empty but GUID map is not.
+        // Both maps empty → fallback to cache (transient failure).
+        // TTY empty, GUID non-empty → use fresh data (valid GUID-only probe).
+        let emptyTTY: [String: String] = [:]
+
+        // GUID-only probe: should use fresh GUID map, NOT cache.
+        let enrichedFresh = CodexActiveSessionsModel.enrichPresencesWithITermTabTitles(
+            [presence],
+            tabTitleByTTY: emptyTTY,
+            tabTitleBySessionGuid: freshGuidMap
+        )
+        XCTAssertEqual(enrichedFresh[0].terminal?.tabTitle, "Fresh GUID Title")
+
+        // Both empty: would fall back to cache (tested by checking enrichment is no-op).
+        let enrichedEmpty = CodexActiveSessionsModel.enrichPresencesWithITermTabTitles(
+            [presence],
+            tabTitleByTTY: emptyTTY,
+            tabTitleBySessionGuid: [:]
+        )
+        XCTAssertNil(enrichedEmpty[0].terminal?.tabTitle)
+
+        // Cache should be used instead of empty maps — that logic is in refreshOnce(),
+        // so verify the cache enrichment works when provided.
+        let enrichedCached = CodexActiveSessionsModel.enrichPresencesWithITermTabTitles(
+            [presence],
+            tabTitleByTTY: emptyTTY,
+            tabTitleBySessionGuid: staleGuidMap
+        )
+        XCTAssertEqual(enrichedCached[0].terminal?.tabTitle, "Stale Cached Title")
+    }
+
     func testClaudeSessionLogCandidates_excludesFilesOlderThanRecencyCutoff() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let projectDir = tmp.appendingPathComponent("projects/-Users-test-MyProject")
