@@ -206,6 +206,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     private var itermProbeRoundRobinCursor: Int = 0
     private var forceFullProbeNextRefresh: Bool = false
     private var consecutiveStableCycles: Int = 0
+    private var consecutiveEmptySuppressedCycles: Int = 0
     private enum ManagedProbeKind: String, Hashable {
         case processDiscovery
         case iTermInventory
@@ -480,6 +481,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         cachedITermTabTitleByTTY = [:]
         cachedITermTabTitleBySessionGuid = [:]
         forceFullProbeNextRefresh = true
+        consecutiveEmptySuppressedCycles = 0
         resetStablePollBackoff()
         armForegroundProbeRamp()
         refreshTask?.cancel()
@@ -1275,10 +1277,21 @@ final class CodexActiveSessionsModel: ObservableObject {
             (a.pid != nil ? 0 : 1) < (b.pid != nil ? 0 : 1)
         }
         ui = Self.reconcileFallbackPresences(sortedFallbacks, into: ui)
+        // When the iTerm probe ran but returned empty (transient AppleScript failure),
+        // fall back to preserved cached title maps to avoid a "—" flash in Cockpit rows.
+        let effectiveTabTitleByTTY: [String: String]
+        let effectiveTabTitleBySessionGuid: [String: String]
+        if probeResult.didProbeITerm, probeResult.itermTabTitleByTTY.isEmpty {
+            effectiveTabTitleByTTY = cachedITermTabTitleByTTY
+            effectiveTabTitleBySessionGuid = cachedITermTabTitleBySessionGuid
+        } else {
+            effectiveTabTitleByTTY = probeResult.itermTabTitleByTTY
+            effectiveTabTitleBySessionGuid = probeResult.itermTabTitleBySessionGuid
+        }
         ui = Self.enrichPresencesWithITermTabTitles(
             ui,
-            tabTitleByTTY: probeResult.itermTabTitleByTTY,
-            tabTitleBySessionGuid: probeResult.itermTabTitleBySessionGuid
+            tabTitleByTTY: effectiveTabTitleByTTY,
+            tabTitleBySessionGuid: effectiveTabTitleBySessionGuid
         )
 
         let probedITermPresenceKeys = plannedITermProbePresenceKeys(
@@ -1310,7 +1323,8 @@ final class CodexActiveSessionsModel: ObservableObject {
         lastRefreshAt = now
 
         let cockpitRecentlyVisible = lastCockpitVisibleAt.map { now.timeIntervalSince($0) < 10 } ?? false
-        let shouldSuppressEmptyPublish = Self.shouldSuppressTransientEmptyPublish(
+        let cockpitIsOrWasVisible = isCockpitVisibleSnapshot || isPinnedCockpitVisibleSnapshot || cockpitRecentlyVisible
+        let baseSuppressEmptyPublish = Self.shouldSuppressTransientEmptyPublish(
             ui: ui,
             cockpitVisible: isCockpitVisibleSnapshot || isPinnedCockpitVisibleSnapshot,
             cockpitRecentlyVisible: cockpitRecentlyVisible,
@@ -1318,6 +1332,18 @@ final class CodexActiveSessionsModel: ObservableObject {
             didProbeITerm: probeResult.didProbeITerm,
             registryHadPresences: probeResult.registryHadPresences
         )
+        let shouldSuppressRecentTransition = Self.shouldSuppressEmptyTransition(
+            uiIsEmpty: ui.isEmpty,
+            hadPreviouslyPublishedPresences: !lastPublishedPresenceSignatures.isEmpty,
+            cockpitIsOrWasVisible: cockpitIsOrWasVisible,
+            consecutiveSuppressedCycles: consecutiveEmptySuppressedCycles
+        )
+        let shouldSuppressEmptyPublish = baseSuppressEmptyPublish || shouldSuppressRecentTransition
+        if shouldSuppressEmptyPublish, ui.isEmpty {
+            consecutiveEmptySuppressedCycles += 1
+        } else {
+            consecutiveEmptySuppressedCycles = 0
+        }
 
         if !shouldSuppressEmptyPublish {
             bySessionID = sessionMap
@@ -2427,6 +2453,25 @@ final class CodexActiveSessionsModel: ObservableObject {
         guard ui.isEmpty else { return false }
         guard !registryHadPresences else { return true }
         return !(didProbeProcesses && didProbeITerm)
+    }
+
+    /// Supplementary suppression: when presences transition from non-empty to empty
+    /// while the cockpit is visible, suppress for a few cycles to ride out transient
+    /// probe failures (lsof timing, AppleScript timeout, registry I/O race).
+    /// Unlike `resetStablePollBackoff()`, the cycle counter is intentionally NOT
+    /// reset during visibility or activation transitions — those are exactly the
+    /// moments where transient empty results are most likely.
+    nonisolated static func shouldSuppressEmptyTransition(
+        uiIsEmpty: Bool,
+        hadPreviouslyPublishedPresences: Bool,
+        cockpitIsOrWasVisible: Bool,
+        consecutiveSuppressedCycles: Int,
+        maxSuppressedCycles: Int = 3
+    ) -> Bool {
+        guard uiIsEmpty else { return false }
+        guard hadPreviouslyPublishedPresences else { return false }
+        guard cockpitIsOrWasVisible else { return false }
+        return consecutiveSuppressedCycles < maxSuppressedCycles
     }
 
     nonisolated static func effectiveCachedProcessPresenceTTL(baseTTL: TimeInterval,
