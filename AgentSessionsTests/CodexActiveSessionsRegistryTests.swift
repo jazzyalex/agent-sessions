@@ -2824,47 +2824,57 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
-    func testEnrichPresencesWithITermTabTitles_guidOnlyProbeIsNotTreatedAsFailure() {
-        // A successful iTerm probe can return GUID-keyed titles with an empty TTY map.
-        // The fallback to cached titles must NOT activate in this case.
-        var presence = CodexActivePresence()
-        presence.source = .codex
-        var terminal = CodexActivePresence.Terminal()
-        terminal.itermSessionId = "w0t0p0:AAAA1111-BBBB-2222-CCCC-333333333333"
-        presence.terminal = terminal
-
-        let freshGuidMap = ["AAAA1111-BBBB-2222-CCCC-333333333333": "Fresh GUID Title"]
-        let staleGuidMap = ["AAAA1111-BBBB-2222-CCCC-333333333333": "Stale Cached Title"]
-
-        // Simulate the fallback condition: TTY map is empty but GUID map is not.
-        // Both maps empty → fallback to cache (transient failure).
-        // TTY empty, GUID non-empty → use fresh data (valid GUID-only probe).
-        let emptyTTY: [String: String] = [:]
-
-        // GUID-only probe: should use fresh GUID map, NOT cache.
-        let enrichedFresh = CodexActiveSessionsModel.enrichPresencesWithITermTabTitles(
-            [presence],
-            tabTitleByTTY: emptyTTY,
-            tabTitleBySessionGuid: freshGuidMap
+    func testEffectiveITermTitleMaps_usesProbeDataForGuidOnlyResult() {
+        // A successful probe with GUID titles but no TTY titles is not a failure.
+        let fresh = CodexActiveSessionsModel.effectiveITermTitleMaps(
+            didProbeITerm: true,
+            probeTitleByTTY: [:],
+            probeTitleBySessionGuid: ["guid-1": "Fresh"],
+            cachedTitleByTTY: ["tty-old": "Stale TTY"],
+            cachedTitleBySessionGuid: ["guid-1": "Stale GUID"]
         )
-        XCTAssertEqual(enrichedFresh[0].terminal?.tabTitle, "Fresh GUID Title")
+        XCTAssertTrue(fresh.tty.isEmpty)
+        XCTAssertEqual(fresh.guid, ["guid-1": "Fresh"])
+    }
 
-        // Both empty: would fall back to cache (tested by checking enrichment is no-op).
-        let enrichedEmpty = CodexActiveSessionsModel.enrichPresencesWithITermTabTitles(
-            [presence],
-            tabTitleByTTY: emptyTTY,
-            tabTitleBySessionGuid: [:]
+    func testEffectiveITermTitleMaps_fallsToCacheWhenBothMapsEmpty() {
+        // Both maps empty after probe → transient failure, use cache.
+        let cached = CodexActiveSessionsModel.effectiveITermTitleMaps(
+            didProbeITerm: true,
+            probeTitleByTTY: [:],
+            probeTitleBySessionGuid: [:],
+            cachedTitleByTTY: ["tty-1": "Cached TTY"],
+            cachedTitleBySessionGuid: ["guid-1": "Cached GUID"]
         )
-        XCTAssertNil(enrichedEmpty[0].terminal?.tabTitle)
+        XCTAssertEqual(cached.tty, ["tty-1": "Cached TTY"])
+        XCTAssertEqual(cached.guid, ["guid-1": "Cached GUID"])
+    }
 
-        // Cache should be used instead of empty maps — that logic is in refreshOnce(),
-        // so verify the cache enrichment works when provided.
-        let enrichedCached = CodexActiveSessionsModel.enrichPresencesWithITermTabTitles(
-            [presence],
-            tabTitleByTTY: emptyTTY,
-            tabTitleBySessionGuid: staleGuidMap
+    func testEffectiveITermTitleMaps_usesProbeDataWhenNotProbed() {
+        // Probe didn't run (deferred) — use whatever the caller passed (cached maps
+        // are already substituted by performRefreshDiscovery in this case).
+        let deferred = CodexActiveSessionsModel.effectiveITermTitleMaps(
+            didProbeITerm: false,
+            probeTitleByTTY: [:],
+            probeTitleBySessionGuid: [:],
+            cachedTitleByTTY: ["tty-1": "Should Not Use"],
+            cachedTitleBySessionGuid: ["guid-1": "Should Not Use"]
         )
-        XCTAssertEqual(enrichedCached[0].terminal?.tabTitle, "Stale Cached Title")
+        XCTAssertTrue(deferred.tty.isEmpty)
+        XCTAssertTrue(deferred.guid.isEmpty)
+    }
+
+    func testEffectiveITermTitleMaps_usesProbeDataWhenBothMapsPopulated() {
+        // Normal case: probe returned both TTY and GUID maps.
+        let normal = CodexActiveSessionsModel.effectiveITermTitleMaps(
+            didProbeITerm: true,
+            probeTitleByTTY: ["tty-1": "Fresh TTY"],
+            probeTitleBySessionGuid: ["guid-1": "Fresh GUID"],
+            cachedTitleByTTY: ["tty-1": "Stale"],
+            cachedTitleBySessionGuid: ["guid-1": "Stale"]
+        )
+        XCTAssertEqual(normal.tty, ["tty-1": "Fresh TTY"])
+        XCTAssertEqual(normal.guid, ["guid-1": "Fresh GUID"])
     }
 
     func testClaudeSessionLogCandidates_excludesFilesOlderThanRecencyCutoff() throws {
