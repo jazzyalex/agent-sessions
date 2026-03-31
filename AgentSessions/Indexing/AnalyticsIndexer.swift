@@ -248,7 +248,8 @@ actor AnalyticsIndexer {
             messages: messages,
             commands: commands,
             parentSessionID: session.parentSessionID,
-            subagentType: session.subagentType
+            subagentType: session.subagentType,
+            customTitle: session.customTitle
         )
         let searchText = SessionSearchTextBuilder.build(session: session)
         let toolIOText: String? = {

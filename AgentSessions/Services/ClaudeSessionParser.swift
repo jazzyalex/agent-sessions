@@ -41,6 +41,7 @@ final class ClaudeSessionParser {
         var gitBranch: String?
         var tmin: Date?
         var tmax: Date?
+        var customTitle: String?
         var idx = 0
 
         // Detect subagent from file path
@@ -84,6 +85,15 @@ final class ClaudeSessionParser {
                     if tmax == nil || ts > tmax! { tmax = ts }
                 }
 
+                // Extract custom title from /rename records (last one wins)
+                if let t = obj["type"] as? String {
+                    if t == "custom-title", let ct = obj["customTitle"] as? String, !ct.isEmpty {
+                        customTitle = ct
+                    } else if t == "agent-name", let an = obj["agentName"] as? String, !an.isEmpty {
+                        customTitle = an
+                    }
+                }
+
                 // Parse event
                 let baseID = eventID(for: url, index: idx)
                 let parsed = parseLineEvents(obj, baseEventID: baseID)
@@ -116,7 +126,8 @@ final class ClaudeSessionParser {
             isHousekeeping: isHousekeeping,
             codexInternalSessionIDHint: sessionID,
             parentSessionID: parentSessionID,
-            subagentType: subagentType
+            subagentType: subagentType,
+            customTitle: customTitle
         )
     }
 
@@ -689,6 +700,7 @@ final class ClaudeSessionParser {
             var tmax: Date?
             var sampleCount = 0
             var sampleEvents: [SessionEvent] = []
+            var customTitle: String?
 
             func ingest(_ rawLine: String) {
                 guard let data = rawLine.data(using: .utf8),
@@ -721,6 +733,15 @@ final class ClaudeSessionParser {
                 if let ts = extractTimestamp(from: obj) {
                     if tmin == nil || ts < tmin! { tmin = ts }
                     if tmax == nil || ts > tmax! { tmax = ts }
+                }
+
+                // Extract custom title from /rename records (last one wins)
+                if let t = obj["type"] as? String {
+                    if t == "custom-title", let ct = obj["customTitle"] as? String, !ct.isEmpty {
+                        customTitle = ct
+                    } else if t == "agent-name", let an = obj["agentName"] as? String, !an.isEmpty {
+                        customTitle = an
+                    }
                 }
 
                 // Create sample event for title extraction
@@ -775,7 +796,8 @@ final class ClaudeSessionParser {
                            isHousekeeping: tempIsHousekeeping || title == "No prompt",
                            codexInternalSessionIDHint: sessionID,
                            parentSessionID: parentSessionID,
-                           subagentType: subagentType)
+                           subagentType: subagentType,
+                           customTitle: customTitle)
         }
 
         guard let initial = build(headBytes: headBytesInitial) else { return nil }

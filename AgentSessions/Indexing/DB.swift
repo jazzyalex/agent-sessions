@@ -140,6 +140,14 @@ actor IndexDB {
             }
         }
 
+        if !tableHasColumn(db, table: "session_meta", column: "custom_title") {
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN custom_title TEXT;")
+            } catch {
+                if !isDuplicateColumnError(error) { throw error }
+            }
+        }
+
         if tableHasColumn(db, table: "session_meta", column: "parent_session_id") {
             try exec(db, "CREATE INDEX IF NOT EXISTS idx_session_meta_parent ON session_meta(parent_session_id);")
         }
@@ -480,7 +488,7 @@ actor IndexDB {
     func fetchSessionMeta(for source: String) throws -> [SessionMetaRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         let sql = """
-        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type
+        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title
         FROM session_meta
         WHERE source = ?
         ORDER BY COALESCE(end_ts, mtime) DESC
@@ -511,7 +519,8 @@ actor IndexDB {
                 messages: Int(sqlite3_column_int64(stmt, 13)),
                 commands: Int(sqlite3_column_int64(stmt, 14)),
                 parentSessionID: sqlite3_column_type(stmt, 15) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 15)),
-                subagentType: sqlite3_column_type(stmt, 16) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 16))
+                subagentType: sqlite3_column_type(stmt, 16) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 16)),
+                customTitle: sqlite3_column_type(stmt, 17) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 17))
             )
             out.append(row)
         }
@@ -1152,14 +1161,14 @@ actor IndexDB {
 
     func upsertSessionMeta(_ m: SessionMetaRow) throws {
         let sql = """
-        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
           repo=excluded.repo, title=excluded.title, codex_internal_session_id=excluded.codex_internal_session_id,
           is_housekeeping=excluded.is_housekeeping, messages=excluded.messages, commands=excluded.commands,
-          parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type;
+          parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type, custom_title=excluded.custom_title;
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -1180,6 +1189,7 @@ actor IndexDB {
         sqlite3_bind_int64(stmt, 15, Int64(m.commands))
         if let pid = m.parentSessionID { sqlite3_bind_text(stmt, 16, pid, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 16) }
         if let sat = m.subagentType { sqlite3_bind_text(stmt, 17, sat, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 17) }
+        if let ct = m.customTitle { sqlite3_bind_text(stmt, 18, ct, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 18) }
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
@@ -1637,6 +1647,7 @@ struct SessionMetaRow {
     let commands: Int
     let parentSessionID: String?
     let subagentType: String?
+    let customTitle: String?
 }
 
 struct SessionDayRow {
