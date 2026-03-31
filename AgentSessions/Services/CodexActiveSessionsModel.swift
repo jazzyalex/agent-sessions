@@ -1222,7 +1222,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             // An empty result is most likely a transient AppleScript failure, not a genuine
             // "no iTerm sessions" state. Caching empty maps overwrites valid titles for all
             // subsequent enrichment passes, producing a brief "—" flash for every Cockpit row.
-            if !probeResult.itermTabTitleByTTY.isEmpty {
+            if !probeResult.itermTabTitleByTTY.isEmpty || !probeResult.itermTabTitleBySessionGuid.isEmpty {
                 cachedITermTabTitleByTTY = probeResult.itermTabTitleByTTY
                 cachedITermTabTitleBySessionGuid = probeResult.itermTabTitleBySessionGuid
             }
@@ -1281,7 +1281,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         // fall back to preserved cached title maps to avoid a "—" flash in Cockpit rows.
         let effectiveTabTitleByTTY: [String: String]
         let effectiveTabTitleBySessionGuid: [String: String]
-        if probeResult.didProbeITerm, probeResult.itermTabTitleByTTY.isEmpty {
+        if probeResult.didProbeITerm, probeResult.itermTabTitleByTTY.isEmpty, probeResult.itermTabTitleBySessionGuid.isEmpty {
             effectiveTabTitleByTTY = cachedITermTabTitleByTTY
             effectiveTabTitleBySessionGuid = cachedITermTabTitleBySessionGuid
         } else {
