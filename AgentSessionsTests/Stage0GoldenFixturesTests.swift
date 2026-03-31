@@ -90,6 +90,21 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         }
     }
 
+    func testCopilotSubdirLayoutV1Parses() throws {
+        // Exercises the v1.0.11+ storage layout: <uuid>/events.jsonl
+        let name = "agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
+        let url = FixturePaths.stage0FixtureURL(name)
+        guard let preview = CopilotSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
+        XCTAssertEqual(preview.source, .copilot)
+        // Session ID should be the UUID directory name, not "events"
+        XCTAssertEqual(preview.id, "aaaabbbb-1111-2222-3333-ccccddddeeee")
+        XCTAssertGreaterThan(preview.eventCount, 0)
+
+        guard let full = CopilotSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        XCTAssertEqual(full.source, .copilot)
+        XCTAssertFalse(full.events.isEmpty)
+    }
+
     func testDroidSessionStoreAndStreamJSONFixturesParse() throws {
         let paths = [
             "agents/droid/session_store_small.jsonl",
