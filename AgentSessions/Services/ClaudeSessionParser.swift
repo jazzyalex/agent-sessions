@@ -42,6 +42,7 @@ final class ClaudeSessionParser {
         var tmin: Date?
         var tmax: Date?
         var customTitle: String?
+        var hasExplicitCustomTitle = false
         var idx = 0
 
         // Detect subagent from file path
@@ -85,11 +86,14 @@ final class ClaudeSessionParser {
                     if tmax == nil || ts > tmax! { tmax = ts }
                 }
 
-                // Extract custom title from /rename records (last one wins)
+                // Extract custom title from /rename records.
+                // custom-title always wins; agent-name is only a fallback.
                 if let t = obj["type"] as? String {
                     if t == "custom-title", let ct = obj["customTitle"] as? String, !ct.isEmpty {
                         customTitle = ct
-                    } else if t == "agent-name", let an = obj["agentName"] as? String, !an.isEmpty {
+                        hasExplicitCustomTitle = true
+                    } else if t == "agent-name", !hasExplicitCustomTitle,
+                              let an = obj["agentName"] as? String, !an.isEmpty {
                         customTitle = an
                     }
                 }
@@ -701,6 +705,7 @@ final class ClaudeSessionParser {
             var sampleCount = 0
             var sampleEvents: [SessionEvent] = []
             var customTitle: String?
+            var hasExplicitCustomTitle = false
 
             func ingest(_ rawLine: String) {
                 guard let data = rawLine.data(using: .utf8),
@@ -735,11 +740,14 @@ final class ClaudeSessionParser {
                     if tmax == nil || ts > tmax! { tmax = ts }
                 }
 
-                // Extract custom title from /rename records (last one wins)
+                // Extract custom title from /rename records.
+                // custom-title always wins; agent-name is only a fallback.
                 if let t = obj["type"] as? String {
                     if t == "custom-title", let ct = obj["customTitle"] as? String, !ct.isEmpty {
                         customTitle = ct
-                    } else if t == "agent-name", let an = obj["agentName"] as? String, !an.isEmpty {
+                        hasExplicitCustomTitle = true
+                    } else if t == "agent-name", !hasExplicitCustomTitle,
+                              let an = obj["agentName"] as? String, !an.isEmpty {
                         customTitle = an
                     }
                 }
