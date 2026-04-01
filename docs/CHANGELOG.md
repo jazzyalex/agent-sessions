@@ -9,6 +9,10 @@ All notable changes to this project will be documented in this file.
 - Performance: Analytics indexing work is decoupled from routine provider refresh paths so Unified/Cockpit stay responsive when Analytics is idle.
 - Performance: Core session indexing now uses a lower-impact foreground execution profile, reduced focused-session monitor cadence, and no longer cancels in-flight refreshes when the app deactivates.
 - Unified toolbar: Refresh indicator now explicitly represents core session indexing (not analytics), with clearer status/help copy to distinguish it from Analytics index builds.
+- Performance: Automatic core refresh monitors now pause while the app is foreground/active and resume in background, reducing sustained CPU and avoiding near-continuous “indexing” status during active Unified use.
+- Unified footer: Core indexing status now shows live session progress (`X/Y` and `%`) instead of a generic “refreshing” message.
+- Unified filters: Toggling agent pills in the toolbar is now filter-only and no longer auto-triggers index refreshes.
+- Indexing UX: Background monitor refreshes now surface as lightweight syncing status, while launch/manual indexing keeps stable progress messaging.
 
 ### Added
 - Analytics: Build lifecycle UI now includes not-built, building, canceled, failed, and stale states with visible progress details (percent, sessions processed, source progress, and indexed date span).

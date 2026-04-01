@@ -914,8 +914,31 @@ struct UnifiedSessionsView: View {
 	        if unified.launchState.overallPhase < .ready {
 	            return unified.launchState.overallPhase.statusDescription
 	        }
-	        if unified.isIndexing || unified.isProcessingTranscripts {
-	            return unified.isProcessingTranscripts ? "Processing transcripts (core index)…" : "Refreshing sessions index (core)…"
+	        if unified.coreIndexingDisplayMode == .syncing {
+	            let progress = unified.coreIndexingProgress
+	            if progress.total > 0, let percent = progress.percent {
+	                return "Syncing updates \(progress.processed)/\(progress.total) (\(percent)%)…"
+	            }
+	            if progress.processed > 0 {
+	                return "Syncing updates (\(progress.processed))…"
+	            }
+	            return "Syncing updates…"
+	        }
+	        if unified.coreIndexingDisplayMode == .indexing || unified.isIndexing {
+	            let progress = unified.coreIndexingProgress
+	            if progress.total > 0 {
+	                if let percent = progress.percent {
+	                    return "Indexing \(progress.processed)/\(progress.total) sessions (\(percent)%)…"
+	                }
+	                return "Indexing \(progress.processed)/\(progress.total) sessions…"
+	            }
+	            if progress.processed > 0 {
+	                return "Indexing \(progress.processed) sessions…"
+	            }
+	            return "Indexing sessions…"
+	        }
+	        if unified.isProcessingTranscripts {
+	            return "Processing transcripts (core index)…"
 	        }
 	        if searchCoordinator.isRunning {
 	            return "Searching…"

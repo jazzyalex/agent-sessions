@@ -665,9 +665,8 @@ final class SessionIndexer: ObservableObject {
                     self.scheduleCodexInternalSessionIDBackfillIfNeeded(in: self.allSessions)
                     self.totalFiles = existingSessions.count
                     self.filesProcessed = existingSessions.count
-                    self.isIndexing = false
-                    self.progressText = "Ready"
-                    self.launchPhase = .ready
+                    self.progressText = "Scanning for updates…"
+                    self.launchPhase = .scanning
                 }
             }
 
@@ -734,15 +733,14 @@ final class SessionIndexer: ObservableObject {
                 sliceSize: executionProfile.sliceSize,
                 interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
                 onProgress: { processed, total in
-                    guard !presentedHydration else { return }
                     guard self.refreshToken == token else { return }
                     DispatchQueue.main.async {
                         Task { @MainActor in
                             await Task.yield()
                             guard self.refreshToken == token else { return }
-                            self.filesProcessed = processed
+                            self.filesProcessed = existingSessions.count + processed
                             if processed > 0 {
-                                self.progressText = "Indexed \(processed)/\(total)"
+                                self.progressText = "Indexed \(self.filesProcessed)/\(self.totalFiles)"
                             }
                         }
                     }
