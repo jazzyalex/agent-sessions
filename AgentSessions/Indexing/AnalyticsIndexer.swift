@@ -32,12 +32,19 @@ actor AnalyticsIndexer {
     }
 
     /// Full build with a custom profile. Calls `onSourceComplete` after each source finishes successfully.
-    func fullBuild(profile: BuildProfile, onSourceComplete: @escaping @Sendable (String) async -> Void) async {
-        await indexAll(incremental: false, profile: profile, onSourceComplete: onSourceComplete)
+    func fullBuild(profile: BuildProfile,
+                   onSourceComplete: @escaping @Sendable (String) async -> Void,
+                   onSourceProgress: (@Sendable (String, Int, Int) async -> Void)? = nil) async {
+        await indexAll(incremental: false, profile: profile, onSourceComplete: onSourceComplete, onSourceProgress: onSourceProgress)
     }
 
     func refresh() async {
         await indexAll(incremental: true)
+    }
+
+    /// Incremental refresh with per-source progress callback.
+    func refresh(onSourceProgress: (@Sendable (String, Int, Int) async -> Void)? = nil) async {
+        await indexAll(incremental: true, onSourceProgress: onSourceProgress)
     }
 
     func refreshDelta(source: String, changed: [URL], removedPaths: [String]) async {
@@ -103,7 +110,8 @@ actor AnalyticsIndexer {
     // MARK: - Core
     private func indexAll(incremental: Bool,
                           profile: BuildProfile? = nil,
-                          onSourceComplete: (@Sendable (String) async -> Void)? = nil) async {
+                          onSourceComplete: (@Sendable (String) async -> Void)? = nil,
+                          onSourceProgress: (@Sendable (String, Int, Int) async -> Void)? = nil) async {
         LaunchProfiler.log("Analytics.indexAll start (incremental=\(incremental), profiled=\(profile != nil))")
         let toolIOEnabled = profile?.skipToolIO == true ? false : toolIOIndexEnabled()
         let toolIOCutoffTS = Int64(Date().addingTimeInterval(-Double(FeatureFlags.toolIOIndexRecentDays) * 24 * 60 * 60).timeIntervalSince1970)
@@ -118,6 +126,7 @@ actor AnalyticsIndexer {
         ]
 
         for (source, enumerate) in sources {
+            if Task.isCancelled { return }
             if !enabledSources.contains(source) { continue }
             var files = enumerate()
             if source == "claude" {
@@ -129,9 +138,11 @@ actor AnalyticsIndexer {
                 do { try await db.purgeSource(source) } catch { /* non-fatal */ }
             }
             if files.isEmpty {
+                await onSourceProgress?(source, 0, 0)
                 await onSourceComplete?(source)
                 continue
             }
+            await onSourceProgress?(source, 0, files.count)
 
             var indexedByPath: [String: IndexedFileRow] = [:]
             var searchReadyPaths = Set<String>()
@@ -165,7 +176,8 @@ actor AnalyticsIndexer {
             await indexFiles(files, source: source, incremental: incremental, profile: profile,
                              indexedByPath: indexedByPath, searchReadyPaths: searchReadyPaths,
                              toolIOReadyPaths: toolIOReadyPaths, toolIOEnabled: toolIOEnabled,
-                             toolIOCutoffTS: toolIOCutoffTS)
+                             toolIOCutoffTS: toolIOCutoffTS,
+                             onSourceProgress: onSourceProgress)
             await onSourceComplete?(source)
         }
 
@@ -178,22 +190,29 @@ actor AnalyticsIndexer {
     /// Processes files with either standard (chunk-8, concurrent) or profiled (serial, yielding) strategy.
     private func indexFiles(_ files: [URL], source: String, incremental: Bool, profile: BuildProfile?,
                             indexedByPath: [String: IndexedFileRow], searchReadyPaths: Set<String>,
-                            toolIOReadyPaths: Set<String>, toolIOEnabled: Bool, toolIOCutoffTS: Int64) async {
+                            toolIOReadyPaths: Set<String>, toolIOEnabled: Bool, toolIOCutoffTS: Int64,
+                            onSourceProgress: (@Sendable (String, Int, Int) async -> Void)? = nil) async {
         let chunkSize = profile?.chunkSize ?? 8
         let yieldNanos = profile?.yieldNanoseconds ?? 0
+        var processed = 0
+        let total = files.count
 
         if chunkSize <= 1 {
             for (idx, url) in files.enumerated() {
+                if Task.isCancelled { return }
                 await indexFileIfNeeded(url: url, source: source, incremental: incremental,
                                         indexedByPath: indexedByPath, searchReadyPaths: searchReadyPaths,
                                         toolIOReadyPaths: toolIOReadyPaths, toolIOEnabled: toolIOEnabled,
                                         toolIOCutoffTS: toolIOCutoffTS)
+                processed += 1
+                await onSourceProgress?(source, processed, total)
                 if yieldNanos > 0, idx < files.count - 1 {
                     try? await Task.sleep(nanoseconds: yieldNanos)
                 }
             }
         } else {
             for slice in stride(from: 0, to: files.count, by: chunkSize).map({ Array(files[$0..<min($0+chunkSize, files.count)]) }) {
+                if Task.isCancelled { return }
                 await withTaskGroup(of: Void.self) { group in
                     for url in slice {
                         group.addTask { [weak self] in
@@ -206,6 +225,8 @@ actor AnalyticsIndexer {
                     }
                     await group.waitForAll()
                 }
+                processed += slice.count
+                await onSourceProgress?(source, processed, total)
                 if yieldNanos > 0 {
                     try? await Task.sleep(nanoseconds: yieldNanos)
                 }
@@ -221,6 +242,7 @@ actor AnalyticsIndexer {
                                    toolIOReadyPaths: Set<String>,
                                    toolIOEnabled: Bool,
                                    toolIOCutoffTS: Int64) async {
+        if Task.isCancelled { return }
         // Stat
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = Int64((attrs[.size] as? NSNumber)?.int64Value ?? 0)
@@ -312,9 +334,9 @@ actor AnalyticsIndexer {
     }
 
     private func toolIOIndexEnabled() -> Bool {
-        // Default ON unless the user explicitly opts out.
+        // Default OFF unless the user explicitly opts in.
         if UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil {
-            return true
+            return false
         }
         return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
     }

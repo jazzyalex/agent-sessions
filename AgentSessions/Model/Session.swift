@@ -134,6 +134,27 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         events.first(where: { $0.kind == .user })?.text?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // Lightweight title for high-frequency list rendering/sorting paths.
+    // Avoids expensive preamble heuristics that are better suited for detail views.
+    public var listTitle: String {
+        if let custom = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
+            return custom
+        }
+        if let light = lightweightTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !light.isEmpty {
+            return light
+        }
+        if let user = events.first(where: { $0.kind == .user })?.text?.collapsedWhitespace(), !user.isEmpty {
+            return user
+        }
+        if let assistant = events.first(where: { $0.kind == .assistant })?.text?.collapsedWhitespace(), !assistant.isEmpty {
+            return assistant
+        }
+        if let name = events.first(where: { $0.kind == .tool_call && ($0.toolName?.isEmpty == false) })?.toolName {
+            return name
+        }
+        return "No prompt"
+    }
+
     // Derived human-friendly title for the session row.
     // Use improved Codex-style filtering with fallbacks for robustness
     public var title: String {

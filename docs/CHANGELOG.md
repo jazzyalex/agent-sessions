@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Analytics: Index building is now explicit and on-demand. Opening Analytics no longer auto-starts indexing from the Unified toolbar; users can start, cancel, and manually update analytics index builds from the Analytics window.
+- Performance: Analytics indexing work is decoupled from routine provider refresh paths so Unified/Cockpit stay responsive when Analytics is idle.
+- Performance: Core session indexing now uses a lower-impact foreground execution profile, reduced focused-session monitor cadence, and no longer cancels in-flight refreshes when the app deactivates.
+- Unified toolbar: Refresh indicator now explicitly represents core session indexing (not analytics), with clearer status/help copy to distinguish it from Analytics index builds.
+
+### Added
+- Analytics: Build lifecycle UI now includes not-built, building, canceled, failed, and stale states with visible progress details (percent, sessions processed, source progress, and indexed date span).
+
 ## [3.4] - 2026-03-30
 
 ### Added

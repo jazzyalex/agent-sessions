@@ -811,8 +811,6 @@ final class SessionIndexer: ObservableObject {
                     self.lastKnownFileStatsByPath[path] = stat
                 }
             }
-            self.scheduleAnalyticsDelta(changedFiles: sortedFiles, removedPaths: removedPaths, executionProfile: executionProfile)
-
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 LaunchProfiler.log("Codex.refresh: sessions merged (total=\(mergedWithArchives.count))")
@@ -975,27 +973,6 @@ final class SessionIndexer: ObservableObject {
         let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
         let size = Int64(values?.fileSize ?? 0)
         return SessionFileStat(mtime: mtime, size: size)
-    }
-
-    private func scheduleAnalyticsDelta(changedFiles: [URL],
-                                        removedPaths: [String],
-                                        executionProfile: IndexRefreshExecutionProfile) {
-        guard !(changedFiles.isEmpty && removedPaths.isEmpty) else { return }
-        let delay = executionProfile.deferNonCriticalWork ? UInt64(500_000_000) : UInt64(120_000_000)
-        Task.detached(priority: .utility) {
-            if delay > 0 {
-                try? await Task.sleep(nanoseconds: delay)
-            }
-            do {
-                let db = try IndexDB()
-                let indexer = AnalyticsIndexer(db: db, enabledSources: [SessionSource.codex.rawValue])
-                await indexer.refreshDelta(source: SessionSource.codex.rawValue,
-                                           changed: changedFiles,
-                                           removedPaths: removedPaths)
-            } catch {
-                // Non-fatal: analytics delta indexing is best-effort.
-            }
-        }
     }
 
 	    private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {

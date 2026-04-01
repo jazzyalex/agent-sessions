@@ -647,6 +647,35 @@ actor IndexDB {
     }
 
     // MARK: - Analytics rollup queries
+    func analyticsSessionDaySpan(sources: [String]) throws -> (String?, String?) {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [String] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = "SELECT MIN(day), MAX(day) FROM session_days\(whereSQL);"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        var idx: Int32 = 1
+        for source in binds {
+            sqlite3_bind_text(stmt, idx, source, -1, SQLITE_TRANSIENT)
+            idx += 1
+        }
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            let minDay = sqlite3_column_type(stmt, 0) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 0))
+            let maxDay = sqlite3_column_type(stmt, 1) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 1))
+            return (minDay, maxDay)
+        }
+        return (nil, nil)
+    }
+
     func countDistinctSessions(sources: [String], dayStart: String?, dayEnd: String?) throws -> Int {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []

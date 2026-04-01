@@ -89,9 +89,9 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     }
 
     private func toolIOIndexEnabled() -> Bool {
-        // Default ON unless the user explicitly opts out.
+        // Default OFF unless the user explicitly opts in.
         if UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil {
-            return true
+            return false
         }
         return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
     }

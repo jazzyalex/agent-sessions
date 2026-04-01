@@ -161,7 +161,7 @@ enum SessionSearchTextBuilder {
         return out
     }
 
-    static func build(session: Session, maxCharacters: Int = 200_000, perFieldLimit: Int = 8_000) -> String {
+    static func build(session: Session, maxCharacters: Int = 48_000, perFieldLimit: Int = 2_000) -> String {
         var parts: [String] = []
         parts.reserveCapacity(220)
         let toolOutputMax = FeatureFlags.instantToolOutputIndexMaxChars

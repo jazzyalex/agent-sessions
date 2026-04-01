@@ -8,6 +8,9 @@ final class AnalyticsService: ObservableObject {
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var isReady: Bool = false
     @Published var analyticsPhase: AnalyticsIndexPhase = .idle
+    @Published private(set) var buildProgress: AnalyticsBuildProgress = .empty
+    @Published private(set) var lastBuiltAt: Date? = nil
+    @Published private(set) var isStaleSinceLastBuild: Bool = false
 
     // Parsing progress tracking
     @Published private(set) var isParsingSessions: Bool = false
@@ -50,6 +53,30 @@ final class AnalyticsService: ObservableObject {
 
         // Observe indexer changes for auto-refresh
         setupObservers()
+    }
+
+    func setBuildProgress(_ progress: AnalyticsBuildProgress) {
+        buildProgress = progress
+    }
+
+    func setLastBuiltAt(_ date: Date?) {
+        lastBuiltAt = date
+    }
+
+    func setAnalyticsStale(_ stale: Bool) {
+        isStaleSinceLastBuild = stale
+    }
+
+    func requestBuild() {
+        NotificationCenter.default.post(name: .requestAnalyticsBuild, object: nil)
+    }
+
+    func requestUpdate() {
+        NotificationCenter.default.post(name: .requestAnalyticsUpdate, object: nil)
+    }
+
+    func requestCancelBuild() {
+        NotificationCenter.default.post(name: .cancelAnalyticsBuild, object: nil)
     }
 
     /// Calculate analytics for given filters
