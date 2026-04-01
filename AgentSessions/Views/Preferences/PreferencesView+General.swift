@@ -235,6 +235,19 @@ extension PreferencesView {
                 set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableGitInspector) }
             ))
             .help("Show the Git Context toolbar button in Sessions (⌘⇧G)")
+
+            sectionHeader("Indexing")
+            VStack(alignment: .leading, spacing: 8) {
+                Button("Rebuild Core Index…") {
+                    showCoreIndexRebuildConfirm = true
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Clear and rebuild the core sessions index. Use only when indexing appears corrupted.")
+
+                Text("This is an advanced repair action and can be CPU-intensive.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

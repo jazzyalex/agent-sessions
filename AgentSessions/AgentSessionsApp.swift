@@ -13,6 +13,7 @@ extension Notification.Name {
     static let showImagesFromMenu = Notification.Name("AgentSessionsShowImagesFromMenu")
     static let showImagesForInlineImage = Notification.Name("AgentSessionsShowImagesForInlineImage")
     static let selectImagesBrowserItem = Notification.Name("AgentSessionsSelectImagesBrowserItem")
+    static let requestCoreIndexRebuild = Notification.Name("AgentSessionsRequestCoreIndexRebuild")
 }
 
 struct PendingCockpitNavigationRequest {
@@ -296,6 +297,9 @@ struct AgentSessionsApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: .showOnboardingFromMenu)) { _ in
                     onboardingCoordinator.presentManually()
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .requestCoreIndexRebuild)) { _ in
+                    unified.rebuildCoreIndex()
+                }
                 .onChange(of: onboardingCoordinator.isPresented) { _, isPresented in
                     if isPresented, let content = onboardingCoordinator.content {
                         onboardingWindowPresenter.show(
@@ -550,7 +554,7 @@ extension AgentSessionsApp {
             AgentEnablement.seedIfNeeded()
             migrateAnalyticsCacheIfNeeded()
             unified.syncAgentEnablementFromDefaults()
-            unified.refresh()
+            unified.refresh(trigger: .launch)
             setupAnalytics()
             presentAnalyticsOnDemandNoticeIfNeeded()
         }

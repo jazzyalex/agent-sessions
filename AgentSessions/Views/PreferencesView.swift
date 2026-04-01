@@ -104,6 +104,7 @@ struct PreferencesView: View {
     @State var showCrashClearConfirm: Bool = false
     @State var showCrashExportError: Bool = false
     @State var crashExportErrorMessage: String = ""
+    @State var showCoreIndexRebuildConfirm: Bool = false
 
     init(initialTab: PreferencesTab = .general) {
         self.initialTabArg = initialTab
@@ -305,6 +306,14 @@ struct PreferencesView: View {
 
             Privacy: Only reads usage percentages, no conversation data accessed.
             """)
+        }
+        .alert("Rebuild Core Index?", isPresented: $showCoreIndexRebuildConfirm) {
+            Button("Rebuild", role: .destructive) {
+                NotificationCenter.default.post(name: .requestCoreIndexRebuild, object: nil)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This rebuild purges cached core index data for all providers (including disabled ones), then rebuilds enabled providers. It can use significant CPU and may reduce responsiveness until complete.")
         }
     }
 

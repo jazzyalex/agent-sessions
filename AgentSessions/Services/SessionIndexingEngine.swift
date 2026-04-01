@@ -40,6 +40,14 @@ struct IndexRefreshExecutionProfile: Equatable {
         interSliceYieldNanoseconds: 300_000_000,
         deferNonCriticalWork: true
     )
+
+    // Prioritize foreground smoothness over throughput.
+    static let foregroundCapped = IndexRefreshExecutionProfile(
+        workerCount: 1,
+        sliceSize: 1,
+        interSliceYieldNanoseconds: 650_000_000,
+        deferNonCriticalWork: true
+    )
 }
 
 		enum SessionIndexingEngine {
