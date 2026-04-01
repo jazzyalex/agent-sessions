@@ -192,9 +192,16 @@ struct AgentSessionsApp: App {
     @State private var analyticsService: AnalyticsService?
     @State private var analyticsWindowController: AnalyticsWindowController?
     @State private var analyticsReady: Bool = false
+    @State private var analyticsPhase: AnalyticsIndexPhase = .idle
+    @State private var analyticsStale: Bool = false
     @State private var analyticsReadyObserver: AnyCancellable?
     @State private var analyticsPhaseObserver: AnyCancellable?
+    @State private var analyticsStaleObserver: AnyCancellable?
+    @State private var analyticsProgressObserver: AnyCancellable?
+    @State private var analyticsLastBuiltObserver: AnyCancellable?
     @State private var analyticsBuildObserver: NSObjectProtocol?
+    @State private var analyticsCancelObserver: NSObjectProtocol?
+    @State private var analyticsUpdateObserver: NSObjectProtocol?
 
     init() {
         guard !AppRuntime.isRunningTests else { return }
@@ -234,6 +241,8 @@ struct AgentSessionsApp: App {
                     droidIndexer: droidIndexer,
                     openclawIndexer: openclawIndexer,
                     analyticsReady: analyticsReady,
+                    analyticsPhase: analyticsPhase,
+                    analyticsIsStale: analyticsStale,
                     layoutMode: layoutMode,
                     onToggleLayout: {
                         let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
@@ -539,9 +548,11 @@ extension AgentSessionsApp {
         Task {
             await AppReadyGate.waitUntilReady()
             AgentEnablement.seedIfNeeded()
+            migrateAnalyticsCacheIfNeeded()
             unified.syncAgentEnablementFromDefaults()
             unified.refresh()
             setupAnalytics()
+            presentAnalyticsOnDemandNoticeIfNeeded()
         }
         Task.detached(priority: .utility) {
             await AppReadyGate.waitUntilReady()
@@ -564,6 +575,41 @@ extension AgentSessionsApp {
         activeCodexSessions.setAppActive(isAppActive)
         codexUsageModel.setAppActive(isAppActive)
         claudeUsageModel.setAppActive(isAppActive)
+    }
+
+    private func migrateAnalyticsCacheIfNeeded() {
+        let defaults = UserDefaults.standard
+        let key = "AnalyticsOnDemandCacheReset_v1"
+        if defaults.bool(forKey: key) { return }
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return
+        }
+        let dir = appSupport.appendingPathComponent("AgentSessions", isDirectory: true)
+        let db = dir.appendingPathComponent("index.db", isDirectory: false)
+        let wal = dir.appendingPathComponent("index.db-wal", isDirectory: false)
+        let shm = dir.appendingPathComponent("index.db-shm", isDirectory: false)
+        try? FileManager.default.removeItem(at: db)
+        try? FileManager.default.removeItem(at: wal)
+        try? FileManager.default.removeItem(at: shm)
+        defaults.set(true, forKey: key)
+    }
+
+    @MainActor
+    private func presentAnalyticsOnDemandNoticeIfNeeded() {
+        let defaults = UserDefaults.standard
+        let key = "AnalyticsOnDemandNoticeShown_v1"
+        if defaults.bool(forKey: key) { return }
+        defaults.set(true, forKey: key)
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Analytics Is Now On Demand"
+        alert.informativeText = """
+        Agent Sessions now prioritizes Unified and Cockpit responsiveness.
+        Analytics indexing starts only when you open Analytics and press Build.
+        """
+        alert.addButton(withTitle: "OK")
+        _ = alert.runModal()
     }
 
     @MainActor
@@ -673,6 +719,14 @@ extension AgentSessionsApp {
             NotificationCenter.default.removeObserver(observer)
             analyticsBuildObserver = nil
         }
+        if let observer = analyticsCancelObserver {
+            NotificationCenter.default.removeObserver(observer)
+            analyticsCancelObserver = nil
+        }
+        if let observer = analyticsUpdateObserver {
+            NotificationCenter.default.removeObserver(observer)
+            analyticsUpdateObserver = nil
+        }
 
         // Create analytics service with indexers
         let service = AnalyticsService(
@@ -697,10 +751,27 @@ extension AgentSessionsApp {
             analyticsPhaseObserver = unified.$analyticsPhase
                 .receive(on: RunLoop.main)
                 .sink { phase in
+                    self.analyticsPhase = phase
                     service.analyticsPhase = phase
                     if phase == .ready {
                         service.refreshReadiness()
                     }
+                }
+            analyticsStaleObserver = unified.$analyticsIsStale
+                .receive(on: RunLoop.main)
+                .sink { stale in
+                    self.analyticsStale = stale
+                    service.setAnalyticsStale(stale)
+                }
+            analyticsProgressObserver = unified.$analyticsBuildProgress
+                .receive(on: RunLoop.main)
+                .sink { progress in
+                    service.setBuildProgress(progress)
+                }
+            analyticsLastBuiltObserver = unified.$analyticsLastBuiltAt
+                .receive(on: RunLoop.main)
+                .sink { date in
+                    service.setLastBuiltAt(date)
                 }
         } else {
             analyticsReady = service.isReady
@@ -721,26 +792,41 @@ extension AgentSessionsApp {
             forName: .toggleAnalyticsWindow,
             object: nil,
             queue: .main
-        ) { [weak controller, weak holder] _ in
+        ) { [weak controller] _ in
             Task { @MainActor in
                 guard let controller else { return }
                 controller.toggle()
-                // Start analytics build if not already running
-                if let unified = holder?.unified,
-                   unified.analyticsPhase == .idle || unified.analyticsPhase == .failed {
-                    unified.requestAnalyticsBuildIfNeeded()
-                }
             }
         }
 
-        // Observe retry-build requests from AnalyticsView.
+        // Observe build requests from AnalyticsView.
         analyticsBuildObserver = NotificationCenter.default.addObserver(
             forName: .requestAnalyticsBuild,
             object: nil,
             queue: .main
         ) { [weak holder] _ in
             Task { @MainActor in
-                holder?.unified?.requestAnalyticsBuildIfNeeded()
+                holder?.unified?.startAnalyticsBuild()
+            }
+        }
+
+        analyticsCancelObserver = NotificationCenter.default.addObserver(
+            forName: .cancelAnalyticsBuild,
+            object: nil,
+            queue: .main
+        ) { [weak holder] _ in
+            Task { @MainActor in
+                holder?.unified?.cancelAnalyticsBuild()
+            }
+        }
+
+        analyticsUpdateObserver = NotificationCenter.default.addObserver(
+            forName: .requestAnalyticsUpdate,
+            object: nil,
+            queue: .main
+        ) { [weak holder] _ in
+            Task { @MainActor in
+                holder?.unified?.updateAnalyticsNow()
             }
         }
     }

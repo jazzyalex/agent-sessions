@@ -221,6 +221,8 @@ struct UnifiedSessionsView: View {
 
     let layoutMode: LayoutMode
     let analyticsReady: Bool
+    let analyticsPhase: AnalyticsIndexPhase
+    let analyticsIsStale: Bool
     let onToggleLayout: () -> Void
 
     @State private var selection: String?
@@ -296,6 +298,8 @@ struct UnifiedSessionsView: View {
          droidIndexer: DroidSessionIndexer,
          openclawIndexer: OpenClawSessionIndexer,
          analyticsReady: Bool,
+         analyticsPhase: AnalyticsIndexPhase,
+         analyticsIsStale: Bool,
          layoutMode: LayoutMode,
          onToggleLayout: @escaping () -> Void) {
         self.unified = unified
@@ -307,6 +311,8 @@ struct UnifiedSessionsView: View {
         self.droidIndexer = droidIndexer
         self.openclawIndexer = openclawIndexer
         self.analyticsReady = analyticsReady
+        self.analyticsPhase = analyticsPhase
+        self.analyticsIsStale = analyticsIsStale
         self.layoutMode = layoutMode
         self.onToggleLayout = onToggleLayout
         let store = SearchSessionStore(adapters: [
@@ -673,7 +679,7 @@ struct UnifiedSessionsView: View {
                        ideal: showSourceColumn ? 100 : 0,
                        max: showSourceColumn ? 120 : 0)
 
-	            TableColumn("Session", value: \Session.title) { s in
+	            TableColumn("Session", value: \Session.listTitle) { s in
 	                SessionTitleCell(
                         session: s,
                         geminiIndexer: geminiIndexer,
@@ -834,7 +840,7 @@ struct UnifiedSessionsView: View {
                 else if first.keyPath == \Session.repoDisplay { key = .repo }
                 else if first.keyPath == \Session.fileSizeSortKey { key = .size }
                 else if first.keyPath == \Session.sourceKey { key = .agent }
-                else if first.keyPath == \Session.title { key = .title }
+                else if first.keyPath == \Session.listTitle { key = .title }
                 else { key = .title }
                 unified.sortDescriptor = .init(key: key, ascending: first.order == .forward)
                 unified.recomputeNow()
@@ -909,7 +915,7 @@ struct UnifiedSessionsView: View {
 	            return unified.launchState.overallPhase.statusDescription
 	        }
 	        if unified.isIndexing || unified.isProcessingTranscripts {
-	            return unified.isProcessingTranscripts ? "Processing sessions…" : "Indexing sessions…"
+	            return unified.isProcessingTranscripts ? "Processing transcripts (core index)…" : "Refreshing sessions index (core)…"
 	        }
 	        if searchCoordinator.isRunning {
 	            return "Searching…"
@@ -1237,7 +1243,9 @@ struct UnifiedSessionsView: View {
             .disabled(!showStarColumn)
 
             AnalyticsButtonView(
-                isReady: analyticsReady
+                isReady: analyticsReady,
+                phase: analyticsPhase,
+                isStale: analyticsIsStale
             )
 
             ToolbarGroupDivider()
@@ -1260,13 +1268,15 @@ struct UnifiedSessionsView: View {
             .disabled(selectedSession == nil)
             .accessibilityLabel(Text("Open Working Directory"))
 
-            ToolbarIconButton(help: "Re-run the session indexer to discover new logs (⌘R)") { _ in
+            ToolbarIconButton(help: "Refresh sessions list/index (core indexing, not Analytics) (⌘R)") { _ in
                 ZStack {
                     ToolbarIcon(systemName: "arrow.clockwise")
                         .opacity(unified.isIndexing || unified.isProcessingTranscripts ? 0.35 : 1)
                     if unified.isIndexing || unified.isProcessingTranscripts {
-                        ProgressView()
-                            .controlSize(.small)
+                        Circle()
+                            .fill(Color.secondary)
+                            .frame(width: 7, height: 7)
+                            .offset(x: 8, y: -8)
                     }
                 }
             } action: {
@@ -2590,7 +2600,7 @@ private struct TranscriptHostView: View {
                     }
                 }
 
-	            Text(session.title)
+	            Text(session.listTitle)
 	                .font(.system(size: 13, weight: .regular, design: .monospaced))
 	                .lineLimit(1)
 	                .truncationMode(.tail)
@@ -2934,15 +2944,22 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
 
 private struct AnalyticsButtonView: View {
     let isReady: Bool
+    let phase: AnalyticsIndexPhase
+    let isStale: Bool
 
     var body: some View {
         ToolbarIconButton(help: helpText) { _ in
             ZStack {
                 ToolbarIcon(systemName: "chart.bar.xaxis")
-                    .opacity(isReady ? 1 : 0.5)
-                if !isReady {
+                    .opacity((isReady || phase == .ready) ? 1 : 0.5)
+                if phase == .queued || phase == .building {
                     ProgressView()
                         .controlSize(.mini)
+                } else if isStale {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 7, height: 7)
+                        .offset(x: 8, y: -8)
                 }
             }
         } action: {
@@ -2953,8 +2970,23 @@ private struct AnalyticsButtonView: View {
     }
 
     private var helpText: String {
-        if isReady { return "View usage analytics (⌘K)" }
-        return "View analytics – building index… (⌘K)"
+        switch phase {
+        case .queued, .building:
+            return "Analytics build in progress (⌘K)"
+        case .ready:
+            if isStale {
+                return "View analytics (stale data, update available) (⌘K)"
+            }
+            return "View usage analytics (⌘K)"
+        case .failed:
+            return "View analytics (last build failed, retry available) (⌘K)"
+        case .canceled:
+            return "View analytics (build canceled, restart available) (⌘K)"
+        case .idle:
+            if isReady {
+                return "View usage analytics (⌘K)"
+            }
+            return "View analytics (build required) (⌘K)"
+        }
     }
 }
-

@@ -352,9 +352,6 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .claude)
             self.applyKnownFileStatsDelta(mode: effectiveMode, delta: delta)
-            self.scheduleAnalyticsDelta(changedFiles: files,
-                                        removedPaths: delta.removedPaths,
-                                        executionProfile: executionProfile)
 
             self.publishAfterCurrentUpdate { [weak self] in
                 guard let self, self.isRefreshTokenCurrent(token) else { return }
@@ -510,27 +507,6 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         }
         refreshStateLock.unlock()
         return shouldPrewarm
-    }
-
-    private func scheduleAnalyticsDelta(changedFiles: [URL],
-                                        removedPaths: [String],
-                                        executionProfile: IndexRefreshExecutionProfile) {
-        guard !(changedFiles.isEmpty && removedPaths.isEmpty) else { return }
-        let delay = executionProfile.deferNonCriticalWork ? UInt64(500_000_000) : UInt64(120_000_000)
-        Task.detached(priority: .utility) {
-            if delay > 0 {
-                try? await Task.sleep(nanoseconds: delay)
-            }
-            do {
-                let db = try IndexDB()
-                let indexer = AnalyticsIndexer(db: db, enabledSources: [SessionSource.claude.rawValue])
-                await indexer.refreshDelta(source: SessionSource.claude.rawValue,
-                                           changed: changedFiles,
-                                           removedPaths: removedPaths)
-            } catch {
-                // Non-fatal: analytics delta indexing is best-effort.
-            }
-        }
     }
 
     private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {

@@ -15,22 +15,22 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     private static let defaultFocusedSessionRefreshIntervals = FocusedSessionRefreshIntervals(
-        activeOnAC: 5,
-        activeOnBattery: 8,
-        inactiveOnAC: 15,
+        activeOnAC: 8,
+        activeOnBattery: 12,
+        inactiveOnAC: 20,
         inactiveOnBattery: 60
     )
     private static let focusedSessionRefreshIntervalsBySource: [SessionSource: FocusedSessionRefreshIntervals] = [
         .codex: FocusedSessionRefreshIntervals(
-            activeOnAC: 1,
-            activeOnBattery: 3,
-            inactiveOnAC: 10,
+            activeOnAC: 4,
+            activeOnBattery: 8,
+            inactiveOnAC: 20,
             inactiveOnBattery: 60
         ),
         .claude: FocusedSessionRefreshIntervals(
-            activeOnAC: 2,
-            activeOnBattery: 5,
-            inactiveOnAC: 15,
+            activeOnAC: 6,
+            activeOnBattery: 10,
+            inactiveOnAC: 25,
             inactiveOnBattery: 60
         ),
         .gemini: defaultFocusedSessionRefreshIntervals,
@@ -450,12 +450,17 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let favoritesAggregationVersion = CurrentValueSubject<UInt64, Never>(0)
     private var hasPublishedInitialSessions = false
     @Published private(set) var analyticsPhase: AnalyticsIndexPhase = .idle
+    @Published private(set) var analyticsBuildProgress: AnalyticsBuildProgress = .empty
+    @Published private(set) var analyticsLastBuiltAt: Date? = nil
+    @Published private(set) var analyticsIsStale: Bool = false
+    @MainActor private var analyticsProgressBySource: [String: (processed: Int, total: Int)] = [:]
     private var analyticsBuildTask: Task<Void, Never>?
     var isAnalyticsIndexing: Bool { analyticsPhase == .queued || analyticsPhase == .building }
     private static let analyticsSupportedSources: Set<String> = [
         "codex", "claude", "gemini", "opencode", "copilot", "droid"
     ]
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
+    private static let analyticsLastBuiltAtDefaultsKey = "AnalyticsLastBuiltAt"
     private let providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
     private let newSessionMonitorIntervalSeconds: UInt64 = 60
     private let monitorRefreshMinimumIntervalSeconds: TimeInterval = 3 * 60
@@ -501,6 +506,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         self.copilot = copilotIndexer
         self.droid = droidIndexer
         self.openclaw = openclawIndexer
+        self.analyticsLastBuiltAt = UserDefaults.standard.object(forKey: Self.analyticsLastBuiltAtDefaultsKey) as? Date
 
         syncAgentEnablementFromDefaults()
         // Observe UserDefaults changes to sync external toggles (Preferences) to this model
@@ -864,11 +870,9 @@ final class UnifiedSessionIndexer: ObservableObject {
         if c6 != droidAgentEnabled { droidAgentEnabled = c6 }
         if c7 != openClawAgentEnabled { openClawAgentEnabled = c7 }
 
-        // If a new analytics-supported source was enabled and backfill was already done,
-        // trigger a rebuild immediately so an already-open Analytics window updates too.
         let afterSources = enabledAnalyticsSources()
-        if analyticsPhase == .ready && !afterSources.subtracting(beforeSources).isEmpty {
-            Task { @MainActor [weak self] in self?.requestAnalyticsBuildIfNeeded() }
+        if analyticsLastBuiltAt != nil && !afterSources.subtracting(beforeSources).isEmpty {
+            analyticsIsStale = true
         }
     }
 
@@ -946,17 +950,6 @@ final class UnifiedSessionIndexer: ObservableObject {
         } else {
             newSessionMonitorTask?.cancel()
             newSessionMonitorTask = nil
-
-            let wasCodexBusy = codex.isIndexing || codex.isProcessingTranscripts
-            if wasCodexBusy {
-                pendingRefreshSourcesWhileInactive.insert(.codex)
-                codex.cancelInFlightWork()
-            }
-            let wasClaudeBusy = claude.isIndexing || claude.isProcessingTranscripts
-            if wasClaudeBusy {
-                pendingRefreshSourcesWhileInactive.insert(.claude)
-                claude.cancelInFlightWork()
-            }
         }
     }
 
@@ -1302,10 +1295,13 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
         }
 
-        // Codex and Claude schedule their own analytics delta via scheduleAnalyticsDelta().
-        // Other analytics-supported sources need an incremental refresh here to keep rollups current.
-        if source != .codex && source != .claude && Self.analyticsSupportedSources.contains(source.rawValue) {
-            await scheduleAnalyticsIncrementalRefresh(source: source)
+        if Self.analyticsSupportedSources.contains(source.rawValue) {
+            await MainActor.run { [weak self] in
+                guard let self, self.analyticsLastBuiltAt != nil else { return }
+                if self.analyticsPhase != .building && self.analyticsPhase != .queued {
+                    self.analyticsIsStale = true
+                }
+            }
         }
     }
 
@@ -1347,36 +1343,18 @@ final class UnifiedSessionIndexer: ObservableObject {
         let onAC = Self.onACPower()
         let isHighVolumeProvider = (source == .codex || source == .claude)
 
-        if isHighVolumeProvider && appIsActive && onAC {
-            return .interactive
+        if isHighVolumeProvider && appIsActive {
+            return .lightBackground
         }
-        if isHighVolumeProvider && appIsActive && !onAC {
-            return IndexRefreshExecutionProfile(
-                workerCount: 1,
-                sliceSize: 6,
-                interSliceYieldNanoseconds: 50_000_000,
-                deferNonCriticalWork: true
-            )
-        }
-        if isHighVolumeProvider {
+        if isHighVolumeProvider && !appIsActive {
             return .lightBackground
         }
 
         if appIsActive && onAC {
-            return IndexRefreshExecutionProfile(
-                workerCount: 1,
-                sliceSize: 8,
-                interSliceYieldNanoseconds: 20_000_000,
-                deferNonCriticalWork: false
-            )
+            return .lightBackground
         }
         if appIsActive && !onAC {
-            return IndexRefreshExecutionProfile(
-                workerCount: 1,
-                sliceSize: 6,
-                interSliceYieldNanoseconds: 60_000_000,
-                deferNonCriticalWork: true
-            )
+            return .lightBackground
         }
         return .lightBackground
     }
@@ -1591,29 +1569,62 @@ final class UnifiedSessionIndexer: ObservableObject {
         return needed.subtracting(completed)
     }
 
-    /// Runs an incremental analytics refresh for a single source after its provider refresh.
-    /// Used for sources that lack their own scheduleAnalyticsDelta (i.e., everything except codex/claude).
-    private func scheduleAnalyticsIncrementalRefresh(source: SessionSource) async {
-        let sourceStr = source.rawValue
-        Task.detached(priority: .utility) {
-            do {
-                let db = try IndexDB()
-                let indexer = AnalyticsIndexer(db: db, enabledSources: [sourceStr])
-                await indexer.refresh()
-            } catch {
-                #if DEBUG
-                print("[Indexing] Analytics incremental refresh failed for \(sourceStr): \(error)")
-                #endif
+    @MainActor
+    private func updateAnalyticsProgress(_ bySource: [String: (processed: Int, total: Int)], enabledSources: Set<String>, dateSpan: (String?, String?)) {
+        let totals = bySource.values.reduce(into: (processed: 0, total: 0)) { partial, row in
+            partial.processed += row.processed
+            partial.total += row.total
+        }
+        let currentSource = enabledSources.first(where: { src in
+            let row = bySource[src] ?? (0, 0)
+            return row.total > 0 && row.processed < row.total
+        })
+        let completedSources = enabledSources.reduce(into: 0) { count, src in
+            let row = bySource[src] ?? (0, 0)
+            if row.total == 0 || row.processed >= row.total {
+                count += 1
             }
         }
+        analyticsBuildProgress = AnalyticsBuildProgress(
+            processedSessions: totals.processed,
+            totalSessions: totals.total,
+            currentSource: currentSource,
+            completedSources: completedSources,
+            totalSources: enabledSources.count,
+            dateStart: dateSpan.0,
+            dateEnd: dateSpan.1
+        )
     }
 
     @MainActor
     func requestAnalyticsBuildIfNeeded() {
-        // Don't restart if already building
+        startAnalyticsBuild()
+    }
+
+    @MainActor
+    func startAnalyticsBuild() {
+        runAnalyticsBuild(preferIncremental: false)
+    }
+
+    @MainActor
+    func updateAnalyticsNow() {
+        runAnalyticsBuild(preferIncremental: true)
+    }
+
+    @MainActor
+    func cancelAnalyticsBuild() {
+        analyticsBuildTask?.cancel()
+        analyticsBuildTask = nil
+        analyticsProgressBySource = [:]
+        analyticsPhase = .canceled
+    }
+
+    @MainActor
+    private func runAnalyticsBuild(preferIncremental: Bool) {
         if analyticsPhase == .building || analyticsPhase == .queued { return }
 
         analyticsPhase = .queued
+        analyticsBuildProgress = .empty
 
         let enabledSources = enabledAnalyticsSources()
         guard !enabledSources.isEmpty else {
@@ -1626,36 +1637,70 @@ final class UnifiedSessionIndexer: ObservableObject {
             do {
                 let db = try IndexDB()
                 let missing = try await self.missingAnalyticsBackfillSources(db: db)
-                if missing.isEmpty {
-                    await MainActor.run { [weak self] in
-                        self?.analyticsPhase = .ready
+                let hasPriorBuild = await MainActor.run { self.analyticsLastBuiltAt != nil }
+                let incremental = preferIncremental && hasPriorBuild && missing.isEmpty
+                let profile = AnalyticsIndexer.BuildProfile(chunkSize: 1, skipToolIO: true, yieldNanoseconds: 20_000_000)
+                let version = Self.analyticsBackfillVersion
+                let indexer = AnalyticsIndexer(db: db, enabledSources: enabledSources)
+
+                await MainActor.run {
+                    self.analyticsPhase = .building
+                    self.analyticsBuildProgress = .empty
+                    self.analyticsProgressBySource = Dictionary(uniqueKeysWithValues: enabledSources.map { ($0, (0, 0)) })
+                }
+
+                if incremental {
+                    LaunchProfiler.log("Unified: Analytics manual incremental update start")
+                    await indexer.refresh(onSourceProgress: { source, processed, total in
+                        if Task.isCancelled { return }
+                        let span = (try? await db.analyticsSessionDaySpan(sources: Array(enabledSources))) ?? (nil, nil)
+                        await MainActor.run {
+                            self.analyticsProgressBySource[source] = (processed, total)
+                            self.updateAnalyticsProgress(self.analyticsProgressBySource, enabledSources: enabledSources, dateSpan: span)
+                        }
+                    })
+                    LaunchProfiler.log("Unified: Analytics manual incremental update complete")
+                } else {
+                    LaunchProfiler.log("Unified: Analytics on-demand build start")
+                    await indexer.fullBuild(profile: profile, onSourceComplete: { source in
+                        if Task.isCancelled { return }
+                        try? await db.setAnalyticsBackfillComplete(source: source, version: version)
+                    }, onSourceProgress: { source, processed, total in
+                        if Task.isCancelled { return }
+                        let span = (try? await db.analyticsSessionDaySpan(sources: Array(enabledSources))) ?? (nil, nil)
+                        await MainActor.run {
+                            self.analyticsProgressBySource[source] = (processed, total)
+                            self.updateAnalyticsProgress(self.analyticsProgressBySource, enabledSources: enabledSources, dateSpan: span)
+                        }
+                    })
+                    LaunchProfiler.log("Unified: Analytics on-demand build complete")
+                }
+
+                if Task.isCancelled {
+                    await MainActor.run {
+                        self.analyticsProgressBySource = [:]
+                        self.analyticsPhase = .canceled
+                        self.analyticsBuildTask = nil
                     }
                     return
                 }
 
-                await MainActor.run { [weak self] in
-                    self?.analyticsPhase = .building
-                }
-
-                let indexer = AnalyticsIndexer(db: db, enabledSources: enabledSources)
-                let version = Self.analyticsBackfillVersion
-                let profile = AnalyticsIndexer.BuildProfile()
-
-                LaunchProfiler.log("Unified: Analytics on-demand build start")
-                await indexer.fullBuild(profile: profile) { source in
-                    try? await db.setAnalyticsBackfillComplete(source: source, version: version)
-                }
-                LaunchProfiler.log("Unified: Analytics on-demand build complete")
-
-                await MainActor.run { [weak self] in
-                    self?.analyticsPhase = .ready
+                await MainActor.run {
+                    self.analyticsProgressBySource = [:]
+                    self.analyticsLastBuiltAt = Date()
+                    UserDefaults.standard.set(self.analyticsLastBuiltAt, forKey: Self.analyticsLastBuiltAtDefaultsKey)
+                    self.analyticsIsStale = false
+                    self.analyticsPhase = .ready
+                    self.analyticsBuildTask = nil
                 }
             } catch {
                 #if DEBUG
                 print("[Indexing] Analytics build failed: \(error)")
                 #endif
                 await MainActor.run { [weak self] in
+                    self?.analyticsProgressBySource = [:]
                     self?.analyticsPhase = .failed
+                    self?.analyticsBuildTask = nil
                 }
             }
         }

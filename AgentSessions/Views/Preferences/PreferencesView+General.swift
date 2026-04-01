@@ -193,7 +193,7 @@ extension PreferencesView {
                     Toggle("Index full tool I/O for recent sessions", isOn: Binding(
                         get: {
                             UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil
-	                                ? true
+	                                ? false
                                 : UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
                         },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) }

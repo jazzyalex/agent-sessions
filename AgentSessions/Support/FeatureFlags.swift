@@ -16,17 +16,17 @@ enum FeatureFlags {
     static let offloadTranscriptBuildInView = true
     static let enableFTSSearch = true
     static let ftsSearchLimit: Int = 2_000
-    static let instantToolOutputIndexMaxChars: Int = 32_000
+    static let instantToolOutputIndexMaxChars: Int = 12_000
     static let sessionSearchFormatVersion: Int = 4
     static let sessionToolIOFormatVersion: Int = 1
     static let transcriptPrewarmMaxSessionsPerRefresh: Int = 96
     static let transcriptPrewarmMaxSessionBytes: Int = 50 * 1024 * 1024
 
     // Tool I/O FTS index (recent window + retention cap for older rows).
-    static let toolIOIndexRecentDays: Int = 90
-    static let toolIOIndexOldBytesCap: Int64 = 25 * 1024 * 1024
-    static let toolIOIndexMaxCharsPerSession: Int = 500_000
-    static let toolIOIndexMaxCharsPerEvent: Int = 200_000
+    static let toolIOIndexRecentDays: Int = 30
+    static let toolIOIndexOldBytesCap: Int64 = 8 * 1024 * 1024
+    static let toolIOIndexMaxCharsPerSession: Int = 120_000
+    static let toolIOIndexMaxCharsPerEvent: Int = 32_000
 
     static let searchSmallSizeBytes: Int = 10 * 1024 * 1024
 

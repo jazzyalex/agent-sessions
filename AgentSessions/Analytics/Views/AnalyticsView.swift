@@ -24,12 +24,31 @@ struct AnalyticsView: View {
             Divider()
 
             switch service.analyticsPhase {
-            case .idle, .queued:
-                buildStateView(message: "Preparing analytics…", showProgress: false)
+            case .idle:
+                buildStateView(
+                    message: "Analytics index not built yet",
+                    detail: "Build once to enable charts. Unified and Cockpit stay fast while analytics is idle.",
+                    showProgress: false,
+                    primaryAction: ("Build Analytics Index", { service.requestBuild() })
+                )
+            case .queued:
+                buildStateView(message: "Preparing analytics build…", detail: nil, showProgress: true)
             case .building:
-                buildStateView(message: "Building analytics index…", showProgress: true)
+                buildingStateView
             case .failed:
-                buildStateView(message: "Analytics build failed", showProgress: false, showRetry: true)
+                buildStateView(
+                    message: "Analytics build failed",
+                    detail: nil,
+                    showProgress: false,
+                    primaryAction: ("Retry Build", { service.requestBuild() })
+                )
+            case .canceled:
+                buildStateView(
+                    message: "Analytics build canceled",
+                    detail: nil,
+                    showProgress: false,
+                    primaryAction: ("Restart Build", { service.requestBuild() })
+                )
             case .ready:
                 if service.isLoading {
                     loadingState
@@ -89,6 +108,22 @@ struct AnalyticsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if service.analyticsPhase == .ready {
+                if service.isStaleSinceLastBuild {
+                    Text("Stale")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.14), in: Capsule())
+                }
+                if let lastBuiltAt = service.lastBuiltAt {
+                    Text("Last updated \(AppDateFormatting.dateTimeShort(lastBuiltAt))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Spacer()
 
             // Date range picker
@@ -128,8 +163,16 @@ struct AnalyticsView: View {
                     .rotationEffect(.degrees(isRefreshing ? 360 : 0))
             }
             .buttonStyle(.plain)
-            .help("Refresh analytics")
-            .disabled(isRefreshing)
+            .help(service.analyticsPhase == .ready ? "Refresh analytics view" : "Refresh unavailable")
+            .disabled(isRefreshing || service.analyticsPhase != .ready)
+
+            if service.analyticsPhase == .ready {
+                Button("Update Index") {
+                    service.requestUpdate()
+                }
+                .buttonStyle(.bordered)
+                .disabled(service.analyticsPhase == .building || service.analyticsPhase == .queued)
+            }
         }
         .padding(.horizontal, AnalyticsDesign.windowPadding)
         .padding(.vertical, 12)
@@ -198,7 +241,10 @@ struct AnalyticsView: View {
     }
 
     @ViewBuilder
-    private func buildStateView(message: String, showProgress: Bool, showRetry: Bool = false) -> some View {
+    private func buildStateView(message: String,
+                                detail: String?,
+                                showProgress: Bool,
+                                primaryAction: (title: String, action: () -> Void)? = nil) -> some View {
         VStack(spacing: 16) {
             Spacer()
             if showProgress {
@@ -208,15 +254,55 @@ struct AnalyticsView: View {
             Text(message)
                 .font(.title3)
                 .foregroundStyle(.secondary)
-            if showRetry {
-                Button("Retry") {
-                    NotificationCenter.default.post(
-                        name: .requestAnalyticsBuild,
-                        object: nil
-                    )
+            if let detail {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+            }
+            if let primaryAction {
+                Button(primaryAction.title) {
+                    primaryAction.action()
                 }
                 .buttonStyle(.bordered)
             }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var buildingStateView: some View {
+        let progress = service.buildProgress
+        return VStack(spacing: 14) {
+            Spacer()
+            ProgressView(value: progress.percent)
+                .frame(maxWidth: 320)
+            Text("Building analytics index… \(Int(progress.percent * 100))%")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            Text("\(progress.processedSessions)/\(max(progress.totalSessions, 1)) sessions")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if progress.totalSources > 0 {
+                Text("Sources \(progress.completedSources)/\(progress.totalSources)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let currentSource = progress.currentSource {
+                Text("Current source: \(currentSource)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let start = progress.dateStart, let end = progress.dateEnd {
+                Text("Indexed date range: \(start) to \(end)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Button("Cancel Build") {
+                service.requestCancelBuild()
+            }
+            .buttonStyle(.bordered)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
