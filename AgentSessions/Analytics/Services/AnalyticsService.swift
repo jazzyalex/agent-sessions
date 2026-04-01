@@ -7,6 +7,7 @@ final class AnalyticsService: ObservableObject {
     @Published private(set) var snapshot: AnalyticsSnapshot = .empty
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var isReady: Bool = false
+    @Published var analyticsPhase: AnalyticsIndexPhase = .idle
 
     // Parsing progress tracking
     @Published private(set) var isParsingSessions: Bool = false
@@ -22,6 +23,11 @@ final class AnalyticsService: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var parsingTask: Task<Void, Never>?
     private let repository: AnalyticsRepository?
+
+    private static let analyticsSupportedSources: Set<SessionSource> = [
+        .codex, .claude, .gemini, .opencode, .copilot
+    ]
+    private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
 
     init(codexIndexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
@@ -258,7 +264,7 @@ final class AnalyticsService: ObservableObject {
         // Use DB for sessions/messages/duration/avg session length; skip commands for performance
         // Note: DB path currently only supports agent filtering, not project filtering
         // When project filter is active, use fallback path
-        if projectFilter == .all, let repo = repository, await repo.isReady() {
+        if projectFilter == .all, let repo = repository, await isRepositoryReady(repo) {
             let (startDay, endDay) = dayBounds(for: dateRange)
             let sources = sourcesFor(agentFilter)
             let cur = await repo.summary(sources: sources, dayStart: startDay, dayEnd: endDay)
@@ -657,7 +663,7 @@ final class AnalyticsService: ObservableObject {
 
     private func calculateAgentBreakdownFastOrFallback(dateRange: AnalyticsDateRange, agentFilter: AnalyticsAgentFilter, projectFilter: AnalyticsProjectFilter, fallbackSessions: [Session]) async -> [AnalyticsAgentBreakdown] {
         // DB path only supports agent filtering, not project filtering
-        if projectFilter == .all, let repo = repository, await repo.isReady(), agentFilter == .all {
+        if projectFilter == .all, let repo = repository, await isRepositoryReady(repo), agentFilter == .all {
             let (startDay, endDay) = dayBounds(for: dateRange)
             let slices = await repo.breakdownByAgent(sources: sourcesFor(.all), dayStart: startDay, dayEnd: endDay)
             let totalSessions = slices.reduce(0) { $0 + $1.sessionsDistinct }
@@ -819,12 +825,13 @@ final class AnalyticsService: ObservableObject {
                 }
             }
 
-            // A repository is considered ready once the rollup DB has data. If repo is unavailable, fall back to phase readiness.
+            // A repository is considered ready once all enabled analytics-supported sources
+            // have completed a full backfill. If repo is unavailable, fall back to phase readiness.
             let repoReady: Bool
             if !phasesReady {
                 repoReady = false
             } else if let repo = repository {
-                repoReady = await repo.isReady()
+                repoReady = await self.isRepositoryReady(repo)
             } else {
                 repoReady = true
             }
@@ -839,5 +846,12 @@ final class AnalyticsService: ObservableObject {
     /// Manually trigger a readiness check (used when analytics indexing finishes).
     func refreshReadiness() {
         updateReadiness()
+    }
+
+    /// Check if repository has all enabled analytics sources backfilled.
+    private func isRepositoryReady(_ repo: AnalyticsRepository) async -> Bool {
+        let enabled = AgentEnablement.enabledSources().intersection(Self.analyticsSupportedSources)
+        let sourceStrings = Set(enabled.map(\.rawValue))
+        return await repo.isReady(for: sourceStrings, version: Self.analyticsBackfillVersion)
     }
 }

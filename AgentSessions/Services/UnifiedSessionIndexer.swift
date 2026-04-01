@@ -449,11 +449,13 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var favoritesSnapshotVersion: UInt64 = 0
     private let favoritesAggregationVersion = CurrentValueSubject<UInt64, Never>(0)
     private var hasPublishedInitialSessions = false
-    @Published private(set) var isAnalyticsIndexing: Bool = false
-    private var lastAnalyticsRefreshStartedAt: Date? = nil
-    private var pendingAnalyticsSources: Set<String> = []
-    private let analyticsRefreshTTLSeconds: TimeInterval = 5 * 60  // 5 minutes
-    private let analyticsStartDelaySeconds: TimeInterval = 2.0     // small delay to avoid launch contention
+    @Published private(set) var analyticsPhase: AnalyticsIndexPhase = .idle
+    private var analyticsBuildTask: Task<Void, Never>?
+    var isAnalyticsIndexing: Bool { analyticsPhase == .queued || analyticsPhase == .building }
+    private static let analyticsSupportedSources: Set<String> = [
+        "codex", "claude", "gemini", "opencode", "copilot"
+    ]
+    private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
     private let providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
     private let newSessionMonitorIntervalSeconds: UInt64 = 60
     private let monitorRefreshMinimumIntervalSeconds: TimeInterval = 3 * 60
@@ -1244,31 +1246,22 @@ final class UnifiedSessionIndexer: ObservableObject {
                                         reason: String,
                                         trigger: IndexRefreshTrigger) async {
         await AppReadyGate.waitUntilReady()
-        let context = await MainActor.run { [weak self] in
-            guard let self else {
-                return (didTrigger: false,
-                        requestGlobalAnalytics: false)
-            }
-            guard self.shouldRefreshSource(source) else {
-                return (didTrigger: false,
-                        requestGlobalAnalytics: false)
-            }
+        let didTrigger = await MainActor.run { [weak self] in
+            guard let self else { return false }
+            guard self.shouldRefreshSource(source) else { return false }
             if !self.appIsActive && trigger != .manual {
                 self.pendingRefreshSourcesWhileInactive.insert(source)
                 LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: deferred (inactive, trigger=\(trigger.rawValue))")
-                return (didTrigger: false,
-                        requestGlobalAnalytics: false)
+                return false
             }
             self.pendingMonitorRefreshSignatureBySource[source] = nil
             let mode = self.refreshMode(for: source, trigger: trigger)
             let executionProfile = self.refreshExecutionProfile(for: source)
             LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: trigger (\(reason), mode=\(mode), trigger=\(trigger.rawValue))")
             self.triggerRefresh(for: source, mode: mode, trigger: trigger, executionProfile: executionProfile)
-            let shouldRunGlobalAnalytics = source != .codex && source != .claude
-            return (didTrigger: true,
-                    requestGlobalAnalytics: shouldRunGlobalAnalytics)
+            return true
         }
-        guard context.didTrigger else { return }
+        guard didTrigger else { return }
 
         var waits = 0
         while waits < 240 {
@@ -1301,12 +1294,6 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
         }
 
-        if context.requestGlobalAnalytics {
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.requestAnalyticsRefreshIfNeeded(enabledSourcesOverride: [source.rawValue])
-            }
-        }
     }
 
     @MainActor
@@ -1572,83 +1559,73 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
+    /// Returns the subset of currently enabled agents that support analytics.
+    func enabledAnalyticsSources() -> Set<String> {
+        var enabled = Set<String>()
+        if codexAgentEnabled { enabled.insert("codex") }
+        if claudeAgentEnabled { enabled.insert("claude") }
+        if geminiAgentEnabled { enabled.insert("gemini") }
+        if openCodeAgentEnabled { enabled.insert("opencode") }
+        if copilotAgentEnabled { enabled.insert("copilot") }
+        return enabled.intersection(Self.analyticsSupportedSources)
+    }
+
+    /// Returns the set of analytics-supported sources that haven't completed a full backfill.
+    func missingAnalyticsBackfillSources(db: IndexDB) async throws -> Set<String> {
+        let needed = enabledAnalyticsSources()
+        let completed = try await db.analyticsBackfillCompleteSources(version: Self.analyticsBackfillVersion)
+        return needed.subtracting(completed)
+    }
+
     @MainActor
-    private func requestAnalyticsRefreshIfNeeded(enabledSourcesOverride: Set<String>? = nil) {
-        let enabledSources: Set<String> = {
-            let effective = enabledSourcesOverride ?? {
-                var s: Set<String> = []
-                if codexAgentEnabled { s.insert("codex") }
-                if claudeAgentEnabled { s.insert("claude") }
-                if geminiAgentEnabled { s.insert("gemini") }
-                if openCodeAgentEnabled { s.insert("opencode") }
-                if copilotAgentEnabled { s.insert("copilot") }
-                if droidAgentEnabled { s.insert("droid") }
-                if openClawAgentEnabled { s.insert("openclaw") }
-                return s
-            }()
-            var filtered: Set<String> = []
-            if codexAgentEnabled && effective.contains("codex") { filtered.insert("codex") }
-            if claudeAgentEnabled && effective.contains("claude") { filtered.insert("claude") }
-            if geminiAgentEnabled && effective.contains("gemini") { filtered.insert("gemini") }
-            if openCodeAgentEnabled && effective.contains("opencode") { filtered.insert("opencode") }
-            if copilotAgentEnabled && effective.contains("copilot") { filtered.insert("copilot") }
-            if droidAgentEnabled && effective.contains("droid") { filtered.insert("droid") }
-            if openClawAgentEnabled && effective.contains("openclaw") { filtered.insert("openclaw") }
-            return filtered
-        }()
-        if enabledSources.isEmpty {
+    func requestAnalyticsBuildIfNeeded() {
+        // Don't restart if already building
+        if analyticsPhase == .building || analyticsPhase == .queued { return }
+
+        analyticsPhase = .queued
+
+        let enabledSources = enabledAnalyticsSources()
+        guard !enabledSources.isEmpty else {
+            analyticsPhase = .idle
             return
         }
 
-        if isAnalyticsIndexing {
-            pendingAnalyticsSources.formUnion(enabledSources)
-            return
-        }
-
-        let now = Date()
-        if let last = lastAnalyticsRefreshStartedAt,
-           now.timeIntervalSince(last) < analyticsRefreshTTLSeconds {
-            LaunchProfiler.log("Unified.refresh: Analytics refresh skipped (within TTL)")
-            return
-        }
-
-        lastAnalyticsRefreshStartedAt = now
-        isAnalyticsIndexing = true
-        let delaySeconds = analyticsStartDelaySeconds
-
-        Task.detached(priority: .utility) { [weak self] in
+        analyticsBuildTask = Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
-            defer {
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.isAnalyticsIndexing = false
-                    if !self.pendingAnalyticsSources.isEmpty {
-                        let pending = self.pendingAnalyticsSources
-                        self.pendingAnalyticsSources.removeAll()
-                        self.requestAnalyticsRefreshIfNeeded(enabledSourcesOverride: pending)
-                    }
-                }
-            }
             do {
-                if delaySeconds > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
-                }
-                LaunchProfiler.log("Unified.refresh: Analytics warmup (open IndexDB)")
                 let db = try IndexDB()
+                let missing = try await self.missingAnalyticsBackfillSources(db: db)
+                if missing.isEmpty {
+                    await MainActor.run { [weak self] in
+                        self?.analyticsPhase = .ready
+                    }
+                    return
+                }
+
+                await MainActor.run { [weak self] in
+                    self?.analyticsPhase = .building
+                }
+
                 let indexer = AnalyticsIndexer(db: db, enabledSources: enabledSources)
-                if try await db.isEmpty() {
-                    LaunchProfiler.log("Unified.refresh: Analytics fullBuild start")
-                    await indexer.fullBuild()
-                    LaunchProfiler.log("Unified.refresh: Analytics fullBuild complete")
-                } else {
-                    LaunchProfiler.log("Unified.refresh: Analytics refresh start")
-                    await indexer.refresh()
-                    LaunchProfiler.log("Unified.refresh: Analytics refresh complete")
+                let version = Self.analyticsBackfillVersion
+                let profile = AnalyticsIndexer.BuildProfile()
+
+                LaunchProfiler.log("Unified: Analytics on-demand build start")
+                await indexer.fullBuild(profile: profile) { source in
+                    try? await db.setAnalyticsBackfillComplete(source: source, version: version)
+                }
+                LaunchProfiler.log("Unified: Analytics on-demand build complete")
+
+                await MainActor.run { [weak self] in
+                    self?.analyticsPhase = .ready
                 }
             } catch {
                 #if DEBUG
-                print("[Indexing] Analytics refresh failed: \(error)")
+                print("[Indexing] Analytics build failed: \(error)")
                 #endif
+                await MainActor.run { [weak self] in
+                    self?.analyticsPhase = .failed
+                }
             }
         }
     }
@@ -1954,6 +1931,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     deinit {
+        analyticsBuildTask?.cancel()
         newSessionMonitorTask?.cancel()
         focusedSessionMonitorTask?.cancel()
         for token in notificationObserverTokens {

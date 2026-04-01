@@ -5,6 +5,13 @@ import Foundation
 actor AnalyticsIndexer {
     struct Progress: Equatable { let processed: Int; let total: Int; let phase: String }
 
+    /// Profile for low-CPU analytics builds (e.g., on-demand backfill).
+    struct BuildProfile: Sendable {
+        var chunkSize: Int = 1
+        var skipToolIO: Bool = true
+        var yieldNanoseconds: UInt64 = 40_000_000  // ~40ms
+    }
+
     private let db: IndexDB
     private let enabledSources: Set<String>
     private let codex = CodexSessionDiscovery()
@@ -22,6 +29,11 @@ actor AnalyticsIndexer {
     // MARK: - Public API
     func fullBuild() async {
         await indexAll(incremental: false)
+    }
+
+    /// Full build with a custom profile. Calls `onSourceComplete` after each source finishes successfully.
+    func fullBuild(profile: BuildProfile, onSourceComplete: @escaping @Sendable (String) async -> Void) async {
+        await indexAll(incremental: false, profile: profile, onSourceComplete: onSourceComplete)
     }
 
     func refresh() async {
@@ -89,13 +101,12 @@ actor AnalyticsIndexer {
     }
 
     // MARK: - Core
-    private func indexAll(incremental: Bool) async {
-        LaunchProfiler.log("Analytics.indexAll start (incremental=\(incremental))")
-        let toolIOEnabled = toolIOIndexEnabled()
+    private func indexAll(incremental: Bool,
+                          profile: BuildProfile? = nil,
+                          onSourceComplete: (@Sendable (String) async -> Void)? = nil) async {
+        LaunchProfiler.log("Analytics.indexAll start (incremental=\(incremental), profiled=\(profile != nil))")
+        let toolIOEnabled = profile?.skipToolIO == true ? false : toolIOIndexEnabled()
         let toolIOCutoffTS = Int64(Date().addingTimeInterval(-Double(FeatureFlags.toolIOIndexRecentDays) * 24 * 60 * 60).timeIntervalSince1970)
-        // One-time migration: switch Claude sessions to stable logical IDs based on in-file sessionId.
-        // Purge old Claude rows (which used path-hash IDs) once, then rebuild.
-        // No destructive purges at startup; rely on refresh to reconcile
 
         let sources: [(String, () -> [URL])] = [
             ("codex", { self.codex.discoverSessionFiles() }),
@@ -115,12 +126,13 @@ actor AnalyticsIndexer {
                 files.removeAll { $0.path.contains("AgentSessions-ClaudeProbeProject") }
             }
             if !incremental {
-                // Full rebuild: purge everything for the source and reindex.
                 do { try await db.purgeSource(source) } catch { /* non-fatal */ }
             }
-            if files.isEmpty { continue }
+            if files.isEmpty {
+                await onSourceComplete?(source)
+                continue
+            }
 
-            // Incremental refresh: skip unchanged files and delete rows for removed files.
             var indexedByPath: [String: IndexedFileRow] = [:]
             var searchReadyPaths = Set<String>()
             var toolIOReadyPaths = Set<String>()
@@ -134,7 +146,6 @@ actor AnalyticsIndexer {
                 }
 
                 let currentPaths = Set(files.map(\.path))
-                // Clean up any stale DB rows even if they predate the `files` table (e.g., older index versions).
                 let knownMetaPaths = Set((try? await db.fetchSessionMetaPaths(for: source)) ?? [])
                 let stalePaths = Array(knownMetaPaths.subtracting(currentPaths))
                 if !stalePaths.isEmpty {
@@ -151,32 +162,55 @@ actor AnalyticsIndexer {
                 }
             }
 
-            // Bound concurrency to keep CPU/IO modest
-            let chunk = 8
-            for slice in stride(from: 0, to: files.count, by: chunk).map({ Array(files[$0..<min($0+chunk, files.count)]) }) {
-                await withTaskGroup(of: Void.self) { group in
-                    for url in slice {
-                        group.addTask { [weak self] in
-                            guard let self else { return }
-                            await self.indexFileIfNeeded(url: url,
-                                                         source: source,
-                                                         incremental: incremental,
-                                                         indexedByPath: indexedByPath,
-                                                         searchReadyPaths: searchReadyPaths,
-                                                         toolIOReadyPaths: toolIOReadyPaths,
-                                                         toolIOEnabled: toolIOEnabled,
-                                                         toolIOCutoffTS: toolIOCutoffTS)
-                        }
-                    }
-                    await group.waitForAll()
-                }
-            }
+            await indexFiles(files, source: source, incremental: incremental, profile: profile,
+                             indexedByPath: indexedByPath, searchReadyPaths: searchReadyPaths,
+                             toolIOReadyPaths: toolIOReadyPaths, toolIOEnabled: toolIOEnabled,
+                             toolIOCutoffTS: toolIOCutoffTS)
+            await onSourceComplete?(source)
         }
 
         if toolIOEnabled {
             try? await db.pruneOldToolIO(cutoffTS: toolIOCutoffTS, oldBytesCap: FeatureFlags.toolIOIndexOldBytesCap)
         }
-        LaunchProfiler.log("Analytics.indexAll complete (incremental=\(incremental))")
+        LaunchProfiler.log("Analytics.indexAll complete (incremental=\(incremental), profiled=\(profile != nil))")
+    }
+
+    /// Processes files with either standard (chunk-8, concurrent) or profiled (serial, yielding) strategy.
+    private func indexFiles(_ files: [URL], source: String, incremental: Bool, profile: BuildProfile?,
+                            indexedByPath: [String: IndexedFileRow], searchReadyPaths: Set<String>,
+                            toolIOReadyPaths: Set<String>, toolIOEnabled: Bool, toolIOCutoffTS: Int64) async {
+        let chunkSize = profile?.chunkSize ?? 8
+        let yieldNanos = profile?.yieldNanoseconds ?? 0
+
+        if chunkSize <= 1 {
+            for (idx, url) in files.enumerated() {
+                await indexFileIfNeeded(url: url, source: source, incremental: incremental,
+                                        indexedByPath: indexedByPath, searchReadyPaths: searchReadyPaths,
+                                        toolIOReadyPaths: toolIOReadyPaths, toolIOEnabled: toolIOEnabled,
+                                        toolIOCutoffTS: toolIOCutoffTS)
+                if yieldNanos > 0, idx < files.count - 1 {
+                    try? await Task.sleep(nanoseconds: yieldNanos)
+                }
+            }
+        } else {
+            for slice in stride(from: 0, to: files.count, by: chunkSize).map({ Array(files[$0..<min($0+chunkSize, files.count)]) }) {
+                await withTaskGroup(of: Void.self) { group in
+                    for url in slice {
+                        group.addTask { [weak self] in
+                            guard let self else { return }
+                            await self.indexFileIfNeeded(url: url, source: source, incremental: incremental,
+                                                         indexedByPath: indexedByPath, searchReadyPaths: searchReadyPaths,
+                                                         toolIOReadyPaths: toolIOReadyPaths, toolIOEnabled: toolIOEnabled,
+                                                         toolIOCutoffTS: toolIOCutoffTS)
+                        }
+                    }
+                    await group.waitForAll()
+                }
+                if yieldNanos > 0 {
+                    try? await Task.sleep(nanoseconds: yieldNanos)
+                }
+            }
+        }
     }
 
     private func indexFileIfNeeded(url: URL,

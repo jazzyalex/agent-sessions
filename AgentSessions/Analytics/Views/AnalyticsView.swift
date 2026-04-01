@@ -23,10 +23,19 @@ struct AnalyticsView: View {
             header
             Divider()
 
-            if service.isLoading {
-                loadingState
-            } else {
-                content
+            switch service.analyticsPhase {
+            case .idle, .queued:
+                buildStateView(message: "Preparing analytics…", showProgress: false)
+            case .building:
+                buildStateView(message: "Building analytics index…", showProgress: true)
+            case .failed:
+                buildStateView(message: "Analytics build failed", showProgress: false, showRetry: true)
+            case .ready:
+                if service.isLoading {
+                    loadingState
+                } else {
+                    content
+                }
             }
         }
         .overlay {
@@ -35,11 +44,16 @@ struct AnalyticsView: View {
             }
         }
         .onAppear {
-            // Load available projects
             availableProjects = service.getAvailableProjects()
-            // Do not parse all sessions here; indexing provides precomputed metrics (next phase).
-            // Keep UI responsive and avoid heavy work on appear.
-            refreshData()
+            if service.analyticsPhase == .ready {
+                refreshData()
+            }
+        }
+        .onChange(of: service.analyticsPhase) { _, phase in
+            if phase == .ready {
+                availableProjects = service.getAvailableProjects()
+                refreshData()
+            }
         }
         .onChange(of: dateRange) { _, _ in refreshData() }
         .onChange(of: agentFilter) { _, _ in refreshData() }
@@ -179,6 +193,31 @@ struct AnalyticsView: View {
             Text("Loading analytics...")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func buildStateView(message: String, showProgress: Bool, showRetry: Bool = false) -> some View {
+        VStack(spacing: 16) {
+            Spacer()
+            if showProgress {
+                ProgressView()
+                    .controlSize(.large)
+            }
+            Text(message)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            if showRetry {
+                Button("Retry") {
+                    NotificationCenter.default.post(
+                        name: .requestAnalyticsBuild,
+                        object: nil
+                    )
+                }
+                .buttonStyle(.bordered)
+            }
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
