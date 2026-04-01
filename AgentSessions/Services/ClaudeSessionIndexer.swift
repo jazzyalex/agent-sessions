@@ -4,6 +4,18 @@ import SwiftUI
 
 /// Session indexer for Claude Code sessions
 final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
+    private struct PersistedFileStat: Codable {
+        let mtime: Int64
+        let size: Int64
+    }
+
+    private struct PersistedFileStatPayload: Codable {
+        let version: Int
+        let stats: [String: PersistedFileStat]
+    }
+
+    private static let coreFileStatsStateKey = "core_file_stats_v1:claude"
+
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
@@ -224,6 +236,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             let fm = FileManager.default
             let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
             let existingSessions = indexed.filter(exists)
+            self.bootstrapKnownFileStatsIfNeeded(from: existingSessions)
 
             // Publish hydrated sessions immediately so the UI is populated
             // while the background file scan runs (matches Codex indexer pattern).
@@ -352,6 +365,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             let sortedSessions = filtered.sorted { $0.modifiedAt > $1.modifiedAt }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .claude)
             self.applyKnownFileStatsDelta(mode: effectiveMode, delta: delta)
+            await self.persistKnownFileStats()
 
             self.publishAfterCurrentUpdate { [weak self] in
                 guard let self, self.isRefreshTokenCurrent(token) else { return }
@@ -427,6 +441,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     private func seedKnownFileStatsIfNeeded() async {
         if hasKnownFileStats() { return }
         do {
+            if let persisted = try await loadPersistedKnownFileStats() {
+                initializeKnownFileStatsIfNeeded(persisted)
+                return
+            }
             let db = try IndexDB()
             let indexed = try await db.fetchIndexedFiles(for: SessionSource.claude.rawValue)
             var map: [String: SessionFileStat] = [:]
@@ -495,6 +513,58 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             lastKnownFileStatsByPath[path] = stat
         }
         refreshStateLock.unlock()
+    }
+
+    private func bootstrapKnownFileStatsIfNeeded(from sessions: [Session]) {
+        guard !sessions.isEmpty else { return }
+        var map: [String: SessionFileStat] = [:]
+        map.reserveCapacity(sessions.count)
+        for session in sessions {
+            let size = Int64(max(0, session.fileSizeBytes ?? 0))
+            let mtime = Int64(max(0, session.modifiedAt.timeIntervalSince1970))
+            map[session.filePath] = SessionFileStat(mtime: mtime, size: size)
+        }
+        initializeKnownFileStatsIfNeeded(map)
+    }
+
+    private func knownFileStatsSnapshot() -> [String: SessionFileStat] {
+        refreshStateLock.lock()
+        let snapshot = lastKnownFileStatsByPath
+        refreshStateLock.unlock()
+        return snapshot
+    }
+
+    private func persistKnownFileStats() async {
+        let snapshot = knownFileStatsSnapshot()
+        guard !snapshot.isEmpty else { return }
+        do {
+            let payload = PersistedFileStatPayload(
+                version: 1,
+                stats: snapshot.reduce(into: [:]) { partial, entry in
+                    partial[entry.key] = PersistedFileStat(mtime: entry.value.mtime, size: entry.value.size)
+                }
+            )
+            let data = try JSONEncoder().encode(payload)
+            guard let json = String(data: data, encoding: .utf8) else { return }
+            let db = try IndexDB()
+            try await db.setIndexState(key: Self.coreFileStatsStateKey, value: json)
+        } catch {
+            // Non-fatal. Next run can still bootstrap from DB/filesystem.
+        }
+    }
+
+    private func loadPersistedKnownFileStats() async throws -> [String: SessionFileStat]? {
+        let db = try IndexDB()
+        guard let raw = try await db.indexStateValue(for: Self.coreFileStatsStateKey),
+              let data = raw.data(using: .utf8) else {
+            return nil
+        }
+        let payload = try JSONDecoder().decode(PersistedFileStatPayload.self, from: data)
+        guard payload.version == 1 else { return nil }
+        let map = payload.stats.reduce(into: [String: SessionFileStat]()) { partial, entry in
+            partial[entry.key] = SessionFileStat(mtime: entry.value.mtime, size: entry.value.size)
+        }
+        return map.isEmpty ? nil : map
     }
 
     private func shouldPrewarmSessionSignature(_ session: Session) -> Bool {

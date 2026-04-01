@@ -77,6 +77,18 @@ extension SessionIndexerProtocol {
 #endif
 // swiftlint:disable type_body_length
 final class SessionIndexer: ObservableObject {
+    private struct PersistedFileStat: Codable {
+        let mtime: Int64
+        let size: Int64
+    }
+
+    private struct PersistedFileStatPayload: Codable {
+        let version: Int
+        let stats: [String: PersistedFileStat]
+    }
+
+    private static let coreFileStatsStateKey = "core_file_stats_v1:codex"
+
     // Source of truth
     @Published private(set) var allSessions: [Session] = []
     // Exposed to UI after filters
@@ -658,6 +670,7 @@ final class SessionIndexer: ObservableObject {
             // while we continue scanning incrementally in the background.
             let existingSessions = indexed
             let presentedHydration = !existingSessions.isEmpty
+            self.bootstrapKnownFileStatsIfNeeded(from: existingSessions)
             if presentedHydration {
                 await MainActor.run {
                     guard self.refreshToken == token else { return }
@@ -809,6 +822,7 @@ final class SessionIndexer: ObservableObject {
                     self.lastKnownFileStatsByPath[path] = stat
                 }
             }
+            await self.persistKnownFileStats()
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 LaunchProfiler.log("Codex.refresh: sessions merged (total=\(mergedWithArchives.count))")
@@ -952,6 +966,10 @@ final class SessionIndexer: ObservableObject {
     private func seedKnownFileStatsIfNeeded() async {
         if !lastKnownFileStatsByPath.isEmpty { return }
         do {
+            if let persisted = try await loadPersistedKnownFileStats() {
+                lastKnownFileStatsByPath = persisted
+                return
+            }
             let db = try IndexDB()
             let indexed = try await db.fetchIndexedFiles(for: SessionSource.codex.rawValue)
             var map: [String: SessionFileStat] = [:]
@@ -971,6 +989,50 @@ final class SessionIndexer: ObservableObject {
         let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
         let size = Int64(values?.fileSize ?? 0)
         return SessionFileStat(mtime: mtime, size: size)
+    }
+
+    private func bootstrapKnownFileStatsIfNeeded(from sessions: [Session]) {
+        guard lastKnownFileStatsByPath.isEmpty, !sessions.isEmpty else { return }
+        var map: [String: SessionFileStat] = [:]
+        map.reserveCapacity(sessions.count)
+        for session in sessions {
+            let size = Int64(max(0, session.fileSizeBytes ?? 0))
+            let mtime = Int64(max(0, session.modifiedAt.timeIntervalSince1970))
+            map[session.filePath] = SessionFileStat(mtime: mtime, size: size)
+        }
+        lastKnownFileStatsByPath = map
+    }
+
+    private func persistKnownFileStats() async {
+        guard !lastKnownFileStatsByPath.isEmpty else { return }
+        do {
+            let payload = PersistedFileStatPayload(
+                version: 1,
+                stats: lastKnownFileStatsByPath.reduce(into: [:]) { partial, entry in
+                    partial[entry.key] = PersistedFileStat(mtime: entry.value.mtime, size: entry.value.size)
+                }
+            )
+            let data = try JSONEncoder().encode(payload)
+            guard let json = String(data: data, encoding: .utf8) else { return }
+            let db = try IndexDB()
+            try await db.setIndexState(key: Self.coreFileStatsStateKey, value: json)
+        } catch {
+            // Non-fatal. Next run can still bootstrap from DB/filesystem.
+        }
+    }
+
+    private func loadPersistedKnownFileStats() async throws -> [String: SessionFileStat]? {
+        let db = try IndexDB()
+        guard let raw = try await db.indexStateValue(for: Self.coreFileStatsStateKey),
+              let data = raw.data(using: .utf8) else {
+            return nil
+        }
+        let payload = try JSONDecoder().decode(PersistedFileStatPayload.self, from: data)
+        guard payload.version == 1 else { return nil }
+        let map = payload.stats.reduce(into: [String: SessionFileStat]()) { partial, entry in
+            partial[entry.key] = SessionFileStat(mtime: entry.value.mtime, size: entry.value.size)
+        }
+        return map.isEmpty ? nil : map
     }
 
 	    private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {

@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - Unified footer: Core indexing status now shows live session progress (`X/Y` and `%`) instead of a generic “refreshing” message.
 - Unified filters: Toggling agent pills in the toolbar is now filter-only and no longer auto-triggers index refreshes.
 - Indexing UX: Background monitor refreshes now surface as lightweight syncing status, while launch/manual indexing keeps stable progress messaging.
+- Indexing reliability: Core indexers now persist their own per-source file-stat baselines and restore them on startup, preventing large false re-sync runs after restart when only a few sessions changed.
 
 ### Added
 - Analytics: Build lifecycle UI now includes not-built, building, canceled, failed, and stale states with visible progress details (percent, sessions processed, source progress, and indexed date span).
