@@ -443,18 +443,12 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         do {
             if let persisted = try await loadPersistedKnownFileStats() {
                 initializeKnownFileStatsIfNeeded(persisted)
-                return
+                #if DEBUG
+                LaunchProfiler.log("Claude.refresh: known file stats loaded from persisted core baseline (\(persisted.count))")
+                #endif
             }
-            let db = try IndexDB()
-            let indexed = try await db.fetchIndexedFiles(for: SessionSource.claude.rawValue)
-            var map: [String: SessionFileStat] = [:]
-            map.reserveCapacity(indexed.count)
-            for row in indexed {
-                map[row.path] = SessionFileStat(mtime: row.mtime, size: row.size)
-            }
-            initializeKnownFileStatsIfNeeded(map)
         } catch {
-            // Non-fatal. Cache will be built from runtime deltas.
+            // Non-fatal. We'll bootstrap from hydrated sessions or runtime deltas.
         }
     }
 
@@ -520,11 +514,19 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         var map: [String: SessionFileStat] = [:]
         map.reserveCapacity(sessions.count)
         for session in sessions {
-            let size = Int64(max(0, session.fileSizeBytes ?? 0))
-            let mtime = Int64(max(0, session.modifiedAt.timeIntervalSince1970))
-            map[session.filePath] = SessionFileStat(mtime: mtime, size: size)
+            let url = URL(fileURLWithPath: session.filePath)
+            if let stat = Self.fileStat(for: url) {
+                map[session.filePath] = stat
+            } else {
+                let size = Int64(max(0, session.fileSizeBytes ?? 0))
+                let mtime = Int64(max(0, session.modifiedAt.timeIntervalSince1970))
+                map[session.filePath] = SessionFileStat(mtime: mtime, size: size)
+            }
         }
         initializeKnownFileStatsIfNeeded(map)
+        #if DEBUG
+        LaunchProfiler.log("Claude.refresh: known file stats bootstrapped from hydrated sessions (\(map.count))")
+        #endif
     }
 
     private func knownFileStatsSnapshot() -> [String: SessionFileStat] {
