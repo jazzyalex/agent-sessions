@@ -968,18 +968,12 @@ final class SessionIndexer: ObservableObject {
         do {
             if let persisted = try await loadPersistedKnownFileStats() {
                 lastKnownFileStatsByPath = persisted
-                return
+                #if DEBUG
+                LaunchProfiler.log("Codex.refresh: known file stats loaded from persisted core baseline (\(persisted.count))")
+                #endif
             }
-            let db = try IndexDB()
-            let indexed = try await db.fetchIndexedFiles(for: SessionSource.codex.rawValue)
-            var map: [String: SessionFileStat] = [:]
-            map.reserveCapacity(indexed.count)
-            for row in indexed {
-                map[row.path] = SessionFileStat(mtime: row.mtime, size: row.size)
-            }
-            lastKnownFileStatsByPath = map
         } catch {
-            // Non-fatal. We'll build cache from filesystem deltas after this pass.
+            // Non-fatal. We'll bootstrap from hydrated sessions or runtime deltas.
         }
     }
 
@@ -996,11 +990,19 @@ final class SessionIndexer: ObservableObject {
         var map: [String: SessionFileStat] = [:]
         map.reserveCapacity(sessions.count)
         for session in sessions {
-            let size = Int64(max(0, session.fileSizeBytes ?? 0))
-            let mtime = Int64(max(0, session.modifiedAt.timeIntervalSince1970))
-            map[session.filePath] = SessionFileStat(mtime: mtime, size: size)
+            let url = URL(fileURLWithPath: session.filePath)
+            if let stat = Self.fileStat(for: url) {
+                map[session.filePath] = stat
+            } else {
+                let size = Int64(max(0, session.fileSizeBytes ?? 0))
+                let mtime = Int64(max(0, session.modifiedAt.timeIntervalSince1970))
+                map[session.filePath] = SessionFileStat(mtime: mtime, size: size)
+            }
         }
         lastKnownFileStatsByPath = map
+        #if DEBUG
+        LaunchProfiler.log("Codex.refresh: known file stats bootstrapped from hydrated sessions (\(map.count))")
+        #endif
     }
 
     private func persistKnownFileStats() async {
