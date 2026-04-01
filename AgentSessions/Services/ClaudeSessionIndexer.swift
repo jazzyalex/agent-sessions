@@ -455,7 +455,11 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     static func shouldEscalateRecentDeltaToFullReconcile(mode: IndexRefreshMode,
                                                           delta: SessionDiscoveryDelta) -> Bool {
         guard mode != .fullReconcile else { return false }
-        return delta.driftDetected
+        // Do not auto-upgrade recent delta scans to full reconciles during normal
+        // launch/monitor refreshes. For large histories this can repeatedly trigger
+        // near-full reindex passes on each app start.
+        _ = delta
+        return false
     }
 
     private func setRefreshToken(_ token: UUID) {
