@@ -868,7 +868,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         // trigger a rebuild immediately so an already-open Analytics window updates too.
         let afterSources = enabledAnalyticsSources()
         if analyticsPhase == .ready && !afterSources.subtracting(beforeSources).isEmpty {
-            requestAnalyticsBuildIfNeeded()
+            Task { @MainActor [weak self] in self?.requestAnalyticsBuildIfNeeded() }
         }
     }
 
