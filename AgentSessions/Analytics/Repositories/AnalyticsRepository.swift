@@ -6,9 +6,11 @@ actor AnalyticsRepository {
 
     init(db: IndexDB) { self.db = db }
 
-    func isReady() async -> Bool {
-        // Consider ready when DB is not empty
-        (try? await db.isEmpty()) == false
+    /// Returns true when all requested sources have a backfill-complete marker for the given version.
+    func isReady(for sources: Set<String>, version: Int) async -> Bool {
+        guard !sources.isEmpty else { return true }
+        let completed = (try? await db.analyticsBackfillCompleteSources(version: version)) ?? []
+        return sources.isSubset(of: completed)
     }
 
     struct Summary {

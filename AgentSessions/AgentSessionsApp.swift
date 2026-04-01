@@ -193,6 +193,8 @@ struct AgentSessionsApp: App {
     @State private var analyticsWindowController: AnalyticsWindowController?
     @State private var analyticsReady: Bool = false
     @State private var analyticsReadyObserver: AnyCancellable?
+    @State private var analyticsPhaseObserver: AnyCancellable?
+    @State private var analyticsBuildObserver: NSObjectProtocol?
 
     init() {
         guard !AppRuntime.isRunningTests else { return }
@@ -667,6 +669,10 @@ extension AgentSessionsApp {
             NotificationCenter.default.removeObserver(observer)
             analyticsToggleObserver = nil
         }
+        if let observer = analyticsBuildObserver {
+            NotificationCenter.default.removeObserver(observer)
+            analyticsBuildObserver = nil
+        }
 
         // Create analytics service with indexers
         let service = AnalyticsService(
@@ -678,15 +684,20 @@ extension AgentSessionsApp {
         )
         analyticsService = service
 
-        // Gate readiness on both analytics warmup and unified analytics indexing.
+        // Relay readiness and analytics phase from unified indexer to the service.
         if let unified = unifiedIndexerHolder.unified {
-            analyticsReady = service.isReady && !unified.isAnalyticsIndexing
+            analyticsReady = service.isReady
             analyticsReadyObserver = service.$isReady
-                .combineLatest(unified.$isAnalyticsIndexing)
                 .receive(on: RunLoop.main)
-                .sink { ready, indexing in
-                    self.analyticsReady = ready && !indexing
-                    if !indexing {
+                .sink { ready in
+                    self.analyticsReady = ready
+                }
+            // Phase relay — keeps service.analyticsPhase in sync with unified indexer.
+            analyticsPhaseObserver = unified.$analyticsPhase
+                .receive(on: RunLoop.main)
+                .sink { phase in
+                    service.analyticsPhase = phase
+                    if phase == .ready {
                         service.refreshReadiness()
                     }
                 }
@@ -703,20 +714,32 @@ extension AgentSessionsApp {
         let controller = AnalyticsWindowController(service: service)
         analyticsWindowController = controller
 
-        // Observe toggle notifications
+        // Observe toggle notifications — always opens the window, regardless of readiness.
+        let holder = unifiedIndexerHolder
         analyticsToggleObserver = NotificationCenter.default.addObserver(
-            forName: Notification.Name("ToggleAnalyticsWindow"),
+            forName: .toggleAnalyticsWindow,
             object: nil,
             queue: .main
-        ) { [weak service, weak controller] _ in
+        ) { [weak controller, weak holder] _ in
             Task { @MainActor in
-                guard let service, let controller else { return }
-                guard service.isReady else {
-                    NSSound.beep()
-                    print("[Analytics] Ignoring toggle – analytics still warming up")
-                    return
-                }
+                guard let controller else { return }
                 controller.toggle()
+                // Start analytics build if not already running
+                if let unified = holder?.unified,
+                   unified.analyticsPhase == .idle || unified.analyticsPhase == .failed {
+                    unified.requestAnalyticsBuildIfNeeded()
+                }
+            }
+        }
+
+        // Observe retry-build requests from AnalyticsView.
+        analyticsBuildObserver = NotificationCenter.default.addObserver(
+            forName: .requestAnalyticsBuild,
+            object: nil,
+            queue: .main
+        ) { [weak holder] _ in
+            Task { @MainActor in
+                holder?.unified?.requestAnalyticsBuildIfNeeded()
             }
         }
     }

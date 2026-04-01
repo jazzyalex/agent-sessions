@@ -155,6 +155,9 @@ actor IndexDB {
         // One-time migration marker table for schema changes that require a full reindex.
         try exec(db, "CREATE TABLE IF NOT EXISTS schema_migrations (key TEXT PRIMARY KEY);")
 
+        // Generic key-value state table for lightweight persistent markers (e.g. backfill tracking).
+        try exec(db, "CREATE TABLE IF NOT EXISTS index_state (key TEXT PRIMARY KEY, value TEXT);")
+
         // session_days keeps per-session contributions split by day
         try exec(db,
             """
@@ -433,6 +436,56 @@ actor IndexDB {
         if has == 1 { return false }
         let hasDays = try queryOneInt64("SELECT EXISTS(SELECT 1 FROM session_days LIMIT 1);")
         return hasDays == 0
+    }
+
+    // MARK: - Analytics Backfill State
+
+    /// Record that a full analytics backfill completed for `source` at the given schema version.
+    func setAnalyticsBackfillComplete(source: String, version: Int) throws {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let key = "analytics_backfill_done:\(source):\(version)"
+        let sql = "INSERT OR REPLACE INTO index_state(key, value) VALUES(?, '1');"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT)
+        let rc = sqlite3_step(stmt)
+        guard rc == SQLITE_DONE else {
+            throw DBError.execFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    /// Returns the set of source names that have a backfill-complete marker for `version`.
+    func analyticsBackfillCompleteSources(version: Int) throws -> Set<String> {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let prefix = "analytics_backfill_done:"
+        let expectedSuffix = ":\(version)"
+        let sql = "SELECT key FROM index_state WHERE key LIKE ?;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, "\(prefix)%", -1, SQLITE_TRANSIENT)
+        var sources = Set<String>()
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let cStr = sqlite3_column_text(stmt, 0) else { continue }
+            let key = String(cString: cStr)
+            // Key format: "analytics_backfill_done:<source>:<version>"
+            guard key.hasSuffix(expectedSuffix) else { continue }
+            let inner = key.dropFirst(prefix.count).dropLast(expectedSuffix.count)
+            if !inner.isEmpty {
+                sources.insert(String(inner))
+            }
+        }
+        return sources
+    }
+
+    /// Remove all analytics backfill markers (all sources, all versions).
+    func clearAnalyticsBackfillState() throws {
+        try exec("DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:%';")
     }
 
     /// Fetch indexed file records for a source from the files table.
@@ -989,6 +1042,9 @@ actor IndexDB {
         try exec("DELETE FROM session_search WHERE source='\(source)'")
         try exec("DELETE FROM session_tool_io WHERE source='\(source)'")
         try exec("DELETE FROM files WHERE source='\(source)'")
+        // Clear analytics backfill markers for this source (all versions).
+        // Note: source values are controlled ASCII identifiers (e.g. "codex"); interpolation is safe here.
+        try exec("DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:\(source):%'")
     }
 
     /// Delete DB rows for sessions whose file paths were removed.

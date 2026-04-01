@@ -254,7 +254,6 @@ struct UnifiedSessionsView: View {
 	    @State private var isAutoSelectingFromSearch: Bool = false
     @State private var hasEverHadSessions: Bool = false
     @State private var hasUserManuallySelected: Bool = false
-    @State private var showAnalyticsWarmupNotice: Bool = false
     @State private var showAgentEnablementNotice: Bool = false
     @State private var isWindowKey: Bool = false
     @State private var activeConsumerID = UUID()
@@ -420,14 +419,7 @@ struct UnifiedSessionsView: View {
                 }
 		)
 
-		let afterAnalytics = lifecycle
-			.onChange(of: analyticsReady) { _, ready in
-				if ready {
-					withAnimation { showAnalyticsWarmupNotice = false }
-				}
-			}
-
-		let afterSelection = afterAnalytics
+		let afterSelection = lifecycle
 			.onChange(of: selection) { _, id in
 				handleSelectionChange(id)
 			}
@@ -601,18 +593,6 @@ struct UnifiedSessionsView: View {
 
 	private var topTrailingNotices: some View {
 		VStack(alignment: .trailing, spacing: 8) {
-			if showAnalyticsWarmupNotice {
-				HStack(spacing: 8) {
-					ProgressView()
-						.controlSize(.small)
-					Text("Analytics is warming up… try again in ~1–2 minutes")
-						.font(.footnote)
-				}
-				.padding(10)
-				.background(.regularMaterial)
-				.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-				.transition(.move(edge: .top).combined(with: .opacity))
-			}
 			if showAgentEnablementNotice {
 				Text("Showing active agents only")
 					.font(.footnote)
@@ -1257,9 +1237,7 @@ struct UnifiedSessionsView: View {
             .disabled(!showStarColumn)
 
             AnalyticsButtonView(
-                isReady: analyticsReady,
-                disabledReason: analyticsDisabledReason,
-                onWarmupTap: handleAnalyticsWarmupTap
+                isReady: analyticsReady
             )
 
             ToolbarGroupDivider()
@@ -1837,21 +1815,6 @@ struct UnifiedSessionsView: View {
 	        refreshSelectionSourceFromCachedRows()
 	    }
 
-    private func handleAnalyticsWarmupTap() {
-        if showAnalyticsWarmupNotice { return }
-        withAnimation { showAnalyticsWarmupNotice = true }
-        // Auto-dismiss after a short delay so the notice stays lightweight.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            withAnimation { showAnalyticsWarmupNotice = false }
-        }
-    }
-
-    private var analyticsDisabledReason: String? {
-        if !analyticsReady {
-            return "Analytics warming up…"
-        }
-        return nil
-    }
 
     @ViewBuilder
     private func launchBlockingTranscriptOverlay() -> some View {
@@ -2971,39 +2934,27 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
 
 private struct AnalyticsButtonView: View {
     let isReady: Bool
-    let disabledReason: String?
-    let onWarmupTap: () -> Void
 
-    // Access via app-level notification instead of environment
     var body: some View {
         ToolbarIconButton(help: helpText) { _ in
             ZStack {
                 ToolbarIcon(systemName: "chart.bar.xaxis")
-                    .opacity(isReady ? 1 : 0.35)
+                    .opacity(isReady ? 1 : 0.5)
                 if !isReady {
                     ProgressView()
                         .controlSize(.mini)
                 }
             }
         } action: {
-            if isReady {
-                NotificationCenter.default.post(name: .toggleAnalytics, object: nil)
-            } else {
-                onWarmupTap()
-            }
+            NotificationCenter.default.post(name: .toggleAnalyticsWindow, object: nil)
         }
         .keyboardShortcut("k", modifiers: .command)
         .accessibilityLabel(Text("Analytics"))
-        // Keep pressable; communicate readiness instead of disabling.
     }
 
     private var helpText: String {
         if isReady { return "View usage analytics (⌘K)" }
-        return disabledReason ?? "Analytics warming up – results will appear once indexing finishes."
+        return "View analytics – building index… (⌘K)"
     }
 }
 
-// Notification for Analytics toggle
-private extension Notification.Name {
-    static let toggleAnalytics = Notification.Name("ToggleAnalyticsWindow")
-}
