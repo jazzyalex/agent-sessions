@@ -488,6 +488,40 @@ actor IndexDB {
         try exec("DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:%';")
     }
 
+    // MARK: - Generic Index State
+
+    /// Store an arbitrary string value in index_state under a key.
+    func setIndexState(key: String, value: String) throws {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = "INSERT OR REPLACE INTO index_state(key, value) VALUES(?, ?);"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, value, -1, SQLITE_TRANSIENT)
+        let rc = sqlite3_step(stmt)
+        guard rc == SQLITE_DONE else {
+            throw DBError.execFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    /// Fetch an arbitrary string value from index_state by key.
+    func indexStateValue(for key: String) throws -> String? {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = "SELECT value FROM index_state WHERE key = ? LIMIT 1;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        guard let cStr = sqlite3_column_text(stmt, 0) else { return nil }
+        return String(cString: cStr)
+    }
+
     /// Fetch indexed file records for a source from the files table.
     /// Used by launch-time indexers to avoid reprocessing files that analytics
     /// has already seen (even when they are filtered out of session_meta).
