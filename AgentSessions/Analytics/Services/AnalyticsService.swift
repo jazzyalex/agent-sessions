@@ -19,6 +19,7 @@ final class AnalyticsService: ObservableObject {
     private let geminiIndexer: GeminiSessionIndexer
     private let opencodeIndexer: OpenCodeSessionIndexer
     private let copilotIndexer: CopilotSessionIndexer
+    private let droidIndexer: DroidSessionIndexer
 
     private var cancellables = Set<AnyCancellable>()
     private var parsingTask: Task<Void, Never>?
@@ -33,12 +34,14 @@ final class AnalyticsService: ObservableObject {
          claudeIndexer: ClaudeSessionIndexer,
          geminiIndexer: GeminiSessionIndexer,
          opencodeIndexer: OpenCodeSessionIndexer,
-         copilotIndexer: CopilotSessionIndexer) {
+         copilotIndexer: CopilotSessionIndexer,
+         droidIndexer: DroidSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
         self.opencodeIndexer = opencodeIndexer
         self.copilotIndexer = copilotIndexer
+        self.droidIndexer = droidIndexer
         if let db = try? IndexDB() {
             self.repository = AnalyticsRepository(db: db)
         } else {
@@ -61,6 +64,7 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.gemini) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
         if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
 
         // Apply filters for current period
         let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
@@ -91,6 +95,7 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.gemini) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
         if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
 
         // Apply message count filters (same as Sessions List)
         let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
@@ -783,9 +788,10 @@ final class AnalyticsService: ObservableObject {
 
     private func setupObservers() {
         // Observe when session data changes (for auto-refresh when window visible)
-        Publishers.CombineLatest(
+        Publishers.CombineLatest3(
             Publishers.CombineLatest4(codexIndexer.$allSessions, claudeIndexer.$allSessions, geminiIndexer.$allSessions, opencodeIndexer.$allSessions),
-            copilotIndexer.$allSessions
+            copilotIndexer.$allSessions,
+            droidIndexer.$allSessions
         )
             .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
             .sink { _ in
@@ -793,12 +799,13 @@ final class AnalyticsService: ObservableObject {
             }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest(
+        Publishers.CombineLatest3(
             Publishers.CombineLatest4(codexIndexer.$launchPhase, claudeIndexer.$launchPhase, geminiIndexer.$launchPhase, opencodeIndexer.$launchPhase),
-            copilotIndexer.$launchPhase
+            copilotIndexer.$launchPhase,
+            droidIndexer.$launchPhase
         )
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _ in
+            .sink { [weak self] _, _, _ in
                 self?.updateReadiness()
             }
             .store(in: &cancellables)
@@ -814,7 +821,8 @@ final class AnalyticsService: ObservableObject {
                 (SessionSource.claude, claudeIndexer.launchPhase),
                 (SessionSource.gemini, geminiIndexer.launchPhase),
                 (SessionSource.opencode, opencodeIndexer.launchPhase),
-                (SessionSource.copilot, copilotIndexer.launchPhase)
+                (SessionSource.copilot, copilotIndexer.launchPhase),
+                (SessionSource.droid, droidIndexer.launchPhase)
             ].filter { enabled.contains($0.0) }.map { $0.1 }
             let phasesReady = phases.allSatisfy { phase in
                 switch phase {

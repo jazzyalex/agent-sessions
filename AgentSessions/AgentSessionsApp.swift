@@ -680,7 +680,8 @@ extension AgentSessionsApp {
             claudeIndexer: claudeIndexer,
             geminiIndexer: geminiIndexer,
             opencodeIndexer: opencodeIndexer,
-            copilotIndexer: copilotIndexer
+            copilotIndexer: copilotIndexer,
+            droidIndexer: droidIndexer
         )
         analyticsService = service
 

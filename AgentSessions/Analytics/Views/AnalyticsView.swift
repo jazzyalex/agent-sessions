@@ -358,7 +358,8 @@ extension View {
         claudeIndexer: claudeIndexer,
         geminiIndexer: geminiIndexer,
         opencodeIndexer: opencodeIndexer,
-        copilotIndexer: copilotIndexer
+        copilotIndexer: copilotIndexer,
+        droidIndexer: DroidSessionIndexer()
     )
 
     AnalyticsView(service: service)

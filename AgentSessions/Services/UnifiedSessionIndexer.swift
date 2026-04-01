@@ -865,10 +865,10 @@ final class UnifiedSessionIndexer: ObservableObject {
         if c7 != openClawAgentEnabled { openClawAgentEnabled = c7 }
 
         // If a new analytics-supported source was enabled and backfill was already done,
-        // reset the phase so the next Analytics open triggers a build for the new source.
+        // trigger a rebuild immediately so an already-open Analytics window updates too.
         let afterSources = enabledAnalyticsSources()
         if analyticsPhase == .ready && !afterSources.subtracting(beforeSources).isEmpty {
-            analyticsPhase = .idle
+            requestAnalyticsBuildIfNeeded()
         }
     }
 
