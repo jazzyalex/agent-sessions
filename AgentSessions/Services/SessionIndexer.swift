@@ -980,6 +980,7 @@ final class SessionIndexer: ObservableObject {
     }
 
     private func bootstrapKnownFileStatsIfNeeded(from sessions: [Session]) {
+        if hasKnownFileStats() { return }
         guard !sessions.isEmpty else { return }
         var map: [String: SessionFileStat] = [:]
         map.reserveCapacity(sessions.count)
