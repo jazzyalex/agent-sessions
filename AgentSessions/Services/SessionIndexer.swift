@@ -208,6 +208,7 @@ final class SessionIndexer: ObservableObject {
     private var recomputeDebouncer: DispatchWorkItem? = nil
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
     private var refreshToken = UUID()
+    private let knownFileStatsLock = NSLock()
     private var lastKnownFileStatsByPath: [String: SessionFileStat] = [:]
     private var codexInternalIDBackfillTask: Task<Void, Never>? = nil
     private static let codexInternalIDBackfillCursorKey = "CodexInternalIDBackfillCursor"
@@ -707,7 +708,8 @@ final class SessionIndexer: ObservableObject {
 
             let discovery = CodexSessionDiscovery(customRoot: self.sessionsRootOverride.isEmpty ? nil : self.sessionsRootOverride)
             let deltaScope: SessionDeltaScope = (mode == .fullReconcile || trigger == .manual) ? .full : .recent
-            let delta = discovery.discoverDelta(previousByPath: self.lastKnownFileStatsByPath, scope: deltaScope)
+            let previousStats = self.knownFileStatsSnapshot()
+            let delta = discovery.discoverDelta(previousByPath: previousStats, scope: deltaScope)
             let found = delta.currentByPath.keys.map { URL(fileURLWithPath: $0) }
             let foundIsEmpty = found.isEmpty
             let currentStatsByPath = delta.currentByPath
@@ -812,16 +814,7 @@ final class SessionIndexer: ObservableObject {
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 .filter { hideProbes ? !CodexProbeConfig.isProbeSession($0) : true }
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .codex)
-            if deltaScope == .full {
-                self.lastKnownFileStatsByPath = currentStatsByPath
-            } else {
-                for removed in removedPaths {
-                    self.lastKnownFileStatsByPath.removeValue(forKey: removed)
-                }
-                for (path, stat) in currentStatsByPath {
-                    self.lastKnownFileStatsByPath[path] = stat
-                }
-            }
+            self.applyKnownFileStatsDelta(scope: deltaScope, currentStatsByPath: currentStatsByPath, removedPaths: removedPaths)
             await self.persistKnownFileStats()
             await MainActor.run {
                 guard self.refreshToken == token else { return }
@@ -964,13 +957,14 @@ final class SessionIndexer: ObservableObject {
     }
 
     private func seedKnownFileStatsIfNeeded() async {
-        if !lastKnownFileStatsByPath.isEmpty { return }
+        if hasKnownFileStats() { return }
         do {
             if let persisted = try await loadPersistedKnownFileStats() {
-                lastKnownFileStatsByPath = persisted
+                initializeKnownFileStatsIfNeeded(persisted)
                 #if DEBUG
                 LaunchProfiler.log("Codex.refresh: known file stats loaded from persisted core baseline (\(persisted.count))")
                 #endif
+                return
             }
         } catch {
             // Non-fatal. We'll bootstrap from hydrated sessions or runtime deltas.
@@ -986,7 +980,7 @@ final class SessionIndexer: ObservableObject {
     }
 
     private func bootstrapKnownFileStatsIfNeeded(from sessions: [Session]) {
-        guard lastKnownFileStatsByPath.isEmpty, !sessions.isEmpty else { return }
+        guard !sessions.isEmpty else { return }
         var map: [String: SessionFileStat] = [:]
         map.reserveCapacity(sessions.count)
         for session in sessions {
@@ -999,18 +993,19 @@ final class SessionIndexer: ObservableObject {
                 map[session.filePath] = SessionFileStat(mtime: mtime, size: size)
             }
         }
-        lastKnownFileStatsByPath = map
+        initializeKnownFileStatsIfNeeded(map)
         #if DEBUG
         LaunchProfiler.log("Codex.refresh: known file stats bootstrapped from hydrated sessions (\(map.count))")
         #endif
     }
 
     private func persistKnownFileStats() async {
-        guard !lastKnownFileStatsByPath.isEmpty else { return }
+        let snapshot = knownFileStatsSnapshot()
+        guard !snapshot.isEmpty else { return }
         do {
             let payload = PersistedFileStatPayload(
                 version: 1,
-                stats: lastKnownFileStatsByPath.reduce(into: [:]) { partial, entry in
+                stats: snapshot.reduce(into: [:]) { partial, entry in
                     partial[entry.key] = PersistedFileStat(mtime: entry.value.mtime, size: entry.value.size)
                 }
             )
@@ -1035,6 +1030,46 @@ final class SessionIndexer: ObservableObject {
             partial[entry.key] = SessionFileStat(mtime: entry.value.mtime, size: entry.value.size)
         }
         return map.isEmpty ? nil : map
+    }
+
+    private func hasKnownFileStats() -> Bool {
+        knownFileStatsLock.lock()
+        let hasStats = !lastKnownFileStatsByPath.isEmpty
+        knownFileStatsLock.unlock()
+        return hasStats
+    }
+
+    private func initializeKnownFileStatsIfNeeded(_ stats: [String: SessionFileStat]) {
+        knownFileStatsLock.lock()
+        if lastKnownFileStatsByPath.isEmpty {
+            lastKnownFileStatsByPath = stats
+        }
+        knownFileStatsLock.unlock()
+    }
+
+    private func knownFileStatsSnapshot() -> [String: SessionFileStat] {
+        knownFileStatsLock.lock()
+        let snapshot = lastKnownFileStatsByPath
+        knownFileStatsLock.unlock()
+        return snapshot
+    }
+
+    private func applyKnownFileStatsDelta(scope: SessionDeltaScope,
+                                          currentStatsByPath: [String: SessionFileStat],
+                                          removedPaths: [String]) {
+        knownFileStatsLock.lock()
+        if scope == .full {
+            lastKnownFileStatsByPath = currentStatsByPath
+            knownFileStatsLock.unlock()
+            return
+        }
+        for removed in removedPaths {
+            lastKnownFileStatsByPath.removeValue(forKey: removed)
+        }
+        for (path, stat) in currentStatsByPath {
+            lastKnownFileStatsByPath[path] = stat
+        }
+        knownFileStatsLock.unlock()
     }
 
 	    private func hydrateFromIndexDBIfAvailable() async throws -> [Session]? {
