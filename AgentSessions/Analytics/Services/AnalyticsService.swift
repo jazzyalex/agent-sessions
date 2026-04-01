@@ -25,7 +25,7 @@ final class AnalyticsService: ObservableObject {
     private let repository: AnalyticsRepository?
 
     private static let analyticsSupportedSources: Set<SessionSource> = [
-        .codex, .claude, .gemini, .opencode, .copilot
+        .codex, .claude, .gemini, .opencode, .copilot, .droid
     ]
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
 

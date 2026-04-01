@@ -453,7 +453,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var analyticsBuildTask: Task<Void, Never>?
     var isAnalyticsIndexing: Bool { analyticsPhase == .queued || analyticsPhase == .building }
     private static let analyticsSupportedSources: Set<String> = [
-        "codex", "claude", "gemini", "opencode", "copilot"
+        "codex", "claude", "gemini", "opencode", "copilot", "droid"
     ]
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
     private let providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
@@ -848,6 +848,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     func syncAgentEnablementFromDefaults(defaults: UserDefaults = .standard) {
+        let beforeSources = enabledAnalyticsSources()
         let c1 = AgentEnablement.isEnabled(.codex, defaults: defaults)
         let c2 = AgentEnablement.isEnabled(.claude, defaults: defaults)
         let c3 = AgentEnablement.isEnabled(.gemini, defaults: defaults)
@@ -862,6 +863,13 @@ final class UnifiedSessionIndexer: ObservableObject {
         if c5 != copilotAgentEnabled { copilotAgentEnabled = c5 }
         if c6 != droidAgentEnabled { droidAgentEnabled = c6 }
         if c7 != openClawAgentEnabled { openClawAgentEnabled = c7 }
+
+        // If a new analytics-supported source was enabled and backfill was already done,
+        // reset the phase so the next Analytics open triggers a build for the new source.
+        let afterSources = enabledAnalyticsSources()
+        if analyticsPhase == .ready && !afterSources.subtracting(beforeSources).isEmpty {
+            analyticsPhase = .idle
+        }
     }
 
     func refresh() {
@@ -1294,6 +1302,11 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
         }
 
+        // Codex and Claude schedule their own analytics delta via scheduleAnalyticsDelta().
+        // Other analytics-supported sources need an incremental refresh here to keep rollups current.
+        if source != .codex && source != .claude && Self.analyticsSupportedSources.contains(source.rawValue) {
+            await scheduleAnalyticsIncrementalRefresh(source: source)
+        }
     }
 
     @MainActor
@@ -1567,6 +1580,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if geminiAgentEnabled { enabled.insert("gemini") }
         if openCodeAgentEnabled { enabled.insert("opencode") }
         if copilotAgentEnabled { enabled.insert("copilot") }
+        if droidAgentEnabled { enabled.insert("droid") }
         return enabled.intersection(Self.analyticsSupportedSources)
     }
 
@@ -1575,6 +1589,23 @@ final class UnifiedSessionIndexer: ObservableObject {
         let needed = enabledAnalyticsSources()
         let completed = try await db.analyticsBackfillCompleteSources(version: Self.analyticsBackfillVersion)
         return needed.subtracting(completed)
+    }
+
+    /// Runs an incremental analytics refresh for a single source after its provider refresh.
+    /// Used for sources that lack their own scheduleAnalyticsDelta (i.e., everything except codex/claude).
+    private func scheduleAnalyticsIncrementalRefresh(source: SessionSource) async {
+        let sourceStr = source.rawValue
+        Task.detached(priority: .utility) {
+            do {
+                let db = try IndexDB()
+                let indexer = AnalyticsIndexer(db: db, enabledSources: [sourceStr])
+                await indexer.refresh()
+            } catch {
+                #if DEBUG
+                print("[Indexing] Analytics incremental refresh failed for \(sourceStr): \(error)")
+                #endif
+            }
+        }
     }
 
     @MainActor

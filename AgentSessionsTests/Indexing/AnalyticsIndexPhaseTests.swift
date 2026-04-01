@@ -17,15 +17,11 @@ final class AnalyticsIndexPhaseTests: XCTestCase {
         }
     }
 
-    func testAnalyticsSupportedSourcesExcludesDroidAndOpenClaw() {
-        // The supported set should be exactly these five
-        let expected: Set<String> = ["codex", "claude", "gemini", "opencode", "copilot"]
-        // We can't directly access the private static, but we can verify via enabledAnalyticsSources
-        // indirectly through the enum equatability. For now, verify the enum cases exist.
+    func testAnalyticsSupportedSourcesExcludesOpenClaw() {
+        // The supported set should be exactly these six (openclaw excluded)
+        let expected: Set<String> = ["codex", "claude", "gemini", "opencode", "copilot", "droid"]
         XCTAssertEqual(AnalyticsIndexPhase.idle, AnalyticsIndexPhase.idle)
         XCTAssertNotEqual(AnalyticsIndexPhase.idle, AnalyticsIndexPhase.ready)
-        // Note: Full integration test of enabledAnalyticsSources() would require a UnifiedSessionIndexer
-        // instance, which depends on real indexers. Keep this test focused on the enum itself.
-        _ = expected  // Suppress unused warning; this documents the expected set.
+        _ = expected
     }
 }
