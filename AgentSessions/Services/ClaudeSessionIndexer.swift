@@ -265,7 +265,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             let deltaScope: SessionDeltaScope = (mode == .fullReconcile || trigger == .manual) ? .full : .recent
             let previousStats = self.knownFileStatsByPathSnapshot()
             let initialDelta = self.discovery.discoverDelta(previousByPath: previousStats, scope: deltaScope)
-            let shouldEscalate = Self.shouldEscalateRecentDeltaToFullReconcile(mode: mode, delta: initialDelta)
+            let shouldEscalate = Self.shouldEscalateRecentDeltaToFullReconcile(mode: mode)
             let effectiveMode: IndexRefreshMode = shouldEscalate ? .fullReconcile : mode
             let delta: SessionDiscoveryDelta = {
                 if shouldEscalate {
@@ -452,13 +452,11 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         }
     }
 
-    static func shouldEscalateRecentDeltaToFullReconcile(mode: IndexRefreshMode,
-                                                          delta: SessionDiscoveryDelta) -> Bool {
+    static func shouldEscalateRecentDeltaToFullReconcile(mode: IndexRefreshMode) -> Bool {
         guard mode != .fullReconcile else { return false }
         // Do not auto-upgrade recent delta scans to full reconciles during normal
         // launch/monitor refreshes. For large histories this can repeatedly trigger
         // near-full reindex passes on each app start.
-        _ = delta
         return false
     }
 
@@ -514,6 +512,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     }
 
     private func bootstrapKnownFileStatsIfNeeded(from sessions: [Session]) {
+        if hasKnownFileStats() { return }
         guard !sessions.isEmpty else { return }
         var map: [String: SessionFileStat] = [:]
         map.reserveCapacity(sessions.count)
