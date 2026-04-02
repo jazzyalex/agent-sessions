@@ -131,7 +131,7 @@ final class ClaudeSessionParser {
             codexInternalSessionIDHint: sessionID,
             parentSessionID: parentSessionID,
             subagentType: subagentType,
-            customTitle: customTitle
+            customTitle: hasExplicitCustomTitle ? customTitle : nil
         )
     }
 
@@ -761,13 +761,85 @@ final class ClaudeSessionParser {
             headLines.forEach(ingest)
             tailLines.forEach(ingest)
 
+            // If no explicit custom-title found in head/tail, do a targeted chunked scan of the gap.
+            // Only searches for explicit custom-title records (not agent-name) to avoid regressing
+            // a newer fallback title from tail with older gap data.
+            // Capped at 8MB to bound I/O for very large sessions without custom-title records.
+            let gapScanBudget = 8 * 1024 * 1024
+            if !hasExplicitCustomTitle, fileSize > headBytes + tailBytes {
+                let marker = Data("\"custom-title\"".utf8)
+                let newline = UInt8(0x0a)
+                if let gapFH = try? FileHandle(forReadingFrom: url) {
+                    defer { try? gapFH.close() }
+                    let gapStart = UInt64(headBytes)
+                    let gapEndRaw = UInt64(max(0, fileSize - tailBytes))
+                    let gapEnd = min(gapEndRaw, gapStart + UInt64(gapScanBudget))
+                    if gapEnd > gapStart {
+                        try? gapFH.seek(toOffset: gapStart)
+                        // Skip partial first line only if we're mid-line (byte before gapStart is not newline).
+                        // If gapStart is already at a line boundary, start scanning immediately.
+                        var needsSkip = true
+                        if gapStart > 0 {
+                            try? gapFH.seek(toOffset: gapStart - 1)
+                            if let prevByte = try? gapFH.read(upToCount: 1), prevByte.first == newline {
+                                needsSkip = false
+                            }
+                            // Position is now at gapStart (read 1 byte from gapStart-1)
+                        }
+                        if needsSkip {
+                            var skipBuffer = Data()
+                            while skipBuffer.last != newline, gapFH.offsetInFile < gapEnd {
+                                let skipRead = min(1024, Int(gapEnd - gapFH.offsetInFile))
+                                guard skipRead > 0, let chunk = try? gapFH.read(upToCount: skipRead), !chunk.isEmpty else { break }
+                                skipBuffer.append(chunk)
+                                if skipBuffer.count > 64 * 1024 { break }
+                            }
+                        }
+                        let chunkSize = 64 * 1024
+                        var remainder = Data()
+                        var pos = gapFH.offsetInFile
+                        scanLoop: while pos < gapEnd {
+                            let toRead = min(chunkSize, Int(gapEnd - pos))
+                            guard let chunk = try? gapFH.read(upToCount: toRead), !chunk.isEmpty else { break }
+                            pos = gapFH.offsetInFile
+                            var buffer = remainder
+                            buffer.append(chunk)
+                            remainder = Data()
+                            // Split on newlines, keeping last partial line as remainder
+                            var start = buffer.startIndex
+                            while let nlIdx = buffer[start...].firstIndex(of: newline) {
+                                let lineData = buffer[start..<nlIdx]
+                                start = buffer.index(after: nlIdx)
+                                // Fast byte-level check for marker before any decoding
+                                guard lineData.range(of: marker) != nil else { continue }
+                                guard let line = String(data: lineData, encoding: .utf8),
+                                      let ld = line.data(using: .utf8),
+                                      let obj = try? JSONSerialization.jsonObject(with: ld) as? [String: Any],
+                                      let t = obj["type"] as? String,
+                                      t == "custom-title",
+                                      let ct = obj["customTitle"] as? String, !ct.isEmpty else { continue }
+                                customTitle = ct
+                                hasExplicitCustomTitle = true
+                                break scanLoop
+                            }
+                            if start < buffer.endIndex {
+                                remainder = Data(buffer[start...])
+                            }
+                        }
+                    }
+                }
+            }
+
             // Estimate event count
             let headBytesRead = headData?.count ?? 1
             let newlineCount = headData?.filter { $0 == 0x0a }.count ?? 1
             let avgLineLen = max(256, headBytesRead / max(newlineCount, 1))
             let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
 
-            // Extract title from sample events (temp session; ID not used downstream for UI)
+            // Extract title from sample events. Pass customTitle (including agent-name fallback)
+            // to the temp session so it influences title computation, then capture the result
+            // as lightweightTitle. Only persist explicit custom-title values on the final session
+            // to prevent agent-name fallbacks from overwriting authoritative titles in the DB.
             let effectiveModel = llmModel ?? model
             let tempIsHousekeeping = Session.computeIsHousekeeping(source: .claude, events: sampleEvents)
             let tempSession = Session(id: hash(path: url.path),
@@ -785,8 +857,10 @@ final class ClaudeSessionParser {
                                       isHousekeeping: tempIsHousekeeping,
                                       codexInternalSessionIDHint: sessionID,
                                       parentSessionID: parentSessionID,
-                                      subagentType: subagentType)
+                                      subagentType: subagentType,
+                                      customTitle: customTitle)
             let title = tempSession.title
+            let explicitCustomTitle = hasExplicitCustomTitle ? customTitle : nil
 
             // Create final lightweight session with empty events
             return Session(id: hash(path: url.path),
@@ -805,7 +879,7 @@ final class ClaudeSessionParser {
                            codexInternalSessionIDHint: sessionID,
                            parentSessionID: parentSessionID,
                            subagentType: subagentType,
-                           customTitle: customTitle)
+                           customTitle: explicitCustomTitle)
         }
 
         guard let initial = build(headBytes: headBytesInitial) else { return nil }

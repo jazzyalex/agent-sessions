@@ -48,7 +48,142 @@ final class CoreSessionMetaTests: XCTestCase {
         let rows = try await db.fetchSessionMeta(for: "codex")
         XCTAssertEqual(rows.count, 1)
         let row = rows[0]
-        XCTAssertEqual(row.customTitle, "My Custom Name", "custom_title should be preserved by core upsert")
+        XCTAssertEqual(row.customTitle, "My Custom Name", "custom_title should be preserved by core upsert when new value is nil")
+    }
+
+    func testCoreUpsertUpdatesCustomTitleWhenNonNil() async throws {
+        // Analytics writes a row with no custom title
+        let analyticsRow = SessionMetaRow(
+            sessionID: "s1", source: "codex", path: "/a.jsonl",
+            mtime: 100, size: 200, startTS: 10, endTS: 20,
+            model: nil, cwd: nil, repo: nil,
+            title: nil, codexInternalSessionID: nil,
+            isHousekeeping: false, messages: 42, commands: 5,
+            parentSessionID: nil, subagentType: nil,
+            customTitle: nil
+        )
+        try await db.upsertSessionMeta(analyticsRow)
+
+        // Core indexer writes with a custom title from /rename parsing
+        let coreRow = SessionMetaRow(
+            sessionID: "s1", source: "codex", path: "/a.jsonl",
+            mtime: 110, size: 210, startTS: 10, endTS: 25,
+            model: nil, cwd: nil, repo: nil,
+            title: nil, codexInternalSessionID: nil,
+            isHousekeeping: false, messages: 10, commands: 0,
+            parentSessionID: nil, subagentType: nil,
+            customTitle: "Renamed Session"
+        )
+        try await db.upsertSessionMetaCore(coreRow)
+
+        let rows = try await db.fetchSessionMeta(for: "codex")
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].customTitle, "Renamed Session", "non-nil custom_title should update DB via COALESCE")
+    }
+
+    func testCoreUpsertUpdatesCustomTitleOverExisting() async throws {
+        // Analytics writes a row with an old custom title
+        let analyticsRow = SessionMetaRow(
+            sessionID: "s1", source: "codex", path: "/a.jsonl",
+            mtime: 100, size: 200, startTS: 10, endTS: 20,
+            model: nil, cwd: nil, repo: nil,
+            title: nil, codexInternalSessionID: nil,
+            isHousekeeping: false, messages: 42, commands: 5,
+            parentSessionID: nil, subagentType: nil,
+            customTitle: "Old Name"
+        )
+        try await db.upsertSessionMeta(analyticsRow)
+
+        // Core indexer writes with a new custom title (user renamed again)
+        let coreRow = SessionMetaRow(
+            sessionID: "s1", source: "codex", path: "/a.jsonl",
+            mtime: 110, size: 210, startTS: 10, endTS: 25,
+            model: nil, cwd: nil, repo: nil,
+            title: nil, codexInternalSessionID: nil,
+            isHousekeeping: false, messages: 10, commands: 0,
+            parentSessionID: nil, subagentType: nil,
+            customTitle: "New Name"
+        )
+        try await db.upsertSessionMetaCore(coreRow)
+
+        let rows = try await db.fetchSessionMeta(for: "codex")
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].customTitle, "New Name", "non-nil custom_title should overwrite existing via COALESCE")
+    }
+
+    func testCoreUpsertCodexInternalIDCoalesce() async throws {
+        // Analytics writes with a backfilled codex internal session ID
+        let analyticsRow = SessionMetaRow(
+            sessionID: "s1", source: "codex", path: "/a.jsonl",
+            mtime: 100, size: 200, startTS: 10, endTS: 20,
+            model: nil, cwd: nil, repo: nil,
+            title: nil, codexInternalSessionID: "backfill-abc",
+            isHousekeeping: false, messages: 42, commands: 5,
+            parentSessionID: nil, subagentType: nil,
+            customTitle: nil
+        )
+        try await db.upsertSessionMeta(analyticsRow)
+
+        // Core indexer writes with nil hint (lightweight parse didn't find it)
+        let coreRow = SessionMetaRow(
+            sessionID: "s1", source: "codex", path: "/a.jsonl",
+            mtime: 110, size: 210, startTS: 10, endTS: 25,
+            model: nil, cwd: nil, repo: nil,
+            title: nil, codexInternalSessionID: nil,
+            isHousekeeping: false, messages: 10, commands: 0,
+            parentSessionID: nil, subagentType: nil,
+            customTitle: nil
+        )
+        try await db.upsertSessionMetaCore(coreRow)
+
+        let rows = try await db.fetchSessionMeta(for: "codex")
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].codexInternalSessionID, "backfill-abc", "nil codex_internal_session_id should preserve existing")
+
+        // Core write with a DIFFERENT non-nil hint must NOT overwrite the authoritative value
+        let coreRow2 = SessionMetaRow(
+            sessionID: "s1", source: "codex", path: "/a.jsonl",
+            mtime: 120, size: 220, startTS: 10, endTS: 30,
+            model: nil, cwd: nil, repo: nil,
+            title: nil, codexInternalSessionID: "new-hint",
+            isHousekeeping: false, messages: 10, commands: 0,
+            parentSessionID: nil, subagentType: nil,
+            customTitle: nil
+        )
+        try await db.upsertSessionMetaCore(coreRow2)
+
+        let rows2 = try await db.fetchSessionMeta(for: "codex")
+        XCTAssertEqual(rows2[0].codexInternalSessionID, "backfill-abc", "core upsert must not overwrite existing codex_internal_session_id")
+    }
+
+    func testCoreUpsertFillsCodexInternalIDWhenNull() async throws {
+        // Row exists with no codex_internal_session_id
+        let initial = SessionMetaRow(
+            sessionID: "s2", source: "codex", path: "/b.jsonl",
+            mtime: 100, size: 200, startTS: 10, endTS: 20,
+            model: nil, cwd: nil, repo: nil,
+            title: nil, codexInternalSessionID: nil,
+            isHousekeeping: false, messages: 0, commands: 0,
+            parentSessionID: nil, subagentType: nil,
+            customTitle: nil
+        )
+        try await db.upsertSessionMetaCore(initial)
+
+        // Core write fills the missing ID
+        let withHint = SessionMetaRow(
+            sessionID: "s2", source: "codex", path: "/b.jsonl",
+            mtime: 110, size: 210, startTS: 10, endTS: 25,
+            model: nil, cwd: nil, repo: nil,
+            title: nil, codexInternalSessionID: "discovered-id",
+            isHousekeeping: false, messages: 0, commands: 0,
+            parentSessionID: nil, subagentType: nil,
+            customTitle: nil
+        )
+        try await db.upsertSessionMetaCore(withHint)
+
+        let rows = try await db.fetchSessionMeta(for: "codex")
+        let row = rows.first { $0.sessionID == "s2" }
+        XCTAssertEqual(row?.codexInternalSessionID, "discovered-id", "core upsert should fill NULL codex_internal_session_id")
     }
 
     func testCoreUpsertPreservesMessages() async throws {
