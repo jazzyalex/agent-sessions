@@ -2927,8 +2927,17 @@ private struct HUDLimitsBar: View {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
     @State private var isHovering = false
+    @State private var activeVariant: Int = 0
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
+
+    private var hasConstrainedIndicator: Bool {
+        entries.contains { $0.fiveHourLeft < 30 || $0.weekLeft < 30 }
+    }
+
+    private var autoExpandNeeded: Bool {
+        activeVariant > 1 && hasConstrainedIndicator
+    }
 
     private var contentRefreshID: String {
         var parts: [String] = [mode.rawValue]
@@ -2960,6 +2969,7 @@ private struct HUDLimitsBar: View {
             )
         }
         parts.append(isHovering ? "hover" : "rest")
+        parts.append(autoExpandNeeded ? "autoExpand" : "normal")
         return parts.joined(separator: "||")
     }
 
@@ -3002,6 +3012,7 @@ private struct HUDLimitsBar: View {
                     .id(contentRefreshID)
                     .frame(height: 22)
                     .clipped()
+                    .onPreferenceChange(LimitsBarVariantKey.self) { activeVariant = $0 }
             }
             .onHover { isHovering = $0 }
             .onTapGesture(count: 2) {
@@ -3013,7 +3024,7 @@ private struct HUDLimitsBar: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if isHovering {
+                if isHovering || autoExpandNeeded {
                     HUDLimitsDetailPanel(entries: entries, mode: mode)
                         .id(contentRefreshID)
                         .frame(maxWidth: .infinity)
@@ -3116,6 +3127,15 @@ private struct HUDLimitsDetailPanel: View {
     }
 }
 
+/// Reports which ViewThatFits variant the HUD limits bar chose (1 = full, 2 = no resets, 3 = bottleneck).
+private struct LimitsBarVariantKey: PreferenceKey {
+    static let defaultValue: Int = 0
+    static func reduce(value: inout Int, nextValue: () -> Int) {
+        let next = nextValue()
+        if next != 0 { value = next }
+    }
+}
+
 /// Shared percent color used by HUDLimitsDetailPanel and HUDLimitsProviderText.
 private func hudPctColor(_ left: Int) -> Color {
     if left <= 10 { return .red }
@@ -3131,10 +3151,13 @@ private struct HUDLimitsBarContent: View {
         ViewThatFits(in: .horizontal) {
             // Variant 1: Full — both windows with reset times
             entriesRow(showResets: true, onlyBottleneck: false)
+                .preference(key: LimitsBarVariantKey.self, value: 1)
             // Variant 2: No resets — both windows, percent only
             entriesRow(showResets: false, onlyBottleneck: false)
+                .preference(key: LimitsBarVariantKey.self, value: 2)
             // Variant 3: Bottleneck only — whichever window has fewer % left
             entriesRow(showResets: false, onlyBottleneck: true)
+                .preference(key: LimitsBarVariantKey.self, value: 3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)

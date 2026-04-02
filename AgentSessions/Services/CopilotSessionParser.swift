@@ -86,6 +86,7 @@ final class CopilotSessionParser {
         }
 
         let id = forcedID ?? sessionID ?? fallbackID(for: url)
+        let customTitle = readWorkspaceName(near: url)
         return Session(
             id: id,
             source: .copilot,
@@ -99,7 +100,8 @@ final class CopilotSessionParser {
             cwd: cwd,
             repoName: nil,
             lightweightTitle: title,
-            lightweightCommands: estimatedCommands
+            lightweightCommands: estimatedCommands,
+            customTitle: customTitle
         )
     }
 
@@ -319,6 +321,7 @@ final class CopilotSessionParser {
 
         let id = forcedID ?? sessionID ?? fallbackID(for: url)
         let nonMetaCount = events.filter { $0.kind != .meta }.count
+        let customTitle = readWorkspaceName(near: url)
         return Session(
             id: id,
             source: .copilot,
@@ -331,7 +334,8 @@ final class CopilotSessionParser {
             events: events,
             cwd: cwd,
             repoName: nil,
-            lightweightTitle: nil
+            lightweightTitle: nil,
+            customTitle: customTitle
         )
     }
 
@@ -427,4 +431,32 @@ final class CopilotSessionParser {
         root["data"] = data
         return root
     }
+}
+
+// MARK: - Workspace YAML title support
+
+/// Reads the top-level `name` field from workspace.yaml in the same per-session directory as events.jsonl.
+/// Copilot writes this field only when the user runs `/rename`.
+/// Only applies to the current directory-based layout (`<uuid>/events.jsonl`), NOT legacy flat `.jsonl` files,
+/// to avoid reading a shared `workspace.yaml` from the parent `session-state/` directory.
+private func readWorkspaceName(near eventsURL: URL) -> String? {
+    // Only read workspace.yaml for directory-based layout (events.jsonl inside a per-session UUID dir).
+    guard eventsURL.lastPathComponent == "events.jsonl" else { return nil }
+    let dir = eventsURL.deletingLastPathComponent()
+    let ws = dir.appendingPathComponent("workspace.yaml")
+    guard let raw = try? String(contentsOf: ws, encoding: .utf8) else { return nil }
+    for line in raw.components(separatedBy: .newlines) {
+        // Top-level only: line must start with `name:` (no leading whitespace)
+        guard line.hasPrefix("name:") else { continue }
+        var value = String(line.dropFirst("name:".count))
+            .trimmingCharacters(in: .whitespaces)
+        // Strip surrounding quotes if present
+        if value.count >= 2,
+           (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
+           (value.hasPrefix("'") && value.hasSuffix("'")) {
+            value = String(value.dropFirst().dropLast())
+        }
+        if !value.isEmpty { return value }
+    }
+    return nil
 }
