@@ -2,6 +2,9 @@ import Foundation
 import Combine
 import CryptoKit
 import SwiftUI
+import os.log
+
+private let indexLog = OSLog(subsystem: "com.triada.AgentSessions", category: "CodexIndexing")
 
 enum LaunchPhase: Int, Comparable {
     case idle = 0
@@ -707,7 +710,7 @@ final class SessionIndexer: ObservableObject {
             }
 
             let discovery = CodexSessionDiscovery(customRoot: self.sessionsRootOverride.isEmpty ? nil : self.sessionsRootOverride)
-            let deltaScope: SessionDeltaScope = (mode == .fullReconcile || trigger == .manual) ? .full : .recent
+            let deltaScope: SessionDeltaScope = (mode == .fullReconcile || trigger == .manual || trigger == .launch) ? .full : .recent
             let previousStats = self.knownFileStatsSnapshot()
             let delta = discovery.discoverDelta(previousByPath: previousStats, scope: deltaScope)
             let found = delta.currentByPath.keys.map { URL(fileURLWithPath: $0) }
@@ -715,25 +718,37 @@ final class SessionIndexer: ObservableObject {
             let currentStatsByPath = delta.currentByPath
             let removedPaths = delta.removedPaths
             let existingSessionPaths = Set(existingSessions.map(\.filePath))
-            let missingHydratedSessionFiles = Self.additionalChangedFilesForMissingHydratedSessions(
-                currentByPath: currentStatsByPath,
-                existingSessionPaths: existingSessionPaths,
-                changedFiles: delta.changedFiles
-            )
             let changedOrNewFiles: [URL]
+            let missingHydratedCount: Int
             switch mode {
             case .fullReconcile:
                 changedOrNewFiles = found
+                missingHydratedCount = 0
             case .incremental:
                 var combined = delta.changedFiles
-                combined.append(contentsOf: missingHydratedSessionFiles)
+                // Supplement: force-parse files on disk but missing from hydrated snapshot.
+                // Uses set-difference to detect the exact gap rather than count comparison.
+                let diskPaths = Set(currentStatsByPath.keys)
+                let changedPaths = Set(delta.changedFiles.map(\.path))
+                let gapPaths = diskPaths
+                    .subtracting(existingSessionPaths)
+                    .subtracting(changedPaths)
+                if !gapPaths.isEmpty {
+                    combined.append(contentsOf: gapPaths.sorted().map { URL(fileURLWithPath: $0) })
+                }
+                missingHydratedCount = gapPaths.count
                 var seenPaths: Set<String> = []
                 changedOrNewFiles = combined.filter { seenPaths.insert($0.path).inserted }
             }
 
             DBG("📁 Found \(found.count) total files, \(changedOrNewFiles.count) changed/new, \(removedPaths.count) removed")
-            if !missingHydratedSessionFiles.isEmpty {
-                LaunchProfiler.log("Codex.refresh: forcing parse for \(missingHydratedSessionFiles.count) recent files missing from hydrated session snapshot")
+            os_log("Codex.refresh: found=%d changed=%d gap=%d hydrated=%d removed=%d scope=%{public}@",
+                   log: indexLog, type: .info,
+                   found.count, delta.changedFiles.count, missingHydratedCount,
+                   existingSessions.count, removedPaths.count,
+                   deltaScope == .full ? "full" : "recent")
+            if missingHydratedCount > 0 {
+                LaunchProfiler.log("Codex.refresh: forcing parse for \(missingHydratedCount) files missing from hydrated session snapshot")
             }
             LaunchProfiler.log("Codex.refresh: file enumeration done (found=\(found.count), changed=\(changedOrNewFiles.count), removed=\(removedPaths.count))")
 
@@ -828,6 +843,24 @@ final class SessionIndexer: ObservableObject {
             let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sortedSessions, source: .codex)
             self.applyKnownFileStatsDelta(scope: deltaScope, currentStatsByPath: currentStatsByPath, removedPaths: removedPaths)
             await self.persistKnownFileStats()
+
+            // Persist lightweight session_meta so subsequent hydration is complete.
+            // Excludes probe sessions to match analytics policy.
+            let sessionsForMeta = allParsedSessions.filter { !CodexProbeConfig.isProbeSession($0) }
+            if !sessionsForMeta.isEmpty {
+                do {
+                    let db = try IndexDB()
+                    try await db.begin()
+                    for session in sessionsForMeta {
+                        try? await db.upsertSessionMetaCore(Self.sessionMetaRow(from: session))
+                    }
+                    try await db.commit()
+                    os_log("Codex: wrote %d session_meta rows", log: indexLog, type: .info, sessionsForMeta.count)
+                } catch {
+                    os_log("Codex: session_meta write failed: %{public}@", log: indexLog, type: .error, error.localizedDescription)
+                    // Non-fatal: hydration gap will persist until next successful write.
+                }
+            }
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 LaunchProfiler.log("Codex.refresh: sessions merged (total=\(mergedWithArchives.count))")
@@ -973,14 +1006,39 @@ final class SessionIndexer: ObservableObject {
         do {
             if let persisted = try await loadPersistedKnownFileStats() {
                 initializeKnownFileStatsIfNeeded(persisted)
+                os_log("Codex: seeded file stats from persisted baseline (%d entries)", log: indexLog, type: .info, persisted.count)
                 #if DEBUG
                 LaunchProfiler.log("Codex.refresh: known file stats loaded from persisted core baseline (\(persisted.count))")
                 #endif
                 return
             }
         } catch {
+            os_log("Codex: seedKnownFileStats failed: %{public}@", log: indexLog, type: .error, error.localizedDescription)
             // Non-fatal. We'll bootstrap from hydrated sessions or runtime deltas.
         }
+    }
+
+    static func sessionMetaRow(from s: Session) -> SessionMetaRow {
+        SessionMetaRow(
+            sessionID: s.id,
+            source: s.source.rawValue,
+            path: s.filePath,
+            mtime: Int64(s.modifiedAt.timeIntervalSince1970),
+            size: Int64(s.fileSizeBytes ?? 0),
+            startTS: Int64((s.startTime ?? s.modifiedAt).timeIntervalSince1970),
+            endTS: Int64((s.endTime ?? s.modifiedAt).timeIntervalSince1970),
+            model: s.model,
+            cwd: s.lightweightCwd,
+            repo: s.repoName,
+            title: s.lightweightTitle,
+            codexInternalSessionID: s.codexInternalSessionIDHint,
+            isHousekeeping: s.isHousekeeping,
+            messages: s.eventCount,
+            commands: s.lightweightCommands ?? 0,
+            parentSessionID: s.parentSessionID,
+            subagentType: s.subagentType,
+            customTitle: s.customTitle
+        )
     }
 
     private static func fileStat(for url: URL) -> SessionFileStat? {

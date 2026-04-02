@@ -1,6 +1,9 @@
 import Foundation
 import Combine
 import SwiftUI
+import os.log
+
+private let indexLog = OSLog(subsystem: "com.triada.AgentSessions", category: "ClaudeIndexing")
 
 /// Session indexer for Claude Code sessions
 final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
@@ -262,7 +265,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             LaunchProfiler.log("Claude.refresh: DB hydrate complete (existing=\(existingSessions.count))")
             #endif
 
-            let deltaScope: SessionDeltaScope = (mode == .fullReconcile || trigger == .manual) ? .full : .recent
+            let deltaScope: SessionDeltaScope = (mode == .fullReconcile || trigger == .manual || trigger == .launch) ? .full : .recent
             let previousStats = self.knownFileStatsByPathSnapshot()
             let initialDelta = self.discovery.discoverDelta(previousByPath: previousStats, scope: deltaScope)
             let shouldEscalate = Self.shouldEscalateRecentDeltaToFullReconcile(mode: mode)
@@ -273,12 +276,28 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 }
                 return initialDelta
             }()
-            let files: [URL] = {
-                if effectiveMode == .fullReconcile {
-                    return delta.currentByPath.keys.map { URL(fileURLWithPath: $0) }
+            let files: [URL]
+            let missingHydratedCount: Int
+            if effectiveMode == .fullReconcile {
+                files = delta.currentByPath.keys.map { URL(fileURLWithPath: $0) }
+                missingHydratedCount = 0
+            } else {
+                // Supplement: force-parse files on disk but missing from hydrated snapshot.
+                // Without this, sessions not in session_meta AND not file-stat-changed stay invisible.
+                let existingPaths = Set(existingSessions.map(\.filePath))
+                let changedPaths = Set(delta.changedFiles.map(\.path))
+                let missingPaths = Set(delta.currentByPath.keys)
+                    .subtracting(existingPaths)
+                    .subtracting(changedPaths)
+                missingHydratedCount = missingPaths.count
+                if missingPaths.isEmpty {
+                    files = delta.changedFiles
+                } else {
+                    var combined = delta.changedFiles
+                    combined.append(contentsOf: missingPaths.sorted().map { URL(fileURLWithPath: $0) })
+                    files = combined
                 }
-                return delta.changedFiles
-            }()
+            }
             if shouldEscalate {
                 LaunchProfiler.log("Claude.refresh: escalating recent delta to full reconcile due to drift")
             }
@@ -289,6 +308,12 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             )
             #endif
             LaunchProfiler.log("Claude.refresh: file enumeration done (changed=\(files.count), removed=\(delta.removedPaths.count), drift=\(delta.driftDetected))")
+            os_log("Claude.refresh: found=%d changed=%d gap=%d hydrated=%d removed=%d scope=%{public}@",
+                   log: indexLog, type: .info,
+                   delta.currentByPath.count, delta.changedFiles.count,
+                   missingHydratedCount,
+                   existingSessions.count, delta.removedPaths.count,
+                   deltaScope == .full ? "full" : "recent")
 
             let config = SessionIndexingEngine.ScanConfig(
                 source: .claude,
@@ -367,6 +392,24 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             self.applyKnownFileStatsDelta(mode: effectiveMode, delta: delta)
             await self.persistKnownFileStats()
 
+            // Persist lightweight session_meta so subsequent hydration is complete.
+            // Excludes probe sessions to match analytics policy.
+            let sessionsForMeta = merged.filter { !ClaudeProbeConfig.isProbeSession($0) }
+            if !sessionsForMeta.isEmpty {
+                do {
+                    let db = try IndexDB()
+                    try await db.begin()
+                    for session in sessionsForMeta {
+                        try? await db.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: session))
+                    }
+                    try await db.commit()
+                    os_log("Claude: wrote %d session_meta rows", log: indexLog, type: .info, sessionsForMeta.count)
+                } catch {
+                    os_log("Claude: session_meta write failed: %{public}@", log: indexLog, type: .error, error.localizedDescription)
+                    // Non-fatal: hydration gap will persist until next successful write.
+                }
+            }
+
             self.publishAfterCurrentUpdate { [weak self] in
                 guard let self, self.isRefreshTokenCurrent(token) else { return }
                 LaunchProfiler.log("Claude.refresh: sessions merged (total=\(mergedWithArchives.count))")
@@ -443,11 +486,13 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         do {
             if let persisted = try await loadPersistedKnownFileStats() {
                 initializeKnownFileStatsIfNeeded(persisted)
+                os_log("Claude: seeded file stats from persisted baseline (%d entries)", log: indexLog, type: .info, persisted.count)
                 #if DEBUG
                 LaunchProfiler.log("Claude.refresh: known file stats loaded from persisted core baseline (\(persisted.count))")
                 #endif
             }
         } catch {
+            os_log("Claude: seedKnownFileStats failed: %{public}@", log: indexLog, type: .error, error.localizedDescription)
             // Non-fatal. We'll bootstrap from hydrated sessions or runtime deltas.
         }
     }
