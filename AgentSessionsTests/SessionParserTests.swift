@@ -592,6 +592,47 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(found.first?.lastPathComponent, sessionURL.lastPathComponent)
     }
 
+    func testCodexAdditionalChangedFilesIncludesMissingHydratedRecentFile() {
+        let pathA = "/tmp/codex-a.jsonl"
+        let pathB = "/tmp/codex-b.jsonl"
+
+        let currentByPath: [String: SessionFileStat] = [
+            pathA: SessionFileStat(mtime: 100, size: 10),
+            pathB: SessionFileStat(mtime: 100, size: 10)
+        ]
+        let existing = Set([pathA])
+
+        let missing = SessionIndexer.additionalChangedFilesForMissingHydratedSessions(
+            currentByPath: currentByPath,
+            existingSessionPaths: existing,
+            changedFiles: []
+        )
+
+        XCTAssertEqual(Set(missing.map(\.path)), Set([pathB]))
+    }
+
+    func testCodexAdditionalChangedFilesSkipsHydratedAndAlreadyChangedPaths() {
+        let pathA = "/tmp/codex-a.jsonl"
+        let pathB = "/tmp/codex-b.jsonl"
+        let pathC = "/tmp/codex-c.jsonl"
+
+        let currentByPath: [String: SessionFileStat] = [
+            pathA: SessionFileStat(mtime: 100, size: 10),
+            pathB: SessionFileStat(mtime: 100, size: 10),
+            pathC: SessionFileStat(mtime: 100, size: 10)
+        ]
+        let existing = Set([pathA])
+        let changed = [URL(fileURLWithPath: pathB)]
+
+        let missing = SessionIndexer.additionalChangedFilesForMissingHydratedSessions(
+            currentByPath: currentByPath,
+            existingSessionPaths: existing,
+            changedFiles: changed
+        )
+
+        XCTAssertEqual(Set(missing.map(\.path)), Set([pathC]))
+    }
+
     func testClaudeDiscoveryUsesProjectsSubtreeWhenPresent() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-Discovery-\(UUID().uuidString)", isDirectory: true)

@@ -1916,12 +1916,7 @@ struct AgentCockpitHUDView: View {
             let elapsed = isCompact ? "" : Self.elapsedLabel(from: row.lastActivityAt)
             let activityTooltip = row.lastActivityAt.map { Self.activityTooltipFormatter.string(from: $0) }
             let cleanedTabTitle = Self.normalizedCockpitTabTitle(row.tabTitle, source: row.source)
-            let confidence: HUDNavigationConfidence = {
-                guard row.resolvedSessionID != nil else { return .none }
-                if row.isDefinitiveMatch { return .exact }
-                if row.sessionID != nil { return .runtimeID }
-                return .cwdOnly
-            }()
+            let confidence = Self.navigationConfidence(for: row)
             return HUDRow(
                 id: row.id,
                 source: row.source,
@@ -2261,6 +2256,13 @@ struct AgentCockpitHUDView: View {
         default:
             return .shell
         }
+    }
+
+    static func navigationConfidence(for row: LegacyMappedRow) -> HUDNavigationConfidence {
+        guard row.resolvedSessionID != nil else { return .none }
+        if row.isDefinitiveMatch { return .exact }
+        if row.sessionID != nil { return .runtimeID }
+        return .cwdOnly
     }
 
     private static func authoritativeSessionID(for presence: CodexActivePresence, resolvedSession: Session?) -> String? {

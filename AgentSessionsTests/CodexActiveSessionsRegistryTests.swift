@@ -2672,9 +2672,39 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(merged.tty, "/dev/ttys030")
     }
 
+    func testNavigationConfidence_runtimeIDMatchIsNavigable() {
+        let row = makeMappedRow(
+            tty: nil,
+            itermSessionId: nil,
+            resolvedSessionID: "resolved-session",
+            sessionID: "runtime-session",
+            isDefinitiveMatch: false
+        )
+        let confidence = AgentCockpitHUDView.navigationConfidence(for: row)
+        XCTAssertEqual(confidence, .runtimeID)
+        XCTAssertTrue(confidence.isNavigable)
+    }
+
+    func testNavigationConfidence_cwdOnlyMatchIsNotNavigable() {
+        let row = makeMappedRow(
+            tty: nil,
+            itermSessionId: nil,
+            resolvedSessionID: "resolved-session",
+            sessionID: nil,
+            isDefinitiveMatch: false
+        )
+        let confidence = AgentCockpitHUDView.navigationConfidence(for: row)
+        XCTAssertEqual(confidence, .cwdOnly)
+        XCTAssertFalse(confidence.isNavigable)
+    }
+
     // MARK: - mergeMetadata helpers
 
-    private func makeMappedRow(tty: String?, itermSessionId: String?) -> LegacyMappedRow {
+    private func makeMappedRow(tty: String?,
+                               itermSessionId: String?,
+                               resolvedSessionID: String? = nil,
+                               sessionID: String? = nil,
+                               isDefinitiveMatch: Bool = false) -> LegacyMappedRow {
         LegacyMappedRow(
             id: UUID().uuidString,
             source: .claude,
@@ -2688,13 +2718,13 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             tty: tty,
             termProgram: nil,
             tabTitle: nil,
-            resolvedSessionID: nil,
-            sessionID: nil,
+            resolvedSessionID: resolvedSessionID,
+            sessionID: sessionID,
             logPath: nil,
             workingDirectory: nil,
             lastActivityAt: nil,
             idleReason: nil,
-            isDefinitiveMatch: false
+            isDefinitiveMatch: isDefinitiveMatch
         )
     }
 

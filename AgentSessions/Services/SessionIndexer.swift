@@ -714,15 +714,27 @@ final class SessionIndexer: ObservableObject {
             let foundIsEmpty = found.isEmpty
             let currentStatsByPath = delta.currentByPath
             let removedPaths = delta.removedPaths
+            let existingSessionPaths = Set(existingSessions.map(\.filePath))
+            let missingHydratedSessionFiles = Self.additionalChangedFilesForMissingHydratedSessions(
+                currentByPath: currentStatsByPath,
+                existingSessionPaths: existingSessionPaths,
+                changedFiles: delta.changedFiles
+            )
             let changedOrNewFiles: [URL]
             switch mode {
             case .fullReconcile:
                 changedOrNewFiles = found
             case .incremental:
-                changedOrNewFiles = delta.changedFiles
+                var combined = delta.changedFiles
+                combined.append(contentsOf: missingHydratedSessionFiles)
+                var seenPaths: Set<String> = []
+                changedOrNewFiles = combined.filter { seenPaths.insert($0.path).inserted }
             }
 
             DBG("📁 Found \(found.count) total files, \(changedOrNewFiles.count) changed/new, \(removedPaths.count) removed")
+            if !missingHydratedSessionFiles.isEmpty {
+                LaunchProfiler.log("Codex.refresh: forcing parse for \(missingHydratedSessionFiles.count) recent files missing from hydrated session snapshot")
+            }
             LaunchProfiler.log("Codex.refresh: file enumeration done (found=\(found.count), changed=\(changedOrNewFiles.count), removed=\(removedPaths.count))")
 
             let sortedFiles = changedOrNewFiles.sorted { ($0.lastPathComponent) > ($1.lastPathComponent) }
@@ -977,6 +989,22 @@ final class SessionIndexer: ObservableObject {
         let mtime = Int64((values?.contentModificationDate ?? .distantPast).timeIntervalSince1970)
         let size = Int64(values?.fileSize ?? 0)
         return SessionFileStat(mtime: mtime, size: size)
+    }
+
+    static func additionalChangedFilesForMissingHydratedSessions(
+        currentByPath: [String: SessionFileStat],
+        existingSessionPaths: Set<String>,
+        changedFiles: [URL]
+    ) -> [URL] {
+        let changedPaths = Set(changedFiles.map(\.path))
+        var missing: [URL] = []
+        missing.reserveCapacity(currentByPath.count)
+        for path in currentByPath.keys {
+            if existingSessionPaths.contains(path) { continue }
+            if changedPaths.contains(path) { continue }
+            missing.append(URL(fileURLWithPath: path))
+        }
+        return missing.sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
     private func bootstrapKnownFileStatsIfNeeded(from sessions: [Session]) {
