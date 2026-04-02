@@ -2496,7 +2496,16 @@ final class CodexActiveSessionsModel: ObservableObject {
 
         // Keep cached process presences alive through deferred-probe windows so
         // pinned/background UI does not oscillate between partial and full rows.
-        let bridgedTTL = max(0, processProbeMinInterval) + max(0, pollInterval)
+        // When the probe interval exceeds the base TTL (deferred-probe modes like
+        // pinned/background), use 2x the probe interval to survive a missed or
+        // delayed cycle. In foreground mode (short probe intervals), the base TTL
+        // already provides sufficient coverage.
+        let normalizedProbeInterval = max(0, processProbeMinInterval)
+        let normalizedPollInterval = max(0, pollInterval)
+        let baseBridge = normalizedProbeInterval + normalizedPollInterval
+        let bridgedTTL = normalizedProbeInterval > normalizedBaseTTL
+            ? normalizedProbeInterval * 2 + normalizedPollInterval
+            : baseBridge
         return max(normalizedBaseTTL, bridgedTTL)
     }
 

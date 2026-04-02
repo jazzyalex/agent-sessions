@@ -2397,6 +2397,9 @@ struct AgentCockpitHUDView: View {
     private static func dedupeRowsByResolvedSession(_ rows: [LegacyMappedRow]) -> [LegacyMappedRow] {
         var byKey: [String: LegacyMappedRow] = [:]
         byKey.reserveCapacity(rows.count)
+        // Secondary dedup: when multiple presences (e.g., parent + subagent) resolve
+        // to the same indexed session, merge them under the resolvedSessionID key.
+        var byResolvedID: [String: String] = [:]
 
         for row in rows {
             let key: String = {
@@ -2421,6 +2424,18 @@ struct AgentCockpitHUDView: View {
                 }
                 return row.id
             }()
+
+            // If this row resolves to an indexed session already claimed by another
+            // presence key, merge into that existing row instead of creating a new one.
+            if let resolvedID = row.resolvedSessionID, !resolvedID.isEmpty {
+                let resolvedKey = "\(row.source.rawValue)|resolved:\(resolvedID)"
+                if let existingKey = byResolvedID[resolvedKey], existingKey != key {
+                    byKey[existingKey] = Self.preferredRow(existing: byKey[existingKey], incoming: row)
+                    continue
+                }
+                byResolvedID[resolvedKey] = key
+            }
+
             let existing = byKey[key]
             byKey[key] = Self.preferredRow(existing: existing, incoming: row)
         }

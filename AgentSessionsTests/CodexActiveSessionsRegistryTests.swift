@@ -952,7 +952,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             hasVisibleConsumer: true
         )
 
-        XCTAssertEqual(ttl, processProbeMinInterval + pollInterval)
+        XCTAssertEqual(ttl, processProbeMinInterval * 2 + pollInterval)
         XCTAssertGreaterThanOrEqual(ttl, processProbeMinInterval + pollInterval)
     }
 
@@ -978,6 +978,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             hasVisibleConsumer: true
         )
 
+        // Foreground probe interval (6s) < base TTL (10s), so 2x multiplier is not applied.
         XCTAssertEqual(ttl, CodexActiveSessionsModel.defaultStaleTTL)
     }
 

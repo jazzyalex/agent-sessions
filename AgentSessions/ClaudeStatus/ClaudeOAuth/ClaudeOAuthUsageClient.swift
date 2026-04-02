@@ -53,13 +53,38 @@ actor ClaudeOAuthUsageClient {
     // shared across all consumers rather than each one burning quota independently.
     private static let sharedCacheURL = URL(fileURLWithPath: "/tmp/claude/statusline-usage-cache.json")
     private static let sharedCacheTokenURL = URL(fileURLWithPath: "/tmp/claude/statusline-usage-cache.token")
-    private static let cacheMaxAge: TimeInterval = 60  // seconds
+    private static let cacheMaxAge: TimeInterval = 240  // 4 minutes — reduces API calls across shared consumers
+
+    /// Resolved once at init from `claude --version`; falls back to a safe default.
+    private let userAgent: String
 
     init() {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
         config.timeoutIntervalForResource = 12
         self.session = URLSession(configuration: config)
+        self.userAgent = Self.resolveUserAgent()
+    }
+
+    /// Shell out to `claude --version` synchronously (fast, <100ms) and cache the result.
+    private static func resolveUserAgent() -> String {
+        let fallback = "claude-code/0.0.0"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["claude", "--version"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return fallback }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return fallback }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let raw = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return fallback }
+        // Output is like "2.1.90 (Claude Code)" — extract version number
+        let version = raw.components(separatedBy: " ").first ?? raw
+        return "claude-code/\(version)"
     }
 
     func fetch(token: String) async throws -> (response: ClaudeOAuthRawUsageResponse, bodyHash: String, rawBody: String) {
@@ -76,7 +101,7 @@ actor ClaudeOAuthUsageClient {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.setValue("claude-code/2.1.34", forHTTPHeaderField: "User-Agent")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let (data, response): (Data, URLResponse)
