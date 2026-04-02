@@ -347,7 +347,7 @@ ensure_usage_visible
 # Claude Code may show "rate exceeded", "rate limit", or similar instead of
 # normal usage data. Detect this early and return a structured error so the
 # caller can serve stale data instead of treating it as a parse failure.
-if echo "$usage_output" | grep -qiE '(rate.*(exceeded|limit)|too many requests|try again later)'; then
+if echo "$usage_output" | grep -qiE '(rate limit|rate exceeded|too many requests|try again later)'; then
   cat <<EOF
 {"ok":false,"error":"rate_limited","hint":"Claude Code CLI reported rate limiting in /usage output"}
 EOF
