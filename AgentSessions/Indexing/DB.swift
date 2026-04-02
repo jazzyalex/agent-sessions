@@ -1324,6 +1324,43 @@ actor IndexDB {
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
+    /// Lightweight upsert for core indexers. Preserves `custom_title`, `messages`, `commands`,
+    /// and `codex_internal_session_id` set by the analytics indexer or the backfill process
+    /// (which produce higher-quality values for those fields).
+    func upsertSessionMetaCore(_ m: SessionMetaRow) throws {
+        let sql = """
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
+          start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
+          repo=excluded.repo, title=excluded.title,
+          is_housekeeping=excluded.is_housekeeping,
+          parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type;
+        """
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, m.sessionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, m.source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 3, m.path, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int64(stmt, 4, m.mtime)
+        sqlite3_bind_int64(stmt, 5, m.size)
+        sqlite3_bind_int64(stmt, 6, m.startTS)
+        sqlite3_bind_int64(stmt, 7, m.endTS)
+        if let model = m.model { sqlite3_bind_text(stmt, 8, model, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 8) }
+        if let cwd = m.cwd { sqlite3_bind_text(stmt, 9, cwd, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 9) }
+        if let repo = m.repo { sqlite3_bind_text(stmt, 10, repo, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 10) }
+        if let title = m.title { sqlite3_bind_text(stmt, 11, title, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 11) }
+        if let codexInternal = m.codexInternalSessionID { sqlite3_bind_text(stmt, 12, codexInternal, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 12) }
+        sqlite3_bind_int64(stmt, 13, m.isHousekeeping ? 1 : 0)
+        sqlite3_bind_int64(stmt, 14, Int64(m.messages))
+        sqlite3_bind_int64(stmt, 15, Int64(m.commands))
+        if let pid = m.parentSessionID { sqlite3_bind_text(stmt, 16, pid, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 16) }
+        if let sat = m.subagentType { sqlite3_bind_text(stmt, 17, sat, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 17) }
+        if let ct = m.customTitle { sqlite3_bind_text(stmt, 18, ct, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 18) }
+        if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta core") }
+    }
+
     func upsertSessionSearch(sessionID: String, source: String, mtime: Int64, size: Int64, text: String, formatVersion: Int = FeatureFlags.sessionSearchFormatVersion) throws {
         let now = Int64(Date().timeIntervalSince1970)
         let sql = """
