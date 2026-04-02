@@ -633,6 +633,101 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(Set(missing.map(\.path)), Set([pathC]))
     }
 
+    // MARK: - DirectorySignatureSnapshot
+
+    func testDirectorySignatureSnapshot_emptyInputProducesEmpty() {
+        let snapshot = DirectorySignatureSnapshot.from([])
+        XCTAssertEqual(snapshot, DirectorySignatureSnapshot.empty)
+        XCTAssertEqual(snapshot.fileCount, 0)
+        XCTAssertNil(snapshot.newestModifiedAt)
+    }
+
+    func testDirectorySignatureSnapshot_identicalInputsProduceEqualSnapshots() {
+        let date = Date(timeIntervalSince1970: 1000)
+        let input: [(path: String, modifiedAt: Date)] = [
+            (path: "/a.jsonl", modifiedAt: date),
+            (path: "/b.jsonl", modifiedAt: date)
+        ]
+        let a = DirectorySignatureSnapshot.from(input)
+        let b = DirectorySignatureSnapshot.from(input)
+        XCTAssertEqual(a, b)
+    }
+
+    func testDirectorySignatureSnapshot_changedMtimeProducesDifferentSnapshot() {
+        let date1 = Date(timeIntervalSince1970: 1000)
+        let date2 = Date(timeIntervalSince1970: 2000)
+        let original: [(path: String, modifiedAt: Date)] = [
+            (path: "/a.jsonl", modifiedAt: date1),
+            (path: "/b.jsonl", modifiedAt: date1)
+        ]
+        let modified: [(path: String, modifiedAt: Date)] = [
+            (path: "/a.jsonl", modifiedAt: date1),
+            (path: "/b.jsonl", modifiedAt: date2)
+        ]
+        XCTAssertNotEqual(DirectorySignatureSnapshot.from(original),
+                          DirectorySignatureSnapshot.from(modified))
+    }
+
+    func testDirectorySignatureSnapshot_orderDoesNotMatter() {
+        let date1 = Date(timeIntervalSince1970: 1000)
+        let date2 = Date(timeIntervalSince1970: 2000)
+        let forward: [(path: String, modifiedAt: Date)] = [
+            (path: "/a.jsonl", modifiedAt: date1),
+            (path: "/b.jsonl", modifiedAt: date2)
+        ]
+        let reversed: [(path: String, modifiedAt: Date)] = [
+            (path: "/b.jsonl", modifiedAt: date2),
+            (path: "/a.jsonl", modifiedAt: date1)
+        ]
+        XCTAssertEqual(DirectorySignatureSnapshot.from(forward),
+                       DirectorySignatureSnapshot.from(reversed))
+    }
+
+    func testDirectorySignatureSnapshot_newestModifiedAtIsCorrect() {
+        let older = Date(timeIntervalSince1970: 1000)
+        let newer = Date(timeIntervalSince1970: 2000)
+        let snapshot = DirectorySignatureSnapshot.from([
+            (path: "/a.jsonl", modifiedAt: older),
+            (path: "/b.jsonl", modifiedAt: newer)
+        ])
+        XCTAssertEqual(snapshot.newestModifiedAt, newer)
+        XCTAssertEqual(snapshot.fileCount, 2)
+    }
+
+    // MARK: - CoreIndexingProgress aggregation
+
+    func testAggregateProgress_idleSourcesDoNotInflateTotals() {
+        let snapshots: [UnifiedSessionIndexer.CoreProviderSnapshot] = [
+            .init(source: .codex, enabled: true, indexing: false, processed: 100, total: 100),
+            .init(source: .claude, enabled: true, indexing: true, processed: 10, total: 50)
+        ]
+        let progress = UnifiedSessionIndexer.aggregateProgress(from: snapshots)
+        XCTAssertEqual(progress.processed, 10)
+        XCTAssertEqual(progress.total, 50)
+        XCTAssertEqual(progress.activeSources, 1)
+        XCTAssertEqual(progress.totalSources, 2)
+    }
+
+    func testAggregateProgress_allIdleReturnsEmpty() {
+        let snapshots: [UnifiedSessionIndexer.CoreProviderSnapshot] = [
+            .init(source: .codex, enabled: true, indexing: false, processed: 100, total: 100),
+            .init(source: .claude, enabled: true, indexing: false, processed: 50, total: 50)
+        ]
+        let progress = UnifiedSessionIndexer.aggregateProgress(from: snapshots)
+        XCTAssertEqual(progress, UnifiedSessionIndexer.CoreIndexingProgress.empty)
+    }
+
+    func testAggregateProgress_multipleActiveSourcesCombine() {
+        let snapshots: [UnifiedSessionIndexer.CoreProviderSnapshot] = [
+            .init(source: .codex, enabled: true, indexing: true, processed: 20, total: 40),
+            .init(source: .claude, enabled: true, indexing: true, processed: 30, total: 60)
+        ]
+        let progress = UnifiedSessionIndexer.aggregateProgress(from: snapshots)
+        XCTAssertEqual(progress.processed, 50)
+        XCTAssertEqual(progress.total, 100)
+        XCTAssertEqual(progress.activeSources, 2)
+    }
+
     func testClaudeDiscoveryUsesProjectsSubtreeWhenPresent() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-Discovery-\(UUID().uuidString)", isDirectory: true)
