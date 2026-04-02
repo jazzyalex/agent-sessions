@@ -675,10 +675,16 @@ final class SessionIndexer: ObservableObject {
             let existingSessions = indexed
             let presentedHydration = !existingSessions.isEmpty
             self.bootstrapKnownFileStatsIfNeeded(from: existingSessions)
+            // Load thread_name lookup once for the entire refresh cycle.
+            let threadNames = Self.loadCodexThreadNames(sessionsRoot: self.sessionsRoot())
+
             if presentedHydration {
+                // Apply thread_name overrides early so hydrated sessions show renamed titles immediately.
+                var hydratedSessions = existingSessions
+                Self.applyCodexThreadNames(&hydratedSessions, from: threadNames)
                 await MainActor.run {
                     guard self.refreshToken == token else { return }
-                    self.allSessions = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: existingSessions, source: .codex)
+                    self.allSessions = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: hydratedSessions, source: .codex)
                     self.scheduleCodexInternalSessionIDBackfillIfNeeded(in: self.allSessions)
                     self.totalFiles = existingSessions.count
                     self.filesProcessed = existingSessions.count
@@ -824,6 +830,7 @@ final class SessionIndexer: ObservableObject {
                         lightweightTitle: session.lightweightTitle ?? existing.lightweightTitle,
                         lightweightCommands: session.lightweightCommands ?? existing.lightweightCommands,
                         isHousekeeping: existing.isHousekeeping,
+                        codexInternalSessionIDHint: session.codexInternalSessionIDHint ?? existing.codexInternalSessionIDHint,
                         parentSessionID: session.parentSessionID ?? existing.parentSessionID,
                         subagentType: session.subagentType ?? existing.subagentType,
                         customTitle: session.customTitle ?? existing.customTitle
@@ -836,7 +843,11 @@ final class SessionIndexer: ObservableObject {
             let fmExists: (Session) -> Bool = { s in
                 FileManager.default.fileExists(atPath: s.filePath)
             }
-            let allParsedSessions = Array(mergedByPath.values).filter(fmExists)
+            var allParsedSessions = Array(mergedByPath.values).filter(fmExists)
+
+            // Reuse thread_name lookup loaded earlier in this refresh cycle.
+            Self.applyCodexThreadNames(&allParsedSessions, from: threadNames)
+
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 .filter { hideProbes ? !CodexProbeConfig.isProbeSession($0) : true }
@@ -1286,6 +1297,198 @@ final class SessionIndexer: ObservableObject {
             var enriched = rebuilt
             enriched.isFavorite = session.isFavorite
             return enriched
+        }
+    }
+
+    // MARK: - Codex thread_name side-channel
+
+    /// Read budget: max bytes of `session_index.jsonl` to load per refresh (2 MB).
+    /// For files exceeding this, we read the tail so recent renames are never lost.
+    private static let threadNameReadBudget = 2 * 1024 * 1024
+
+    /// Bounded fingerprint segments to detect updates that preserve size/mtime metadata.
+    private static let threadNameFingerprintSegmentBytes = 8 * 1024
+    /// Force periodic re-parse so unchanged metadata/fingerprint does not live forever.
+    private static let threadNameCacheMaxAge: TimeInterval = 120
+
+    /// Lock-protected cache for parsed thread names, invalidated by path+mtime+size+fingerprint+age.
+    private static let threadNameCacheLock = NSLock()
+    private static var _threadNameCache: (
+        path: String,
+        mtime: Date,
+        size: Int,
+        fingerprint: UInt64,
+        loadedAt: Date,
+        lookup: [String: String]
+    )?
+
+    private static func fnv1a64(_ data: Data, seed: UInt64 = 0xcbf29ce484222325) -> UInt64 {
+        var hash = seed
+        for byte in data {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return hash
+    }
+
+    /// Returns `~/.codex/session_index.jsonl` only for verified `.../sessions` layouts.
+    /// For non-standard roots (for example imported snapshots), side-channel overrides are disabled.
+    private static func codexThreadNameIndexURL(sessionsRoot: URL) -> URL? {
+        guard sessionsRoot.lastPathComponent == "sessions" else {
+            os_log("Codex thread_name side-channel disabled for non-standard sessions root: %{public}@",
+                   log: indexLog, type: .info, sessionsRoot.path)
+            return nil
+        }
+        return sessionsRoot.deletingLastPathComponent().appendingPathComponent("session_index.jsonl")
+    }
+
+    /// Reads a small head+tail sample to detect same-size updates even on coarse mtime filesystems.
+    private static func computeThreadNameFingerprint(fileHandle: FileHandle, size: Int) -> UInt64 {
+        let boundedSize = max(0, size)
+        let segmentBytes = max(1, threadNameFingerprintSegmentBytes)
+        let segmentCount = min(boundedSize, segmentBytes)
+        var hash = fnv1a64(Data("\(boundedSize)".utf8))
+
+        do {
+            try fileHandle.seek(toOffset: 0)
+            let head = try fileHandle.read(upToCount: segmentCount) ?? Data()
+            hash = fnv1a64(head, seed: hash)
+
+            if boundedSize > segmentCount {
+                let tailOffset = UInt64(boundedSize - segmentCount)
+                try fileHandle.seek(toOffset: tailOffset)
+                let tail = try fileHandle.read(upToCount: segmentCount) ?? Data()
+                hash = fnv1a64(tail, seed: hash)
+            }
+        } catch {
+            // Leave hash as size-only fallback when sampling fails.
+        }
+
+        return hash
+    }
+
+    /// Reads `~/.codex/session_index.jsonl` and returns a lookup from internal session UUID to user-set thread name.
+    /// - Cached by (path, mtime, size, fingerprint) with max age fallback; safe for multi-root and root-switching scenarios.
+    /// - For files larger than `threadNameReadBudget`, reads the **tail** so recent appended renames are captured.
+    /// - Returns empty on any read failure — never serves stale data from a prior cycle.
+    static func loadCodexThreadNames(sessionsRoot: URL) -> [String: String] {
+        guard let indexFile = codexThreadNameIndexURL(sessionsRoot: sessionsRoot) else { return [:] }
+        let filePath = indexFile.path
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: filePath)) ?? [:]
+        guard let mtime = attrs[.modificationDate] as? Date,
+              let size = (attrs[.size] as? NSNumber)?.intValue else {
+            return [:]
+        }
+        guard let fh = try? FileHandle(forReadingFrom: indexFile) else { return [:] }
+        defer { try? fh.close() }
+
+        let fingerprint = computeThreadNameFingerprint(fileHandle: fh, size: size)
+
+        // Return cached result if file hasn't changed and cache age is within guard rails.
+        let now = Date()
+        threadNameCacheLock.lock()
+        let cached = _threadNameCache
+        threadNameCacheLock.unlock()
+        if let cached,
+           cached.path == filePath,
+           cached.mtime == mtime,
+           cached.size == size,
+           cached.fingerprint == fingerprint,
+           now.timeIntervalSince(cached.loadedAt) <= threadNameCacheMaxAge {
+            return cached.lookup
+        }
+        // For files within budget, read everything. For larger files, read the tail
+        // so recently appended renames (which are at the end) are always captured.
+        let data: Data
+        let skipFirstLine: Bool
+        if size <= threadNameReadBudget {
+            try? fh.seek(toOffset: 0)
+            guard let d = try? fh.read(upToCount: size) else { return [:] }
+            data = d
+            skipFirstLine = false
+        } else {
+            let tailOffset = UInt64(size - threadNameReadBudget)
+            var shouldSkipFirstLine = true
+            if tailOffset > 0 {
+                try? fh.seek(toOffset: tailOffset - 1)
+                if let previousByteData = (try? fh.read(upToCount: 1)) ?? nil,
+                   previousByteData.first == UInt8(ascii: "\n") {
+                    // Offset lands on a line boundary: first tail line is complete.
+                    shouldSkipFirstLine = false
+                }
+            }
+            try? fh.seek(toOffset: tailOffset)
+            guard let d = try? fh.read(upToCount: threadNameReadBudget) else { return [:] }
+            data = d
+            skipFirstLine = shouldSkipFirstLine
+        }
+        var lookup: [String: String] = [:]
+        var skippedFirstLine = skipFirstLine
+        data.withUnsafeBytes { buffer in
+            guard let base = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            let bytes = UnsafeBufferPointer(start: base, count: buffer.count)
+            var lineStart = bytes.startIndex
+            while lineStart < bytes.endIndex {
+                var lineEnd = lineStart
+                while lineEnd < bytes.endIndex && bytes[lineEnd] != UInt8(ascii: "\n") { lineEnd += 1 }
+                defer { lineStart = lineEnd + 1 }
+                // When reading from a tail offset, the first "line" is likely a partial — skip it.
+                if skippedFirstLine {
+                    skippedFirstLine = false
+                    continue
+                }
+                guard lineEnd > lineStart,
+                      let lineData = String(bytes: bytes[lineStart..<lineEnd], encoding: .utf8)?.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                      let id = obj["id"] as? String, !id.isEmpty,
+                      let name = obj["thread_name"] as? String, !name.isEmpty else { continue }
+                lookup[id] = name
+            }
+        }
+        threadNameCacheLock.lock()
+        _threadNameCache = (
+            path: filePath,
+            mtime: mtime,
+            size: size,
+            fingerprint: fingerprint,
+            loadedAt: now,
+            lookup: lookup
+        )
+        threadNameCacheLock.unlock()
+        return lookup
+    }
+
+    /// Applies thread_name overrides from session_index.jsonl as customTitle on matching sessions.
+    /// Overwrites existing customTitle when the lookup value differs, so re-renames propagate.
+    static func applyCodexThreadNames(_ sessions: inout [Session], from lookup: [String: String]) {
+        guard !lookup.isEmpty else { return }
+        for i in sessions.indices {
+            guard let hint = sessions[i].codexInternalSessionIDHint,
+                  let name = lookup[hint],
+                  sessions[i].customTitle != name else { continue }
+            let wasFavorite = sessions[i].isFavorite
+            var rebuilt = Session(
+                id: sessions[i].id,
+                source: sessions[i].source,
+                startTime: sessions[i].startTime,
+                endTime: sessions[i].endTime,
+                model: sessions[i].model,
+                filePath: sessions[i].filePath,
+                fileSizeBytes: sessions[i].fileSizeBytes,
+                eventCount: sessions[i].eventCount,
+                events: sessions[i].events,
+                cwd: sessions[i].lightweightCwd,
+                repoName: sessions[i].lightweightRepoName,
+                lightweightTitle: sessions[i].lightweightTitle,
+                lightweightCommands: sessions[i].lightweightCommands,
+                isHousekeeping: sessions[i].isHousekeeping,
+                codexInternalSessionIDHint: hint,
+                parentSessionID: sessions[i].parentSessionID,
+                subagentType: sessions[i].subagentType,
+                customTitle: name
+            )
+            rebuilt.isFavorite = wasFavorite
+            sessions[i] = rebuilt
         }
     }
 

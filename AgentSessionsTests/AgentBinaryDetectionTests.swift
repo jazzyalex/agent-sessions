@@ -79,15 +79,15 @@ final class FocusedSessionRefreshIntervalsTests: XCTestCase {
     func testCodexIntervalMatrix() {
         XCTAssertEqual(
             UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .codex, appIsActive: true, onAC: true),
-            1
+            4
         )
         XCTAssertEqual(
             UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .codex, appIsActive: true, onAC: false),
-            3
+            8
         )
         XCTAssertEqual(
             UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .codex, appIsActive: false, onAC: true),
-            10
+            20
         )
         XCTAssertEqual(
             UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .codex, appIsActive: false, onAC: false),
@@ -98,15 +98,15 @@ final class FocusedSessionRefreshIntervalsTests: XCTestCase {
     func testClaudeIntervalMatrix() {
         XCTAssertEqual(
             UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .claude, appIsActive: true, onAC: true),
-            2
+            6
         )
         XCTAssertEqual(
             UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .claude, appIsActive: true, onAC: false),
-            5
+            10
         )
         XCTAssertEqual(
             UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .claude, appIsActive: false, onAC: true),
-            15
+            25
         )
         XCTAssertEqual(
             UnifiedSessionIndexer.focusedSessionRefreshIntervalSeconds(for: .claude, appIsActive: false, onAC: false),

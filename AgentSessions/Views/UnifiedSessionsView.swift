@@ -1924,6 +1924,12 @@ struct UnifiedSessionsView: View {
                 )
                     .accessibilityLabel(Text("\(label) \(liveState == .activeWorking ? "active" : "open") session"))
             }
+            if session.isSubagent && !isSubagentRow {
+                Text("s")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(isSelected ? .white : rowTextColor)
+                    .accessibilityLabel("Subagent")
+            }
             Text(label)
                 .font(.system(size: 12, weight: isSubagentRow ? .light : .regular, design: .monospaced))
                 .foregroundStyle(isSubagentRow ? rowTextColor.opacity(0.7) : rowTextColor)
