@@ -66,7 +66,7 @@ actor ClaudeOAuthUsageClient {
         self.userAgent = Self.resolveUserAgent()
     }
 
-    /// Shell out to `claude --version` synchronously (fast, <100ms) and cache the result.
+    /// Shell out to `claude --version` with a timeout guard and cache the result.
     private static func resolveUserAgent() -> String {
         let fallback = "claude-code/0.0.0"
         let process = Process()
@@ -76,7 +76,14 @@ actor ClaudeOAuthUsageClient {
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         do { try process.run() } catch { return fallback }
-        process.waitUntilExit()
+        // Poll with timeout (matches ClaudeOAuthTokenResolver pattern)
+        let maxWait = 20  // 2 seconds max
+        var iterations = 0
+        while process.isRunning && iterations < maxWait {
+            Thread.sleep(forTimeInterval: 0.1)
+            iterations += 1
+        }
+        if process.isRunning { process.terminate(); return fallback }
         guard process.terminationStatus == 0 else { return fallback }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let raw = String(data: data, encoding: .utf8)?
