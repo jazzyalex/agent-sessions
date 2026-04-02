@@ -271,6 +271,18 @@ actor ClaudeUsageSourceManager {
                 publish(snap)
                 // Have cached data — just wait, don't fall back
                 scheduleOAuthRefresh(delay: delay)
+            } else if var persisted = await store.load(),
+                      Date().timeIntervalSince(persisted.fetchedAt) < Self.cacheHardExpire {
+                // No in-memory snapshot but the persistent store has one within
+                // the hard-expire window. Serve it as stale rather than falling
+                // back to tmux (which also gets rate-limited).
+                persisted.source = .cachedOAuth
+                persisted.health = .stale
+                lastOAuthSnapshot = persisted
+                publish(persisted)
+                os_log("ClaudeOAuth: rate limited — serving persisted snapshot (age %.0fs)",
+                       log: log, type: .info, Date().timeIntervalSince(persisted.fetchedAt))
+                scheduleOAuthRefresh(delay: delay)
             } else if mode == .auto && !usingTmuxFallback {
                 if webApiEnabled && !usingWebFallback {
                     os_log("ClaudeOAuth: no cached data during rate limit, activating web API fallback",
