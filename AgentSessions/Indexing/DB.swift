@@ -1324,9 +1324,10 @@ actor IndexDB {
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
-    /// Lightweight upsert for core indexers. Preserves `custom_title`, `messages`, `commands`,
-    /// and `codex_internal_session_id` set by the analytics indexer or the backfill process
-    /// (which produce higher-quality values for those fields).
+    /// Lightweight upsert for core indexers. Preserves `messages` and `commands` set by the
+    /// analytics indexer (which produces higher-quality values). Uses COALESCE for
+    /// `custom_title` and `codex_internal_session_id` so non-NULL parsed values update the DB
+    /// while NULL values (from lightweight parses that missed the record) preserve existing data.
     func upsertSessionMetaCore(_ m: SessionMetaRow) throws {
         let sql = """
         INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title)
@@ -1336,7 +1337,9 @@ actor IndexDB {
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
           repo=excluded.repo, title=excluded.title,
           is_housekeeping=excluded.is_housekeeping,
-          parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type;
+          parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type,
+          custom_title=COALESCE(excluded.custom_title, session_meta.custom_title),
+          codex_internal_session_id=CASE WHEN session_meta.codex_internal_session_id IS NULL THEN excluded.codex_internal_session_id ELSE session_meta.codex_internal_session_id END;
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
