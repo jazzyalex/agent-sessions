@@ -5,6 +5,32 @@ import SwiftUI
 import IOKit.ps
 #endif
 
+/// Composite snapshot of all monitored files in a source's directories.
+/// Changes to ANY tracked file (not just the global latest) produce a different snapshot.
+struct DirectorySignatureSnapshot: Equatable {
+    let fileCount: Int
+    /// Hasher uses a per-process random seed (SE-0206), so this value is only
+    /// meaningful for comparisons within the same process lifetime.
+    let combinedHash: Int
+    let newestModifiedAt: Date?
+
+    static let empty = DirectorySignatureSnapshot(fileCount: 0, combinedHash: 0, newestModifiedAt: nil)
+
+    static func from(_ signatures: [(path: String, modifiedAt: Date)]) -> DirectorySignatureSnapshot {
+        guard !signatures.isEmpty else { return .empty }
+        var hasher = Hasher()
+        for sig in signatures.sorted(by: { $0.path < $1.path }) {
+            hasher.combine(sig.path)
+            hasher.combine(sig.modifiedAt)
+        }
+        return DirectorySignatureSnapshot(
+            fileCount: signatures.count,
+            combinedHash: hasher.finalize(),
+            newestModifiedAt: signatures.max(by: { $0.modifiedAt < $1.modifiedAt })?.modifiedAt
+        )
+    }
+}
+
 /// Aggregates all agent sessions into a single list with unified filters and search.
 final class UnifiedSessionIndexer: ObservableObject {
     enum CoreIndexingDisplayMode: Equatable {
@@ -48,30 +74,6 @@ final class UnifiedSessionIndexer: ObservableObject {
     private struct FileSignature: Equatable {
         let path: String
         let modifiedAt: Date
-    }
-
-    /// Composite snapshot of all monitored files in a source's directories.
-    /// Changes to ANY tracked file (not just the global latest) produce a different snapshot.
-    private struct DirectorySignatureSnapshot: Equatable {
-        let fileCount: Int
-        let combinedHash: Int
-        let newestModifiedAt: Date?
-
-        static let empty = DirectorySignatureSnapshot(fileCount: 0, combinedHash: 0, newestModifiedAt: nil)
-
-        static func from(_ signatures: [(path: String, modifiedAt: Date)]) -> DirectorySignatureSnapshot {
-            guard !signatures.isEmpty else { return .empty }
-            var hasher = Hasher()
-            for sig in signatures.sorted(by: { $0.path < $1.path }) {
-                hasher.combine(sig.path)
-                hasher.combine(sig.modifiedAt)
-            }
-            return DirectorySignatureSnapshot(
-                fileCount: signatures.count,
-                combinedHash: hasher.finalize(),
-                newestModifiedAt: signatures.max(by: { $0.modifiedAt < $1.modifiedAt })?.modifiedAt
-            )
-        }
     }
 
     private struct FocusedSessionContext: Equatable {
@@ -382,7 +384,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             return Int((Double(clamped) / Double(total)) * 100.0)
         }
     }
-    private struct CoreProviderSnapshot {
+    struct CoreProviderSnapshot {
         let source: SessionSource
         let enabled: Bool
         let indexing: Bool
@@ -661,33 +663,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         .combineLatest(agentEnabledFlags)
         .map { metrics, flags in
             let snapshots = Self.coreProviderSnapshots(metrics: metrics, flags: flags)
-            let enabledRows = snapshots.filter(\.enabled)
-            guard !enabledRows.isEmpty else {
-                return CoreIndexingProgress.empty
-            }
-            let anyIndexing = enabledRows.contains(where: \.indexing)
-            guard anyIndexing else {
-                return CoreIndexingProgress.empty
-            }
-
-            let activeRows = enabledRows.filter(\.indexing)
-            let processed = activeRows.reduce(into: 0) { partial, provider in
-                let rowProcessed = max(0, provider.processed)
-                let rowTotal = max(0, provider.total)
-                partial += min(rowProcessed, rowTotal > 0 ? rowTotal : rowProcessed)
-            }
-            let total = activeRows.reduce(into: 0) { partial, provider in
-                let rowTotal = max(0, provider.total)
-                let rowProcessed = max(0, provider.processed)
-                partial += max(rowTotal, rowProcessed)
-            }
-
-            return CoreIndexingProgress(
-                processed: processed,
-                total: total,
-                activeSources: enabledRows.filter(\.indexing).count,
-                totalSources: enabledRows.count
-            )
+            return Self.aggregateProgress(from: snapshots)
         }
         .receive(on: DispatchQueue.main)
         .sink { [weak self] progress in
@@ -921,6 +897,36 @@ final class UnifiedSessionIndexer: ObservableObject {
         for source in sources {
             requestProviderRefresh(source: source, reason: "unified-refresh", trigger: trigger)
         }
+    }
+
+    static func aggregateProgress(from snapshots: [CoreProviderSnapshot]) -> CoreIndexingProgress {
+        let enabledRows = snapshots.filter(\.enabled)
+        guard !enabledRows.isEmpty else {
+            return CoreIndexingProgress.empty
+        }
+        let anyIndexing = enabledRows.contains(where: \.indexing)
+        guard anyIndexing else {
+            return CoreIndexingProgress.empty
+        }
+
+        let activeRows = enabledRows.filter(\.indexing)
+        let processed = activeRows.reduce(into: 0) { partial, provider in
+            let rowProcessed = max(0, provider.processed)
+            let rowTotal = max(0, provider.total)
+            partial += min(rowProcessed, rowTotal > 0 ? rowTotal : rowProcessed)
+        }
+        let total = activeRows.reduce(into: 0) { partial, provider in
+            let rowTotal = max(0, provider.total)
+            let rowProcessed = max(0, provider.processed)
+            partial += max(rowTotal, rowProcessed)
+        }
+
+        return CoreIndexingProgress(
+            processed: processed,
+            total: total,
+            activeSources: activeRows.count,
+            totalSources: enabledRows.count
+        )
     }
 
     private static func coreProviderSnapshots(
@@ -1296,6 +1302,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private func mostRecentSignature(in directories: [URL], fileLimitPerDirectory: Int) -> FileSignature? {
         let fm = FileManager.default
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
+        let scanCap = fileLimitPerDirectory * 10
         var newest: FileSignature? = nil
 
         for directory in directories {
@@ -1307,14 +1314,17 @@ final class UnifiedSessionIndexer: ObservableObject {
                 continue
             }
 
-            var visited = 0
+            var scanned = 0
+            var matched = 0
             for case let file as URL in enumerator {
                 let values = try? file.resourceValues(forKeys: keys)
                 guard values?.isRegularFile == true else { continue }
-                visited += 1
-                if visited > fileLimitPerDirectory { break }
+                scanned += 1
+                if scanned > scanCap { break }
                 let ext = file.pathExtension.lowercased()
                 guard ext == "jsonl" || ext == "ndjson" else { continue }
+                matched += 1
+                if matched > fileLimitPerDirectory { break }
                 let modifiedAt = values?.contentModificationDate ?? .distantPast
                 let signature = FileSignature(path: file.path, modifiedAt: modifiedAt)
                 if newest == nil || signature.modifiedAt > newest!.modifiedAt {
@@ -1377,6 +1387,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                                           fileLimitPerDirectory: Int) -> DirectorySignatureSnapshot {
         let fm = FileManager.default
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
+        let scanCap = fileLimitPerDirectory * 10
         var allSignatures: [(path: String, modifiedAt: Date)] = []
 
         for directory in directories {
@@ -1388,14 +1399,17 @@ final class UnifiedSessionIndexer: ObservableObject {
                 continue
             }
 
-            var visited = 0
+            var scanned = 0
+            var matched = 0
             for case let file as URL in enumerator {
                 let values = try? file.resourceValues(forKeys: keys)
                 guard values?.isRegularFile == true else { continue }
-                visited += 1
-                if visited > fileLimitPerDirectory { break }
+                scanned += 1
+                if scanned > scanCap { break }
                 let ext = file.pathExtension.lowercased()
                 guard ext == "jsonl" || ext == "ndjson" else { continue }
+                matched += 1
+                if matched > fileLimitPerDirectory { break }
                 let modifiedAt = values?.contentModificationDate ?? .distantPast
                 allSignatures.append((path: file.path, modifiedAt: modifiedAt))
             }

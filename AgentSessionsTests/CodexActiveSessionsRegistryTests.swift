@@ -2698,6 +2698,32 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertFalse(confidence.isNavigable)
     }
 
+    func testNavigationConfidence_exactMatchIsNavigable() {
+        let row = makeMappedRow(
+            tty: nil,
+            itermSessionId: nil,
+            resolvedSessionID: "resolved-session",
+            sessionID: "runtime-session",
+            isDefinitiveMatch: true
+        )
+        let confidence = AgentCockpitHUDView.navigationConfidence(for: row)
+        XCTAssertEqual(confidence, .exact)
+        XCTAssertTrue(confidence.isNavigable)
+    }
+
+    func testNavigationConfidence_noResolvedSessionIsNone() {
+        let row = makeMappedRow(
+            tty: nil,
+            itermSessionId: nil,
+            resolvedSessionID: nil,
+            sessionID: "runtime-session",
+            isDefinitiveMatch: false
+        )
+        let confidence = AgentCockpitHUDView.navigationConfidence(for: row)
+        XCTAssertEqual(confidence, .none)
+        XCTAssertFalse(confidence.isNavigable)
+    }
+
     // MARK: - mergeMetadata helpers
 
     private func makeMappedRow(tty: String?,
