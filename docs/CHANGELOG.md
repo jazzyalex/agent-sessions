@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 - Unified filters: Toggling agent pills in the toolbar is now filter-only and no longer auto-triggers index refreshes.
 - Indexing UX: Background monitor refreshes now surface as lightweight syncing status, while launch/manual indexing keeps stable progress messaging.
 - Indexing reliability: Core indexers now persist their own per-source file-stat baselines and restore them on startup, preventing large false re-sync runs after restart when only a few sessions changed.
+- Indexing reliability (Codex): Incremental refresh now force-includes recent files that exist on disk but are missing from the hydrated session snapshot, preventing newest sessions from being silently skipped when persisted file-stat baselines are ahead of session rows.
+- Agent Cockpit: `Go to Session` remains blocked for cwd-only fallback matches, but runtime-ID matches are now treated as navigable again.
 
 ### Added
 - Analytics: Build lifecycle UI now includes not-built, building, canceled, failed, and stale states with visible progress details (percent, sessions processed, source progress, and indexed date span).
