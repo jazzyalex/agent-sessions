@@ -399,7 +399,7 @@ struct CockpitView: View {
         guard activeEnabled else { return }
         activeCodex.refreshNow()
         codexIndexer.refresh(mode: .incremental, trigger: .manual)
-        claudeIndexer.refresh(mode: .fullReconcile, trigger: .manual)
+        claudeIndexer.refresh(mode: .incremental, trigger: .manual)
         opencodeIndexer.refresh()
     }
 

@@ -1647,17 +1647,8 @@ struct UnifiedSessionsView: View {
             }
         }
 
-        if let workingDirectory = target.workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !workingDirectory.isEmpty {
-            let normalized = CodexActiveSessionsModel.normalizePath(workingDirectory)
-            if let match = scoped.first(where: { session in
-                guard let cwd = session.cwd else { return false }
-                return CodexActiveSessionsModel.normalizePath(cwd) == normalized
-            }) {
-                return match
-            }
-        }
-
+        // cwd-only fallback intentionally omitted — prefer "no navigation"
+        // over navigating to a potentially wrong session from the same directory.
         return nil
     }
 

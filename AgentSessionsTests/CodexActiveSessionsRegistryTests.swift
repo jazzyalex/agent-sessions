@@ -2693,7 +2693,8 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             logPath: nil,
             workingDirectory: nil,
             lastActivityAt: nil,
-            idleReason: nil
+            idleReason: nil,
+            isDefinitiveMatch: false
         )
     }
 

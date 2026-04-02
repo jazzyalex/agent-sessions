@@ -50,6 +50,30 @@ final class UnifiedSessionIndexer: ObservableObject {
         let modifiedAt: Date
     }
 
+    /// Composite snapshot of all monitored files in a source's directories.
+    /// Changes to ANY tracked file (not just the global latest) produce a different snapshot.
+    private struct DirectorySignatureSnapshot: Equatable {
+        let fileCount: Int
+        let combinedHash: Int
+        let newestModifiedAt: Date?
+
+        static let empty = DirectorySignatureSnapshot(fileCount: 0, combinedHash: 0, newestModifiedAt: nil)
+
+        static func from(_ signatures: [(path: String, modifiedAt: Date)]) -> DirectorySignatureSnapshot {
+            guard !signatures.isEmpty else { return .empty }
+            var hasher = Hasher()
+            for sig in signatures.sorted(by: { $0.path < $1.path }) {
+                hasher.combine(sig.path)
+                hasher.combine(sig.modifiedAt)
+            }
+            return DirectorySignatureSnapshot(
+                fileCount: signatures.count,
+                combinedHash: hasher.finalize(),
+                newestModifiedAt: signatures.max(by: { $0.modifiedAt < $1.modifiedAt })?.modifiedAt
+            )
+        }
+    }
+
     private struct FocusedSessionContext: Equatable {
         let source: SessionSource
         let sessionID: String
@@ -497,13 +521,13 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let foregroundMonitorRefreshMinimumIntervalSeconds: TimeInterval = 10 * 60
     private var newSessionMonitorTask: Task<Void, Never>? = nil
     private var focusedSessionMonitorTask: Task<Void, Never>? = nil
-    private var lastSeenCodexSignature: FileSignature? = nil
-    private var lastSeenClaudeSignature: FileSignature? = nil
+    private var lastSeenCodexSnapshot: DirectorySignatureSnapshot? = nil
+    private var lastSeenClaudeSnapshot: DirectorySignatureSnapshot? = nil
     private var focusedSessionContext: FocusedSessionContext? = nil
     private var lastFocusedSignatureBySource: [SessionSource: FileSignature] = [:]
     private var consecutiveMissingFocusedSignatureCountBySource: [SessionSource: Int] = [:]
     private var lastMonitorRefreshBySource: [SessionSource: Date] = [:]
-    private var pendingMonitorRefreshSignatureBySource: [SessionSource: FileSignature] = [:]
+    private var pendingMonitorRefreshSnapshotBySource: [SessionSource: DirectorySignatureSnapshot] = [:]
     private var pendingRefreshSourcesWhileInactive: Set<SessionSource> = []
     private var pendingManualFocusedReloadSources: Set<SessionSource> = []
     private var hasInitializedNewSessionMonitorBaseline: Bool = false
@@ -646,18 +670,15 @@ final class UnifiedSessionIndexer: ObservableObject {
                 return CoreIndexingProgress.empty
             }
 
-            let processed = enabledRows.reduce(into: 0) { partial, provider in
+            let activeRows = enabledRows.filter(\.indexing)
+            let processed = activeRows.reduce(into: 0) { partial, provider in
                 let rowProcessed = max(0, provider.processed)
                 let rowTotal = max(0, provider.total)
-                if provider.indexing {
-                    partial += min(rowProcessed, rowTotal > 0 ? rowTotal : rowProcessed)
-                } else {
-                    partial += max(rowProcessed, rowTotal)
-                }
+                partial += min(rowProcessed, rowTotal > 0 ? rowTotal : rowProcessed)
             }
-            let total = enabledRows.reduce(into: 0) { partial, provider in
-                let rowProcessed = max(0, provider.processed)
+            let total = activeRows.reduce(into: 0) { partial, provider in
                 let rowTotal = max(0, provider.total)
+                let rowProcessed = max(0, provider.processed)
                 partial += max(rowTotal, rowProcessed)
             }
 
@@ -1077,15 +1098,15 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     private func checkForNewSessions(establishBaselineIfNeeded: Bool = false) async {
-        let codexSignature = detectLatestCodexSignature()
-        let claudeSignature = detectLatestClaudeSignature()
+        let codexSnapshot = detectCodexDirectorySnapshot()
+        let claudeSnapshot = detectClaudeDirectorySnapshot()
         await MainActor.run { [weak self] in
             guard let self else { return }
             if establishBaselineIfNeeded && !self.hasInitializedNewSessionMonitorBaseline {
-                self.lastSeenCodexSignature = codexSignature
-                self.lastSeenClaudeSignature = claudeSignature
-                self.pendingMonitorRefreshSignatureBySource[.codex] = nil
-                self.pendingMonitorRefreshSignatureBySource[.claude] = nil
+                self.lastSeenCodexSnapshot = codexSnapshot
+                self.lastSeenClaudeSnapshot = claudeSnapshot
+                self.pendingMonitorRefreshSnapshotBySource[.codex] = nil
+                self.pendingMonitorRefreshSnapshotBySource[.claude] = nil
                 self.hasInitializedNewSessionMonitorBaseline = true
                 return
             }
@@ -1093,47 +1114,32 @@ final class UnifiedSessionIndexer: ObservableObject {
                 self.hasInitializedNewSessionMonitorBaseline = true
             }
 
-            if codexSignature != self.lastSeenCodexSignature {
-                self.lastSeenCodexSignature = codexSignature
-                if codexSignature != nil {
-                    if self.shouldTriggerMonitorRefresh(source: .codex, now: Date()) {
-                        // Preserve the pending marker until the refresh is actually accepted
-                        // (performProviderRefresh clears it when it triggers).
-                        if let codexSignature {
-                            self.pendingMonitorRefreshSignatureBySource[.codex] = codexSignature
-                        }
-                        self.requestProviderRefresh(source: .codex, reason: "foreground-new-session", trigger: .monitor)
-                    } else if let codexSignature {
-                        self.pendingMonitorRefreshSignatureBySource[.codex] = codexSignature
-                    }
+            self.processSnapshotDelta(source: .codex, snapshot: codexSnapshot,
+                                      lastSnapshot: &self.lastSeenCodexSnapshot)
+            self.processSnapshotDelta(source: .claude, snapshot: claudeSnapshot,
+                                      lastSnapshot: &self.lastSeenClaudeSnapshot)
+        }
+    }
+
+    @MainActor
+    private func processSnapshotDelta(source: SessionSource,
+                                      snapshot: DirectorySignatureSnapshot,
+                                      lastSnapshot: inout DirectorySignatureSnapshot?) {
+        if snapshot != lastSnapshot {
+            lastSnapshot = snapshot
+            if snapshot.fileCount > 0 {
+                if self.shouldTriggerMonitorRefresh(source: source, now: Date()) {
+                    self.pendingMonitorRefreshSnapshotBySource[source] = snapshot
+                    self.requestProviderRefresh(source: source, reason: "directory-snapshot-delta", trigger: .monitor)
                 } else {
-                    self.pendingMonitorRefreshSignatureBySource[.codex] = nil
+                    self.pendingMonitorRefreshSnapshotBySource[source] = snapshot
                 }
-            } else if self.pendingMonitorRefreshSignatureBySource[.codex] != nil {
-                if self.shouldTriggerMonitorRefresh(source: .codex, now: Date()) {
-                    self.requestProviderRefresh(source: .codex, reason: "foreground-new-session", trigger: .monitor)
-                }
+            } else {
+                self.pendingMonitorRefreshSnapshotBySource[source] = nil
             }
-            if claudeSignature != self.lastSeenClaudeSignature {
-                self.lastSeenClaudeSignature = claudeSignature
-                if claudeSignature != nil {
-                    if self.shouldTriggerMonitorRefresh(source: .claude, now: Date()) {
-                        // Preserve the pending marker until the refresh is actually accepted
-                        // (performProviderRefresh clears it when it triggers).
-                        if let claudeSignature {
-                            self.pendingMonitorRefreshSignatureBySource[.claude] = claudeSignature
-                        }
-                        self.requestProviderRefresh(source: .claude, reason: "foreground-new-session", trigger: .monitor)
-                    } else if let claudeSignature {
-                        self.pendingMonitorRefreshSignatureBySource[.claude] = claudeSignature
-                    }
-                } else {
-                    self.pendingMonitorRefreshSignatureBySource[.claude] = nil
-                }
-            } else if self.pendingMonitorRefreshSignatureBySource[.claude] != nil {
-                if self.shouldTriggerMonitorRefresh(source: .claude, now: Date()) {
-                    self.requestProviderRefresh(source: .claude, reason: "foreground-new-session", trigger: .monitor)
-                }
+        } else if self.pendingMonitorRefreshSnapshotBySource[source] != nil {
+            if self.shouldTriggerMonitorRefresh(source: source, now: Date()) {
+                self.requestProviderRefresh(source: source, reason: "directory-snapshot-delta", trigger: .monitor)
             }
         }
     }
@@ -1179,6 +1185,29 @@ final class UnifiedSessionIndexer: ObservableObject {
         return newest
     }
 
+    private func detectCodexDirectorySnapshot() -> DirectorySignatureSnapshot {
+        let root = codexSessionsRoot()
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date()
+        var allSignatures: [(path: String, modifiedAt: Date)] = []
+
+        for offset in 0...2 {
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: now) else { continue }
+            let comps = calendar.dateComponents([.year, .month, .day], from: day)
+            guard let y = comps.year, let m = comps.month, let d = comps.day else { continue }
+            let folder = root
+                .appendingPathComponent(String(format: "%04d", y))
+                .appendingPathComponent(String(format: "%02d", m))
+                .appendingPathComponent(String(format: "%02d", d))
+
+            allSignatures.append(contentsOf: collectFileSignatures(in: folder, matching: { file in
+                file.lastPathComponent.hasPrefix("rollout-") && file.pathExtension.lowercased() == "jsonl"
+            }))
+        }
+
+        return DirectorySignatureSnapshot.from(allSignatures)
+    }
+
     private func fileSignature(atPath path: String) -> FileSignature? {
         let url = URL(fileURLWithPath: path)
         let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
@@ -1210,6 +1239,30 @@ final class UnifiedSessionIndexer: ObservableObject {
             return mostRecentSignature(in: selected, fileLimitPerDirectory: 500)
         }
         return mostRecentSignature(in: [projectsRoot], fileLimitPerDirectory: 500)
+    }
+
+    private func detectClaudeDirectorySnapshot() -> DirectorySignatureSnapshot {
+        let projectsRoot = claudeProjectsRoot()
+        let fm = FileManager.default
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .contentModificationDateKey]
+        guard let children = try? fm.contentsOfDirectory(at: projectsRoot,
+                                                         includingPropertiesForKeys: Array(keys),
+                                                         options: [.skipsHiddenFiles]) else {
+            return .empty
+        }
+
+        var directories: [(url: URL, modifiedAt: Date)] = []
+        directories.reserveCapacity(children.count)
+        for child in children {
+            let values = try? child.resourceValues(forKeys: keys)
+            guard values?.isDirectory == true else { continue }
+            directories.append((child, values?.contentModificationDate ?? .distantPast))
+        }
+
+        let sorted = directories.sorted { lhs, rhs in lhs.modifiedAt > rhs.modifiedAt }
+        let selected = Array(sorted.prefix(5)).map(\.url)
+        let scanDirs = selected.isEmpty ? [projectsRoot] : selected
+        return collectDirectorySnapshot(in: scanDirs, fileLimitPerDirectory: 500)
     }
 
     private func codexSessionsRoot() -> URL {
@@ -1298,6 +1351,59 @@ final class UnifiedSessionIndexer: ObservableObject {
         return newest
     }
 
+    private func collectFileSignatures(in folder: URL,
+                                       matching predicate: (URL) -> Bool) -> [(path: String, modifiedAt: Date)] {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue else {
+            return []
+        }
+        guard let items = try? fm.contentsOfDirectory(at: folder,
+                                                      includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+                                                      options: [.skipsHiddenFiles]) else {
+            return []
+        }
+
+        var result: [(path: String, modifiedAt: Date)] = []
+        for file in items where predicate(file) {
+            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
+            guard values?.isRegularFile == true else { continue }
+            result.append((path: file.path, modifiedAt: values?.contentModificationDate ?? .distantPast))
+        }
+        return result
+    }
+
+    private func collectDirectorySnapshot(in directories: [URL],
+                                          fileLimitPerDirectory: Int) -> DirectorySignatureSnapshot {
+        let fm = FileManager.default
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
+        var allSignatures: [(path: String, modifiedAt: Date)] = []
+
+        for directory in directories {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: directory.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            guard let enumerator = fm.enumerator(at: directory,
+                                                 includingPropertiesForKeys: Array(keys),
+                                                 options: [.skipsHiddenFiles]) else {
+                continue
+            }
+
+            var visited = 0
+            for case let file as URL in enumerator {
+                let values = try? file.resourceValues(forKeys: keys)
+                guard values?.isRegularFile == true else { continue }
+                visited += 1
+                if visited > fileLimitPerDirectory { break }
+                let ext = file.pathExtension.lowercased()
+                guard ext == "jsonl" || ext == "ndjson" else { continue }
+                let modifiedAt = values?.contentModificationDate ?? .distantPast
+                allSignatures.append((path: file.path, modifiedAt: modifiedAt))
+            }
+        }
+
+        return DirectorySignatureSnapshot.from(allSignatures)
+    }
+
     private func requestProviderRefresh(source: SessionSource,
                                         reason: String,
                                         trigger: IndexRefreshTrigger = .manual) {
@@ -1354,7 +1460,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 LaunchProfiler.log("Unified.refresh[\(source.rawValue)]: deferred (inactive, trigger=\(trigger.rawValue))")
                 return false
             }
-            self.pendingMonitorRefreshSignatureBySource[source] = nil
+            self.pendingMonitorRefreshSnapshotBySource[source] = nil
             let mode = self.refreshMode(for: source, trigger: trigger)
             let executionProfile = self.refreshExecutionProfile(for: source, trigger: trigger)
             switch trigger {

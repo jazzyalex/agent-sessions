@@ -50,6 +50,24 @@ enum HUDAgentType: Equatable {
     }
 }
 
+enum HUDNavigationConfidence: Equatable {
+    /// Resolved via log-path or direct session-ID match.
+    case exact
+    /// Resolved via runtime session-ID match.
+    case runtimeID
+    /// Resolved only via working-directory / cwd fallback.
+    case cwdOnly
+    /// No indexed session found.
+    case none
+
+    var isNavigable: Bool {
+        switch self {
+        case .exact, .runtimeID: return true
+        case .cwdOnly, .none: return false
+        }
+    }
+}
+
 struct HUDRow: Identifiable, Equatable {
     let id: String
     let source: SessionSource
@@ -74,6 +92,7 @@ struct HUDRow: Identifiable, Equatable {
     let lastActivityTooltip: String?
     let idleReason: HUDIdleReason?
     let activeSubagentCount: Int
+    let navigationConfidence: HUDNavigationConfidence
 
     init(id: String,
          source: SessionSource,
@@ -97,7 +116,8 @@ struct HUDRow: Identifiable, Equatable {
          lastActivityAt: Date? = nil,
          lastActivityTooltip: String? = nil,
          idleReason: HUDIdleReason? = nil,
-         activeSubagentCount: Int = 0) {
+         activeSubagentCount: Int = 0,
+         navigationConfidence: HUDNavigationConfidence = .none) {
         self.id = id
         self.source = source
         self.agentType = agentType
@@ -121,6 +141,7 @@ struct HUDRow: Identifiable, Equatable {
         self.lastActivityTooltip = lastActivityTooltip
         self.idleReason = idleReason
         self.activeSubagentCount = activeSubagentCount
+        self.navigationConfidence = navigationConfidence
     }
 
     static func == (lhs: HUDRow, rhs: HUDRow) -> Bool {
@@ -147,6 +168,7 @@ struct HUDRow: Identifiable, Equatable {
             && lhs.lastActivityTooltip == rhs.lastActivityTooltip
             && lhs.idleReason == rhs.idleReason
             && lhs.activeSubagentCount == rhs.activeSubagentCount
+            && lhs.navigationConfidence == rhs.navigationConfidence
     }
 }
 
@@ -215,6 +237,7 @@ struct LegacyMappedRow: Identifiable {
     let workingDirectory: String?
     let lastActivityAt: Date?
     let idleReason: HUDIdleReason?
+    let isDefinitiveMatch: Bool
 }
 
 struct SessionLookupIndexes {
@@ -1470,8 +1493,10 @@ struct AgentCockpitHUDView: View {
         Button("Go to Session") {
             goToSession(row)
         }
-        .disabled(!activeEnabled || row.resolvedSessionID == nil)
-        .help("Select this session in the main Agent Sessions window and open its transcript.")
+        .disabled(!activeEnabled || !row.navigationConfidence.isNavigable)
+        .help(row.navigationConfidence.isNavigable
+              ? "Select this session in the main Agent Sessions window and open its transcript."
+              : "No exact session match found — only a working-directory fallback is available.")
 
         Button("Focus in iTerm2") {
             focus(row)
@@ -1520,7 +1545,7 @@ struct AgentCockpitHUDView: View {
     }
 
     private func goToSession(_ row: HUDRow) {
-        guard activeEnabled else { return }
+        guard activeEnabled, row.navigationConfidence.isNavigable else { return }
         guard let resolvedSessionID = row.resolvedSessionID else {
             NSSound.beep()
             return
@@ -1864,7 +1889,8 @@ struct AgentCockpitHUDView: View {
                 logPath: presence.sessionLogPath,
                 workingDirectory: session?.cwd ?? presence.workspaceRoot,
                 lastActivityAt: lastActivityAt,
-                idleReason: idleReason
+                idleReason: idleReason,
+                isDefinitiveMatch: isDefinitiveMatch
             ))
         }
 
@@ -1890,6 +1916,12 @@ struct AgentCockpitHUDView: View {
             let elapsed = isCompact ? "" : Self.elapsedLabel(from: row.lastActivityAt)
             let activityTooltip = row.lastActivityAt.map { Self.activityTooltipFormatter.string(from: $0) }
             let cleanedTabTitle = Self.normalizedCockpitTabTitle(row.tabTitle, source: row.source)
+            let confidence: HUDNavigationConfidence = {
+                guard row.resolvedSessionID != nil else { return .none }
+                if row.isDefinitiveMatch { return .exact }
+                if row.sessionID != nil { return .runtimeID }
+                return .cwdOnly
+            }()
             return HUDRow(
                 id: row.id,
                 source: row.source,
@@ -1915,7 +1947,8 @@ struct AgentCockpitHUDView: View {
                 idleReason: row.idleReason,
                 activeSubagentCount: row.resolvedSessionID.flatMap { activeSubagentCounts[$0] }
                     ?? row.sessionID.flatMap { activeSubagentCounts[$0] }
-                    ?? 0
+                    ?? 0,
+                navigationConfidence: confidence
             )
         }
 
@@ -2461,7 +2494,8 @@ struct AgentCockpitHUDView: View {
             logPath: winner.logPath ?? loser.logPath,
             workingDirectory: winner.workingDirectory ?? loser.workingDirectory,
             lastActivityAt: winner.lastActivityAt ?? loser.lastActivityAt,
-            idleReason: winner.idleReason
+            idleReason: winner.idleReason,
+            isDefinitiveMatch: winner.isDefinitiveMatch || loser.isDefinitiveMatch
         )
     }
 

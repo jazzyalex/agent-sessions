@@ -80,6 +80,11 @@ Suggested build steps
   - Other user-facing documentation
 - Use clear, concise language without emoji decoration.
 
+## Investigation and Findings Policy
+- All findings in audits, plans, and reports must be **evidence-backed** — include file paths, line numbers, or exact output that substantiates each claim.
+- Uncertainty must be **explicitly labeled as hypothesis** (e.g., "Hypothesis: X may cause Y because Z"), never presented as verified fact.
+- Avoid probabilistic wording ("likely", "probably", "seems to") for claims that have been verified — use definitive language for verified facts and hypothesis labels for unverified ones.
+
 ## Xcode Project Hygiene
 - When adding/moving/renaming Swift files (app or tests), ensure they are added to `AgentSessions.xcodeproj` with both a `PBXFileReference` and a `PBXBuildFile` in the correct target. Missing entries will break builds with "Cannot find … in scope".
 
