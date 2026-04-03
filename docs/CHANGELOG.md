@@ -26,9 +26,10 @@ All notable changes to this project will be documented in this file.
 - Agent Cockpit: Limits bar now auto-expands the detail panel when any quota indicator is amber/red and reset times no longer fit inline, so constrained usage is always visible without a hover.
 - Codex: Session custom titles are now parsed from `session_index.jsonl` (`thread_name` field) using a lock-protected mtime/size/path cache and tail-read for large files.
 - Copilot: Session custom titles are now parsed from `workspace.yaml` (`name` field), gated to directory-based layouts to prevent cross-session contamination.
+- Claude: Custom session titles set via the `/rename` CLI command are now reliably restored after relaunch.
 
 ### Fixed
-- Session custom titles set via `/rename` were not restored after relaunch because `upsertSessionMetaCore` omitted `custom_title` from its `UPDATE SET`; non-NULL parsed values now update the DB while NULL preserves the existing title.
+- Claude: Custom session titles set via the `/rename` CLI command were not restored after relaunch because `upsertSessionMetaCore` omitted `custom_title` from its `UPDATE SET`; non-NULL parsed values now update the DB while NULL preserves the existing title.
 - Custom title scan in the lightweight parser now uses a chunked gap scan (64KB chunks, 8MB budget) so title records in the middle of large session files are no longer missed.
 
 ## [3.4] - 2026-03-30
