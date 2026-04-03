@@ -46,6 +46,10 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 ## What's New in 3.4
 
+**3.4.1** — Custom session titles across Claude, Codex, and Copilot; subagent indicator in flat list; auto-expanding Cockpit limits bar; and indexing reliability fixes.
+
+**Highlights:** All three major agents now support custom session titles. Claude sessions respect names set with the `/rename` CLI command (e.g. `/rename my-feature`). Codex titles are read from `thread_name` in `session_index.jsonl`. Copilot titles are read from `workspace.yaml`. Subagent sessions now show an `s` badge in flat list view. Agent Cockpit limits bar auto-expands when usage is amber/red.
+
 **3.4** — Subagent session hierarchy in session history and Agent Cockpit, plus important performance, security, and reliability fixes.
 
 **Highlights:** Codex subagent sessions now nest under their parent in the unified session list (`Cmd+H` to toggle). Agent Cockpit shows a live subagent count badge per session. Performance fix eliminates a CPU drain in session rows. SQL queries are fully parameterized throughout.
