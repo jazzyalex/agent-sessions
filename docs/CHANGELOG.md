@@ -15,10 +15,19 @@ All notable changes to this project will be documented in this file.
 - Indexing UX: Background monitor refreshes now surface as lightweight syncing status, while launch/manual indexing keeps stable progress messaging.
 - Indexing reliability: Core indexers now persist their own per-source file-stat baselines and restore them on startup, preventing large false re-sync runs after restart when only a few sessions changed.
 - Indexing reliability (Codex): Incremental refresh now force-includes recent files that exist on disk but are missing from the hydrated session snapshot, preventing newest sessions from being silently skipped when persisted file-stat baselines are ahead of session rows.
+- Indexing reliability (Codex): `thread_name` side-channel overrides now apply only to verified `.../sessions` layouts and use stronger cache invalidation, preventing cross-root title mismatches and stale rename reuse.
 - Agent Cockpit: `Go to Session` remains blocked for cwd-only fallback matches, but runtime-ID matches are now treated as navigable again.
 
 ### Added
 - Analytics: Build lifecycle UI now includes not-built, building, canceled, failed, and stale states with visible progress details (percent, sessions processed, source progress, and indexed date span).
+- Session list: Subagent sessions now show an `s` indicator in flat list view so they are identifiable without the hierarchy expanded. The indicator is hidden in hierarchy view where nesting already conveys subagent status.
+- Agent Cockpit: Limits bar now auto-expands the detail panel when any quota indicator is amber/red and reset times no longer fit inline, so constrained usage is always visible without a hover.
+- Codex: Session custom titles are now parsed from `session_index.jsonl` (`thread_name` field) using a lock-protected mtime/size/path cache and tail-read for large files.
+- Copilot: Session custom titles are now parsed from `workspace.yaml` (`name` field), gated to directory-based layouts to prevent cross-session contamination.
+
+### Fixed
+- Session custom titles set via `/rename` were not restored after relaunch because `upsertSessionMetaCore` omitted `custom_title` from its `UPDATE SET`; non-NULL parsed values now update the DB while NULL preserves the existing title.
+- Custom title scan in the lightweight parser now uses a chunked gap scan (64KB chunks, 8MB budget) so title records in the middle of large session files are no longer missed.
 
 ## [3.4] - 2026-03-30
 
