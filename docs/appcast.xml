@@ -12,6 +12,7 @@
 <li>Analytics: Build lifecycle UI now includes not-built, building, canceled, failed, and stale states with visible progress details (percent, sessions processed, source progress, and indexed date span).</li>
 <li>Session list: Subagent sessions now show an `s` indicator in flat list view so they are identifiable without the hierarchy expanded. The indicator is hidden in hierarchy view where nesting already conveys subagent status.</li>
 <li>Agent Cockpit: Limits bar now auto-expands the detail panel when any quota indicator is amber/red and reset times no longer fit inline, so constrained usage is always visible without a hover.</li>
+<li>Claude: Custom session titles set via the `/rename` CLI command are now reliably restored after relaunch.</li>
 <li>Codex: Session custom titles are now parsed from `session_index.jsonl` (`thread_name` field) using a lock-protected mtime/size/path cache and tail-read for large files.</li>
 <li>Copilot: Session custom titles are now parsed from `workspace.yaml` (`name` field), gated to directory-based layouts to prevent cross-session contamination.</li>
 </ul>
@@ -26,7 +27,7 @@
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li>Session custom titles set via `/rename` were not restored after relaunch because `upsertSessionMetaCore` omitted `custom_title` from its `UPDATE SET`; non-NULL parsed values now update the DB while NULL preserves the existing title.</li>
+<li>Claude: Custom session titles set via `/rename` were not restored after relaunch because `upsertSessionMetaCore` omitted `custom_title` from its `UPDATE SET`; non-NULL parsed values now update the DB while NULL preserves the existing title.</li>
 <li>Custom title scan in the lightweight parser now uses a chunked gap scan (64KB chunks, 8MB budget) so title records in the middle of large session files are no longer missed.</li>
 </ul>
 <h3>Reminder: What You Got in 3.4</h3>
