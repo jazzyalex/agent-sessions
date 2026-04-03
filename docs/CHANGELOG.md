@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-04-03
+
 ### Changed
 - Analytics: Index building is now explicit and on-demand. Opening Analytics no longer auto-starts indexing from the Unified toolbar; users can start, cancel, and manually update analytics index builds from the Analytics window.
 - Performance: Analytics indexing work is decoupled from routine provider refresh paths so Unified/Cockpit stay responsive when Analytics is idle.
