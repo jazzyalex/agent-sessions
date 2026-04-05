@@ -2179,26 +2179,37 @@ final class SessionIndexer: ObservableObject {
             if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: s)) {
                 if let val = Double(s) { return Date(timeIntervalSince1970: normalizeEpochSeconds(val)) }
             }
-            // ISO8601 with or without fractional seconds
-            let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let d = iso.date(from: s) { return d }
-            let isoNoFrac = ISO8601DateFormatter()
-            isoNoFrac.formatOptions = [.withInternetDateTime]
-            if let d = isoNoFrac.date(from: s) { return d }
+            // ISO8601 with or without fractional seconds (use cached formatters)
+            if let d = Self.isoFracFormatter.date(from: s) { return d }
+            if let d = Self.isoNoFracFormatter.date(from: s) { return d }
             // Common fallbacks
-            let fmts = [
-                "yyyy-MM-dd HH:mm:ssZZZZZ",
-                "yyyy-MM-dd HH:mm:ss",
-                "yyyy/MM/dd HH:mm:ssZZZZZ",
-                "yyyy/MM/dd HH:mm:ss"
-            ]
-            let df = DateFormatter()
-            df.locale = Locale(identifier: "en_US_POSIX")
-            for f in fmts { df.dateFormat = f; if let d = df.date(from: s) { return d } }
+            for fmt in Self.fallbackDateFormatters {
+                if let d = fmt.date(from: s) { return d }
+            }
         }
         return nil
     }
+
+    // Cached date formatters — allocation is expensive, reuse across all parse calls
+    private static let isoFracFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoNoFracFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+    private static let fallbackDateFormatters: [DateFormatter] = {
+        ["yyyy-MM-dd HH:mm:ssZZZZZ", "yyyy-MM-dd HH:mm:ss",
+         "yyyy/MM/dd HH:mm:ssZZZZZ", "yyyy/MM/dd HH:mm:ss"].map { fmt in
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "en_US_POSIX")
+            df.dateFormat = fmt
+            return df
+        }
+    }()
 
     private static func normalizeEpochSeconds(_ value: Double) -> Double {
         // Heuristic: >1e14 → microseconds; >1e11 → milliseconds; else seconds
