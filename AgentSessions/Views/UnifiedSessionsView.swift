@@ -203,13 +203,13 @@ private struct WindowKeyObserver: NSViewRepresentable {
 
 struct UnifiedSessionsView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
-    @ObservedObject var codexIndexer: SessionIndexer
-    @ObservedObject var claudeIndexer: ClaudeSessionIndexer
-    @ObservedObject var geminiIndexer: GeminiSessionIndexer
-    @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
-    @ObservedObject var copilotIndexer: CopilotSessionIndexer
-    @ObservedObject var droidIndexer: DroidSessionIndexer
-    @ObservedObject var openclawIndexer: OpenClawSessionIndexer
+    let codexIndexer: SessionIndexer
+    let claudeIndexer: ClaudeSessionIndexer
+    let geminiIndexer: GeminiSessionIndexer
+    let opencodeIndexer: OpenCodeSessionIndexer
+    let copilotIndexer: CopilotSessionIndexer
+    let droidIndexer: DroidSessionIndexer
+    let openclawIndexer: OpenClawSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @EnvironmentObject var activeCodexSessions: CodexActiveSessionsModel
@@ -2536,13 +2536,13 @@ private struct LayoutToggleButton: View {
 private struct TranscriptHostView: View {
     let kind: SessionSource
     let selection: String?
-    @ObservedObject var codexIndexer: SessionIndexer
-    @ObservedObject var claudeIndexer: ClaudeSessionIndexer
-    @ObservedObject var geminiIndexer: GeminiSessionIndexer
-    @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
-    @ObservedObject var copilotIndexer: CopilotSessionIndexer
-    @ObservedObject var droidIndexer: DroidSessionIndexer
-    @ObservedObject var openclawIndexer: OpenClawSessionIndexer
+    let codexIndexer: SessionIndexer
+    let claudeIndexer: ClaudeSessionIndexer
+    let geminiIndexer: GeminiSessionIndexer
+    let opencodeIndexer: OpenCodeSessionIndexer
+    let copilotIndexer: CopilotSessionIndexer
+    let droidIndexer: DroidSessionIndexer
+    let openclawIndexer: OpenClawSessionIndexer
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset

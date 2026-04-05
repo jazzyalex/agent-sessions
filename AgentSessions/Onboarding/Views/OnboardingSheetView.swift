@@ -4,13 +4,13 @@ import AppKit
 struct OnboardingSheetView: View {
     let content: OnboardingContent
     @ObservedObject var coordinator: OnboardingCoordinator
-    @ObservedObject var codexIndexer: SessionIndexer
-    @ObservedObject var claudeIndexer: ClaudeSessionIndexer
-    @ObservedObject var geminiIndexer: GeminiSessionIndexer
-    @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
-    @ObservedObject var copilotIndexer: CopilotSessionIndexer
-    @ObservedObject var droidIndexer: DroidSessionIndexer
-    @ObservedObject var openclawIndexer: OpenClawSessionIndexer
+    let codexIndexer: SessionIndexer
+    let claudeIndexer: ClaudeSessionIndexer
+    let geminiIndexer: GeminiSessionIndexer
+    let opencodeIndexer: OpenCodeSessionIndexer
+    let copilotIndexer: CopilotSessionIndexer
+    let droidIndexer: DroidSessionIndexer
+    let openclawIndexer: OpenClawSessionIndexer
     @ObservedObject var codexUsageModel: CodexUsageModel
     @ObservedObject var claudeUsageModel: ClaudeUsageModel
 
