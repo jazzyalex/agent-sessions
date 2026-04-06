@@ -1032,13 +1032,10 @@ struct CodexSessionImagesGalleryView: View {
 
     @MainActor
     private func openInPreviewApp(_ url: URL) {
-        guard let previewURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") else {
-            NSWorkspace.shared.open(url)
-            return
-        }
-
-        let config = NSWorkspace.OpenConfiguration()
-        NSWorkspace.shared.open([url], withApplicationAt: previewURL, configuration: config, completionHandler: nil)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "Preview", url.path]
+        try? process.run()
     }
 
     private func saveWithPanel(item: ImageBrowserViewModel.Item) {
