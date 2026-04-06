@@ -938,18 +938,22 @@ final class ClaudeSessionParser {
             return Date(timeIntervalSince1970: normalizeEpochSeconds(Double(num)))
         }
         if let str = value as? String {
-            // Try ISO8601
-            let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = iso.date(from: str) {
-                return date
-            }
-            // Try without fractional seconds
-            iso.formatOptions = [.withInternetDateTime]
-            return iso.date(from: str)
+            if let date = isoFracFormatter.date(from: str) { return date }
+            return isoNoFracFormatter.date(from: str)
         }
         return nil
     }
+
+    private static let isoFracFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoNoFracFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
 
     private static func normalizeEpochSeconds(_ value: Double) -> Double {
         if value > 1e14 { return value / 1_000_000 }  // microseconds
