@@ -205,7 +205,7 @@ struct UnifiedSessionsView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     let codexIndexer: SessionIndexer
     let claudeIndexer: ClaudeSessionIndexer
-    let geminiIndexer: GeminiSessionIndexer
+    @ObservedObject var geminiIndexer: GeminiSessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
     let copilotIndexer: CopilotSessionIndexer
     let droidIndexer: DroidSessionIndexer
