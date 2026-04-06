@@ -2179,16 +2179,19 @@ final class SessionIndexer: ObservableObject {
             if CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: s)) {
                 if let val = Double(s) { return Date(timeIntervalSince1970: normalizeEpochSeconds(val)) }
             }
-            // ISO8601 with or without fractional seconds (use cached formatters)
+            // ISO8601 with or without fractional seconds (cached, lock-protected)
+            Self.dateFormatterLock.lock()
+            defer { Self.dateFormatterLock.unlock() }
             if let d = Self.isoFracFormatter.date(from: s) { return d }
             if let d = Self.isoNoFracFormatter.date(from: s) { return d }
-            // Common fallbacks
             for fmt in Self.fallbackDateFormatters {
                 if let d = fmt.date(from: s) { return d }
             }
         }
         return nil
     }
+
+    private static let dateFormatterLock = NSLock()
 
     // Cached date formatters — allocation is expensive, reuse across all parse calls
     private static let isoFracFormatter: ISO8601DateFormatter = {
