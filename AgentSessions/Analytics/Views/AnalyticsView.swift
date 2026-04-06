@@ -57,11 +57,6 @@ struct AnalyticsView: View {
                 }
             }
         }
-        .overlay {
-            if service.isParsingSessions {
-                parsingProgressOverlay
-            }
-        }
         .onAppear {
             availableProjects = service.getAvailableProjects()
             if service.analyticsPhase == .ready {
@@ -83,12 +78,6 @@ struct AnalyticsView: View {
         .onChange(of: openCodeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: copilotAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: droidAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
-        .onChange(of: service.isParsingSessions) { _, isParsing in
-            // Refresh analytics when parsing completes
-            if !isParsing {
-                refreshData()
-            }
-        }
         // Apply preferredColorScheme only for explicit Light/Dark modes
         // For System mode, omit the modifier entirely to avoid SwiftUI's buggy nil-handling
         .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .light) {
@@ -306,61 +295,6 @@ struct AnalyticsView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var parsingProgressOverlay: some View {
-        ZStack {
-            // Semi-transparent background
-            Color.black.opacity(0.3)
-                .ignoresSafeArea()
-
-            // Progress card
-            VStack(spacing: 16) {
-                // Progress ring
-                ZStack {
-                    Circle()
-                        .stroke(Color.gray.opacity(0.2), lineWidth: 4)
-                        .frame(width: 60, height: 60)
-
-                    Circle()
-                        .trim(from: 0, to: service.parsingProgress)
-                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .frame(width: 60, height: 60)
-                        .rotationEffect(.degrees(-90))
-                        .animation(.linear(duration: 0.3), value: service.parsingProgress)
-
-                    Text("\(Int(service.parsingProgress * 100))%")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                // Status text
-                VStack(spacing: 4) {
-                    Text("Analyzing Sessions")
-                        .font(.headline)
-
-                    Text(service.parsingStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-
-                // Cancel button
-                Button("Cancel") {
-                    service.cancelParsing()
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .font(.caption)
-            }
-            .padding(24)
-            .frame(width: 280)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color("CardBackground"))
-                    .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
-            )
-        }
     }
 
     private func placeholderView(icon: String, text: String) -> some View {

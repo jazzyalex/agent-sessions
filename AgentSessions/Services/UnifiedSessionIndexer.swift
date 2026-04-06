@@ -1854,7 +1854,6 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let missing = try await self.missingAnalyticsBackfillSources(db: db)
                 let hasPriorBuild = await MainActor.run { self.analyticsLastBuiltAt != nil }
                 let incremental = preferIncremental && hasPriorBuild && missing.isEmpty
-                let profile = AnalyticsIndexer.BuildProfile(chunkSize: 1, skipToolIO: true, yieldNanoseconds: 20_000_000)
                 let version = Self.analyticsBackfillVersion
                 let indexer = AnalyticsIndexer(db: db, enabledSources: enabledSources)
 
@@ -1864,31 +1863,28 @@ final class UnifiedSessionIndexer: ObservableObject {
                     self.analyticsProgressBySource = Dictionary(uniqueKeysWithValues: enabledSources.map { ($0, (0, 0)) })
                 }
 
+                var failedSources = Set<String>()
                 if incremental {
-                    LaunchProfiler.log("Unified: Analytics manual incremental update start")
-                    await indexer.refresh(onSourceProgress: { source, processed, total in
+                    LaunchProfiler.log("Unified: Analytics incremental refresh start (meta-derived)")
+                    failedSources = await indexer.refresh(onSourceProgress: { source, processed, total in
                         if Task.isCancelled { return }
-                        let span = (try? await db.analyticsSessionDaySpan(sources: Array(enabledSources))) ?? (nil, nil)
                         await MainActor.run {
                             self.analyticsProgressBySource[source] = (processed, total)
-                            self.updateAnalyticsProgress(self.analyticsProgressBySource, enabledSources: enabledSources, dateSpan: span)
                         }
                     })
-                    LaunchProfiler.log("Unified: Analytics manual incremental update complete")
+                    LaunchProfiler.log("Unified: Analytics incremental refresh complete")
                 } else {
-                    LaunchProfiler.log("Unified: Analytics on-demand build start")
-                    await indexer.fullBuild(profile: profile, onSourceComplete: { source in
+                    LaunchProfiler.log("Unified: Analytics full build start (meta-derived)")
+                    failedSources = await indexer.fullBuild(onSourceComplete: { source in
                         if Task.isCancelled { return }
                         try? await db.setAnalyticsBackfillComplete(source: source, version: version)
                     }, onSourceProgress: { source, processed, total in
                         if Task.isCancelled { return }
-                        let span = (try? await db.analyticsSessionDaySpan(sources: Array(enabledSources))) ?? (nil, nil)
                         await MainActor.run {
                             self.analyticsProgressBySource[source] = (processed, total)
-                            self.updateAnalyticsProgress(self.analyticsProgressBySource, enabledSources: enabledSources, dateSpan: span)
                         }
                     })
-                    LaunchProfiler.log("Unified: Analytics on-demand build complete")
+                    LaunchProfiler.log("Unified: Analytics full build complete")
                 }
 
                 if Task.isCancelled {
@@ -1900,8 +1896,23 @@ final class UnifiedSessionIndexer: ObservableObject {
                     return
                 }
 
+                if !failedSources.isEmpty {
+                    #if DEBUG
+                    print("[Indexing] Analytics build had \(failedSources.count) source failures: \(failedSources)")
+                    #endif
+                    await MainActor.run {
+                        self.analyticsProgressBySource = [:]
+                        self.analyticsPhase = .failed
+                        self.analyticsBuildTask = nil
+                    }
+                    return
+                }
+
+                // Update progress with final date span
+                let span = (try? await db.analyticsSessionDaySpan(sources: Array(enabledSources))) ?? (nil, nil)
                 await MainActor.run {
                     self.analyticsProgressBySource = [:]
+                    self.updateAnalyticsProgress([:], enabledSources: enabledSources, dateSpan: span)
                     self.analyticsLastBuiltAt = Date()
                     UserDefaults.standard.set(self.analyticsLastBuiltAt, forKey: Self.analyticsLastBuiltAtDefaultsKey)
                     self.analyticsIsStale = false

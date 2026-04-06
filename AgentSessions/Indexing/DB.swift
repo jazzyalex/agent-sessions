@@ -331,6 +331,25 @@ actor IndexDB {
             try exec(db, "DELETE FROM rollups_daily;")
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", customTitleMigration)
         }
+
+        // Analytics now derives session_days from session_meta instead of file parsing.
+        // Clear stale analytics data so the first build re-derives everything.
+        // v2: adds meta_mtime column for change detection.
+        let analyticsMetaDerive = "analytics_meta_derive_v2"
+        if !migrationApplied(db, key: analyticsMetaDerive) {
+            try exec(db, "DELETE FROM session_days;")
+            try exec(db, "DELETE FROM rollups_daily;")
+            try exec(db, "DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:%';")
+            // Add meta_mtime column for tracking derivation freshness.
+            if !tableHasColumn(db, table: "session_days", column: "meta_mtime") {
+                do {
+                    try exec(db, "ALTER TABLE session_days ADD COLUMN meta_mtime INTEGER DEFAULT 0;")
+                } catch {
+                    if !isDuplicateColumnError(error) { throw error }
+                }
+            }
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", analyticsMetaDerive)
+        }
     }
 
     // MARK: - Exec helpers
@@ -1759,7 +1778,7 @@ actor IndexDB {
 
     func insertSessionDayRows(_ rows: [SessionDayRow]) throws {
         guard !rows.isEmpty else { return }
-        let sql = "INSERT OR REPLACE INTO session_days(day, source, session_id, model, messages, commands, duration_sec) VALUES(?,?,?,?,?,?,?);"
+        let sql = "INSERT OR REPLACE INTO session_days(day, source, session_id, model, messages, commands, duration_sec, meta_mtime) VALUES(?,?,?,?,?,?,?,?);"
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
         for r in rows {
@@ -1770,9 +1789,301 @@ actor IndexDB {
             sqlite3_bind_int64(stmt, 5, Int64(r.messages))
             sqlite3_bind_int64(stmt, 6, Int64(r.commands))
             sqlite3_bind_double(stmt, 7, r.durationSec)
+            sqlite3_bind_int64(stmt, 8, r.metaMtime)
             if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("insert session_days") }
             sqlite3_reset(stmt)
         }
+    }
+
+    // MARK: - Analytics derivation from session_meta
+
+    /// Purge session_meta rows for a source whose path no longer exists in the files table.
+    /// This reconciles ghost sessions left by deleted/moved files before analytics derivation.
+    /// Returns the number of rows purged.
+    @discardableResult
+    func purgeOrphanedSessionMeta(for source: String) throws -> Int {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = """
+        DELETE FROM session_meta WHERE source=? AND path NOT IN (
+            SELECT path FROM files WHERE source=?
+        );
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, source, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("purge orphaned session_meta") }
+        return Int(sqlite3_changes(db))
+    }
+
+    /// Derive session_days rows from session_meta for a source (no file I/O).
+    /// Returns the number of sessions processed.
+    @discardableResult
+    func populateSessionDaysFromMeta(for source: String) throws -> Int {
+        let metas = try fetchSessionMeta(for: source)
+        guard !metas.isEmpty else { return 0 }
+        let rows = Self.deriveSessionDayRows(from: metas)
+        try insertSessionDayRows(rows)
+        return metas.count
+    }
+
+    /// Incremental variant: derive session_days for specific session IDs.
+    /// Returns the affected day strings (for rollup recomputation).
+    @discardableResult
+    func populateSessionDaysFromMetaIncremental(sessionIDs: [String], source: String) throws -> Set<String> {
+        guard !sessionIDs.isEmpty else { return [] }
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+
+        // Delete old session_days for these sessions
+        let chunkSize = 200
+        for chunk in stride(from: 0, to: sessionIDs.count, by: chunkSize).map({ Array(sessionIDs[$0..<min($0+chunkSize, sessionIDs.count)]) }) {
+            let qs = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let sql = "DELETE FROM session_days WHERE source=? AND session_id IN (\(qs));"
+            let stmt = try prepare(sql)
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+            for (i, sid) in chunk.enumerated() {
+                sqlite3_bind_text(stmt, Int32(2 + i), sid, -1, SQLITE_TRANSIENT)
+            }
+            if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("delete session_days incremental") }
+        }
+
+        // Fetch meta rows for the specific session IDs and derive new day rows
+        var metas: [SessionMetaRow] = []
+        for chunk in stride(from: 0, to: sessionIDs.count, by: chunkSize).map({ Array(sessionIDs[$0..<min($0+chunkSize, sessionIDs.count)]) }) {
+            let qs = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let sql = """
+            SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title,
+                   codex_internal_session_id, is_housekeeping, messages, commands,
+                   parent_session_id, subagent_type, custom_title
+            FROM session_meta WHERE source=? AND session_id IN (\(qs));
+            """
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+                throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+            for (i, sid) in chunk.enumerated() {
+                sqlite3_bind_text(stmt, Int32(2 + i), sid, -1, SQLITE_TRANSIENT)
+            }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                metas.append(SessionMetaRow(
+                    sessionID: String(cString: sqlite3_column_text(stmt, 0)),
+                    source: String(cString: sqlite3_column_text(stmt, 1)),
+                    path: String(cString: sqlite3_column_text(stmt, 2)),
+                    mtime: sqlite3_column_int64(stmt, 3),
+                    size: sqlite3_column_int64(stmt, 4),
+                    startTS: sqlite3_column_type(stmt, 5) == SQLITE_NULL ? 0 : sqlite3_column_int64(stmt, 5),
+                    endTS: sqlite3_column_type(stmt, 6) == SQLITE_NULL ? 0 : sqlite3_column_int64(stmt, 6),
+                    model: sqlite3_column_type(stmt, 7) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 7)),
+                    cwd: sqlite3_column_type(stmt, 8) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 8)),
+                    repo: sqlite3_column_type(stmt, 9) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 9)),
+                    title: sqlite3_column_type(stmt, 10) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 10)),
+                    codexInternalSessionID: sqlite3_column_type(stmt, 11) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 11)),
+                    isHousekeeping: sqlite3_column_int64(stmt, 12) != 0,
+                    messages: Int(sqlite3_column_int64(stmt, 13)),
+                    commands: Int(sqlite3_column_int64(stmt, 14)),
+                    parentSessionID: sqlite3_column_type(stmt, 15) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 15)),
+                    subagentType: sqlite3_column_type(stmt, 16) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 16)),
+                    customTitle: sqlite3_column_type(stmt, 17) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 17))
+                ))
+            }
+        }
+
+        let rows = Self.deriveSessionDayRows(from: metas)
+        try insertSessionDayRows(rows)
+        return Set(rows.map(\.day))
+    }
+
+    /// Derive SessionDayRow entries from session_meta timestamps (no file parsing).
+    /// Single-day sessions produce one row; multi-day sessions use largest-remainder
+    /// distribution to ensure per-day integer counts sum exactly to session totals.
+    static func deriveSessionDayRows(from metas: [SessionMetaRow]) -> [SessionDayRow] {
+        let cal = Calendar.current
+        let f = dayFormatter
+        var allRows: [SessionDayRow] = []
+        allRows.reserveCapacity(metas.count)
+
+        for m in metas {
+            let start = Date(timeIntervalSince1970: TimeInterval(m.startTS))
+            let end = Date(timeIntervalSince1970: TimeInterval(m.endTS))
+            let startDay = cal.startOfDay(for: start)
+            let endDay = cal.startOfDay(for: end)
+
+            if startDay == endDay {
+                // Single-day session (vast majority)
+                let day = f.string(from: startDay)
+                let dur = max(0, end.timeIntervalSince(start))
+                allRows.append(SessionDayRow(day: day, source: m.source, sessionID: m.sessionID,
+                                             model: m.model, messages: m.messages,
+                                             commands: m.commands, durationSec: dur,
+                                             metaMtime: m.mtime))
+            } else {
+                // Multi-day session: collect day spans, then distribute counts
+                let totalDur = max(1, end.timeIntervalSince(start))
+                var spans: [(day: String, dur: Double, frac: Double)] = []
+                var cursor = startDay
+                while cursor <= endDay {
+                    let next = cal.date(byAdding: .day, value: 1, to: cursor) ?? end
+                    let a = max(start, cursor)
+                    let b = min(end, next)
+                    if b > a {
+                        let day = f.string(from: cursor)
+                        let dur = b.timeIntervalSince(a)
+                        spans.append((day: day, dur: dur, frac: dur / totalDur))
+                    }
+                    cursor = next
+                }
+
+                let msgDist = largestRemainderDistribute(total: m.messages, fractions: spans.map(\.frac))
+                let cmdDist = largestRemainderDistribute(total: m.commands, fractions: spans.map(\.frac))
+
+                for (i, span) in spans.enumerated() {
+                    allRows.append(SessionDayRow(day: span.day, source: m.source, sessionID: m.sessionID,
+                                                 model: m.model, messages: msgDist[i],
+                                                 commands: cmdDist[i], durationSec: span.dur,
+                                                 metaMtime: m.mtime))
+                }
+            }
+        }
+        return allRows
+    }
+
+    /// Distribute an integer total across buckets proportionally, preserving the exact sum.
+    /// Uses the largest-remainder method: assign floors first, then give +1 to buckets
+    /// with the largest fractional remainders until the total is met.
+    private static func largestRemainderDistribute(total: Int, fractions: [Double]) -> [Int] {
+        guard !fractions.isEmpty else { return [] }
+        if fractions.count == 1 { return [total] }
+
+        let exact = fractions.map { Double(total) * $0 }
+        var floors = exact.map { Int($0) }
+        var remainders = exact.enumerated().map { (idx: $0.offset, rem: $0.element - Double(floors[$0.offset])) }
+        let deficit = total - floors.reduce(0, +)
+
+        // Sort by descending remainder, distribute the deficit
+        remainders.sort { $0.rem > $1.rem }
+        for i in 0..<min(deficit, remainders.count) {
+            floors[remainders[i].idx] += 1
+        }
+        return floors
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = .current
+        return f
+    }()
+
+    /// Batch-recompute all rollups for a source from session_days.
+    func recomputeAllRollups(for source: String) throws {
+        try exec("DELETE FROM rollups_daily WHERE source='\(source)';")
+        let sql = """
+        INSERT INTO rollups_daily(day, source, model, sessions, messages, commands, duration_sec)
+        SELECT day, source, model, COUNT(DISTINCT session_id), SUM(messages), SUM(commands), SUM(duration_sec)
+        FROM session_days
+        WHERE source=?
+        GROUP BY day, source, model;
+        """
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("batch insert rollups_daily") }
+    }
+
+    /// Recompute rollups for specific days only (incremental).
+    func recomputeRollupsForDays(_ days: Set<String>, source: String) throws {
+        for day in days {
+            try recomputeRollups(day: day, source: source)
+        }
+    }
+
+    /// Find session IDs that need session_days (re-)derivation:
+    /// - sessions in session_meta with no session_days rows (new)
+    /// - sessions whose session_meta.mtime changed since session_days were derived
+    ///   (detected via the meta_mtime column stored during derivation)
+    func findSessionsNeedingDayUpdate(source: String) throws -> [String] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = """
+        SELECT m.session_id FROM session_meta m
+        LEFT JOIN (
+            SELECT DISTINCT session_id, meta_mtime
+            FROM session_days WHERE source=?
+        ) d ON m.session_id = d.session_id
+        WHERE m.source=?
+          AND (d.session_id IS NULL OR d.meta_mtime != m.mtime);
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, source, -1, SQLITE_TRANSIENT)
+        var ids: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { ids.append(String(cString: c)) }
+        }
+        return ids
+    }
+
+    /// Find session_days rows whose session no longer exists in session_meta.
+    func findStaleDayRows(source: String) throws -> [String] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = """
+        SELECT DISTINCT d.session_id FROM session_days d
+        LEFT JOIN session_meta m ON d.session_id = m.session_id AND d.source = m.source
+        WHERE d.source=? AND m.session_id IS NULL;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        var ids: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { ids.append(String(cString: c)) }
+        }
+        return ids
+    }
+
+    /// Delete session_days rows for specific session IDs.
+    /// Returns the affected days for rollup recomputation.
+    func deleteSessionDaysForIDs(_ sessionIDs: [String], source: String) throws -> Set<String> {
+        guard !sessionIDs.isEmpty else { return [] }
+        var affectedDays = Set<String>()
+        let chunkSize = 200
+        for chunk in stride(from: 0, to: sessionIDs.count, by: chunkSize).map({ Array(sessionIDs[$0..<min($0+chunkSize, sessionIDs.count)]) }) {
+            let qs = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            // First collect affected days
+            let selSQL = "SELECT DISTINCT day FROM session_days WHERE source=? AND session_id IN (\(qs));"
+            let selStmt = try prepare(selSQL)
+            defer { sqlite3_finalize(selStmt) }
+            sqlite3_bind_text(selStmt, 1, source, -1, SQLITE_TRANSIENT)
+            for (i, sid) in chunk.enumerated() {
+                sqlite3_bind_text(selStmt, Int32(2 + i), sid, -1, SQLITE_TRANSIENT)
+            }
+            while sqlite3_step(selStmt) == SQLITE_ROW {
+                if let c = sqlite3_column_text(selStmt, 0) { affectedDays.insert(String(cString: c)) }
+            }
+            // Then delete
+            let delSQL = "DELETE FROM session_days WHERE source=? AND session_id IN (\(qs));"
+            let delStmt = try prepare(delSQL)
+            defer { sqlite3_finalize(delStmt) }
+            sqlite3_bind_text(delStmt, 1, source, -1, SQLITE_TRANSIENT)
+            for (i, sid) in chunk.enumerated() {
+                sqlite3_bind_text(delStmt, Int32(2 + i), sid, -1, SQLITE_TRANSIENT)
+            }
+            if sqlite3_step(delStmt) != SQLITE_DONE { throw DBError.execFailed("delete session_days for IDs") }
+        }
+        return affectedDays
     }
 
     // Recompute rollups for a specific (day, source) from session_days
@@ -1829,6 +2140,7 @@ struct SessionDayRow {
     let messages: Int
     let commands: Int
     let durationSec: Double
+    let metaMtime: Int64
 }
 
 struct IndexedFileRow {

@@ -12,11 +12,6 @@ final class AnalyticsService: ObservableObject {
     @Published private(set) var lastBuiltAt: Date? = nil
     @Published private(set) var isStaleSinceLastBuild: Bool = false
 
-    // Parsing progress tracking
-    @Published private(set) var isParsingSessions: Bool = false
-    @Published private(set) var parsingProgress: Double = 0.0  // 0.0 to 1.0
-    @Published private(set) var parsingStatus: String = ""
-
     private let codexIndexer: SessionIndexer
     private let claudeIndexer: ClaudeSessionIndexer
     private let geminiIndexer: GeminiSessionIndexer
@@ -25,7 +20,6 @@ final class AnalyticsService: ObservableObject {
     private let droidIndexer: DroidSessionIndexer
 
     private var cancellables = Set<AnyCancellable>()
-    private var parsingTask: Task<Void, Never>?
     private let repository: AnalyticsRepository?
 
     private static let analyticsSupportedSources: Set<SessionSource> = [
@@ -149,98 +143,6 @@ final class AnalyticsService: ObservableObject {
         return sortedProjects.map { $0.key }
     }
 
-    /// Ensure all sessions are fully parsed for accurate analytics
-    func ensureSessionsFullyParsed() {
-        // Cancel any existing parsing task
-        parsingTask?.cancel()
-
-        parsingTask = Task { @MainActor in
-            isParsingSessions = true
-            parsingProgress = 0.0
-            parsingStatus = "Preparing to analyze sessions..."
-
-            defer {
-                isParsingSessions = false
-                parsingStatus = ""
-            }
-
-            // Count total lightweight sessions
-            let codexLightweight = codexIndexer.allSessions.filter { $0.events.isEmpty }.count
-            let claudeLightweight = claudeIndexer.allSessions.filter { $0.events.isEmpty }.count
-            let geminiLightweight = geminiIndexer.allSessions.filter { $0.events.isEmpty }.count
-            let opencodeLightweight = 0 // OpenCode indexer does full parse during refresh; skip here
-            let copilotLightweight = copilotIndexer.allSessions.filter { $0.events.isEmpty }.count
-            let totalLightweight = codexLightweight + claudeLightweight + geminiLightweight + opencodeLightweight + copilotLightweight
-
-            guard totalLightweight > 0 else {
-                print("ℹ️ All sessions already fully parsed")
-                return
-            }
-
-            print("📊 Analytics: Parsing \(totalLightweight) lightweight sessions")
-            var completedCount = 0
-
-            // Parse Codex sessions
-            if codexLightweight > 0 {
-                parsingStatus = "Analyzing \(codexLightweight) Codex sessions..."
-                await codexIndexer.parseAllSessionsFull { current, total in
-                    completedCount = current
-                    self.parsingProgress = Double(completedCount) / Double(totalLightweight)
-                    self.parsingStatus = "Analyzing Codex sessions (\(current)/\(total))..."
-                }
-            }
-
-            // Parse Claude sessions
-            if claudeLightweight > 0 {
-                let claudeOffset = codexLightweight
-                parsingStatus = "Analyzing \(claudeLightweight) Claude sessions..."
-                await claudeIndexer.parseAllSessionsFull { current, total in
-                    completedCount = claudeOffset + current
-                    self.parsingProgress = Double(completedCount) / Double(totalLightweight)
-                    self.parsingStatus = "Analyzing Claude sessions (\(current)/\(total))..."
-                }
-            }
-
-            // Parse Gemini sessions
-            if geminiLightweight > 0 {
-                let geminiOffset = codexLightweight + claudeLightweight
-                parsingStatus = "Analyzing \(geminiLightweight) Gemini sessions..."
-                await geminiIndexer.parseAllSessionsFull { current, total in
-                    completedCount = geminiOffset + current
-                    self.parsingProgress = Double(completedCount) / Double(totalLightweight)
-                    self.parsingStatus = "Analyzing Gemini sessions (\(current)/\(total))..."
-                }
-            }
-
-            // Parse OpenCode sessions
-            // OpenCode sessions are already loaded in full during their index refresh; skip here.
-
-            // Parse Copilot sessions
-            if copilotLightweight > 0 {
-                let copilotOffset = codexLightweight + claudeLightweight + geminiLightweight
-                parsingStatus = "Analyzing \(copilotLightweight) Copilot sessions..."
-                await copilotIndexer.parseAllSessionsFull { current, total in
-                    completedCount = copilotOffset + current
-                    self.parsingProgress = Double(completedCount) / Double(totalLightweight)
-                    self.parsingStatus = "Analyzing Copilot sessions (\(current)/\(total))..."
-                }
-            }
-
-            parsingProgress = 1.0
-            parsingStatus = "Analysis complete!"
-            print("✅ Analytics: Parsing complete")
-
-            // Small delay before hiding status
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-        }
-    }
-
-    /// Cancel any ongoing parsing
-    func cancelParsing() {
-        parsingTask?.cancel()
-        isParsingSessions = false
-        parsingStatus = ""
-    }
 
     // MARK: - Filtering
 
