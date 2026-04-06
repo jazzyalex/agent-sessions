@@ -682,9 +682,10 @@ final class SessionIndexer: ObservableObject {
                 // Apply thread_name overrides early so hydrated sessions show renamed titles immediately.
                 var hydratedSessions = existingSessions
                 Self.applyCodexThreadNames(&hydratedSessions, from: threadNames)
+                let finalHydratedSessions = hydratedSessions
                 await MainActor.run {
                     guard self.refreshToken == token else { return }
-                    self.allSessions = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: hydratedSessions, source: .codex)
+                    self.allSessions = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: finalHydratedSessions, source: .codex)
                     self.scheduleCodexInternalSessionIDBackfillIfNeeded(in: self.allSessions)
                     self.totalFiles = existingSessions.count
                     self.filesProcessed = existingSessions.count
@@ -847,6 +848,7 @@ final class SessionIndexer: ObservableObject {
 
             // Reuse thread_name lookup loaded earlier in this refresh cycle.
             Self.applyCodexThreadNames(&allParsedSessions, from: threadNames)
+            let totalParsedCount = allParsedSessions.count
 
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
             let sortedSessions = allParsedSessions.sorted { $0.modifiedAt > $1.modifiedAt }
@@ -907,9 +909,9 @@ final class SessionIndexer: ObservableObject {
                 let lightCount = changedSessions.filter { $0.events.isEmpty }.count
                 let heavyCount = changedSessions.count - lightCount
                 if !existingSessions.isEmpty {
-                    DBG("✅ INDEXING DONE: total=\(allParsedSessions.count) (existing=\(existingSessions.count), changed=\(changedSessions.count), removed=\(removedPaths.count), lightweight=\(lightCount), fullParse=\(heavyCount))")
+                    DBG("✅ INDEXING DONE: total=\(totalParsedCount) (existing=\(existingSessions.count), changed=\(changedSessions.count), removed=\(removedPaths.count), lightweight=\(lightCount), fullParse=\(heavyCount))")
                 } else {
-                    DBG("✅ INDEXING DONE: total=\(allParsedSessions.count) changed=\(changedSessions.count) removed=\(removedPaths.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
+                    DBG("✅ INDEXING DONE: total=\(totalParsedCount) changed=\(changedSessions.count) removed=\(removedPaths.count) lightweight=\(lightCount) fullParse=\(heavyCount)")
                 }
 
                 if presentedHydration || executionProfile.deferNonCriticalWork {
