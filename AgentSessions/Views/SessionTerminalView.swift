@@ -3603,7 +3603,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             if inlineDecodeFailedIDs.contains(id) {
                 if inlineHoverPopover == nil {
                     let popover = NSPopover()
-                    popover.behavior = .transient
+                    popover.behavior = .semitransient
                     popover.animates = false
                     inlineHoverPopover = popover
                 }
@@ -3628,7 +3628,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
             if inlineHoverPopover == nil {
                 let popover = NSPopover()
-                popover.behavior = .transient
+                popover.behavior = .semitransient
                 popover.animates = false
                 inlineHoverPopover = popover
             }
@@ -3682,7 +3682,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             }
         }
 
-        private func closeInlineHoverPopover() {
+        fileprivate func closeInlineHoverPopover() {
             inlineHoverTask?.cancel()
             inlineHoverTask = nil
             inlineHoverImageID = nil
@@ -4055,38 +4055,31 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 	        }
 
 		        override func mouseDown(with event: NSEvent) {
+		            // Dismiss the hover preview so it doesn't steal the click.
+		            inlineImageCoordinator?.closeInlineHoverPopover()
+
 		            if event.type == .leftMouseDown {
 		                mouseDownLocationInWindow = event.locationInWindow
+
+		                // Single-click on an inline image opens the Image Browser.
+		                // Must be handled here (before super) because NSTextView's
+		                // mouseDown enters a tracking loop that swallows mouseUp.
+		                if let coordinator = inlineImageCoordinator,
+		                   event.clickCount == 1,
+		                   !event.modifierFlags.contains(.command),
+		                   !event.modifierFlags.contains(.shift),
+		                   !event.modifierFlags.contains(.control),
+		                   !event.modifierFlags.contains(.option) {
+		                    let point = convert(event.locationInWindow, from: nil)
+		                    if let hit = inlineImageIDWithEffectiveRange(at: point) {
+		                        coordinator.handleInlineImageOpen(id: hit.id)
+		                        return
+		                    }
+		                }
 		            } else {
 		                mouseDownLocationInWindow = nil
 		            }
 		            super.mouseDown(with: event)
-		        }
-
-			        override func mouseUp(with event: NSEvent) {
-			            super.mouseUp(with: event)
-
-			            guard event.type == .leftMouseUp else { return }
-			            guard event.clickCount == 1 else { return }
-			            guard !event.modifierFlags.contains(.command),
-			                  !event.modifierFlags.contains(.shift),
-			                  !event.modifierFlags.contains(.control),
-			                  !event.modifierFlags.contains(.option) else { return }
-
-			            if let down = mouseDownLocationInWindow {
-			                let dx = abs(down.x - event.locationInWindow.x)
-			                let dy = abs(down.y - event.locationInWindow.y)
-		                if dx > 3 || dy > 3 { return }
-		            }
-
-		            let point = convert(event.locationInWindow, from: nil)
-		            if let hit = inlineImageIDWithEffectiveRange(at: point) {
-		                Task { @MainActor in
-		                    // Single click opens the Image Browser for the current session and selects this image.
-		                    inlineImageCoordinator?.handleInlineImageOpen(id: hit.id)
-		                }
-		                return
-		            }
 		        }
 
         override func viewDidMoveToWindow() {
