@@ -845,17 +845,19 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         updateLaunchState()
 
-        // When probe cleanups succeed, refresh underlying providers and analytics rollups
+        // When probe cleanups succeed, mark analytics stale so they re-derive on next view.
+        // Avoid calling refresh() here — probe cleanup runs during an in-flight manual refresh
+        // and the coalesced second pass causes a redundant "0/N" indexing run.
         notificationObserverTokens.append(NotificationCenter.default.addObserver(forName: CodexProbeCleanup.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
             guard let self = self else { return }
             if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
-                self.refresh()
+                if self.analyticsLastBuiltAt != nil { self.analyticsIsStale = true }
             }
         })
         notificationObserverTokens.append(NotificationCenter.default.addObserver(forName: ClaudeProbeProject.didRunCleanupNotification, object: nil, queue: .main) { [weak self] note in
             guard let self = self else { return }
             if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
-                self.refresh()
+                if self.analyticsLastBuiltAt != nil { self.analyticsIsStale = true }
             }
         })
     }

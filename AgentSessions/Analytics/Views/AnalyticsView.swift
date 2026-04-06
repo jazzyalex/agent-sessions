@@ -18,6 +18,11 @@ struct AnalyticsView: View {
     @State private var isRefreshing: Bool = false
     @State private var aggregationMetric: AnalyticsAggregationMetric = .messages
 
+    private var hasEnabledSources: Bool {
+        codexAgentEnabled || claudeAgentEnabled || geminiAgentEnabled ||
+        openCodeAgentEnabled || copilotAgentEnabled || droidAgentEnabled
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -25,12 +30,15 @@ struct AnalyticsView: View {
 
             switch service.analyticsPhase {
             case .idle:
-                buildStateView(
-                    message: "Analytics index not built yet",
-                    detail: "Build once to enable charts. Unified and Cockpit stay fast while analytics is idle.",
-                    showProgress: false,
-                    primaryAction: ("Build Analytics Index", { service.requestBuild() })
-                )
+                if !hasEnabledSources {
+                    buildStateView(
+                        message: "No analytics sources enabled",
+                        detail: "Enable at least one agent in Preferences to view analytics.",
+                        showProgress: false
+                    )
+                } else {
+                    buildStateView(message: "Preparing analytics…", detail: nil, showProgress: true)
+                }
             case .queued:
                 buildStateView(message: "Preparing analytics build…", detail: nil, showProgress: true)
             case .building:
@@ -61,12 +69,19 @@ struct AnalyticsView: View {
             availableProjects = service.getAvailableProjects()
             if service.analyticsPhase == .ready {
                 refreshData()
+            } else if service.analyticsPhase == .idle {
+                service.requestBuild()
             }
         }
         .onChange(of: service.analyticsPhase) { _, phase in
             if phase == .ready {
                 availableProjects = service.getAvailableProjects()
                 refreshData()
+            }
+        }
+        .onChange(of: service.isStaleSinceLastBuild) { _, stale in
+            if stale && service.analyticsPhase == .ready {
+                service.requestUpdate()
             }
         }
         .onChange(of: dateRange) { _, _ in refreshData() }
@@ -155,13 +170,6 @@ struct AnalyticsView: View {
             .help(service.analyticsPhase == .ready ? "Refresh analytics view" : "Refresh unavailable")
             .disabled(isRefreshing || service.analyticsPhase != .ready)
 
-            if service.analyticsPhase == .ready {
-                Button("Update Index") {
-                    service.requestUpdate()
-                }
-                .buttonStyle(.bordered)
-                .disabled(service.analyticsPhase == .building || service.analyticsPhase == .queued)
-            }
         }
         .padding(.horizontal, AnalyticsDesign.windowPadding)
         .padding(.vertical, 12)
