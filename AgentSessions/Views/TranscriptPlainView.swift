@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 private enum TranscriptToolbarStyle {
     static let baseFont = Font.system(size: 13, weight: .regular, design: .monospaced)
@@ -706,6 +707,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .help("Copy entire transcript to clipboard (⌥⌘C)")
                     .keyboardShortcut("c", modifiers: [.command, .option])
                     .accessibilityLabel("Copy Transcript")
+
+                Divider().frame(height: 20)
+
+                Button("Export") { exportMarkdown(session: session) }
+                    .buttonStyle(.borderless)
+                    .font(TranscriptToolbarStyle.baseFont)
+                    .help("Export transcript as Markdown")
+                    .accessibilityLabel("Export Transcript")
 
                 Divider().frame(height: 20)
 
@@ -1548,6 +1557,31 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func copyAll() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(transcript, forType: .string)
+    }
+
+    private func exportMarkdown(session: Session) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = markdownFilename(for: session)
+
+        guard let window = NSApp.keyWindow else { return }
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            let header = "# \(session.listTitle)\n\n"
+            let content = header + transcript
+            try? content.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func markdownFilename(for session: Session) -> String {
+        let title = session.listTitle
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .prefix(60)
+        let date = (session.startTime ?? Date()).formatted(.iso8601.year().month().day())
+        return "\(title) \(date).md"
     }
 
 	    private func clearSearch() {
