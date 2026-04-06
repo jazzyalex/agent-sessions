@@ -938,12 +938,15 @@ final class ClaudeSessionParser {
             return Date(timeIntervalSince1970: normalizeEpochSeconds(Double(num)))
         }
         if let str = value as? String {
-            if let date = isoFracFormatter.date(from: str) { return date }
-            return isoNoFracFormatter.date(from: str)
+            Self.dateFormatterLock.lock()
+            defer { Self.dateFormatterLock.unlock() }
+            if let date = Self.isoFracFormatter.date(from: str) { return date }
+            return Self.isoNoFracFormatter.date(from: str)
         }
         return nil
     }
 
+    private static let dateFormatterLock = NSLock()
     private static let isoFracFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
