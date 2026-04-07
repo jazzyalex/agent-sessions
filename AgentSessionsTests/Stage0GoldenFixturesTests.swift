@@ -64,12 +64,8 @@ final class Stage0GoldenFixturesTests: XCTestCase {
     func testClaudeSchemaDriftAttachmentEventSurvivesParsing() throws {
         let url = FixturePaths.stage0FixtureURL("agents/claude/schema_drift.jsonl")
         guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        let attachmentEvents = full.events.filter { event in
-            guard event.kind == .meta, let data = Data(base64Encoded: event.rawJSON),
-                  let decoded = String(data: data, encoding: .utf8) else { return false }
-            return decoded.contains("\"type\":\"attachment\"")
-        }
-        XCTAssertFalse(attachmentEvents.isEmpty, "attachment event should survive parsing as .meta")
+        XCTAssertFalse(metaEvents(withType: "attachment", in: full.events).isEmpty,
+                       "attachment event should survive parsing as .meta")
     }
 
     func testCopilotSmallPreviewAndFull() throws {
@@ -104,12 +100,8 @@ final class Stage0GoldenFixturesTests: XCTestCase {
     func testCopilotSchemaDriftShutdownEventSurvivesParsing() throws {
         let url = FixturePaths.stage0FixtureURL("agents/copilot/schema_drift.jsonl")
         guard let full = CopilotSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
-        let shutdownEvents = full.events.filter { event in
-            guard event.kind == .meta, let data = Data(base64Encoded: event.rawJSON),
-                  let decoded = String(data: data, encoding: .utf8) else { return false }
-            return decoded.contains("\"type\":\"session.shutdown\"")
-        }
-        XCTAssertFalse(shutdownEvents.isEmpty, "session.shutdown event should survive parsing as .meta")
+        XCTAssertFalse(metaEvents(withType: "session.shutdown", in: full.events).isEmpty,
+                       "session.shutdown event should survive parsing as .meta")
     }
 
     func testCopilotSubdirLayoutV1Parses() throws {
@@ -246,5 +238,15 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertEqual(toolCalls.first?.toolName, "shell")
         XCTAssertEqual(toolResults.first?.toolName, "shell")
         XCTAssertEqual(errors.first?.toolName, "shell")
+    }
+
+    // MARK: - Helpers
+
+    private func metaEvents(withType type: String, in events: [SessionEvent]) -> [SessionEvent] {
+        events.filter { event in
+            guard event.kind == .meta, let data = Data(base64Encoded: event.rawJSON),
+                  let decoded = String(data: data, encoding: .utf8) else { return false }
+            return decoded.contains("\"type\":\"\(type)\"")
+        }
     }
 }
