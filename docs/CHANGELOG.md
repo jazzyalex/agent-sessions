@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ## [3.5] - 2026-04-06
 
+## [3.5] - 2026-04-06
+
 ### Added
 - Transcript toolbar: Export as Markdown button for saving session transcripts as `.md` files.
 
