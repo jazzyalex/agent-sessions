@@ -3,32 +3,27 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.4.1</title>
-            <pubDate>Fri, 03 Apr 2026 12:30:40 -0700</pubDate>
+            <title>3.5</title>
+            <pubDate>Mon, 06 Apr 2026 17:10:52 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.4.1</h2>
+<h2>What&#x27;s New in 3.5</h2>
 <h3>Features</h3>
 <ul>
-<li>Analytics: Build lifecycle UI now includes not-built, building, canceled, failed, and stale states with visible progress details (percent, sessions processed, source progress, and indexed date span).</li>
-<li>Session list: Subagent sessions now show an `s` indicator in flat list view so they are identifiable without the hierarchy expanded. The indicator is hidden in hierarchy view where nesting already conveys subagent status.</li>
-<li>Agent Cockpit: Limits bar now auto-expands the detail panel when any quota indicator is amber/red and reset times no longer fit inline, so constrained usage is always visible without a hover.</li>
-<li>Claude: Custom session titles set via the `/rename` CLI command are now reliably restored after relaunch.</li>
-<li>Codex: Session custom titles are now parsed from `session_index.jsonl` (`thread_name` field) using a lock-protected mtime/size/path cache and tail-read for large files.</li>
-<li>Copilot: Session custom titles are now parsed from `workspace.yaml` (`name` field), gated to directory-based layouts to prevent cross-session contamination.</li>
+<li>Transcript toolbar: Export as Markdown button for saving session transcripts as `.md` files.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
-<li>Analytics: Index building is now explicit and on-demand. Opening Analytics no longer auto-starts indexing from the Unified toolbar; users can start, cancel, and manually update analytics index builds from the Analytics window.</li>
-<li>Performance: Analytics indexing work is decoupled from routine provider refresh paths so Unified/Cockpit stay responsive when Analytics is idle.</li>
-<li>Performance: Core session indexing now uses a lower-impact foreground execution profile, reduced focused-session monitor cadence, and no longer cancels in-flight refreshes when the app deactivates.</li>
-<li>Unified toolbar: Refresh indicator now explicitly represents core session indexing (not analytics), with clearer status/help copy to distinguish it from Analytics index builds.</li>
-<li>Performance: Automatic core refresh monitors now pause while the app is foreground/active and resume in background, reducing sustained CPU and avoiding near-continuous “indexing” status during active Unified use.</li>
-<li>Unified footer: Core indexing status now shows live session progress (`X/Y` and `%`) instead of a generic “refreshing” message.</li>
+<li>Analytics: Index building now derives from `session_meta` instead of file parsing, significantly reducing work.</li>
+<li>SwiftUI: Eliminated redundant body evaluations and cached date formatters to reduce CPU usage.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li>Claude: Custom session titles set via `/rename` were not restored after relaunch because `upsertSessionMetaCore` omitted `custom_title` from its `UPDATE SET`; non-NULL parsed values now update the DB while NULL preserves the existing title.</li>
-<li>Custom title scan in the lightweight parser now uses a chunked gap scan (64KB chunks, 8MB budget) so title records in the middle of large session files are no longer missed.</li>
+<li>Analytics: Index now auto-builds on view appear; suppressed probe cleanup double-refresh.</li>
+<li>Concurrency: Captured mutable vars as `let` before `MainActor.run` for Swift 6 strict concurrency compliance.</li>
+<li>Unified view: Restored `@ObservedObject` for Gemini indexer in `UnifiedSessionsView`.</li>
+<li>Thread safety: Added `NSLock` around cached date formatters in `ClaudeSessionParser` and `SessionIndexer`.</li>
+<li>Image Browser: Inline image click now handled in `mouseDown` for reliable open behavior.</li>
+<li>Preview.app: Use `/usr/bin/open` instead of `NSWorkspace` API to launch Preview reliably.</li>
 </ul>
 <h3>Reminder: What You Got in 3.4</h3>
 <ul>
@@ -37,12 +32,12 @@
 <li>Agent Cockpit HUD: Codex active subagent badges now use the runtime `thread_spawn` state DB when available, so open worker agents stay counted even when their rollout files go quiet; passive rollout/`lsof` heuristics remain as a fallback.</li>
 <li>Agent Cockpit HUD: Codex runtime subagent counts now resolve the parent session before runtime edge lookup (even when the primary log path is a child rollout), and runtime state DB discovery now honors `CODEX_HOME`/`SessionsRootOverride` before falling back to `~/.codex`.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.4.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.4.1</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.5">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.5</a></p>
             ]]></description>
-            <sparkle:version>34</sparkle:version>
-            <sparkle:shortVersionString>3.4.1</sparkle:shortVersionString>
+            <sparkle:version>35</sparkle:version>
+            <sparkle:shortVersionString>3.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.4.1/AgentSessions-3.4.1.dmg" length="15483821" type="application/octet-stream" sparkle:edSignature="w0H4IgWKEAd8FBN9n+4YwrYAfv1GIKsvG/2Rburo4iqWV4AhRJ4MJ5xMF46LgqnfHDvo4VcZoJQFvtkJqwChAw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.5/AgentSessions-3.5.dmg" length="15302956" type="application/octet-stream" sparkle:edSignature="K+4feRRFs6PgkbcMZiwER3uV40MwQHL1n/kMCn6HpD5C1iLz0yHo5fohYQduwEq7gaJNUFngdbn6M9FVMrQABA=="/>
         </item>
     </channel>
 </rss>
