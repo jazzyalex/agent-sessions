@@ -61,6 +61,17 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         }
     }
 
+    func testClaudeSchemaDriftAttachmentEventSurvivesParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/claude/schema_drift.jsonl")
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        let attachmentEvents = full.events.filter { event in
+            guard event.kind == .meta, let data = Data(base64Encoded: event.rawJSON),
+                  let decoded = String(data: data, encoding: .utf8) else { return false }
+            return decoded.contains("\"type\":\"attachment\"")
+        }
+        XCTAssertFalse(attachmentEvents.isEmpty, "attachment event should survive parsing as .meta")
+    }
+
     func testCopilotSmallPreviewAndFull() throws {
         let url = FixturePaths.stage0FixtureURL("agents/copilot/small.jsonl")
         guard let preview = CopilotSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
@@ -88,6 +99,17 @@ final class Stage0GoldenFixturesTests: XCTestCase {
             guard let full = CopilotSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil: \(name)") }
             XCTAssertFalse(full.events.isEmpty)
         }
+    }
+
+    func testCopilotSchemaDriftShutdownEventSurvivesParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/copilot/schema_drift.jsonl")
+        guard let full = CopilotSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        let shutdownEvents = full.events.filter { event in
+            guard event.kind == .meta, let data = Data(base64Encoded: event.rawJSON),
+                  let decoded = String(data: data, encoding: .utf8) else { return false }
+            return decoded.contains("\"type\":\"session.shutdown\"")
+        }
+        XCTAssertFalse(shutdownEvents.isEmpty, "session.shutdown event should survive parsing as .meta")
     }
 
     func testCopilotSubdirLayoutV1Parses() throws {
