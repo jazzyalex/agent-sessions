@@ -21,7 +21,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.4.1/AgentSessions-3.4.1.dmg"><b>Download Agent Sessions 3.4.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.5/AgentSessions-3.5.dmg"><b>Download Agent Sessions 3.5 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -44,13 +44,11 @@ Agent Sessions helps you search across large session histories, quickly find the
   <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI, Claude Code, and OpenCode sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
 
-## What's New in 3.4
+## What's New in 3.5
 
-**3.4.1** — Custom session titles across Claude, Codex, and Copilot; subagent indicator in flat list; auto-expanding Cockpit limits bar; and indexing reliability fixes.
+**TL;DR** — Export as Markdown, faster analytics, and a wave of concurrency and thread-safety fixes.
 
-**Highlights:** All three major agents now support custom session titles. Claude sessions respect names set with the `/rename` CLI command (e.g. `/rename my-feature`). Codex titles are read from `thread_name` in `session_index.jsonl`. Copilot titles are read from `workspace.yaml`. Subagent sessions now show an `s` badge in flat list view. Agent Cockpit limits bar auto-expands when usage is amber/red.
-
-**3.4** — Subagent session hierarchy in session history and Agent Cockpit, plus important performance, security, and reliability fixes.
+**Highlights:** Export any session transcript as a `.md` file straight from the toolbar. Analytics index building now derives from `session_meta` instead of file parsing, cutting index time significantly. Under the hood: Swift 6 concurrency compliance, `NSLock`-protected date formatters, reliable image browser clicks, and reduced SwiftUI body evaluations for lower CPU usage.
 
 **Highlights:** Codex subagent sessions now nest under their parent in the unified session list (`Cmd+H` to toggle). Agent Cockpit shows a live subagent count badge per session. Performance fix eliminates a CPU drain in session rows. SQL queries are fully parameterized throughout.
 
@@ -97,7 +95,7 @@ Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Cod
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.4.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.4.1/AgentSessions-3.4.1.dmg)
+1. [Download AgentSessions-3.5.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.5/AgentSessions-3.5.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew

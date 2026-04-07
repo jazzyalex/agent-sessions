@@ -4,6 +4,76 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.5] - 2026-04-06
+
+### Added
+- Transcript toolbar: Export as Markdown button for saving session transcripts as `.md` files.
+
+### Fixed
+- Analytics: Index now auto-builds on view appear; suppressed probe cleanup double-refresh.
+- Concurrency: Captured mutable vars as `let` before `MainActor.run` for Swift 6 strict concurrency compliance.
+- Unified view: Restored `@ObservedObject` for Gemini indexer in `UnifiedSessionsView`.
+- Thread safety: Added `NSLock` around cached date formatters in `ClaudeSessionParser` and `SessionIndexer`.
+- Image Browser: Inline image click now handled in `mouseDown` for reliable open behavior.
+- Preview.app: Use `/usr/bin/open` instead of `NSWorkspace` API to launch Preview reliably.
+
+### Performance
+- Analytics: Index building now derives from `session_meta` instead of file parsing, significantly reducing work.
+- SwiftUI: Eliminated redundant body evaluations and cached date formatters to reduce CPU usage.
+
+## [3.4.1] - 2026-04-03
+
+### Changed
+- Analytics: Index building is now explicit and on-demand. Opening Analytics no longer auto-starts indexing from the Unified toolbar; users can start, cancel, and manually update analytics index builds from the Analytics window.
+- Performance: Analytics indexing work is decoupled from routine provider refresh paths so Unified/Cockpit stay responsive when Analytics is idle.
+- Performance: Core session indexing now uses a lower-impact foreground execution profile, reduced focused-session monitor cadence, and no longer cancels in-flight refreshes when the app deactivates.
+- Unified toolbar: Refresh indicator now explicitly represents core session indexing (not analytics), with clearer status/help copy to distinguish it from Analytics index builds.
+- Performance: Automatic core refresh monitors now pause while the app is foreground/active and resume in background, reducing sustained CPU and avoiding near-continuous "indexing" status during active Unified use.
+- Unified footer: Core indexing status now shows live session progress (`X/Y` and `%`) instead of a generic "refreshing" message.
+- Unified filters: Toggling agent pills in the toolbar is now filter-only and no longer auto-triggers index refreshes.
+- Indexing UX: Background monitor refreshes now surface as lightweight syncing status, while launch/manual indexing keeps stable progress messaging.
+- Indexing reliability: Core indexers now persist their own per-source file-stat baselines and restore them on startup, preventing large false re-sync runs after restart when only a few sessions changed.
+- Indexing reliability (Codex): Incremental refresh now force-includes recent files that exist on disk but are missing from the hydrated session snapshot, preventing newest sessions from being silently skipped when persisted file-stat baselines are ahead of session rows.
+- Indexing reliability (Codex): `thread_name` side-channel overrides now apply only to verified `.../sessions` layouts and use stronger cache invalidation, preventing cross-root title mismatches and stale rename reuse.
+- Agent Cockpit: `Go to Session` remains blocked for cwd-only fallback matches, but runtime-ID matches are now treated as navigable again.
+
+### Added
+- Analytics: Build lifecycle UI now includes not-built, building, canceled, failed, and stale states with visible progress details (percent, sessions processed, source progress, and indexed date span).
+- Session list: Subagent sessions now show an `s` indicator in flat list view so they are identifiable without the hierarchy expanded. The indicator is hidden in hierarchy view where nesting already conveys subagent status.
+- Agent Cockpit: Limits bar now auto-expands the detail panel when any quota indicator is amber/red and reset times no longer fit inline, so constrained usage is always visible without a hover.
+- Codex: Session custom titles are now parsed from `session_index.jsonl` (`thread_name` field) using a lock-protected mtime/size/path cache and tail-read for large files.
+- Copilot: Session custom titles are now parsed from `workspace.yaml` (`name` field), gated to directory-based layouts to prevent cross-session contamination.
+- Claude: Custom session titles set via the `/rename` CLI command are now reliably restored after relaunch.
+
+### Fixed
+- Claude: Custom session titles set via the `/rename` CLI command were not restored after relaunch because `upsertSessionMetaCore` omitted `custom_title` from its `UPDATE SET`; non-NULL parsed values now update the DB while NULL preserves the existing title.
+- Custom title scan in the lightweight parser now uses a chunked gap scan (64KB chunks, 8MB budget) so title records in the middle of large session files are no longer missed.
+
+## [3.4] - 2026-03-30
+
+### Added
+- Session list: Codex subagent sessions now appear as nested children under their parent in the unified session list. A toggle shows or hides the hierarchy; `Cmd+H` controls visibility from the keyboard.
+- Agent Cockpit: Active Codex subagent count badge added to HUD rows. `Cmd+Shift+S` toggles subagent display.
+
+### Fixed
+- Agent Cockpit HUD: Codex active subagent badges now use the runtime `thread_spawn` state DB when available, so open worker agents stay counted even when their rollout files go quiet; passive rollout/`lsof` heuristics remain as a fallback.
+- Agent Cockpit HUD: Codex runtime subagent counts now resolve the parent session before runtime edge lookup (even when the primary log path is a child rollout), and runtime state DB discovery now honors `CODEX_HOME`/`SessionsRootOverride` before falling back to `~/.codex`.
+- Codex limits tracking: Visible usage surfaces now prefer auth-backed limits refresh first, fall back to CLI RPC and JSONL only when needed, and keep `/status` probing as a last resort. Preferences copy now reflects the new source order.
+- Codex limits tracking: `/status` fallback snapshots now refresh their rate-limit buckets correctly, menu-background surfaces still run the preferred OAuth/CLI refresh chain, and partial live responses no longer leave the other bucket frozen as if the whole snapshot were authoritative.
+- Performance: Eliminated a `repeatForever` animation CPU drain in session rows that caused sustained energy use even when sessions were idle.
+- Security: SQL queries throughout the indexer are now fully parameterized; regex extraction is hardened against malformed input.
+- Subagents: Subagent sessions are preserved in search results when hierarchy display is disabled, preventing sessions from going missing in filtered views.
+- OpenCode: Parent ID query is guarded for older SQLite schemas that predate the `parent_id` column.
+- Indexing: Reindex purge now runs after table creation in bootstrap, preventing failures on first-run with no prior DB.
+- Launch/TCC: Session startup now avoids implicit repo filesystem probes while deriving row project names, reducing spurious Photos/Music permission prompts after rebuild/cold launch.
+- Launch restore: `Saved Sessions` window now registers shared window-open routing callbacks, so menu-bar `Open Agent Sessions`/cockpit routing still works when only Saved Sessions is restored.
+- Launch/TCC: Preferences agent status rows and OpenCode backend badges now use stored non-probing state under build tooling, avoiding extra PATH, root-directory, and SQLite checks during metadata extraction.
+
+## [3.3.3.1] - 2026-03-26
+
+### Fixed
+- Codex: Reset countdown no longer exceeds the 5-hour window — reset times are now stored in ISO 8601 format, preventing a date-rollover bug that produced countdowns of up to 24 hours.
+
 ## [3.3.3] - 2026-03-26
 
 ### Added

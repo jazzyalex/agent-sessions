@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.5] - 2026-04-06
+
+### Added
+- Transcript toolbar: Export as Markdown button for saving session transcripts as `.md` files.
+
+### Fixed
+- Analytics: Index now auto-builds on view appear; suppressed probe cleanup double-refresh.
+- Concurrency: Captured mutable vars as `let` before `MainActor.run` for Swift 6 strict concurrency compliance.
+- Unified view: Restored `@ObservedObject` for Gemini indexer in `UnifiedSessionsView`.
+- Thread safety: Added `NSLock` around cached date formatters in `ClaudeSessionParser` and `SessionIndexer`.
+- Image Browser: Inline image click now handled in `mouseDown` for reliable open behavior.
+- Preview.app: Use `/usr/bin/open` instead of `NSWorkspace` API to launch Preview reliably.
+
+### Performance
+- Analytics: Index building now derives from `session_meta` instead of file parsing, significantly reducing work.
+- SwiftUI: Eliminated redundant body evaluations and cached date formatters to reduce CPU usage.
+
 ## [3.4.1] - 2026-04-03
 
 ### Changed
