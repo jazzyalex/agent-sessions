@@ -1316,7 +1316,7 @@ private extension PreferencesView {
         } catch {
             return (127, "", error.localizedDescription)
         }
-        process.waitUntilExit()
+        process.waitForExit()
         let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
         let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
         let outString = String(data: outData, encoding: .utf8) ?? ""

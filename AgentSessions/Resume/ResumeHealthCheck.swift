@@ -146,7 +146,7 @@ fi
         do { try process.run() } catch {
             return (1, "Failed to run health-check: \(error.localizedDescription)")
         }
-        process.waitUntilExit()
+        process.waitForExit(timeout: TimeInterval(timeoutSeconds))
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let out = String(data: data, encoding: .utf8) ?? ""
         return (process.terminationStatus, out)
@@ -161,7 +161,7 @@ fi
         p.standardOutput = out
         p.standardError = Pipe()
         do { try p.run() } catch { return nil }
-        p.waitUntilExit()
+        p.waitForExit()
         guard p.terminationStatus == 0 else { return nil }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)

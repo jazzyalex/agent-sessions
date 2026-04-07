@@ -45,7 +45,7 @@ public struct ProcessCommandExecutor: CommandExecuting {
             throw CommandError.executableNotFound(command[0])
         }
 
-        process.waitUntilExit()
+        process.waitForExit()
 
         let stdoutData = (process.standardOutput as? Pipe)?.fileHandleForReading.readDataToEndOfFile() ?? Data()
         let stderrData = (process.standardError as? Pipe)?.fileHandleForReading.readDataToEndOfFile() ?? Data()

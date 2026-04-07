@@ -2781,7 +2781,7 @@ final class CodexActiveSessionsModel: ObservableObject {
 
         do {
             try process.run()
-            process.waitUntilExit()
+            process.waitForExit()
         } catch {
             return false
         }

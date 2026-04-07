@@ -2310,7 +2310,7 @@ actor CodexStatusService {
         p.standardOutput = out
         p.standardError = Pipe()
         do { try p.run() } catch { return nil }
-        p.waitUntilExit()
+        p.waitForExit()
         guard p.terminationStatus == 0 else { return nil }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         // Strip OSC escapes injected by terminal shell integrations.
@@ -2328,7 +2328,7 @@ actor CodexStatusService {
         p.arguments = ["-lic", "command -v tmux || true"]
         let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
         do { try p.run() } catch { return nil }
-        p.waitUntilExit()
+        p.waitForExit()
         var s = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         // Strip OSC escapes injected by terminal shell integrations.
         s = s.replacingOccurrences(of: "\u{1b}\\][^\u{07}]*\u{07}", with: "", options: .regularExpression)

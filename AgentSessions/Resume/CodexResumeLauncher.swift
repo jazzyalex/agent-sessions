@@ -119,7 +119,7 @@ final class CodexResumeLauncher: ObservableObject {
         p.standardOutput = out
         p.standardError = Pipe()
         do { try p.run() } catch { return nil }
-        p.waitUntilExit()
+        p.waitForExit()
         guard p.terminationStatus == 0 else { return nil }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)

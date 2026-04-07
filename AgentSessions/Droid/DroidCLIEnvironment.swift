@@ -104,7 +104,7 @@ struct DroidCLIEnvironment {
         do { try process.run() } catch {
             return (127, nil, error.localizedDescription)
         }
-        process.waitUntilExit()
+        process.waitForExit()
         let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
         let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
         return (process.terminationStatus, out, err)

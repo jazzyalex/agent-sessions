@@ -55,7 +55,7 @@ enum AgentTerminalLauncher {
         process.standardOutput = Pipe()
 
         try process.run()
-        process.waitUntilExit()
+        process.waitForExit()
         guard process.terminationStatus == 0 else {
             let data = stderr.fileHandleForReading.readDataToEndOfFile()
             let err = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

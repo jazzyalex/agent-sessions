@@ -922,7 +922,7 @@ actor ClaudeStatusService {
         } catch {
             return ""
         }
-        task.waitUntilExit()
+        task.waitForExit()
         guard task.terminationStatus == 0 else { return "" }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8) ?? ""
@@ -1307,7 +1307,7 @@ actor ClaudeStatusService {
 
         do {
             try process.run()
-            process.waitUntilExit()
+            process.waitForExit()
             var output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             // Strip OSC escapes injected by terminal shell integrations.
             output = output.replacingOccurrences(of: "\u{1b}\\][^\u{07}]*\u{07}", with: "", options: .regularExpression)
@@ -1347,7 +1347,7 @@ actor ClaudeStatusService {
 
         do {
             try process.run()
-            process.waitUntilExit()
+            process.waitForExit()
             var output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             // Strip OSC escapes injected by terminal shell integrations.
             output = output.replacingOccurrences(of: "\u{1b}\\][^\u{07}]*\u{07}", with: "", options: .regularExpression)
@@ -1377,7 +1377,7 @@ actor ClaudeStatusService {
         process.standardError = Pipe()
         do {
             try process.run()
-            process.waitUntilExit()
+            process.waitForExit()
             guard process.terminationStatus == 0 else { return nil }
             var output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             // Strip OSC escapes injected by terminal shell integrations.
