@@ -93,6 +93,33 @@ enum AgentEnablement {
         defaults.set(known, forKey: PreferencesKey.Agents.knownAvailableProviders)
     }
 
+    /// Returns providers that are available on disk but the user has not yet
+    /// been notified about.  A provider qualifies when it is available, absent
+    /// from `KnownAvailableProviders`, and has no explicit UserDefaults
+    /// preference (distinguishing "user chose to enable" from "auto-enabled by
+    /// isAvailable fallback").
+    static func newlyAvailableProviders(
+        availableSources: Set<SessionSource>,
+        defaults: UserDefaults = .standard
+    ) -> [SessionSource] {
+        let known = Set(defaults.stringArray(forKey: PreferencesKey.Agents.knownAvailableProviders) ?? [])
+        return availableSources
+            .filter { source in
+                !known.contains(source.rawValue)
+                    && defaults.object(forKey: enablementKey(for: source)) == nil
+            }
+            .sorted { $0.rawValue < $1.rawValue }
+    }
+
+    /// Adds providers to the known set so their banner is not shown again.
+    static func markProvidersAsKnown(_ sources: [SessionSource], defaults: UserDefaults = .standard) {
+        var known = Set(defaults.stringArray(forKey: PreferencesKey.Agents.knownAvailableProviders) ?? [])
+        for source in sources {
+            known.insert(source.rawValue)
+        }
+        defaults.set(Array(known), forKey: PreferencesKey.Agents.knownAvailableProviders)
+    }
+
     static func enabledSources(defaults: UserDefaults = .standard) -> Set<SessionSource> {
         var out: Set<SessionSource> = []
         for s in SessionSource.allCases where isEnabled(s, defaults: defaults) {

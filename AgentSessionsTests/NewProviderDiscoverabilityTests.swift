@@ -65,4 +65,71 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         let known = defaults.stringArray(forKey: PreferencesKey.Agents.knownAvailableProviders) ?? []
         XCTAssertFalse(known.contains("cursor"), "Second migration should be a no-op")
     }
+
+    // MARK: - Detection Logic
+
+    func testNewlyAvailableProviders_returnsProviderNotInKnownSetWithNoExplicitPref() {
+        let suite = "test.detect.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        // Known set has codex and claude
+        defaults.set(["codex", "claude"], forKey: PreferencesKey.Agents.knownAvailableProviders)
+        // No explicit pref for cursor — simulates implicit isAvailable() default
+
+        let candidates = AgentEnablement.newlyAvailableProviders(
+            availableSources: [.codex, .claude, .cursor],
+            defaults: defaults
+        )
+
+        XCTAssertEqual(candidates, [.cursor])
+    }
+
+    func testNewlyAvailableProviders_excludesProviderWithExplicitPref() {
+        let suite = "test.detect.explicit.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        defaults.set(["codex"], forKey: PreferencesKey.Agents.knownAvailableProviders)
+        // User explicitly set cursor to true — they already know about it
+        defaults.set(true, forKey: AgentEnablement.enablementKey(for: .cursor))
+
+        let candidates = AgentEnablement.newlyAvailableProviders(
+            availableSources: [.codex, .cursor],
+            defaults: defaults
+        )
+
+        XCTAssertTrue(candidates.isEmpty, "Provider with explicit pref should not be a candidate")
+    }
+
+    func testNewlyAvailableProviders_excludesProviderAlreadyInKnownSet() {
+        let suite = "test.detect.known.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        defaults.set(["codex", "cursor"], forKey: PreferencesKey.Agents.knownAvailableProviders)
+
+        let candidates = AgentEnablement.newlyAvailableProviders(
+            availableSources: [.codex, .cursor],
+            defaults: defaults
+        )
+
+        XCTAssertTrue(candidates.isEmpty, "Provider already in known set should not be a candidate")
+    }
+
+    func testNewlyAvailableProviders_returnsEmptyWhenNoNewProviders() {
+        let suite = "test.detect.empty.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        let allRaw = SessionSource.allCases.map(\.rawValue)
+        defaults.set(allRaw, forKey: PreferencesKey.Agents.knownAvailableProviders)
+
+        let candidates = AgentEnablement.newlyAvailableProviders(
+            availableSources: Set(SessionSource.allCases),
+            defaults: defaults
+        )
+
+        XCTAssertTrue(candidates.isEmpty)
+    }
 }
