@@ -619,9 +619,50 @@ struct UnifiedSessionsView: View {
 					.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 					.transition(.move(edge: .top).combined(with: .opacity))
 			}
+			ForEach(Array(unified.newlyAvailableProviders.enumerated()), id: \.element) { index, source in
+				newProviderBanner(for: source)
+					.transition(.move(edge: .top).combined(with: .opacity))
+					.animation(
+						.easeOut(duration: 0.3).delay(Double(index) * 0.3),
+						value: unified.newlyAvailableProviders
+					)
+			}
 		}
 		.padding(.top, 8)
 		.padding(.trailing, 8)
+		.animation(.easeInOut(duration: 0.3), value: showAgentEnablementNotice)
+	}
+
+	private func newProviderBanner(for source: SessionSource) -> some View {
+		HStack(spacing: 10) {
+			Image(systemName: source.iconName)
+				.font(.title3)
+			VStack(alignment: .leading, spacing: 2) {
+				Text("\(source.displayName) sessions found")
+					.font(.footnote.weight(.medium))
+			}
+			Spacer(minLength: 8)
+			Button("Enable") {
+				withAnimation(.easeInOut(duration: 0.3)) {
+					unified.dismissNewProviderBanner(for: source, enable: true)
+				}
+			}
+			.buttonStyle(.borderedProminent)
+			.controlSize(.small)
+			.accessibilityLabel("Enable \(source.displayName)")
+			Button("Dismiss") {
+				withAnimation(.easeInOut(duration: 0.3)) {
+					unified.dismissNewProviderBanner(for: source, enable: false)
+				}
+			}
+			.buttonStyle(.bordered)
+			.controlSize(.small)
+			.accessibilityLabel("Dismiss \(source.displayName) notification")
+		}
+		.padding(10)
+		.background(.regularMaterial)
+		.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+		.accessibilityElement(children: .contain)
 	}
 
 	    private var rootContent: some View {
