@@ -560,6 +560,8 @@ extension AgentSessionsApp {
         Task {
             await AppReadyGate.waitUntilReady()
             AgentEnablement.seedIfNeeded()
+            AgentEnablement.migrateKnownAvailableProvidersIfNeeded()
+            unified.detectNewlyAvailableProviders()
             migrateAnalyticsCacheIfNeeded()
             unified.syncAgentEnablementFromDefaults()
             unified.refresh(trigger: .launch)

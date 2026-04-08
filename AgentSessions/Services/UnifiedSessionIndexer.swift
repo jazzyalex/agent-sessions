@@ -495,6 +495,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var openClawAgentEnabled: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Agents.openClawEnabled) as? Bool ?? false
     @Published private(set) var cursorAgentEnabled: Bool = AgentEnablement.isEnabled(.cursor)
 
+    /// Providers detected on disk that the user hasn't been notified about yet.
+    @Published private(set) var newlyAvailableProviders: [SessionSource] = []
+
     // Sorting
     struct SessionSortDescriptor: Equatable { let key: Key; let ascending: Bool; enum Key { case modified, msgs, repo, title, agent, size } }
     @Published var sortDescriptor: SessionSortDescriptor = .init(key: .modified, ascending: false)
@@ -924,6 +927,36 @@ final class UnifiedSessionIndexer: ObservableObject {
         let afterSources = enabledAnalyticsSources()
         if analyticsLastBuiltAt != nil && !afterSources.subtracting(beforeSources).isEmpty {
             analyticsIsStale = true
+        }
+    }
+
+    /// Detects providers whose data exists on disk but the user has not yet
+    /// been notified about.  Called once at startup after migration.
+    func detectNewlyAvailableProviders(defaults: UserDefaults = .standard) {
+        var available = Set<SessionSource>()
+        for source in SessionSource.allCases {
+            if AgentEnablement.isAvailable(source, defaults: defaults) {
+                available.insert(source)
+            }
+        }
+        let candidates = AgentEnablement.newlyAvailableProviders(
+            availableSources: available,
+            defaults: defaults
+        )
+        if candidates != newlyAvailableProviders {
+            newlyAvailableProviders = candidates
+        }
+    }
+
+    /// Called when the user taps Enable or Dismiss on a detection banner.
+    func dismissNewProviderBanner(for source: SessionSource, enable: Bool, defaults: UserDefaults = .standard) {
+        if enable {
+            AgentEnablement.setEnabled(source, enabled: true, defaults: defaults)
+        }
+        AgentEnablement.markProvidersAsKnown([source], defaults: defaults)
+        newlyAvailableProviders.removeAll { $0 == source }
+        if enable {
+            syncAgentEnablementFromDefaults(defaults: defaults)
         }
     }
 
