@@ -150,6 +150,12 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         XCTAssertTrue(screens.isEmpty)
     }
 
+    func testNewProviderScreens_returnsEmptyForVersionWithNoNewProviders() {
+        // Version "2.9" exists as a real app version but no provider has versionIntroduced == "2.9"
+        let screens = OnboardingContent.newProviderScreens(for: "2.9")
+        XCTAssertTrue(screens.isEmpty, "Version with no new providers should produce no screens")
+    }
+
     func testUpdateTourForVersion3_2_includesNewProviderScreen() {
         // Exercise the same path OnboardingCoordinator uses at runtime
         let content = OnboardingContent.updateTour(for: "3.2")

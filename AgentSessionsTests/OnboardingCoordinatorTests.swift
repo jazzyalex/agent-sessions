@@ -118,7 +118,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(updateTour?.screens.last?.title, "New Agent Support")
     }
 
-    func testCheckAndPresentIfNeededForReleaseThreeShowsTwoScreenUpdateTour() async {
+    func testCheckAndPresentIfNeededForReleaseThreeShowsThreeScreenUpdateTour() async {
         let suite = "OnboardingCoordinatorTests.release3Update"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
