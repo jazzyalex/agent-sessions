@@ -36,4 +36,29 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .cursor: return "cursorarrow.rays"
         }
     }
+
+    public var versionIntroduced: String {
+        switch self {
+        case .codex, .claude:   return "1.0"
+        case .gemini:           return "2.5"
+        case .opencode:         return "2.8"
+        case .copilot:          return "2.11"
+        case .droid:            return "3.0"
+        case .openclaw:         return "3.1"
+        case .cursor:           return "3.2"
+        }
+    }
+
+    public var featureDescription: String {
+        switch self {
+        case .codex:    return "Track your Codex CLI coding sessions"
+        case .claude:   return "Browse your Claude Code conversations"
+        case .gemini:   return "View your Gemini CLI interactions"
+        case .opencode: return "Review your OpenCode sessions"
+        case .copilot:  return "Browse your GitHub Copilot chat history"
+        case .droid:    return "View your Droid agent sessions"
+        case .openclaw: return "Explore your OpenClaw conversations"
+        case .cursor:   return "Import and search your Cursor AI sessions"
+        }
+    }
 }
