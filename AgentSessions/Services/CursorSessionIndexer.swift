@@ -338,6 +338,8 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                         repoName: current.repoName,
                         lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
                         lightweightCommands: current.lightweightCommands ?? parsed.lightweightCommands,
+                        parentSessionID: parsed.parentSessionID ?? current.parentSessionID,
+                        subagentType: parsed.subagentType ?? current.subagentType,
                         customTitle: current.customTitle ?? parsed.customTitle
                     )
                     self.allSessions[idx] = merged
@@ -378,6 +380,8 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
             repoName: session.repoName,
             lightweightTitle: session.lightweightTitle,
             lightweightCommands: session.lightweightCommands,
+            parentSessionID: session.parentSessionID,
+            subagentType: session.subagentType,
             customTitle: meta.name.isEmpty ? nil : meta.name
         )
     }
