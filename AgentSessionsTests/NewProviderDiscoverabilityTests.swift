@@ -132,4 +132,27 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
 
         XCTAssertTrue(candidates.isEmpty)
     }
+
+    // MARK: - Update Tour Screens
+
+    func testNewProviderScreens_returnsCursorScreenForVersion3_2() {
+        let screens = OnboardingContent.newProviderScreens(for: "3.2")
+        XCTAssertEqual(screens.count, 1)
+        let screen = screens[0]
+        XCTAssertEqual(screen.title, "New Agent Support")
+        XCTAssertEqual(screen.agentShowcase.count, 1)
+        XCTAssertEqual(screen.agentShowcase[0].title, "Cursor")
+        XCTAssertEqual(screen.agentShowcase[0].symbolName, "cursorarrow.rays")
+    }
+
+    func testNewProviderScreens_returnsEmptyForUnknownVersion() {
+        let screens = OnboardingContent.newProviderScreens(for: "99.0")
+        XCTAssertTrue(screens.isEmpty)
+    }
+
+    func testFallbackUpdateTourForVersion3_2_includesNewProviderScreen() {
+        let content = OnboardingContent.fallbackUpdateTour(for: "3.2")
+        let hasNewAgentScreen = content.screens.contains { $0.title == "New Agent Support" }
+        XCTAssertTrue(hasNewAgentScreen, "Fallback tour for 3.2 should include New Agent Support slide")
+    }
 }

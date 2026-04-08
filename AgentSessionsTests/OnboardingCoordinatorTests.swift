@@ -111,9 +111,11 @@ final class OnboardingCoordinatorTests: XCTestCase {
         let updateTour = OnboardingContent.updateTour(for: "3.0")
 
         XCTAssertEqual(updateTour?.kind, .updateTour)
-        XCTAssertEqual(updateTour?.screens.count, 2)
+        // Droid was introduced in 3.0, so newProviderScreens appends a "New Agent Support" slide.
+        XCTAssertEqual(updateTour?.screens.count, 3)
         XCTAssertEqual(updateTour?.screens.first?.title, "Agent Cockpit (Beta)")
-        XCTAssertEqual(updateTour?.screens.last?.title, "Feedback & Community Support")
+        XCTAssertEqual(updateTour?.screens[1].title, "Feedback & Community Support")
+        XCTAssertEqual(updateTour?.screens.last?.title, "New Agent Support")
     }
 
     func testCheckAndPresentIfNeededForReleaseThreeShowsTwoScreenUpdateTour() async {
@@ -135,7 +137,8 @@ final class OnboardingCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(result.isPresented)
         XCTAssertEqual(result.kind, .updateTour)
-        XCTAssertEqual(result.screens, 2)
+        // Droid was introduced in 3.0, so newProviderScreens appends a "New Agent Support" slide.
+        XCTAssertEqual(result.screens, 3)
     }
 
     func testFallbackUpdateTourLeadsWithCockpit() {

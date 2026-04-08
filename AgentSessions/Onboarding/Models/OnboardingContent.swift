@@ -58,7 +58,16 @@ extension OnboardingContent {
     }
 
     static func updateTour(for majorMinor: String) -> OnboardingContent? {
-        updateCatalog[majorMinor]
+        guard var content = updateCatalog[majorMinor] else { return nil }
+        let extra = newProviderScreens(for: majorMinor)
+        if !extra.isEmpty {
+            content = OnboardingContent(
+                versionMajorMinor: content.versionMajorMinor,
+                kind: content.kind,
+                screens: content.screens + extra
+            )
+        }
+        return content
     }
 
     static func fullTour(for majorMinor: String) -> OnboardingContent {
@@ -70,11 +79,33 @@ extension OnboardingContent {
     }
 
     static func fallbackUpdateTour(for majorMinor: String) -> OnboardingContent {
-        OnboardingContent(
+        let base = release3UpdateTourScreens()
+        let extra = newProviderScreens(for: majorMinor)
+        return OnboardingContent(
             versionMajorMinor: majorMinor,
             kind: .updateTour,
-            screens: release3UpdateTourScreens()
+            screens: base + extra
         )
+    }
+
+    /// Returns a "New Agent Support" screen for any providers introduced in the
+    /// given version.  Returns an empty array if no providers match.
+    static func newProviderScreens(for majorMinor: String) -> [Screen] {
+        let newSources = SessionSource.allCases.filter { $0.versionIntroduced == majorMinor }
+        guard !newSources.isEmpty else { return [] }
+        let showcaseItems = newSources.map {
+            Screen.AgentShowcaseItem(symbolName: $0.iconName, title: $0.displayName)
+        }
+        let bullets = newSources.map { $0.featureDescription }
+        return [
+            Screen(
+                symbolName: "party.popper",
+                title: "New Agent Support",
+                body: "This update adds support for new AI coding assistants.",
+                agentShowcase: showcaseItems,
+                bullets: bullets
+            )
+        ]
     }
 
     private static let updateCatalog: [String: OnboardingContent] = [
