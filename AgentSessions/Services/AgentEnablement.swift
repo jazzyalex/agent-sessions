@@ -69,6 +69,30 @@ enum AgentEnablement {
         }
     }
 
+    static func enablementKey(for source: SessionSource) -> String {
+        switch source {
+        case .codex:    return PreferencesKey.Agents.codexEnabled
+        case .claude:   return PreferencesKey.Agents.claudeEnabled
+        case .gemini:   return PreferencesKey.Agents.geminiEnabled
+        case .opencode: return PreferencesKey.Agents.openCodeEnabled
+        case .copilot:  return PreferencesKey.Agents.copilotEnabled
+        case .droid:    return PreferencesKey.Agents.droidEnabled
+        case .openclaw: return PreferencesKey.Agents.openClawEnabled
+        case .cursor:   return PreferencesKey.Agents.cursorEnabled
+        }
+    }
+
+    /// Initialises `KnownAvailableProviders` for users upgrading to the first
+    /// version that includes the detection-banner feature.  Runs once (when the
+    /// key is nil), independent of `seedIfNeeded()`.
+    static func migrateKnownAvailableProvidersIfNeeded(defaults: UserDefaults = .standard) {
+        guard defaults.object(forKey: PreferencesKey.Agents.knownAvailableProviders) == nil else { return }
+        let known = SessionSource.allCases
+            .filter { defaults.object(forKey: enablementKey(for: $0)) != nil }
+            .map(\.rawValue)
+        defaults.set(known, forKey: PreferencesKey.Agents.knownAvailableProviders)
+    }
+
     static func enabledSources(defaults: UserDefaults = .standard) -> Set<SessionSource> {
         var out: Set<SessionSource> = []
         for s in SessionSource.allCases where isEnabled(s, defaults: defaults) {

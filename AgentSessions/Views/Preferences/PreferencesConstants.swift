@@ -46,6 +46,7 @@ enum PreferencesKey {
         static let droidEnabled = "AgentEnabledDroid"
         static let openClawEnabled = "AgentEnabledOpenClaw"
         static let cursorEnabled = "AgentEnabledCursor"
+        static let knownAvailableProviders = "KnownAvailableProviders"
     }
 
     // Polling intervals
