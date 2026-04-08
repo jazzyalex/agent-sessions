@@ -630,17 +630,14 @@ struct UnifiedSessionsView: View {
 		}
 		.padding(.top, 8)
 		.padding(.trailing, 8)
-		.animation(.easeInOut(duration: 0.3), value: showAgentEnablementNotice)
 	}
 
 	private func newProviderBanner(for source: SessionSource) -> some View {
 		HStack(spacing: 10) {
 			Image(systemName: source.iconName)
 				.font(.title3)
-			VStack(alignment: .leading, spacing: 2) {
-				Text("\(source.displayName) sessions found")
-					.font(.footnote.weight(.medium))
-			}
+			Text("\(source.displayName) sessions found")
+				.font(.footnote.weight(.medium))
 			Spacer(minLength: 8)
 			Button("Enable") {
 				withAnimation(.easeInOut(duration: 0.3)) {

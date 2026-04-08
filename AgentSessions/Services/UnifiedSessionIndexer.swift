@@ -933,12 +933,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// Detects providers whose data exists on disk but the user has not yet
     /// been notified about.  Called once at startup after migration.
     func detectNewlyAvailableProviders(defaults: UserDefaults = .standard) {
-        var available = Set<SessionSource>()
-        for source in SessionSource.allCases {
-            if AgentEnablement.isAvailable(source, defaults: defaults) {
-                available.insert(source)
-            }
-        }
+        let available = Set(SessionSource.allCases.filter { AgentEnablement.isAvailable($0, defaults: defaults) })
         let candidates = AgentEnablement.newlyAvailableProviders(
             availableSources: available,
             defaults: defaults

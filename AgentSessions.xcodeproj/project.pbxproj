@@ -75,7 +75,7 @@
 		3D7BE6551A4D05AE1747DA77 /* AppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35186F4194824F3250DE3B8E /* AppRuntime.swift */; };
 		3F27E678043DB2F53FEB538B /* DroidSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B1C6B3A05A32EF8AD67BBE9 /* DroidSettings.swift */; };
 		413FF48DEC4A13291731756F /* ToolTextBlockNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 766062A5F7093B1C287501F0 /* ToolTextBlockNormalizer.swift */; };
-		4262C44EB5E247E99FD99F01 /* test-session.jsonl in Sources */ = {isa = PBXBuildFile; fileRef = 9059F3E358CEE3DD092E327B /* test-session.jsonl */; };
+		4262C44EB5E247E99FD99F01 /* test-session.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 9059F3E358CEE3DD092E327B /* test-session.jsonl */; };
 		42F90BA7CBE613327417D28D /* CopilotTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 815DCA7C60A7B56BC748C548 /* CopilotTranscriptView.swift */; };
 		4310AE956110DDEB90364B3D /* OpenCodeSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05D72F56F8E9EB0484E4361C /* OpenCodeSessionIndexer.swift */; };
 		431DEFC9588D26B6D761163C /* CopilotCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D2C4410891B7F22F64831EC /* CopilotCLIEnvironment.swift */; };
@@ -181,7 +181,7 @@
 		A9D49F2A967D8DD12C2FD3FE /* OpenCodeBackendDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFE880E8C4F8CEFBE7FD3B6 /* OpenCodeBackendDetector.swift */; };
 		AAD67C266F144F9C0EEC24CB /* TranscriptColorSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F13DE3D3808C990779216E4 /* TranscriptColorSystem.swift */; };
 		ABE8604AC7ECD25304634C7C /* CrashReportingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2171D0501F372B5E76925ADA /* CrashReportingServiceTests.swift */; };
-		AD30BD793924C18DE7456342 /* subagent-session.jsonl in Sources */ = {isa = PBXBuildFile; fileRef = C00F56881BDBF91B5144FD2A /* subagent-session.jsonl */; };
+		AD30BD793924C18DE7456342 /* subagent-session.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = C00F56881BDBF91B5144FD2A /* subagent-session.jsonl */; };
 		AF0E81FF8E234498C1F05F56 /* ClaudeProbeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBD66FC176CB54B298244DDB /* ClaudeProbeConfig.swift */; };
 		ANREP000020000000000001 /* AnalyticsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANREP000010000000000001 /* AnalyticsRepository.swift */; };
 		B000001C2A0A000100000001 /* AgentSessionsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000112A0A000100000001 /* AgentSessionsApp.swift */; };
@@ -299,7 +299,7 @@
 		EFB738C2A9060852B3E98D4A /* CodexSessionImagesGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 984DB58B4EDFDA087B0B1623 /* CodexSessionImagesGalleryView.swift */; };
 		F0001909B140D84305F63FA1 /* codex_052_raw.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = ABFD9C178275CA23FCE6B3DE /* codex_052_raw.jsonl */; };
 		F0BC877DF9F93DD51B379288 /* GeminiInlineDataImageScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FAA1266E87A642CDA69A762 /* GeminiInlineDataImageScanner.swift */; };
-		F0D3CE42B2AF00A7DFDAFC76 /* test-store.db in Sources */ = {isa = PBXBuildFile; fileRef = B0E8FC80B896F4902702739B /* test-store.db */; };
+		F0D3CE42B2AF00A7DFDAFC76 /* test-store.db in Resources */ = {isa = PBXBuildFile; fileRef = B0E8FC80B896F4902702739B /* test-store.db */; };
 		F2B4B7640DFFB2F641D497EA /* GeminiResumeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99CD97A89CCCDCA326CCE023 /* GeminiResumeTypes.swift */; };
 		F2C6B688E1EC6DFAD5F87726 /* SessionArchiveManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE3BFABDF39A35915C5DDCAA /* SessionArchiveManager.swift */; };
 		F45D0033901B8FEE986C0D59 /* FilterEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 495C9F72C10641EC9FE0B216 /* FilterEngine.swift */; };
@@ -1679,6 +1679,9 @@
 				A6E88B46DC1595DBEFE72086 /* codex_051_usage.jsonl in Resources */,
 				F0001909B140D84305F63FA1 /* codex_052_raw.jsonl in Resources */,
 				F99D8667D52F20CA899A68B2 /* codex_053_rate_limit.jsonl in Resources */,
+				4262C44EB5E247E99FD99F01 /* test-session.jsonl in Resources */,
+				AD30BD793924C18DE7456342 /* subagent-session.jsonl in Resources */,
+				F0D3CE42B2AF00A7DFDAFC76 /* test-store.db in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1969,9 +1972,6 @@
 				EC762372C84091AFA2F77ECD /* CursorSessionIndexer.swift in Sources */,
 				9C1C91D57A76756AB7386E12 /* PreferencesView+Cursor.swift in Sources */,
 				867937185092A7641F1E1508 /* CursorTranscriptView.swift in Sources */,
-				4262C44EB5E247E99FD99F01 /* test-session.jsonl in Sources */,
-				AD30BD793924C18DE7456342 /* subagent-session.jsonl in Sources */,
-				F0D3CE42B2AF00A7DFDAFC76 /* test-store.db in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

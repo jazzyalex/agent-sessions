@@ -48,24 +48,16 @@ enum AgentEnablement {
     ]
 
     static func isEnabled(_ source: SessionSource, defaults: UserDefaults = .standard) -> Bool {
+        let key = enablementKey(for: source)
+        if let explicit = defaults.object(forKey: key) as? Bool { return explicit }
         switch source {
-        case .codex:
-            return defaults.object(forKey: PreferencesKey.Agents.codexEnabled) as? Bool ?? true
-        case .claude:
-            return defaults.object(forKey: PreferencesKey.Agents.claudeEnabled) as? Bool ?? true
-        case .gemini:
-            return defaults.object(forKey: PreferencesKey.Agents.geminiEnabled) as? Bool ?? true
-        case .opencode:
-            return defaults.object(forKey: PreferencesKey.Agents.openCodeEnabled) as? Bool ?? true
-        case .copilot:
-            return defaults.object(forKey: PreferencesKey.Agents.copilotEnabled) as? Bool ?? true
-        case .droid:
-            return defaults.object(forKey: PreferencesKey.Agents.droidEnabled) as? Bool ?? true
         case .openclaw:
             // Default OFF unless OpenClaw/Clawdbot is actually present on disk or in PATH.
-            return defaults.object(forKey: PreferencesKey.Agents.openClawEnabled) as? Bool ?? isAvailable(.openclaw, defaults: defaults)
+            return isAvailable(.openclaw, defaults: defaults)
         case .cursor:
-            return defaults.object(forKey: PreferencesKey.Agents.cursorEnabled) as? Bool ?? isAvailable(.cursor, defaults: defaults)
+            return isAvailable(.cursor, defaults: defaults)
+        default:
+            return true
         }
     }
 
@@ -108,7 +100,12 @@ enum AgentEnablement {
                 !known.contains(source.rawValue)
                     && defaults.object(forKey: enablementKey(for: source)) == nil
             }
-            .sorted { $0.rawValue < $1.rawValue }
+            .sorted { lhs, rhs in
+                let allCases = SessionSource.allCases
+                let li = allCases.firstIndex(of: lhs) ?? 0
+                let ri = allCases.firstIndex(of: rhs) ?? 0
+                return li < ri
+            }
     }
 
     /// Adds providers to the known set so their banner is not shown again.
@@ -263,24 +260,7 @@ enum AgentEnablement {
     }
 
     private static func storedEnabledPreference(for source: SessionSource, defaults: UserDefaults) -> Bool? {
-        switch source {
-        case .codex:
-            return defaults.object(forKey: PreferencesKey.Agents.codexEnabled) as? Bool
-        case .claude:
-            return defaults.object(forKey: PreferencesKey.Agents.claudeEnabled) as? Bool
-        case .gemini:
-            return defaults.object(forKey: PreferencesKey.Agents.geminiEnabled) as? Bool
-        case .opencode:
-            return defaults.object(forKey: PreferencesKey.Agents.openCodeEnabled) as? Bool
-        case .copilot:
-            return defaults.object(forKey: PreferencesKey.Agents.copilotEnabled) as? Bool
-        case .droid:
-            return defaults.object(forKey: PreferencesKey.Agents.droidEnabled) as? Bool
-        case .openclaw:
-            return defaults.object(forKey: PreferencesKey.Agents.openClawEnabled) as? Bool
-        case .cursor:
-            return defaults.object(forKey: PreferencesKey.Agents.cursorEnabled) as? Bool
-        }
+        defaults.object(forKey: enablementKey(for: source)) as? Bool
     }
 
     static func binaryInstalled(for source: SessionSource) -> Bool {
@@ -326,24 +306,7 @@ enum AgentEnablement {
     }
 
     private static func setEnabledInternal(_ source: SessionSource, enabled: Bool, defaults: UserDefaults) {
-        switch source {
-        case .codex:
-            defaults.set(enabled, forKey: PreferencesKey.Agents.codexEnabled)
-        case .claude:
-            defaults.set(enabled, forKey: PreferencesKey.Agents.claudeEnabled)
-        case .gemini:
-            defaults.set(enabled, forKey: PreferencesKey.Agents.geminiEnabled)
-        case .opencode:
-            defaults.set(enabled, forKey: PreferencesKey.Agents.openCodeEnabled)
-        case .copilot:
-            defaults.set(enabled, forKey: PreferencesKey.Agents.copilotEnabled)
-        case .droid:
-            defaults.set(enabled, forKey: PreferencesKey.Agents.droidEnabled)
-        case .openclaw:
-            defaults.set(enabled, forKey: PreferencesKey.Agents.openClawEnabled)
-        case .cursor:
-            defaults.set(enabled, forKey: PreferencesKey.Agents.cursorEnabled)
-        }
+        defaults.set(enabled, forKey: enablementKey(for: source))
     }
 
     private static func storedBinaryPresence(for source: SessionSource, defaults: UserDefaults = .standard) -> Bool? {

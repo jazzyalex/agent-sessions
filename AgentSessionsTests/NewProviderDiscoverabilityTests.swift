@@ -17,6 +17,16 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         }
     }
 
+    func testEveryVersionIntroducedProducesValidNewProviderScreen() {
+        // Round-trip: every source's versionIntroduced must produce a non-empty
+        // result from newProviderScreens, guarding against typo mismatches.
+        let versions = Set(SessionSource.allCases.map(\.versionIntroduced))
+        for version in versions {
+            let screens = OnboardingContent.newProviderScreens(for: version)
+            XCTAssertFalse(screens.isEmpty, "versionIntroduced \"\(version)\" should produce at least one new-provider screen")
+        }
+    }
+
     func testCursorVersionIntroduced() {
         XCTAssertEqual(SessionSource.cursor.versionIntroduced, "3.2")
     }
