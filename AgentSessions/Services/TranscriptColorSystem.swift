@@ -72,6 +72,9 @@ enum TranscriptColorSystem {
         case .openclaw:
             // Orange-ish (distinct from tool success green and OpenCode purple).
             return NSColor(calibratedRed: 0.95, green: 0.55, blue: 0.15, alpha: 1.0)
+        case .cursor:
+            // Teal-ish (Cursor brand).
+            return NSColor(calibratedRed: 0.20, green: 0.60, blue: 0.70, alpha: 1.0)
         }
     }
 

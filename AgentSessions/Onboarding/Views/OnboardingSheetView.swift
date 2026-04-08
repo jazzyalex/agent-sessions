@@ -11,6 +11,7 @@ struct OnboardingSheetView: View {
     let copilotIndexer: CopilotSessionIndexer
     let droidIndexer: DroidSessionIndexer
     let openclawIndexer: OpenClawSessionIndexer
+    let cursorIndexer: CursorSessionIndexer
     @ObservedObject var codexUsageModel: CodexUsageModel
     @ObservedObject var claudeUsageModel: ClaudeUsageModel
 
@@ -24,6 +25,7 @@ struct OnboardingSheetView: View {
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = false
+    @AppStorage(PreferencesKey.Agents.cursorEnabled) private var cursorAgentEnabled: Bool = true
 
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
@@ -111,6 +113,7 @@ struct OnboardingSheetView: View {
         .onReceive(copilotIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(droidIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(openclawIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(cursorIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onChange(of: hideZeroMessageSessionsPref) { _, _ in handleSessionDataUpdate() }
         .onChange(of: hideLowMessageSessionsPref) { _, _ in handleSessionDataUpdate() }
         .onChange(of: showHousekeepingSessionsPref) { _, _ in handleSessionDataUpdate() }
@@ -548,6 +551,11 @@ struct OnboardingSheetView: View {
                 get: { openClawAgentEnabled },
                 set: { _ = AgentEnablement.setEnabled(.openclaw, enabled: $0) }
             )
+        case .cursor:
+            return Binding(
+                get: { cursorAgentEnabled },
+                set: { _ = AgentEnablement.setEnabled(.cursor, enabled: $0) }
+            )
         }
     }
 
@@ -622,6 +630,7 @@ struct OnboardingSheetView: View {
         case .copilot: return copilotIndexer.allSessions
         case .droid: return droidIndexer.allSessions
         case .openclaw: return openclawIndexer.allSessions
+        case .cursor: return cursorIndexer.allSessions
         }
     }
 
@@ -634,6 +643,7 @@ struct OnboardingSheetView: View {
         case .copilot: return copilotAgentEnabled
         case .droid: return droidAgentEnabled
         case .openclaw: return openClawAgentEnabled
+        case .cursor: return cursorAgentEnabled
         }
     }
 
@@ -681,6 +691,7 @@ struct OnboardingSheetView: View {
             + copilotIndexer.allSessions
             + droidIndexer.allSessions
             + openclawIndexer.allSessions
+            + cursorIndexer.allSessions
         return WeeklyActivityDay.build(from: sessions, palette: palette)
     }
 
@@ -703,8 +714,8 @@ struct OnboardingSheetView: View {
 
         if !showHousekeepingSessionsPref, session.isHousekeeping { return false }
 
-        // Message count filters (OpenCode excluded from msg-count heuristics)
-        if session.source != .opencode {
+        // Message count filters (OpenCode and Cursor DB-only sessions excluded from msg-count heuristics)
+        if session.source != .opencode, !CursorSessionIndexer.isDBOnlySession(session) {
             if hideZeroMessageSessionsPref, session.messageCount == 0 { return false }
             if hideLowMessageSessionsPref, session.messageCount > 0, session.messageCount <= 2 { return false }
         }
@@ -712,7 +723,7 @@ struct OnboardingSheetView: View {
         // Tool-call-only filter (strict)
         if hasCommandsOnlyPref {
             switch session.source {
-            case .codex, .opencode, .copilot, .droid, .openclaw:
+            case .codex, .opencode, .copilot, .droid, .openclaw, .cursor:
                 if !session.events.isEmpty {
                     if !session.events.contains(where: { $0.kind == .tool_call }) { return false }
                 } else {
@@ -971,6 +982,7 @@ private struct AgentBadge: View {
         case .copilot: return "CP"
         case .droid: return "D"
         case .openclaw: return "CL"
+        case .cursor: return "CR"
         }
     }
 }
@@ -2028,6 +2040,8 @@ private struct OnboardingPalette {
             return Color(red: 0.26, green: 0.72, blue: 0.38)
         case .openclaw:
             return Color(red: 0.95, green: 0.55, blue: 0.18)
+        case .cursor:
+            return Color(red: 0.20, green: 0.60, blue: 0.70)
         }
     }
 }

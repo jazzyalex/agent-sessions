@@ -1,0 +1,6 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<user_query>\nrun ls command\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Running the ls command for you."},{"type":"tool_use","name":"Shell","input":{"command":"ls -la /tmp","description":"List directory contents"}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Here are the directory contents:\n\n```\ntotal 0\ndrwxrwxrwt  12 root  wheel  384 Jan  1 00:00 .\ndrwxr-xr-x   6 root  wheel  192 Jan  1 00:00 ..\n```"}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"<user_query>\nnow show me the git status\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"[REDACTED]"},{"type":"tool_use","name":"Shell","input":{"command":"git status","description":"Check git status"}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The repository is clean — no uncommitted changes."}]}}

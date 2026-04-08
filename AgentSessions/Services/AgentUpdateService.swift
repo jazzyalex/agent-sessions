@@ -390,6 +390,8 @@ private extension AgentUpdateService {
                     .init(manager: .pip, identifier: "openclaw")
                 ]
             )
+        case .cursor:
+            return nil
         }
     }
 

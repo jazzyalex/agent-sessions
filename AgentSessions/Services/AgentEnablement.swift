@@ -64,6 +64,8 @@ enum AgentEnablement {
         case .openclaw:
             // Default OFF unless OpenClaw/Clawdbot is actually present on disk or in PATH.
             return defaults.object(forKey: PreferencesKey.Agents.openClawEnabled) as? Bool ?? isAvailable(.openclaw, defaults: defaults)
+        case .cursor:
+            return defaults.object(forKey: PreferencesKey.Agents.cursorEnabled) as? Bool ?? isAvailable(.cursor, defaults: defaults)
         }
     }
 
@@ -122,6 +124,7 @@ enum AgentEnablement {
             setEnabledInternal(.copilot, enabled: true, defaults: defaults)
             setEnabledInternal(.droid, enabled: isAvailable(.droid, defaults: defaults), defaults: defaults)
             setEnabledInternal(.openclaw, enabled: isAvailable(.openclaw, defaults: defaults), defaults: defaults)
+            setEnabledInternal(.cursor, enabled: isAvailable(.cursor, defaults: defaults), defaults: defaults)
         } else {
             // Cold start: avoid spawning the user's login shell (can be slow with heavy rc files).
             // Prefer filesystem availability checks and fall back to a fast PATH/common-locations probe.
@@ -132,6 +135,7 @@ enum AgentEnablement {
             let copilot = isAvailable(.copilot, defaults: defaults)
             let droid = isAvailable(.droid, defaults: defaults)
             let openclaw = isAvailable(.openclaw, defaults: defaults)
+            let cursor = isAvailable(.cursor, defaults: defaults)
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
@@ -140,6 +144,7 @@ enum AgentEnablement {
             setEnabledInternal(.copilot, enabled: copilot, defaults: defaults)
             setEnabledInternal(.droid, enabled: droid, defaults: defaults)
             setEnabledInternal(.openclaw, enabled: openclaw, defaults: defaults)
+            setEnabledInternal(.cursor, enabled: cursor, defaults: defaults)
         }
 
         // Guarantee at least one enabled agent.
@@ -184,6 +189,14 @@ enum AgentEnablement {
         case .openclaw:
             let custom = defaults.string(forKey: PreferencesKey.Paths.openClawSessionsRootOverride) ?? ""
             root = OpenClawSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
+        case .cursor:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.cursorSessionsRootOverride) ?? ""
+            let disc = CursorSessionDiscovery(customRoot: custom.isEmpty ? nil : custom)
+            root = disc.sessionsRoot()
+            // Also check chats root (DB-only sessions live there)
+            var isChatsDir: ObjCBool = false
+            let chatsRoot = disc.chatsRoot()
+            if fm.fileExists(atPath: chatsRoot.path, isDirectory: &isChatsDir), isChatsDir.boolValue { return true }
         }
         if fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue { return true }
         if source == .droid {
@@ -214,6 +227,8 @@ enum AgentEnablement {
             return defaults.object(forKey: PreferencesKey.Agents.droidEnabled) as? Bool
         case .openclaw:
             return defaults.object(forKey: PreferencesKey.Agents.openClawEnabled) as? Bool
+        case .cursor:
+            return defaults.object(forKey: PreferencesKey.Agents.cursorEnabled) as? Bool
         }
     }
 
@@ -231,6 +246,8 @@ enum AgentEnablement {
         case .droid: return binaryDetectedCached("droid")
         case .openclaw:
             return binaryDetectedCached("openclaw") || binaryDetectedCached("clawdbot")
+        case .cursor:
+            return binaryDetectedCached("cursor") || binaryDetectedCached("cursor-agent")
         }
     }
 
@@ -273,6 +290,8 @@ enum AgentEnablement {
             defaults.set(enabled, forKey: PreferencesKey.Agents.droidEnabled)
         case .openclaw:
             defaults.set(enabled, forKey: PreferencesKey.Agents.openClawEnabled)
+        case .cursor:
+            defaults.set(enabled, forKey: PreferencesKey.Agents.cursorEnabled)
         }
     }
 
@@ -292,6 +311,8 @@ enum AgentEnablement {
             return defaults.object(forKey: PreferencesKey.droidCLIAvailable) as? Bool
         case .openclaw:
             return nil
+        case .cursor:
+            return defaults.object(forKey: PreferencesKey.cursorCLIAvailable) as? Bool
         }
     }
 

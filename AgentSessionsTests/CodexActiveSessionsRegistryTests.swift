@@ -3389,6 +3389,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             copilotList: [],
             droidList: [],
             openclawList: [],
+            cursorList: [],
             favoritesSnapshot: UnifiedSessionIndexer.FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: [favoriteKey]),
             favoritesVersion: 1,
             enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
@@ -3398,7 +3399,8 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
                 openCode: false,
                 copilot: false,
                 droid: false,
-                openClaw: false
+                openClaw: false,
+                cursor: false
             )
         )
 
@@ -3419,6 +3421,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             copilotList: [],
             droidList: [],
             openclawList: [],
+            cursorList: [],
             favoritesSnapshot: UnifiedSessionIndexer.FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: []),
             favoritesVersion: 3,
             enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
@@ -3428,7 +3431,8 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
                 openCode: false,
                 copilot: false,
                 droid: false,
-                openClaw: false
+                openClaw: false,
+                cursor: false
             )
         )
 

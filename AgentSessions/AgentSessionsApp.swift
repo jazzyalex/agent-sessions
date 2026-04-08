@@ -159,6 +159,7 @@ struct AgentSessionsApp: App {
     @StateObject private var copilotIndexer = CopilotSessionIndexer()
     @StateObject private var droidIndexer = DroidSessionIndexer()
     @StateObject private var openclawIndexer = OpenClawSessionIndexer()
+    @StateObject private var cursorIndexer = CursorSessionIndexer()
     @StateObject private var updaterController = UpdaterController()
     @StateObject private var onboardingCoordinator = OnboardingCoordinator()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
@@ -229,7 +230,8 @@ struct AgentSessionsApp: App {
                     opencodeIndexer: opencodeIndexer,
                     copilotIndexer: copilotIndexer,
                     droidIndexer: droidIndexer,
-                    openclawIndexer: openclawIndexer
+                    openclawIndexer: openclawIndexer,
+                    cursorIndexer: cursorIndexer
                 )
                 let layoutMode = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
                 UnifiedSessionsView(
@@ -241,6 +243,7 @@ struct AgentSessionsApp: App {
                     copilotIndexer: copilotIndexer,
                     droidIndexer: droidIndexer,
                     openclawIndexer: openclawIndexer,
+                    cursorIndexer: cursorIndexer,
                     analyticsReady: analyticsReady,
                     analyticsPhase: analyticsPhase,
                     analyticsIsStale: analyticsStale,
@@ -312,6 +315,7 @@ struct AgentSessionsApp: App {
                             copilotIndexer: copilotIndexer,
                             droidIndexer: droidIndexer,
                             openclawIndexer: openclawIndexer,
+                            cursorIndexer: cursorIndexer,
                             codexUsageModel: codexUsageModel,
                             claudeUsageModel: claudeUsageModel
                         )
@@ -383,7 +387,8 @@ struct AgentSessionsApp: App {
                         opencodeIndexer: opencodeIndexer,
                         copilotIndexer: copilotIndexer,
                         droidIndexer: droidIndexer,
-                        openclawIndexer: openclawIndexer
+                        openclawIndexer: openclawIndexer,
+                        cursorIndexer: cursorIndexer
                     )
                 )
                 .environmentObject(archiveManager)
@@ -432,7 +437,8 @@ final class _UnifiedHolder: ObservableObject {
                      opencodeIndexer: OpenCodeSessionIndexer,
                      copilotIndexer: CopilotSessionIndexer,
                      droidIndexer: DroidSessionIndexer,
-                     openclawIndexer: OpenClawSessionIndexer) -> UnifiedSessionIndexer {
+                     openclawIndexer: OpenClawSessionIndexer,
+                     cursorIndexer: CursorSessionIndexer) -> UnifiedSessionIndexer {
         if let u = unified { return u }
         let u = UnifiedSessionIndexer(codexIndexer: codexIndexer,
                                       claudeIndexer: claudeIndexer,
@@ -440,7 +446,8 @@ final class _UnifiedHolder: ObservableObject {
                                       opencodeIndexer: opencodeIndexer,
                                       copilotIndexer: copilotIndexer,
                                       droidIndexer: droidIndexer,
-                                      openclawIndexer: openclawIndexer)
+                                      openclawIndexer: openclawIndexer,
+                                      cursorIndexer: cursorIndexer)
         unified = u
         return u
     }
@@ -521,7 +528,8 @@ extension AgentSessionsApp {
             opencodeIndexer: opencodeIndexer,
             copilotIndexer: copilotIndexer,
             droidIndexer: droidIndexer,
-            openclawIndexer: openclawIndexer
+            openclawIndexer: openclawIndexer,
+            cursorIndexer: cursorIndexer
         )
     }
 
@@ -958,6 +966,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         copilotIndexer: CopilotSessionIndexer,
         droidIndexer: DroidSessionIndexer,
         openclawIndexer: OpenClawSessionIndexer,
+        cursorIndexer: CursorSessionIndexer,
         codexUsageModel: CodexUsageModel,
         claudeUsageModel: ClaudeUsageModel
     ) {
@@ -972,6 +981,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
             copilotIndexer: copilotIndexer,
             droidIndexer: droidIndexer,
             openclawIndexer: openclawIndexer,
+            cursorIndexer: cursorIndexer,
             codexUsageModel: codexUsageModel,
             claudeUsageModel: claudeUsageModel
         )
@@ -1061,6 +1071,7 @@ private struct OnboardingWindowState {
     let copilotIndexer: CopilotSessionIndexer
     let droidIndexer: DroidSessionIndexer
     let openclawIndexer: OpenClawSessionIndexer
+    let cursorIndexer: CursorSessionIndexer
     let codexUsageModel: CodexUsageModel
     let claudeUsageModel: ClaudeUsageModel
 }
@@ -1080,6 +1091,7 @@ private struct OnboardingWindowRoot: View {
             copilotIndexer: state.copilotIndexer,
             droidIndexer: state.droidIndexer,
             openclawIndexer: state.openclawIndexer,
+            cursorIndexer: state.cursorIndexer,
             codexUsageModel: state.codexUsageModel,
             claudeUsageModel: state.claudeUsageModel
         )

@@ -20,6 +20,8 @@ extension Color {
     static let agentDroid: Color = TranscriptColorSystem.agentBrandAccent(source: .droid)
     /// OpenClaw brand color
     static let agentOpenClaw: Color = TranscriptColorSystem.agentBrandAccent(source: .openclaw)
+    /// Cursor brand color
+    static let agentCursor: Color = TranscriptColorSystem.agentBrandAccent(source: .cursor)
 
     // MARK: - Monochrome Support
 
@@ -31,6 +33,7 @@ extension Color {
     static let agentCopilotGray = Color(white: 0.75) // Very light gray
     static let agentDroidGray = Color(white: 0.8)
     static let agentOpenClawGray = Color(white: 0.85)
+    static let agentCursorGray = Color(white: 0.9)
 
     /// Get the brand color for a given session source
     static func agentColor(for source: SessionSource) -> Color {
@@ -42,6 +45,7 @@ extension Color {
         case .copilot: return .agentCopilot
         case .droid: return .agentDroid
         case .openclaw: return .agentOpenClaw
+        case .cursor: return .agentCursor
         }
     }
 
@@ -56,6 +60,7 @@ extension Color {
             case .copilot: return .agentCopilotGray
             case .droid: return .agentDroidGray
             case .openclaw: return .agentOpenClawGray
+            case .cursor: return .agentCursorGray
             }
         } else {
             return agentColor(for: source)

@@ -170,6 +170,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                includeCopilot: Bool,
                includeDroid: Bool,
                includeOpenClaw: Bool,
+               includeCursor: Bool,
                enableDeepScan: Bool,
                all: [Session]) {
         // Cancel any in-flight search
@@ -189,6 +190,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             if includeCopilot { set.insert(.copilot) }
             if includeDroid { set.insert(.droid) }
             if includeOpenClaw { set.insert(.openclaw) }
+            if includeCursor { set.insert(.cursor) }
             return set
         }()
         
@@ -203,7 +205,10 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
         // Phase 0: fast path via SQLite FTS if available.
         if FeatureFlags.enableFTSSearch, let db = db {
-            let allowedRaw = allowed.map { $0.rawValue }
+            // Cursor sessions are not indexed in the FTS database — exclude from FTS queries
+            // so they fall through to the unindexed/legacy transcript-cache search path.
+            let ftsAllowed = allowed.filter { $0 != .cursor }
+            let allowedRaw = ftsAllowed.map { $0.rawValue }
             let parsed = FilterEngine.parseOperators(filters.query)
             let freeText = parsed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
             let effectiveFTSQuery = Self.makeInstantFTSQuery(from: freeText)
@@ -317,9 +322,11 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                         }
                     }
 
-                    let unindexedCandidates = enableDeepScan
-                        ? candidates.filter { !indexedIDs.contains($0.id) && !seen.contains($0.id) }
-                        : []
+                    // Always include Cursor sessions in unindexed candidates (they have no FTS index).
+                    // For other sources, only scan unindexed sessions when deep scan is enabled.
+                    let unindexedCandidates = candidates.filter {
+                        !indexedIDs.contains($0.id) && !seen.contains($0.id) && (enableDeepScan || $0.source == .cursor)
+                    }
                     let deepCandidates = deepEnabled
                         ? candidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
                         : []

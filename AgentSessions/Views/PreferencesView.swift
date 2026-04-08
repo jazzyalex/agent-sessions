@@ -62,6 +62,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.openCodeCLIAvailable) var openCodeCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.copilotCLIAvailable) var copilotCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.droidCLIAvailable) var droidCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.cursorCLIAvailable) var cursorCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
@@ -70,6 +71,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Agents.copilotEnabled) var copilotAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.droidEnabled) var droidAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openClawEnabled) var openClawAgentEnabled: Bool = false
+    @AppStorage(PreferencesKey.Agents.cursorEnabled) var cursorAgentEnabled: Bool = true
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -204,7 +206,7 @@ struct PreferencesView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selectedTab) {
-                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI }, id: \.self) { tab in
+                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -213,7 +215,7 @@ struct PreferencesView: View {
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
-                ForEach([PreferencesTab.openClawCLI], id: \.self) { tab in
+                ForEach([PreferencesTab.openClawCLI, .cursor], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -350,6 +352,8 @@ struct PreferencesView: View {
                 droidCLITab
             case .openClawCLI:
                 openClawCLITab
+            case .cursor:
+                cursorTab
             case .about:
                 aboutTab
             }
@@ -797,6 +801,7 @@ struct PreferencesView: View {
         case .copilot: scheduleCopilotProbe()
         case .droid: scheduleDroidProbe()
         case .openclaw: scheduleOpenClawProbe()
+        case .cursor: break
         }
     }
 
@@ -816,6 +821,8 @@ struct PreferencesView: View {
             return droidResolvedPath
         case .openclaw:
             return openClawResolvedPath
+        case .cursor:
+            return nil
         }
     }
 
@@ -842,6 +849,8 @@ struct PreferencesView: View {
         case .openclaw:
             let value = openClawBinaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .cursor:
+            return nil
         }
     }
 
@@ -972,6 +981,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case copilotCLI
     case droidCLI
     case openClawCLI
+    case cursor
     case about
 
     var id: String { rawValue }
@@ -992,6 +1002,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .copilotCLI: return "GitHub Copilot CLI"
         case .droidCLI: return "Droid"
         case .openClawCLI: return "OpenClaw"
+        case .cursor: return "Cursor"
         case .about: return "About"
         }
     }
@@ -1012,6 +1023,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .copilotCLI: return "bolt.horizontal.circle"
         case .droidCLI: return "d.circle"
         case .openClawCLI: return "o.circle"
+        case .cursor: return "cursorarrow.rays"
         case .about: return "info.circle"
         }
     }
@@ -1019,7 +1031,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Agents → About
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI, .openClawCLI, .about] }
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI, .openClawCLI, .cursor, .about] }
 }
 
 // MARK: - Probe helpers
@@ -1171,7 +1183,7 @@ extension PreferencesView {
             if droidVersionString == nil && droidProbeState != .probing { probeDroid() }
         case .openClawCLI:
             if openClawVersionString == nil && openClawProbeState != .probing { probeOpenClaw() }
-        case .menuBar, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
+        case .cursor, .menuBar, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
     }
