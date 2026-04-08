@@ -107,7 +107,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(titles[4], "Feedback & Community Support")
     }
 
-    func testReleaseThreeUpdateCatalogHasTwoScreenTour() {
+    func testReleaseThreeUpdateCatalogHasThreeScreenTour() {
         let updateTour = OnboardingContent.updateTour(for: "3.0")
 
         XCTAssertEqual(updateTour?.kind, .updateTour)

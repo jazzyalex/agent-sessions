@@ -150,9 +150,11 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         XCTAssertTrue(screens.isEmpty)
     }
 
-    func testFallbackUpdateTourForVersion3_2_includesNewProviderScreen() {
-        let content = OnboardingContent.fallbackUpdateTour(for: "3.2")
+    func testUpdateTourForVersion3_2_includesNewProviderScreen() {
+        // Exercise the same path OnboardingCoordinator uses at runtime
+        let content = OnboardingContent.updateTour(for: "3.2")
+            ?? OnboardingContent.fallbackUpdateTour(for: "3.2")
         let hasNewAgentScreen = content.screens.contains { $0.title == "New Agent Support" }
-        XCTAssertTrue(hasNewAgentScreen, "Fallback tour for 3.2 should include New Agent Support slide")
+        XCTAssertTrue(hasNewAgentScreen, "Update tour for 3.2 should include New Agent Support slide")
     }
 }
