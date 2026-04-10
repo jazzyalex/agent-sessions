@@ -9,7 +9,7 @@
 </td>
 <td>
 
-**Unified session browser for Codex CLI, Claude Code, Gemini CLI, GitHub Copilot CLI, Droid (Factory CLI), and OpenCode.**
+**Unified session browser for Codex CLI, Claude Code, Cursor, Gemini CLI, GitHub Copilot CLI, Droid (Factory CLI), and OpenCode.**
 Search, browse, and resume your past AI-coding sessions in a local-first macOS app.
 
 </td>
@@ -21,7 +21,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.5/AgentSessions-3.5.dmg"><b>Download Agent Sessions 3.5 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6/AgentSessions-3.6.dmg"><b>Download Agent Sessions 3.6 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -44,13 +44,11 @@ Agent Sessions helps you search across large session histories, quickly find the
   <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI, Claude Code, and OpenCode sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
 
-## What's New in 3.5
+## What's New in 3.6
 
-**TL;DR** — Export as Markdown, faster analytics, and a wave of concurrency and thread-safety fixes.
+**TL;DR** — Cursor IDE/CLI joins as the 8th session provider, plus automatic new-provider detection.
 
-**Highlights:** Export any session transcript as a `.md` file straight from the toolbar. Analytics index building now derives from `session_meta` instead of file parsing, cutting index time significantly. Under the hood: Swift 6 concurrency compliance, `NSLock`-protected date formatters, reliable image browser clicks, and reduced SwiftUI body evaluations for lower CPU usage.
-
-**Highlights:** Codex subagent sessions now nest under their parent in the unified session list (`Cmd+H` to toggle). Agent Cockpit shows a live subagent count badge per session. Performance fix eliminates a CPU drain in session rows. SQL queries are fully parameterized throughout.
+**Highlights:** Browse, search, and resume your Cursor AI sessions alongside every other agent. Agent Sessions now reads Cursor's JSONL transcripts and SQLite chat databases from `~/.cursor/`, with full support for subagent hierarchy. A new discoverability banner appears when a newly supported agent is found on disk, and the update tour auto-generates a slide so you never miss a new provider.
 
 ## Core Features
 
@@ -95,7 +93,7 @@ Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Cod
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.5.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.5/AgentSessions-3.5.dmg)
+1. [Download AgentSessions-3.6.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.6/AgentSessions-3.6.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
@@ -124,7 +122,7 @@ open "/Applications/Agent Sessions.app"
 
 ## Resume Workflows
 
-- Right-click any Claude, Codex, OpenCode, Copilot, or Gemini session and choose **Copy Resume Command** to get the exact CLI command for that session.
+- Right-click any Claude, Codex, Cursor, OpenCode, Copilot, or Gemini session and choose **Copy Resume Command** to get the exact CLI command for that session.
 - Open a session in your preferred terminal (Terminal.app or iTerm).
 - Use Unified Search (across sessions) and Find (within a session) to jump to relevant tool calls and outputs quickly.
 
@@ -136,6 +134,7 @@ open "/Applications/Agent Sessions.app"
   - `~/.claude/sessions`
   - `~/.gemini/tmp`
   - `~/.copilot/session-state`
+  - `~/.cursor/projects` and `~/.cursor/chats`
   - `~/.factory/sessions` and `~/.factory/projects`
   - `~/.local/share/opencode/opencode.db` and `~/.local/share/opencode/storage/session`
 - Details: `docs/PRIVACY.md` and `docs/security.md`
