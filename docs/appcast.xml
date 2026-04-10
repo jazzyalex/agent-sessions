@@ -3,41 +3,35 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.5</title>
-            <pubDate>Mon, 06 Apr 2026 17:10:52 -0700</pubDate>
+            <title>3.6</title>
+            <pubDate>Thu, 09 Apr 2026 21:54:46 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.5</h2>
+<h2>What&#x27;s New in 3.6</h2>
 <h3>Features</h3>
 <ul>
-<li>Transcript toolbar: Export as Markdown button for saving session transcripts as `.md` files.</li>
-</ul>
-<h3>Improvements</h3>
-<ul>
-<li>Analytics: Index building now derives from `session_meta` instead of file parsing, significantly reducing work.</li>
-<li>SwiftUI: Eliminated redundant body evaluations and cached date formatters to reduce CPU usage.</li>
+<li>Cursor: Cursor IDE/CLI added as 8th session provider — imports JSONL agent transcripts and SQLite chat databases from `~/.cursor/`. Supports session browsing, search, transcript viewing, subagent hierarchy, and resume command. No Cockpit support in this release.</li>
+<li>Discoverability: New-provider detection banner appears in the sessions view when a newly supported agent is found on disk but not yet enabled, prompting users to turn it on.</li>
+<li>Onboarding: Update tour now auto-generates a slide for newly available providers, so users see what&#x27;s new without digging into preferences.</li>
+<li>Session sources: `versionIntroduced` and `featureDescription` metadata added to session source model for use in discoverability and onboarding flows.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
+<li>Cursor: Subagent metadata (`parentSessionID`, `subagentType`) now preserved during CursorSessionIndexer session merges.</li>
+<li>Reliability: Replaced unbounded `waitUntilExit` with bounded `Process.waitForExit` across CLI integrations (Codex, Gemini, Preferences), preventing potential hangs on unresponsive child processes.</li>
+</ul>
+<h3>Reminder: What You Got in 3.5</h3>
+<ul>
+<li>Transcript toolbar: Export as Markdown button for saving session transcripts as `.md` files.</li>
 <li>Analytics: Index now auto-builds on view appear; suppressed probe cleanup double-refresh.</li>
 <li>Concurrency: Captured mutable vars as `let` before `MainActor.run` for Swift 6 strict concurrency compliance.</li>
 <li>Unified view: Restored `@ObservedObject` for Gemini indexer in `UnifiedSessionsView`.</li>
-<li>Thread safety: Added `NSLock` around cached date formatters in `ClaudeSessionParser` and `SessionIndexer`.</li>
-<li>Image Browser: Inline image click now handled in `mouseDown` for reliable open behavior.</li>
-<li>Preview.app: Use `/usr/bin/open` instead of `NSWorkspace` API to launch Preview reliably.</li>
 </ul>
-<h3>Reminder: What You Got in 3.4</h3>
-<ul>
-<li>Session list: Codex subagent sessions now appear as nested children under their parent in the unified session list. A toggle shows or hides the hierarchy; `Cmd+H` controls visibility from the keyboard.</li>
-<li>Agent Cockpit: Active Codex subagent count badge added to HUD rows. `Cmd+Shift+S` toggles subagent display.</li>
-<li>Agent Cockpit HUD: Codex active subagent badges now use the runtime `thread_spawn` state DB when available, so open worker agents stay counted even when their rollout files go quiet; passive rollout/`lsof` heuristics remain as a fallback.</li>
-<li>Agent Cockpit HUD: Codex runtime subagent counts now resolve the parent session before runtime edge lookup (even when the primary log path is a child rollout), and runtime state DB discovery now honors `CODEX_HOME`/`SessionsRootOverride` before falling back to `~/.codex`.</li>
-</ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.5">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.5</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6</a></p>
             ]]></description>
-            <sparkle:version>35</sparkle:version>
-            <sparkle:shortVersionString>3.5</sparkle:shortVersionString>
+            <sparkle:version>36</sparkle:version>
+            <sparkle:shortVersionString>3.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.5/AgentSessions-3.5.dmg" length="15302956" type="application/octet-stream" sparkle:edSignature="K+4feRRFs6PgkbcMZiwER3uV40MwQHL1n/kMCn6HpD5C1iLz0yHo5fohYQduwEq7gaJNUFngdbn6M9FVMrQABA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6/AgentSessions-3.6.dmg" length="15513211" type="application/octet-stream" sparkle:edSignature="3cPNTaLxnqARpYsgQsPEj7AHHPflR83wgzVouGEY7ms8xMa25nJksKFu/6U4eaBKVkbMbFUuRqqXFsdViNHFAQ=="/>
         </item>
     </channel>
 </rss>
