@@ -52,8 +52,8 @@ bump is committed.
 
 ### Non-goals
 
-- **NG1.** Fully automated unattended prebump for all 7 agents. OpenCode,
-  Copilot, and OpenClaw need design work (sandboxing, auth tokens, channel
+- **NG1.** Fully automated unattended prebump for all 7 agents. OpenCode
+  and OpenClaw need design work (sandboxing, provider credentials, channel
   routing) that is out of scope for v1.
 - **NG2.** Replacing the weekly on-disk scan. We are *augmenting* it with a
   staleness flag; the on-disk fingerprint is still the first line of
@@ -92,9 +92,34 @@ Added to `results.<agent>.evidence`:
   "sample_older_than_cli":       true,
   "sample_older_than_window":    false,
   "is_stale":                    true,
-  "stale_reason":                "sample_predates_cli_upgrade"
+  "stale_reason":                "sample_older_than_cli",
+  "mode_context":                "normal"
 }
 ```
+
+`stale_reason` describes the **cause** and is orthogonal to run mode. The
+defined values are:
+
+- `sample_older_than_cli` — signal 1 fired (sample predates the installed
+  binary).
+- `sample_older_than_window` — signal 2 fired (sample older than the
+  freshness window).
+- `cli_binary_unresolved` — `shutil.which` could not resolve the binary,
+  so signal 1 is unavailable; staleness falls back to the window alone.
+- `forced_fresh` — the operator passed `--force-fresh` (§4.2); staleness
+  is suppressed for this run and the field records that override.
+- (null) — not stale.
+
+`mode_context` records how the scanner was invoked and is orthogonal to
+the cause:
+
+- `normal` — standard weekly run, `installed` was queried.
+- `skip_update` — `--skip-update` was passed; `installed` was not
+  queried but staleness detection still ran (see §3.2 interaction note).
+
+Both fields are always present; the split means the same underlying
+failure (`shutil.which` miss) reports a single consistent cause regardless
+of whether `--skip-update` was in effect.
 
 `evidence.schema_matches_baseline` stays as-is (it continues to describe
 *this sample*). A new parallel field is added:
@@ -125,35 +150,56 @@ Two independent signals, OR'd together:
 
 **Why binary mtime** (not a recorded upgrade timestamp or package-manager
 install time): every one of the 7 agents is installed via a mix of
-`brew` / `npm` / `cargo` / custom installers, and their binary's inode
-`mtime` is updated atomically by every installer when the executable is
-replaced. It is the single portable signal that survives all install paths
-and does not require a separate state file. A recorded
-`~/.config/agent-sessions/agent-watch/install-timestamps.json` was
-considered and rejected — it adds a new source of drift and fails closed
-on first-run. Binary mtime is a strict lower bound on "when the user
-switched to this version" and is already what everyone uses for
-`which` / `ls -l` debugging.
+`brew` / `npm` / `cargo` / custom installers. Under common installer
+behavior the binary's inode `mtime` is refreshed when the executable is
+replaced, which makes it the **best-available portable signal** that
+survives all install paths without requiring a separate state file. A
+recorded `~/.config/agent-sessions/agent-watch/install-timestamps.json`
+was considered and rejected — it adds a new source of drift and fails
+closed on first-run. Binary mtime is what everyone already uses for
+`which` / `ls -l` debugging, so it is the signal least likely to surprise
+an operator reading a stale-evidence report.
+
+**Known limitations (mtime trust boundary).** Binary mtime is sound under
+brew / npm / cargo / direct-download installers but is **not** a strict
+lower bound on "when the user switched to this version." Documented
+failure modes where the signal lies:
+
+- **Wrapper script on PATH.** `shutil.which` resolves a shell wrapper
+  whose mtime reflects the wrapper, not the underlying binary the wrapper
+  execs. The mtime check reports the age of the wrapper.
+- **mtime-preserving install.** `cp -p`, `install -p`, `rsync --times`,
+  and some self-updaters copy the new binary with the upstream build
+  time, so the inode mtime can be *older* than the local upgrade event.
+- **PATH shadowing.** A stale binary earlier on `PATH` shadows a freshly
+  installed one elsewhere; `shutil.which` returns the shadow and reports
+  its mtime, not the real one.
+
+Operators who hit any of these cases can use `--force-fresh` (§4.2) to
+override staleness for a single run. There is no persistent override; the
+next run re-evaluates from scratch.
 
 **Why a freshness window fallback:** binary mtime alone is too lenient for
 agents the user doesn't run often. If droid was upgraded 90 days ago and the
 newest sample is 60 days old, signal 1 reports "fresh" — but the sample is
 unlikely to exercise anything the user cares about. The 14-day window is a
-defensive backstop; it can be relaxed per-agent for cold ones (e.g. copilot).
+defensive backstop; it can be relaxed per-agent for cold ones (e.g. droid).
 
 If `shutil.which` cannot resolve the binary, `cli_binary_mtime_utc` is
 `null`, `sample_older_than_cli` is `null`, and staleness falls back to the
-freshness window alone. This is recorded in `stale_reason` as
-`cli_binary_unresolved`.
+freshness window alone. `stale_reason` is set to `cli_binary_unresolved`
+regardless of run mode.
 
 **Interaction with `--skip-update`.** When the weekly scanner runs with
 `--skip-update`, `installed` is never queried, but staleness detection
 still runs using whatever binary `shutil.which` resolves on `PATH` — the
 binary mtime is cheap to stat and the user's "agents already updated
 locally" assertion does not contradict it. If `shutil.which` succeeds,
-`sample_older_than_cli` is computed normally; if it fails, staleness falls
-back to the freshness window alone with `stale_reason = "installed_skipped"`.
-The `sample_freshness` block is never nulled out — it remains the signal
+`sample_older_than_cli` is computed normally; if it fails, `stale_reason`
+is `cli_binary_unresolved` (same cause as the normal-mode miss). The run
+mode is recorded separately in `mode_context = "skip_update"`, so the
+same underlying failure never gets two different labels. The
+`sample_freshness` block is never nulled out — it remains the signal
 that catches the codex-style trap even when upstream checks are skipped.
 
 ### 3.3 Severity / recommendation impact
@@ -183,12 +229,16 @@ In `_pick_severity` + the post-pick override in `main()`:
 
 ### 3.4 Stdout one-liner
 
-The per-agent weekly summary line gains a `stale=true|false` token and,
-when stale, a short reason:
+The per-agent weekly summary line gains a `stale=true|false` token with a
+short reason in parentheses whenever a reason is available (stale runs,
+and the `forced_fresh` override):
 
 ```
 codex: severity=medium verified=0.119.0 installed=0.120.0 upstream=0.120.0
-       rec=run_prebump_validator stale=true(sample_predates_cli_upgrade)
+       rec=run_prebump_validator stale=true(sample_older_than_cli)
+
+codex: severity=low verified=0.119.0 installed=0.120.0 upstream=0.120.0
+       rec=bump_verified_version stale=false(forced_fresh)
 ```
 
 ---
@@ -216,11 +266,26 @@ optional — not required for v1.
 ```
 ./scripts/agent_watch.py --mode prebump [--agent codex] [--agent claude] ...
                          [--keep-sandbox] [--timeout-seconds 180]
+                         [--force-fresh] [--allow-real-home]
                          [--config docs/agent-support/agent-watch-config.json]
 ```
 
 - `--agent` is repeatable; default is "all agents that have a
   `prebump.driver` entry in the config".
+- `--force-fresh` — skip staleness evaluation for this run and treat the
+  installed CLI as definitively fresh. Use when the operator knows an
+  mtime-preserving install just happened or has verified freshness out of
+  band (see "Known limitations" in §3.2). The run records
+  `stale_reason = "forced_fresh"` in every affected `sample_freshness`
+  block and the stdout one-liner (§3.4) prints
+  `stale=false(forced_fresh)` so the override is visible in every
+  downstream artifact. Not persistent; the next run re-evaluates.
+- `--allow-real-home` — opt-in escape hatch for the copilot hermeticity
+  gate (§4.4). Without this flag, a detected sandbox leak under
+  `home_override` is a hard failure with exit code `4`. With it, the
+  driver continues in `real_home` mode for the affected agent for this
+  run only. **Use only if you understand your real config dir will be
+  mutated.** Never automatic, never silent, never persistent across runs.
 - Exit codes:
   - `0` — every requested agent produced a fresh session and
     `fresh_session_matches_baseline == true`.
@@ -228,7 +293,10 @@ optional — not required for v1.
     does **not** match baseline (this is the "do not bump" signal).
   - `3` — at least one agent's prebump driver failed before producing a
     session (CLI error, auth missing, timeout, no headless mode).
-  - `4` — config / invariant error (unknown agent, missing driver).
+  - `4` — config / invariant error **or sandbox breach**. Covers unknown
+    agent, missing driver, credential-copy hygiene failure (§4.4), and
+    the copilot `home_override` sandbox-leak assertion when
+    `--allow-real-home` was not passed.
 - Intended use from a pre-commit or manual workflow:
   ```
   ./scripts/agent_watch.py --mode prebump --agent codex --agent claude \
@@ -304,6 +372,32 @@ Two modes, both selected per-agent:
    a CI or env-var-driven setup bypass credential files entirely. Copied
    credentials live only inside the temp sandbox and are removed with it;
    the duplication is brief and bounded.
+
+   **Credential-copy hygiene checks.** Before copying any credential file
+   into the sandbox the driver runs these gates, in order, and aborts with
+   exit code `4` on any hard failure:
+
+   1. **Max size.** Reject any candidate file larger than **64 KiB** per
+      file. Credential files (`auth.json`, `.credentials.json`, OAuth
+      token blobs) are all well under this. Oversize implies the path
+      was misconfigured and is pointing at a log, a database, or a
+      history file — copying it would be both a hygiene failure and a
+      privacy leak. Abort with a clear error naming the offending path.
+   2. **Permission check.** Require file mode `0600` or stricter (owner
+      read/write only, no group, no world). If the file is group- or
+      world-readable the driver refuses to copy it and tells the operator
+      to `chmod 600 <path>`. This prevents the validator from silently
+      handling a credential that was never meant to be machine-readable
+      by anything but the owning process.
+   3. **Max age warning.** If the credential file's mtime is older than
+      **90 days**, log a visible `WARNING` (one line on stderr, also
+      recorded in the driver's `stderr_file`) that the credential may
+      have expired. This is a warning, not a failure — stale auth
+      usually surfaces as an opaque CLI error later, and raising it here
+      lets the operator diagnose at the right layer.
+
+   All three gates apply per-file for every credential in the declared
+   list; a single failure aborts the whole prebump run for that agent.
 2. **`real_home`** (fallback): run the agent against the user's real HOME,
    then pick up the resulting session by mtime under the standard
    discovery path. Used for agents whose auth is too entangled to sandbox
@@ -388,13 +482,18 @@ minimum proposed invocation — none were executed.
   `--allow-all-tools` (or `COPILOT_ALLOW_ALL=1`) is required.
   `--config-dir` overrides `~/.copilot` directly, which makes sandboxing
   trivial — this is why copilot is v1 despite being the motivating trap.
-  **Implementation gate:** the copilot driver runs a one-shot sandbox-leak
-  check on its first invocation (post-run `find ~/.copilot -newer
-  <sandbox-start-marker>`); if any file in real HOME was touched, the
-  driver fails with a loud diagnostic and copilot drops to `real_home`
-  mode for the remainder of v1. This converts the "is `--config-dir`
-  hermetic?" question from a design blocker into a runtime assertion
-  that fails closed.
+  **Implementation gate (fail-closed, no auto-downgrade).** Every copilot
+  driver invocation runs a sandbox-leak assertion: before launch it marks
+  a start timestamp, and after the run it stats every file under real
+  `~/.copilot` with `find ~/.copilot -newer <marker>`. If any file in
+  real HOME was modified during the run the driver **hard-fails with
+  exit code 4** (sandbox breach) and emits a loud diagnostic naming the
+  polluted paths. There is no silent downgrade. An operator who has read
+  the diagnostic and accepts the consequences can rerun with the
+  explicit `--allow-real-home` flag (§4.2), which allows the affected
+  run to continue against real HOME for that invocation only. The
+  override is never automatic, never silent, and never persistent across
+  runs — the next prebump run re-asserts hermeticity from scratch.
 - **opencode.** `opencode run "<message>" --format json` exists. Storage is
   a multi-file tree under `~/.local/share/opencode/storage/`; the tree root
   can in theory be relocated via `XDG_DATA_HOME`, but we have not
@@ -470,24 +569,49 @@ minimum proposed invocation — none were executed.
    if an agent's API-key env var is already set in the parent environment
    the driver forwards it and never touches real HOME; otherwise the
    driver copies the minimum credential files from real HOME into the
-   temp sandbox, which is torn down on exit. Rationale: least surprise
-   for a local developer who already has a working OAuth / ChatGPT
-   session, plus a clean escape hatch for anyone running with API keys.
-   See §4.4.
-5. **Copilot `--config-dir` hermeticity — resolved (runtime gate).** We
-   ship copilot as v1 under `home_override`, and the copilot driver runs
-   a one-shot sandbox-leak assertion on its first invocation — if any
-   file under real `~/.copilot` was modified during the run, the driver
-   fails loudly and downgrades copilot to `real_home` mode for the rest
-   of v1. Rationale: we were told not to run the CLI during design, so
-   the design cannot prove `--config-dir` is hermetic; a fail-closed
-   runtime check during v1 implementation is the correct place to verify
-   it, and the verification does not block planning. See §5 copilot note.
+   temp sandbox, which is torn down on exit. Every copied file passes
+   three hygiene gates before the copy: max size 64 KiB (reject larger,
+   exit 4), mode `0600` or stricter (reject world/group readable, exit
+   4), and a visible WARNING if mtime is older than 90 days (non-fatal).
+   Rationale: least surprise for a local developer who already has a
+   working OAuth / ChatGPT session, plus a clean escape hatch for anyone
+   running with API keys, plus explicit guardrails so a misconfigured
+   credential list cannot smuggle a log or history file into the
+   sandbox. See §4.4.
+5. **Copilot `--config-dir` hermeticity — resolved (fail-closed runtime
+   gate).** We ship copilot as v1 under `home_override`, and every
+   copilot driver invocation runs a sandbox-leak assertion. If any file
+   under real `~/.copilot` is modified during the run the driver
+   hard-fails with exit code `4` (sandbox breach) and emits a loud
+   diagnostic. There is **no automatic, silent, or persistent downgrade
+   to `real_home`**. An operator who reads the diagnostic and accepts
+   the consequences can rerun with the explicit `--allow-real-home`
+   flag, which permits `real_home` mode for that invocation only. The
+   next run re-asserts hermeticity from scratch. Rationale: we were
+   told not to run the CLI during design, so the design cannot prove
+   `--config-dir` is hermetic; a fail-closed runtime check is the
+   correct place to verify it, and forcing an explicit opt-in per run
+   keeps the "my real config dir might be mutated" decision in the
+   operator's hands every time. See §5 copilot note and §4.2.
 6. **`--skip-update` interaction — resolved.** Staleness detection keeps
    running under `--skip-update`. `sample_older_than_cli` is computed from
-   whatever `shutil.which` resolves (cheap, local); if `which` fails,
-   staleness falls back to the freshness window alone with
-   `stale_reason = "installed_skipped"`. `sample_freshness` is never
-   nulled out. Rationale: the whole point of the freshness signal is to
-   catch the codex trap even when the user *thinks* they are up to date,
-   which is exactly the scenario `--skip-update` is asserting. See §3.2.
+   whatever `shutil.which` resolves (cheap, local). `stale_reason`
+   carries the **cause** (`cli_binary_unresolved` when `which` fails)
+   and `mode_context` separately carries the **mode**
+   (`skip_update`), so the same underlying failure never gets two
+   different labels. `sample_freshness` is never nulled out. Rationale:
+   the whole point of the freshness signal is to catch the codex trap
+   even when the user *thinks* they are up to date, which is exactly
+   the scenario `--skip-update` is asserting. See §3.1 and §3.2.
+7. **Binary mtime trust boundary — resolved.** Binary mtime is the
+   best-available portable signal, sound under brew / npm / cargo /
+   direct-download installers, but it is not a strict lower bound on
+   "when the user switched to this version." Documented failure modes
+   (wrapper scripts on PATH, mtime-preserving installs via `cp -p` /
+   `install -p` / `rsync --times`, PATH shadowing) are enumerated in
+   §3.2 "Known limitations." Operators who hit one of these can pass
+   `--force-fresh` (§4.2) to override staleness for a single run; the
+   override records `stale_reason = "forced_fresh"` in the report and
+   the stdout one-liner, and does not persist. Rationale: keep the
+   trust model honest about what the signal actually proves, and
+   surface a per-run escape hatch rather than a persistent opt-out.
