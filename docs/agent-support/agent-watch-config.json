@@ -229,7 +229,14 @@
           ],
           "glob": "**/*.jsonl",
           "required_types": ["session", "message"],
-          "max_lines": 2500
+          "max_lines": 2500,
+          "exclude_globs": [
+            "backup",
+            "*/backup/*",
+            "*.jsonl.reset.*",
+            "*.jsonl.deleted.*",
+            "*.jsonl.lock"
+          ]
         },
         "discovery_path_contract": {
           "description": "OpenClaw sessions should resolve to agents/<id>/sessions/*.jsonl.",

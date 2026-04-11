@@ -214,7 +214,30 @@ def _safe_relpath(path: Path) -> str:
         return str(path)
 
 
-def _newest_file(roots: list[str], glob: str) -> Path | None:
+def _path_matches_any_exclude(path: Path, exclude_globs: list[str] | None) -> bool:
+    """Return True if *path* matches any of the provided fnmatch-style globs.
+
+    Matching is performed against both the full POSIX path and against each
+    individual path component so patterns like ``backup`` or ``**/backup/**``
+    both work. This is used by the weekly local-schema selector to skip
+    backup/reset snapshots that the Swift-side discovery does not surface.
+    """
+    if not exclude_globs:
+        return False
+    import fnmatch
+    posix = path.as_posix()
+    for pattern in exclude_globs:
+        if not isinstance(pattern, str) or not pattern:
+            continue
+        if fnmatch.fnmatch(posix, pattern):
+            return True
+        for part in path.parts:
+            if fnmatch.fnmatch(part, pattern):
+                return True
+    return False
+
+
+def _newest_file(roots: list[str], glob: str, exclude_globs: list[str] | None = None) -> Path | None:
     candidates: list[Path] = []
     for r in roots:
         root = _expand_path(r)
@@ -229,6 +252,8 @@ def _newest_file(roots: list[str], glob: str) -> Path | None:
         except OSError:
             continue
         if not p.is_file():
+            continue
+        if _path_matches_any_exclude(p, exclude_globs):
             continue
         if st.st_mtime > newest_mtime:
             newest = p
@@ -260,14 +285,20 @@ def _jsonl_contains_any_type(path: Path, required_types: set[str], max_lines: in
     return False
 
 
-def _newest_file_with_types(roots: list[str], glob: str, required_types: list[str], max_lines: int) -> Path | None:
+def _newest_file_with_types(
+    roots: list[str],
+    glob: str,
+    required_types: list[str],
+    max_lines: int,
+    exclude_globs: list[str] | None = None,
+) -> Path | None:
     candidates: list[Path] = []
     for r in roots:
         root = _expand_path(r)
         if not root.exists():
             continue
         candidates.extend(root.glob(glob) if "*" in glob and "/" not in glob else root.rglob(glob))
-    candidates = [c for c in candidates if c.is_file()]
+    candidates = [c for c in candidates if c.is_file() and not _path_matches_any_exclude(c, exclude_globs)]
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     wanted = {t for t in required_types if isinstance(t, str) and t}
     for p in candidates:
@@ -953,10 +984,14 @@ def main(argv: list[str]) -> int:
                 if kind == "jsonl_newest":
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     required_types = list(local_schema_cfg.get("required_types") or [])
+                    exclude_globs_cfg = local_schema_cfg.get("exclude_globs")
+                    exclude_globs = [g for g in exclude_globs_cfg if isinstance(g, str)] if isinstance(exclude_globs_cfg, list) else None
                     if required_types:
-                        newest = _newest_file_with_types(roots, glob, required_types, max_lines=400)
+                        newest = _newest_file_with_types(
+                            roots, glob, required_types, max_lines=400, exclude_globs=exclude_globs
+                        )
                     else:
-                        newest = _newest_file(roots, glob)
+                        newest = _newest_file(roots, glob, exclude_globs=exclude_globs)
                     if newest:
                         local_fp = _jsonl_schema_fingerprint(newest, max_lines=max_lines)
                 elif kind == "gemini_session_json_newest":

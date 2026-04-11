@@ -175,9 +175,20 @@ def _iter_openclaw_session_files() -> list[Path]:
                     continue
                 if ".jsonl.deleted." in p.name:
                     continue
+                if ".jsonl.reset." in p.name:
+                    continue
                 if p.suffix != ".jsonl":
                     continue
                 if "sessions" not in p.parts:
+                    continue
+                # Swift-side discovery enumerates only the flat `sessions/` directory
+                # (no subdirectory descent). Mirror that here so the weekly probe
+                # never picks up reset/backup snapshots the viewer cannot see.
+                try:
+                    sessions_idx = len(p.parts) - 1 - list(reversed(p.parts)).index("sessions")
+                except ValueError:
+                    continue
+                if len(p.parts) - sessions_idx != 2:
                     continue
                 out.append(p)
     return sorted(out, key=lambda p: p.stat().st_mtime if p.exists() else 0.0, reverse=True)
@@ -244,8 +255,16 @@ def main(argv: list[str]) -> int:
         captured.extend(capture_openclaw(out))
 
     if not captured:
-        print("No sessions captured (no matching files found).", file=sys.stderr)
-        return 2
+        # Empty capture is benign: the user simply has no live sessions for any
+        # selected agent on this host (e.g. all OpenClaw sessions were reset or
+        # deleted, leaving only `backup/` and `.jsonl.reset.*` snapshots which
+        # the Swift-side discovery correctly ignores). Treat this as a successful
+        # run that yielded no samples; monitoring can notice the empty list and
+        # fall back to fixture baselines without escalating severity.
+        print("No live sessions captured (no matching files found).", file=sys.stderr)
+        print("(Versions recorded; no session files copied.)")
+        print(f"Versions: {out / 'versions.json'}")
+        return 0
 
     for item in captured:
         print(f"{item.agent}: {item.source} -> {item.destination}")
