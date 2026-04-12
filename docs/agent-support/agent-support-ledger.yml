@@ -10,6 +10,32 @@
 #
 entries:
   - agent_sessions_version: "2.10.1"
+    as_of_date_utc: "2026-04-12"
+    as_of_commit: "c8e5c87"
+    verified:
+      claude:
+        sessions:
+          max_verified_version: "2.1.104"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260412-173755Z/report.json", "scripts/probe_scan_output/agent_watch/20260412-181759Z/report.json"]
+        usage_limits:
+          max_verified_version: "2.1.104"
+          evidence: ["AgentSessions/Resources/claude_usage_capture.sh", "scripts/probe_scan_output/agent_watch/20260412-173755Z/report.json"]
+      copilot:
+        sessions:
+          max_verified_version: "1.0.24"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260412-173755Z/report.json", "scripts/probe_scan_output/agent_watch/20260412-181759Z/report.json"]
+      openclaw:
+        sessions:
+          max_verified_version: "2026.4.10"
+          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "scripts/probe_scan_output/agent_watch/20260412-181759Z/report.json"]
+    notes:
+      - "Weekly check 2026-04-12: bumped 3 agents (claude 2.1.92->2.1.104, copilot 1.0.16->1.0.24, openclaw 2026.4.5->2026.4.10)."
+      - "Claude: attachment type additive (infrastructure metadata), parser handles via .meta fallback, testClaudeSchemaDriftAttachmentEventSurvivesParsing passes."
+      - "Copilot: session.shutdown type additive (end-of-session telemetry), parser handles via default branch, testCopilotSchemaDriftShutdownEventSurvivesParsing passes. CLI updated to 1.0.24."
+      - "OpenClaw: schema unchanged after mass-delete recovery (doctor --fix had renamed all sessions 2026-03-16). Fresh session generated, schema_matches_baseline=true."
+      - "Prebump drivers failed: claude needs --verbose flag, copilot sandbox needs GITHUB_TOKEN. Weekly evidence + existing drift tests deemed sufficient."
+
+  - agent_sessions_version: "2.10.1"
     as_of_date_utc: "2026-04-11"
     as_of_commit: "f3ac41a"
     verified:
