@@ -419,6 +419,9 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                 }
             }
         case .openclaw:
+            defaults.register(defaults: [
+                PreferencesKey.Advanced.includeOpenClawDeletedSessions: true
+            ])
             let custom = defaults.string(forKey: PreferencesKey.Paths.openClawSessionsRootOverride)
             let includeDeleted = defaults.bool(forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions)
             let discovery = OpenClawSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil,

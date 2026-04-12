@@ -122,8 +122,9 @@ final class OpenClawSessionParser {
                 return nil
             }
 
+        let meta = deletedFileMetadata(for: url)
         let agentID = agentIDFromPath(url)
-        let pathBaseID = url.deletingPathExtension().lastPathComponent
+        let pathBaseID = meta.baseName
         let baseID = forcedID
             ?? sessionID
             ?? (pathBaseID.isEmpty ? sha256(path: url.path) : pathBaseID)
@@ -154,7 +155,8 @@ final class OpenClawSessionParser {
             repoName: nil,
             lightweightTitle: title,
             lightweightCommands: estimatedCommands,
-            isHousekeeping: isHousekeeping
+            isHousekeeping: isHousekeeping,
+            deletedAt: meta.deletedAt
         )
     }
 
@@ -400,8 +402,9 @@ final class OpenClawSessionParser {
             return nil
         }
 
+        let meta = deletedFileMetadata(for: url)
         let agentID = agentIDFromPath(url)
-        let pathBaseID = url.deletingPathExtension().lastPathComponent
+        let pathBaseID = meta.baseName
         let baseID = forcedID
             ?? sessionID
             ?? (pathBaseID.isEmpty ? sha256(path: url.path) : pathBaseID)
@@ -429,7 +432,8 @@ final class OpenClawSessionParser {
             repoName: nil,
             lightweightTitle: nil,
             lightweightCommands: nil,
-            isHousekeeping: isHousekeeping
+            isHousekeeping: isHousekeeping,
+            deletedAt: meta.deletedAt
         )
     }
 
@@ -666,5 +670,31 @@ final class OpenClawSessionParser {
         guard let i = comps.lastIndex(of: "agents"), i + 1 < comps.count else { return "main" }
         let agent = comps[i + 1]
         return agent.isEmpty ? "main" : agent
+    }
+
+    private static func deletedFileMetadata(for url: URL) -> (baseName: String, deletedAt: Date?) {
+        let name = url.lastPathComponent
+        if let range = name.range(of: ".jsonl.deleted.") {
+            let base = String(name[..<range.lowerBound])
+            let tsString = String(name[range.upperBound...])
+            let deletedAt: Date? = {
+                // Unix epoch (numeric)
+                if let ts = Double(tsString) { return Date(timeIntervalSince1970: ts) }
+                // ISO 8601 with dashes replacing colons (e.g. 2026-03-16T21-20-30.062Z)
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                // OpenClaw uses dashes instead of colons in the time portion
+                let colonized = tsString.replacingOccurrences(
+                    of: #"T(\d{2})-(\d{2})-(\d{2})"#,
+                    with: "T$1:$2:$3",
+                    options: .regularExpression)
+                if let d = iso.date(from: colonized) { return d }
+                iso.formatOptions = [.withInternetDateTime]
+                return iso.date(from: colonized)
+            }()
+            return (base, deletedAt)
+        }
+        let base = url.deletingPathExtension().lastPathComponent
+        return (base, nil)
     }
 }

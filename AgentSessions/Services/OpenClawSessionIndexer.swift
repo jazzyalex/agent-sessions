@@ -46,6 +46,9 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
 
     init() {
+        UserDefaults.standard.register(defaults: [
+            PreferencesKey.Advanced.includeOpenClawDeletedSessions: true
+        ])
         let customRoot = UserDefaults.standard.string(forKey: PreferencesKey.Paths.openClawSessionsRootOverride) ?? ""
         let includeDeleted = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions)
         self.lastCustomRootOverride = customRoot
@@ -341,7 +344,8 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                         repoName: current.repoName,
                         lightweightTitle: current.lightweightTitle ?? full.lightweightTitle,
                         lightweightCommands: current.lightweightCommands,
-                        isHousekeeping: full.isHousekeeping
+                        isHousekeeping: full.isHousekeeping,
+                        deletedAt: current.deletedAt ?? full.deletedAt
                     )
                     self.allSessions[idx] = merged
                     self.unreadableSessionIDs.remove(id)

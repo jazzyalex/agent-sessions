@@ -209,11 +209,11 @@ extension PreferencesView {
             }
 
             Group {
-                Toggle("Include deleted OpenClaw sessions", isOn: Binding(
+                Toggle("Show deleted OpenClaw sessions", isOn: Binding(
                     get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions) },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions) }
                 ))
-                .help("Show OpenClaw/Clawdbot transcripts ending in .jsonl.deleted.<timestamp>. Hidden by default.")
+                .help("OpenClaw auto-deletes sessions after 30 days. Shown by default with a 'deleted' badge. Disable to hide them.")
 
                 sectionHeader("OpenClaw CLI Binary")
                 VStack(alignment: .leading, spacing: 10) {

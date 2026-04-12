@@ -2688,6 +2688,17 @@ private struct TranscriptHostView: View {
                     }
                 }
 
+                if session.isDeleted {
+                    Text("deleted")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.red.opacity(0.12))
+                        .foregroundStyle(.red)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .accessibilityLabel("Deleted session")
+                }
+
 	            Text(session.listTitle)
 	                .font(.system(size: 13, weight: .regular, design: .monospaced))
 	                .lineLimit(1)

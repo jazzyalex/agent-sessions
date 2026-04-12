@@ -900,10 +900,28 @@ final class SessionParserTests: XCTestCase {
         try writeText("", to: lock)
         try writeText("", to: deleted)
 
-        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path, includeDeleted: false)
         let found = discovery.discoverSessionFiles()
         XCTAssertEqual(found.count, 1)
         XCTAssertEqual(found.first.map(canonicalPath), canonicalPath(live))
+    }
+
+    func testOpenClawDiscoveryIncludesDeletedByDefault() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-DefaultDeleted-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let sessionsDir = root.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let active = sessionsDir.appendingPathComponent("active.jsonl")
+        let deleted = sessionsDir.appendingPathComponent("old.jsonl.deleted.1704067200")
+        try writeText("", to: active)
+        try writeText("", to: deleted)
+
+        let discovery = OpenClawSessionDiscovery(customRoot: root.path)
+        let found = discovery.discoverSessionFiles()
+        XCTAssertEqual(found.count, 2, "Default discovery should include both active and deleted sessions")
     }
 
     func testClaudeTitleSkipsLocalCommandCaveatAndUsesTrailingPrompt() {
@@ -1057,5 +1075,131 @@ final class SessionParserTests: XCTestCase {
                         lightweightTitle: "<local-command-stdout></local-command-stdout>",
                         lightweightCommands: nil)
         XCTAssertFalse(s.title.contains("<local-command-"))
+    }
+
+    func testOpenClawDeletedFileProducesStableID() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-DeletedID-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-abc","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}"# + "\n"
+        let user = #"{"type":"message","id":"m1","timestamp":"2026-01-01T00:01:00Z","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}"# + "\n"
+
+        let activeFile = sessionsDir.appendingPathComponent("my-session.jsonl")
+        try (header + user).write(to: activeFile, atomically: true, encoding: .utf8)
+
+        let deletedFile = sessionsDir.appendingPathComponent("my-session.jsonl.deleted.1704067200")
+        try (header + user).write(to: deletedFile, atomically: true, encoding: .utf8)
+
+        let activeSession = OpenClawSessionParser.parseFile(at: activeFile)
+        let deletedSession = OpenClawSessionParser.parseFile(at: deletedFile)
+
+        XCTAssertNotNil(activeSession)
+        XCTAssertNotNil(deletedSession)
+        XCTAssertEqual(activeSession!.id, deletedSession!.id)
+        XCTAssertFalse(activeSession!.isDeleted)
+        XCTAssertTrue(deletedSession!.isDeleted)
+        XCTAssertNil(activeSession!.deletedAt)
+        XCTAssertNotNil(deletedSession!.deletedAt)
+        XCTAssertEqual(deletedSession!.deletedAt!.timeIntervalSince1970, 1704067200, accuracy: 1)
+    }
+
+    func testOpenClawDeletedFullParseMatchesLightweight() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-DeletedFull-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-xyz","timestamp":"2026-02-01T00:00:00Z","cwd":"/tmp"}"# + "\n"
+        let user = #"{"type":"message","id":"m1","timestamp":"2026-02-01T00:01:00Z","message":{"role":"user","content":[{"type":"text","text":"test"}]}}"# + "\n"
+
+        let deletedFile = sessionsDir.appendingPathComponent("test-session.jsonl.deleted.1706745600")
+        try (header + user).write(to: deletedFile, atomically: true, encoding: .utf8)
+
+        let light = OpenClawSessionParser.parseFile(at: deletedFile)
+        let full = OpenClawSessionParser.parseFileFull(at: deletedFile)
+
+        XCTAssertNotNil(light)
+        XCTAssertNotNil(full)
+        XCTAssertEqual(light!.id, full!.id)
+        XCTAssertTrue(light!.isDeleted)
+        XCTAssertTrue(full!.isDeleted)
+    }
+
+    func testOpenClawDeletedISO8601Timestamp() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-DeletedISO-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-iso","timestamp":"2026-03-16T00:00:00Z","cwd":"/tmp"}"# + "\n"
+        let user = #"{"type":"message","id":"m1","timestamp":"2026-03-16T00:01:00Z","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}"# + "\n"
+
+        // Real OpenClaw format: colons replaced with dashes in time portion
+        let deletedFile = sessionsDir.appendingPathComponent("my-session.jsonl.deleted.2026-03-16T21-20-30.062Z")
+        try (header + user).write(to: deletedFile, atomically: true, encoding: .utf8)
+
+        let session = OpenClawSessionParser.parseFile(at: deletedFile)
+        XCTAssertNotNil(session)
+        XCTAssertTrue(session!.isDeleted)
+        XCTAssertNotNil(session!.deletedAt)
+
+        // Verify the active counterpart produces the same ID
+        let activeFile = sessionsDir.appendingPathComponent("my-session.jsonl")
+        try (header + user).write(to: activeFile, atomically: true, encoding: .utf8)
+        let activeSession = OpenClawSessionParser.parseFile(at: activeFile)
+        XCTAssertEqual(session!.id, activeSession!.id)
+    }
+
+    func testDeletedFlagSurvivesMerge() {
+        let light = Session(id: "openclaw:main:test",
+                            source: .openclaw,
+                            startTime: Date(),
+                            endTime: Date(),
+                            model: nil,
+                            filePath: "/tmp/test.jsonl.deleted.1704067200",
+                            eventCount: 1,
+                            events: [],
+                            cwd: "/tmp",
+                            repoName: nil,
+                            lightweightTitle: "test",
+                            deletedAt: Date(timeIntervalSince1970: 1704067200))
+        XCTAssertTrue(light.isDeleted)
+        XCTAssertNotNil(light.deletedAt)
+
+        let full = Session(id: "openclaw:main:test",
+                           source: .openclaw,
+                           startTime: Date(),
+                           endTime: Date(),
+                           model: "gpt-4",
+                           filePath: "/tmp/test.jsonl.deleted.1704067200",
+                           eventCount: 3,
+                           events: [],
+                           cwd: "/tmp",
+                           repoName: nil,
+                           lightweightTitle: nil,
+                           deletedAt: Date(timeIntervalSince1970: 1704067200))
+        XCTAssertTrue(full.isDeleted)
+        XCTAssertEqual(full.deletedAt!.timeIntervalSince1970, 1704067200, accuracy: 1)
+    }
+
+    func testSessionIsDeletedDefaultsFalse() {
+        let s = Session(id: "test",
+                        source: .openclaw,
+                        startTime: nil,
+                        endTime: nil,
+                        model: nil,
+                        filePath: "/tmp/test.jsonl",
+                        eventCount: 0,
+                        events: [])
+        XCTAssertFalse(s.isDeleted)
+        XCTAssertNil(s.deletedAt)
     }
 }

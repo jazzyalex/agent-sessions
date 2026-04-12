@@ -10,7 +10,7 @@ final class OpenClawSessionDiscovery: SessionDiscovery {
     private let customRoot: String?
     private let includeDeleted: Bool
 
-    init(customRoot: String? = nil, includeDeleted: Bool = false) {
+    init(customRoot: String? = nil, includeDeleted: Bool = true) {
         self.customRoot = customRoot
         self.includeDeleted = includeDeleted
     }

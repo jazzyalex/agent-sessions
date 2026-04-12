@@ -31,6 +31,10 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // Runtime UI state (not persisted in session files)
     public var isFavorite: Bool = false
 
+    // Soft-deletion support (OpenClaw auto-deletes after 30 days)
+    public var isDeleted: Bool { deletedAt != nil }
+    public let deletedAt: Date?
+
     // Default initializer for full sessions
     public init(id: String,
                 source: SessionSource = .codex,
@@ -45,7 +49,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 codexInternalSessionIDHint: String? = nil,
                 parentSessionID: String? = nil,
                 subagentType: String? = nil,
-                customTitle: String? = nil) {
+                customTitle: String? = nil,
+                deletedAt: Date? = nil) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -65,6 +70,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.parentSessionID = parentSessionID
         self.subagentType = subagentType
         self.isFavorite = false
+        self.deletedAt = deletedAt
     }
 
     // Lightweight session initializer
@@ -85,7 +91,8 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 codexInternalSessionIDHint: String? = nil,
                 parentSessionID: String? = nil,
                 subagentType: String? = nil,
-                customTitle: String? = nil) {
+                customTitle: String? = nil,
+                deletedAt: Date? = nil) {
         self.id = id
         self.source = source
         self.startTime = startTime
@@ -105,6 +112,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.parentSessionID = parentSessionID
         self.subagentType = subagentType
         self.isFavorite = false
+        self.deletedAt = deletedAt
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -125,8 +133,10 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case parentSessionID
         case subagentType
         case customTitle
+        case deletedAt
         // isFavorite intentionally excluded (runtime only)
         // isHousekeeping intentionally excluded (derived at parse/index time)
+        // isDeleted is a computed property (deletedAt != nil)
     }
 
     public var shortID: String { String(id.prefix(6)) }

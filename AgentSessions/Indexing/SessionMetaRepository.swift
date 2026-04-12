@@ -5,6 +5,24 @@ actor SessionMetaRepository {
     private let db: IndexDB
     init(db: IndexDB) { self.db = db }
 
+    /// Derive deletedAt from OpenClaw `.jsonl.deleted.<timestamp>` filepath convention.
+    private func deletedAt(fromPath path: String) -> Date? {
+        guard let range = path.range(of: ".jsonl.deleted.") else { return nil }
+        let tsString = String(path[range.upperBound...])
+        // Unix epoch (numeric)
+        if let ts = Double(tsString) { return Date(timeIntervalSince1970: ts) }
+        // ISO 8601 with dashes replacing colons (e.g. 2026-03-16T21-20-30.062Z)
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let colonized = tsString.replacingOccurrences(
+            of: #"T(\d{2})-(\d{2})-(\d{2})"#,
+            with: "T$1:$2:$3",
+            options: .regularExpression)
+        if let d = iso.date(from: colonized) { return d }
+        iso.formatOptions = [.withInternetDateTime]
+        return iso.date(from: colonized)
+    }
+
     func fetchIndexedFilePaths(for source: SessionSource) async throws -> Set<String> {
         let rows = try await db.fetchIndexedFiles(for: source.rawValue)
         var paths: Set<String> = []
@@ -78,7 +96,8 @@ actor SessionMetaRepository {
                                codexInternalSessionIDHint: enriched.codexInternalSessionIDHint,
                                parentSessionID: enriched.parentSessionID,
                                subagentType: enriched.subagentType,
-                               customTitle: enriched.customTitle))
+                               customTitle: enriched.customTitle,
+                               deletedAt: deletedAt(fromPath: r.path)))
         }
         return out
     }
