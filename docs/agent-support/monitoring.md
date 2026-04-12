@@ -51,6 +51,10 @@ Recommendation guidelines:
 - `run_weekly_now`: release watch shows risk keywords; run weekly scan early.
 - `prepare_hotfix`: probe output/schema fingerprint shows breaking or likely-breaking drift; schedule parser/fixture update.
 
+| Severity | Recommendation | Meaning |
+|----------|----------------|---------|
+| `medium` | `run_prebump_validator` | Weekly evidence passed schema diff but the sampled session predates the installed CLI binary. Run `./scripts/agent_watch.py --mode prebump --agent <name>` before bumping. |
+
 ## What “usage/limits drift” means (Claude + Codex)
 - Codex:
   - Passive channel: session JSONL `token_count` / `rate_limits` event structure.
@@ -88,3 +92,37 @@ When the report recommends `prepare_hotfix`:
    - `docs/agent-json-tracking.md`
    - `docs/agent-support/agent-support-matrix.yml`
    - `docs/agent-support/agent-support-ledger.yml` (new AS release entry)
+
+## Sample freshness (weekly)
+
+`results.<agent>.evidence.sample_freshness` records whether the newest
+local session predates the currently installed CLI binary. Fields:
+
+- `sample_mtime_utc`, `cli_binary_mtime_utc`, `cli_binary_path` — raw inputs.
+- `freshness_window_seconds` — per-agent backstop (14d hot / 30d cold).
+- `sample_older_than_cli` — primary staleness signal.
+- `sample_older_than_window` — backstop signal.
+- `is_stale` — OR of both signals (with `forced_fresh` short-circuit).
+- `stale_reason` — one of `sample_older_than_cli`, `sample_older_than_window`,
+  `cli_binary_unresolved`, `forced_fresh`, or `null`.
+- `mode_context` — `normal` or `skip_update`.
+
+When `installed > verified`, `schema_matches_baseline == true`, and
+`is_stale == true`, severity is `medium` and the recommendation is
+`run_prebump_validator`. Fresh samples retain the existing
+`bump_verified_version` auto-downgrade.
+
+### Gating a matrix bump on prebump
+
+```
+./scripts/agent_watch.py --mode prebump --agent codex --agent claude \
+    && git add docs/agent-support/agent-support-matrix.yml \
+    && git commit -m "chore(matrix): bump codex_cli / claude_code"
+```
+
+Exit 0 is required. Exit 2 means the fresh session does not match baseline.
+Exit 3 means a driver failed (CLI error, timeout, no headless mode, or
+discovery-contract violation). Exit 4 means a config error (unknown
+agent, missing/invalid `discover_session` contract, credential hygiene
+failure) or a sandbox breach (the copilot hermeticity gate, overridable
+only via `--allow-real-home`).

@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -29,6 +30,7 @@ from typing import Any
 
 
 DEFAULT_CONFIG = "docs/agent-support/agent-watch-config.json"
+DEFAULT_TIMEOUT_SECONDS = 120
 
 
 def _now_utc_slug() -> str:
@@ -162,6 +164,94 @@ def _keyword_hits(text: str, keywords: list[str]) -> list[str]:
         if k.lower() in lower:
             hits.append(k)
     return hits
+
+
+def _resolve_cli_binary_mtime(installed_version_cmd: list[str] | None) -> tuple[str | None, float | None]:
+    """Resolve the CLI binary on PATH and return (abs_path, mtime_epoch).
+
+    Both elements are None if the command is empty, unresolvable, or the
+    resolved path cannot be stat'd. Used by sample_freshness to decide if
+    the newest local sample predates the installed binary.
+    """
+    if not isinstance(installed_version_cmd, list) or not installed_version_cmd:
+        return None, None
+    binary_name = installed_version_cmd[0]
+    if not isinstance(binary_name, str) or not binary_name:
+        return None, None
+    resolved = shutil.which(binary_name)
+    if not resolved:
+        return None, None
+    try:
+        st = os.stat(resolved)
+    except OSError:
+        return resolved, None
+    return resolved, float(st.st_mtime)
+
+
+def _epoch_to_utc_iso(epoch: float | None) -> str | None:
+    if epoch is None:
+        return None
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _compute_sample_freshness(
+    *,
+    sample_mtime: float | None,
+    cli_binary_path: str | None,
+    cli_binary_mtime: float | None,
+    freshness_window_seconds: int,
+    now_epoch: float,
+    mode_context: str,
+    force_fresh: bool,
+) -> dict[str, Any]:
+    """Build the sample_freshness evidence block per spec §3.1/§3.2."""
+    block: dict[str, Any] = {
+        "sample_mtime_utc": _epoch_to_utc_iso(sample_mtime),
+        "cli_binary_mtime_utc": _epoch_to_utc_iso(cli_binary_mtime),
+        "cli_binary_path": cli_binary_path,
+        "freshness_window_seconds": int(freshness_window_seconds),
+        "sample_older_than_cli": None,
+        "sample_older_than_window": None,
+        "is_stale": False,
+        "stale_reason": None,
+        "mode_context": mode_context,
+    }
+
+    if force_fresh:
+        block["is_stale"] = False
+        block["stale_reason"] = "forced_fresh"
+        return block
+
+    if sample_mtime is None:
+        # No sample on disk — staleness is not meaningful; leave flags None.
+        return block
+
+    if cli_binary_mtime is not None:
+        older_cli = sample_mtime < cli_binary_mtime
+        block["sample_older_than_cli"] = bool(older_cli)
+    else:
+        block["sample_older_than_cli"] = None
+
+    older_window = (now_epoch - sample_mtime) > freshness_window_seconds
+    block["sample_older_than_window"] = bool(older_window)
+
+    if block["sample_older_than_cli"] is True:
+        block["is_stale"] = True
+        block["stale_reason"] = "sample_older_than_cli"
+    elif older_window:
+        block["is_stale"] = True
+        if cli_binary_path is None:
+            block["stale_reason"] = "cli_binary_unresolved"
+        else:
+            block["stale_reason"] = "sample_older_than_window"
+    else:
+        if cli_binary_path is None:
+            # Binary unresolved but window still fresh — record the cause so
+            # downstream readers know signal 1 was unavailable.
+            block["stale_reason"] = "cli_binary_unresolved"
+            block["is_stale"] = False
+
+    return block
 
 
 def _pick_severity(
@@ -825,14 +915,621 @@ def _fetch_upstream(source: dict[str, Any], timeout: int) -> dict[str, Any]:
     return {"ok": False, "error": "unsupported_source_kind", "kind": kind}
 
 
+def _apply_stale_override(
+    *,
+    severity: str,
+    recommendation: str,
+    installed_newer_than_verified: bool,
+    schema_matches_baseline: bool | None,
+    sample_freshness: dict[str, Any] | None,
+    probe_failed: bool,
+) -> tuple[str, str]:
+    """Spec §3.3: block auto-downgrade when the weekly sample is stale.
+
+    Mirrors the bump_verified_version auto-downgrade guards — only fires
+    when the downgrade would have fired (severity is low/medium, probe
+    succeeded, installed > verified, schema matches baseline) AND the
+    sample is stale. Preserves high severity and probe-failure
+    recommendations untouched.
+    """
+    if severity not in ("low", "medium"):
+        return severity, recommendation
+    if probe_failed:
+        return severity, recommendation
+    if not installed_newer_than_verified:
+        return severity, recommendation
+    if schema_matches_baseline is not True:
+        return severity, recommendation
+    if not isinstance(sample_freshness, dict):
+        return severity, recommendation
+    if sample_freshness.get("is_stale") is not True:
+        return severity, recommendation
+    return "medium", "run_prebump_validator"
+
+
+def _format_summary_line(
+    *,
+    agent_name: str,
+    severity: str,
+    verified: str | None,
+    installed: str | None,
+    upstream: str | None,
+    recommendation: str,
+    sample_freshness: dict[str, Any] | None,
+) -> str:
+    base = (
+        f"{agent_name}: severity={severity} "
+        f"verified={verified or 'unknown'} "
+        f"installed={installed or 'unknown'} "
+        f"upstream={upstream or 'unknown'} "
+        f"rec={recommendation}"
+    )
+    if not isinstance(sample_freshness, dict):
+        return base
+    is_stale = sample_freshness.get("is_stale")
+    reason = sample_freshness.get("stale_reason")
+    token = "stale=true" if is_stale else "stale=false"
+    if isinstance(reason, str) and reason:
+        token = f"{token}({reason})"
+    return f"{base} {token}"
+
+
+def _build_prebump_report_entry(
+    *,
+    agent_name: str,
+    driver_name: str,
+    ok: bool,
+    session_path: Path | None,
+    stdout_file: Path | None,
+    stderr_file: Path | None,
+    error: str | None,
+    schema_diff: dict[str, Any] | None,
+    fresh_session_matches_baseline: bool | None,
+    sample_freshness: dict[str, Any] | None,
+    auth_warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "agent": agent_name,
+        "driver": driver_name,
+        "ok": ok,
+        "session_path": str(session_path) if session_path else None,
+        "stdout_file": str(stdout_file) if stdout_file else None,
+        "stderr_file": str(stderr_file) if stderr_file else None,
+        "error": error,
+        "evidence": {
+            "schema_matches_baseline": fresh_session_matches_baseline,
+            "fresh_session_matches_baseline": fresh_session_matches_baseline,
+            # Spec §3.1: true ONLY when prebump produced fresh evidence
+            # AND it matched baseline.
+            "fresh_evidence_available": fresh_session_matches_baseline is True,
+            "schema_diff": schema_diff,
+            "sample_freshness": sample_freshness,
+            "auth_warnings": list(auth_warnings or []),
+        },
+    }
+
+
+def _exit_code_for_prebump(entries: list[dict[str, Any]]) -> int:
+    worst = 0
+    for e in entries:
+        if e.get("fatal") == "config":
+            worst = max(worst, 4)
+            continue
+        if not e.get("ok"):
+            worst = max(worst, 3)
+            continue
+        ev = e.get("evidence") or {}
+        if ev.get("fresh_session_matches_baseline") is False:
+            worst = max(worst, 2)
+    return worst
+
+
+class _DiscoveryViolation(Exception):
+    """Raised when a driver result violates discover_session contract."""
+
+
+def _session_path_matches_glob(session_path: Path, root: Path, pattern: str) -> bool:
+    """Return True if session_path is among the files yielded by root.glob(pattern).
+
+    Delegates glob walking to pathlib itself (root.glob) so ** spans
+    nested directories regardless of the host interpreter's pattern
+    semantics. Resolves both sides so symlinked sandbox HOMEs compare
+    equal.
+
+    Performance: root.glob(pattern) walks the directory tree on every
+    call. That is fine for per-agent prebump runs (one session per run,
+    tiny sandbox HOME) but must not be used in hot loops — keep it
+    scoped to post-run validation.
+    """
+    try:
+        session_resolved = session_path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    for candidate in root.glob(pattern):
+        try:
+            if candidate.resolve() == session_resolved:
+                return True
+        except (OSError, RuntimeError):
+            continue
+    return False
+
+
+def _validate_session_discovery(session_path: Path, contract: dict, sandbox: Path) -> None:
+    """F4: validate session_path against the agent's discover_session contract.
+
+    Checks (each failure raises _DiscoveryViolation):
+      1. session_path is under one of contract['roots'], where each root
+         is interpreted relative to *sandbox* (sandbox-HOME substitution).
+      2. session_path is yielded by root.glob(pattern) for one of the
+         declared (root, glob) pairs — see _session_path_matches_glob.
+      3. The file parses as JSONL and contains at least one line per
+         type in contract['required_types'] (matched on the per-line
+         'type' field).
+
+    Discovery violations are mapped to exit 3 (driver-failed) by the
+    caller — the driver produced the wrong artifact.
+
+    Note on key tolerance: this runtime validator accepts BOTH modern
+    ("roots"/"globs") and legacy ("roots_relative_to_sandbox"/"glob")
+    config keys so older on-disk configs keep validating cleanly. The
+    config gate in _run_prebump deliberately only accepts the modern
+    form — the asymmetry is intentional; do not "fix" it.
+    """
+    if not isinstance(contract, dict):
+        return  # no contract declared → skip (see residual risk note)
+    try:
+        session_path = session_path.resolve()
+    except OSError as exc:
+        raise _DiscoveryViolation(f"cannot resolve session_path: {exc}") from exc
+
+    roots = contract.get("roots") or contract.get("roots_relative_to_sandbox") or []
+    # Resolve the declared roots to absolute sandbox-relative paths once.
+    resolved_roots: list[Path] = []
+    for root_spec in roots:
+        resolved_roots.append((sandbox / str(root_spec).lstrip("/")).resolve())
+    if resolved_roots:
+        ok = False
+        for root in resolved_roots:
+            try:
+                session_path.relative_to(root)
+                ok = True
+                break
+            except ValueError:
+                continue
+        if not ok:
+            raise _DiscoveryViolation(
+                f"session {session_path} is not under any declared root in {roots}"
+            )
+
+    globs = contract.get("globs")
+    if not globs:
+        single = contract.get("glob")
+        globs = [single] if single else []
+    if globs and resolved_roots:
+        # Iterate every (root, glob) pair; succeed on the first match.
+        matched = False
+        for root in resolved_roots:
+            for pattern in globs:
+                if _session_path_matches_glob(session_path, root, pattern):
+                    matched = True
+                    break
+            if matched:
+                break
+        if not matched:
+            raise _DiscoveryViolation(
+                f"session {session_path} does not match any (root, glob) pair "
+                f"in roots={roots} globs={globs}"
+            )
+
+    required_types = list(contract.get("required_types") or [])
+    if required_types:
+        seen: set[str] = set()
+        try:
+            with session_path.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise _DiscoveryViolation(
+                            f"session {session_path} is not valid JSONL: {exc}"
+                        ) from exc
+                    t = obj.get("type") if isinstance(obj, dict) else None
+                    if isinstance(t, str):
+                        seen.add(t)
+        except OSError as exc:
+            raise _DiscoveryViolation(f"cannot read session: {exc}") from exc
+        missing = [t for t in required_types if t not in seen]
+        if missing:
+            raise _DiscoveryViolation(
+                f"session {session_path} missing required types {missing}; saw {sorted(seen)}"
+            )
+
+
+def _run_prebump(
+    args,
+    cfg: dict[str, Any],
+    *,
+    report_dir: Path,
+    verified_map: dict[str, str | None],
+    evidence: dict[str, list[str]],
+) -> int:
+    import agent_watch_prebump_drivers as drv_mod
+
+    prebump_dir = report_dir.parent / (report_dir.name + "-prebump")
+    prebump_dir.mkdir(parents=True, exist_ok=True)
+
+    agents_cfg = cfg.get("agents") or {}
+    configured_prebump_agents = {
+        name for name, acfg in agents_cfg.items()
+        if isinstance(acfg, dict) and isinstance(acfg.get("prebump"), dict)
+    }
+    requested = list(args.agent or [])
+    if requested:
+        unknown = [a for a in requested if a not in configured_prebump_agents]
+        if unknown:
+            import sys as _sys
+            _sys.stderr.write(
+                "agent_watch --mode prebump: rejected agent(s) "
+                f"{unknown}: not in configured prebump set "
+                f"{sorted(configured_prebump_agents)}\n"
+            )
+            return 4
+        selected = set(requested)
+    else:
+        selected = set(configured_prebump_agents)
+
+    prebump_agents = {name: agents_cfg[name] for name in selected}
+    if not prebump_agents:
+        return 0
+
+    # F1/A: discovery-contract config gate. Every selected agent must
+    # declare a well-formed prebump.discover_session contract using the
+    # modern roots/globs keys. Collect ALL failures across the selected
+    # set before bailing so the user can fix everything in one pass.
+    gate_failures: list[dict[str, Any]] = []
+    for _name, _acfg in prebump_agents.items():
+        _pb = _acfg.get("prebump") or {}
+        _ds = _pb.get("discover_session")
+        if not isinstance(_ds, dict):
+            gate_failures.append({
+                "agent": _name,
+                "driver": _pb.get("driver"),
+                "ok": False,
+                "error": f"config_gate:{_name}: prebump.discover_session missing or not a dict",
+                "fatal": "config",
+                "evidence": {},
+            })
+            continue
+        _roots = _ds.get("roots")
+        _globs = _ds.get("globs")
+        _req = _ds.get("required_types", [])
+        _reasons: list[str] = []
+        if not isinstance(_roots, list) or len(_roots) < 1:
+            _reasons.append("roots must be a non-empty list")
+        if not isinstance(_globs, list) or len(_globs) < 1:
+            _reasons.append("globs must be a non-empty list")
+        # required_types is OPTIONAL: missing key or empty list is fine
+        # (Copilot declares required_types: [] by design).
+        if "required_types" in _ds and not isinstance(_req, list):
+            _reasons.append("required_types must be a list when present")
+        if _reasons:
+            import sys as _sys
+            _msg = f"config_gate:{_name}: " + "; ".join(_reasons)
+            _sys.stderr.write(
+                f"agent_watch --mode prebump: {_msg}\n"
+            )
+            gate_failures.append({
+                "agent": _name,
+                "driver": _pb.get("driver"),
+                "ok": False,
+                "error": _msg,
+                "fatal": "config",
+                "evidence": {},
+            })
+    if gate_failures:
+        # Do not run any driver; let the user fix all config errors at
+        # once. Write a report entry per failing agent and exit 4.
+        report = {
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "mode": "prebump",
+            "report_dir": _safe_relpath(prebump_dir),
+            "results": {e["agent"]: e for e in gate_failures},
+        }
+        (prebump_dir / "report.json").write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        return 4
+
+    entries: list[dict[str, Any]] = []
+    now_epoch = datetime.now(timezone.utc).timestamp()
+    real_home = Path(os.environ.get("HOME", str(Path.home())))
+
+    for agent_name, agent_cfg in prebump_agents.items():
+        pb = agent_cfg["prebump"]
+        driver_name = pb.get("driver")
+        driver = drv_mod.DRIVERS.get(driver_name) if isinstance(driver_name, str) else None
+        agent_out = prebump_dir / agent_name
+        agent_out.mkdir(parents=True, exist_ok=True)
+
+        if driver is None:
+            entries.append({
+                "agent": agent_name,
+                "driver": driver_name,
+                "ok": False,
+                "error": f"unknown_driver:{driver_name}",
+                "fatal": "config",
+                "evidence": {},
+            })
+            continue
+
+        try:
+            sandbox = drv_mod.make_sandbox(parent=agent_out, label=agent_name)
+        except Exception as exc:
+            entries.append({
+                "agent": agent_name,
+                "driver": driver_name,
+                "ok": False,
+                "error": f"sandbox_create_failed:{exc}",
+                "fatal": "config",
+                "evidence": {},
+            })
+            continue
+
+        # F2: prepare_auth is the only auth path. Drivers receive env.
+        try:
+            env, auth_warnings = drv_mod.prepare_auth(
+                prebump_cfg=pb, sandbox=sandbox, real_home=real_home,
+            )
+        except drv_mod.HygieneError as exc:
+            entries.append({
+                "agent": agent_name,
+                "driver": driver_name,
+                "ok": False,
+                "error": f"hygiene_failed:{exc}",
+                "fatal": "config",
+                "evidence": {},
+            })
+            drv_mod.teardown_sandbox(sandbox, keep=args.keep_sandbox)
+            continue
+
+        # P2: surface prepare_auth advisory warnings (e.g. 90-day stale
+        # credential) to stderr immediately so operators see them at
+        # emit-time. They are also threaded into evidence.auth_warnings
+        # below for the report audit trail.
+        for _warn in auth_warnings:
+            import sys as _sys
+            _sys.stderr.write(f"agent_watch prebump [{agent_name}]: {_warn}\n")
+
+        prompt = str(pb.get("prompt") or "")
+        # F6: CLI flag wins by default; fall back to per-agent config; then global default.
+        if args.timeout_seconds is not None:
+            timeout = int(args.timeout_seconds)
+        else:
+            timeout = int(pb.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
+
+        try:
+            result = driver.run(sandbox, env, prompt, timeout)
+        except drv_mod.HygieneError as exc:
+            entries.append({
+                "agent": agent_name,
+                "driver": driver_name,
+                "ok": False,
+                "error": f"hygiene_failed:{exc}",
+                "fatal": "config",
+                "evidence": {},
+            })
+            drv_mod.teardown_sandbox(sandbox, keep=args.keep_sandbox)
+            continue
+        except Exception as exc:
+            entries.append({
+                "agent": agent_name,
+                "driver": driver_name,
+                "ok": False,
+                "error": f"driver_exception:{exc}",
+                "evidence": {},
+            })
+            drv_mod.teardown_sandbox(sandbox, keep=args.keep_sandbox)
+            continue
+
+        # Copilot hermeticity gate: sandbox_breach → fatal=config (exit 4)
+        # unless --allow-real-home was explicitly passed.
+        if (
+            not result.ok
+            and isinstance(result.error, str)
+            and result.error.startswith("sandbox_breach")
+        ):
+            if not args.allow_real_home:
+                entries.append({
+                    "agent": agent_name,
+                    "driver": driver_name,
+                    "ok": False,
+                    "error": result.error,
+                    "fatal": "config",
+                    "stdout_file": str(result.stdout_file),
+                    "stderr_file": str(result.stderr_file),
+                    "evidence": {"auth_warnings": list(auth_warnings)},
+                })
+                drv_mod.teardown_sandbox(sandbox, keep=True)
+                continue
+            # --allow-real-home: re-run the driver with real HOME so the
+            # session lands under the user's actual home directory.
+            import sys as _sys
+            _sys.stderr.write(
+                f"agent_watch prebump [{agent_name}]: sandbox_breach detected, "
+                f"--allow-real-home set, re-running with real HOME\n"
+            )
+            drv_mod.teardown_sandbox(sandbox, keep=args.keep_sandbox)
+            env["HOME"] = str(real_home)
+            try:
+                result = driver.run(sandbox, env, prompt, timeout)
+            except drv_mod.HygieneError as exc:
+                entries.append({
+                    "agent": agent_name,
+                    "driver": driver_name,
+                    "ok": False,
+                    "error": f"hygiene_failed:{exc}",
+                    "fatal": "config",
+                    "evidence": {},
+                })
+                continue
+            except Exception as exc:
+                entries.append({
+                    "agent": agent_name,
+                    "driver": driver_name,
+                    "ok": False,
+                    "error": f"driver_exception:{exc}",
+                    "evidence": {},
+                })
+                continue
+            # For the re-run, discovery validation must use real_home
+            # as the sandbox parameter since roots are HOME-relative.
+            sandbox = real_home
+
+        # P1: ok=True must be backed by an actual session file. A driver
+        # that returns ok=True with session_path=None or a path that does
+        # not exist has silently failed — treat as driver-failed so
+        # _exit_code_for_prebump returns 3 instead of letting the run
+        # pass the gate on no fresh evidence.
+        if result.ok and (result.session_path is None or not result.session_path.exists()):
+            entries.append({
+                "agent": agent_name,
+                "driver": driver_name,
+                "ok": False,
+                "error": "no_session_produced",
+                "evidence": {
+                    "auth_warnings": list(auth_warnings),
+                },
+            })
+            drv_mod.teardown_sandbox(sandbox, keep=(args.keep_sandbox or True))
+            continue
+
+        # F4: validate the session against the discover_session contract.
+        if result.ok and result.session_path and result.session_path.exists():
+            try:
+                _validate_session_discovery(
+                    result.session_path,
+                    pb.get("discover_session") or {},
+                    sandbox,
+                )
+            except _DiscoveryViolation as exc:
+                entries.append({
+                    "agent": agent_name,
+                    "driver": driver_name,
+                    "ok": False,
+                    "error": f"discovery_violation:{exc}",
+                    "evidence": {},
+                })
+                drv_mod.teardown_sandbox(sandbox, keep=(args.keep_sandbox or True))
+                continue
+
+        schema_diff: dict[str, Any] | None = None
+        fresh_matches: bool | None = None
+        if result.ok and result.session_path and result.session_path.exists():
+            matrix_key = {
+                "codex": "codex_cli", "claude": "claude_code", "copilot": "copilot_cli",
+                "droid": "droid", "gemini": "gemini_cli", "opencode": "opencode",
+                "openclaw": "openclaw",
+            }.get(agent_name)
+            baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
+            baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
+            if agent_name == "gemini":
+                fp = _gemini_session_json_schema_fingerprint(result.session_path, max_messages=5000)
+            elif agent_name == "opencode":
+                fp = _opencode_storage_session_tree_schema_fingerprint(
+                    result.session_path, max_messages=250, max_parts=2500
+                )
+            else:
+                fp = _jsonl_schema_fingerprint(result.session_path, max_lines=5000)
+            if baseline_type_keys:
+                schema_diff = _schema_diff(
+                    observed_type_keys=fp.get("type_keys") or {},
+                    baseline_type_keys=baseline_type_keys,
+                )
+                fresh_matches = bool(schema_diff.get("unknown_only_is_empty"))
+            else:
+                fresh_matches = True  # no baseline → nothing diffs
+
+        cli_path, cli_mtime = _resolve_cli_binary_mtime(
+            agent_cfg.get("installed_version_cmd") if isinstance(agent_cfg.get("installed_version_cmd"), list) else None
+        )
+        sample_mtime = None
+        if result.session_path and result.session_path.exists():
+            try:
+                sample_mtime = float(result.session_path.stat().st_mtime)
+            except OSError:
+                sample_mtime = None
+        window_days = int(((agent_cfg.get("weekly") or {}).get("freshness_window_days") or 14))
+        sf = _compute_sample_freshness(
+            sample_mtime=sample_mtime,
+            cli_binary_path=cli_path,
+            cli_binary_mtime=cli_mtime,
+            freshness_window_seconds=window_days * 86400,
+            now_epoch=now_epoch,
+            mode_context="normal",
+            force_fresh=bool(getattr(args, "force_fresh", False)),
+        )
+
+        entry = _build_prebump_report_entry(
+            agent_name=agent_name,
+            driver_name=driver_name,
+            ok=bool(result.ok),
+            session_path=result.session_path,
+            stdout_file=result.stdout_file,
+            stderr_file=result.stderr_file,
+            error=result.error,
+            schema_diff=schema_diff,
+            fresh_session_matches_baseline=fresh_matches,
+            sample_freshness=sf,
+            auth_warnings=auth_warnings,
+        )
+        entries.append(entry)
+        drv_mod.teardown_sandbox(sandbox, keep=(args.keep_sandbox or not result.ok))
+
+    report = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "mode": "prebump",
+        "report_dir": _safe_relpath(prebump_dir),
+        "results": {e["agent"]: e for e in entries},
+    }
+    (prebump_dir / "report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    rc = _exit_code_for_prebump(entries)
+    print(f"Agent watch (prebump) report: {prebump_dir / 'report.json'}")
+    for e in entries:
+        ev = e.get("evidence") or {}
+        fsmb = ev.get("fresh_session_matches_baseline")
+        print(f"{e['agent']}: driver={e.get('driver')} ok={e.get('ok')} fresh_matches_baseline={fsmb} error={e.get('error')}")
+    return rc
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["daily", "weekly"], required=True)
+    parser.add_argument("--mode", choices=["daily", "weekly", "prebump"], required=True)
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--timeout", type=int, default=12)
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--skip-update", action="store_true",
                         help="Skip installed-version and upstream-fetch checks (agents already updated locally)")
+    parser.add_argument("--force-fresh", action="store_true",
+                        help="Suppress staleness for this run; records stale_reason=forced_fresh")
+    parser.add_argument("--agent", action="append", default=[], help="Repeatable. Restricts prebump to the listed agents.")
+    parser.add_argument("--keep-sandbox", action="store_true", help="Keep prebump sandbox directories for debugging.")
+    parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=None,
+        help=(
+            "Per-driver timeout for prebump runs (seconds). Precedence: "
+            "CLI flag overrides per-agent config; falls back to "
+            "agents.<name>.prebump.timeout_seconds, then DEFAULT_TIMEOUT_SECONDS."
+        ),
+    )
+    parser.add_argument("--allow-real-home", action="store_true", help="Allow copilot (and other home_override agents) to fall back to real HOME after an explicit sandbox-leak diagnostic.")
     args = parser.parse_args(argv)
 
     cfg_path = Path(args.config)
@@ -889,6 +1586,9 @@ def main(argv: list[str]) -> int:
             # Exit evidence block when indentation changes back to 4 spaces (new field) or 2 (new agent).
             if re.match(r"^\s{4}\w+:", line) or re.match(r"^\s{2}\w+:", line):
                 in_evidence = False
+
+    if args.mode == "prebump":
+        return _run_prebump(args, cfg, report_dir=report_dir, verified_map=verified_map, evidence=evidence)
 
     results: dict[str, Any] = {}
     summary_lines: list[str] = []
@@ -1069,6 +1769,35 @@ def main(argv: list[str]) -> int:
             probe_failed_but_upstream_degraded=probe_failed_but_upstream_degraded,
         )
 
+        sample_freshness: dict[str, Any] | None = None
+        if args.mode == "weekly":
+            window_days_cfg = int(((agent_cfg.get("weekly") or {}).get("freshness_window_days") or 14))
+            window_seconds = window_days_cfg * 86400
+            sample_mtime_epoch: float | None = None
+            if isinstance(weekly_details, dict):
+                local_schema_obj = weekly_details.get("local_schema")
+                if isinstance(local_schema_obj, dict):
+                    fpath = local_schema_obj.get("file")
+                    if isinstance(fpath, str):
+                        try:
+                            st = os.stat(fpath)
+                            sample_mtime_epoch = float(st.st_mtime)
+                            local_schema_obj["mtime_epoch"] = sample_mtime_epoch
+                            local_schema_obj["mtime_utc"] = _epoch_to_utc_iso(sample_mtime_epoch)
+                        except OSError:
+                            pass
+            cli_path, cli_mtime = _resolve_cli_binary_mtime(installed_cmd if isinstance(installed_cmd, list) else None)
+            mode_context = "skip_update" if args.skip_update else "normal"
+            sample_freshness = _compute_sample_freshness(
+                sample_mtime=sample_mtime_epoch,
+                cli_binary_path=cli_path,
+                cli_binary_mtime=cli_mtime,
+                freshness_window_seconds=window_seconds,
+                now_epoch=datetime.now(timezone.utc).timestamp(),
+                mode_context=mode_context,
+                force_fresh=bool(getattr(args, "force_fresh", False)),
+            )
+
         # If we have concrete evidence that the newest local schema matches our fixture baseline,
         # downgrade "installed newer" to low and suggest bumping verified version.
         if (
@@ -1080,6 +1809,16 @@ def main(argv: list[str]) -> int:
         ):
             severity = "low"
             recommendation = "bump_verified_version"
+
+        if args.mode == "weekly":
+            severity, recommendation = _apply_stale_override(
+                severity=severity,
+                recommendation=recommendation,
+                installed_newer_than_verified=installed_newer_than_verified,
+                schema_matches_baseline=schema_matches_baseline,
+                sample_freshness=sample_freshness,
+                probe_failed=probe_failed,
+            )
 
         # Daily runs should only bother the user when something looks risky/urgent.
         # Low severity (newer version with no risk signal) is recorded silently.
@@ -1116,6 +1855,8 @@ def main(argv: list[str]) -> int:
             "evidence": {
                 "schema_matches_baseline": schema_matches_baseline,
                 "schema_diff": schema_diff,
+                "sample_freshness": sample_freshness,
+                "fresh_evidence_available": False,
             },
             "severity": severity,
             "recommendation": recommendation,
@@ -1123,7 +1864,15 @@ def main(argv: list[str]) -> int:
 
         if severity != "none":
             summary_lines.append(
-                f"{agent_name}: severity={severity} verified={verified or 'unknown'} installed={installed or 'unknown'} upstream={upstream or 'unknown'} rec={recommendation}"
+                _format_summary_line(
+                    agent_name=agent_name,
+                    severity=severity,
+                    verified=verified,
+                    installed=installed,
+                    upstream=upstream,
+                    recommendation=recommendation,
+                    sample_freshness=sample_freshness,
+                )
             )
 
     report = {

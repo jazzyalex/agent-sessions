@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Fresh-session validator for `scripts/agent_watch.py`: weekly staleness
+  detection (`evidence.sample_freshness`) across all 7 agents and a new
+  opt-in `--mode prebump` path with per-agent drivers for codex, claude,
+  gemini, droid, and copilot. New recommendation `run_prebump_validator`
+  blocks auto-downgrade to `bump_verified_version` when the newest local
+  sample predates the installed CLI binary. Hybrid env-var-first auth
+  with credential-copy hygiene gates (64 KiB / mode 0600 / 90-day
+  warning). Copilot driver enforces a fail-closed sandbox-leak assertion
+  overridable only via `--allow-real-home` per run.
+
 ## [3.6] - 2026-04-09
 
 ### Added

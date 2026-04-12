@@ -44,6 +44,58 @@ Interpretation:
 
 ---
 
+## 1a  Prebump Validation (opt-in, before a matrix bump)
+
+Weekly scanning samples the newest on-disk session, which can predate a CLI
+upgrade and give a false "safe to bump" call (the codex 0.120.0 trap and the
+copilot `session.shutdown` trap). When weekly reports
+`recommendation == run_prebump_validator` — or before you stage any
+`max_verified_version` bump — run the prebump path to exercise the currently
+installed CLI once inside a sandbox and diff its output against the fixture
+baseline:
+
+```
+./scripts/agent_watch.py --mode prebump --agent codex --agent claude
+```
+
+Exit-code contract:
+- `0` — every requested agent produced a fresh session and the schema
+  matches baseline. Safe to bump.
+- `2` — at least one fresh session's schema does **not** match baseline.
+  Do **not** bump; investigate the schema diff in
+  `scripts/probe_scan_output/agent_watch/<slug>-prebump/report.json`.
+- `3` — at least one driver failed (timeout, auth, CLI not found, or
+  discovery contract violation — wrong session root, wrong glob, or
+  missing required event types).
+- `4` — config/invariant error: unknown `--agent` (or one with no
+  prebump block), missing/invalid `discover_session` contract,
+  credential hygiene failure (oversize / mode), or sandbox breach
+  (copilot hermeticity gate). Re-run with
+  `--allow-real-home` only if you understand your real config dir will
+  be mutated for that one invocation.
+
+Flags:
+- `--agent <name>` (repeatable) — restrict to specific agents. An
+  unknown agent or one without a `prebump` config block exits 4.
+- `--keep-sandbox` — preserve the temp `$HOME` for debugging.
+- `--timeout-seconds N` — per-driver timeout. CLI flag overrides
+  per-agent config; falls back to config, then global default (120s).
+- `--force-fresh` — suppress staleness evaluation for this run only (records
+  `stale_reason=forced_fresh` in the report).
+- `--allow-real-home` — copilot/real-HOME opt-in after a sandbox-breach
+  diagnostic; never persistent.
+
+Prebump uses the hybrid env-var-first auth policy: if the relevant API-key
+env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+`FACTORY_API_KEY`, `GITHUB_TOKEN`) is set it is forwarded into the sandbox
+and real HOME is never read. Otherwise the driver copies the declared
+credential file from real HOME into the sandbox after running three hygiene
+gates (64 KiB max, mode `0600`, ≤90-day mtime warning). v1 drivers:
+`codex_exec`, `claude_print`, `gemini_prompt`, `droid_exec`, `copilot_prompt`.
+opencode + openclaw are v2.
+
+---
+
 ## 2  Usage / Limits Drift (Codex + Claude)
 
 Usage and limits tracking can drift **independently** of session schema. Monitor both.
