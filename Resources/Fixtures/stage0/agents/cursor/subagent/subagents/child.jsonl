@@ -1,0 +1,2 @@
+{"role":"user","message":{"content":[{"type":"text","text":"List files"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"file1.txt\nfile2.txt"}]}}

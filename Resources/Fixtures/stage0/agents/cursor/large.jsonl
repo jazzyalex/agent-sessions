@@ -1,0 +1,10 @@
+{"role":"user","message":{"content":[{"type":"text","text":"What files are here?"}]}}
+{"role":"assistant","message":{"content":[{"type":"thinking","thinking":"Let me check the directory."},{"type":"text","text":"I will list the files."},{"type":"tool_use","name":"Bash","input":{"command":"ls -la"}}]}}
+{"role":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"file1.txt\nfile2.txt"}]}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"There are two files."}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"Read file1.txt."}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"file1.txt"}}]}}
+{"role":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"text","text":"hello world"}]}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The file contains: hello world."}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"Thanks."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"You are welcome."}]}}

@@ -1,0 +1,4 @@
+{"role":"user","message":{"content":[{"type":"text","text":"List the files."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Here are the files."}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"Run ls."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Running ls."},{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}

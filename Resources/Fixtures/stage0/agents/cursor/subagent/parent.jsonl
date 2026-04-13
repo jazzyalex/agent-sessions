@@ -1,0 +1,2 @@
+{"role":"user","message":{"content":[{"type":"text","text":"Run a subagent."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Spawning subagent."},{"type":"tool_use","name":"Agent","input":{"prompt":"List files"}}]}}
