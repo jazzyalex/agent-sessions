@@ -3,35 +3,36 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.6</title>
-            <pubDate>Thu, 09 Apr 2026 21:54:46 -0700</pubDate>
+            <title>3.6.1</title>
+            <pubDate>Mon, 13 Apr 2026 09:54:59 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.6</h2>
+<h2>What&#x27;s New in 3.6.1</h2>
 <h3>Features</h3>
+<ul>
+<li>Cursor resume: Unified Sessions now supports launching Cursor CLI resume directly with automatic `--continue` fallback, plus Copy Resume Command support for Cursor sessions.</li>
+<li>OpenClaw: Deleted sessions now shown by default with a badge indicating removal.</li>
+<li>Monitoring: Fresh-session validator v1 — detects and flags staleness traps in the weekly agent_watch dispatch.</li>
+</ul>
+<h3>Bug Fixes</h3>
+<ul>
+<li>OpenClaw: Eliminated full-rescan on every app launch; incremental refresh now used consistently.</li>
+<li>Monitoring: Excluded OpenClaw backup paths from weekly probe to avoid false positives.</li>
+<li>Cursor: Guarded against non-string role values in schema fingerprinting to prevent crashes on unexpected transcript shapes.</li>
+<li>Monitoring: Removed spurious `exit_code` field from stdout in the no-db-found path.</li>
+</ul>
+<h3>Reminder: What You Got in 3.6</h3>
 <ul>
 <li>Cursor: Cursor IDE/CLI added as 8th session provider — imports JSONL agent transcripts and SQLite chat databases from `~/.cursor/`. Supports session browsing, search, transcript viewing, subagent hierarchy, and resume command. No Cockpit support in this release.</li>
 <li>Discoverability: New-provider detection banner appears in the sessions view when a newly supported agent is found on disk but not yet enabled, prompting users to turn it on.</li>
 <li>Onboarding: Update tour now auto-generates a slide for newly available providers, so users see what&#x27;s new without digging into preferences.</li>
 <li>Session sources: `versionIntroduced` and `featureDescription` metadata added to session source model for use in discoverability and onboarding flows.</li>
 </ul>
-<h3>Bug Fixes</h3>
-<ul>
-<li>Cursor: Subagent metadata (`parentSessionID`, `subagentType`) now preserved during CursorSessionIndexer session merges.</li>
-<li>Reliability: Replaced unbounded `waitUntilExit` with bounded `Process.waitForExit` across CLI integrations (Codex, Gemini, Preferences), preventing potential hangs on unresponsive child processes.</li>
-</ul>
-<h3>Reminder: What You Got in 3.5</h3>
-<ul>
-<li>Transcript toolbar: Export as Markdown button for saving session transcripts as `.md` files.</li>
-<li>Analytics: Index now auto-builds on view appear; suppressed probe cleanup double-refresh.</li>
-<li>Concurrency: Captured mutable vars as `let` before `MainActor.run` for Swift 6 strict concurrency compliance.</li>
-<li>Unified view: Restored `@ObservedObject` for Gemini indexer in `UnifiedSessionsView`.</li>
-</ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.1</a></p>
             ]]></description>
-            <sparkle:version>36</sparkle:version>
-            <sparkle:shortVersionString>3.6</sparkle:shortVersionString>
+            <sparkle:version>37</sparkle:version>
+            <sparkle:shortVersionString>3.6.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6/AgentSessions-3.6.dmg" length="15513211" type="application/octet-stream" sparkle:edSignature="3cPNTaLxnqARpYsgQsPEj7AHHPflR83wgzVouGEY7ms8xMa25nJksKFu/6U4eaBKVkbMbFUuRqqXFsdViNHFAQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.1/AgentSessions-3.6.1.dmg" length="15699493" type="application/octet-stream" sparkle:edSignature="4o3hidQw9f35XjAnp+hP1aWVTWCLynkxTBqg085af8Ac8wxkye/AItwEFTQyhfZj+qHfBVrtYOUWrtVZM5j4DA=="/>
         </item>
     </channel>
 </rss>
