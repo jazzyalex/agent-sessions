@@ -74,3 +74,16 @@ For efficiency, dispatch work in parallel by independence:
 - **Medium-severity investigations** (claude, copilot, etc.) → one agent per provider, read-only
 - **High-severity root cause** (e.g. openclaw discovery) → opus agent, may need code fixes
 - **Prebump runs** → one agent per provider (after investigation clears)
+
+## Discovery contracts quick-reference
+
+| Agent    | Expected path pattern |
+|----------|-----------------------|
+| Codex    | `*/sessions/YYYY/MM/DD/rollout-*.jsonl` |
+| Claude   | `~/.claude/projects/**/*.{jsonl,ndjson}` |
+| OpenCode | `*/opencode/storage/session/*/ses_*.json` |
+| Droid    | `~/.factory/sessions/**/*.jsonl` |
+| Gemini   | `~/.gemini/tmp/<hash>/(chats/)?session-*.json` |
+| Copilot  | `~/.copilot/session-state/*.jsonl` |
+| OpenClaw | `*/agents/<id>/sessions/*.jsonl` |
+| Cursor   | `~/.cursor/projects/**/.../agent-transcripts/**/*.jsonl` |

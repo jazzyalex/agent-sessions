@@ -167,6 +167,25 @@ OpenCode uses a **multi-file JSON tree** (`storage/session/`, `storage/message/`
 
 ---
 
+## 3a  Cursor Storage
+
+Cursor uses two storage backends:
+
+- **JSONL transcripts** (`~/.cursor/projects/<workspace>/agent-transcripts/<uuid>/<uuid>.jsonl`) — primary session data, parsed by Agent Sessions. Subagent transcripts live in a `subagents/` subdirectory.
+- **SQLite chat databases** (`~/.cursor/chats/<workspace-hash>/<uuid>/store.db`) — supplementary metadata (session name, model, timestamps). Key "0" in the `meta` table contains hex-encoded JSON.
+
+The weekly scan fingerprints JSONL transcripts only. The SQLite probe (`cursor_sqlite_probe.py`) verifies the `meta` table is readable — it does not deep-fingerprint the database schema.
+
+**What to watch for:**
+- New top-level keys on `role: user/assistant` lines.
+- New content block types beyond `text`, `tool_use`, `tool_result`, `thinking`.
+- The `agent-transcripts/` directory being renamed or moved.
+- SQLite probe failures indicating `meta` table schema changes.
+
+**Note:** `cursor --version` returns null when the Cursor IDE is not installed. This is expected and not a monitoring failure.
+
+---
+
 ## 4  Discovery Path Contracts
 
 Each agent has a `discovery_path_contract` in `agent-watch-config.json` defining the
@@ -188,6 +207,7 @@ Key contracts (simplified from regexes in `agent-watch-config.json`):
 | Gemini   | `~/.gemini/tmp/<hash>/(chats/)?session-*.json` |
 | Copilot  | `~/.copilot/session-state/*.jsonl` |
 | OpenClaw | `*/agents/<id>/sessions/*.jsonl` |
+| Cursor   | `~/.cursor/projects/*/agent-transcripts/*/*.jsonl` |
 
 ---
 
