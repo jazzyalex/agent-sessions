@@ -216,6 +216,12 @@ final class CursorSessionParserTests: XCTestCase {
             XCTAssertEqual(cwd, "/tmp")
         }
     }
+
+    func testInferCWDBestEffortReturnsDecodedPathWhenFinalDirectoryMissing() {
+        let projectName = "Users-alexm-Repository-This-Path-Should-Not-Exist-For-Tests"
+        let decoded = CursorSessionParser.inferCWDBestEffort(fromProjectDirName: projectName)
+        XCTAssertEqual(decoded, "/Users/alexm/Repository/This-Path-Should-Not-Exist-For-Tests")
+    }
 }
 
 // MARK: - CursorChatMetaReader Tests

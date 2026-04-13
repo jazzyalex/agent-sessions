@@ -15,6 +15,7 @@ struct PreferencesView: View {
     @ObservedObject var claudeSettings = ClaudeResumeSettings.shared
     @ObservedObject var geminiSettings = GeminiCLISettings.shared
     @ObservedObject var copilotSettings = CopilotSettings.shared
+    @ObservedObject var cursorSettings = CursorSettings.shared
     @State var showingResetConfirm: Bool = false
     @AppStorage(PreferencesKey.showUsageStrip) var showUsageStrip: Bool = false
     // Codex tracking master toggle
@@ -169,6 +170,11 @@ struct PreferencesView: View {
     @State var copilotVersionString: String? = nil
     @State var copilotResolvedPath: String? = nil
     @State var copilotProbeDebounce: DispatchWorkItem? = nil
+    // Cursor probe state
+    @State var cursorProbeState: ProbeState = .idle
+    @State var cursorVersionString: String? = nil
+    @State var cursorResolvedPath: String? = nil
+    @State var cursorProbeDebounce: DispatchWorkItem? = nil
     // Copilot sessions directory override
     @AppStorage(PreferencesKey.Paths.copilotSessionsRootOverride) var copilotSessionsPath: String = ""
     @State var copilotSessionsPathValid: Bool = true
@@ -665,6 +671,7 @@ struct PreferencesView: View {
 
         geminiSettings.setBinaryOverride("")
         copilotSettings.setBinaryPath("")
+        cursorSettings.setBinaryPath("")
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -689,6 +696,7 @@ struct PreferencesView: View {
         scheduleClaudeProbe()
         scheduleGeminiProbe()
         scheduleCopilotProbe()
+        scheduleCursorProbe()
         scheduleDroidProbe()
         scheduleOpenClawProbe()
     }
@@ -801,7 +809,7 @@ struct PreferencesView: View {
         case .copilot: scheduleCopilotProbe()
         case .droid: scheduleDroidProbe()
         case .openclaw: scheduleOpenClawProbe()
-        case .cursor: break
+        case .cursor: scheduleCursorProbe()
         }
     }
 
@@ -822,7 +830,7 @@ struct PreferencesView: View {
         case .openclaw:
             return openClawResolvedPath
         case .cursor:
-            return nil
+            return cursorResolvedPath
         }
     }
 
@@ -850,7 +858,8 @@ struct PreferencesView: View {
             let value = openClawBinaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .cursor:
-            return nil
+            let value = cursorSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         }
     }
 
@@ -1143,6 +1152,32 @@ extension PreferencesView {
         }
     }
 
+    func probeCursor() {
+        if cursorProbeState == .probing { return }
+        cursorProbeState = .probing
+        cursorVersionString = nil
+        cursorResolvedPath = nil
+        let override = cursorSettings.binaryPath.isEmpty ? nil : cursorSettings.binaryPath
+        DispatchQueue.global(qos: .userInitiated).async {
+            let env = CursorCLIEnvironment()
+            let result = env.probe(customPath: override)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let res):
+                    self.cursorVersionString = res.versionString
+                    self.cursorResolvedPath = res.binaryURL.path
+                    self.cursorProbeState = .success
+                    self.cursorCLIAvailable = true
+                case .failure:
+                    self.cursorVersionString = nil
+                    self.cursorResolvedPath = nil
+                    self.cursorProbeState = .failure
+                    self.cursorCLIAvailable = false
+                }
+            }
+        }
+    }
+
     func probeOpenClaw() {
         if openClawProbeState == .probing { return }
         openClawProbeState = .probing
@@ -1183,7 +1218,9 @@ extension PreferencesView {
             if droidVersionString == nil && droidProbeState != .probing { probeDroid() }
         case .openClawCLI:
             if openClawVersionString == nil && openClawProbeState != .probing { probeOpenClaw() }
-        case .cursor, .menuBar, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
+        case .cursor:
+            if cursorVersionString == nil && cursorProbeState != .probing { probeCursor() }
+        case .menuBar, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
     }
@@ -1220,6 +1257,13 @@ extension PreferencesView {
         droidProbeDebounce?.cancel()
         let work = DispatchWorkItem { probeDroid() }
         droidProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleCursorProbe() {
+        cursorProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeCursor() }
+        cursorProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 

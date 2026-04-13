@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Cursor resume: Unified Sessions now supports launching Cursor CLI resume directly (`cursor agent --resume <chatId>`) with automatic `--continue` fallback, plus Copy Resume Command support for Cursor sessions.
+
 ## [3.6] - 2026-04-09
 
 ### Added

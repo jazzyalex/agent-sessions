@@ -29,7 +29,7 @@ extension PreferencesView {
                 // Terminal app preference for both Codex and Claude resumes
                 labeledRow("Terminal App") {
                     Picker("", selection: Binding(
-                        get: { (resumeSettings.launchMode == .iterm || claudeSettings.preferITerm || opencodeSettings.preferITerm || copilotSettings.preferITerm || geminiSettings.preferITerm) ? 1 : 0 },
+                        get: { (resumeSettings.launchMode == .iterm || claudeSettings.preferITerm || opencodeSettings.preferITerm || copilotSettings.preferITerm || geminiSettings.preferITerm || cursorSettings.preferITerm) ? 1 : 0 },
                         set: { idx in
                             // Apply to Codex
                             resumeSettings.setLaunchMode(idx == 1 ? .iterm : .terminal)
@@ -41,6 +41,8 @@ extension PreferencesView {
                             copilotSettings.setPreferITerm(idx == 1)
                             // Apply to Gemini
                             geminiSettings.setPreferITerm(idx == 1)
+                            // Apply to Cursor
+                            cursorSettings.setPreferITerm(idx == 1)
                         }
                     )) {
                         Text("Terminal").tag(0)

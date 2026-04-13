@@ -278,7 +278,7 @@ enum AgentEnablement {
         case .openclaw:
             return binaryDetectedCached("openclaw") || binaryDetectedCached("clawdbot")
         case .cursor:
-            return binaryDetectedCached("cursor") || binaryDetectedCached("cursor-agent")
+            return binaryDetectedCached("agent") || binaryDetectedCached("cursor") || binaryDetectedCached("cursor-agent")
         }
     }
 

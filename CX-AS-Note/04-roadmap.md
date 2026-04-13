@@ -76,44 +76,6 @@
     - If collections ship in v1, users can assign a saved session to at least one named collection.
     - Behavior persists across refresh/reindex/restart.
 
-- [ ] [2026-02-28] [Bug] Session handoff after restart is delayed until first prompt (Codex + Claude)
-  - Goal:
-    - Ensure a newly started session B is recognized immediately after restart, even before first user prompt.
-    - Ensure previous session A transitions out of live state without waiting for prompt activity in B.
-  - Inputs:
-    - Repro:
-      1. Start session A and interact.
-      2. Stop agent (`Ctrl+C`).
-      3. Start agent again (session B), no prompt yet.
-      4. Observe Cockpit/Unified live-state attribution.
-    - Current behavior:
-      - A can remain live/active too long.
-      - B may not appear as current until first prompt.
-  - Dependencies:
-    - `CodexActiveSessionsModel` presence loading + join resolution.
-    - `classifyLiveStates` and provider-specific probe fallback behavior.
-    - Session join keys (`sessionId`, `sessionLogPath`, `tty`, `workspaceRoot`) before/after first event.
-  - Definition of done:
-    - Without sending a first prompt in B, UI correctly shows:
-      - A as past (or not live),
-      - B as live (idle/active as appropriate).
-    - Works for both Codex and Claude.
-    - Regression notes and exact validation steps captured in `CX-AS-Note/06-qa-notes.md`.
-
-- [ ] [2026-02-13] [Bug] Codex sessions can be stale/missing until relaunch
-  - Goal: diagnose why active rollout sessions are not visible or not updating when pressing Refresh, but become visible after app relaunch.
-  - Inputs:
-    - Codex session id observed: `rollout-2026-02-12T21-02-20-019c5560-e857-7392-85db-6d7f80583e5e`
-    - Affected area: Codex indexing + lightweight parse + monitor refresh scheduling.
-    - Candidate touchpoints: `SessionIndexer`, `SessionDiscovery`, `UnifiedSessionIndexer`, `SessionList/Unified view`.
-  - Dependencies:
-    - Confirm `refresh` trigger/mode semantics in `UnifiedSessionIndexer`.
-    - Confirm delta window vs full scan behavior for recent/probe sessions.
-    - Confirm lightweight/full parse decisions and search fallback.
-  - Definition of done:
-    - Refresh path yields visible updates for active sessions without app restart.
-    - Search sees updates from actively-writing sessions without requiring cold restart.
-    - Reproduction steps and validation notes captured in `CX-AS-Note/06-qa-notes.md`.
 
 - [ ] [2026-02-13] [Design Decision] Hybrid refresh cadence for active + non-focused sessions
   - Goal:
@@ -139,3 +101,11 @@
 
 - [x] [DATE] Session memory bank structure initialized
   - Created `CX-AS-Note/` with standardized categories.
+
+- [x] [2026-02-28] [Bug] Session handoff after restart is delayed until first prompt (Codex + Claude) — Fixed 2026-04-12
+
+- [x] [2026-02-13] [Bug] Codex sessions can be stale/missing until relaunch — Fixed 2026-04-12
+
+- [x] [2026-02-26] [Bug] Ghost active Codex subagent rows in Cockpit — Fixed 2026-04-12
+
+- [x] [2026-02-26] [Bug] Claude sessions showing as open when actually active — Fixed 2026-04-12

@@ -62,10 +62,11 @@ The misclassification of active Claude sessions as "open" stems from a combinati
 ---
 *Analysis completed as requested without modifying any source code in the repository.*
 
-## Follow-up Status (2026-02-26)
+## Follow-up Status (2026-04-12)
 
-- Claude active/open session tracking appears correct in current validation.
-- Ghost active session behavior is still reproducible and requires additional investigation before declaring fully fixed.
+- Issue 1 (Ghost active Codex subagent rows): **Fixed**
+- Issue 2 (Claude sessions showing as open when active): **Fixed**
+- Issue 3 (New session not recognized until first prompt): **Fixed**
 
 ## Additional Known Issue (2026-02-28)
 

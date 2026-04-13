@@ -126,6 +126,28 @@ final class CopyResumeCommandTests: XCTestCase {
         XCTAssertEqual(cmd, "cd '/Users/alex/my project' && codex resume sess-xyz")
     }
 
+    // MARK: - Cursor copy command scenarios
+
+    func testCursor_sessionID_and_cwd() {
+        let cmd = cursorCopyCommand(sessionID: "178ea7fa-c37b-43e1-a9e6-bfbe996c0c55", binaryPath: "agent", cwd: "/repo/project")
+        XCTAssertEqual(cmd, "cd /repo/project && agent --resume 178ea7fa-c37b-43e1-a9e6-bfbe996c0c55")
+    }
+
+    func testCursor_sessionID_no_cwd() {
+        let cmd = cursorCopyCommand(sessionID: "chat-123", binaryPath: "agent", cwd: nil)
+        XCTAssertEqual(cmd, "agent --resume chat-123")
+    }
+
+    func testCursor_no_sessionID_uses_continue() {
+        let cmd = cursorCopyCommand(sessionID: nil, binaryPath: "agent", cwd: nil)
+        XCTAssertEqual(cmd, "agent --continue")
+    }
+
+    func testCursor_binaryUsesAgentSubcommand() {
+        let cmd = cursorCopyCommand(sessionID: "chat-123", binaryPath: "cursor", cwd: nil)
+        XCTAssertEqual(cmd, "cursor agent --resume chat-123")
+    }
+
     // MARK: - Helpers
 
     /// Replicates the command-building logic used in copyResumeCommand (Claude)
@@ -149,6 +171,23 @@ final class CopyResumeCommandTests: XCTestCase {
         let builder = CodexResumeCommandBuilder()
         let binary = binaryOverride.isEmpty ? "codex" : binaryOverride
         let core = "\(builder.shellQuoteIfNeeded(binary)) resume \(builder.shellQuoteIfNeeded(sessionID))"
+        if let cwd, !cwd.isEmpty {
+            return "cd \(builder.shellQuoteIfNeeded(cwd)) && \(core)"
+        }
+        return core
+    }
+
+    /// Replicates the command-building logic used in copyResumeCommand (Cursor)
+    private func cursorCopyCommand(sessionID: String?, binaryPath: String, cwd: String?) -> String {
+        let builder = CursorResumeCommandBuilder()
+        let binary = binaryPath.isEmpty ? "agent" : binaryPath
+        let strategy: CursorResumeCommandBuilder.Strategy = {
+            if let id = sessionID, !id.isEmpty {
+                return .resumeByID(id: id)
+            }
+            return .continueMostRecent
+        }()
+        let core = (try? builder.makeCoreCommand(strategy: strategy, binaryCommand: binary)) ?? ""
         if let cwd, !cwd.isEmpty {
             return "cd \(builder.shellQuoteIfNeeded(cwd)) && \(core)"
         }

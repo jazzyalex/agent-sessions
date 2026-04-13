@@ -1067,6 +1067,8 @@ struct UnifiedSessionsView: View {
             return true // session.id is the SQLite session ID; falls back to --continue
         case .copilot:
             return true // session.id from session.start; falls back to --continue
+        case .cursor:
+            return true // session.id from transcript UUID; falls back to --continue
         case .gemini:
             return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: session)) != nil
         default:
@@ -1131,6 +1133,17 @@ struct UnifiedSessionsView: View {
             } else {
                 core = "\(builder.shellQuoteIfNeeded(binary)) --continue"
             }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+            pb.setString(command, forType: .string)
+
+        case .cursor:
+            let settings = CursorSettings.shared
+            let sid = session.id
+            let wd = settings.effectiveWorkingDirectory(for: session)
+            let binary = settings.binaryPath.isEmpty ? "agent" : settings.binaryPath
+            let builder = CursorResumeCommandBuilder()
+            let strategy: CursorResumeCommandBuilder.Strategy = !sid.isEmpty ? .resumeByID(id: sid) : .continueMostRecent
+            guard let core = try? builder.makeCoreCommand(strategy: strategy, binaryCommand: binary) else { return }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
 
@@ -1331,13 +1344,13 @@ struct UnifiedSessionsView: View {
 
             ToolbarGroupDivider()
 
-            ToolbarIconButton(help: "Resume the selected Codex or Claude session in its original CLI (⌃⌘R). Gemini, OpenCode, and Copilot sessions are read-only.") { _ in
+            ToolbarIconButton(help: "Resume the selected session in its original CLI (⌃⌘R).") { _ in
                 ToolbarIcon(systemName: "terminal")
             } action: {
                 if let s = selectedSession { resume(s) }
             }
             .keyboardShortcut("r", modifiers: [.command, .control])
-            .disabled(selectedSession == nil || !(selectedSession?.source == .codex || selectedSession?.source == .claude))
+            .disabled(!canResumeSelectedSession)
             .accessibilityLabel(Text("Resume"))
 
             ToolbarIconButton(help: "Reveal the selected session's working directory in Finder (⌘⇧O)") { _ in
@@ -2050,9 +2063,39 @@ struct UnifiedSessionsView: View {
         showActionAlert(message: "Unable to focus the terminal for this session.")
     }
 
+    private var canResumeSelectedSession: Bool {
+        guard let selectedSession else { return false }
+        let geminiCLISessionID = selectedSession.source == .gemini
+            ? GeminiSessionIDHelper.deriveSessionID(from: selectedSession)
+            : nil
+        return canResumeSession(selectedSession, geminiCLISessionID: geminiCLISessionID)
+    }
+
+    private func effectiveWorkingDirectoryURL(for session: Session) -> URL? {
+        switch session.source {
+        case .claude:
+            return ClaudeSessionIDHelper.projectRoot(for: session)
+        case .codex:
+            if let wd = CodexResumeSettings.shared.effectiveWorkingDirectory(for: session), !wd.isEmpty {
+                return URL(fileURLWithPath: wd)
+            }
+            return nil
+        case .opencode:
+            return OpenCodeSettings.shared.effectiveWorkingDirectory(for: session)
+        case .copilot:
+            return CopilotSettings.shared.effectiveWorkingDirectory(for: session)
+        case .cursor:
+            return CursorSettings.shared.effectiveWorkingDirectory(for: session)
+        case .gemini:
+            return GeminiCLISettings.shared.effectiveWorkingDirectory(for: session)
+        default:
+            guard let path = session.cwd, !path.isEmpty else { return nil }
+            return URL(fileURLWithPath: path)
+        }
+    }
+
     private func openDir(_ s: Session) {
-        guard let path = s.cwd, !path.isEmpty else { return }
-        let url = URL(fileURLWithPath: path)
+        guard let url = effectiveWorkingDirectoryURL(for: s) else { return }
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -2076,6 +2119,7 @@ struct UnifiedSessionsView: View {
         case .opencode: return "OpenCode"
         case .claude: return "Claude Code"
         case .copilot: return "Copilot CLI"
+        case .cursor: return "Cursor CLI"
         case .gemini: return "Gemini CLI"
         default: return "CLI"
         }
@@ -2083,7 +2127,7 @@ struct UnifiedSessionsView: View {
 
     private func canResumeSession(_ s: Session, geminiCLISessionID: String? = nil) -> Bool {
         switch s.source {
-        case .codex, .claude, .opencode, .copilot:
+        case .codex, .claude, .opencode, .copilot, .cursor:
             return true
         case .gemini:
             return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: s)) != nil
@@ -2118,6 +2162,17 @@ struct UnifiedSessionsView: View {
             Task { @MainActor in
                 let launcher: CopilotTerminalLaunching = settings.preferITerm ? CopilotITermLauncher() : CopilotTerminalLauncher()
                 let coord = CopilotResumeCoordinator(env: CopilotCLIEnvironment(), builder: CopilotResumeCommandBuilder(), launcher: launcher)
+                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+            }
+        case .cursor:
+            let settings = CursorSettings.shared
+            let sid = s.id
+            let wd = settings.effectiveWorkingDirectory(for: s)
+            let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
+            let input = CursorResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
+            Task { @MainActor in
+                let launcher: CursorTerminalLaunching = settings.preferITerm ? CursorITermLauncher() : CursorTerminalLauncher()
+                let coord = CursorResumeCoordinator(env: CursorCLIEnvironment(), builder: CursorResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
         case .gemini:

@@ -380,6 +380,13 @@ final class CursorSessionParser {
         return inferCWD(fromProjectDirName: projectName)
     }
 
+    /// Best-effort CWD inference for resume/copy command paths.
+    /// Unlike `inferCWD`, this does not require the final path to exist.
+    static func inferCWDBestEffort(from url: URL) -> String? {
+        guard let projectName = extractProjectDirName(from: url) else { return nil }
+        return inferCWDBestEffort(fromProjectDirName: projectName)
+    }
+
     /// Infer CWD from a Cursor project directory name (encoded with `-` as separator).
     ///
     /// Cursor encodes absolute paths by replacing `/` with `-`:
@@ -390,6 +397,30 @@ final class CursorSessionParser {
     /// as a path separator first (check if the prefix directory exists), and if not, rejoin
     /// with the next segment using a literal hyphen.
     static func inferCWD(fromProjectDirName projectName: String) -> String? {
+        let bestEffort = inferCWDBestEffort(fromProjectDirName: projectName)
+        guard let bestEffort else { return nil }
+
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: bestEffort, isDirectory: &isDir), isDir.boolValue {
+            return bestEffort
+        }
+
+        // Fallback: try the naive all-slash replacement (for edge cases where no
+        // intermediate directories exist, e.g. temp paths)
+        let naive = "/" + projectName.replacingOccurrences(of: "-", with: "/")
+        if fm.fileExists(atPath: naive, isDirectory: &isDir), isDir.boolValue {
+            return naive
+        }
+
+        return nil
+    }
+
+    /// Best-effort decoder for Cursor project-dir encoding.
+    /// Prefers segment boundaries that are known directories when possible,
+    /// but always returns a decoded absolute path even when the final
+    /// directory currently does not exist.
+    static func inferCWDBestEffort(fromProjectDirName projectName: String) -> String? {
         let segments = projectName.components(separatedBy: "-")
         guard !segments.isEmpty else { return nil }
 
@@ -422,21 +453,7 @@ final class CursorSessionParser {
             i += 1
         }
 
-        let finalPath = resolvedPrefix + "/" + currentComponent
-
-        // Verify the final path exists
-        if fm.fileExists(atPath: finalPath, isDirectory: &isDir), isDir.boolValue {
-            return finalPath
-        }
-
-        // Fallback: try the naive all-slash replacement (for edge cases where no
-        // intermediate directories exist, e.g. temp paths)
-        let naive = "/" + projectName.replacingOccurrences(of: "-", with: "/")
-        if fm.fileExists(atPath: naive, isDirectory: &isDir), isDir.boolValue {
-            return naive
-        }
-
-        return nil
+        return resolvedPrefix + "/" + currentComponent
     }
 
     /// Extract the project directory name from a transcript file URL.
