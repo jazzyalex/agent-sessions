@@ -1,7 +1,8 @@
 # Agent Monitoring (Daily + Weekly)
 
 This document defines the reliable process for detecting upstream agent format drift and deciding
-whether Agent Sessions (AS) needs an urgent update.
+whether Agent Sessions (AS) needs an urgent update for active providers. Droid is legacy-only and
+is excluded from routine monitoring.
 
 This is intentionally **non-destructive**:
 - It produces reports and evidence captures.
@@ -15,8 +16,8 @@ This is intentionally **non-destructive**:
 - Include Claude + Codex **usage/limit tracking** in monitoring (these can drift independently of sessions).
 
 ## Cadence
-- Daily: `codex`, `claude`, `opencode`, `droid`, `openclaw` (release watch only; quiet unless there is actionable change).
-- Weekly: all 7 agents including `gemini`, `copilot`, and `openclaw` (release watch + minimal probes + schema fingerprints).
+- Daily: `codex`, `claude`, `opencode`, `openclaw` (release watch only; quiet unless there is actionable change).
+- Weekly: all 7 active agents including `gemini`, `copilot`, and `cursor` (release watch + minimal probes + schema fingerprints).
 - Weekly also enforces `discovery_path_contract` checks from config to catch storage-layout drift that can break app discovery even when parser schema still matches.
 
 ## Sources of Truth

@@ -1,6 +1,6 @@
 # Agent Support Docs
 
-Start here for how Agent Sessions tracks supported agent versions and parsing compatibility.
+Start here for how Agent Sessions tracks active agent versions, legacy imports, and parsing compatibility.
 
 ## What lives where
 - Support matrix: `docs/agent-support/agent-support-matrix.yml`
@@ -14,5 +14,5 @@ Start here for how Agent Sessions tracks supported agent versions and parsing co
 1. Read the workflow.
 2. Use the update checklist before changing the matrix.
 3. Record every upstream check in the memory bank.
-4. Run monitoring (daily/weekly) to detect drift early.
+4. Run monitoring (daily/weekly) to detect drift early for active providers.
 5. Treat both parser schema drift and discovery path-layout drift as release blockers.

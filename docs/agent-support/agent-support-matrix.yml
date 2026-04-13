@@ -5,6 +5,7 @@ workflow_doc: "docs/agent-support/workflow.md"
 notes:
   - "Max verified versions come from repo fixtures and documented format changes."
   - "Some agents do not log their own CLI version; those are marked unknown."
+  - "Droid is retained for legacy imports and fixtures, but it is no longer part of the active monitoring/support set."
   - "2026-03-31 weekly check: bumped all 7 agents. Claude/Gemini additive schema drift (new keys). Copilot major version (0.0.420->1.0.11): storage layout changed to <uuid>/events.jsonl subdirectory; runtime patched in f77040f, monitoring config updated, new subdirectory fixture added."
   - "2026-04-06 weekly check: bumped OpenCode 1.3.17, Gemini 0.36.0, OpenClaw 2026.4.5 (schema unchanged). Claude 2.1.92 and Copilot 1.0.16: additive new event types (attachment, session.shutdown); schema_drift fixtures updated."
   - "2026-04-12 weekly check: bumped Claude 2.1.92->2.1.104 (attachment type additive, parser handles via .meta, drift test passes), Copilot 1.0.16->1.0.24 (session.shutdown additive, parser handles via default branch, drift test passes), OpenClaw 2026.4.5->2026.4.10 (schema unchanged, fresh session after mass-delete recovery). Prebump drivers failed (claude: --verbose flag needed; copilot: sandbox auth missing) — weekly evidence sufficient."

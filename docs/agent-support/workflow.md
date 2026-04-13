@@ -1,7 +1,7 @@
 # Agent Support Workflow
 
-This workflow defines how Agent Sessions tracks the latest supported agent versions and how we
-detect upstream session format changes that could break JSON or JSONL parsing.
+This workflow defines how Agent Sessions tracks the latest active agent versions, legacy import
+paths, and how we detect upstream session format changes that could break JSON or JSONL parsing.
 
 ## Source of Truth
 - Support matrix: `docs/agent-support/agent-support-matrix.yml`
@@ -22,8 +22,8 @@ detect upstream session format changes that could break JSON or JSONL parsing.
 2. Read the update checklist.
    - Use `docs/agent-support/update-checklist.md` to gate the work.
 3. Run monitoring (preferred).
-   - Daily: release watch for `codex`, `claude`, `opencode`, `droid`, `openclaw`.
-   - Weekly: release watch + probes for all eight agents.
+   - Daily: release watch for `codex`, `claude`, `opencode`, `openclaw`.
+   - Weekly: release watch + probes for the seven active providers (`codex`, `claude`, `gemini`, `copilot`, `cursor`, `opencode`, `openclaw`).
    - See `docs/agent-support/monitoring.md`.
 4. Collect upstream agent versions (manual fallback).
    - Record the latest available versions in a scratch note; do not update the matrix yet.
@@ -43,7 +43,7 @@ detect upstream session format changes that could break JSON or JSONL parsing.
      - `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/SessionParserTests`
    - Auto capture helper (Gemini/OpenCode): `./scripts/capture_latest_agent_sessions.py` writes the newest local session artifacts to `scripts/agent_captures/` for quick diffing and fixture updates.
    - Auto capture helper (OpenClaw): `./scripts/capture_latest_agent_sessions.py --agent openclaw` writes the latest local OpenClaw JSONL session to `scripts/agent_captures/` for quick diffing and fixture updates.
-   - Auto capture helper (Droid): `./scripts/droid_stream_schema_probe.py` runs `droid exec --output-format stream-json` and writes stream logs plus a schema report to `scripts/agent_captures/`.
+   - Legacy helper (Droid): `./scripts/droid_stream_schema_probe.py` remains available for archival session analysis, but it is not part of the active monitoring cadence.
 9. Update documentation.
    - Update `docs/agent-json-tracking.md` with the change and evidence.
    - Update `docs/agent-support/agent-support-matrix.yml` with `max_verified_version`,

@@ -142,7 +142,7 @@
       }
     },
     "droid": {
-      "cadence": { "daily": false, "weekly": true },
+      "cadence": { "daily": false, "weekly": false },
       "installed_version_cmd": ["droid", "--version"],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.droid.max_verified_version",
       "upstream": [
