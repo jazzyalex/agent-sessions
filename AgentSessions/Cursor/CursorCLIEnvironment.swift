@@ -41,36 +41,34 @@ struct CursorCLIEnvironment: CursorCLIEnvironmentProviding {
             if FileManager.default.isExecutableFile(atPath: url.path) { return url }
         }
 
-        if let fromLogin = whichViaLoginShell("agent"), FileManager.default.isExecutableFile(atPath: fromLogin) {
-            return URL(fileURLWithPath: fromLogin)
+        let loginShellCandidates = [
+            whichViaLoginShell("agent"),
+            whichViaLoginShell("cursor")
+        ].compactMap { $0 }
+        if let url = bestCursorCLI(from: loginShellCandidates) {
+            return url
         }
 
-        if let fromLogin = whichViaLoginShell("cursor"), FileManager.default.isExecutableFile(atPath: fromLogin) {
-            return URL(fileURLWithPath: fromLogin)
-        }
-
-        if let path = which("agent") {
-            return URL(fileURLWithPath: path)
-        }
-
-        if let path = which("cursor") {
-            return URL(fileURLWithPath: path)
+        let pathCandidates = [
+            which("agent"),
+            which("cursor")
+        ].compactMap { $0 }
+        if let url = bestCursorCLI(from: pathCandidates) {
+            return url
         }
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let candidates = [
             "\(home)/.local/bin/agent",
-            "\(home)/.local/bin/cursor",
             "/opt/homebrew/bin/agent",
             "/usr/local/bin/agent",
+            "\(home)/.local/bin/cursor",
             "/opt/homebrew/bin/cursor",
             "/usr/local/bin/cursor"
         ]
 
-        for path in candidates {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return URL(fileURLWithPath: path)
-            }
+        if let url = bestCursorCLI(from: candidates) {
+            return url
         }
 
         return nil
@@ -137,5 +135,33 @@ struct CursorCLIEnvironment: CursorCLIEnvironmentProviding {
         } catch {
             return nil
         }
+    }
+
+    private func bestCursorCLI(from paths: [String]) -> URL? {
+        var firstExecutable: URL?
+        var seen = Set<String>()
+
+        for path in paths {
+            guard seen.insert(path).inserted else { continue }
+            guard FileManager.default.isExecutableFile(atPath: path) else { continue }
+            let url = URL(fileURLWithPath: path)
+            if firstExecutable == nil {
+                firstExecutable = url
+            }
+            if supportsResumeFlags(binary: url) {
+                return url
+            }
+        }
+
+        return firstExecutable
+    }
+
+    private func supportsResumeFlags(binary: URL) -> Bool {
+        let topHelp = (try? executor.run([binary.path, "--help"], cwd: nil))
+        let agentHelp = (try? executor.run([binary.path, "agent", "--help"], cwd: nil))
+        let helpOut = [topHelp?.stdout, topHelp?.stderr, agentHelp?.stdout, agentHelp?.stderr]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+        return helpOut.contains("--resume") || helpOut.contains("--continue")
     }
 }

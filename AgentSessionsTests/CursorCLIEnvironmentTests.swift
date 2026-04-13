@@ -43,6 +43,79 @@ final class CursorCLIEnvironmentTests: XCTestCase {
         }
     }
 
+    func testResolveBinaryPrefersFunctionalAgentOverCursorShim() {
+        let executor = MockExecutor()
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let agentBinaryPath = makeTempExecutable(name: "cursor-resolve-agent")
+        executor.responses[[shell, "-lic", "command -v agent || true"]] = CommandResult(stdout: "\(agentBinaryPath)\n", stderr: "", exitCode: 0)
+        executor.responses[[agentBinaryPath, "--help"]] = CommandResult(stdout: "--resume [chatId]\n--continue", stderr: "", exitCode: 0)
+        executor.responses[[agentBinaryPath, "agent", "--help"]] = CommandResult(stdout: "", stderr: "", exitCode: 0)
+
+        let cursorBinaryPath = makeTempExecutable(name: "cursor-resolve-cursor")
+        executor.responses[[shell, "-lic", "command -v cursor || true"]] = CommandResult(stdout: "\(cursorBinaryPath)\n", stderr: "", exitCode: 0)
+        executor.responses[[cursorBinaryPath, "--help"]] = CommandResult(stdout: "No Cursor IDE installation found", stderr: "", exitCode: 1)
+        executor.responses[[cursorBinaryPath, "agent", "--help"]] = CommandResult(stdout: "", stderr: "No Cursor IDE installation found", exitCode: 1)
+
+        let env = CursorCLIEnvironment(executor: executor)
+        let resolved = env.resolveBinary(customPath: nil)
+
+        XCTAssertEqual(resolved?.path, agentBinaryPath)
+    }
+
+    func testResolveBinaryFallsBackToCursorShimWhenAgentIsUnavailable() {
+        let executor = MockExecutor()
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let cursorBinaryPath = makeTempExecutable(name: "cursor-resolve-cursor-only")
+        executor.responses[[shell, "-lic", "command -v agent || true"]] = CommandResult(stdout: "", stderr: "", exitCode: 0)
+        executor.responses[[shell, "-lic", "command -v cursor || true"]] = CommandResult(stdout: "\(cursorBinaryPath)\n", stderr: "", exitCode: 0)
+        executor.responses[[cursorBinaryPath, "--help"]] = CommandResult(stdout: "--resume [chatId]\n--continue", stderr: "", exitCode: 0)
+        executor.responses[[cursorBinaryPath, "agent", "--help"]] = CommandResult(stdout: "", stderr: "", exitCode: 0)
+
+        let env = CursorCLIEnvironment(executor: executor)
+        let resolved = env.resolveBinary(customPath: nil)
+
+        XCTAssertEqual(resolved?.path, cursorBinaryPath)
+    }
+
+    func testResolveBinaryAcceptsCandidateWithContinueOnlySupport() {
+        let executor = MockExecutor()
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let agentBinaryPath = makeTempExecutable(name: "cursor-resolve-continue-only")
+        executor.responses[[shell, "-lic", "command -v agent || true"]] = CommandResult(stdout: "\(agentBinaryPath)\n", stderr: "", exitCode: 0)
+        executor.responses[[shell, "-lic", "command -v cursor || true"]] = CommandResult(stdout: "", stderr: "", exitCode: 0)
+        executor.responses[[agentBinaryPath, "--help"]] = CommandResult(stdout: "--continue", stderr: "", exitCode: 0)
+        executor.responses[[agentBinaryPath, "agent", "--help"]] = CommandResult(stdout: "", stderr: "", exitCode: 0)
+
+        let env = CursorCLIEnvironment(executor: executor)
+        let resolved = env.resolveBinary(customPath: nil)
+
+        XCTAssertEqual(resolved?.path, agentBinaryPath)
+    }
+
+    func testProbeReportsUnsupportedAutoDetectedCLI() {
+        let executor = MockExecutor()
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let agentBinaryPath = makeTempExecutable(name: "cursor-resolve-unsupported")
+        executor.responses[[shell, "-lic", "command -v agent || true"]] = CommandResult(stdout: "\(agentBinaryPath)\n", stderr: "", exitCode: 0)
+        executor.responses[[shell, "-lic", "command -v cursor || true"]] = CommandResult(stdout: "", stderr: "", exitCode: 0)
+        executor.responses[[agentBinaryPath, "--version"]] = CommandResult(stdout: "cursor-agent 0.1.0", stderr: "", exitCode: 0)
+        executor.responses[[agentBinaryPath, "--help"]] = CommandResult(stdout: "old cursor help", stderr: "", exitCode: 0)
+        executor.responses[[agentBinaryPath, "agent", "--help"]] = CommandResult(stdout: "", stderr: "", exitCode: 0)
+
+        let env = CursorCLIEnvironment(executor: executor)
+        let result = env.probe(customPath: nil)
+
+        switch result {
+        case .success(let probe):
+            XCTAssertEqual(probe.binaryURL.path, agentBinaryPath)
+            XCTAssertEqual(probe.versionString, "cursor-agent 0.1.0")
+            XCTAssertFalse(probe.supportsResume)
+            XCTAssertFalse(probe.supportsContinue)
+        case .failure(let error):
+            XCTFail("unexpected failure: \(error)")
+        }
+    }
+
     private final class MockExecutor: CommandExecuting {
         var responses: [[String]: CommandResult] = [:]
 

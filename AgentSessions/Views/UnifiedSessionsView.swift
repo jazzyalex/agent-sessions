@@ -1140,10 +1140,9 @@ struct UnifiedSessionsView: View {
             let settings = CursorSettings.shared
             let sid = session.id
             let wd = settings.effectiveWorkingDirectory(for: session)
-            let binary = settings.binaryPath.isEmpty ? "agent" : settings.binaryPath
+            let plan = settings.copyCommandPlan(sessionID: sid)
             let builder = CursorResumeCommandBuilder()
-            let strategy: CursorResumeCommandBuilder.Strategy = !sid.isEmpty ? .resumeByID(id: sid) : .continueMostRecent
-            guard let core = try? builder.makeCoreCommand(strategy: strategy, binaryCommand: binary) else { return }
+            guard let core = try? builder.makeCoreCommand(strategy: plan.strategy, binaryCommand: plan.binary) else { return }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
 

@@ -148,6 +148,16 @@ final class CopyResumeCommandTests: XCTestCase {
         XCTAssertEqual(cmd, "cursor agent --resume chat-123")
     }
 
+    func testCursor_autoModePrefersCursorExecutable() {
+        let cmd = cursorCopyCommand(sessionID: "chat-123", binaryPath: "", cachedBinaryPath: "cursor", cwd: nil)
+        XCTAssertEqual(cmd, "cursor agent --resume chat-123")
+    }
+
+    func testCursor_autoModeFallsBackToAgentWhenCacheEmpty() {
+        let cmd = cursorCopyCommand(sessionID: "chat-123", binaryPath: "", cachedBinaryPath: nil, cwd: nil)
+        XCTAssertEqual(cmd, "agent --resume chat-123")
+    }
+
     // MARK: - Helpers
 
     /// Replicates the command-building logic used in copyResumeCommand (Claude)
@@ -178,9 +188,12 @@ final class CopyResumeCommandTests: XCTestCase {
     }
 
     /// Replicates the command-building logic used in copyResumeCommand (Cursor)
-    private func cursorCopyCommand(sessionID: String?, binaryPath: String, cwd: String?) -> String {
+    private func cursorCopyCommand(sessionID: String?,
+                                   binaryPath: String,
+                                   cachedBinaryPath: String? = nil,
+                                   cwd: String?) -> String {
         let builder = CursorResumeCommandBuilder()
-        let binary = binaryPath.isEmpty ? "agent" : binaryPath
+        let binary = binaryPath.isEmpty ? (cachedBinaryPath ?? "agent") : binaryPath
         let strategy: CursorResumeCommandBuilder.Strategy = {
             if let id = sessionID, !id.isEmpty {
                 return .resumeByID(id: id)

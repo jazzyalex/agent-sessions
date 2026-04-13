@@ -672,6 +672,7 @@ struct PreferencesView: View {
         geminiSettings.setBinaryOverride("")
         copilotSettings.setBinaryPath("")
         cursorSettings.setBinaryPath("")
+        cursorSettings.setResolvedBinaryPath(nil)
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -1158,6 +1159,7 @@ extension PreferencesView {
         cursorVersionString = nil
         cursorResolvedPath = nil
         let override = cursorSettings.binaryPath.isEmpty ? nil : cursorSettings.binaryPath
+        let isAutoProbe = override == nil
         DispatchQueue.global(qos: .userInitiated).async {
             let env = CursorCLIEnvironment()
             let result = env.probe(customPath: override)
@@ -1166,11 +1168,19 @@ extension PreferencesView {
                 case .success(let res):
                     self.cursorVersionString = res.versionString
                     self.cursorResolvedPath = res.binaryURL.path
+                    if isAutoProbe {
+                        self.cursorSettings.setResolvedBinary(res.binaryURL.path,
+                                                              supportsResume: res.supportsResume,
+                                                              supportsContinue: res.supportsContinue)
+                    }
                     self.cursorProbeState = .success
                     self.cursorCLIAvailable = true
                 case .failure:
                     self.cursorVersionString = nil
                     self.cursorResolvedPath = nil
+                    if isAutoProbe {
+                        self.cursorSettings.setResolvedBinaryPath(nil)
+                    }
                     self.cursorProbeState = .failure
                     self.cursorCLIAvailable = false
                 }
