@@ -1,5 +1,5 @@
 agent_sessions_version: 2.10.1
-as_of_commit: c8e5c87
+as_of_commit: e3ab144
 as_of_date: 2026-04-12
 workflow_doc: "docs/agent-support/workflow.md"
 notes:

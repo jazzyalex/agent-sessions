@@ -19,11 +19,13 @@ entries:
           evidence:
             - "Resources/Fixtures/stage0/agents/cursor/small.jsonl"
             - "Resources/Fixtures/stage0/agents/cursor/large.jsonl"
+          report: "scripts/probe_scan_output/agent_watch/20260413-025417Z/report.json"
     notes:
       - "Initial Cursor monitoring setup. Date-based version (no CLI version embedded in transcripts)."
       - "cursor --version returns null (IDE not installed); expected steady state, not a failure."
-      - "SQLite probe verifies ~/.cursor/chats/*/*/store.db meta table health."
+      - "SQLite probe verifies ~/.cursor/chats/*/*/store.db meta table health. Probe ok=true on first run."
       - "Subagent fixtures cover the agent-transcripts/<uuid>/subagents/<uuid>.jsonl path."
+      - "First weekly scan: severity=none, schema_matches_baseline=true, discovery_ok=true, sqlite_probe_ok=true."
 
   - agent_sessions_version: "2.10.1"
     as_of_date_utc: "2026-04-12"
