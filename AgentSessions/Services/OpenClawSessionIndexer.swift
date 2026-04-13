@@ -1,9 +1,24 @@
 import Foundation
 import Combine
 import SwiftUI
+import os.log
+
+private let indexLog = OSLog(subsystem: "com.triada.AgentSessions", category: "OpenClawIndexing")
 
 /// Session indexer for OpenClaw / Clawdbot sessions.
 final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
+    private struct PersistedFileStat: Codable {
+        let mtime: Int64
+        let size: Int64
+    }
+
+    private struct PersistedFileStatPayload: Codable {
+        let version: Int
+        let stats: [String: PersistedFileStat]
+    }
+
+    private static let coreFileStatsStateKey = "core_file_stats_v1:openclaw"
+
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
@@ -41,6 +56,8 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
     private var cancellables = Set<AnyCancellable>()
     private var previewMTimeByID: [String: Date] = [:]
     private var refreshToken = UUID()
+    private let fileStatsLock = NSLock()
+    private var lastKnownFileStatsByPath: [String: SessionFileStat] = [:]
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
@@ -126,27 +143,122 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
 
         let requestedPriority: TaskPriority = executionProfile.deferNonCriticalWork ? .utility : .userInitiated
         let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : requestedPriority
-        Task.detached(priority: prio) { [weak self, token, executionProfile] in
+        Task.detached(priority: prio) { [weak self, token, mode, executionProfile] in
             guard let self else { return }
 
+            // ── Phase 1: Hydrate from IndexDB ──
+            var indexed: [Session] = []
+            do {
+                if let hydrated = try await self.hydrateFromIndexDBIfAvailable() {
+                    indexed = hydrated
+                }
+            } catch {
+                // DB errors are non-fatal; fall back to filesystem.
+            }
+            if indexed.isEmpty {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                do {
+                    if let retry = try await self.hydrateFromIndexDBIfAvailable(), !retry.isEmpty {
+                        indexed = retry
+                    }
+                } catch {}
+            }
+
+            await self.seedKnownFileStatsIfNeeded()
+            let fm = FileManager.default
+            let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
+            let existingSessions = indexed.filter(exists)
+            self.bootstrapKnownFileStatsIfNeeded(from: existingSessions)
+
+            // ── Phase 2: Publish hydrated sessions immediately ──
+            let presentedHydration = !existingSessions.isEmpty
+            if presentedHydration {
+                let hydratedSorted = existingSessions.sorted { $0.modifiedAt > $1.modifiedAt }
+                // Archive fallbacks merged here for immediate display; re-merged on the final
+                // complete list at end of Phase 7 to avoid duplication from delta slices.
+                let hydratedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(
+                    into: hydratedSorted, source: .openclaw)
+
+                var hydratedPreviewTimes: [String: Date] = [:]
+                hydratedPreviewTimes.reserveCapacity(hydratedWithArchives.count)
+                for s in hydratedWithArchives {
+                    let url = URL(fileURLWithPath: s.filePath)
+                    if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+                       let m = rv.contentModificationDate {
+                        hydratedPreviewTimes[s.id] = m
+                    }
+                }
+                let capturedPreviewTimes = hydratedPreviewTimes
+
+                await MainActor.run {
+                    guard self.refreshToken == token else { return }
+                    self.allSessions = hydratedWithArchives
+                    self.previewMTimeByID = capturedPreviewTimes
+                    self.launchPhase = .scanning
+                    self.filesProcessed = hydratedWithArchives.count
+                    self.totalFiles = hydratedWithArchives.count
+                    self.progressText = "Loaded \(hydratedWithArchives.count) from index"
+                }
+                #if DEBUG
+                print("[Launch] Hydrated \(existingSessions.count) OpenClaw sessions from DB, now scanning for changes…")
+                #endif
+                LaunchProfiler.log("OpenClaw.refresh: DB hydrate published (existing=\(existingSessions.count))")
+            } else {
+                #if DEBUG
+                print("[Launch] DB hydration returned nil for OpenClaw – scanning all files")
+                #endif
+            }
+
+            // ── Phase 3: Delta scan (only changed/new files) ──
+            let previousStats = self.knownFileStatsSnapshot()
+            let delta = self.discovery.discoverDelta(previousByPath: previousStats)
+
+            let files: [URL]
+            let missingHydratedCount: Int
+            if mode == .fullReconcile || previousStats.isEmpty {
+                // First-ever scan or manual full reconcile: parse everything
+                files = delta.currentByPath.keys.map { URL(fileURLWithPath: $0) }
+                missingHydratedCount = 0
+            } else {
+                // Supplement: force-parse files on disk but missing from hydrated snapshot.
+                let existingPaths = Set(existingSessions.map(\.filePath))
+                let changedPaths = Set(delta.changedFiles.map(\.path))
+                let missingPaths = Set(delta.currentByPath.keys)
+                    .subtracting(existingPaths)
+                    .subtracting(changedPaths)
+                missingHydratedCount = missingPaths.count
+                if missingPaths.isEmpty {
+                    files = delta.changedFiles
+                } else {
+                    var combined = delta.changedFiles
+                    combined.append(contentsOf: missingPaths.sorted().map { URL(fileURLWithPath: $0) })
+                    files = combined
+                }
+            }
+
+            #if DEBUG
+            print("📁 Found \(files.count) OpenClaw changed/new files (removed=\(delta.removedPaths.count), total_on_disk=\(delta.currentByPath.count))")
+            #endif
+            LaunchProfiler.log("OpenClaw.refresh: file enumeration done (changed=\(files.count), removed=\(delta.removedPaths.count), gap=\(missingHydratedCount))")
+
+            // shouldMergeArchives: false — we call mergePinnedArchiveFallbacks once below
+            // on the complete merged list, preventing duplication from delta slices.
             let config = SessionIndexingEngine.ScanConfig(
                 source: .openclaw,
-                discoverFiles: {
-                    let files = self.discovery.discoverSessionFiles()
-                    LaunchProfiler.log("OpenClaw.refresh: file enumeration done (files=\(files.count))")
-                    return files
-                },
+                discoverFiles: { files },
                 parseLightweight: { OpenClawSessionParser.parseFile(at: $0) },
                 shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
                 throttler: self.progressThrottler,
+                shouldContinue: { self.refreshToken == token },
+                shouldMergeArchives: false,
                 workerCount: executionProfile.workerCount,
                 sliceSize: executionProfile.sliceSize,
                 interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
                 onProgress: { processed, total in
                     guard self.refreshToken == token else { return }
-                    self.totalFiles = total
-                    self.hasEmptyDirectory = (total == 0)
-                    self.filesProcessed = processed
+                    self.totalFiles = existingSessions.count + total
+                    self.hasEmptyDirectory = existingSessions.isEmpty && total == 0
+                    self.filesProcessed = existingSessions.count + processed
                     if processed > 0 {
                         self.progressText = "Indexed \(processed)/\(total)"
                     }
@@ -156,14 +268,56 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                 }
             )
 
-            let result = await SessionIndexingEngine.hydrateOrScan(
-                hydrate: { try await self.hydrateFromIndexDBIfAvailable() },
-                config: config
-            )
+            let scanResult = await SessionIndexingEngine.hydrateOrScan(config: config)
+            let changedSessions = scanResult.sessions
 
+            // Bail early if a newer refresh has started — don't touch shared state.
+            guard self.refreshToken == token else { return }
+
+            // ── Phase 4: Merge hydrated + scanned ──
+            var mergedByPath: [String: Session] = [:]
+            mergedByPath.reserveCapacity(existingSessions.count + changedSessions.count)
+            for session in existingSessions {
+                mergedByPath[session.filePath] = session
+            }
+            for removed in delta.removedPaths {
+                mergedByPath.removeValue(forKey: removed)
+            }
+            for session in changedSessions {
+                mergedByPath[session.filePath] = session
+            }
+
+            let merged = Array(mergedByPath.values).filter(exists)
+            let sortedSessions = merged.sorted { $0.modifiedAt > $1.modifiedAt }
+            // Single archive fallback merge on the complete, deduplicated list.
+            let mergedWithArchives = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(
+                into: sortedSessions, source: .openclaw)
+
+            // ── Phase 5: Persist file stats (token-guarded) ──
+            if self.refreshToken == token {
+                self.applyKnownFileStatsDelta(delta)
+                await self.persistKnownFileStats()
+            }
+
+            // ── Phase 6: Persist session_meta for next launch's hydration (token-guarded) ──
+            if self.refreshToken == token, !merged.isEmpty {
+                do {
+                    let db = try IndexDB()
+                    try await db.begin()
+                    for session in merged {
+                        try? await db.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: session))
+                    }
+                    try await db.commit()
+                    os_log("OpenClaw: wrote %d session_meta rows", log: indexLog, type: .info, merged.count)
+                } catch {
+                    os_log("OpenClaw: session_meta write failed: %{public}@", log: indexLog, type: .error, error.localizedDescription)
+                }
+            }
+
+            // ── Phase 7: Publish final merged sessions ──
             var previewTimes: [String: Date] = [:]
-            previewTimes.reserveCapacity(result.sessions.count)
-            for s in result.sessions {
+            previewTimes.reserveCapacity(mergedWithArchives.count)
+            for s in mergedWithArchives {
                 let url = URL(fileURLWithPath: s.filePath)
                 if let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
                    let m = rv.contentModificationDate {
@@ -174,27 +328,9 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
 
             await MainActor.run {
                 guard self.refreshToken == token else { return }
-                switch result.kind {
-                case .hydrated:
-                    LaunchProfiler.log("OpenClaw.refresh: DB hydrate hit (sessions=\(result.sessions.count))")
-                    self.allSessions = result.sessions
-                    self.isIndexing = false
-                    self.filesProcessed = result.sessions.count
-                    self.totalFiles = result.sessions.count
-                    self.progressText = "Loaded \(result.sessions.count) from index"
-                    self.launchPhase = .ready
-                    self.previewMTimeByID = previewTimesByID
-                    #if DEBUG
-                    print("[Launch] Hydrated OpenClaw sessions from DB: count=\(result.sessions.count)")
-                    #endif
-                    return
-                case .scanned:
-                    break
-                }
-
-                LaunchProfiler.log("OpenClaw.refresh: sessions merged (total=\(result.sessions.count))")
+                LaunchProfiler.log("OpenClaw.refresh: sessions merged (total=\(mergedWithArchives.count))")
                 self.previewMTimeByID = previewTimesByID
-                self.allSessions = result.sessions
+                self.allSessions = mergedWithArchives
                 self.isIndexing = false
                 if FeatureFlags.throttleIndexingUIUpdates {
                     self.filesProcessed = self.totalFiles
@@ -203,7 +339,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                     }
                 }
                 #if DEBUG
-                print("✅ OPENCLAW INDEXING DONE: total=\(self.totalFiles)")
+                print("✅ OPENCLAW INDEXING DONE: total=\(mergedWithArchives.count) (existing=\(existingSessions.count), changed=\(changedSessions.count), removed=\(delta.removedPaths.count))")
                 #endif
                 self.progressText = "Ready"
                 self.launchPhase = .ready
@@ -406,6 +542,99 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
         let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
         let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: updated, filters: filters, mode: .normal)
         transcriptCache.set(updated.id, transcript: transcript)
+    }
+
+    // MARK: - File Stat Persistence
+
+    private func hasKnownFileStats() -> Bool {
+        fileStatsLock.lock()
+        let hasStats = !lastKnownFileStatsByPath.isEmpty
+        fileStatsLock.unlock()
+        return hasStats
+    }
+
+    private func initializeKnownFileStatsIfNeeded(_ stats: [String: SessionFileStat]) {
+        fileStatsLock.lock()
+        if lastKnownFileStatsByPath.isEmpty {
+            lastKnownFileStatsByPath = stats
+        }
+        fileStatsLock.unlock()
+    }
+
+    private func knownFileStatsSnapshot() -> [String: SessionFileStat] {
+        fileStatsLock.lock()
+        let snapshot = lastKnownFileStatsByPath
+        fileStatsLock.unlock()
+        return snapshot
+    }
+
+    private func applyKnownFileStatsDelta(_ delta: SessionDiscoveryDelta) {
+        fileStatsLock.lock()
+        lastKnownFileStatsByPath = delta.currentByPath
+        fileStatsLock.unlock()
+    }
+
+    private func bootstrapKnownFileStatsIfNeeded(from sessions: [Session]) {
+        if hasKnownFileStats() { return }
+        guard !sessions.isEmpty else { return }
+        var map: [String: SessionFileStat] = [:]
+        map.reserveCapacity(sessions.count)
+        for session in sessions {
+            let url = URL(fileURLWithPath: session.filePath)
+            if let stat = Self.fileStat(for: url) {
+                map[session.filePath] = stat
+            } else {
+                let size = Int64(max(0, session.fileSizeBytes ?? 0))
+                let mtime = Int64(max(0, session.modifiedAt.timeIntervalSince1970))
+                map[session.filePath] = SessionFileStat(mtime: mtime, size: size)
+            }
+        }
+        initializeKnownFileStatsIfNeeded(map)
+    }
+
+    private func seedKnownFileStatsIfNeeded() async {
+        if hasKnownFileStats() { return }
+        do {
+            if let persisted = try await loadPersistedKnownFileStats() {
+                initializeKnownFileStatsIfNeeded(persisted)
+                os_log("OpenClaw: seeded file stats from persisted baseline (%d entries)", log: indexLog, type: .info, persisted.count)
+            }
+        } catch {
+            os_log("OpenClaw: seedKnownFileStats failed: %{public}@", log: indexLog, type: .error, error.localizedDescription)
+        }
+    }
+
+    private func persistKnownFileStats() async {
+        let snapshot = knownFileStatsSnapshot()
+        guard !snapshot.isEmpty else { return }
+        do {
+            let payload = PersistedFileStatPayload(
+                version: 1,
+                stats: snapshot.reduce(into: [:]) { partial, entry in
+                    partial[entry.key] = PersistedFileStat(mtime: entry.value.mtime, size: entry.value.size)
+                }
+            )
+            let data = try JSONEncoder().encode(payload)
+            guard let json = String(data: data, encoding: .utf8) else { return }
+            let db = try IndexDB()
+            try await db.setIndexState(key: Self.coreFileStatsStateKey, value: json)
+        } catch {
+            // Non-fatal. Next run can still bootstrap from DB/filesystem.
+        }
+    }
+
+    private func loadPersistedKnownFileStats() async throws -> [String: SessionFileStat]? {
+        let db = try IndexDB()
+        guard let raw = try await db.indexStateValue(for: Self.coreFileStatsStateKey),
+              let data = raw.data(using: .utf8) else {
+            return nil
+        }
+        let payload = try JSONDecoder().decode(PersistedFileStatPayload.self, from: data)
+        guard payload.version == 1 else { return nil }
+        let map = payload.stats.reduce(into: [String: SessionFileStat]()) { partial, entry in
+            partial[entry.key] = SessionFileStat(mtime: entry.value.mtime, size: entry.value.size)
+        }
+        return map.isEmpty ? nil : map
     }
 }
 

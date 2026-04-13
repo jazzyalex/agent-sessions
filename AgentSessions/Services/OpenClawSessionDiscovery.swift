@@ -40,6 +40,37 @@ final class OpenClawSessionDiscovery: SessionDiscovery {
     }
 
     func discoverSessionFiles() -> [URL] {
+        // Newest first (mtime)
+        return collectSessionFiles().sorted {
+            let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if a != b { return a > b }
+            return $0.lastPathComponent > $1.lastPathComponent
+        }
+    }
+
+    func discoverDelta(previousByPath: [String: SessionFileStat]) -> SessionDiscoveryDelta {
+        // Use unsorted collection — diff doesn't need ordering, and we only sort
+        // the smaller changedFiles slice rather than all files.
+        let files = collectSessionFiles()
+        let (currentByPath, changedFiles) = SessionFileStat.diff(files, against: previousByPath)
+        let removedPaths = Array(Set(previousByPath.keys).subtracting(currentByPath.keys))
+        return SessionDiscoveryDelta(
+            changedFiles: changedFiles.sorted {
+                let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                if a != b { return a > b }
+                return $0.lastPathComponent > $1.lastPathComponent
+            },
+            removedPaths: removedPaths,
+            currentByPath: currentByPath,
+            driftDetected: false
+        )
+    }
+
+    /// Collects all session files without sorting. Callers that need a specific
+    /// order should sort the result themselves.
+    private func collectSessionFiles() -> [URL] {
         let root = sessionsRoot()
         let fm = FileManager.default
 
@@ -76,14 +107,7 @@ final class OpenClawSessionDiscovery: SessionDiscovery {
                 }
             }
         }
-
-        // Newest first (mtime)
-        return found.sorted {
-            let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            if a != b { return a > b }
-            return $0.lastPathComponent > $1.lastPathComponent
-        }
+        return found
     }
 
     private func isValidStateRoot(_ url: URL) -> Bool {
