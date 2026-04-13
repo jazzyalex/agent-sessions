@@ -42,6 +42,8 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 3. Whether this is a major release that requires onboarding updates
 4. Public copy updates needed for README/GitHub Pages (major changes to highlight, renamed features, or outdated wording to fix)
 
+**Do NOT ask about QA status** — QA always runs automatically as part of pre-deploy (see QA Gate above).
+
 ## Public Copy Update (Required for Releases)
 
 - Update `README.md` with a short **TL;DR** and major highlights under “What’s New in X.Y”.

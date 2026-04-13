@@ -4,8 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-04-13
+
 ### Added
 - Cursor resume: Unified Sessions now supports launching Cursor CLI resume directly with automatic `--continue` fallback, plus Copy Resume Command support for Cursor sessions.
+- OpenClaw: Deleted sessions now shown by default with a badge indicating removal.
+- Monitoring: Fresh-session validator v1 — detects and flags staleness traps in the weekly agent_watch dispatch.
+
+### Fixed
+- OpenClaw: Eliminated full-rescan on every app launch; incremental refresh now used consistently.
+- Monitoring: Excluded OpenClaw backup paths from weekly probe to avoid false positives.
+- Cursor: Guarded against non-string role values in schema fingerprinting to prevent crashes on unexpected transcript shapes.
+- Monitoring: Removed spurious `exit_code` field from stdout in the no-db-found path.
+
+### Maintenance
+- Droid support deprecated; histories remain importable for legacy use.
+- Cursor added to agent_watch weekly monitoring with SQLite probe and schema fingerprinting.
+- Agent version bumps: Claude 2.1.104, Copilot 1.0.24, OpenClaw 2026.4.10.
 
 ## [3.6] - 2026-04-09
 
