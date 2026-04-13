@@ -11,6 +11,22 @@
 entries:
   - agent_sessions_version: "2.10.1"
     as_of_date_utc: "2026-04-12"
+    as_of_commit: "ea7b973"
+    verified:
+      cursor:
+        sessions:
+          max_verified_version: "2026.04.12"
+          evidence:
+            - "Resources/Fixtures/stage0/agents/cursor/small.jsonl"
+            - "Resources/Fixtures/stage0/agents/cursor/large.jsonl"
+    notes:
+      - "Initial Cursor monitoring setup. Date-based version (no CLI version embedded in transcripts)."
+      - "cursor --version returns null (IDE not installed); expected steady state, not a failure."
+      - "SQLite probe verifies ~/.cursor/chats/*/*/store.db meta table health."
+      - "Subagent fixtures cover the agent-transcripts/<uuid>/subagents/<uuid>.jsonl path."
+
+  - agent_sessions_version: "2.10.1"
+    as_of_date_utc: "2026-04-12"
     as_of_commit: "c8e5c87"
     verified:
       claude:

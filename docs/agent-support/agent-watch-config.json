@@ -329,6 +329,38 @@
           }
         ]
       }
+    },
+    "cursor": {
+      "cadence": { "daily": false, "weekly": true },
+      "installed_version_cmd": ["cursor", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.cursor.max_verified_version",
+      "upstream": [],
+      "risk_keywords": {
+        "schema": ["session", "transcript", "json", "jsonl", "agent-transcripts", "format", "tool_result", "thinking"],
+        "usage": []
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "cursor_transcript_newest",
+          "roots": ["~/.cursor/projects"],
+          "glob": "**/agent-transcripts/**/*.jsonl",
+          "max_lines": 2500
+        },
+        "freshness_window_days": 30,
+        "discovery_path_contract": {
+          "description": "Cursor transcripts under ~/.cursor/projects/*/agent-transcripts/*/*.jsonl",
+          "patterns": ["/\\.cursor/projects/.+/agent-transcripts/.+\\.jsonl$"]
+        },
+        "probes": [
+          {
+            "kind": "script",
+            "label": "cursor_sqlite_probe",
+            "argv": ["./scripts/cursor_sqlite_probe.py"],
+            "timeout_seconds": 30,
+            "parse": "cursor_sqlite_json"
+          }
+        ]
+      }
     }
   }
 }

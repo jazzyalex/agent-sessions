@@ -23,7 +23,7 @@ detect upstream session format changes that could break JSON or JSONL parsing.
    - Use `docs/agent-support/update-checklist.md` to gate the work.
 3. Run monitoring (preferred).
    - Daily: release watch for `codex`, `claude`, `opencode`, `droid`, `openclaw`.
-   - Weekly: release watch + probes for all seven agents.
+   - Weekly: release watch + probes for all eight agents.
    - See `docs/agent-support/monitoring.md`.
 4. Collect upstream agent versions (manual fallback).
    - Record the latest available versions in a scratch note; do not update the matrix yet.
