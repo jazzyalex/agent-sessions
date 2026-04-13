@@ -805,6 +805,13 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
             bp = Path(p)
             if bp.exists():
                 fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
+    elif agent_name == "cursor":
+        for p in filtered:
+            if not p.endswith(".jsonl"):
+                continue
+            bp = Path(p)
+            if bp.exists():
+                fps.append(_cursor_transcript_schema_fingerprint(bp, max_lines=5000))
 
     return _merge_type_keys(fps)
 
@@ -901,6 +908,11 @@ def _run_probe_script(probe: dict[str, Any], out_dir: Path, verbose: bool) -> di
     elif parse_kind == "capture_latest_sessions":
         # capture_latest_agent_sessions.py prints paths; we just record stdout.
         parsed = {"captured": stdout.splitlines()}
+    elif parse_kind == "cursor_sqlite_json":
+        try:
+            parsed = json.loads(stdout) if stdout else None
+        except Exception:
+            parsed = None
 
     ok = rc == 0
     if parse_kind == "claude_usage_json":
@@ -908,6 +920,8 @@ def _run_probe_script(probe: dict[str, Any], out_dir: Path, verbose: bool) -> di
     if parse_kind == "codex_status_json":
         ok = ok and isinstance(parsed, dict)
     if parse_kind == "claude_status_json":
+        ok = ok and isinstance(parsed, dict) and bool(parsed.get("ok") is True)
+    if parse_kind == "cursor_sqlite_json":
         ok = ok and isinstance(parsed, dict) and bool(parsed.get("ok") is True)
 
     if verbose and not ok:
@@ -1627,6 +1641,7 @@ def main(argv: list[str]) -> int:
         "gemini": matrix_versions.get("gemini_cli"),
         "copilot": matrix_versions.get("copilot_cli"),
         "openclaw": matrix_versions.get("openclaw"),
+        "cursor": matrix_versions.get("cursor"),
     }
 
     # Extract evidence fixtures from matrix YAML (minimal parser for `agents.*.evidence_fixtures:` lists).
@@ -1752,6 +1767,7 @@ def main(argv: list[str]) -> int:
                     "gemini": "gemini_cli",
                     "opencode": "opencode",
                     "openclaw": "openclaw",
+                    "cursor": "cursor",
                 }.get(agent_name)
                 baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
                 baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
@@ -1785,6 +1801,11 @@ def main(argv: list[str]) -> int:
                         local_fp = _opencode_storage_session_tree_schema_fingerprint(
                             newest, max_messages=max_messages, max_parts=max_parts
                         )
+                elif kind == "cursor_transcript_newest":
+                    max_lines = int(local_schema_cfg.get("max_lines") or 2500)
+                    newest = _newest_file(roots, glob)
+                    if newest:
+                        local_fp = _cursor_transcript_schema_fingerprint(newest, max_lines=max_lines)
 
                 if local_fp is not None:
                     weekly_details["local_schema"] = local_fp
