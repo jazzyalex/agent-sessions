@@ -460,6 +460,13 @@ def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
     }
 
 
+_ROLE_MAP = {
+    "user": "user", "human": "user",
+    "assistant": "assistant", "model": "assistant",
+    "system": "system",
+}
+
+
 def _cursor_transcript_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
     """
     Schema fingerprint for Cursor agent transcript JSONL files.
@@ -472,12 +479,6 @@ def _cursor_transcript_schema_fingerprint(path: Path, max_lines: int) -> dict[st
     Role normalization matches CursorSessionParser.swift:187-193:
       user/human -> user, assistant/model -> assistant, system -> system, else -> assistant
     """
-    _ROLE_MAP = {
-        "user": "user", "human": "user",
-        "assistant": "assistant", "model": "assistant",
-        "system": "system",
-    }
-
     type_keys: dict[str, set[str]] = {}
     type_counts: dict[str, int] = {}
     parse_errors: int = 0
@@ -504,8 +505,8 @@ def _cursor_transcript_schema_fingerprint(path: Path, max_lines: int) -> dict[st
             continue
 
         # Bucket top-level keys by normalized role
-        raw_role = (obj.get("role") or "")
-        role = _ROLE_MAP.get(raw_role.lower(), "assistant") if isinstance(raw_role, str) else "assistant"
+        raw_role = obj.get("role") or ""
+        role = _ROLE_MAP.get(raw_role.lower(), "assistant")
         type_counts[role] = type_counts.get(role, 0) + 1
         ks = type_keys.setdefault(role, set())
         for k in obj.keys():
