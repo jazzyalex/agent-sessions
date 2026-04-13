@@ -505,8 +505,9 @@ def _cursor_transcript_schema_fingerprint(path: Path, max_lines: int) -> dict[st
             continue
 
         # Bucket top-level keys by normalized role
-        raw_role = obj.get("role") or ""
-        role = _ROLE_MAP.get(raw_role.lower(), "assistant")
+        raw_role = obj.get("role")
+        role_key = raw_role.lower() if isinstance(raw_role, str) else ""
+        role = _ROLE_MAP.get(role_key, "assistant")
         type_counts[role] = type_counts.get(role, 0) + 1
         ks = type_keys.setdefault(role, set())
         for k in obj.keys():
