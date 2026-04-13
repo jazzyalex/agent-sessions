@@ -460,6 +460,83 @@ def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
     }
 
 
+def _cursor_transcript_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
+    """
+    Schema fingerprint for Cursor agent transcript JSONL files.
+
+    Cursor transcripts use `role` (user/assistant) as the top-level discriminator
+    instead of `type`. We bucket by normalized role AND by content block type
+    (prefixed `content.<type>`) so _schema_diff() detects both structural and
+    content-level drift.
+
+    Role normalization matches CursorSessionParser.swift:187-193:
+      user/human -> user, assistant/model -> assistant, system -> system, else -> assistant
+    """
+    _ROLE_MAP = {
+        "user": "user", "human": "user",
+        "assistant": "assistant", "model": "assistant",
+        "system": "system",
+    }
+
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors: int = 0
+    total_lines: int = 0
+
+    lines: list[str] = []
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            lines.append(line)
+            if len(lines) > max_lines:
+                lines.pop(0)
+
+    for raw in lines:
+        total_lines += 1
+        s = raw.strip()
+        try:
+            obj = json.loads(s)
+        except json.JSONDecodeError:
+            parse_errors += 1
+            continue
+        if not isinstance(obj, dict):
+            continue
+
+        # Bucket top-level keys by normalized role
+        raw_role = (obj.get("role") or "")
+        role = _ROLE_MAP.get(raw_role.lower(), "assistant") if isinstance(raw_role, str) else "assistant"
+        type_counts[role] = type_counts.get(role, 0) + 1
+        ks = type_keys.setdefault(role, set())
+        for k in obj.keys():
+            ks.add(k)
+
+        # Bucket content block keys by content type
+        msg = obj.get("message")
+        if isinstance(msg, dict):
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    ct = block.get("type")
+                    if not isinstance(ct, str) or not ct:
+                        ct = "<missing-content-type>"
+                    bucket = f"content.{ct}"
+                    type_counts[bucket] = type_counts.get(bucket, 0) + 1
+                    cks = type_keys.setdefault(bucket, set())
+                    for k in block.keys():
+                        cks.add(k)
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "parsed_lines": total_lines,
+        "parse_errors": parse_errors,
+    }
+
+
 def _gemini_session_json_schema_fingerprint(path: Path, max_messages: int) -> dict[str, Any]:
     """
     Best-effort schema fingerprint for Gemini CLI session JSON.
