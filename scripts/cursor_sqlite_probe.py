@@ -75,8 +75,7 @@ def probe(db_path: Path) -> dict:
 def main() -> int:
     db_path = find_newest_store_db()
     if db_path is None:
-        result = {"ok": False, "db_path": None, "error": "no_store_db_found", "exit_code": 1}
-        print(json.dumps(result))
+        print(json.dumps({"ok": False, "db_path": None, "error": "no_store_db_found"}))
         return 1
 
     result = probe(db_path)
