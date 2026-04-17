@@ -202,6 +202,12 @@ final class SessionParserTests: XCTestCase {
 
     func testSubagentHierarchyInfersRoleOnlyCodexParentInSameWorkspace() {
         let cwd = "/tmp/repo"
+        let earlierParent = makeCodexHierarchySession(
+            id: "earlier-parent",
+            runtimeID: "019d9d0d-74e5-7c71-8682-a3fd159be56a",
+            timestamp: "2026-04-17T13-06-38",
+            cwd: cwd
+        )
         let parent = makeCodexHierarchySession(
             id: "parent",
             runtimeID: "019d9d10-3975-78d0-aa1d-76869a532044",
@@ -217,13 +223,14 @@ final class SessionParserTests: XCTestCase {
         )
 
         let result = SubagentHierarchyBuilder.build(
-            sessions: [roleOnlyChild, parent],
+            sessions: [roleOnlyChild, parent, earlierParent],
             hierarchyEnabled: true
         )
 
-        XCTAssertEqual(result.sessions.map(\.id), ["parent", "review-child"])
+        XCTAssertEqual(result.sessions.map(\.id), ["parent", "review-child", "earlier-parent"])
         XCTAssertEqual(result.rowMeta["parent"]?.hasChildren, true)
         XCTAssertEqual(result.rowMeta["parent"]?.childCount, 1)
+        XCTAssertEqual(result.rowMeta["earlier-parent"]?.hasChildren, false)
         XCTAssertEqual(result.rowMeta["review-child"]?.depth, 1)
     }
 

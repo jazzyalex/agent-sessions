@@ -64,14 +64,16 @@ enum SubagentHierarchyBuilder {
             parentKeyToID[s.id] = s.id
         }
 
+        let roleOnlyParentIndex = RoleOnlyParentIndex(sessions: sessions)
+
         var childrenByParentID: [String: [Session]] = [:]
         var childIDs: Set<String> = []
 
         for s in sessions {
             guard let resolvedParentID = resolvedParentID(
                 for: s,
-                sessions: sessions,
-                parentKeyToID: parentKeyToID
+                parentKeyToID: parentKeyToID,
+                roleOnlyParentIndex: roleOnlyParentIndex
             ) else { continue }
             // Don't attach to self
             guard resolvedParentID != s.id else { continue }
@@ -123,19 +125,22 @@ enum SubagentHierarchyBuilder {
 
     private static func resolvedParentID(
         for session: Session,
-        sessions: [Session],
-        parentKeyToID: [String: String]
+        parentKeyToID: [String: String],
+        roleOnlyParentIndex: RoleOnlyParentIndex
     ) -> String? {
         if let rawParentKey = session.parentSessionID {
             return parentKeyToID[rawParentKey]
         }
-        return inferredRoleOnlyCodexParentID(for: session, sessions: sessions)
+        return inferredRoleOnlyCodexParentID(for: session, roleOnlyParentIndex: roleOnlyParentIndex)
     }
 
     /// Older Codex role subagents record only `source.subagent = "<role>"`,
     /// with no `parent_thread_id`. Keep the fallback narrow so unrelated
     /// review/memory subagents are not grouped across projects or old sessions.
-    private static func inferredRoleOnlyCodexParentID(for child: Session, sessions: [Session]) -> String? {
+    private static func inferredRoleOnlyCodexParentID(
+        for child: Session,
+        roleOnlyParentIndex: RoleOnlyParentIndex
+    ) -> String? {
         guard child.source == .codex,
               child.parentSessionID == nil,
               child.subagentType != nil,
@@ -143,28 +148,68 @@ enum SubagentHierarchyBuilder {
             return nil
         }
 
-        let childStartedAt = child.modifiedAt
-        let maxParentAge: TimeInterval = 2 * 60 * 60
-        var best: Session?
+        return roleOnlyParentIndex.nearestParentID(
+            cwd: childCwd,
+            before: child.modifiedAt,
+            maxAge: Self.maxRoleOnlyParentAge
+        )
+    }
 
-        for candidate in sessions {
-            guard candidate.id != child.id,
-                  candidate.source == child.source,
-                  !candidate.isSubagent,
-                  normalizedCwd(candidate.cwd) == childCwd else {
-                continue
+    private static let maxRoleOnlyParentAge: TimeInterval = 2 * 60 * 60
+
+    private struct RoleOnlyParentCandidate {
+        let id: String
+        let startedAt: Date
+    }
+
+    private struct RoleOnlyParentIndex {
+        private var candidatesByCwd: [String: [RoleOnlyParentCandidate]] = [:]
+
+        init(sessions: [Session]) {
+            candidatesByCwd.reserveCapacity(sessions.count)
+
+            for session in sessions {
+                guard session.source == .codex,
+                      !session.isSubagent,
+                      let cwd = SubagentHierarchyBuilder.normalizedCwd(session.cwd) else {
+                    continue
+                }
+                candidatesByCwd[cwd, default: []].append(
+                    RoleOnlyParentCandidate(id: session.id, startedAt: session.modifiedAt)
+                )
             }
 
-            let parentStartedAt = candidate.modifiedAt
-            guard parentStartedAt <= childStartedAt else { continue }
-            guard childStartedAt.timeIntervalSince(parentStartedAt) <= maxParentAge else { continue }
-
-            if best == nil || parentStartedAt > best!.modifiedAt {
-                best = candidate
+            for cwd in candidatesByCwd.keys {
+                candidatesByCwd[cwd]?.sort { lhs, rhs in
+                    if lhs.startedAt == rhs.startedAt { return lhs.id < rhs.id }
+                    return lhs.startedAt < rhs.startedAt
+                }
             }
         }
 
-        return best?.id
+        func nearestParentID(cwd: String, before childStartedAt: Date, maxAge: TimeInterval) -> String? {
+            guard let candidates = candidatesByCwd[cwd], !candidates.isEmpty else {
+                return nil
+            }
+
+            var low = 0
+            var high = candidates.count
+            while low < high {
+                let mid = (low + high) / 2
+                if candidates[mid].startedAt <= childStartedAt {
+                    low = mid + 1
+                } else {
+                    high = mid
+                }
+            }
+
+            guard low > 0 else { return nil }
+            let nearest = candidates[low - 1]
+            guard childStartedAt.timeIntervalSince(nearest.startedAt) <= maxAge else {
+                return nil
+            }
+            return nearest.id
+        }
     }
 
     private static func normalizedCwd(_ cwd: String?) -> String? {
