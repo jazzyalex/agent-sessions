@@ -68,8 +68,11 @@ enum SubagentHierarchyBuilder {
         var childIDs: Set<String> = []
 
         for s in sessions {
-            guard let rawParentKey = s.parentSessionID else { continue }
-            guard let resolvedParentID = parentKeyToID[rawParentKey] else { continue }
+            guard let resolvedParentID = resolvedParentID(
+                for: s,
+                sessions: sessions,
+                parentKeyToID: parentKeyToID
+            ) else { continue }
             // Don't attach to self
             guard resolvedParentID != s.id else { continue }
             childrenByParentID[resolvedParentID, default: []].append(s)
@@ -116,5 +119,59 @@ enum SubagentHierarchyBuilder {
             rowMeta[s.id] = SubagentRowMeta(depth: 0, hasChildren: false, childCount: 0)
         }
         return Result(sessions: sessions, rowMeta: rowMeta)
+    }
+
+    private static func resolvedParentID(
+        for session: Session,
+        sessions: [Session],
+        parentKeyToID: [String: String]
+    ) -> String? {
+        if let rawParentKey = session.parentSessionID {
+            return parentKeyToID[rawParentKey]
+        }
+        return inferredRoleOnlyCodexParentID(for: session, sessions: sessions)
+    }
+
+    /// Older Codex role subagents record only `source.subagent = "<role>"`,
+    /// with no `parent_thread_id`. Keep the fallback narrow so unrelated
+    /// review/memory subagents are not grouped across projects or old sessions.
+    private static func inferredRoleOnlyCodexParentID(for child: Session, sessions: [Session]) -> String? {
+        guard child.source == .codex,
+              child.parentSessionID == nil,
+              child.subagentType != nil,
+              let childCwd = normalizedCwd(child.cwd) else {
+            return nil
+        }
+
+        let childStartedAt = child.modifiedAt
+        let maxParentAge: TimeInterval = 2 * 60 * 60
+        var best: Session?
+
+        for candidate in sessions {
+            guard candidate.id != child.id,
+                  candidate.source == child.source,
+                  !candidate.isSubagent,
+                  normalizedCwd(candidate.cwd) == childCwd else {
+                continue
+            }
+
+            let parentStartedAt = candidate.modifiedAt
+            guard parentStartedAt <= childStartedAt else { continue }
+            guard childStartedAt.timeIntervalSince(parentStartedAt) <= maxParentAge else { continue }
+
+            if best == nil || parentStartedAt > best!.modifiedAt {
+                best = candidate
+            }
+        }
+
+        return best?.id
+    }
+
+    private static func normalizedCwd(_ cwd: String?) -> String? {
+        guard let cwd = cwd?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !cwd.isEmpty else {
+            return nil
+        }
+        return URL(fileURLWithPath: cwd).standardizedFileURL.path
     }
 }

@@ -12,6 +12,32 @@ final class SessionParserTests: XCTestCase {
         try text.data(using: .utf8)!.write(to: url)
     }
 
+    private func makeCodexHierarchySession(
+        id: String,
+        runtimeID: String,
+        timestamp: String,
+        cwd: String,
+        parentSessionID: String? = nil,
+        subagentType: String? = nil
+    ) -> Session {
+        Session(
+            id: id,
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/tmp/rollout-\(timestamp)-\(runtimeID).jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: cwd,
+            repoName: nil,
+            lightweightTitle: id,
+            codexInternalSessionIDHint: runtimeID,
+            parentSessionID: parentSessionID,
+            subagentType: subagentType
+        )
+    }
+
     private func createOpenCodeSQLiteFixture(at url: URL) throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
@@ -172,6 +198,58 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(s.repoName, repoDir.lastPathComponent)
         XCTAssertEqual(s.gitBranch, "feature/test")
         XCTAssertEqual(s.codexInternalSessionID, "019b2ea4-2a8d-76e2-9cd8-58208e1f2837")
+    }
+
+    func testSubagentHierarchyInfersRoleOnlyCodexParentInSameWorkspace() {
+        let cwd = "/tmp/repo"
+        let parent = makeCodexHierarchySession(
+            id: "parent",
+            runtimeID: "019d9d10-3975-78d0-aa1d-76869a532044",
+            timestamp: "2026-04-17T13-09-39",
+            cwd: cwd
+        )
+        let roleOnlyChild = makeCodexHierarchySession(
+            id: "review-child",
+            runtimeID: "019d9d15-b642-7fd3-b91b-390331f2aefa",
+            timestamp: "2026-04-17T13-15-39",
+            cwd: cwd,
+            subagentType: "review"
+        )
+
+        let result = SubagentHierarchyBuilder.build(
+            sessions: [roleOnlyChild, parent],
+            hierarchyEnabled: true
+        )
+
+        XCTAssertEqual(result.sessions.map(\.id), ["parent", "review-child"])
+        XCTAssertEqual(result.rowMeta["parent"]?.hasChildren, true)
+        XCTAssertEqual(result.rowMeta["parent"]?.childCount, 1)
+        XCTAssertEqual(result.rowMeta["review-child"]?.depth, 1)
+    }
+
+    func testSubagentHierarchyDoesNotInferRoleOnlyParentAcrossWorkspaces() {
+        let parent = makeCodexHierarchySession(
+            id: "parent",
+            runtimeID: "019d9d10-3975-78d0-aa1d-76869a532044",
+            timestamp: "2026-04-17T13-09-39",
+            cwd: "/tmp/repo-a"
+        )
+        let roleOnlyChild = makeCodexHierarchySession(
+            id: "review-child",
+            runtimeID: "019d9d15-b642-7fd3-b91b-390331f2aefa",
+            timestamp: "2026-04-17T13-15-39",
+            cwd: "/tmp/repo-b",
+            subagentType: "review"
+        )
+
+        let result = SubagentHierarchyBuilder.build(
+            sessions: [roleOnlyChild, parent],
+            hierarchyEnabled: true
+        )
+
+        XCTAssertEqual(result.sessions.map(\.id), ["review-child", "parent"])
+        XCTAssertEqual(result.rowMeta["review-child"]?.depth, 0)
+        XCTAssertEqual(result.rowMeta["parent"]?.hasChildren, false)
     }
 
     func testRepoNamePrefersStoredLightweightRepoName() {

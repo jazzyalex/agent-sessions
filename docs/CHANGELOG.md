@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Session list hierarchy now nests older Codex role subagent sessions that record only `source.subagent` when a same-workspace parent can be inferred.
 - Resume launch AppleScript now receives commands via `osascript` argv instead of source interpolation, reducing script-injection surface.
 - Transcript rendering now uses a bounded transcript cache and preloads Whole Session Raw/Pretty content outside `body` to reduce memory spikes and UI stutter on large sessions.
 - Claude OAuth shared cache writes now apply restrictive POSIX permissions on cache directory and files.
