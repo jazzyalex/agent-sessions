@@ -119,7 +119,8 @@
       },
       "weekly": {
         "local_schema": {
-          "kind": "opencode_storage_latest_session",
+          "kind": "opencode_latest_session",
+          "db_roots": ["~/.local/share/opencode/opencode.db"],
           "roots": ["~/.local/share/opencode/storage/session"],
           "glob": "**/ses_*.json",
           "max_messages": 250,
@@ -127,8 +128,8 @@
         },
         "freshness_window_days": 30,
         "discovery_path_contract": {
-          "description": "OpenCode sessions should come from storage/session/*/ses_*.json.",
-          "patterns": ["/opencode/storage/session/.+/ses_[^/]+\\.json$"]
+          "description": "OpenCode sessions should come from opencode.db when SQLite is present, or storage/session/*/ses_*.json for legacy file storage.",
+          "patterns": ["/opencode/opencode\\.db$", "/opencode/storage/session/.+/ses_[^/]+\\.json$"]
         },
         "probes": [
           {
@@ -234,6 +235,7 @@
         "timeout_seconds": 180,
         "env_vars": ["GEMINI_API_KEY"],
         "credential_files": ["~/.gemini/oauth_creds.json"],
+        "support_files": ["~/.gemini/settings.json", "~/.gemini/google_accounts.json"],
         "discover_session": {
           "kind": "gemini_session_json_newest",
           "roots": [".gemini/tmp"],

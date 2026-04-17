@@ -19,8 +19,13 @@ struct OpenCodeBackendDetector {
     static func openCodeRoot(customRoot: String?) -> URL {
         if let custom = customRoot, !custom.isEmpty {
             let expanded = (custom as NSString).expandingTildeInPath
-            let url = URL(fileURLWithPath: expanded, isDirectory: true)
+            let url = URL(fileURLWithPath: expanded)
             let fm = FileManager.default
+
+            // Allow advanced users/tests to point directly at opencode.db.
+            if url.lastPathComponent == "opencode.db" {
+                return url.deletingLastPathComponent()
+            }
 
             // If the user pointed at storage/ or storage/session/, walk up to opencode/
             let migrationFile = url.appendingPathComponent("migration")
@@ -67,6 +72,13 @@ struct OpenCodeBackendDetector {
 
     /// Returns the URL for opencode.db within the given opencode root.
     static func dbURL(customRoot: String?) -> URL {
+        if let custom = customRoot, !custom.isEmpty {
+            let expanded = (custom as NSString).expandingTildeInPath
+            let url = URL(fileURLWithPath: expanded)
+            if url.lastPathComponent == "opencode.db" {
+                return url
+            }
+        }
         return openCodeRoot(customRoot: customRoot)
             .appendingPathComponent("opencode.db", isDirectory: false)
     }

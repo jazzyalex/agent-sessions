@@ -171,6 +171,31 @@ def test_prepare_auth_copies_credential_when_env_missing(tmp_path, monkeypatch):
     assert env["HOME"] == str(sb)
 
 
+def test_prepare_auth_copies_support_files_without_strict_mode(tmp_path, monkeypatch):
+    from agent_watch_prebump_drivers import prepare_auth
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    real_home = tmp_path / "realhome"
+    (real_home / ".gemini").mkdir(parents=True)
+    settings = real_home / ".gemini" / "settings.json"
+    settings.write_text('{"security":{"auth":{"selectedType":"oauth-personal"}}}')
+    os.chmod(settings, 0o644)
+
+    sb = tmp_path / "sb"
+    sb.mkdir()
+    pb_cfg = {
+        "env_vars": ["GEMINI_API_KEY"],
+        "credential_files": [],
+        "support_files": [str(settings)],
+    }
+    env, warnings = prepare_auth(prebump_cfg=pb_cfg, sandbox=sb, real_home=real_home)
+    copied = sb / ".gemini" / "settings.json"
+    assert copied.exists()
+    assert copied.read_text() == settings.read_text()
+    assert oct(copied.stat().st_mode & 0o777) == "0o600"
+    assert env["HOME"] == str(sb)
+    assert warnings == []
+
+
 def test_prepare_auth_raises_on_hygiene_failure(tmp_path, monkeypatch):
     from agent_watch_prebump_drivers import prepare_auth, HygieneError
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

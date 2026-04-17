@@ -68,6 +68,20 @@ final class Stage0GoldenFixturesTests: XCTestCase {
                        "attachment event should survive parsing as .meta")
     }
 
+    func testClaudeSchemaDriftPermissionModeEventSurvivesParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/claude/schema_drift.jsonl")
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        XCTAssertFalse(metaEvents(withType: "permission-mode", in: full.events).isEmpty,
+                       "permission-mode event should survive parsing as .meta")
+    }
+
+    func testClaudeSchemaDriftStopHookSummaryEventSurvivesParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/claude/schema_drift.jsonl")
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        XCTAssertFalse(metaEvents(containing: "\"subtype\":\"stop_hook_summary\"", in: full.events).isEmpty,
+                       "stop_hook_summary system event should survive parsing as .meta")
+    }
+
     func testCopilotSmallPreviewAndFull() throws {
         let url = FixturePaths.stage0FixtureURL("agents/copilot/small.jsonl")
         guard let preview = CopilotSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
@@ -243,10 +257,14 @@ final class Stage0GoldenFixturesTests: XCTestCase {
     // MARK: - Helpers
 
     private func metaEvents(withType type: String, in events: [SessionEvent]) -> [SessionEvent] {
+        metaEvents(containing: "\"type\":\"\(type)\"", in: events)
+    }
+
+    private func metaEvents(containing needle: String, in events: [SessionEvent]) -> [SessionEvent] {
         events.filter { event in
             guard event.kind == .meta, let data = Data(base64Encoded: event.rawJSON),
                   let decoded = String(data: data, encoding: .utf8) else { return false }
-            return decoded.contains("\"type\":\"\(type)\"")
+            return decoded.contains(needle)
         }
     }
 }

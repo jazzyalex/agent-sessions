@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import urllib.error
@@ -769,6 +770,173 @@ def _opencode_storage_session_tree_schema_fingerprint(
         "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
         "message_files_parsed": message_files_parsed,
         "part_files_parsed": part_files_parsed,
+        "parse_errors": parse_errors,
+    }
+
+
+def _opencode_sqlite_latest_session_schema_fingerprint(
+    db_path: Path, *, max_messages: int, max_parts: int
+) -> dict[str, Any]:
+    """
+    Fingerprint OpenCode's current SQLite backend (opencode.db).
+
+    The Swift app reads the SQLite tables and maps records into the same logical
+    session/message/part model as the older storage/ JSON tree. Keep these
+    schema buckets normalized to the fixture keys so version checks report real
+    format drift, not storage implementation details like snake_case columns.
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors = 0
+    message_rows_parsed = 0
+    part_rows_parsed = 0
+
+    def _add(event_type: str, obj: dict[str, Any]) -> None:
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        ks = type_keys.setdefault(event_type, set())
+        for k, v in obj.items():
+            if v is not None:
+                ks.add(k)
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+    except Exception as exc:
+        return {
+            "file": str(db_path),
+            "type_counts": {},
+            "type_keys": {},
+            "message_rows_parsed": 0,
+            "part_rows_parsed": 0,
+            "parse_errors": 1,
+            "error": f"sqlite_open_failed: {exc}",
+        }
+
+    try:
+        session_row = conn.execute(
+            """
+            SELECT id, project_id, parent_id, slug, directory, title, version,
+                   time_created, time_updated, summary_additions, summary_deletions,
+                   summary_files, summary_diffs
+            FROM session
+            WHERE time_archived IS NULL
+            ORDER BY time_updated DESC
+            LIMIT 1;
+            """
+        ).fetchone()
+        if session_row is None:
+            return {
+                "file": str(db_path),
+                "type_counts": {},
+                "type_keys": {},
+                "message_rows_parsed": 0,
+                "part_rows_parsed": 0,
+                "parse_errors": 0,
+                "warning": "no_sessions_found",
+            }
+
+        session_id = str(session_row["id"])
+        session_obj: dict[str, Any] = {
+            "id": session_id,
+            "projectID": session_row["project_id"],
+            "parentID": session_row["parent_id"],
+            "slug": session_row["slug"],
+            "directory": session_row["directory"],
+            "title": session_row["title"],
+            "version": session_row["version"],
+            "time": {
+                "created": session_row["time_created"],
+                "updated": session_row["time_updated"],
+            },
+        }
+        if any(session_row[k] is not None for k in ("summary_additions", "summary_deletions", "summary_files")):
+            session_obj["summary"] = {
+                "additions": session_row["summary_additions"],
+                "deletions": session_row["summary_deletions"],
+                "files": session_row["summary_files"],
+            }
+        if session_row["summary_diffs"] is not None:
+            session_obj["summaryDiffs"] = session_row["summary_diffs"]
+        _add("session", session_obj)
+
+        message_rows = conn.execute(
+            """
+            SELECT id, session_id, data
+            FROM message
+            WHERE session_id = ?
+            ORDER BY time_created, id
+            LIMIT ?;
+            """,
+            (session_id, max(0, int(max_messages))),
+        ).fetchall()
+
+        total_parts_budget = max(0, int(max_parts))
+        for msg_row in message_rows:
+            try:
+                msg_obj = json.loads(str(msg_row["data"]))
+            except Exception:
+                parse_errors += 1
+                continue
+            if not isinstance(msg_obj, dict):
+                continue
+            msg_obj = dict(msg_obj)
+            msg_obj.setdefault("id", msg_row["id"])
+            msg_obj.setdefault("sessionID", msg_row["session_id"])
+            role = msg_obj.get("role")
+            event_type = f"message.{role}" if isinstance(role, str) and role else "message"
+            _add(event_type, msg_obj)
+            message_rows_parsed += 1
+
+            if total_parts_budget <= 0:
+                continue
+            part_rows = conn.execute(
+                """
+                SELECT id, message_id, session_id, data
+                FROM part
+                WHERE message_id = ?
+                ORDER BY time_created, id
+                LIMIT ?;
+                """,
+                (msg_row["id"], total_parts_budget),
+            ).fetchall()
+            for part_row in part_rows:
+                try:
+                    part_obj = json.loads(str(part_row["data"]))
+                except Exception:
+                    parse_errors += 1
+                    total_parts_budget -= 1
+                    continue
+                total_parts_budget -= 1
+                if not isinstance(part_obj, dict):
+                    continue
+                part_obj = dict(part_obj)
+                part_obj.setdefault("id", part_row["id"])
+                part_obj.setdefault("messageID", part_row["message_id"])
+                part_obj.setdefault("sessionID", part_row["session_id"])
+                part_type = part_obj.get("type")
+                event_type = f"part.{part_type}" if isinstance(part_type, str) and part_type else "part"
+                _add(event_type, part_obj)
+                part_rows_parsed += 1
+    except Exception as exc:
+        parse_errors += 1
+        return {
+            "file": str(db_path),
+            "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+            "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+            "message_rows_parsed": message_rows_parsed,
+            "part_rows_parsed": part_rows_parsed,
+            "parse_errors": parse_errors,
+            "error": f"sqlite_query_failed: {exc}",
+        }
+    finally:
+        conn.close()
+
+    return {
+        "file": str(db_path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "message_rows_parsed": message_rows_parsed,
+        "part_rows_parsed": part_rows_parsed,
         "parse_errors": parse_errors,
     }
 
@@ -1802,6 +1970,23 @@ def main(argv: list[str]) -> int:
                         local_fp = _opencode_storage_session_tree_schema_fingerprint(
                             newest, max_messages=max_messages, max_parts=max_parts
                         )
+                elif kind == "opencode_latest_session":
+                    max_messages = int(local_schema_cfg.get("max_messages") or 250)
+                    max_parts = int(local_schema_cfg.get("max_parts") or 2500)
+                    db_roots = list(local_schema_cfg.get("db_roots") or ["~/.local/share/opencode/opencode.db"])
+                    db_candidates = [_expand_path(str(p)) for p in db_roots if isinstance(p, str)]
+                    db_candidates = [p for p in db_candidates if p.exists()]
+                    if db_candidates:
+                        newest = max(db_candidates, key=lambda p: p.stat().st_mtime)
+                        local_fp = _opencode_sqlite_latest_session_schema_fingerprint(
+                            newest, max_messages=max_messages, max_parts=max_parts
+                        )
+                    else:
+                        newest = _newest_file(roots, glob)
+                        if newest:
+                            local_fp = _opencode_storage_session_tree_schema_fingerprint(
+                                newest, max_messages=max_messages, max_parts=max_parts
+                            )
                 elif kind == "cursor_transcript_newest":
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     newest = _newest_file(roots, glob)

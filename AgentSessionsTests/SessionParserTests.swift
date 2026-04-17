@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import AgentSessions
 
 final class SessionParserTests: XCTestCase {
@@ -9,6 +10,84 @@ final class SessionParserTests: XCTestCase {
 
     private func writeText(_ text: String, to url: URL) throws {
         try text.data(using: .utf8)!.write(to: url)
+    }
+
+    private func createOpenCodeSQLiteFixture(at url: URL) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(url.path, &db) == SQLITE_OK else {
+            sqlite3_close(db)
+            return XCTFail("failed to open SQLite fixture")
+        }
+        defer { sqlite3_close(db) }
+
+        func exec(_ sql: String) throws {
+            var err: UnsafeMutablePointer<Int8>?
+            guard sqlite3_exec(db, sql, nil, nil, &err) == SQLITE_OK else {
+                let message = err.map { String(cString: $0) } ?? "unknown sqlite error"
+                sqlite3_free(err)
+                throw NSError(domain: "OpenCodeSQLiteFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            }
+        }
+
+        func sqlString(_ value: String) -> String {
+            "'" + value.replacingOccurrences(of: "'", with: "''") + "'"
+        }
+
+        try exec("""
+        CREATE TABLE session (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            parent_id TEXT,
+            slug TEXT NOT NULL,
+            directory TEXT NOT NULL,
+            title TEXT NOT NULL,
+            version TEXT NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            time_archived INTEGER
+        );
+        CREATE TABLE message (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            data TEXT NOT NULL
+        );
+        CREATE TABLE part (
+            id TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL,
+            data TEXT NOT NULL
+        );
+        """)
+
+        try exec("""
+        INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated, time_archived)
+        VALUES ('ses_sqlite_demo', 'proj_sqlite', NULL, 'sqlite-demo', '/tmp/repo', 'SQLite demo', '1.4.6', 1776370000000, 1776370002000, NULL);
+        """)
+
+        let userMessage = #"{"role":"user","time":{"created":1776370000010},"agent":"build","model":{"providerID":"opencode","modelID":"big-pickle"},"summary":{"diffs":[]}}"#
+        let assistantMessage = #"{"parentID":"msg_user_sqlite","role":"assistant","mode":"build","agent":"build","path":{"cwd":"/tmp/repo","root":"/tmp/repo"},"cost":0,"tokens":{"total":10},"modelID":"big-pickle","providerID":"opencode"}"#
+        try exec("""
+        INSERT INTO message (id, session_id, time_created, time_updated, data)
+        VALUES ('msg_user_sqlite', 'ses_sqlite_demo', 1776370000010, 1776370000010, \(sqlString(userMessage)));
+        INSERT INTO message (id, session_id, time_created, time_updated, data)
+        VALUES ('msg_assistant_sqlite', 'ses_sqlite_demo', 1776370001000, 1776370002000, \(sqlString(assistantMessage)));
+        """)
+
+        let userText = #"{"type":"text","text":"Hello from SQLite","time":{"start":1776370000010,"end":1776370000010}}"#
+        let assistantText = #"{"type":"text","text":"SQLite response","time":{"start":1776370001000,"end":1776370001000}}"#
+        let toolPart = #"{"type":"tool","tool":"grep","callID":"call_sqlite_1","state":{"status":"completed","input":{"pattern":"SQLite"},"output":"Found 1 match","time":{"start":1776370001100,"end":1776370001200}}}"#
+        try exec("""
+        INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+        VALUES ('prt_user_text_sqlite', 'msg_user_sqlite', 'ses_sqlite_demo', 1776370000010, 1776370000010, \(sqlString(userText)));
+        INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+        VALUES ('prt_assistant_text_sqlite', 'msg_assistant_sqlite', 'ses_sqlite_demo', 1776370001000, 1776370001000, \(sqlString(assistantText)));
+        INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+        VALUES ('prt_tool_sqlite', 'msg_assistant_sqlite', 'ses_sqlite_demo', 1776370001100, 1776370001200, \(sqlString(toolPart)));
+        """)
     }
 
     private func canonicalPath(_ url: URL) -> String {
@@ -569,6 +648,33 @@ final class SessionParserTests: XCTestCase {
         let found = discovery.discoverSessionFiles()
         XCTAssertEqual(found.count, 1)
         XCTAssertEqual(found.first?.lastPathComponent, "ses_demo.json")
+    }
+
+    func testOpenCodeSqliteReaderLoadsCurrentDatabaseLayout() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-SQLite-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("opencode.db")
+        try createOpenCodeSQLiteFixture(at: dbURL)
+
+        XCTAssertTrue(OpenCodeBackendDetector.isSQLiteAvailable(customRoot: dbURL.path))
+
+        let sessions = OpenCodeSqliteReader.listSessions(customRoot: dbURL.path)
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions.first?.id, "ses_sqlite_demo")
+        XCTAssertEqual(sessions.first?.cwd, "/tmp/repo")
+        XCTAssertEqual(sessions.first?.model, "big-pickle")
+        XCTAssertEqual(sessions.first?.eventCount, 2)
+
+        guard let full = OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_sqlite_demo") else {
+            return XCTFail("full SQLite parse returned nil")
+        }
+        XCTAssertTrue(full.events.contains { $0.kind == .user && ($0.text ?? "").contains("Hello from SQLite") })
+        XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("SQLite response") })
+        XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "grep" })
+        XCTAssertTrue(full.events.contains { $0.kind == .tool_result && ($0.toolOutput ?? "").contains("Found 1 match") })
     }
 
     func testCodexDiscoveryFindsRolloutFilesInDateHierarchy() throws {

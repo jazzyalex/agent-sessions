@@ -9,6 +9,65 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "3.6.1"
+    as_of_date_utc: "2026-04-17"
+    as_of_commit: "cb723ae"
+    verified:
+      gemini:
+        sessions:
+          max_verified_version: "0.38.1"
+          evidence: ["Resources/Fixtures/stage0/agents/gemini/small.json", "Resources/Fixtures/stage0/agents/gemini/large.json", "Resources/Fixtures/stage0/agents/gemini/schema_drift.json", "scripts/probe_scan_output/agent_watch/20260417-021412Z-prebump/report.json"]
+      copilot:
+        sessions:
+          max_verified_version: "1.0.31"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl", "scripts/probe_scan_output/agent_watch/20260417-021815Z-prebump/report.json"]
+      opencode:
+        sessions:
+          max_verified_version: "1.4.7"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_small/001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/001.json", "scripts/agent_captures/20260417-022051Z/opencode/latest_session_export.json", "scripts/probe_scan_output/agent_watch/20260417-022056Z/report.json"]
+      openclaw:
+        sessions:
+          max_verified_version: "2026.4.15"
+          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "scripts/agent_captures/20260417-022051Z/openclaw/agents/main/sessions/005976ca-88c4-4ec6-98fb-21d838cd3ecb.jsonl", "scripts/probe_scan_output/agent_watch/20260417-022056Z/report.json"]
+    notes:
+      - "Follow-up verification 2026-04-17: bumped Gemini 0.37.1->0.38.1, Copilot 1.0.24->1.0.31, OpenCode 1.4.6->1.4.7, and OpenClaw 2026.4.14->2026.4.15."
+      - "Gemini: prebump passed after copying non-secret ~/.gemini/settings.json and google_accounts.json support files into the sandbox while keeping ~/.gemini/oauth_creds.json under strict credential hygiene; fresh sample matches baseline."
+      - "Copilot: prebump passed with sandboxed session-state <uuid>/events.jsonl using GH_TOKEN from local gh auth for this run only; fresh sample matches baseline."
+      - "OpenCode: fresh opencode run produced SQLite session ses_266c3bb4affe7iXGZQYHBv4YtP in ~/.local/share/opencode/opencode.db with session.version 1.4.7; schema matches baseline."
+      - "OpenClaw: fresh local agent turn appended to session 005976ca-88c4-4ec6-98fb-21d838cd3ecb under OpenClaw 2026.4.15; schema unchanged and discovery contract ok."
+
+  - agent_sessions_version: "3.6.1"
+    as_of_date_utc: "2026-04-16"
+    as_of_commit: "cb723ae"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.121.0"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "Resources/Fixtures/stage0/agents/codex/large.jsonl", "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260416-195201Z/report.json", "scripts/probe_scan_output/agent_watch/20260416-200416Z/report.json"]
+        usage_limits:
+          max_verified_version: "0.121.0"
+          evidence: ["AgentSessions/Resources/codex_status_capture.sh", "scripts/probe_scan_output/agent_watch/20260416-195201Z/report.json", "scripts/probe_scan_output/agent_watch/20260416-200416Z/report.json"]
+      claude:
+        sessions:
+          max_verified_version: "2.1.112"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260416-202518Z/report.json"]
+      opencode:
+        sessions:
+          max_verified_version: "1.4.6"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_small/001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/001.json", "scripts/agent_captures/20260416-202539Z/opencode/latest_session_export.json", "scripts/probe_scan_output/agent_watch/20260416-202518Z/report.json"]
+      openclaw:
+        sessions:
+          max_verified_version: "2026.4.14"
+          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "scripts/agent_captures/20260416-202546Z/openclaw/agents/main/sessions/005976ca-88c4-4ec6-98fb-21d838cd3ecb.jsonl", "scripts/probe_scan_output/agent_watch/20260416-202518Z/report.json"]
+    notes:
+      - "Weekly check 2026-04-16: bumped Codex 0.120.0->0.121.0, Claude 2.1.104->2.1.112, OpenCode 1.4.3->1.4.6, and OpenClaw 2026.4.10->2026.4.14."
+      - "Codex: installed and upstream are 0.121.0; schema_matches_baseline=true; discovery contract ok; codex_status_probe ok=true."
+      - "Claude: installed/upstream are 2.1.112; fresh local session under ~/.claude/projects has schema_matches_baseline=true after adding permission-mode and stop_hook_summary coverage. Parser preserves these metadata events as .meta. Claude usage/status probes are tracked separately and were not used to validate session format."
+      - "OpenCode: installed/upstream are 1.4.6; current storage is ~/.local/share/opencode/opencode.db SQLite. The app already uses OpenCodeSqliteReader for runtime; monitoring/capture now fingerprint/copy SQLite evidence, direct opencode.db overrides are accepted, and SQLite reader coverage was added."
+      - "OpenClaw: installed/upstream are 2026.4.14; sessions do not embed CLI version, so verified version records the locally observed CLI version from evidence capture. Schema unchanged and discovery contract ok."
+      - "Claude prebump driver was fixed to pass --verbose with --print --output-format stream-json. The sandboxed Claude prebump still cannot use local login state, but weekly fresh local evidence is sufficient for session-format verification."
+      - "Copilot 1.0.30 and Gemini 0.38.1 remain candidates because prebump drivers failed from missing sandbox-visible auth (Copilot token/GitHub auth; Gemini auth method/API key)."
+
   - agent_sessions_version: "2.10.1"
     as_of_date_utc: "2026-04-12"
     as_of_commit: "ea7b973"

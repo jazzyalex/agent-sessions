@@ -1,1 +1,1 @@
-{"id":"p_tool_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"completed","input":{"command":"ls","cwd":"/tmp/repo"},"output":"a.txt\nb.txt\n","metadata":{"exit":0},"time":{"start":1730000002500,"end":1730000003000}}}
+{"id":"p_tool_1","sessionID":"s_stage0_small","messageID":"m_assistant_small","type":"tool","callID":"call_1","tool":"bash","state":{"status":"completed","input":{"command":"ls","cwd":"/tmp/repo"},"output":"a.txt\nb.txt\n","metadata":{"exit":0},"time":{"start":1730000002500,"end":1730000003000}}}

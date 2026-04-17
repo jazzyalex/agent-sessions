@@ -116,6 +116,10 @@ def prepare_auth(
        (raises HygieneError on hard failure → caller maps to exit 4),
        and copy the file into the sandbox under its path relative to
        real_home, clamping to mode 0600.
+    4. Copy non-secret support files listed under
+       prebump_cfg["support_files"] into the sandbox. These files provide
+       auth selection/account metadata and are size-limited, but do not use
+       strict credential mode gates because CLI settings are commonly 0644.
 
     Returns (env, warnings). Raises HygieneError on hard failure.
     """
@@ -147,6 +151,25 @@ def prepare_auth(
         dst = sandbox / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(cred, dst)
+        os.chmod(dst, 0o600)
+
+    support_specs = list(prebump_cfg.get("support_files") or [])
+    for spec in support_specs:
+        if isinstance(spec, str) and spec.startswith("~/"):
+            src = real_home / spec[2:]
+        else:
+            src = Path(spec)
+        if not src.exists() or not src.is_file():
+            continue
+        try:
+            if src.stat().st_size > 64 * 1024:
+                raise HygieneError(f"support file {src} is > 64 KiB")
+            rel = src.relative_to(real_home)
+        except ValueError:
+            rel = Path(src.name)
+        dst = sandbox / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
         os.chmod(dst, 0o600)
     return env, warnings
 
@@ -222,6 +245,7 @@ class ClaudePrintDriver:
             proc = subprocess.run(
                 [
                     "claude", "-p",
+                    "--verbose",
                     "--output-format", "stream-json",
                     "--session-id", session_id,
                     prompt,

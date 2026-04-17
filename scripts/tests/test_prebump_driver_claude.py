@@ -19,6 +19,7 @@ def test_claude_driver_runs_and_returns_session(tmp_path, monkeypatch):
         # F3: read env explicitly, not os.environ.
         assert env is not None
         assert env.get("HOME") == str(sb)
+        assert "--verbose" in argv
         home = Path(env["HOME"])
         proj = home / ".claude" / "projects" / "repo-hash"
         proj.mkdir(parents=True, exist_ok=True)

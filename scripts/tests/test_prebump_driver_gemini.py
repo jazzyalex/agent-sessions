@@ -42,4 +42,5 @@ def test_gemini_config_has_prebump_block():
     pb = cfg["agents"]["gemini"]["prebump"]
     assert pb["driver"] == "gemini_prompt"
     assert "GEMINI_API_KEY" in pb["env_vars"]
+    assert "~/.gemini/settings.json" in pb["support_files"]
     assert pb["discover_session"]["globs"][0].endswith(".json")

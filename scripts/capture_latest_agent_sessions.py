@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -87,6 +88,30 @@ def capture_gemini(dest_root: Path) -> list[CaptureResult]:
 
 
 def capture_opencode(dest_root: Path) -> list[CaptureResult]:
+    opencode_root = Path.home() / ".local" / "share" / "opencode"
+    db_path = opencode_root / "opencode.db"
+    if db_path.exists():
+        out_root = dest_root / "opencode"
+        out_db = out_root / "opencode.db"
+        _safe_copy(db_path, out_db)
+        results: list[CaptureResult] = [CaptureResult(agent="opencode", source=db_path, destination=out_db)]
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(str(db_path) + suffix)
+            if sidecar.exists():
+                dst = out_root / sidecar.name
+                _safe_copy(sidecar, dst)
+                results.append(CaptureResult(agent="opencode", source=sidecar, destination=dst))
+
+        # Write a small JSON evidence export for review without opening the DB.
+        export_path = out_root / "latest_session_export.json"
+        try:
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            export_path.write_text(json.dumps(_export_latest_opencode_sqlite_session(db_path), indent=2), encoding="utf-8")
+            results.append(CaptureResult(agent="opencode", source=db_path, destination=export_path))
+        except Exception:
+            pass
+        return results
+
     storage_root = Path.home() / ".local" / "share" / "opencode" / "storage"
     sessions_root = storage_root / "session"
     if not sessions_root.exists():
@@ -144,6 +169,48 @@ def capture_opencode(dest_root: Path) -> list[CaptureResult]:
             shutil.copytree(part_dir, dst_part_dir, dirs_exist_ok=True)
 
     return results
+
+
+def _export_latest_opencode_sqlite_session(db_path: Path) -> dict:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT id, project_id, parent_id, slug, directory, title, version, time_created, time_updated
+            FROM session
+            WHERE time_archived IS NULL
+            ORDER BY time_updated DESC
+            LIMIT 1;
+            """
+        ).fetchone()
+        if row is None:
+            return {"backend": "sqlite", "db": str(db_path), "session": None, "messages": [], "parts": []}
+        session_id = row["id"]
+        messages = [
+            {"id": r["id"], "session_id": r["session_id"], "data": json.loads(r["data"])}
+            for r in conn.execute(
+                "SELECT id, session_id, data FROM message WHERE session_id = ? ORDER BY time_created, id LIMIT 20;",
+                (session_id,),
+            )
+        ]
+        message_ids = [m["id"] for m in messages]
+        parts = []
+        for message_id in message_ids:
+            for r in conn.execute(
+                "SELECT id, message_id, session_id, data FROM part WHERE message_id = ? ORDER BY time_created, id LIMIT 50;",
+                (message_id,),
+            ):
+                parts.append({"id": r["id"], "message_id": r["message_id"], "session_id": r["session_id"], "data": json.loads(r["data"])})
+        return {
+            "backend": "sqlite",
+            "db": str(db_path),
+            "session": dict(row),
+            "messages": messages,
+            "parts": parts,
+        }
+    finally:
+        conn.close()
 
 
 def _openclaw_root_candidates() -> list[Path]:
