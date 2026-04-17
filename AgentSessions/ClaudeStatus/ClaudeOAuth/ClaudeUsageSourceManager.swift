@@ -156,20 +156,31 @@ actor ClaudeUsageSourceManager {
         let newContext = OAuthVisibilityContext(menuVisible: menuVisible, stripVisible: stripVisible, appIsActive: appIsActive)
         let wasVisible = visible
         visibilityContext = newContext
+        let becameVisible = !wasVisible && visible
+        let shouldRetryOAuth = Self.shouldRetryOAuthOnVisibleTransition(
+            wasVisible: wasVisible,
+            visible: visible,
+            mode: mode
+        )
 
         if usingTmuxFallback || mode == .tmuxOnly {
             let adapter = tmuxAdapter
             Task.detached {
                 await adapter?.setVisibility(menuVisible: menuVisible, stripVisible: stripVisible, appIsActive: appIsActive)
             }
+            if shouldRetryOAuth {
+                credentialWatchTask?.cancel()
+                credentialWatchTask = nil
+                scheduleOAuthRefresh(delay: 0)
+            }
             return
         }
 
         // When transitioning hidden → visible, bypass credential gate
-        if !wasVisible && visible {
+        if becameVisible {
             if mode == .webOnly {
                 scheduleWebRefresh(delay: 0)
-            } else {
+            } else if shouldRetryOAuth {
                 credentialWatchTask?.cancel()
                 credentialWatchTask = nil
                 scheduleOAuthRefresh(delay: 0)
@@ -406,6 +417,18 @@ actor ClaudeUsageSourceManager {
         }
 
         return .credentialWatch
+    }
+
+    static func shouldRetryOAuthOnVisibleTransition(wasVisible: Bool,
+                                                    visible: Bool,
+                                                    mode: ClaudeUsageMode) -> Bool {
+        guard !wasVisible && visible else { return false }
+        switch mode {
+        case .auto, .oauthOnly:
+            return true
+        case .tmuxOnly, .webOnly:
+            return false
+        }
     }
 
     // MARK: - Credential Watch

@@ -153,6 +153,36 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertEqual(plan, .coldStart(delay: 30))
     }
 
+    func testVisibleTransitionRetriesOAuthForAutoModeEvenAfterTmuxFallback() {
+        XCTAssertTrue(
+            ClaudeUsageSourceManager.shouldRetryOAuthOnVisibleTransition(
+                wasVisible: false,
+                visible: true,
+                mode: .auto
+            )
+        )
+    }
+
+    func testVisibleTransitionDoesNotRetryOAuthForTmuxOnlyMode() {
+        XCTAssertFalse(
+            ClaudeUsageSourceManager.shouldRetryOAuthOnVisibleTransition(
+                wasVisible: false,
+                visible: true,
+                mode: .tmuxOnly
+            )
+        )
+    }
+
+    func testAlreadyVisibleTransitionDoesNotRetryOAuth() {
+        XCTAssertFalse(
+            ClaudeUsageSourceManager.shouldRetryOAuthOnVisibleTransition(
+                wasVisible: true,
+                visible: true,
+                mode: .auto
+            )
+        )
+    }
+
     func testAutoMode_webApiFallback_stateTrackedInDiagnostics() async {
         let mgr = ClaudeUsageSourceManager()
         await mgr.start(mode: .auto, handler: { _ in }, availabilityHandler: { _ in })
