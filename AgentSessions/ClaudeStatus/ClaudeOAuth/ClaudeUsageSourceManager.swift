@@ -77,6 +77,7 @@ actor ClaudeUsageSourceManager {
     private var lastOAuthSnapshot: ClaudeLimitSnapshot?
     private(set) var lastRawOAuthPayload: String?
     private var refreshTask: Task<Void, Never>?
+    private var oauthRateLimitRetryDeadline: Date?
     private var shouldRun = false
     private var startedAt: Date?
     private var didAttemptDelegatedRefresh = false
@@ -160,7 +161,9 @@ actor ClaudeUsageSourceManager {
         let shouldRetryOAuth = Self.shouldRetryOAuthOnVisibleTransition(
             wasVisible: wasVisible,
             visible: visible,
-            mode: mode
+            mode: mode,
+            rateLimitRetryDeadline: oauthRateLimitRetryDeadline,
+            now: Date()
         )
 
         if usingTmuxFallback || mode == .tmuxOnly {
@@ -169,9 +172,7 @@ actor ClaudeUsageSourceManager {
                 await adapter?.setVisibility(menuVisible: menuVisible, stripVisible: stripVisible, appIsActive: appIsActive)
             }
             if shouldRetryOAuth {
-                credentialWatchTask?.cancel()
-                credentialWatchTask = nil
-                scheduleOAuthRefresh(delay: 0)
+                wakeOAuthForVisibleTransition()
             }
             return
         }
@@ -181,9 +182,7 @@ actor ClaudeUsageSourceManager {
             if mode == .webOnly {
                 scheduleWebRefresh(delay: 0)
             } else if shouldRetryOAuth {
-                credentialWatchTask?.cancel()
-                credentialWatchTask = nil
-                scheduleOAuthRefresh(delay: 0)
+                wakeOAuthForVisibleTransition()
             }
         }
     }
@@ -238,6 +237,7 @@ actor ClaudeUsageSourceManager {
 
             // Success — reset all failure state
             oauthFailureCount = 0
+            oauthRateLimitRetryDeadline = nil
             didAttemptDelegatedRefresh = false
             lastFailureFingerprint = nil
             credentialWatchTask?.cancel()
@@ -262,6 +262,7 @@ actor ClaudeUsageSourceManager {
             scheduleOAuthRefresh(delay: Self.refreshInterval)
 
         } catch ClaudeOAuthUsageClientError.unauthorized {
+            oauthRateLimitRetryDeadline = nil
             os_log("ClaudeOAuth: 401, invalidating token cache", log: log, type: .info)
             await tokenResolver.invalidateCache()
 
@@ -283,6 +284,7 @@ actor ClaudeUsageSourceManager {
 
         } catch ClaudeOAuthUsageClientError.rateLimited(let retryAfter) {
             let delay = retryAfter + 10
+            oauthRateLimitRetryDeadline = Date().addingTimeInterval(delay)
             os_log("ClaudeOAuth: rate limited, retrying in %.0fs", log: log, type: .info, delay)
             if var snap = lastOAuthSnapshot {
                 snap.health = .stale
@@ -318,12 +320,14 @@ actor ClaudeUsageSourceManager {
             }
 
         } catch {
+            oauthRateLimitRetryDeadline = nil
             os_log("ClaudeOAuth: fetch error: %{public}@", log: log, type: .error, error.localizedDescription)
             await handleOAuthFailure(reason: error.localizedDescription)
         }
     }
 
     private func handleOAuthFailure(reason: String) async {
+        oauthRateLimitRetryDeadline = nil
         oauthFailureCount += 1
         os_log("ClaudeOAuth: failure #%d: %{public}@", log: log, type: .info, oauthFailureCount, reason)
 
@@ -421,14 +425,30 @@ actor ClaudeUsageSourceManager {
 
     static func shouldRetryOAuthOnVisibleTransition(wasVisible: Bool,
                                                     visible: Bool,
-                                                    mode: ClaudeUsageMode) -> Bool {
+                                                    mode: ClaudeUsageMode,
+                                                    rateLimitRetryDeadline: Date? = nil,
+                                                    now: Date = Date()) -> Bool {
         guard !wasVisible && visible else { return false }
+        if let rateLimitRetryDeadline, rateLimitRetryDeadline > now {
+            return false
+        }
         switch mode {
         case .auto, .oauthOnly:
             return true
         case .tmuxOnly, .webOnly:
             return false
         }
+    }
+
+    private func wakeOAuthForVisibleTransition() {
+        // Visibility should wake credential-gated failures, but not cancel a server-imposed 429 backoff.
+        if let deadline = oauthRateLimitRetryDeadline, deadline > Date() {
+            os_log("ClaudeOAuth: preserving rate-limit retry deadline while becoming visible", log: log, type: .info)
+            return
+        }
+        credentialWatchTask?.cancel()
+        credentialWatchTask = nil
+        scheduleOAuthRefresh(delay: 0)
     }
 
     // MARK: - Credential Watch

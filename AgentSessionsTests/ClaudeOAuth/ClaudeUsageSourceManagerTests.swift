@@ -183,6 +183,34 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         )
     }
 
+    func testVisibleTransitionDoesNotRetryOAuthDuringRateLimitBackoff() {
+        let now = Date(timeIntervalSince1970: 1_000)
+
+        XCTAssertFalse(
+            ClaudeUsageSourceManager.shouldRetryOAuthOnVisibleTransition(
+                wasVisible: false,
+                visible: true,
+                mode: .auto,
+                rateLimitRetryDeadline: now.addingTimeInterval(60),
+                now: now
+            )
+        )
+    }
+
+    func testVisibleTransitionRetriesOAuthAfterRateLimitBackoffExpires() {
+        let now = Date(timeIntervalSince1970: 1_000)
+
+        XCTAssertTrue(
+            ClaudeUsageSourceManager.shouldRetryOAuthOnVisibleTransition(
+                wasVisible: false,
+                visible: true,
+                mode: .auto,
+                rateLimitRetryDeadline: now.addingTimeInterval(-1),
+                now: now
+            )
+        )
+    }
+
     func testAutoMode_webApiFallback_stateTrackedInDiagnostics() async {
         let mgr = ClaudeUsageSourceManager()
         await mgr.start(mode: .auto, handler: { _ in }, availabilityHandler: { _ in })
