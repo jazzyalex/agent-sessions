@@ -55,9 +55,12 @@ actor IndexDB {
     private static func applyPragmas(_ db: OpaquePointer?) throws {
         try exec(db, "PRAGMA journal_mode=WAL;")
         try exec(db, "PRAGMA synchronous=NORMAL;")
+        try exec(db, "PRAGMA busy_timeout = 5000;")
     }
 
     private static func bootstrap(_ db: OpaquePointer?) throws {
+        try exec(db, "BEGIN IMMEDIATE;")
+        do {
         // files table tracks which files we indexed and their mtimes/sizes
         try exec(db,
             """
@@ -349,6 +352,11 @@ actor IndexDB {
                 }
             }
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", analyticsMetaDerive)
+        }
+            try exec(db, "COMMIT;")
+        } catch {
+            try? exec(db, "ROLLBACK;")
+            throw error
         }
     }
 

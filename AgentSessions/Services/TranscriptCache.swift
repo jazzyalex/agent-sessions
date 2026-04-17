@@ -1,11 +1,23 @@
 import Foundation
 
 /// Thread-safe cache for generated transcripts used in search filtering.
-/// Generates transcripts in background on app launch to ensure accurate search results.
+/// The cache is bounded so long-running indexing sessions do not grow memory
+/// without limit.
 final class TranscriptCache: @unchecked Sendable {
+    private struct Entry {
+        let transcript: String
+        let cost: Int
+        var lastAccess: UInt64
+    }
+
     private let lock = NSLock()
-    private var cache: [String: String] = [:]
+    private var entries: [String: Entry] = [:]
+    private var totalCost: Int = 0
+    private var accessSerial: UInt64 = 0
     private var indexingInProgress = false
+
+    private let maxEntries = 512
+    private let maxTotalCost = 64 * 1024 * 1024
 
     private func withLock<T>(_ body: () -> T) -> T {
         lock.lock()
@@ -13,19 +25,55 @@ final class TranscriptCache: @unchecked Sendable {
         return body()
     }
 
+    private func nextAccessSerial() -> UInt64 {
+        accessSerial &+= 1
+        return accessSerial
+    }
+
+    private func evictIfNeeded() {
+        while entries.count > maxEntries || totalCost > maxTotalCost {
+            guard let oldestKey = entries.min(by: { $0.value.lastAccess < $1.value.lastAccess })?.key else {
+                break
+            }
+            if let removed = entries.removeValue(forKey: oldestKey) {
+                totalCost = max(0, totalCost - removed.cost)
+            }
+        }
+    }
+
     /// Retrieve cached transcript for a session (thread-safe)
     func getCached(_ sessionID: String) -> String? {
-        withLock { cache[sessionID] }
+        withLock {
+            guard var entry = entries[sessionID] else { return nil }
+            entry.lastAccess = nextAccessSerial()
+            entries[sessionID] = entry
+            return entry.transcript
+        }
     }
 
     /// Store a generated transcript (thread-safe)
     func set(_ sessionID: String, transcript: String) {
-        withLock { cache[sessionID] = transcript }
+        withLock {
+            let cost = max(1, transcript.utf8.count)
+            if let existing = entries[sessionID] {
+                totalCost = max(0, totalCost - existing.cost)
+            }
+            entries[sessionID] = Entry(
+                transcript: transcript,
+                cost: cost,
+                lastAccess: nextAccessSerial()
+            )
+            totalCost += cost
+            evictIfNeeded()
+        }
     }
 
     /// Remove a single cached transcript (thread-safe)
     func remove(_ sessionID: String) {
-        _ = withLock { cache.removeValue(forKey: sessionID) }
+        withLock {
+            guard let removed = entries.removeValue(forKey: sessionID) else { return }
+            totalCost = max(0, totalCost - removed.cost)
+        }
     }
 
     /// Generate and cache transcripts for multiple sessions in background
@@ -51,7 +99,7 @@ final class TranscriptCache: @unchecked Sendable {
                 if Task.isCancelled { break }
                 continue
             }
-            let alreadyCached = withLock { cache[session.id] != nil }
+            let alreadyCached = withLock { entries[session.id] != nil }
 
             // Skip if already cached or lightweight (no events)
             guard !alreadyCached, !session.events.isEmpty else { continue }
@@ -64,7 +112,7 @@ final class TranscriptCache: @unchecked Sendable {
             )
             if Task.isCancelled { break }
 
-            withLock { cache[session.id] = transcript }
+            set(session.id, transcript: transcript)
 
             indexed += 1
 
@@ -77,7 +125,7 @@ final class TranscriptCache: @unchecked Sendable {
             }
         }
 
-        let totalCount = withLock { cache.count }
+        let totalCount = withLock { entries.count }
 
         #if DEBUG
         print("TRANSCRIPT CACHE: Indexed \(indexed) sessions (total cached: \(totalCount))")
@@ -86,12 +134,15 @@ final class TranscriptCache: @unchecked Sendable {
 
     /// Clear all cached transcripts (thread-safe)
     func clear() {
-        withLock { cache.removeAll() }
+        withLock {
+            entries.removeAll()
+            totalCost = 0
+        }
     }
 
     /// Get current cache size (thread-safe)
     func count() -> Int {
-        withLock { cache.count }
+        withLock { entries.count }
     }
 
     /// Check if indexing is currently in progress (thread-safe)

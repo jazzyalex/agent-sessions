@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Resume launch AppleScript now receives commands via `osascript` argv instead of source interpolation, reducing script-injection surface.
+- Transcript rendering now uses a bounded transcript cache and preloads Whole Session Raw/Pretty content outside `body` to reduce memory spikes and UI stutter on large sessions.
+- Claude OAuth shared cache writes now apply restrictive POSIX permissions on cache directory and files.
+- IndexDB bootstrap now configures `busy_timeout` and runs schema/bootstrap migration steps inside a single transaction for safer concurrent startup.
+
 ## [3.6.1] - 2026-04-13
 
 ### Added

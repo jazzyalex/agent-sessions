@@ -230,9 +230,21 @@ actor ClaudeOAuthUsageClient {
     /// readers detect the reverse race (new JSON, old sidecar).
     private func writeSharedCache(data: Data, tokenFingerprint fp: String) {
         let dir = Self.sharedCacheURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: NSNumber(value: 0o700)]
+        )
         try? data.write(to: Self.sharedCacheURL, options: .atomic)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o600)],
+            ofItemAtPath: Self.sharedCacheURL.path
+        )
         let contentHash = SHA256.hash(data: data).prefix(4).map { String(format: "%02x", $0) }.joined()
         try? "\(fp):\(contentHash)".write(to: Self.sharedCacheTokenURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o600)],
+            ofItemAtPath: Self.sharedCacheTokenURL.path
+        )
     }
 }

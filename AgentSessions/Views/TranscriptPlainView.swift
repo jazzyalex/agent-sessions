@@ -3310,6 +3310,14 @@ private struct WholeSessionRawPrettySheet: View {
     let session: Session?
     @Environment(\.dismiss) private var dismiss
     @State private var tab: Int = 0
+    @State private var rawJSON: String = ""
+    @State private var prettyJSON: String = ""
+    @State private var loadedSessionID: String?
+
+    private var contentTaskID: String {
+        session?.id ?? "__no-session__"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Picker("", selection: $tab) {
@@ -3321,12 +3329,13 @@ private struct WholeSessionRawPrettySheet: View {
             Divider()
             ScrollView {
                 if let s = session {
-                    let raw = s.events.map { $0.rawJSON }.joined(separator: "\n")
-                    let pretty = prettyJSONForSession(s)
-                    if tab == 0 {
-                        Text(pretty).font(.system(.body, design: .monospaced)).textSelection(.enabled).padding(12)
+                    if loadedSessionID != s.id {
+                        ProgressView("Loading transcript")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if tab == 0 {
+                        Text(prettyJSON).font(.system(.body, design: .monospaced)).textSelection(.enabled).padding(12)
                     } else {
-                        Text(raw).font(.system(.body, design: .monospaced)).textSelection(.enabled).padding(12)
+                        Text(rawJSON).font(.system(.body, design: .monospaced)).textSelection(.enabled).padding(12)
                     }
                 } else {
                     ContentUnavailableView("No session", systemImage: "doc")
@@ -3335,5 +3344,28 @@ private struct WholeSessionRawPrettySheet: View {
             HStack { Spacer(); Button("Close") { dismiss() } }.padding(8)
         }
         .frame(width: 720, height: 520)
+        .task(id: contentTaskID) {
+            await loadContent()
+        }
+    }
+
+    private func loadContent() async {
+        guard let session else {
+            await MainActor.run {
+                rawJSON = ""
+                prettyJSON = ""
+                loadedSessionID = nil
+            }
+            return
+        }
+
+        let raw = session.events.map { $0.rawJSON }.joined(separator: "\n")
+        let pretty = prettyJSONForSession(session)
+
+        await MainActor.run {
+            rawJSON = raw
+            prettyJSON = pretty
+            loadedSessionID = session.id
+        }
     }
 }
