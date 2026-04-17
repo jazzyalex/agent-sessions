@@ -29,12 +29,19 @@ actor ClaudeUsageSourceManager {
     typealias SnapshotHandler = @Sendable (ClaudeLimitSnapshot) -> Void
     typealias AvailabilityHandler = @Sendable (ClaudeServiceAvailability) -> Void
 
+    enum OAuthRetryPlan: Equatable {
+        case coldStart(delay: TimeInterval)
+        case timed(delay: TimeInterval)
+        case credentialWatch
+    }
+
     // MARK: - Thresholds
 
     private static let refreshInterval: TimeInterval = 5 * 60         // 5 minutes (OAuth + Web)
     private static let cacheStaleThreshold: TimeInterval = 10 * 60    // 10 minutes
     private static let cacheHardExpire: TimeInterval = 30 * 60        // 30 minutes
     private static let credentialWatchInterval: TimeInterval = 30     // 30s watch poll
+    private static let visibleFailureRetryInterval: TimeInterval = 5 * 60
     // Fast retries during cold start (first 90s) to close the blank-screen gap.
     private static let coldStartWindow: TimeInterval = 90
     private static let coldStartRetryDelays: [TimeInterval] = [10, 30]
@@ -358,19 +365,47 @@ actor ClaudeUsageSourceManager {
     }
 
     private func scheduleOAuthRetry() {
-        // Fast retries during cold-start window (unchanged behavior)
-        if !usingTmuxFallback,
-           let started = startedAt,
-           Date().timeIntervalSince(started) < Self.coldStartWindow,
-           oauthFailureCount <= Self.coldStartRetryDelays.count {
-            let delay = Self.coldStartRetryDelays[oauthFailureCount - 1]
+        let plan = Self.oauthRetryPlan(
+            usingTmuxFallback: usingTmuxFallback,
+            startedAt: startedAt,
+            now: Date(),
+            failureCount: oauthFailureCount,
+            visible: visible
+        )
+
+        switch plan {
+        case .coldStart(let delay):
             os_log("ClaudeOAuth: cold-start retry in %.0fs", log: log, type: .info, delay)
             scheduleOAuthRefresh(delay: delay)
-            return
+        case .timed(let delay):
+            os_log("ClaudeOAuth: visible failure retry in %.0fs", log: log, type: .info, delay)
+            scheduleOAuthRefresh(delay: delay)
+        case .credentialWatch:
+            // Hidden surfaces avoid background network churn; they wake when credentials change
+            // or when the strip/menu/Cockpit becomes visible again.
+            os_log("ClaudeOAuth: entering credential-gated retry mode", log: log, type: .info)
+            startCredentialWatch()
         }
-        // After cold-start window: credential-gated retry replaces blind backoff
-        os_log("ClaudeOAuth: entering credential-gated retry mode", log: log, type: .info)
-        startCredentialWatch()
+    }
+
+    static func oauthRetryPlan(usingTmuxFallback: Bool,
+                               startedAt: Date?,
+                               now: Date,
+                               failureCount: Int,
+                               visible: Bool) -> OAuthRetryPlan {
+        if !usingTmuxFallback,
+           let startedAt,
+           now.timeIntervalSince(startedAt) < Self.coldStartWindow,
+           failureCount > 0,
+           failureCount <= Self.coldStartRetryDelays.count {
+            return .coldStart(delay: Self.coldStartRetryDelays[failureCount - 1])
+        }
+
+        if visible {
+            return .timed(delay: Self.visibleFailureRetryInterval)
+        }
+
+        return .credentialWatch
     }
 
     // MARK: - Credential Watch

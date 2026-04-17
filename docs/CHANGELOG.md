@@ -662,6 +662,7 @@ All notable changes to this project will be documented in this file.
 - Transcript: Rename view mode buttons to Session/Text/JSON, align them with HIG-style leading padding, and space the session ID control.
 - Menu Bar: When usage data is stale, reset indicators now show “n/a” instead of an incorrect countdown.
 - Claude Usage: Refresh usage automatically after wake when the usage strip or menu bar label is visible.
+- Claude Usage: Keep a timed retry active while Cockpit, footer, or menu usage surfaces are visible after OAuth failures so limits refresh without waiting for a Claude terminal prompt to update credentials.
 - Menu Bar: Show an updating spinner next to reset indicators while probes run.
 - Search: Unified Search now accepts quoted repo/path filters with spaces.
 - Claude/Codex Usage: Add a conservative startup sweep for probe tmux servers and harden cleanup/timeouts to avoid orphaned CLI processes after stalled probes or restarts.

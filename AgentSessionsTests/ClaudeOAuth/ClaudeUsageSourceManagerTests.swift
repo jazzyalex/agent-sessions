@@ -114,6 +114,45 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         await mgr.stop()
     }
 
+    func testOAuthRetryPlan_hiddenAfterColdStartUsesCredentialWatch() {
+        let started = Date(timeIntervalSince1970: 1_000)
+        let plan = ClaudeUsageSourceManager.oauthRetryPlan(
+            usingTmuxFallback: false,
+            startedAt: started,
+            now: started.addingTimeInterval(120),
+            failureCount: 1,
+            visible: false
+        )
+
+        XCTAssertEqual(plan, .credentialWatch)
+    }
+
+    func testOAuthRetryPlan_visibleAfterColdStartKeepsTimedRetryAlive() {
+        let started = Date(timeIntervalSince1970: 1_000)
+        let plan = ClaudeUsageSourceManager.oauthRetryPlan(
+            usingTmuxFallback: false,
+            startedAt: started,
+            now: started.addingTimeInterval(120),
+            failureCount: 1,
+            visible: true
+        )
+
+        XCTAssertEqual(plan, .timed(delay: 5 * 60))
+    }
+
+    func testOAuthRetryPlan_coldStartStillUsesFastRetry() {
+        let started = Date(timeIntervalSince1970: 1_000)
+        let plan = ClaudeUsageSourceManager.oauthRetryPlan(
+            usingTmuxFallback: false,
+            startedAt: started,
+            now: started.addingTimeInterval(30),
+            failureCount: 2,
+            visible: true
+        )
+
+        XCTAssertEqual(plan, .coldStart(delay: 30))
+    }
+
     func testAutoMode_webApiFallback_stateTrackedInDiagnostics() async {
         let mgr = ClaudeUsageSourceManager()
         await mgr.start(mode: .auto, handler: { _ in }, availabilityHandler: { _ in })
