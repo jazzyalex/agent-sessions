@@ -41,7 +41,14 @@ enum SubagentHierarchyBuilder {
         // 1. Build parent lookup: parentKey → [child Session]
         //    Also build a reverse lookup to resolve parentSessionID → session.id
         var parentKeyToID: [String: String] = [:]  // raw UUID/parentID → session.id
+        var needsRoleOnlyParentIndex = false
         for s in sessions {
+            if s.source == .codex,
+               s.parentSessionID == nil,
+               s.subagentType != nil {
+                needsRoleOnlyParentIndex = true
+            }
+
             // Only register hints for non-subagent sessions: subagent events
             // carry the *parent's* sessionId, so allowing them to register would
             // overwrite the real parent mapping and break resolution.
@@ -64,7 +71,9 @@ enum SubagentHierarchyBuilder {
             parentKeyToID[s.id] = s.id
         }
 
-        let roleOnlyParentIndex = RoleOnlyParentIndex(sessions: sessions)
+        let roleOnlyParentIndex = needsRoleOnlyParentIndex
+            ? RoleOnlyParentIndex(sessions: sessions)
+            : nil
 
         var childrenByParentID: [String: [Session]] = [:]
         var childIDs: Set<String> = []
@@ -126,7 +135,7 @@ enum SubagentHierarchyBuilder {
     private static func resolvedParentID(
         for session: Session,
         parentKeyToID: [String: String],
-        roleOnlyParentIndex: RoleOnlyParentIndex
+        roleOnlyParentIndex: RoleOnlyParentIndex?
     ) -> String? {
         if let rawParentKey = session.parentSessionID {
             return parentKeyToID[rawParentKey]
@@ -139,12 +148,13 @@ enum SubagentHierarchyBuilder {
     /// review/memory subagents are not grouped across projects or old sessions.
     private static func inferredRoleOnlyCodexParentID(
         for child: Session,
-        roleOnlyParentIndex: RoleOnlyParentIndex
+        roleOnlyParentIndex: RoleOnlyParentIndex?
     ) -> String? {
         guard child.source == .codex,
               child.parentSessionID == nil,
               child.subagentType != nil,
-              let childCwd = normalizedCwd(child.cwd) else {
+              let childCwd = normalizedCwd(child.cwd),
+              let roleOnlyParentIndex else {
             return nil
         }
 
