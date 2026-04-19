@@ -285,6 +285,31 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(result.rowMeta["review-child"]?.depth, 1)
     }
 
+    func testSubagentHierarchyDoesNotInferRoleOnlyParentWhenCandidateIsStale() {
+        let parent = makeCodexHierarchySession(
+            id: "parent",
+            runtimeID: "019d9d1c-5243-7da0-8125-f543471883b0",
+            timestamp: "2026-04-17T13-22-52",
+            cwd: "/Users/alexm/Repository/Codex-History"
+        )
+        let roleOnlyChild = makeCodexHierarchySession(
+            id: "review-child",
+            runtimeID: "019d9ec7-30b2-7ab2-834b-7bd2a6f00f7d",
+            timestamp: "2026-04-18T01-43-02",
+            cwd: "/Users/alexm/Repository/Codex-History",
+            subagentType: "review"
+        )
+
+        let result = SubagentHierarchyBuilder.build(
+            sessions: [roleOnlyChild, parent],
+            hierarchyEnabled: true
+        )
+
+        XCTAssertEqual(result.sessions.map(\.id), ["review-child", "parent"])
+        XCTAssertEqual(result.rowMeta["review-child"]?.depth, 0)
+        XCTAssertEqual(result.rowMeta["parent"]?.hasChildren, false)
+    }
+
     func testRepoNamePrefersStoredLightweightRepoName() {
         let session = Session(
             id: "test-session",
