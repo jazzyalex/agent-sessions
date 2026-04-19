@@ -85,6 +85,7 @@ All notable changes to this project will be documented in this file.
 - Agent Cockpit: Limits bar now auto-expands the detail panel when any quota indicator is amber/red and reset times no longer fit inline, so constrained usage is always visible without a hover.
 - Codex: Session custom titles are now parsed from `session_index.jsonl` (`thread_name` field) using a lock-protected mtime/size/path cache and tail-read for large files.
 - Copilot: Session custom titles are now parsed from `workspace.yaml` (`name` field), gated to directory-based layouts to prevent cross-session contamination.
+- OpenCode: Stored session titles, including names set with `/rename`, now populate custom session titles for SQLite and JSON-backed sessions.
 - Claude: Custom session titles set via the `/rename` CLI command are now reliably restored after relaunch.
 
 ### Fixed

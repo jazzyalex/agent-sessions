@@ -75,7 +75,8 @@ struct OpenCodeSqliteReader {
             // Fetch message count and first model in a separate quick query
             let (msgCount, modelID) = lightweightMessageMeta(db: db, sessionID: id)
 
-            let subagentType = OpenCodeSessionParser.deriveSubagentTypeFromTitle(title.isEmpty ? nil : title)
+            let sessionTitle = OpenCodeSessionParser.normalizedSessionTitle(title)
+            let subagentType = OpenCodeSessionParser.deriveSubagentTypeFromTitle(sessionTitle)
             sessions.append(Session(
                 id: id,
                 source: .opencode,
@@ -88,10 +89,11 @@ struct OpenCodeSqliteReader {
                 events: [],
                 cwd: directory.isEmpty ? nil : directory,
                 repoName: nil,
-                lightweightTitle: title.isEmpty ? nil : title,
+                lightweightTitle: sessionTitle,
                 lightweightCommands: nil,
                 parentSessionID: parentID,
-                subagentType: subagentType
+                subagentType: subagentType,
+                customTitle: sessionTitle
             ))
         }
         return sessions
@@ -253,7 +255,8 @@ struct OpenCodeSqliteReader {
         }
 
         let nonMetaCount = events.filter { $0.kind != .meta }.count
-        let subagentType = OpenCodeSessionParser.deriveSubagentTypeFromTitle(title.isEmpty ? nil : title)
+        let sessionTitle = OpenCodeSessionParser.normalizedSessionTitle(title)
+        let subagentType = OpenCodeSessionParser.deriveSubagentTypeFromTitle(sessionTitle)
         return Session(
             id: id,
             source: .opencode,
@@ -266,10 +269,11 @@ struct OpenCodeSqliteReader {
             events: events,
             cwd: directory.isEmpty ? nil : directory,
             repoName: nil,
-            lightweightTitle: title.isEmpty ? nil : title,
+            lightweightTitle: sessionTitle,
             lightweightCommands: commandCount > 0 ? commandCount : nil,
             parentSessionID: parentID,
-            subagentType: subagentType
+            subagentType: subagentType,
+            customTitle: sessionTitle
         )
     }
 

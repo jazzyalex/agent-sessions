@@ -140,7 +140,8 @@ final class OpenCodeSessionParser {
         // Count messages + commands cheaply by scanning the corresponding message directory, if present.
         let (eventCount, modelID, commandCount) = lightweightMessageMetadata(for: obj.id, sessionURL: url)
 
-        let subagentType = Self.deriveSubagentTypeFromTitle( obj.title)
+        let sessionTitle = Self.normalizedSessionTitle(obj.title)
+        let subagentType = Self.deriveSubagentTypeFromTitle(sessionTitle)
         return Session(
             id: obj.id,
             source: .opencode,
@@ -153,10 +154,11 @@ final class OpenCodeSessionParser {
             events: [],
             cwd: obj.directory,
             repoName: nil,
-            lightweightTitle: obj.title,
+            lightweightTitle: sessionTitle,
             lightweightCommands: commandCount > 0 ? commandCount : nil,
             parentSessionID: obj.parentID,
-            subagentType: subagentType
+            subagentType: subagentType,
+            customTitle: sessionTitle
         )
     }
 
@@ -175,7 +177,8 @@ final class OpenCodeSessionParser {
         let allEvents = warningEvents + events
 
         let nonMetaCount = allEvents.filter { $0.kind != .meta }.count
-        let subagentType = Self.deriveSubagentTypeFromTitle( obj.title)
+        let sessionTitle = Self.normalizedSessionTitle(obj.title)
+        let subagentType = Self.deriveSubagentTypeFromTitle(sessionTitle)
         return Session(
             id: obj.id,
             source: .opencode,
@@ -188,11 +191,17 @@ final class OpenCodeSessionParser {
             events: allEvents,
             cwd: obj.directory,
             repoName: nil,
-            lightweightTitle: obj.title,
+            lightweightTitle: sessionTitle,
             lightweightCommands: commandCount > 0 ? commandCount : nil,
             parentSessionID: obj.parentID,
-            subagentType: subagentType
+            subagentType: subagentType,
+            customTitle: sessionTitle
         )
+    }
+
+    static func normalizedSessionTitle(_ title: String?) -> String? {
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Derive subagent type from OpenCode title pattern: "... (@<agent> subagent)"

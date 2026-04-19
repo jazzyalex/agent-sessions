@@ -697,9 +697,16 @@ final class SessionParserTests: XCTestCase {
         """
         try unknownPartJSON.data(using: .utf8)!.write(to: assistantPartDir.appendingPathComponent("prt_unknown_0002.json"))
 
+        let preview = OpenCodeSessionParser.parseFile(at: sessionURL)
+        XCTAssertEqual(preview?.customTitle, "Quick check-in")
+        XCTAssertEqual(preview?.title, "Quick check-in")
+
         let session = OpenCodeSessionParser.parseFileFull(at: sessionURL)
         XCTAssertNotNil(session)
         guard let parsed = session else { return }
+
+        XCTAssertEqual(parsed.customTitle, "Quick check-in")
+        XCTAssertEqual(parsed.title, "Quick check-in")
 
         let userTexts = parsed.events.filter { $0.kind == .user }.compactMap { $0.text }
         let assistantTexts = parsed.events.filter { $0.kind == .assistant }.compactMap { $0.text }
@@ -803,10 +810,14 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(sessions.first?.cwd, "/tmp/repo")
         XCTAssertEqual(sessions.first?.model, "big-pickle")
         XCTAssertEqual(sessions.first?.eventCount, 2)
+        XCTAssertEqual(sessions.first?.customTitle, "SQLite demo")
+        XCTAssertEqual(sessions.first?.title, "SQLite demo")
 
         guard let full = OpenCodeSqliteReader.loadFullSession(customRoot: dbURL.path, sessionID: "ses_sqlite_demo") else {
             return XCTFail("full SQLite parse returned nil")
         }
+        XCTAssertEqual(full.customTitle, "SQLite demo")
+        XCTAssertEqual(full.title, "SQLite demo")
         XCTAssertTrue(full.events.contains { $0.kind == .user && ($0.text ?? "").contains("Hello from SQLite") })
         XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("SQLite response") })
         XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "grep" })
