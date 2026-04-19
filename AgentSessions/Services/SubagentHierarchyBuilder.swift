@@ -160,12 +160,9 @@ enum SubagentHierarchyBuilder {
 
         return roleOnlyParentIndex.nearestParentID(
             cwd: childCwd,
-            before: child.modifiedAt,
-            maxAge: Self.maxRoleOnlyParentAge
+            before: child.modifiedAt
         )
     }
-
-    private static let maxRoleOnlyParentAge: TimeInterval = 2 * 60 * 60
 
     private struct RoleOnlyParentCandidate {
         let id: String
@@ -197,7 +194,7 @@ enum SubagentHierarchyBuilder {
             }
         }
 
-        func nearestParentID(cwd: String, before childStartedAt: Date, maxAge: TimeInterval) -> String? {
+        func nearestParentID(cwd: String, before childStartedAt: Date) -> String? {
             guard let candidates = candidatesByCwd[cwd], !candidates.isEmpty else {
                 return nil
             }
@@ -215,9 +212,6 @@ enum SubagentHierarchyBuilder {
 
             guard low > 0 else { return nil }
             let nearest = candidates[low - 1]
-            guard childStartedAt.timeIntervalSince(nearest.startedAt) <= maxAge else {
-                return nil
-            }
             return nearest.id
         }
     }
