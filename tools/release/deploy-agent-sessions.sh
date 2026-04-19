@@ -245,7 +245,9 @@ check_dependencies
 command -v gh >/dev/null || { red "gh CLI not found"; exit 2; }
 gh auth status >/dev/null 2>&1 || { red "gh not authenticated. Run: gh auth login"; exit 2; }
 
-if ! check_notary_profile 5; then
+if [[ "${SKIP_NOTARY_CHECK:-0}" == "1" ]]; then
+  yellow "Skipping notary profile pre-check (SKIP_NOTARY_CHECK=1)"
+elif ! check_notary_profile 5; then
   red "Notary profile '$NOTARY_PROFILE' not configured or not accessible."
   red "Try:"
   red "  xcrun notarytool history --keychain-profile \"$NOTARY_PROFILE\""
