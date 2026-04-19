@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.6.2] - 2026-04-19
+
+### Added
+- OpenCode: Renamed session titles (set via `/rename`) are now persisted as custom session titles, matching Claude and Codex behavior.
+
 ### Fixed
 - Session list hierarchy now nests older Codex role subagent sessions that record only `source.subagent` when a same-workspace parent can be inferred, even after multi-hour gaps.
 - Resume launch AppleScript now receives commands via `osascript` argv instead of source interpolation, reducing script-injection surface.

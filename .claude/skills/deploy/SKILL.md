@@ -21,14 +21,19 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 - Do not clone to temporary directories and do not switch to alternate worktrees as a deployment workaround.
 - If the local worktree is dirty, stop and tell the user to clean the tree first (commit, stash, or discard), then continue in the same local repo.
 
-## Recommended QA Gate (Before Deploy Steps)
+## QA Gate (Mandatory — Run Automatically Before Deploy)
 
-- Before bump/release/verify commands, recommend running `docs/release/pre-release-qa.md`.
-- Ask for QA status explicitly:
-  1. Was the checklist run for this candidate build?
-  2. Result: `GO` or `NO-GO`?
-  3. Any known risk accepted for release?
-- If QA was not run, pause deployment execution and recommend running the checklist first.
+- **Always run QA automatically** before any bump/release/verify step, unless the user explicitly says to skip it (e.g. "skip QA", "no QA").
+- Do not ask whether to run QA — just run it.
+- QA execution order:
+  1. **Scope** — `git log --oneline --decorate -n 30` and `git diff --name-only <LAST_TAG>..HEAD`; identify high-risk areas.
+  2. **Build** — `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build`
+  3. **Full test suite** — `./scripts/xcode_test_stable.sh`
+  4. **Targeted tests** — run suites for touched high-risk areas (session parsing, usage tracking, onboarding, etc.)
+  5. **Warnings sweep** — flag any new actionable warnings in build output.
+  6. **Manual smoke reminder** — list the manual steps from `docs/release/pre-release-qa.md` §3–4 and ask the user to confirm GO/NO-GO after completing them.
+- If automated gates fail → stop, report failure, do not proceed to bump/release.
+- If user says "skip QA" or "no QA" → proceed without running, note it was skipped.
 
 ## Before Starting (Ask the User)
 
@@ -36,6 +41,8 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 2. Any headline changes (new agents, major features) that must be reflected in `docs/CHANGELOG.md`
 3. Whether this is a major release that requires onboarding updates
 4. Public copy updates needed for README/GitHub Pages (major changes to highlight, renamed features, or outdated wording to fix)
+
+**Do NOT ask about QA status** — QA always runs automatically as part of pre-deploy (see QA Gate above).
 
 ## Public Copy Update (Required for All Releases)
 
