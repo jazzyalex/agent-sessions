@@ -5,7 +5,8 @@ set -euo pipefail
 # Requirements:
 # - Xcode CLT (xcodebuild, notarytool)
 # - Developer ID Application certificate installed in login keychain
-# - notarytool keychain profile configured (default: AgentSessionsNotary)
+# - notarytool keychain profile configured (default: AgentSessionsNotary), or
+#   explicit NOTARY_APPLE_ID/NOTARY_TEAM_ID/NOTARY_PASSWORD credentials
 # - gh CLI authenticated to github.com (gh auth login)
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -19,10 +20,48 @@ VERSION=${VERSION:-${VERSION_DEFAULT:-0.1}}
 TAG=${TAG:-v$VERSION}
 
 NOTARY_PROFILE=${NOTARY_PROFILE:-AgentSessionsNotary}
+NOTARY_APPLE_ID=${NOTARY_APPLE_ID:-}
+NOTARY_TEAM_ID=${NOTARY_TEAM_ID:-}
+NOTARY_PASSWORD=${NOTARY_PASSWORD:-}
 
 # Try to auto-detect a Developer ID Application identity if not provided
 DEV_ID_APP=${DEV_ID_APP:-}
 TEAM_ID=${TEAM_ID:-}
+
+NOTARY_AUTH_ARGS=()
+NOTARY_AUTH_LABEL=""
+
+using_explicit_notary_credentials() {
+  [[ -n "$NOTARY_APPLE_ID" || -n "$NOTARY_TEAM_ID" || -n "$NOTARY_PASSWORD" ]]
+}
+
+build_notary_auth_args() {
+  NOTARY_AUTH_ARGS=()
+
+  if using_explicit_notary_credentials; then
+    local team="${NOTARY_TEAM_ID:-${TEAM_ID:-}}"
+    local missing=()
+
+    [[ -n "$NOTARY_APPLE_ID" ]] || missing+=("NOTARY_APPLE_ID")
+    [[ -n "$team" ]] || missing+=("NOTARY_TEAM_ID or TEAM_ID")
+    [[ -n "$NOTARY_PASSWORD" ]] || missing+=("NOTARY_PASSWORD")
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+      echo "ERROR: Incomplete explicit notary credentials. Missing: ${missing[*]}" >&2
+      echo "Set NOTARY_APPLE_ID, NOTARY_PASSWORD, and NOTARY_TEAM_ID or TEAM_ID." >&2
+      return 2
+    fi
+
+    NOTARY_AUTH_ARGS=(--apple-id "$NOTARY_APPLE_ID" --team-id "$team" --password "$NOTARY_PASSWORD")
+    NOTARY_AUTH_LABEL="Apple ID credentials (${NOTARY_APPLE_ID}, team ${team})"
+  else
+    NOTARY_AUTH_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+    NOTARY_AUTH_LABEL="keychain profile '${NOTARY_PROFILE}'"
+  fi
+}
+
+build_notary_auth_args || exit $?
+
 if [[ -z "$DEV_ID_APP" ]]; then
   if [[ -n "$TEAM_ID" ]]; then
     DETECTED=$(security find-identity -v -p codesigning 2>/dev/null | grep -i "Developer ID Application" | grep "(${TEAM_ID})" | head -n1 | sed -E 's/^[[:space:]]*[0-9]+\) [A-F0-9]+ \"([^\"]+)\".*$/\1/') || true
@@ -45,7 +84,7 @@ echo "App      : $APP_NAME"
 echo "Version  : $VERSION"
 echo "Identity : $DEV_ID_APP"
 if [[ -n "$TEAM_ID" ]]; then echo "Team ID  : $TEAM_ID"; fi
-echo "Notary   : $NOTARY_PROFILE"
+echo "Notary   : $NOTARY_AUTH_LABEL"
 echo "Tag      : $TAG"
 
 DIST="$REPO_ROOT/dist"
@@ -114,7 +153,6 @@ echo "✅ DMG file type validated"
 
 notarize_background() {
   local dmg="$1"
-  local profile="$2"
   local interval=30
   local max_wait=1200 # 20 minutes
   local log_file="/tmp/notarization-${VERSION:-unknown}-$(date +%s).log"
@@ -124,7 +162,7 @@ notarize_background() {
 
   # Submit for notarization without blocking
   local submission_json submission_id
-  if ! submission_json=$(xcrun notarytool submit "$dmg" --keychain-profile "$profile" --output-format json 2>&1 | tee "$log_file"); then
+  if ! submission_json=$(xcrun notarytool submit "$dmg" "${NOTARY_AUTH_ARGS[@]}" --output-format json 2>&1 | tee "$log_file"); then
     echo "ERROR: Notarization submission failed" >&2
     exit 7
   fi
@@ -186,7 +224,7 @@ print(data.get("id", ""), end="")
     ((elapsed+=interval))
 
     local info_json
-    if ! info_json=$(xcrun notarytool info "$submission_id" --keychain-profile "$profile" --output-format json 2>&1 | tee -a "$log_file"); then
+    if ! info_json=$(xcrun notarytool info "$submission_id" "${NOTARY_AUTH_ARGS[@]}" --output-format json 2>&1 | tee -a "$log_file"); then
       echo "ERROR: Failed to poll notarization status" >&2
       exit 7
     fi
@@ -255,9 +293,9 @@ print(data.get("status", ""), end="")
 
 if [[ "${NOTARIZE_SYNC:-0}" == "1" ]]; then
   echo "==> Notarizing DMG (synchronous mode)"
-  xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun notarytool submit "$DMG" "${NOTARY_AUTH_ARGS[@]}" --wait
 else
-  notarize_background "$DMG" "$NOTARY_PROFILE"
+  notarize_background "$DMG"
 fi
 
 echo "==> Stapling and verifying Gatekeeper"

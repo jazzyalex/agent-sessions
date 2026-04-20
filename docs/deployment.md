@@ -311,7 +311,7 @@ Complete this checklist **before** running the deployment script. Answer all que
 ### 3. Environment Validation
 - [ ] macOS with Xcode CLT installed
 - [ ] Developer ID Application certificate in Keychain
-- [ ] Notary profile configured: `xcrun notarytool history --keychain-profile AgentSessionsNotary`
+- [ ] Notary profile configured (`xcrun notarytool history --keychain-profile AgentSessionsNotary`) or explicit notary credentials available via environment variables
 - [ ] Sparkle EdDSA private key exists in Keychain:
   ```bash
   security find-generic-password -s "Sparkle"
@@ -333,6 +333,11 @@ VERSION=2.5.1                                         # Target version
 TEAM_ID=24NDRU35WD                                    # Apple Team ID
 NOTARY_PROFILE=AgentSessionsNotary                    # Keychain profile name
 DEV_ID_APP="Developer ID Application: Alex M (24NDRU35WD)"  # Code signing identity
+
+# Optional fallback if the keychain profile cannot be read by notarytool
+NOTARY_APPLE_ID=your-apple-id@example.com
+NOTARY_TEAM_ID=24NDRU35WD
+NOTARY_PASSWORD=your-app-specific-password
 
 # Optional (defaults shown)
 UPDATE_CASK=1                                         # Update Homebrew cask (1=yes, 0=no)
@@ -689,6 +694,19 @@ xcrun notarytool store-credentials AgentSessionsNotary \
   --team-id "24NDRU35WD" \
   --password "app-specific-password"
 ```
+
+If `store-credentials` succeeds but profile-based commands still return `401
+Unauthenticated`, run the deploy with explicit credentials instead of bypassing
+notary checks:
+
+```bash
+NOTARY_APPLE_ID="your-apple-id@example.com" \
+NOTARY_TEAM_ID="24NDRU35WD" \
+NOTARY_PASSWORD="app-specific-password" \
+VERSION=3.6.2 SKIP_CONFIRM=1 tools/release/deploy release 3.6.2
+```
+
+Do not commit `.env` files or shell history containing `NOTARY_PASSWORD`.
 
 ### GitHub CLI authentication
 ```bash

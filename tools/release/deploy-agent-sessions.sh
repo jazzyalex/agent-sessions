@@ -29,6 +29,9 @@ TAG=${TAG:-v$VERSION}
 
 TEAM_ID=${TEAM_ID:-}
 NOTARY_PROFILE=${NOTARY_PROFILE:-AgentSessionsNotary}
+NOTARY_APPLE_ID=${NOTARY_APPLE_ID:-}
+NOTARY_TEAM_ID=${NOTARY_TEAM_ID:-}
+NOTARY_PASSWORD=${NOTARY_PASSWORD:-}
 DEV_ID_APP=${DEV_ID_APP:-}
 NOTES_FILE=${NOTES_FILE:-}
 UPDATE_CASK=${UPDATE_CASK:-1}
@@ -40,20 +43,54 @@ green(){ printf "\033[32m%s\033[0m\n" "$*"; }
 yellow(){ printf "\033[33m%s\033[0m\n" "$*"; }
 red(){ printf "\033[31m%s\033[0m\n" "$*"; }
 
+NOTARY_AUTH_ARGS=()
+NOTARY_AUTH_LABEL=""
+
+using_explicit_notary_credentials() {
+  [[ -n "$NOTARY_APPLE_ID" || -n "$NOTARY_TEAM_ID" || -n "$NOTARY_PASSWORD" ]]
+}
+
+build_notary_auth_args() {
+  NOTARY_AUTH_ARGS=()
+
+  if using_explicit_notary_credentials; then
+    local team="${NOTARY_TEAM_ID:-${TEAM_ID:-}}"
+    local missing=()
+
+    [[ -n "$NOTARY_APPLE_ID" ]] || missing+=("NOTARY_APPLE_ID")
+    [[ -n "$team" ]] || missing+=("NOTARY_TEAM_ID or TEAM_ID")
+    [[ -n "$NOTARY_PASSWORD" ]] || missing+=("NOTARY_PASSWORD")
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+      red "ERROR: Incomplete explicit notary credentials. Missing: ${missing[*]}"
+      red "Set NOTARY_APPLE_ID, NOTARY_PASSWORD, and NOTARY_TEAM_ID or TEAM_ID."
+      return 2
+    fi
+
+    NOTARY_AUTH_ARGS=(--apple-id "$NOTARY_APPLE_ID" --team-id "$team" --password "$NOTARY_PASSWORD")
+    NOTARY_AUTH_LABEL="Apple ID credentials (${NOTARY_APPLE_ID}, team ${team})"
+  else
+    NOTARY_AUTH_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+    NOTARY_AUTH_LABEL="keychain profile '${NOTARY_PROFILE}'"
+  fi
+}
+
 # Retry notarytool history checks to survive transient keychain/tooling hiccups.
 # Some macOS/Xcode environments occasionally fail a first attempt even when the
 # profile is configured (for example, brief keychain access races).
-check_notary_profile() {
+check_notary_credentials() {
   local attempts="${1:-5}"
   local sleep_s=2
 
+  build_notary_auth_args || return $?
+
   for ((i=1; i<=attempts; i++)); do
-    if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+    if xcrun notarytool history "${NOTARY_AUTH_ARGS[@]}" >/dev/null 2>&1; then
       return 0
     fi
 
     if [[ $i -lt $attempts ]]; then
-      yellow "Notary profile check failed (attempt $i/$attempts). Retrying in ${sleep_s}s..."
+      yellow "Notary credential check failed (attempt $i/$attempts). Retrying in ${sleep_s}s..."
       sleep "$sleep_s"
       sleep_s=$((sleep_s * 2))
     fi
@@ -212,7 +249,7 @@ Context:
 
 Validations (already passed):
   ✓ Dependencies available and gh authenticated
-  ✓ Notary profile '${NOTARY_PROFILE}' present
+  ✓ Notary credentials verified via ${NOTARY_AUTH_LABEL}
   ✓ Working tree clean, on main, synced with origin/main
   ✓ Version progression validated and tag available
   ✓ CHANGELOG.md contains [${VERSION}]
@@ -245,14 +282,17 @@ check_dependencies
 command -v gh >/dev/null || { red "gh CLI not found"; exit 2; }
 gh auth status >/dev/null 2>&1 || { red "gh not authenticated. Run: gh auth login"; exit 2; }
 
-if [[ "${SKIP_NOTARY_CHECK:-0}" == "1" ]]; then
-  yellow "Skipping notary profile pre-check (SKIP_NOTARY_CHECK=1)"
-elif ! check_notary_profile 5; then
-  red "Notary profile '$NOTARY_PROFILE' not configured or not accessible."
-  red "Try:"
+if ! check_notary_credentials 5; then
+  red "Notary credentials are not configured or not accessible."
+  if [[ -n "$NOTARY_AUTH_LABEL" ]]; then
+    red "Tried: $NOTARY_AUTH_LABEL"
+  fi
+  red "Try the keychain profile:"
   red "  xcrun notarytool history --keychain-profile \"$NOTARY_PROFILE\""
-  red "If you need to recreate credentials:"
+  red "Or recreate the keychain profile:"
   red "  xcrun notarytool store-credentials \"$NOTARY_PROFILE\" --apple-id <id> --team-id <TEAM> --password <app-specific-password>"
+  red "If the profile is broken, use explicit credentials for this run:"
+  red "  NOTARY_APPLE_ID=<id> NOTARY_TEAM_ID=<TEAM> NOTARY_PASSWORD=<app-specific-password> VERSION=$VERSION tools/release/deploy release $VERSION"
   exit 2
 fi
 
@@ -277,7 +317,7 @@ echo "App       : $APP_NAME"
 echo "Version   : $VERSION (tag $TAG)"
 echo "Team ID   : ${TEAM_ID:-<not set>}"
 echo "Dev ID    : $DEV_ID_APP"
-echo "Notary    : $NOTARY_PROFILE"
+echo "Notary    : $NOTARY_AUTH_LABEL"
 
 # Enhanced pre-flight validation
 echo ""
@@ -381,7 +421,7 @@ green "✓ All pre-flight checks passed"
 CURR_BUILD=$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([0-9][0-9]*\).*/\1/p' AgentSessions.xcodeproj/project.pbxproj | head -n1)
 show_preflight_checklist "$CURR_BUILD" "${PREV_VERSION:-}" "${PREV_BUILD:-}"
 
-export TEAM_ID NOTARY_PROFILE DEV_ID_APP VERSION TAG
+export TEAM_ID NOTARY_PROFILE NOTARY_APPLE_ID NOTARY_TEAM_ID NOTARY_PASSWORD DEV_ID_APP VERSION TAG
 
 # Check if resuming and build already complete
 if [[ "${RESUME_FROM:-}" == "appcast" ]] || [[ "${RESUME_FROM:-}" == "github_release" ]]; then
@@ -395,7 +435,7 @@ if [[ "${RESUME_FROM:-}" == "appcast" ]] || [[ "${RESUME_FROM:-}" == "github_rel
 else
   green "==> Building and notarizing"
   chmod +x "$REPO_ROOT/tools/release/build_sign_notarize_release.sh"
-  TEAM_ID="$TEAM_ID" NOTARY_PROFILE="$NOTARY_PROFILE" TAG="$TAG" VERSION="$VERSION" DEV_ID_APP="$DEV_ID_APP" \
+  TEAM_ID="$TEAM_ID" NOTARY_PROFILE="$NOTARY_PROFILE" NOTARY_APPLE_ID="$NOTARY_APPLE_ID" NOTARY_TEAM_ID="$NOTARY_TEAM_ID" NOTARY_PASSWORD="$NOTARY_PASSWORD" TAG="$TAG" VERSION="$VERSION" DEV_ID_APP="$DEV_ID_APP" \
     "$REPO_ROOT/tools/release/build_sign_notarize_release.sh"
 
   DMG="$REPO_ROOT/dist/${APP_NAME}-${VERSION}.dmg"
