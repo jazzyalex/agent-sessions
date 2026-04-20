@@ -3,22 +3,21 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.6.1</title>
-            <pubDate>Mon, 13 Apr 2026 09:54:59 -0700</pubDate>
+            <title>3.6.2</title>
+            <pubDate>Sun, 19 Apr 2026 17:48:25 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.6.1</h2>
+<h2>What&#x27;s New in 3.6.2</h2>
 <h3>Features</h3>
 <ul>
-<li>Cursor resume: Unified Sessions now supports launching Cursor CLI resume directly with automatic `--continue` fallback, plus Copy Resume Command support for Cursor sessions.</li>
-<li>OpenClaw: Deleted sessions now shown by default with a badge indicating removal.</li>
-<li>Monitoring: Fresh-session validator v1 — detects and flags staleness traps in the weekly agent_watch dispatch.</li>
+<li>OpenCode: Renamed session titles (set via `/rename`) are now persisted as custom session titles, matching Claude and Codex behavior.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li>OpenClaw: Eliminated full-rescan on every app launch; incremental refresh now used consistently.</li>
-<li>Monitoring: Excluded OpenClaw backup paths from weekly probe to avoid false positives.</li>
-<li>Cursor: Guarded against non-string role values in schema fingerprinting to prevent crashes on unexpected transcript shapes.</li>
-<li>Monitoring: Removed spurious `exit_code` field from stdout in the no-db-found path.</li>
+<li>Session list hierarchy now nests older Codex role subagent sessions that record only `source.subagent` when a same-workspace parent can be inferred, even after multi-hour gaps.</li>
+<li>Resume launch AppleScript now receives commands via `osascript` argv instead of source interpolation, reducing script-injection surface.</li>
+<li>Transcript rendering now uses a bounded transcript cache and preloads Whole Session Raw/Pretty content outside `body` to reduce memory spikes and UI stutter on large sessions.</li>
+<li>Claude OAuth shared cache writes now apply restrictive POSIX permissions on cache directory and files.</li>
+<li>IndexDB bootstrap now configures `busy_timeout` and runs schema/bootstrap migration steps inside a single transaction for safer concurrent startup.</li>
 </ul>
 <h3>Reminder: What You Got in 3.6</h3>
 <ul>
@@ -27,12 +26,12 @@
 <li>Onboarding: Update tour now auto-generates a slide for newly available providers, so users see what&#x27;s new without digging into preferences.</li>
 <li>Session sources: `versionIntroduced` and `featureDescription` metadata added to session source model for use in discoverability and onboarding flows.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.1</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.2</a></p>
             ]]></description>
-            <sparkle:version>37</sparkle:version>
-            <sparkle:shortVersionString>3.6.1</sparkle:shortVersionString>
+            <sparkle:version>38</sparkle:version>
+            <sparkle:shortVersionString>3.6.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.1/AgentSessions-3.6.1.dmg" length="15699493" type="application/octet-stream" sparkle:edSignature="4o3hidQw9f35XjAnp+hP1aWVTWCLynkxTBqg085af8Ac8wxkye/AItwEFTQyhfZj+qHfBVrtYOUWrtVZM5j4DA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.2/AgentSessions-3.6.2.dmg" length="15746025" type="application/octet-stream" sparkle:edSignature="KwbwASBk2cnDIsOSWsSPZEnIuFWVmXR6qcBC3liWnYVPlSWuSTXT8YynbbIn/LbWjygXv9HmQDhZG4SpY3ZfDA=="/>
         </item>
     </channel>
 </rss>
