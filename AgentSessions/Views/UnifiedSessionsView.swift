@@ -1999,12 +1999,6 @@ struct UnifiedSessionsView: View {
                 )
                     .accessibilityLabel(Text("\(label) \(liveState == .activeWorking ? "active" : "open") session"))
             }
-            if session.isSubagent && !isSubagentRow {
-                Text("s")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(isSelected ? .white : rowTextColor)
-                    .accessibilityLabel("Subagent")
-            }
             Text(label)
                 .font(.system(size: 12, weight: isSubagentRow ? .light : .regular, design: .monospaced))
                 .foregroundStyle(isSubagentRow ? rowTextColor.opacity(0.7) : rowTextColor)
@@ -2698,10 +2692,12 @@ private struct TranscriptHostView: View {
             let onToggleExpand: ((String) -> Void)?
 		    @State private var hover: Bool = false
 
-	    var body: some View {
-	        HStack(spacing: 4) {
-                // Disclosure chevron for parents with children
-                if let meta = rowMeta, meta.hasChildren {
+		    var body: some View {
+                let isNestedSubagent = (rowMeta?.depth ?? 0) > 0
+                let showFlatSubagentMarker = session.isSubagent && !isNestedSubagent
+		        HStack(spacing: 4) {
+	                // Disclosure chevron for parents with children
+	                if let meta = rowMeta, meta.hasChildren {
                     Button(action: { onToggleExpand?(session.id) }) {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 10, weight: .medium))
@@ -2714,15 +2710,26 @@ private struct TranscriptHostView: View {
                     Text("(\(meta.childCount))")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(.secondary)
-                } else if let meta = rowMeta, meta.depth > 0 {
-                    // Indent for subagent children
-                    Spacer().frame(width: 20)
-                }
+	                } else if isNestedSubagent {
+	                    // Indent for subagent children
+	                    Spacer().frame(width: 20)
+	                }
 
-                // Subagent type badge (only when hierarchy nesting is active)
-                if let meta = rowMeta, meta.depth > 0 {
-                    if let agentType = session.subagentType, !agentType.isEmpty {
-                        Text(agentType)
+                    if showFlatSubagentMarker {
+                        Text("s")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.12))
+                            .foregroundStyle(.secondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .accessibilityLabel("Subagent")
+                    }
+
+	                // Subagent type badge (only when hierarchy nesting is active)
+	                if isNestedSubagent {
+	                    if let agentType = session.subagentType, !agentType.isEmpty {
+	                        Text(agentType)
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)

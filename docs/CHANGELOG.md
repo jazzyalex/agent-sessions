@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Session list: Subagent fallback markers now appear in the Session column instead of the CLI Agent column, so unresolved subagents no longer read as `s Codex`, `s Claude`, or `s OpenCode`.
 
 ## [3.6.2] - 2026-04-19
 
