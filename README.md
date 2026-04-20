@@ -49,7 +49,7 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 **TL;DR** — Cursor CLI session support joins the active provider lineup, Droid session import is now legacy-only, and automatic new-provider detection keeps the browser current.
 
-**Highlights:** Browse, search, and resume your Cursor CLI sessions alongside every other agent. Agent Sessions now reads Cursor CLI JSONL transcripts from `~/.cursor/`, with full support for subagent hierarchy. A new discoverability banner appears when a newly supported agent is found on disk, and the update tour auto-generates a slide so you never miss a new provider.
+**Highlights:** Browse, search, and resume your Cursor CLI sessions alongside every other agent. Agent Sessions now reads Cursor CLI JSONL transcripts and SQLite chat databases from `~/.cursor/`, with full support for subagent hierarchy. A new discoverability banner appears when a newly supported agent is found on disk, and the update tour auto-generates a slide so you never miss a new provider.
 
 ## Core Features
 
