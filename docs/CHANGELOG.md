@@ -37,7 +37,7 @@ All notable changes to this project will be documented in this file.
 ## [3.6] - 2026-04-09
 
 ### Added
-- Cursor: Cursor IDE/CLI added as 8th session provider — imports JSONL agent transcripts and SQLite chat databases from `~/.cursor/`. Supports session browsing, search, transcript viewing, subagent hierarchy, and resume command. No Cockpit support in this release.
+- Cursor: Cursor CLI sessions added as 8th session provider — imports JSONL agent transcripts from `~/.cursor/`. Supports session browsing, search, transcript viewing, subagent hierarchy, and resume command. No Cockpit support in this release.
 - Discoverability: New-provider detection banner appears in the sessions view when a newly supported agent is found on disk but not yet enabled, prompting users to turn it on.
 - Onboarding: Update tour now auto-generates a slide for newly available providers, so users see what's new without digging into preferences.
 - Session sources: `versionIntroduced` and `featureDescription` metadata added to session source model for use in discoverability and onboarding flows.

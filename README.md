@@ -9,7 +9,7 @@
 </td>
 <td>
 
-**Unified session browser for Codex CLI, Claude Code, Cursor, Gemini CLI, GitHub Copilot CLI, OpenCode, and OpenClaw.**
+**Unified session browser for Codex CLI, Claude Code, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode, and OpenClaw.**
 Droid histories remain importable for legacy sessions, but Droid is no longer an actively supported provider.
 Search, browse, and resume your past AI-coding sessions in a local-first macOS app.
 
@@ -47,9 +47,9 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 ## What's New in 3.6
 
-**TL;DR** — Cursor IDE/CLI joins the active provider lineup, Droid session import is now legacy-only, and automatic new-provider detection keeps the browser current.
+**TL;DR** — Cursor CLI session support joins the active provider lineup, Droid session import is now legacy-only, and automatic new-provider detection keeps the browser current.
 
-**Highlights:** Browse, search, and resume your Cursor AI sessions alongside every other agent. Agent Sessions now reads Cursor's JSONL transcripts and SQLite chat databases from `~/.cursor/`, with full support for subagent hierarchy. A new discoverability banner appears when a newly supported agent is found on disk, and the update tour auto-generates a slide so you never miss a new provider.
+**Highlights:** Browse, search, and resume your Cursor CLI sessions alongside every other agent. Agent Sessions now reads Cursor CLI JSONL transcripts from `~/.cursor/`, with full support for subagent hierarchy. A new discoverability banner appears when a newly supported agent is found on disk, and the update tour auto-generates a slide so you never miss a new provider.
 
 ## Core Features
 
