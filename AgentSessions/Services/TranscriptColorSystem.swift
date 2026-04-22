@@ -63,6 +63,9 @@ enum TranscriptColorSystem {
         case .opencode:
             // Purple
             return NSColor.systemPurple
+        case .hermes:
+            // Gold-orange brand accent.
+            return NSColor(calibratedRed: 0.80, green: 0.52, blue: 0.18, alpha: 1.0)
         case .copilot:
             // Magenta-ish
             return NSColor(calibratedRed: 0.90, green: 0.20, blue: 0.60, alpha: 1.0)

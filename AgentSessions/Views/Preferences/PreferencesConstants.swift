@@ -32,6 +32,7 @@ enum PreferencesKey {
     static let claudeCLIAvailable = "ClaudeCLIAvailable"
     static let geminiCLIAvailable = "GeminiCLIAvailable"
     static let openCodeCLIAvailable = "OpenCodeCLIAvailable"
+    static let hermesCLIAvailable = "HermesCLIAvailable"
     static let copilotCLIAvailable = "CopilotCLIAvailable"
     static let droidCLIAvailable = "DroidCLIAvailable"
     static let cursorCLIAvailable = "CursorCLIAvailable"
@@ -42,6 +43,7 @@ enum PreferencesKey {
         static let claudeEnabled = "AgentEnabledClaude"
         static let geminiEnabled = "AgentEnabledGemini"
         static let openCodeEnabled = "AgentEnabledOpenCode"
+        static let hermesEnabled = "AgentEnabledHermes"
         static let copilotEnabled = "AgentEnabledCopilot"
         static let droidEnabled = "AgentEnabledDroid"
         static let openClawEnabled = "AgentEnabledOpenClaw"
@@ -88,6 +90,7 @@ enum PreferencesKey {
     enum Paths {
         static let claudeSessionsRootOverride = "ClaudeSessionsRootOverride"
         static let opencodeSessionsRootOverride = "OpenCodeSessionsRootOverride"
+        static let hermesSessionsRootOverride = "HermesSessionsRootOverride"
         static let copilotSessionsRootOverride = "CopilotSessionsRootOverride"
         static let droidSessionsRootOverride = "DroidSessionsRootOverride"
         static let droidProjectsRootOverride = "DroidProjectsRootOverride"

@@ -14,6 +14,8 @@ extension Color {
     static let agentGemini: Color = TranscriptColorSystem.agentBrandAccent(source: .gemini)
     /// OpenCode brand color
     static let agentOpenCode: Color = TranscriptColorSystem.agentBrandAccent(source: .opencode)
+    /// Hermes brand color
+    static let agentHermes: Color = TranscriptColorSystem.agentBrandAccent(source: .hermes)
     /// Copilot brand color
     static let agentCopilot: Color = TranscriptColorSystem.agentBrandAccent(source: .copilot)
     /// Droid brand color
@@ -30,6 +32,7 @@ extension Color {
     static let agentClaudeGray = Color(white: 0.5)  // Medium gray
     static let agentGeminiGray = Color(white: 0.6)  // Lighter gray
     static let agentOpenCodeGray = Color(white: 0.7) // Lightest gray
+    static let agentHermesGray = Color(white: 0.72)
     static let agentCopilotGray = Color(white: 0.75) // Very light gray
     static let agentDroidGray = Color(white: 0.8)
     static let agentOpenClawGray = Color(white: 0.85)
@@ -42,6 +45,7 @@ extension Color {
         case .claude: return .agentClaude
         case .gemini: return .agentGemini
         case .opencode: return .agentOpenCode
+        case .hermes: return .agentHermes
         case .copilot: return .agentCopilot
         case .droid: return .agentDroid
         case .openclaw: return .agentOpenClaw
@@ -57,6 +61,7 @@ extension Color {
             case .claude: return .agentClaudeGray
             case .gemini: return .agentGeminiGray
             case .opencode: return .agentOpenCodeGray
+            case .hermes: return .agentHermesGray
             case .copilot: return .agentCopilotGray
             case .droid: return .agentDroidGray
             case .openclaw: return .agentOpenClawGray

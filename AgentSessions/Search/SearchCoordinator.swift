@@ -167,6 +167,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                includeClaude: Bool,
                includeGemini: Bool,
                includeOpenCode: Bool,
+               includeHermes: Bool,
                includeCopilot: Bool,
                includeDroid: Bool,
                includeOpenClaw: Bool,
@@ -187,6 +188,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             if includeClaude { set.insert(.claude) }
             if includeGemini { set.insert(.gemini) }
             if includeOpenCode { set.insert(.opencode) }
+            if includeHermes { set.insert(.hermes) }
             if includeCopilot { set.insert(.copilot) }
             if includeDroid { set.insert(.droid) }
             if includeOpenClaw { set.insert(.openclaw) }

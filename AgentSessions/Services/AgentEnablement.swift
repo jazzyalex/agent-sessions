@@ -51,6 +51,8 @@ enum AgentEnablement {
         let key = enablementKey(for: source)
         if let explicit = defaults.object(forKey: key) as? Bool { return explicit }
         switch source {
+        case .hermes:
+            return isAvailable(.hermes, defaults: defaults)
         case .openclaw:
             // Default OFF unless OpenClaw/Clawdbot is actually present on disk or in PATH.
             return isAvailable(.openclaw, defaults: defaults)
@@ -67,6 +69,7 @@ enum AgentEnablement {
         case .claude:   return PreferencesKey.Agents.claudeEnabled
         case .gemini:   return PreferencesKey.Agents.geminiEnabled
         case .opencode: return PreferencesKey.Agents.openCodeEnabled
+        case .hermes:   return PreferencesKey.Agents.hermesEnabled
         case .copilot:  return PreferencesKey.Agents.copilotEnabled
         case .droid:    return PreferencesKey.Agents.droidEnabled
         case .openclaw: return PreferencesKey.Agents.openClawEnabled
@@ -169,6 +172,7 @@ enum AgentEnablement {
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
             setEnabledInternal(.gemini, enabled: gemini, defaults: defaults)
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
+            setEnabledInternal(.hermes, enabled: isAvailable(.hermes, defaults: defaults), defaults: defaults)
             setEnabledInternal(.copilot, enabled: true, defaults: defaults)
             setEnabledInternal(.droid, enabled: isAvailable(.droid, defaults: defaults), defaults: defaults)
             setEnabledInternal(.openclaw, enabled: isAvailable(.openclaw, defaults: defaults), defaults: defaults)
@@ -180,6 +184,7 @@ enum AgentEnablement {
             let claude = isAvailable(.claude, defaults: defaults)
             let gemini = isAvailable(.gemini, defaults: defaults)
             let opencode = isAvailable(.opencode, defaults: defaults)
+            let hermes = isAvailable(.hermes, defaults: defaults)
             let copilot = isAvailable(.copilot, defaults: defaults)
             let droid = isAvailable(.droid, defaults: defaults)
             let openclaw = isAvailable(.openclaw, defaults: defaults)
@@ -189,6 +194,7 @@ enum AgentEnablement {
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
             setEnabledInternal(.gemini, enabled: gemini, defaults: defaults)
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
+            setEnabledInternal(.hermes, enabled: hermes, defaults: defaults)
             setEnabledInternal(.copilot, enabled: copilot, defaults: defaults)
             setEnabledInternal(.droid, enabled: droid, defaults: defaults)
             setEnabledInternal(.openclaw, enabled: openclaw, defaults: defaults)
@@ -226,6 +232,9 @@ enum AgentEnablement {
             // Check opencode.db first (v1.2+ SQLite backend)
             if OpenCodeBackendDetector.isSQLiteAvailable(customRoot: custom.isEmpty ? nil : custom) { return true }
             root = OpenCodeSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
+        case .hermes:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.hermesSessionsRootOverride) ?? ""
+            root = HermesSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         case .copilot:
             let custom = defaults.string(forKey: PreferencesKey.Paths.copilotSessionsRootOverride) ?? ""
             root = CopilotSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
@@ -273,6 +282,7 @@ enum AgentEnablement {
         case .claude: return binaryDetectedCached("claude") || binaryDetectedCached("claude-code")
         case .gemini: return binaryDetectedCached("gemini")
         case .opencode: return binaryDetectedCached("opencode")
+        case .hermes: return binaryDetectedCached("hermes")
         case .copilot: return binaryDetectedCached("copilot")
         case .droid: return binaryDetectedCached("droid")
         case .openclaw:
@@ -319,6 +329,8 @@ enum AgentEnablement {
             return defaults.object(forKey: PreferencesKey.geminiCLIAvailable) as? Bool
         case .opencode:
             return defaults.object(forKey: PreferencesKey.openCodeCLIAvailable) as? Bool
+        case .hermes:
+            return defaults.object(forKey: PreferencesKey.hermesCLIAvailable) as? Bool
         case .copilot:
             return defaults.object(forKey: PreferencesKey.copilotCLIAvailable) as? Bool
         case .droid:

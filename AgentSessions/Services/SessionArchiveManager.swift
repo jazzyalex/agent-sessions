@@ -408,6 +408,14 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                     map[String(base.dropFirst("ses_".count))] = url
                 }
             }
+        case .hermes:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.hermesSessionsRootOverride)
+            let discovery = HermesSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
+            for url in discovery.discoverSessionFiles() {
+                if let s = HermesSessionParser.parseFile(at: url), !s.id.isEmpty {
+                    map[s.id] = url
+                }
+            }
         case .droid:
             let sessionsCustom = defaults.string(forKey: PreferencesKey.Paths.droidSessionsRootOverride)
             let projectsCustom = defaults.string(forKey: PreferencesKey.Paths.droidProjectsRootOverride)
@@ -454,6 +462,8 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             return GeminiSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .opencode:
             return OpenCodeSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .hermes:
+            return HermesSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .codex:
             // SessionIndexer’s lightweight parsing helpers are currently private; for backfill we only need
             // a stable upstream path so the archive can be created. Metadata will be refreshed on later scans.

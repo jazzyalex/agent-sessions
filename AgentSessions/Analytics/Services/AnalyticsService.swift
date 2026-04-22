@@ -16,6 +16,7 @@ final class AnalyticsService: ObservableObject {
     private let claudeIndexer: ClaudeSessionIndexer
     private let geminiIndexer: GeminiSessionIndexer
     private let opencodeIndexer: OpenCodeSessionIndexer
+    private let hermesIndexer: HermesSessionIndexer
     private let copilotIndexer: CopilotSessionIndexer
     private let droidIndexer: DroidSessionIndexer
 
@@ -23,7 +24,7 @@ final class AnalyticsService: ObservableObject {
     private let repository: AnalyticsRepository?
 
     private static let analyticsSupportedSources: Set<SessionSource> = [
-        .codex, .claude, .gemini, .opencode, .copilot, .droid
+        .codex, .claude, .gemini, .opencode, .hermes, .copilot, .droid
     ]
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
 
@@ -31,12 +32,14 @@ final class AnalyticsService: ObservableObject {
          claudeIndexer: ClaudeSessionIndexer,
          geminiIndexer: GeminiSessionIndexer,
          opencodeIndexer: OpenCodeSessionIndexer,
+         hermesIndexer: HermesSessionIndexer,
          copilotIndexer: CopilotSessionIndexer,
          droidIndexer: DroidSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
         self.opencodeIndexer = opencodeIndexer
+        self.hermesIndexer = hermesIndexer
         self.copilotIndexer = copilotIndexer
         self.droidIndexer = droidIndexer
         if let db = try? IndexDB() {
@@ -84,6 +87,7 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
         if AgentEnablement.isEnabled(.gemini) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
         if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
         if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
 
@@ -115,6 +119,7 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
         if AgentEnablement.isEnabled(.gemini) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
         if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
         if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
 
@@ -372,7 +377,7 @@ final class AnalyticsService: ObservableObject {
         let raw: [String]
         switch filter {
         case .all:
-            raw = [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue, SessionSource.opencode.rawValue, SessionSource.copilot.rawValue, SessionSource.droid.rawValue, SessionSource.openclaw.rawValue]
+            raw = [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue, SessionSource.opencode.rawValue, SessionSource.hermes.rawValue, SessionSource.copilot.rawValue, SessionSource.droid.rawValue, SessionSource.openclaw.rawValue]
         case .codexOnly:
             raw = [SessionSource.codex.rawValue]
         case .claudeOnly:
@@ -381,6 +386,8 @@ final class AnalyticsService: ObservableObject {
             raw = [SessionSource.gemini.rawValue]
         case .opencodeOnly:
             raw = [SessionSource.opencode.rawValue]
+        case .hermesOnly:
+            raw = [SessionSource.hermes.rawValue]
         case .copilotOnly:
             raw = [SessionSource.copilot.rawValue]
         case .droidOnly:
@@ -719,7 +726,7 @@ final class AnalyticsService: ObservableObject {
         // Observe when session data changes (for auto-refresh when window visible)
         Publishers.CombineLatest3(
             Publishers.CombineLatest4(codexIndexer.$allSessions, claudeIndexer.$allSessions, geminiIndexer.$allSessions, opencodeIndexer.$allSessions),
-            copilotIndexer.$allSessions,
+            Publishers.CombineLatest(hermesIndexer.$allSessions, copilotIndexer.$allSessions),
             droidIndexer.$allSessions
         )
             .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
@@ -730,7 +737,7 @@ final class AnalyticsService: ObservableObject {
 
         Publishers.CombineLatest3(
             Publishers.CombineLatest4(codexIndexer.$launchPhase, claudeIndexer.$launchPhase, geminiIndexer.$launchPhase, opencodeIndexer.$launchPhase),
-            copilotIndexer.$launchPhase,
+            Publishers.CombineLatest(hermesIndexer.$launchPhase, copilotIndexer.$launchPhase),
             droidIndexer.$launchPhase
         )
             .receive(on: DispatchQueue.main)
@@ -750,6 +757,7 @@ final class AnalyticsService: ObservableObject {
                 (SessionSource.claude, claudeIndexer.launchPhase),
                 (SessionSource.gemini, geminiIndexer.launchPhase),
                 (SessionSource.opencode, opencodeIndexer.launchPhase),
+                (SessionSource.hermes, hermesIndexer.launchPhase),
                 (SessionSource.copilot, copilotIndexer.launchPhase),
                 (SessionSource.droid, droidIndexer.launchPhase)
             ].filter { enabled.contains($0.0) }.map { $0.1 }

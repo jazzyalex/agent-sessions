@@ -59,12 +59,13 @@ extension PreferencesView {
 
             sectionHeader("Active CLI agents")
             VStack(alignment: .leading, spacing: 6) {
-                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, copilotAgentEnabled, droidAgentEnabled, openClawAgentEnabled, cursorAgentEnabled].filter { $0 }.count
+                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, hermesAgentEnabled, copilotAgentEnabled, droidAgentEnabled, openClawAgentEnabled, cursorAgentEnabled].filter { $0 }.count
 
                 agentEnableToggle(title: "Codex", source: .codex, isOn: $codexAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Claude", source: .claude, isOn: $claudeAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Gemini", source: .gemini, isOn: $geminiAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "OpenCode", source: .opencode, isOn: $openCodeAgentEnabled, enabledCount: enabledCount)
+                agentEnableToggle(title: "Hermes", source: .hermes, isOn: $hermesAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Copilot", source: .copilot, isOn: $copilotAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Droid", source: .droid, isOn: $droidAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "OpenClaw", source: .openclaw, isOn: $openClawAgentEnabled, enabledCount: enabledCount)

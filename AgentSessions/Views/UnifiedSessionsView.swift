@@ -207,6 +207,7 @@ struct UnifiedSessionsView: View {
     let claudeIndexer: ClaudeSessionIndexer
     @ObservedObject var geminiIndexer: GeminiSessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
+    let hermesIndexer: HermesSessionIndexer
     let copilotIndexer: CopilotSessionIndexer
     let droidIndexer: DroidSessionIndexer
     let openclawIndexer: OpenClawSessionIndexer
@@ -249,6 +250,7 @@ struct UnifiedSessionsView: View {
 	@AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
+	@AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
 	    @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
 	    @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = false
@@ -296,6 +298,7 @@ struct UnifiedSessionsView: View {
          claudeIndexer: ClaudeSessionIndexer,
          geminiIndexer: GeminiSessionIndexer,
          opencodeIndexer: OpenCodeSessionIndexer,
+         hermesIndexer: HermesSessionIndexer,
          copilotIndexer: CopilotSessionIndexer,
          droidIndexer: DroidSessionIndexer,
          openclawIndexer: OpenClawSessionIndexer,
@@ -310,6 +313,7 @@ struct UnifiedSessionsView: View {
         self.claudeIndexer = claudeIndexer
         self.geminiIndexer = geminiIndexer
         self.opencodeIndexer = opencodeIndexer
+        self.hermesIndexer = hermesIndexer
         self.copilotIndexer = copilotIndexer
         self.droidIndexer = droidIndexer
         self.openclawIndexer = openclawIndexer
@@ -345,6 +349,11 @@ struct UnifiedSessionsView: View {
                     }
                     return OpenCodeSessionParser.parseFileFull(at: url)
                 }
+            ),
+            .hermes: .init(
+                transcriptCache: hermesIndexer.searchTranscriptCache,
+                update: { hermesIndexer.updateSession($0) },
+                parseFull: { url, _ in HermesSessionParser.parseFileFull(at: url) }
             ),
             .copilot: .init(
                 transcriptCache: copilotIndexer.searchTranscriptCache,
@@ -1065,6 +1074,8 @@ struct UnifiedSessionsView: View {
             return session.codexInternalSessionID != nil || session.codexFilenameUUID != nil
         case .opencode:
             return true // session.id is the SQLite session ID; falls back to --continue
+        case .hermes:
+            return true
         case .copilot:
             return true // session.id from session.start; falls back to --continue
         case .cursor:
@@ -1121,6 +1132,18 @@ struct UnifiedSessionsView: View {
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
 
+        case .hermes:
+            let settings = HermesSettings.shared
+            let sid = session.id
+            let wd = effectiveWorkingDirectoryURL(for: session)
+            let binary = settings.binaryPath.isEmpty ? "hermes" : settings.binaryPath
+            let builder = HermesResumeCommandBuilder()
+            let core = !sid.isEmpty
+                ? "\(builder.shellQuoteIfNeeded(binary)) --resume \(builder.shellQuoteIfNeeded(sid))"
+                : "\(builder.shellQuoteIfNeeded(binary)) --continue"
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+            pb.setString(command, forType: .string)
+
         case .copilot:
             let settings = CopilotSettings.shared
             let sid = session.id
@@ -1170,6 +1193,7 @@ struct UnifiedSessionsView: View {
                                claudeIndexer: claudeIndexer,
                                geminiIndexer: geminiIndexer,
                                opencodeIndexer: opencodeIndexer,
+                               hermesIndexer: hermesIndexer,
                                copilotIndexer: copilotIndexer,
                                droidIndexer: droidIndexer,
                                openclawIndexer: openclawIndexer,
@@ -1189,6 +1213,7 @@ struct UnifiedSessionsView: View {
                         case .claude: return "Claude"
                         case .gemini: return "Gemini"
                         case .opencode: return "OpenCode"
+                        case .hermes: return "Hermes"
                         case .copilot: return "Copilot"
                         case .droid: return "Droid"
                         case .openclaw: return "OpenClaw"
@@ -1287,6 +1312,11 @@ struct UnifiedSessionsView: View {
                     AgentTabToggle(title: "OpenCode", color: Color.purple, isMonochrome: stripMonochrome, isOn: $unified.includeOpenCode)
                         .help("Show or hide OpenCode sessions in the list (⌘4)")
                         .keyboardShortcut("4", modifiers: .command)
+                }
+
+                if hermesAgentEnabled {
+                    AgentTabToggle(title: "Hermes", color: TranscriptColorSystem.agentBrandAccent(source: .hermes), isMonochrome: stripMonochrome, isOn: $unified.includeHermes)
+                        .help("Show or hide Hermes sessions in the list")
                 }
 
                 if copilotAgentEnabled {
@@ -1761,6 +1791,8 @@ struct UnifiedSessionsView: View {
             if !unified.includeGemini { unified.includeGemini = true }
         case .opencode:
             if !unified.includeOpenCode { unified.includeOpenCode = true }
+        case .hermes:
+            if !unified.includeHermes { unified.includeHermes = true }
         case .copilot:
             if !unified.includeCopilot { unified.includeCopilot = true }
         case .droid:
@@ -1980,6 +2012,7 @@ struct UnifiedSessionsView: View {
         case .claude: label = "Claude"
         case .gemini: label = "Gemini"
         case .opencode: label = "OpenCode"
+        case .hermes: label = "Hermes"
         case .copilot: label = "Copilot"
         case .droid: label = "Droid"
         case .openclaw: label = "OpenClaw"
@@ -2075,6 +2108,11 @@ struct UnifiedSessionsView: View {
             return nil
         case .opencode:
             return OpenCodeSettings.shared.effectiveWorkingDirectory(for: session)
+        case .hermes:
+            if let path = session.cwd, !path.isEmpty {
+                return URL(fileURLWithPath: path)
+            }
+            return nil
         case .copilot:
             return CopilotSettings.shared.effectiveWorkingDirectory(for: session)
         case .cursor:
@@ -2110,6 +2148,7 @@ struct UnifiedSessionsView: View {
         switch source {
         case .codex: return "Codex CLI"
         case .opencode: return "OpenCode"
+        case .hermes: return "Hermes"
         case .claude: return "Claude Code"
         case .copilot: return "Copilot CLI"
         case .cursor: return "Cursor CLI"
@@ -2120,7 +2159,7 @@ struct UnifiedSessionsView: View {
 
     private func canResumeSession(_ s: Session, geminiCLISessionID: String? = nil) -> Bool {
         switch s.source {
-        case .codex, .claude, .opencode, .copilot, .cursor:
+        case .codex, .claude, .opencode, .hermes, .copilot, .cursor:
             return true
         case .gemini:
             return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: s)) != nil
@@ -2144,6 +2183,17 @@ struct UnifiedSessionsView: View {
             Task { @MainActor in
                 let launcher: OpenCodeTerminalLaunching = settings.preferITerm ? OpenCodeITermLauncher() : OpenCodeTerminalLauncher()
                 let coord = OpenCodeResumeCoordinator(env: OpenCodeCLIEnvironment(), builder: OpenCodeResumeCommandBuilder(), launcher: launcher)
+                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+            }
+        case .hermes:
+            let settings = HermesSettings.shared
+            let sid = s.id
+            let wd = effectiveWorkingDirectoryURL(for: s)
+            let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
+            let input = HermesResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
+            Task { @MainActor in
+                let launcher: HermesTerminalLaunching = settings.preferITerm ? HermesITermLauncher() : HermesTerminalLauncher()
+                let coord = HermesResumeCoordinator(env: HermesCLIEnvironment(), builder: HermesResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
         case .copilot:
@@ -2241,6 +2291,7 @@ struct UnifiedSessionsView: View {
 	                                includeClaude: unified.includeClaude && claudeAgentEnabled,
 	                                includeGemini: unified.includeGemini && geminiAgentEnabled,
 	                                includeOpenCode: unified.includeOpenCode && openCodeAgentEnabled,
+	                                includeHermes: unified.includeHermes && hermesAgentEnabled,
 	                                includeCopilot: unified.includeCopilot && copilotAgentEnabled,
 	                                includeDroid: unified.includeDroid && droidAgentEnabled,
 	                                includeOpenClaw: unified.includeOpenClaw && openClawAgentEnabled,
@@ -2250,7 +2301,7 @@ struct UnifiedSessionsView: View {
 	    }
 
     private func flashAgentEnablementNoticeIfNeeded() {
-        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled)
+        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled)
         guard anyDisabled else {
             withAnimation { showAgentEnablementNotice = false }
             return
@@ -2268,6 +2319,7 @@ struct UnifiedSessionsView: View {
         case .claude: return Color.agentClaude
         case .gemini: return Color.teal
         case .opencode: return Color.purple
+        case .hermes: return TranscriptColorSystem.agentBrandAccent(source: .hermes)
         case .copilot: return Color.agentCopilot
         case .droid: return Color.agentDroid
         case .openclaw: return Color.agentOpenClaw
@@ -2653,6 +2705,7 @@ private struct TranscriptHostView: View {
     let claudeIndexer: ClaudeSessionIndexer
     let geminiIndexer: GeminiSessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
+    let hermesIndexer: HermesSessionIndexer
     let copilotIndexer: CopilotSessionIndexer
     let droidIndexer: DroidSessionIndexer
     let openclawIndexer: OpenClawSessionIndexer
@@ -2669,6 +2722,8 @@ private struct TranscriptHostView: View {
                 .opacity(kind == .gemini ? 1 : 0)
             OpenCodeTranscriptView(indexer: opencodeIndexer, sessionID: selection)
                 .opacity(kind == .opencode ? 1 : 0)
+            HermesTranscriptView(indexer: hermesIndexer, sessionID: selection)
+                .opacity(kind == .hermes ? 1 : 0)
             CopilotTranscriptView(indexer: copilotIndexer, sessionID: selection)
                 .opacity(kind == .copilot ? 1 : 0)
             DroidTranscriptView(indexer: droidIndexer, sessionID: selection)
@@ -2928,6 +2983,7 @@ private struct UnifiedSearchFiltersView: View {
                      includeClaude: unified.includeClaude,
                      includeGemini: unified.includeGemini,
                      includeOpenCode: unified.includeOpenCode,
+                     includeHermes: unified.includeHermes,
                      includeCopilot: unified.includeCopilot,
                      includeDroid: unified.includeDroid,
                      includeOpenClaw: unified.includeOpenClaw,
@@ -2960,6 +3016,7 @@ private struct UnifiedSearchFiltersView: View {
                          includeClaude: unified.includeClaude,
                          includeGemini: unified.includeGemini,
                          includeOpenCode: unified.includeOpenCode,
+                         includeHermes: unified.includeHermes,
                          includeCopilot: unified.includeCopilot,
                          includeDroid: unified.includeDroid,
                          includeOpenClaw: unified.includeOpenClaw,

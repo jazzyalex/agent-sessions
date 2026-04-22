@@ -14,6 +14,7 @@ struct PreferencesView: View {
     @ObservedObject var resumeSettings = CodexResumeSettings.shared
     @ObservedObject var claudeSettings = ClaudeResumeSettings.shared
     @ObservedObject var geminiSettings = GeminiCLISettings.shared
+    @ObservedObject var hermesSettings = HermesSettings.shared
     @ObservedObject var copilotSettings = CopilotSettings.shared
     @ObservedObject var cursorSettings = CursorSettings.shared
     @State var showingResetConfirm: Bool = false
@@ -61,6 +62,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.claudeCLIAvailable) var claudeCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.geminiCLIAvailable) var geminiCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.openCodeCLIAvailable) var openCodeCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.hermesCLIAvailable) var hermesCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.copilotCLIAvailable) var copilotCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.droidCLIAvailable) var droidCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.cursorCLIAvailable) var cursorCLIAvailable: Bool = true
@@ -69,6 +71,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.geminiEnabled) var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) var openCodeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.hermesEnabled) var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) var copilotAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.droidEnabled) var droidAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openClawEnabled) var openClawAgentEnabled: Bool = false
@@ -164,6 +167,14 @@ struct PreferencesView: View {
     @AppStorage("OpenCodeSessionsRootOverride") var opencodeSessionsPath: String = ""
     @State var opencodeSessionsPathValid: Bool = true
     @State var opencodeSessionsPathDebounce: DispatchWorkItem? = nil
+    // Hermes probe state
+    @State var hermesProbeState: ProbeState = .idle
+    @State var hermesVersionString: String? = nil
+    @State var hermesResolvedPath: String? = nil
+    @State var hermesProbeDebounce: DispatchWorkItem? = nil
+    @AppStorage(PreferencesKey.Paths.hermesSessionsRootOverride) var hermesSessionsPath: String = ""
+    @State var hermesSessionsPathValid: Bool = true
+    @State var hermesSessionsPathDebounce: DispatchWorkItem? = nil
 
     // Copilot probe state
     @State var copilotProbeState: ProbeState = .idle
@@ -212,12 +223,12 @@ struct PreferencesView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selectedTab) {
-                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor }, id: \.self) { tab in
+                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .hermesCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
                 Divider()
-                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI], id: \.self) { tab in
+                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI, .droidCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -352,6 +363,8 @@ struct PreferencesView: View {
                 openCodeTab
             case .geminiCLI:
                 geminiCLITab
+            case .hermesCLI:
+                hermesCLITab
             case .copilotCLI:
                 copilotCLITab
             case .droidCLI:
@@ -807,6 +820,7 @@ struct PreferencesView: View {
         case .claude: scheduleClaudeProbe()
         case .gemini: scheduleGeminiProbe()
         case .opencode: scheduleOpenCodeProbe()
+        case .hermes: scheduleHermesProbe()
         case .copilot: scheduleCopilotProbe()
         case .droid: scheduleDroidProbe()
         case .openclaw: scheduleOpenClawProbe()
@@ -824,6 +838,8 @@ struct PreferencesView: View {
             return geminiResolvedPath
         case .opencode:
             return opencodeResolvedPath
+        case .hermes:
+            return hermesResolvedPath
         case .copilot:
             return copilotResolvedPath
         case .droid:
@@ -848,6 +864,9 @@ struct PreferencesView: View {
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .opencode:
             let value = opencodeSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .hermes:
+            let value = hermesSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .copilot:
             let value = copilotSettings.binaryPath
@@ -988,6 +1007,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case claudeResume
     case opencode
     case geminiCLI
+    case hermesCLI
     case copilotCLI
     case droidCLI
     case openClawCLI
@@ -1009,6 +1029,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .claudeResume: return "Claude Code"
         case .opencode: return "OpenCode"
         case .geminiCLI: return "Gemini CLI"
+        case .hermesCLI: return "Hermes"
         case .copilotCLI: return "GitHub Copilot CLI"
         case .droidCLI: return "Droid"
         case .openClawCLI: return "OpenClaw"
@@ -1030,6 +1051,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .claudeResume: return "c.square"
         case .opencode: return "chevron.left.slash.chevron.right"
         case .geminiCLI: return "g.circle"
+        case .hermesCLI: return "brain"
         case .copilotCLI: return "bolt.horizontal.circle"
         case .droidCLI: return "d.circle"
         case .openClawCLI: return "o.circle"
@@ -1041,7 +1063,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Agents → About
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .droidCLI, .openClawCLI, .cursor, .about] }
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI, .droidCLI, .openClawCLI, .cursor, .about] }
 }
 
 // MARK: - Probe helpers
@@ -1222,6 +1244,8 @@ extension PreferencesView {
             if opencodeVersionString == nil && opencodeProbeState != .probing { probeOpenCode() }
         case .geminiCLI:
             if geminiVersionString == nil && geminiProbeState != .probing { probeGemini() }
+        case .hermesCLI:
+            if hermesVersionString == nil && hermesProbeState != .probing { probeHermes() }
         case .copilotCLI:
             if copilotVersionString == nil && copilotProbeState != .probing { probeCopilot() }
         case .droidCLI:

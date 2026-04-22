@@ -8,6 +8,7 @@ struct OnboardingSheetView: View {
     let claudeIndexer: ClaudeSessionIndexer
     let geminiIndexer: GeminiSessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
+    let hermesIndexer: HermesSessionIndexer
     let copilotIndexer: CopilotSessionIndexer
     let droidIndexer: DroidSessionIndexer
     let openclawIndexer: OpenClawSessionIndexer
@@ -22,6 +23,7 @@ struct OnboardingSheetView: View {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = false
@@ -110,6 +112,7 @@ struct OnboardingSheetView: View {
         .onReceive(claudeIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(geminiIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(opencodeIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(hermesIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(copilotIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(droidIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(openclawIndexer.$allSessions) { _ in handleSessionDataUpdate() }
@@ -536,6 +539,11 @@ struct OnboardingSheetView: View {
                 get: { openCodeAgentEnabled },
                 set: { _ = AgentEnablement.setEnabled(.opencode, enabled: $0) }
             )
+        case .hermes:
+            return Binding(
+                get: { hermesAgentEnabled },
+                set: { _ = AgentEnablement.setEnabled(.hermes, enabled: $0) }
+            )
         case .copilot:
             return Binding(
                 get: { copilotAgentEnabled },
@@ -627,6 +635,7 @@ struct OnboardingSheetView: View {
         case .claude: return claudeIndexer.allSessions
         case .gemini: return geminiIndexer.allSessions
         case .opencode: return opencodeIndexer.allSessions
+        case .hermes: return hermesIndexer.allSessions
         case .copilot: return copilotIndexer.allSessions
         case .droid: return droidIndexer.allSessions
         case .openclaw: return openclawIndexer.allSessions
@@ -640,6 +649,7 @@ struct OnboardingSheetView: View {
         case .claude: return claudeAgentEnabled
         case .gemini: return geminiAgentEnabled
         case .opencode: return openCodeAgentEnabled
+        case .hermes: return hermesAgentEnabled
         case .copilot: return copilotAgentEnabled
         case .droid: return droidAgentEnabled
         case .openclaw: return openClawAgentEnabled
@@ -688,6 +698,7 @@ struct OnboardingSheetView: View {
             + claudeIndexer.allSessions
             + geminiIndexer.allSessions
             + opencodeIndexer.allSessions
+            + hermesIndexer.allSessions
             + copilotIndexer.allSessions
             + droidIndexer.allSessions
             + openclawIndexer.allSessions
@@ -723,7 +734,7 @@ struct OnboardingSheetView: View {
         // Tool-call-only filter (strict)
         if hasCommandsOnlyPref {
             switch session.source {
-            case .codex, .opencode, .copilot, .droid, .openclaw, .cursor:
+            case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor:
                 if !session.events.isEmpty {
                     if !session.events.contains(where: { $0.kind == .tool_call }) { return false }
                 } else {
@@ -979,6 +990,7 @@ private struct AgentBadge: View {
         case .codex: return "CX"
         case .gemini: return "G"
         case .opencode: return "OC"
+        case .hermes: return "HM"
         case .copilot: return "CP"
         case .droid: return "D"
         case .openclaw: return "CL"
@@ -2034,6 +2046,8 @@ private struct OnboardingPalette {
             return accentBlue
         case .opencode:
             return Color(red: 0.62, green: 0.52, blue: 0.96)
+        case .hermes:
+            return Color.agentHermes
         case .copilot:
             return Color(red: 0.82, green: 0.36, blue: 0.78)
         case .droid:

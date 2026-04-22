@@ -8,6 +8,7 @@ struct AnalyticsView: View {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
 
@@ -20,7 +21,7 @@ struct AnalyticsView: View {
 
     private var hasEnabledSources: Bool {
         codexAgentEnabled || claudeAgentEnabled || geminiAgentEnabled ||
-        openCodeAgentEnabled || copilotAgentEnabled || droidAgentEnabled
+        openCodeAgentEnabled || hermesAgentEnabled || copilotAgentEnabled || droidAgentEnabled
     }
 
     var body: some View {
@@ -91,6 +92,7 @@ struct AnalyticsView: View {
         .onChange(of: claudeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: geminiAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: openCodeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onChange(of: hermesAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: copilotAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: droidAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         // Apply preferredColorScheme only for explicit Light/Dark modes
@@ -343,6 +345,7 @@ struct AnalyticsView: View {
         if claudeAgentEnabled { out.append(.claudeOnly) }
         if geminiAgentEnabled { out.append(.geminiOnly) }
         if openCodeAgentEnabled { out.append(.opencodeOnly) }
+        if hermesAgentEnabled { out.append(.hermesOnly) }
         if copilotAgentEnabled { out.append(.copilotOnly) }
         if droidAgentEnabled { out.append(.droidOnly) }
         return out
@@ -379,6 +382,7 @@ extension View {
     let claudeIndexer = ClaudeSessionIndexer()
     let geminiIndexer = GeminiSessionIndexer()
     let opencodeIndexer = OpenCodeSessionIndexer()
+    let hermesIndexer = HermesSessionIndexer()
     let copilotIndexer = CopilotSessionIndexer()
 
     let service = AnalyticsService(
@@ -386,6 +390,7 @@ extension View {
         claudeIndexer: claudeIndexer,
         geminiIndexer: geminiIndexer,
         opencodeIndexer: opencodeIndexer,
+        hermesIndexer: hermesIndexer,
         copilotIndexer: copilotIndexer,
         droidIndexer: DroidSessionIndexer()
     )

@@ -156,6 +156,7 @@ struct AgentSessionsApp: App {
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @StateObject private var activeCodexSessions = CodexActiveSessionsModel()
     @StateObject private var geminiIndexer = GeminiSessionIndexer()
+    @StateObject private var hermesIndexer = HermesSessionIndexer()
     @StateObject private var copilotIndexer = CopilotSessionIndexer()
     @StateObject private var droidIndexer = DroidSessionIndexer()
     @StateObject private var openclawIndexer = OpenClawSessionIndexer()
@@ -183,6 +184,7 @@ struct AgentSessionsApp: App {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Advanced.hideDockIcon) private var hideDockIcon: Bool = false
     @AppStorage("UnifiedLegacyNoticeShown") private var unifiedNoticeShown: Bool = false
     @State private var selectedSessionID: String?
@@ -217,114 +219,126 @@ struct AgentSessionsApp: App {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { AppReadyGate.markReady() }
     }
 
-    var body: some Scene {
-        // Default unified window
-        WindowGroup("Agent Sessions", id: "Agent Sessions") {
-            if AppRuntime.isRunningTests {
-                EmptyView()
-            } else {
-                let unified = unifiedIndexerHolder.makeUnified(
+    @ViewBuilder
+    private var unifiedWindowRoot: some View {
+        if AppRuntime.isRunningTests {
+            EmptyView()
+        } else {
+            let unified = unifiedIndexerHolder.makeUnified(
+                codexIndexer: indexer,
+                claudeIndexer: claudeIndexer,
+                geminiIndexer: geminiIndexer,
+                opencodeIndexer: opencodeIndexer,
+                hermesIndexer: hermesIndexer,
+                copilotIndexer: copilotIndexer,
+                droidIndexer: droidIndexer,
+                openclawIndexer: openclawIndexer,
+                cursorIndexer: cursorIndexer
+            )
+            configuredUnifiedWindow(unified: unified)
+        }
+    }
+
+    @ViewBuilder
+    private func configuredUnifiedWindow(unified: UnifiedSessionIndexer) -> some View {
+        let layoutMode = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
+        UnifiedSessionsView(
+            unified: unified,
+            codexIndexer: indexer,
+            claudeIndexer: claudeIndexer,
+            geminiIndexer: geminiIndexer,
+            opencodeIndexer: opencodeIndexer,
+            hermesIndexer: hermesIndexer,
+            copilotIndexer: copilotIndexer,
+            droidIndexer: droidIndexer,
+            openclawIndexer: openclawIndexer,
+            cursorIndexer: cursorIndexer,
+            analyticsReady: analyticsReady,
+            analyticsPhase: analyticsPhase,
+            analyticsIsStale: analyticsStale,
+            layoutMode: layoutMode,
+            onToggleLayout: {
+                let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
+                layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
+            }
+        )
+        .environmentObject(codexUsageModel)
+        .environmentObject(claudeUsageModel)
+        .environmentObject(activeCodexSessions)
+        .environmentObject(indexer.columnVisibility)
+        .environmentObject(archiveManager)
+        .environmentObject(updaterController)
+        .background(WindowAutosave(name: "MainWindow"))
+        .background(WindowOpenRegistrationView())
+        .onAppear {
+            runSharedLaunchBootstrap(windowLabel: "Unified main window")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            handleAppDidBecomeActive()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            handleAppDidResignActive()
+        }
+        .onChange(of: showUsageStrip) { _, _ in
+            updateUsageModels()
+        }
+        .onChange(of: codexUsageEnabledPref) { _, _ in
+            updateUsageModels()
+        }
+        .onChange(of: claudeUsageEnabledPref) { _, _ in
+            updateUsageModels()
+        }
+        .onChange(of: menuBarEnabled) { _, newValue in
+            updateUsageModels()
+            Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: newValue)
+        }
+        .onChange(of: liveSessionsEnabled) { _, _ in
+            updateUsageModels()
+        }
+        .onChange(of: hideDockIcon) { _, newValue in
+            Self.applyActivationPolicy(hideDockIcon: newValue, menuBarEnabled: menuBarEnabled)
+        }
+        .onChange(of: codexAgentEnabled) { _, _ in handleAgentEnablementChange() }
+        .onChange(of: claudeAgentEnabled) { _, _ in handleAgentEnablementChange() }
+        .onChange(of: geminiAgentEnabled) { _, _ in handleAgentEnablementChange() }
+        .onChange(of: openCodeAgentEnabled) { _, _ in handleAgentEnablementChange() }
+        .onAppear {
+            guard !AppRuntime.isRunningTests else { return }
+            Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showOnboardingFromMenu)) { _ in
+            onboardingCoordinator.presentManually()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .requestCoreIndexRebuild)) { _ in
+            unified.rebuildCoreIndex()
+        }
+        .onChange(of: onboardingCoordinator.isPresented) { _, isPresented in
+            if isPresented, let content = onboardingCoordinator.content {
+                onboardingWindowPresenter.show(
+                    content: content,
+                    coordinator: onboardingCoordinator,
                     codexIndexer: indexer,
                     claudeIndexer: claudeIndexer,
                     geminiIndexer: geminiIndexer,
                     opencodeIndexer: opencodeIndexer,
-                    copilotIndexer: copilotIndexer,
-                    droidIndexer: droidIndexer,
-                    openclawIndexer: openclawIndexer,
-                    cursorIndexer: cursorIndexer
-                )
-                let layoutMode = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
-                UnifiedSessionsView(
-                    unified: unified,
-                    codexIndexer: indexer,
-                    claudeIndexer: claudeIndexer,
-                    geminiIndexer: geminiIndexer,
-                    opencodeIndexer: opencodeIndexer,
+                    hermesIndexer: hermesIndexer,
                     copilotIndexer: copilotIndexer,
                     droidIndexer: droidIndexer,
                     openclawIndexer: openclawIndexer,
                     cursorIndexer: cursorIndexer,
-                    analyticsReady: analyticsReady,
-                    analyticsPhase: analyticsPhase,
-                    analyticsIsStale: analyticsStale,
-                    layoutMode: layoutMode,
-                    onToggleLayout: {
-                        let current = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
-                        layoutModeRaw = (current == .vertical ? LayoutMode.horizontal : .vertical).rawValue
-                    }
+                    codexUsageModel: codexUsageModel,
+                    claudeUsageModel: claudeUsageModel
                 )
-                .environmentObject(codexUsageModel)
-                .environmentObject(claudeUsageModel)
-                .environmentObject(activeCodexSessions)
-                .environmentObject(indexer.columnVisibility)
-                .environmentObject(archiveManager)
-                .environmentObject(updaterController)
-                .background(WindowAutosave(name: "MainWindow"))
-                .background(WindowOpenRegistrationView())
-                .onAppear {
-                    runSharedLaunchBootstrap(windowLabel: "Unified main window")
-                }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                    handleAppDidBecomeActive()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-                    handleAppDidResignActive()
-                }
-                .onChange(of: showUsageStrip) { _, _ in
-                    updateUsageModels()
-                }
-                .onChange(of: codexUsageEnabledPref) { _, _ in
-                    updateUsageModels()
-                }
-                .onChange(of: claudeUsageEnabledPref) { _, _ in
-                    updateUsageModels()
-                }
-                .onChange(of: menuBarEnabled) { _, newValue in
-                    updateUsageModels()
-                    Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: newValue)
-                }
-                .onChange(of: liveSessionsEnabled) { _, _ in
-                    updateUsageModels()
-                }
-                .onChange(of: hideDockIcon) { _, newValue in
-                    Self.applyActivationPolicy(hideDockIcon: newValue, menuBarEnabled: menuBarEnabled)
-                }
-                .onChange(of: codexAgentEnabled) { _, _ in handleAgentEnablementChange() }
-                .onChange(of: claudeAgentEnabled) { _, _ in handleAgentEnablementChange() }
-                .onChange(of: geminiAgentEnabled) { _, _ in handleAgentEnablementChange() }
-                .onChange(of: openCodeAgentEnabled) { _, _ in handleAgentEnablementChange() }
-                .onAppear {
-                    guard !AppRuntime.isRunningTests else { return }
-                    Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .showOnboardingFromMenu)) { _ in
-                    onboardingCoordinator.presentManually()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .requestCoreIndexRebuild)) { _ in
-                    unified.rebuildCoreIndex()
-                }
-                .onChange(of: onboardingCoordinator.isPresented) { _, isPresented in
-                    if isPresented, let content = onboardingCoordinator.content {
-                        onboardingWindowPresenter.show(
-                            content: content,
-                            coordinator: onboardingCoordinator,
-                            codexIndexer: indexer,
-                            claudeIndexer: claudeIndexer,
-                            geminiIndexer: geminiIndexer,
-                            opencodeIndexer: opencodeIndexer,
-                            copilotIndexer: copilotIndexer,
-                            droidIndexer: droidIndexer,
-                            openclawIndexer: openclawIndexer,
-                            cursorIndexer: cursorIndexer,
-                            codexUsageModel: codexUsageModel,
-                            claudeUsageModel: claudeUsageModel
-                        )
-                    } else {
-                        onboardingWindowPresenter.hide()
-                    }
-                }
-                // Immediate cleanup happens after each probe; no app-exit cleanup required.
+            } else {
+                onboardingWindowPresenter.hide()
             }
+        }
+    }
+
+    var body: some Scene {
+        // Default unified window
+        WindowGroup("Agent Sessions", id: "Agent Sessions") {
+            unifiedWindowRoot
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -385,6 +399,7 @@ struct AgentSessionsApp: App {
                         claudeIndexer: claudeIndexer,
                         geminiIndexer: geminiIndexer,
                         opencodeIndexer: opencodeIndexer,
+                        hermesIndexer: hermesIndexer,
                         copilotIndexer: copilotIndexer,
                         droidIndexer: droidIndexer,
                         openclawIndexer: openclawIndexer,
@@ -435,6 +450,7 @@ final class _UnifiedHolder: ObservableObject {
                      claudeIndexer: ClaudeSessionIndexer,
                      geminiIndexer: GeminiSessionIndexer,
                      opencodeIndexer: OpenCodeSessionIndexer,
+                     hermesIndexer: HermesSessionIndexer,
                      copilotIndexer: CopilotSessionIndexer,
                      droidIndexer: DroidSessionIndexer,
                      openclawIndexer: OpenClawSessionIndexer,
@@ -444,6 +460,7 @@ final class _UnifiedHolder: ObservableObject {
                                       claudeIndexer: claudeIndexer,
                                       geminiIndexer: geminiIndexer,
                                       opencodeIndexer: opencodeIndexer,
+                                      hermesIndexer: hermesIndexer,
                                       copilotIndexer: copilotIndexer,
                                       droidIndexer: droidIndexer,
                                       openclawIndexer: openclawIndexer,
@@ -526,6 +543,7 @@ extension AgentSessionsApp {
             claudeIndexer: claudeIndexer,
             geminiIndexer: geminiIndexer,
             opencodeIndexer: opencodeIndexer,
+            hermesIndexer: hermesIndexer,
             copilotIndexer: copilotIndexer,
             droidIndexer: droidIndexer,
             openclawIndexer: openclawIndexer,
@@ -748,6 +766,7 @@ extension AgentSessionsApp {
             claudeIndexer: claudeIndexer,
             geminiIndexer: geminiIndexer,
             opencodeIndexer: opencodeIndexer,
+            hermesIndexer: hermesIndexer,
             copilotIndexer: copilotIndexer,
             droidIndexer: droidIndexer
         )
@@ -965,6 +984,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         claudeIndexer: ClaudeSessionIndexer,
         geminiIndexer: GeminiSessionIndexer,
         opencodeIndexer: OpenCodeSessionIndexer,
+        hermesIndexer: HermesSessionIndexer,
         copilotIndexer: CopilotSessionIndexer,
         droidIndexer: DroidSessionIndexer,
         openclawIndexer: OpenClawSessionIndexer,
@@ -980,6 +1000,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
             claudeIndexer: claudeIndexer,
             geminiIndexer: geminiIndexer,
             opencodeIndexer: opencodeIndexer,
+            hermesIndexer: hermesIndexer,
             copilotIndexer: copilotIndexer,
             droidIndexer: droidIndexer,
             openclawIndexer: openclawIndexer,
@@ -1070,6 +1091,7 @@ private struct OnboardingWindowState {
     let claudeIndexer: ClaudeSessionIndexer
     let geminiIndexer: GeminiSessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
+    let hermesIndexer: HermesSessionIndexer
     let copilotIndexer: CopilotSessionIndexer
     let droidIndexer: DroidSessionIndexer
     let openclawIndexer: OpenClawSessionIndexer
@@ -1090,6 +1112,7 @@ private struct OnboardingWindowRoot: View {
             claudeIndexer: state.claudeIndexer,
             geminiIndexer: state.geminiIndexer,
             opencodeIndexer: state.opencodeIndexer,
+            hermesIndexer: state.hermesIndexer,
             copilotIndexer: state.copilotIndexer,
             droidIndexer: state.droidIndexer,
             openclawIndexer: state.openclawIndexer,

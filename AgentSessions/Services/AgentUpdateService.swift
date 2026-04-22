@@ -357,6 +357,8 @@ private extension AgentUpdateService {
                     .init(manager: .pip, identifier: "opencode-ai")
                 ]
             )
+        case .hermes:
+            return nil
         case .copilot:
             return AgentUpdateProfile(
                 source: source,

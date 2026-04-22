@@ -194,6 +194,7 @@ struct SessionTerminalView: View {
         case .claude: return "Claude"
         case .gemini: return "Gemini"
         case .opencode: return "OpenCode"
+        case .hermes: return "Hermes"
         case .copilot: return "Copilot"
         case .droid: return "Droid"
         case .openclaw: return "OpenClaw"
