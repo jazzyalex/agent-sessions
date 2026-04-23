@@ -91,6 +91,24 @@ final class HermesSessionParser {
         return formatter
     }()
 
+    private static let localTimestampWithFractional: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+        return formatter
+    }()
+
+    private static let localTimestampBasic: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return formatter
+    }()
+
     static func parseFile(at url: URL) -> Session? {
         guard let payload = load(url) else { return nil }
         let eventsEstimate = estimatedNonMetaCount(messages: payload.messages ?? [], fallback: payload.message_count ?? 0)
@@ -296,7 +314,9 @@ final class HermesSessionParser {
     private static func parseDate(_ value: String?) -> Date? {
         guard let value, !value.isEmpty else { return nil }
         if let date = iso8601Fractional.date(from: value) { return date }
-        return iso8601Basic.date(from: value)
+        if let date = iso8601Basic.date(from: value) { return date }
+        if let date = localTimestampWithFractional.date(from: value) { return date }
+        return localTimestampBasic.date(from: value)
     }
 
     private static func fileSize(at url: URL) -> Int? {

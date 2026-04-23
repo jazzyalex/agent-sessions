@@ -2109,10 +2109,7 @@ struct UnifiedSessionsView: View {
         case .opencode:
             return OpenCodeSettings.shared.effectiveWorkingDirectory(for: session)
         case .hermes:
-            if let path = session.cwd, !path.isEmpty {
-                return URL(fileURLWithPath: path)
-            }
-            return nil
+            return HermesSettings.shared.effectiveWorkingDirectory(for: session)
         case .copilot:
             return CopilotSettings.shared.effectiveWorkingDirectory(for: session)
         case .cursor:
