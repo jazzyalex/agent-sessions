@@ -2,6 +2,10 @@ import Foundation
 
 final class HermesSessionParser {
     private struct SessionJSON: Codable {
+        struct ModelConfig: Codable {
+            let cwd: String?
+        }
+
         enum JSONValue: Codable {
             case string(String)
             case number(Double)
@@ -75,6 +79,8 @@ final class HermesSessionParser {
         let platform: String?
         let session_start: String?
         let last_updated: String?
+        let cwd: String?
+        let model_config: ModelConfig?
         let message_count: Int?
         let messages: [Message]?
     }
@@ -113,6 +119,7 @@ final class HermesSessionParser {
         guard let payload = load(url) else { return nil }
         let eventsEstimate = estimatedNonMetaCount(messages: payload.messages ?? [], fallback: payload.message_count ?? 0)
         let title = deriveTitle(messages: payload.messages ?? [], platform: payload.platform, sessionID: payload.session_id)
+        let projectContext = extractProjectContext(payload)
 
         return Session(
             id: payload.session_id,
@@ -124,8 +131,8 @@ final class HermesSessionParser {
             fileSizeBytes: fileSize(at: url),
             eventCount: eventsEstimate,
             events: [],
-            cwd: nil,
-            repoName: nil,
+            cwd: projectContext.cwd,
+            repoName: projectContext.repoName,
             lightweightTitle: title,
             lightweightCommands: estimatedToolCalls(messages: payload.messages ?? []),
             customTitle: title
@@ -138,6 +145,7 @@ final class HermesSessionParser {
         let events = buildEvents(messages: payload.messages ?? [], fallbackTimestamp: timestamp)
         let nonMetaCount = events.filter { $0.kind != .meta }.count
         let title = deriveTitle(messages: payload.messages ?? [], platform: payload.platform, sessionID: payload.session_id)
+        let projectContext = extractProjectContext(payload)
 
         return Session(
             id: payload.session_id,
@@ -149,8 +157,8 @@ final class HermesSessionParser {
             fileSizeBytes: fileSize(at: url),
             eventCount: nonMetaCount,
             events: events,
-            cwd: nil,
-            repoName: nil,
+            cwd: projectContext.cwd,
+            repoName: projectContext.repoName,
             lightweightTitle: title,
             lightweightCommands: estimatedToolCalls(messages: payload.messages ?? []),
             customTitle: title
@@ -160,6 +168,28 @@ final class HermesSessionParser {
     private static func load(_ url: URL) -> SessionJSON? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(SessionJSON.self, from: data)
+    }
+
+    private static func extractProjectContext(_ payload: SessionJSON) -> (cwd: String?, repoName: String?) {
+        let direct = payload.cwd?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nested = payload.model_config?.cwd?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = (direct?.isEmpty == false) ? direct : ((nested?.isEmpty == false) ? nested : nil)
+        guard let normalized = normalizedStoredPath(candidate) else {
+            return (nil, nil)
+        }
+        // Preserve the recorded cwd and let Session.repoName apply the
+        // app's existing path-only heuristic without touching the filesystem.
+        return (normalized, nil)
+    }
+
+    private static func normalizedStoredPath(_ rawPath: String?) -> String? {
+        guard var path = rawPath?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
+            return nil
+        }
+        if path.hasPrefix("~") {
+            path = (path as NSString).expandingTildeInPath
+        }
+        return URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
     private static func buildEvents(messages: [SessionJSON.Message], fallbackTimestamp: Date?) -> [SessionEvent] {

@@ -434,8 +434,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
 
     // MARK: - Repo/CWD helpers
     public var cwd: String? {
-        // Gemini/OpenCode/Copilot/OpenClaw sessions: trust lightweightCwd even after full parse
-        if (source == .gemini || source == .opencode || source == .copilot || source == .openclaw),
+        // Providers that persist cwd as lightweight metadata should keep using it
+        // after full parse as well; transcript event scraping is not authoritative.
+        if (source == .gemini || source == .opencode || source == .copilot || source == .openclaw || source == .hermes),
            let lightCwd = lightweightCwd, !lightCwd.isEmpty {
             return lightCwd
         }
@@ -828,7 +829,7 @@ private extension Session {
         return cache
     }()
 
-    static func gitInfo(from start: String, maxLevels: Int = 6) -> GitInfo? {
+    private static func gitInfo(from start: String, maxLevels: Int = 6) -> GitInfo? {
         let normalizedStart = URL(fileURLWithPath: start).standardizedFileURL.path
         let cacheKey = "\(normalizedStart)|\(maxLevels)" as NSString
         if let cached = gitInfoCache.object(forKey: cacheKey) {
@@ -865,4 +866,5 @@ private extension Session {
         gitInfoCache.setObject(GitInfoCacheBox(resolved), forKey: cacheKey)
         return resolved
     }
+
 }

@@ -248,7 +248,7 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                                          eventCount: max(current.eventCount, parsed.nonMetaCount),
                                          events: parsed.events,
                                          cwd: current.lightweightCwd ?? parsed.cwd,
-                                         repoName: current.repoName,
+                                         repoName: current.repoName ?? parsed.repoName,
                                          lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
                                          lightweightCommands: current.lightweightCommands)
                     self.allSessions[idx] = merged

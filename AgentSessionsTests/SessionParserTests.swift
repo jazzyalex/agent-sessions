@@ -1455,4 +1455,145 @@ final class SessionParserTests: XCTestCase {
         XCTAssertFalse(s.isDeleted)
         XCTAssertNil(s.deletedAt)
     }
+
+    func testHermesParserPreservesRecordedCwdWhenPresent() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let repoDir = root.appendingPathComponent("repo", isDirectory: true)
+        let nestedDir = repoDir.appendingPathComponent("Sources/App", isDirectory: true)
+        try fm.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("session_hermes_repo.json")
+        let json = """
+        {
+          "session_id": "20260423_hermes_repo",
+          "model": "gpt-5.4",
+          "platform": "cli",
+          "session_start": "2026-04-23T10:00:00.000000",
+          "last_updated": "2026-04-23T10:05:00.000000",
+          "cwd": "\(nestedDir.path)",
+          "message_count": 1,
+          "messages": [
+            { "role": "user", "content": "Open the repo" }
+          ]
+        }
+        """
+        try writeText(json, to: url)
+
+        guard let session = HermesSessionParser.parseFile(at: url) else {
+            return XCTFail("Hermes preview parse returned nil")
+        }
+
+        XCTAssertEqual(session.cwd, nestedDir.path)
+        XCTAssertEqual(session.repoName, nestedDir.lastPathComponent)
+    }
+
+    func testHermesFullParsePreservesRecordedCwdWhenEventsLoaded() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let nestedDir = root.appendingPathComponent("repo/Sources/App", isDirectory: true)
+        try fm.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("session_hermes_full.json")
+        let json = """
+        {
+          "session_id": "20260424_hermes_full",
+          "model": "gpt-5.4",
+          "platform": "cli",
+          "session_start": "2026-04-24T10:00:00.000000",
+          "last_updated": "2026-04-24T10:05:00.000000",
+          "cwd": "\(nestedDir.path)",
+          "message_count": 2,
+          "messages": [
+            { "role": "user", "content": "Open the repo" },
+            { "role": "assistant", "content": "Loaded." }
+          ]
+        }
+        """
+        try writeText(json, to: url)
+
+        guard let session = HermesSessionParser.parseFileFull(at: url) else {
+            return XCTFail("Hermes full parse returned nil")
+        }
+
+        XCTAssertFalse(session.events.isEmpty)
+        XCTAssertEqual(session.cwd, nestedDir.path)
+        XCTAssertEqual(session.repoName, nestedDir.lastPathComponent)
+    }
+
+    func testHermesParserKeepsOfflinePathMetadata() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let nonRepoDir = root.appendingPathComponent("plain-folder", isDirectory: true)
+        try fm.createDirectory(at: nonRepoDir, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("session_hermes_plain.json")
+        let json = """
+        {
+          "session_id": "20260423_hermes_plain",
+          "model": "gpt-5.4",
+          "platform": "cli",
+          "session_start": "2026-04-23T10:00:00.000000",
+          "last_updated": "2026-04-23T10:05:00.000000",
+          "model_config": { "cwd": "\(nonRepoDir.path)" },
+          "message_count": 1,
+          "messages": [
+            { "role": "user", "content": "Open plain folder" }
+          ]
+        }
+        """
+        try writeText(json, to: url)
+
+        guard let session = HermesSessionParser.parseFile(at: url) else {
+            return XCTFail("Hermes preview parse returned nil")
+        }
+
+        XCTAssertEqual(session.cwd, nonRepoDir.path)
+        XCTAssertEqual(session.repoName, nonRepoDir.lastPathComponent)
+    }
+
+    func testHermesParserPreservesDeepNestedPathsWithoutFilesystemProbe() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let repoDir = root.appendingPathComponent("repo", isDirectory: true)
+        let deepDir = repoDir
+            .appendingPathComponent("one/two/three/four/five/six/seven/eight", isDirectory: true)
+        try fm.createDirectory(at: deepDir, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("session_hermes_deep.json")
+        let json = """
+        {
+          "session_id": "20260423_hermes_deep",
+          "model": "gpt-5.4",
+          "platform": "cli",
+          "session_start": "2026-04-23T10:00:00.000000",
+          "last_updated": "2026-04-23T10:05:00.000000",
+          "model_config": { "cwd": "\(deepDir.path)" },
+          "message_count": 1,
+          "messages": [
+            { "role": "user", "content": "Open the deep repo path" }
+          ]
+        }
+        """
+        try writeText(json, to: url)
+
+        guard let session = HermesSessionParser.parseFile(at: url) else {
+            return XCTFail("Hermes preview parse returned nil")
+        }
+
+        XCTAssertEqual(session.cwd, deepDir.path)
+        XCTAssertEqual(session.repoName, deepDir.lastPathComponent)
+    }
 }
