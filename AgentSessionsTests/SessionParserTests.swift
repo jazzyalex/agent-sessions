@@ -1411,6 +1411,141 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(session!.id, activeSession!.id)
     }
 
+    func testOpenClawParserUsesTelegramPrefixAsProjectOrigin() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-Origin-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-telegram","timestamp":"2026-04-24T00:00:00Z","cwd":"/Users/alexm/clawd"}"# + "\n"
+        let user = #"{"type":"message","id":"m1","timestamp":"2026-04-24T00:01:00Z","message":{"role":"user","content":[{"type":"text","text":"[Telegram A M (@jazzyalex) id:1108897 2026-04-24 10:00 PST] hi\n[message_id: 1]"}]}}"# + "\n"
+
+        let url = sessionsDir.appendingPathComponent("telegram.jsonl")
+        try (header + user).write(to: url, atomically: true, encoding: .utf8)
+
+        let light = OpenClawSessionParser.parseFile(at: url)
+        let full = OpenClawSessionParser.parseFileFull(at: url)
+
+        XCTAssertEqual(light?.repoName, "telegram")
+        XCTAssertEqual(light?.repoDisplay, "telegram")
+        XCTAssertEqual(full?.repoName, "telegram")
+    }
+
+    func testOpenClawParserUsesCronPrefixAsProjectOrigin() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-Cron-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-cron","timestamp":"2026-04-24T00:00:00Z","cwd":"/Users/alexm/clawd"}"# + "\n"
+        let user = #"{"type":"message","id":"m1","timestamp":"2026-04-24T00:01:00Z","message":{"role":"user","content":[{"type":"text","text":"[cron:49b981e1-346c-4f72-8584-157bde0416d8 google-form-checker] Check forms"}]}}"# + "\n"
+
+        let url = sessionsDir.appendingPathComponent("cron.jsonl")
+        try (header + user).write(to: url, atomically: true, encoding: .utf8)
+
+        let session = OpenClawSessionParser.parseFile(at: url)
+
+        XCTAssertEqual(session?.repoName, "cron")
+        XCTAssertEqual(session?.repoDisplay, "cron")
+    }
+
+    func testOpenClawParserUsesConversationMetadataAsTelegramOrigin() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-TelegramMetadata-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-telegram-metadata","timestamp":"2026-04-24T00:00:00Z","cwd":"/Users/alexm/clawd"}"# + "\n"
+        let text = """
+        Conversation info (untrusted metadata):
+        ```json
+        {
+          "message_id": "1444",
+          "sender_id": "1108897",
+          "sender": "A M",
+          "timestamp": "Sun 2026-04-12 11:14 PDT"
+        }
+        ```
+
+        Sender (untrusted metadata):
+        ```json
+        {
+          "label": "A M (1108897)",
+          "id": "1108897",
+          "name": "A M",
+          "username": "jazzyalex"
+        }
+        ```
+
+        smart cat
+        """
+        let escaped = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let user = #"{"type":"message","id":"m1","timestamp":"2026-04-24T00:01:00Z","message":{"role":"user","content":[{"type":"text","text":"\#(escaped)"}]}}"# + "\n"
+
+        let url = sessionsDir.appendingPathComponent("telegram-metadata.jsonl")
+        try (header + user).write(to: url, atomically: true, encoding: .utf8)
+
+        let session = OpenClawSessionParser.parseFile(at: url)
+        let full = OpenClawSessionParser.parseFileFull(at: url)
+
+        XCTAssertEqual(session?.repoName, "telegram")
+        XCTAssertEqual(session?.repoDisplay, "telegram")
+        XCTAssertEqual(full?.repoName, "telegram")
+    }
+
+    func testOpenClawParserUsesTUIForUnprefixedPromptOrigin() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-TUI-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-tui","timestamp":"2026-04-24T00:00:00Z","cwd":"/Users/alexm/clawd"}"# + "\n"
+        let user = #"{"type":"message","id":"m1","timestamp":"2026-04-24T00:01:00Z","message":{"role":"user","content":[{"type":"text","text":"local prompt from the terminal"}]}}"# + "\n"
+
+        let url = sessionsDir.appendingPathComponent("tui.jsonl")
+        try (header + user).write(to: url, atomically: true, encoding: .utf8)
+
+        let session = OpenClawSessionParser.parseFile(at: url)
+
+        XCTAssertEqual(session?.repoName, "tui")
+        XCTAssertEqual(session?.repoDisplay, "tui")
+    }
+
+    func testOpenClawParserUsesSystemOriginForHeartbeatOnlySession() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenClaw-System-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+
+        let sessionsDir = tmp.appendingPathComponent("agents/main/sessions", isDirectory: true)
+        try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+
+        let header = #"{"type":"session","version":3,"id":"sess-system","timestamp":"2026-04-24T00:00:00Z","cwd":"/Users/alexm/clawd"}"# + "\n"
+        let user = #"{"type":"message","id":"m1","timestamp":"2026-04-24T00:01:00Z","message":{"role":"user","content":[{"type":"text","text":"Read HEARTBEAT.md and consider outstanding tasks"}]}}"# + "\n"
+
+        let url = sessionsDir.appendingPathComponent("system.jsonl")
+        try (header + user).write(to: url, atomically: true, encoding: .utf8)
+
+        let light = OpenClawSessionParser.parseFile(at: url)
+        let full = OpenClawSessionParser.parseFileFull(at: url)
+
+        XCTAssertEqual(light?.repoName, "system")
+        XCTAssertEqual(light?.repoDisplay, "system")
+        XCTAssertEqual(full?.repoName, "system")
+        XCTAssertTrue(light?.isHousekeeping ?? false)
+        XCTAssertTrue(full?.isHousekeeping ?? false)
+    }
+
     func testDeletedFlagSurvivesMerge() {
         let light = Session(id: "openclaw:main:test",
                             source: .openclaw,

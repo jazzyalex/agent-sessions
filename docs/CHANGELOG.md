@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - Hermes: Fixed local session decoding and Unified search/filter integration so newly enabled Hermes sessions appear in Unified, search deeply by transcript text, retain meaningful titles for long prompts, and copy the correct resume ID.
 - Hermes: Hermes sessions now preserve recorded `cwd` metadata for search/path filtering without probing the filesystem during indexing.
 - Hermes: The Project column now shows the session origin from Hermes `platform` metadata, such as `cli`, `telegram`, or `cron`.
+- OpenClaw: The Project column now shows derived session origin, such as `telegram`, `cron`, or `tui`.
 - Session list: Subagent fallback markers now appear in the Session column instead of the CLI Agent column, so unresolved subagents no longer read as `s Codex`, `s Claude`, or `s OpenCode`.
 
 ## [3.6.2] - 2026-04-19

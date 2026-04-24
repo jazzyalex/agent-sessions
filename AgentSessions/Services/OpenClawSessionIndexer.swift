@@ -62,6 +62,17 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
 
+    private static let originProjectLabels: Set<String> = [
+        "telegram",
+        "cron",
+        "tui",
+        "whatsapp",
+        "discord",
+        "imessage",
+        "webchat",
+        "system"
+    ]
+
     init() {
         UserDefaults.standard.register(defaults: [
             PreferencesKey.Advanced.includeOpenClawDeletedSessions: true
@@ -168,10 +179,11 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
             let fm = FileManager.default
             let exists: (Session) -> Bool = { s in fm.fileExists(atPath: s.filePath) }
             let existingSessions = indexed.filter(exists)
+            let hasLegacyOriginProjects = existingSessions.contains { Self.needsOriginProjectReparse($0) }
             self.bootstrapKnownFileStatsIfNeeded(from: existingSessions)
 
             // ── Phase 2: Publish hydrated sessions immediately ──
-            let presentedHydration = !existingSessions.isEmpty
+            let presentedHydration = !existingSessions.isEmpty && !hasLegacyOriginProjects
             if presentedHydration {
                 let hydratedSorted = existingSessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 // Archive fallbacks merged here for immediate display; re-merged on the final
@@ -226,13 +238,19 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                 let missingPaths = Set(delta.currentByPath.keys)
                     .subtracting(existingPaths)
                     .subtracting(changedPaths)
+                let staleOriginPaths = Set(existingSessions
+                    .filter { Self.needsOriginProjectReparse($0) }
+                    .map(\.filePath))
+                    .intersection(Set(delta.currentByPath.keys))
+                    .subtracting(changedPaths)
                 missingHydratedCount = missingPaths.count
-                if missingPaths.isEmpty {
+                if missingPaths.isEmpty && staleOriginPaths.isEmpty {
                     files = delta.changedFiles
                 } else {
-                    var combined = delta.changedFiles
-                    combined.append(contentsOf: missingPaths.sorted().map { URL(fileURLWithPath: $0) })
-                    files = combined
+                    let combinedPaths = changedPaths
+                        .union(missingPaths)
+                        .union(staleOriginPaths)
+                    files = combinedPaths.sorted().map { URL(fileURLWithPath: $0) }
                 }
             }
 
@@ -477,7 +495,7 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                         eventCount: max(current.eventCount, full.nonMetaCount),
                         events: full.events,
                         cwd: current.lightweightCwd ?? full.cwd,
-                        repoName: current.repoName,
+                        repoName: full.repoName ?? current.repoName,
                         lightweightTitle: current.lightweightTitle ?? full.lightweightTitle,
                         lightweightCommands: current.lightweightCommands,
                         isHousekeeping: full.isHousekeeping,
@@ -503,6 +521,13 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
         }
         let size = Int64(values.fileSize ?? 0)
         return SessionFileStat(mtime: Int64(modified.timeIntervalSince1970), size: size)
+    }
+
+    private static func needsOriginProjectReparse(_ session: Session) -> Bool {
+        let label = session.repoName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        return !originProjectLabels.contains(label)
     }
 
     func isPreviewStale(id: String) -> Bool {

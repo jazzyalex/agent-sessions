@@ -11,6 +11,7 @@ import CryptoKit
 /// - Meta records: model_change, thinking_level_change, compaction, etc.
 final class OpenClawSessionParser {
     private static let previewScanLimit = 2_000
+    private static let systemOriginLabel = "system"
 
     enum TitleStrategy: String {
         case promptOnly
@@ -29,6 +30,7 @@ final class OpenClawSessionParser {
         var sessionID: String? = nil
         var cwd: String? = nil
         var model: String? = nil
+        var origin: String? = nil
         var tmin: Date? = nil
         var tmax: Date? = nil
         var title: String? = nil
@@ -76,6 +78,9 @@ final class OpenClawSessionParser {
                                 return true
                             }
                             sawNonHousekeepingUser = true
+                            if origin == nil {
+                                origin = deriveOrigin(fromUserText: trimmed)
+                            }
                             if title == nil {
                                 title = deriveTitle(fromUserText: trimmed)
                             }
@@ -152,7 +157,7 @@ final class OpenClawSessionParser {
             eventCount: max(0, estimatedEvents),
             events: [],
             cwd: cwd,
-            repoName: nil,
+            repoName: origin ?? systemOriginLabel,
             lightweightTitle: title,
             lightweightCommands: estimatedCommands,
             isHousekeeping: isHousekeeping,
@@ -169,6 +174,7 @@ final class OpenClawSessionParser {
         var sessionID: String? = nil
         var cwd: String? = nil
         var model: String? = nil
+        var origin: String? = nil
         var tmin: Date? = nil
         var tmax: Date? = nil
 
@@ -258,7 +264,12 @@ final class OpenClawSessionParser {
                         if let userText = extractText(fromContent: msg["content"]) {
                             let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
                             if isHeartbeatPrompt(trimmed) { sawHeartbeatPrompt = true }
-                            if !isHeartbeatPrompt(trimmed) && !isNewSessionScaffold(trimmed) { sawNonHousekeepingUser = true }
+                            if !isHeartbeatPrompt(trimmed) && !isNewSessionScaffold(trimmed) {
+                                sawNonHousekeepingUser = true
+                                if origin == nil {
+                                    origin = deriveOrigin(fromUserText: trimmed)
+                                }
+                            }
                         }
                         let text = extractText(fromContent: msg["content"])
                         if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -429,7 +440,7 @@ final class OpenClawSessionParser {
             eventCount: max(events.filter { $0.kind != .meta }.count, 0),
             events: events,
             cwd: cwd,
-            repoName: nil,
+            repoName: origin ?? systemOriginLabel,
             lightweightTitle: nil,
             lightweightCommands: nil,
             isHousekeeping: isHousekeeping,
@@ -438,6 +449,34 @@ final class OpenClawSessionParser {
     }
 
     // MARK: - Title helpers
+
+    private static func deriveOrigin(fromUserText text: String) -> String {
+        let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lower.hasPrefix("conversation info (untrusted metadata):")
+            && lower.contains("\"sender_id\"")
+            && lower.contains("sender (untrusted metadata):") {
+            return "telegram"
+        }
+        if lower.hasPrefix("[telegram ") || lower.contains("\n[telegram ") {
+            return "telegram"
+        }
+        if lower.hasPrefix("[cron:") || lower.hasPrefix("[cron ") || lower.contains("\n[cron:") || lower.contains("\n[cron ") {
+            return "cron"
+        }
+        if lower.hasPrefix("[whatsapp ") || lower.contains("\n[whatsapp ") {
+            return "whatsapp"
+        }
+        if lower.hasPrefix("[discord ") || lower.contains("\n[discord ") {
+            return "discord"
+        }
+        if lower.hasPrefix("[imessage ") || lower.contains("\n[imessage ") {
+            return "imessage"
+        }
+        if lower.hasPrefix("[webchat ") || lower.contains("\n[webchat ") {
+            return "webchat"
+        }
+        return "tui"
+    }
 
     private static func deriveTitle(fromUserText text: String) -> String {
         let strategy = currentTitleStrategy()
