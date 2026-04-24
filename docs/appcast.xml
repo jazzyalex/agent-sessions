@@ -3,21 +3,18 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.6.2</title>
-            <pubDate>Sun, 19 Apr 2026 17:48:25 -0700</pubDate>
+            <title>3.6.3</title>
+            <pubDate>Fri, 24 Apr 2026 15:39:56 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.6.2</h2>
-<h3>Features</h3>
+<h2>What&#x27;s New in 3.6.3</h2>
+<h3>Improvements</h3>
 <ul>
-<li>OpenCode: Renamed session titles (set via `/rename`) are now persisted as custom session titles, matching Claude and Codex behavior.</li>
-</ul>
-<h3>Bug Fixes</h3>
-<ul>
-<li>Session list hierarchy now nests older Codex role subagent sessions that record only `source.subagent` when a same-workspace parent can be inferred, even after multi-hour gaps.</li>
-<li>Resume launch AppleScript now receives commands via `osascript` argv instead of source interpolation, reducing script-injection surface.</li>
-<li>Transcript rendering now uses a bounded transcript cache and preloads Whole Session Raw/Pretty content outside `body` to reduce memory spikes and UI stutter on large sessions.</li>
-<li>Claude OAuth shared cache writes now apply restrictive POSIX permissions on cache directory and files.</li>
-<li>IndexDB bootstrap now configures `busy_timeout` and runs schema/bootstrap migration steps inside a single transaction for safer concurrent startup.</li>
+<li>Preferences: Removed Droid from the Settings sidebar as part of the ongoing provider de-emphasis, while keeping legacy Droid session support available.</li>
+<li>Session list: Updated Hermes and OpenClaw accent colors to separate them more clearly from Claude in agent-name styling.</li>
+<li>Hermes: Added local Hermes session discovery, transcript browsing, analytics inclusion, and resume/copy-resume actions in Unified Sessions.</li>
+<li>Hermes: Fixed local session decoding and Unified search/filter integration so newly enabled Hermes sessions appear in Unified, search deeply by transcript text, retain meaningful titles for long prompts, and copy the correct resume ID.</li>
+<li>Hermes: Hermes sessions now preserve recorded `cwd` metadata for search/path filtering without probing the filesystem during indexing.</li>
+<li>Hermes: The Project column now shows the session origin from Hermes `platform` metadata, such as `cli`, `telegram`, or `cron`.</li>
 </ul>
 <h3>Reminder: What You Got in 3.6</h3>
 <ul>
@@ -26,12 +23,12 @@
 <li>Onboarding: Update tour now auto-generates a slide for newly available providers, so users see what&#x27;s new without digging into preferences.</li>
 <li>Session sources: `versionIntroduced` and `featureDescription` metadata added to session source model for use in discoverability and onboarding flows.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.2</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.3</a></p>
             ]]></description>
-            <sparkle:version>38</sparkle:version>
-            <sparkle:shortVersionString>3.6.2</sparkle:shortVersionString>
+            <sparkle:version>39</sparkle:version>
+            <sparkle:shortVersionString>3.6.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.2/AgentSessions-3.6.2.dmg" length="15746025" type="application/octet-stream" sparkle:edSignature="KwbwASBk2cnDIsOSWsSPZEnIuFWVmXR6qcBC3liWnYVPlSWuSTXT8YynbbIn/LbWjygXv9HmQDhZG4SpY3ZfDA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.3/AgentSessions-3.6.3.dmg" length="16896635" type="application/octet-stream" sparkle:edSignature="u0iHIza5VtkX/qsTwkNxl1WKdHuX0ZVaFmzHZ9JIGbyeE8vHfe/0h7Tx/mo2evuCLnC8iJ7haHZO1J8NYWrDCg=="/>
         </item>
     </channel>
 </rss>
