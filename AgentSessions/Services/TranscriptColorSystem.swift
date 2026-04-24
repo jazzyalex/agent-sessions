@@ -64,8 +64,8 @@ enum TranscriptColorSystem {
             // Purple
             return NSColor.systemPurple
         case .hermes:
-            // Gold-orange brand accent.
-            return NSColor(calibratedRed: 0.80, green: 0.52, blue: 0.18, alpha: 1.0)
+            // Olive-gold accent, shifted away from Claude/OpenClaw warm oranges.
+            return NSColor(calibratedRed: 0.62, green: 0.64, blue: 0.18, alpha: 1.0)
         case .copilot:
             // Magenta-ish
             return NSColor(calibratedRed: 0.90, green: 0.20, blue: 0.60, alpha: 1.0)
@@ -73,8 +73,8 @@ enum TranscriptColorSystem {
             // Green brand (disambiguation handled via styling, not hue).
             return NSColor(calibratedRed: 0.16, green: 0.68, blue: 0.28, alpha: 1.0)
         case .openclaw:
-            // Orange-ish (distinct from tool success green and OpenCode purple).
-            return NSColor(calibratedRed: 0.95, green: 0.55, blue: 0.15, alpha: 1.0)
+            // Coral-orange accent, kept warm but separated from Claude/Hermes.
+            return NSColor(calibratedRed: 0.88, green: 0.33, blue: 0.20, alpha: 1.0)
         case .cursor:
             // Teal-ish (Cursor brand).
             return NSColor(calibratedRed: 0.20, green: 0.60, blue: 0.70, alpha: 1.0)

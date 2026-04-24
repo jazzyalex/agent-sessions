@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Preferences: Removed Droid from the Settings sidebar as part of the ongoing provider de-emphasis, while keeping legacy Droid session support available.
+- Session list: Updated Hermes and OpenClaw accent colors to separate them more clearly from Claude in agent-name styling.
 - Hermes: Added local Hermes session discovery, transcript browsing, analytics inclusion, and resume/copy-resume actions in Unified Sessions.
 - Hermes: Fixed local session decoding and Unified search/filter integration so newly enabled Hermes sessions appear in Unified, search deeply by transcript text, retain meaningful titles for long prompts, and copy the correct resume ID.
 - Hermes: Hermes sessions now preserve recorded `cwd` metadata for search/path filtering without probing the filesystem during indexing.

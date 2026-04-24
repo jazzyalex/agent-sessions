@@ -228,7 +228,7 @@ struct PreferencesView: View {
                         .tag(tab)
                 }
                 Divider()
-                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI, .droidCLI], id: \.self) { tab in
+                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -260,7 +260,7 @@ struct PreferencesView: View {
             loadCurrentSettings()
             // Respect caller-provided tab, otherwise restore last selection
             if initialTabArg == .general, let restored = PreferencesTab(rawValue: lastSelectedTabRaw) {
-                selectedTab = restored
+                selectedTab = restored == .droidCLI ? .general : restored
             }
             // Trigger any probes needed for the initial/visible tab
             if let tab = selectedTab ?? .some(initialTabArg) { maybeProbe(for: tab) }
@@ -1063,7 +1063,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Agents → About
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI, .droidCLI, .openClawCLI, .cursor, .about] }
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI, .openClawCLI, .cursor, .about] }
 }
 
 // MARK: - Probe helpers
