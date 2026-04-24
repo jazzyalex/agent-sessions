@@ -22,7 +22,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.2/AgentSessions-3.6.2.dmg"><b>Download Agent Sessions 3.6.2 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.3/AgentSessions-3.6.3.dmg"><b>Download Agent Sessions 3.6.3 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -94,7 +94,7 @@ Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Cod
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.6.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.2/AgentSessions-3.6.2.dmg)
+1. [Download AgentSessions-3.6.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.3/AgentSessions-3.6.3.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
