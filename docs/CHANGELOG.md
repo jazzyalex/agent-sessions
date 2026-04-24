@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [3.6.3] - 2026-04-24
 - Preferences: Removed Droid from the Settings sidebar as part of the ongoing provider de-emphasis, while keeping legacy Droid session support available.
 - Session list: Updated Hermes and OpenClaw accent colors to separate them more clearly from Claude in agent-name styling.
 - Hermes: Added local Hermes session discovery, transcript browsing, analytics inclusion, and resume/copy-resume actions in Unified Sessions.
