@@ -174,12 +174,19 @@ final class HermesSessionParser {
         let direct = payload.cwd?.trimmingCharacters(in: .whitespacesAndNewlines)
         let nested = payload.model_config?.cwd?.trimmingCharacters(in: .whitespacesAndNewlines)
         let candidate = (direct?.isEmpty == false) ? direct : ((nested?.isEmpty == false) ? nested : nil)
-        guard let normalized = normalizedStoredPath(candidate) else {
-            return (nil, nil)
+        let platform = normalizedPlatformLabel(payload.platform)
+
+        // Preserve the recorded cwd for search/path filtering, but use Hermes'
+        // platform as the row project label so the Project column shows origin.
+        return (normalizedStoredPath(candidate), platform)
+    }
+
+    private static func normalizedPlatformLabel(_ platform: String?) -> String? {
+        guard let label = platform?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !label.isEmpty else {
+            return nil
         }
-        // Preserve the recorded cwd and let Session.repoName apply the
-        // app's existing path-only heuristic without touching the filesystem.
-        return (normalized, nil)
+        return label
     }
 
     private static func normalizedStoredPath(_ rawPath: String?) -> String? {

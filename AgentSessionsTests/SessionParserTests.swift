@@ -1488,7 +1488,7 @@ final class SessionParserTests: XCTestCase {
         }
 
         XCTAssertEqual(session.cwd, nestedDir.path)
-        XCTAssertEqual(session.repoName, nestedDir.lastPathComponent)
+        XCTAssertEqual(session.repoName, "cli")
     }
 
     func testHermesFullParsePreservesRecordedCwdWhenEventsLoaded() throws {
@@ -1524,7 +1524,7 @@ final class SessionParserTests: XCTestCase {
 
         XCTAssertFalse(session.events.isEmpty)
         XCTAssertEqual(session.cwd, nestedDir.path)
-        XCTAssertEqual(session.repoName, nestedDir.lastPathComponent)
+        XCTAssertEqual(session.repoName, "cli")
     }
 
     func testHermesParserKeepsOfflinePathMetadata() throws {
@@ -1558,7 +1558,7 @@ final class SessionParserTests: XCTestCase {
         }
 
         XCTAssertEqual(session.cwd, nonRepoDir.path)
-        XCTAssertEqual(session.repoName, nonRepoDir.lastPathComponent)
+        XCTAssertEqual(session.repoName, "cli")
     }
 
     func testHermesParserPreservesDeepNestedPathsWithoutFilesystemProbe() throws {
@@ -1594,6 +1594,68 @@ final class SessionParserTests: XCTestCase {
         }
 
         XCTAssertEqual(session.cwd, deepDir.path)
-        XCTAssertEqual(session.repoName, deepDir.lastPathComponent)
+        XCTAssertEqual(session.repoName, "cli")
+    }
+
+    func testHermesParserUsesPlatformAsProjectOrigin() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("session_hermes_telegram.json")
+        let json = """
+        {
+          "session_id": "20260424_hermes_telegram",
+          "model": "gpt-5.4",
+          "platform": "telegram",
+          "session_start": "2026-04-24T10:00:00.000000",
+          "last_updated": "2026-04-24T10:05:00.000000",
+          "message_count": 1,
+          "messages": [
+            { "role": "user", "content": "Start from Telegram" }
+          ]
+        }
+        """
+        try writeText(json, to: url)
+
+        guard let session = HermesSessionParser.parseFile(at: url) else {
+            return XCTFail("Hermes preview parse returned nil")
+        }
+
+        XCTAssertNil(session.cwd)
+        XCTAssertEqual(session.repoName, "telegram")
+        XCTAssertEqual(session.repoDisplay, "telegram")
+    }
+
+    func testHermesParserFallsBackWhenPlatformMissing() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("session_hermes_no_platform.json")
+        let json = """
+        {
+          "session_id": "20260424_hermes_no_platform",
+          "model": "gpt-5.4",
+          "platform": null,
+          "session_start": "2026-04-24T10:00:00.000000",
+          "last_updated": "2026-04-24T10:05:00.000000",
+          "message_count": 1,
+          "messages": [
+            { "role": "user", "content": "No platform here" }
+          ]
+        }
+        """
+        try writeText(json, to: url)
+
+        guard let session = HermesSessionParser.parseFile(at: url) else {
+            return XCTFail("Hermes preview parse returned nil")
+        }
+
+        XCTAssertNil(session.cwd)
+        XCTAssertNil(session.repoName)
+        XCTAssertEqual(session.repoDisplay, "—")
     }
 }
