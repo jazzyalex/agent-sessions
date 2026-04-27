@@ -3,6 +3,11 @@ import XCTest
 
 @MainActor
 final class CodexResumeTests: XCTestCase {
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled)
+        super.tearDown()
+    }
+
     func testVersionParsingHandlesTypicalOutput() {
         let version = CodexVersion.parse(from: "codex 0.40.1")
         switch version {
@@ -27,6 +32,8 @@ final class CodexResumeTests: XCTestCase {
     }
 
     func testCommandBuilderProducesResumeCommand() throws {
+        UserDefaults.standard.set(false, forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled)
+
         let session = sampleSession(id: "abc123", fileName: "rollout-2025-09-22T10-11-12-abc123.jsonl", cwd: "/tmp/project")
         let defaults = UserDefaults(suiteName: "CodexResumeTestsCommand")!
         defaults.removePersistentDomain(forName: "CodexResumeTestsCommand")
@@ -113,6 +120,27 @@ final class CodexResumeTests: XCTestCase {
         XCTAssertTrue(package.displayCommand.contains("resume 'internal-xyz'"))
     }
 
+    func testCommandBuilderDoesNotCoupleResumeCommandToCockpitPresence() throws {
+        UserDefaults.standard.set(true, forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled)
+
+        let session = sampleSession(id: "active-123", fileName: "rollout-2025-09-22T10-11-12-active-123.jsonl", cwd: "/tmp/project")
+        let defaults = UserDefaults(suiteName: "CodexResumeTestsActivePresence")!
+        defaults.removePersistentDomain(forName: "CodexResumeTestsActivePresence")
+        let settings = CodexResumeSettings.makeForTesting(defaults: defaults)
+        let binaryURL = URL(fileURLWithPath: "/usr/local/bin/codex")
+        let builder = CodexResumeCommandBuilder()
+
+        let package = try builder.makeCommand(for: session,
+                                              settings: settings,
+                                              binaryURL: binaryURL,
+                                              fallbackPath: nil,
+                                              attemptResumeFirst: true)
+
+        XCTAssertEqual(package.shellCommand, "cd '/tmp/project' && '/usr/local/bin/codex' resume 'active-123'")
+        XCTAssertFalse(package.shellCommand.contains("/bin/zsh "))
+        XCTAssertFalse(package.shellCommand.contains("write_presence(){"))
+    }
+
     // MARK: Helpers
 
     private func sampleSession(id: String, fileName: String, cwd: String?) -> Session {
@@ -133,4 +161,5 @@ final class CodexResumeTests: XCTestCase {
                        eventCount: events.count,
                        events: events)
     }
+
 }

@@ -64,6 +64,9 @@ final class CodexResumeCoordinatorTests: XCTestCase {
     }
 
     func testQuickLaunchLaunchesWhenProbeSucceeds() async throws {
+        UserDefaults.standard.set(true, forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled)
+        defer { UserDefaults.standard.removeObject(forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled) }
+
         let binaryURL = URL(fileURLWithPath: "/usr/local/bin/codex")
         let env = MockEnvironment(result: .success(.init(version: .semantic(major: 0, minor: 40, patch: 1),
                                                           binaryURL: binaryURL)))
@@ -92,9 +95,10 @@ final class CodexResumeCoordinatorTests: XCTestCase {
             XCTAssertTrue(launcher.didLaunch)
             let expectedFallback = URL(fileURLWithPath: url.path)
             let cmd = launcher.lastCommand ?? ""
+            XCTAssertFalse(cmd.contains("/bin/zsh "))
+            XCTAssertFalse(cmd.contains("write_presence(){"))
             XCTAssertTrue(cmd.contains("'\(binaryURL.path)' resume 'abc'"))
             XCTAssertTrue(cmd.contains("'\(binaryURL.path)' -c experimental_resume='\(expectedFallback.path)'"))
-            // Optional third attempt may be present; ensure at least 2 attempts
             XCTAssertTrue(cmd.components(separatedBy: "||").count >= 2)
         default:
             XCTFail("Expected quick launch to succeed")
@@ -128,7 +132,7 @@ final class CodexResumeCoordinatorTests: XCTestCase {
 
         func launchInTerminal(_ package: CodexResumeCommandBuilder.CommandPackage) throws {
             didLaunch = true
-            lastCommand = package.displayCommand
+            lastCommand = package.shellCommand
         }
     }
 }

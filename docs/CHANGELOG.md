@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Codex: Fixed Resume in Terminal by keeping the launched command as plain `codex resume`; Cockpit live tracking remains handled by independent process/iTerm discovery instead of a resume-command wrapper.
 
 ## [3.6.4] - 2026-04-27
 - Codex: Local rollout sessions from Codex CLI, Codex Desktop, and the Codex VS Code extension now stay in one Codex corpus with row-level surface labels.
