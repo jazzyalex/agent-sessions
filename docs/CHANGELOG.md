@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [3.6.4] - 2026-04-27
 - Codex: Local rollout sessions from Codex CLI, Codex Desktop, and the Codex VS Code extension now stay in one Codex corpus with row-level surface labels.
 - Codex: Session titles can now fall back to the local Codex `state_*.sqlite` thread metadata when `session_index.jsonl` has no rename.
 
