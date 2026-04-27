@@ -1,5 +1,25 @@
 import Foundation
 
+public enum CodexSessionSurface: String, Codable, Sendable {
+    case cli
+    case desktop
+    case vscode
+    case subagent
+    case other
+    case unknown
+
+    public var displayName: String {
+        switch self {
+        case .cli: return "CLI"
+        case .desktop: return "Desktop"
+        case .vscode: return "VS Code"
+        case .subagent: return "Subagent"
+        case .other: return "Other"
+        case .unknown: return "Unknown"
+        }
+    }
+}
+
 public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let id: String
     public let source: SessionSource
@@ -22,6 +42,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let lightweightTitle: String?
     public let customTitle: String?
     public let codexInternalSessionIDHint: String?
+    public let codexOriginator: String?
+    public let codexSource: String?
+    public let codexSurface: CodexSessionSurface?
 
     // Subagent hierarchy
     public let parentSessionID: String?   // Raw ID of parent session (UUID for Claude/Codex, ses_ID for OpenCode)
@@ -50,6 +73,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 parentSessionID: String? = nil,
                 subagentType: String? = nil,
                 customTitle: String? = nil,
+                codexOriginator: String? = nil,
+                codexSource: String? = nil,
+                codexSurface: CodexSessionSurface? = nil,
                 deletedAt: Date? = nil) {
         self.id = id
         self.source = source
@@ -66,6 +92,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.lightweightTitle = nil
         self.customTitle = customTitle
         self.codexInternalSessionIDHint = codexInternalSessionIDHint
+        self.codexOriginator = codexOriginator
+        self.codexSource = codexSource
+        self.codexSurface = codexSurface
         self.lightweightCommands = nil
         self.parentSessionID = parentSessionID
         self.subagentType = subagentType
@@ -92,6 +121,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 parentSessionID: String? = nil,
                 subagentType: String? = nil,
                 customTitle: String? = nil,
+                codexOriginator: String? = nil,
+                codexSource: String? = nil,
+                codexSurface: CodexSessionSurface? = nil,
                 deletedAt: Date? = nil) {
         self.id = id
         self.source = source
@@ -108,6 +140,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.lightweightTitle = lightweightTitle
         self.customTitle = customTitle
         self.codexInternalSessionIDHint = codexInternalSessionIDHint
+        self.codexOriginator = codexOriginator
+        self.codexSource = codexSource
+        self.codexSurface = codexSurface
         self.lightweightCommands = lightweightCommands
         self.parentSessionID = parentSessionID
         self.subagentType = subagentType
@@ -130,6 +165,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case lightweightTitle
         case lightweightCommands
         case codexInternalSessionIDHint
+        case codexOriginator
+        case codexSource
+        case codexSurface
         case parentSessionID
         case subagentType
         case customTitle

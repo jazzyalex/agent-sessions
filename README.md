@@ -9,7 +9,7 @@
 </td>
 <td>
 
-**Unified session browser for Codex CLI, Claude Code, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode, and OpenClaw.**
+**Unified session browser for local Codex sessions, Claude Code, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode, and OpenClaw.**
 Droid histories remain importable for legacy sessions, but Droid is no longer an actively supported provider.
 Search, browse, and resume your past AI-coding sessions in a local-first macOS app.
 
@@ -54,6 +54,7 @@ Agent Sessions helps you search across large session histories, quickly find the
 ## Core Features
 
 - Agent Cockpit live HUD for active Codex CLI, Claude Code, and OpenCode iTerm2 sessions.
+- Browse and search local Codex sessions across CLI, Desktop, and VS Code in one place.
 - Unified browsing across supported agents, with strict filtering and a single session list.
 - Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.

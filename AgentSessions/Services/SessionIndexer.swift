@@ -3,6 +3,7 @@ import Combine
 import CryptoKit
 import SwiftUI
 import os.log
+import SQLite3
 
 private let indexLog = OSLog(subsystem: "com.triada.AgentSessions", category: "CodexIndexing")
 
@@ -462,7 +463,10 @@ final class SessionIndexer: ObservableObject {
                             lightweightCommands: current.lightweightCommands,
                             parentSessionID: fullSession.parentSessionID ?? current.parentSessionID,
                             subagentType: fullSession.subagentType ?? current.subagentType,
-                            customTitle: fullSession.customTitle ?? current.customTitle
+                            customTitle: fullSession.customTitle ?? current.customTitle,
+                            codexOriginator: fullSession.codexOriginator ?? current.codexOriginator,
+                            codexSource: fullSession.codexSource ?? current.codexSource,
+                            codexSurface: fullSession.codexSurface ?? current.codexSurface
                         )
                         var updated = self.allSessions
                         updated[idx] = merged
@@ -677,10 +681,12 @@ final class SessionIndexer: ObservableObject {
             self.bootstrapKnownFileStatsIfNeeded(from: existingSessions)
             // Load thread_name lookup once for the entire refresh cycle.
             let threadNames = Self.loadCodexThreadNames(sessionsRoot: self.sessionsRoot())
+            let stateThreads = Self.loadCodexStateThreads(sessionsRoot: self.sessionsRoot())
 
             if presentedHydration {
                 // Apply thread_name overrides early so hydrated sessions show renamed titles immediately.
                 var hydratedSessions = existingSessions
+                Self.applyCodexStateTitles(&hydratedSessions, from: stateThreads)
                 Self.applyCodexThreadNames(&hydratedSessions, from: threadNames)
                 let finalHydratedSessions = hydratedSessions
                 await MainActor.run {
@@ -834,7 +840,10 @@ final class SessionIndexer: ObservableObject {
                         codexInternalSessionIDHint: session.codexInternalSessionIDHint ?? existing.codexInternalSessionIDHint,
                         parentSessionID: session.parentSessionID ?? existing.parentSessionID,
                         subagentType: session.subagentType ?? existing.subagentType,
-                        customTitle: session.customTitle ?? existing.customTitle
+                        customTitle: session.customTitle ?? existing.customTitle,
+                        codexOriginator: session.codexOriginator ?? existing.codexOriginator,
+                        codexSource: session.codexSource ?? existing.codexSource,
+                        codexSurface: session.codexSurface ?? existing.codexSurface
                     )
                     mergedByPath[session.filePath] = merged
                 } else {
@@ -847,6 +856,7 @@ final class SessionIndexer: ObservableObject {
             var allParsedSessions = Array(mergedByPath.values).filter(fmExists)
 
             // Reuse thread_name lookup loaded earlier in this refresh cycle.
+            Self.applyCodexStateTitles(&allParsedSessions, from: stateThreads)
             Self.applyCodexThreadNames(&allParsedSessions, from: threadNames)
             let totalParsedCount = allParsedSessions.count
 
@@ -1050,7 +1060,10 @@ final class SessionIndexer: ObservableObject {
             commands: s.lightweightCommands ?? 0,
             parentSessionID: s.parentSessionID,
             subagentType: s.subagentType,
-            customTitle: s.customTitle
+            customTitle: s.customTitle,
+            codexOriginator: s.codexOriginator,
+            codexSource: s.codexSource,
+            codexSurface: s.codexSurface?.rawValue
         )
     }
 
@@ -1294,7 +1307,10 @@ final class SessionIndexer: ObservableObject {
                 codexInternalSessionIDHint: internalID,
                 parentSessionID: session.parentSessionID,
                 subagentType: session.subagentType,
-                customTitle: session.customTitle
+                customTitle: session.customTitle,
+                codexOriginator: session.codexOriginator,
+                codexSource: session.codexSource,
+                codexSurface: session.codexSurface
             )
             var enriched = rebuilt
             enriched.isFavorite = session.isFavorite
@@ -1303,6 +1319,158 @@ final class SessionIndexer: ObservableObject {
     }
 
     // MARK: - Codex thread_name side-channel
+
+    private struct CodexStateThread {
+        let id: String
+        let rolloutPath: String
+        let title: String?
+        let firstUserMessage: String?
+
+        var bestTitle: String? {
+            if let title = Self.nonEmpty(title) { return title }
+            return Self.nonEmpty(firstUserMessage)
+        }
+
+        private static func nonEmpty(_ value: String?) -> String? {
+            guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+                return nil
+            }
+            return trimmed
+        }
+    }
+
+    private struct CodexStateThreadLookup {
+        let byID: [String: CodexStateThread]
+        let byPath: [String: CodexStateThread]
+
+        var isEmpty: Bool { byID.isEmpty && byPath.isEmpty }
+    }
+
+    private static let codexStateFirstUserMessageTitleLimit = 512
+
+    private static func codexStateDirectoryURL(sessionsRoot: URL) -> URL? {
+        guard sessionsRoot.lastPathComponent == "sessions" else { return nil }
+        return sessionsRoot.deletingLastPathComponent()
+    }
+
+    private static func loadCodexStateThreads(sessionsRoot: URL) -> CodexStateThreadLookup {
+        guard let stateDir = codexStateDirectoryURL(sessionsRoot: sessionsRoot) else {
+            return CodexStateThreadLookup(byID: [:], byPath: [:])
+        }
+        guard let stateURL = newestCodexStateDB(in: stateDir) else {
+            return CodexStateThreadLookup(byID: [:], byPath: [:])
+        }
+        return readCodexStateThreads(from: stateURL)
+    }
+
+    private static func newestCodexStateDB(in directory: URL) -> URL? {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]) else {
+            return nil
+        }
+        let candidates = entries.filter { url in
+            url.lastPathComponent.hasPrefix("state_") && url.pathExtension == "sqlite"
+        }
+        return candidates.max { lhs, rhs in
+            let lhsVersion = codexStateDBVersion(lhs)
+            let rhsVersion = codexStateDBVersion(rhs)
+            if lhsVersion != rhsVersion { return lhsVersion < rhsVersion }
+            let lhsMtime = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let rhsMtime = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return lhsMtime < rhsMtime
+        }
+    }
+
+    private static func codexStateDBVersion(_ url: URL) -> Int {
+        let name = url.deletingPathExtension().lastPathComponent
+        guard let suffix = name.split(separator: "_").last, let version = Int(suffix) else { return 0 }
+        return version
+    }
+
+    private static func readCodexStateThreads(from url: URL) -> CodexStateThreadLookup {
+        var db: OpaquePointer?
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+        guard sqlite3_open_v2(url.path, &db, flags, nil) == SQLITE_OK else {
+            if let db { sqlite3_close(db) }
+            return CodexStateThreadLookup(byID: [:], byPath: [:])
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+        SELECT id, rollout_path, title,
+               CASE WHEN length(trim(title)) > 0 THEN NULL ELSE substr(first_user_message, 1, ?) END
+        FROM threads;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return CodexStateThreadLookup(byID: [:], byPath: [:])
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, Int32(codexStateFirstUserMessageTitleLimit))
+
+        var byID: [String: CodexStateThread] = [:]
+        var byPath: [String: CodexStateThread] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let idCString = sqlite3_column_text(stmt, 0),
+                  let pathCString = sqlite3_column_text(stmt, 1) else { continue }
+            let thread = CodexStateThread(
+                id: String(cString: idCString),
+                rolloutPath: String(cString: pathCString),
+                title: sqlite3_column_type(stmt, 2) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 2)),
+                firstUserMessage: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 3))
+            )
+            byID[thread.id] = thread
+            byPath[normalizeCodexRolloutPath(thread.rolloutPath)] = thread
+        }
+        return CodexStateThreadLookup(byID: byID, byPath: byPath)
+    }
+
+    private static func normalizeCodexRolloutPath(_ path: String) -> String {
+        URL(fileURLWithPath: NSString(string: path).expandingTildeInPath).standardizedFileURL.path
+    }
+
+    private static func applyCodexStateTitles(_ sessions: inout [Session], from lookup: CodexStateThreadLookup) {
+        guard !lookup.isEmpty else { return }
+        for i in sessions.indices {
+            guard sessions[i].customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else {
+                continue
+            }
+            let thread: CodexStateThread?
+            if let hint = sessions[i].codexInternalSessionIDHint {
+                thread = lookup.byID[hint] ?? lookup.byPath[normalizeCodexRolloutPath(sessions[i].filePath)]
+            } else {
+                thread = lookup.byPath[normalizeCodexRolloutPath(sessions[i].filePath)]
+            }
+            guard let title = thread?.bestTitle,
+                  sessions[i].lightweightTitle != title else { continue }
+            let wasFavorite = sessions[i].isFavorite
+            var rebuilt = Session(
+                id: sessions[i].id,
+                source: sessions[i].source,
+                startTime: sessions[i].startTime,
+                endTime: sessions[i].endTime,
+                model: sessions[i].model,
+                filePath: sessions[i].filePath,
+                fileSizeBytes: sessions[i].fileSizeBytes,
+                eventCount: sessions[i].eventCount,
+                events: sessions[i].events,
+                cwd: sessions[i].lightweightCwd,
+                repoName: sessions[i].lightweightRepoName,
+                lightweightTitle: title,
+                lightweightCommands: sessions[i].lightweightCommands,
+                isHousekeeping: sessions[i].isHousekeeping,
+                codexInternalSessionIDHint: sessions[i].codexInternalSessionIDHint,
+                parentSessionID: sessions[i].parentSessionID,
+                subagentType: sessions[i].subagentType,
+                customTitle: sessions[i].customTitle,
+                codexOriginator: sessions[i].codexOriginator,
+                codexSource: sessions[i].codexSource,
+                codexSurface: sessions[i].codexSurface
+            )
+            rebuilt.isFavorite = wasFavorite
+            sessions[i] = rebuilt
+        }
+    }
 
     /// Read budget: max bytes of `session_index.jsonl` to load per refresh (2 MB).
     /// For files exceeding this, we read the tail so recent renames are never lost.
@@ -1487,7 +1655,10 @@ final class SessionIndexer: ObservableObject {
                 codexInternalSessionIDHint: hint,
                 parentSessionID: sessions[i].parentSessionID,
                 subagentType: sessions[i].subagentType,
-                customTitle: name
+                customTitle: name,
+                codexOriginator: sessions[i].codexOriginator,
+                codexSource: sessions[i].codexSource,
+                codexSurface: sessions[i].codexSurface
             )
             rebuilt.isFavorite = wasFavorite
             sessions[i] = rebuilt
@@ -1495,6 +1666,75 @@ final class SessionIndexer: ObservableObject {
     }
 
 	    // MARK: - Parsing
+
+    private struct CodexSurfaceMetadata {
+        let originator: String?
+        let source: String?
+        let surface: CodexSessionSurface
+    }
+
+    private static func codexSurfaceMetadata(from payload: [String: Any]) -> CodexSurfaceMetadata {
+        let originator = nonEmptyString(payload["originator"] as? String)
+        let rawSource = payload["source"]
+        let sourceString = codexSourceString(from: rawSource)
+        return CodexSurfaceMetadata(
+            originator: originator,
+            source: sourceString,
+            surface: classifyCodexSurface(originator: originator, source: rawSource, sourceString: sourceString)
+        )
+    }
+
+    private static func nonEmptyString(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func codexSourceString(from source: Any?) -> String? {
+        if let string = nonEmptyString(source as? String) {
+            return string
+        }
+        guard let source else { return nil }
+        guard JSONSerialization.isValidJSONObject(source),
+              let data = try? JSONSerialization.data(withJSONObject: source, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8),
+              !json.isEmpty else {
+            return nil
+        }
+        return json
+    }
+
+    private static func classifyCodexSurface(originator: String?, source: Any?, sourceString: String?) -> CodexSessionSurface {
+        if let sourceDict = source as? [String: Any], sourceDict["subagent"] != nil {
+            return .subagent
+        }
+
+        let originLower = originator?.lowercased()
+        let sourceLower = sourceString?.lowercased()
+
+        if originLower == "codex desktop" ||
+            originLower?.contains("desktop") == true ||
+            originLower?.contains("app") == true {
+            return .desktop
+        }
+        if originLower == "codex_vscode" {
+            return .vscode
+        }
+        if originLower == "codex_cli_rs" || originLower == "codex-tui" {
+            return .cli
+        }
+        if sourceLower == "vscode" {
+            return .vscode
+        }
+        if sourceLower == "cli" || sourceLower == "exec" {
+            return .cli
+        }
+        if originator != nil || sourceString != nil {
+            return .other
+        }
+        return .unknown
+    }
 
     func parseFile(at url: URL) -> Session? {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
@@ -1526,6 +1766,7 @@ final class SessionIndexer: ObservableObject {
         var modelSeen: String? = nil
         var parentSessionID: String? = nil
         var subagentType: String? = nil
+        var codexSurfaceMetadata: CodexSurfaceMetadata? = nil
         var idx = 0
         DBG("    📖 parseFileFull: Starting forEachLine...")
         do {
@@ -1543,6 +1784,9 @@ final class SessionIndexer: ObservableObject {
                     let payload = obj["payload"] as? [String: Any]
 
                     if parentSessionID == nil, objType == "session_meta", let payload {
+                        if codexSurfaceMetadata == nil {
+                            codexSurfaceMetadata = Self.codexSurfaceMetadata(from: payload)
+                        }
                         if let source = payload["source"],
                            let sourceDict = source as? [String: Any],
                            let subagentInfo = sourceDict["subagent"] {
@@ -1595,7 +1839,10 @@ final class SessionIndexer: ObservableObject {
                               isHousekeeping: isHousekeeping,
                               codexInternalSessionIDHint: internalSessionIDHint,
                               parentSessionID: parentSessionID,
-                              subagentType: subagentType)
+                              subagentType: subagentType,
+                              codexOriginator: codexSurfaceMetadata?.originator,
+                              codexSource: codexSurfaceMetadata?.source,
+                              codexSurface: codexSurfaceMetadata?.surface ?? .unknown)
 
         if size > 5_000_000 {  // Log full parse of files >5MB
             DBG("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
@@ -1685,6 +1932,7 @@ final class SessionIndexer: ObservableObject {
         var cwd: String? = nil
         var parentSessionID: String? = nil
         var subagentType: String? = nil
+        var codexSurfaceMetadata: CodexSurfaceMetadata? = nil
 
         func ingest(_ raw: String) {
             let line = sanitizeCodexHugeFields(sanitizeImagePayload(raw))
@@ -1715,6 +1963,11 @@ final class SessionIndexer: ObservableObject {
                 }
 
                 // Codex session_meta: detect subagent source
+                if objType == "session_meta", let payload {
+                    if codexSurfaceMetadata == nil {
+                        codexSurfaceMetadata = Self.codexSurfaceMetadata(from: payload)
+                    }
+                }
                 if parentSessionID == nil, objType == "session_meta", let payload {
                     if let source = payload["source"] {
                         if let sourceDict = source as? [String: Any],
@@ -1773,7 +2026,10 @@ final class SessionIndexer: ObservableObject {
                                   isHousekeeping: tempIsHousekeeping,
                                   codexInternalSessionIDHint: internalSessionIDHint,
                                   parentSessionID: parentSessionID,
-                                  subagentType: subagentType)
+                                  subagentType: subagentType,
+                                  codexOriginator: codexSurfaceMetadata?.originator,
+                                  codexSource: codexSurfaceMetadata?.source,
+                                  codexSurface: codexSurfaceMetadata?.surface ?? .unknown)
 
         // Extract title from sample events using existing logic
         let title = tempSession.codexPreviewTitle ?? tempSession.title
@@ -1795,7 +2051,10 @@ final class SessionIndexer: ObservableObject {
                               codexInternalSessionIDHint: internalSessionIDHint,
                               parentSessionID: parentSessionID,
                               subagentType: subagentType,
-                              customTitle: tempSession.customTitle)
+                              customTitle: tempSession.customTitle,
+                              codexOriginator: codexSurfaceMetadata?.originator,
+                              codexSource: codexSurfaceMetadata?.source,
+                              codexSurface: codexSurfaceMetadata?.surface ?? .unknown)
         return session
     }
 

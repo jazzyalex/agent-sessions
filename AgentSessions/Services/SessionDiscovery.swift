@@ -78,19 +78,21 @@ final class CodexSessionDiscovery: SessionDiscovery {
 
     func discoverSessionFiles() -> [URL] {
         let root = sessionsRoot()
+        let roots = scanRoots(for: root)
         let fm = FileManager.default
 
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
-            return []
-        }
-
         var found: [URL] = []
-        if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
-            for case let url as URL in enumerator {
-                // Codex format: rollout-YYYY-MM-DDThh-mm-ss-UUID.jsonl
-                if url.lastPathComponent.hasPrefix("rollout-") && url.pathExtension.lowercased() == "jsonl" {
-                    found.append(url)
+        for scanRoot in roots {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: scanRoot.path, isDirectory: &isDir), isDir.boolValue else {
+                continue
+            }
+            if let enumerator = fm.enumerator(at: scanRoot, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+                for case let url as URL in enumerator {
+                    // Codex format: rollout-YYYY-MM-DDThh-mm-ss-UUID.jsonl
+                    if url.lastPathComponent.hasPrefix("rollout-") && url.pathExtension.lowercased() == "jsonl" {
+                        found.append(url)
+                    }
                 }
             }
         }
@@ -99,13 +101,26 @@ final class CodexSessionDiscovery: SessionDiscovery {
         return found.sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
+    private func scanRoots(for root: URL) -> [URL] {
+        var roots = [root]
+        roots.append(contentsOf: archivedScanRoots(for: root).filter { !roots.contains($0) })
+        return roots
+    }
+
+    private func archivedScanRoots(for root: URL) -> [URL] {
+        guard root.lastPathComponent == "sessions" else { return [] }
+        return [
+            root.deletingLastPathComponent().appendingPathComponent("archived_sessions", isDirectory: true)
+        ]
+    }
+
     func discoverDelta(previousByPath: [String: SessionFileStat], scope: SessionDeltaScope = .recent) -> SessionDiscoveryDelta {
         let files: [URL]
         switch scope {
         case .full:
             files = discoverSessionFiles()
         case .recent:
-            files = discoverRecentSessionFiles(dayWindow: 3)
+            files = discoverRecentSessionFiles(dayWindow: 3, previousByPath: previousByPath)
         }
 
         let (currentByPath, changedFiles) = SessionFileStat.diff(files, against: previousByPath)
@@ -116,9 +131,27 @@ final class CodexSessionDiscovery: SessionDiscovery {
             removedPaths = Array(Set(previousByPath.keys).subtracting(currentByPath.keys))
         case .recent:
             let prefixes = recentDayFolders(dayWindow: 3).map { $0.path }
+            let archivedPrefixes = archivedScanRoots(for: sessionsRoot()).map { $0.path }
+            let currentArchivedFilenames = Set(currentByPath.keys
+                .filter { path in archivedPrefixes.contains { Self.path(path, isWithin: $0) } }
+                .map { URL(fileURLWithPath: $0).lastPathComponent })
             removedPaths = previousByPath.keys.filter { oldPath in
                 guard currentByPath[oldPath] == nil else { return false }
-                return prefixes.contains(where: { oldPath.hasPrefix($0 + "/") || oldPath == $0 })
+                let isArchivedPath = archivedPrefixes.contains { Self.path(oldPath, isWithin: $0) }
+                if isArchivedPath {
+                    return true
+                }
+                if prefixes.contains(where: { Self.path(oldPath, isWithin: $0) }) {
+                    return true
+                }
+                let filename = URL(fileURLWithPath: oldPath).lastPathComponent
+                let rootPath = sessionsRoot().path
+                if Self.path(oldPath, isWithin: rootPath),
+                   currentArchivedFilenames.contains(filename),
+                   !FileManager.default.fileExists(atPath: oldPath) {
+                    return true
+                }
+                return false
             }
         }
 
@@ -130,7 +163,7 @@ final class CodexSessionDiscovery: SessionDiscovery {
         )
     }
 
-    private func discoverRecentSessionFiles(dayWindow: Int) -> [URL] {
+    private func discoverRecentSessionFiles(dayWindow: Int, previousByPath: [String: SessionFileStat]) -> [URL] {
         let fm = FileManager.default
         var found: [URL] = []
         for folder in recentDayFolders(dayWindow: dayWindow) {
@@ -147,7 +180,65 @@ final class CodexSessionDiscovery: SessionDiscovery {
                 found.append(file)
             }
         }
+        found.append(contentsOf: discoverRecentArchivedSessionFiles(dayWindow: dayWindow, previousByPath: previousByPath))
         return found.sorted { $0.lastPathComponent > $1.lastPathComponent }
+    }
+
+    private func discoverRecentArchivedSessionFiles(dayWindow: Int, previousByPath: [String: SessionFileStat]) -> [URL] {
+        let fm = FileManager.default
+        let prefixes = recentRolloutFilenamePrefixes(dayWindow: dayWindow)
+        guard !prefixes.isEmpty else { return [] }
+        let sessionsRootPath = sessionsRoot().path
+        let previouslyKnownSessionFilenames = Set(previousByPath.keys
+            .filter { Self.path($0, isWithin: sessionsRootPath) }
+            .map { URL(fileURLWithPath: $0).lastPathComponent })
+
+        var found: [URL] = []
+        for root in archivedScanRoots(for: sessionsRoot()) {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            guard let enumerator = fm.enumerator(at: root,
+                                                 includingPropertiesForKeys: [.isRegularFileKey],
+                                                 options: [.skipsHiddenFiles]) else {
+                continue
+            }
+            for case let url as URL in enumerator {
+                guard url.lastPathComponent.hasPrefix("rollout-"),
+                      url.pathExtension.lowercased() == "jsonl" else {
+                    continue
+                }
+                let filenameIsRecent = prefixes.contains { url.lastPathComponent.hasPrefix($0) }
+                if filenameIsRecent || previousByPath[url.path] != nil {
+                    found.append(url)
+                    continue
+                }
+                if previouslyKnownSessionFilenames.contains(url.lastPathComponent) {
+                    found.append(url)
+                }
+            }
+        }
+        return found
+    }
+
+    private static func path(_ path: String, isWithin rootPath: String) -> Bool {
+        let normalizedPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        let normalizedRootPath = URL(fileURLWithPath: rootPath).resolvingSymlinksInPath().path
+        return normalizedPath == normalizedRootPath || normalizedPath.hasPrefix(normalizedRootPath + "/")
+    }
+
+    private func recentRolloutFilenamePrefixes(dayWindow: Int) -> [String] {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date()
+        let days = max(1, dayWindow)
+        var prefixes: [String] = []
+        prefixes.reserveCapacity(days)
+        for offset in 0..<days {
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: now) else { continue }
+            let comps = calendar.dateComponents([.year, .month, .day], from: day)
+            guard let y = comps.year, let m = comps.month, let d = comps.day else { continue }
+            prefixes.append(String(format: "rollout-%04d-%02d-%02dT", y, m, d))
+        }
+        return prefixes
     }
 
     private func recentDayFolders(dayWindow: Int) -> [URL] {

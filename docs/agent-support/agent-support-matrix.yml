@@ -12,6 +12,7 @@ notes:
   - "2026-04-12: added cursor as 8th monitored agent. Initial verified version 2026.04.12 (date-based, no version embedded in transcripts)."
   - "2026-04-16 weekly check: bumped Codex 0.120.0->0.121.0, Claude 2.1.104->2.1.112 (additive stop_hook_summary/permission metadata preserved as .meta), OpenCode 1.4.3->1.4.6 (current storage is opencode.db SQLite; parser already supported SQLite, monitoring/capture updated), and OpenClaw 2026.4.10->2026.4.14 (schema unchanged, fresh local sample). Copilot 1.0.30 and Gemini 0.38.1 remained candidates pending auth-enabled fresh samples."
   - "2026-04-17 follow-up: bumped Gemini 0.37.1->0.38.1 and Copilot 1.0.24->1.0.31 from successful auth-enabled prebump runs; bumped OpenCode 1.4.6->1.4.7 and OpenClaw 2026.4.14->2026.4.15 from fresh local sessions. Gemini prebump now copies non-secret settings/account support files into the sandbox while keeping OAuth credentials under strict hygiene."
+  - "Codex support covers local rollout JSONL sessions from Codex CLI, Codex Desktop, and the Codex VS Code extension; these remain one Codex corpus with per-session surface labels."
 agents:
   codex_cli:
     max_verified_version: "0.121.0"

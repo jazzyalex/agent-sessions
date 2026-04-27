@@ -20,6 +20,46 @@ final class CoreSessionMetaTests: XCTestCase {
 
     // MARK: - upsertSessionMetaCore preserves analytics fields
 
+    func testCodexSurfaceMetadataRoundTripsThroughSessionMeta() async throws {
+        let row = SessionMetaRow(
+            sessionID: "codex-desktop",
+            source: "codex",
+            path: "/rollout.jsonl",
+            mtime: 100,
+            size: 200,
+            startTS: 10,
+            endTS: 20,
+            model: "gpt-5.5",
+            cwd: "/repo",
+            repo: "repo",
+            title: "Desktop title",
+            codexInternalSessionID: "thread-1",
+            isHousekeeping: false,
+            messages: 3,
+            commands: 1,
+            parentSessionID: nil,
+            subagentType: nil,
+            customTitle: nil,
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: CodexSessionSurface.desktop.rawValue
+        )
+
+        try await db.upsertSessionMetaCore(row)
+
+        let rows = try await db.fetchSessionMeta(for: "codex")
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].codexOriginator, "Codex Desktop")
+        XCTAssertEqual(rows[0].codexSource, "vscode")
+        XCTAssertEqual(rows[0].codexSurface, "desktop")
+
+        let repo = SessionMetaRepository(db: db)
+        let sessions = try await repo.fetchSessions(for: .codex)
+        XCTAssertEqual(sessions.first?.codexOriginator, "Codex Desktop")
+        XCTAssertEqual(sessions.first?.codexSource, "vscode")
+        XCTAssertEqual(sessions.first?.codexSurface, .desktop)
+    }
+
     func testCoreUpsertPreservesCustomTitle() async throws {
         // Analytics writes a row with custom_title set
         let analyticsRow = SessionMetaRow(
