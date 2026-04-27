@@ -38,6 +38,10 @@ This runbook provides a **fully automated deployment process** with comprehensiv
 - `SKIP_CONFIRM=1` — make bump and release flows unattended (suppresses confirmation prompts where supported).
 - `NOTARIZE_SYNC=1` — use legacy blocking notarization instead of background polling.
 - `UPDATE_CASK=1` — update the Homebrew tap via GitHub API.
+- Notary auth is resolved in this order:
+  - App Store Connect API key: `NOTARY_KEY_PATH`, `NOTARY_KEY_ID`, and optional `NOTARY_ISSUER` (aliases: `ASC_PRIVATE_KEY`/`ASC_PRIVATE_KEY_PATH`, `ASC_KEY_ID`, `ASC_ISSUER_ID`).
+  - Apple ID app-specific password: `NOTARY_APPLE_ID`, `NOTARY_PASSWORD`, and `NOTARY_TEAM_ID` or `TEAM_ID`.
+  - Keychain profile: `NOTARY_PROFILE`, default `AgentSessionsNotary`.
 
 **Log locations** (see troubleshooting for details):
 - Unified deploy log: `tools/release/deploy` prints the path (in `/tmp`) when running `release`.
@@ -311,7 +315,7 @@ Complete this checklist **before** running the deployment script. Answer all que
 ### 3. Environment Validation
 - [ ] macOS with Xcode CLT installed
 - [ ] Developer ID Application certificate in Keychain
-- [ ] Notary profile configured (`xcrun notarytool history --keychain-profile AgentSessionsNotary`) or explicit notary credentials available via environment variables
+- [ ] Notary auth configured, preferably via an App Store Connect API key in ignored `tools/release/.env`; fallback is a valid `AgentSessionsNotary` keychain profile or explicit Apple ID app-password environment variables.
 - [ ] Sparkle EdDSA private key exists in Keychain:
   ```bash
   security find-generic-password -s "Sparkle"
@@ -332,6 +336,9 @@ VERSION=2.5.1                                         # Target version
 # Optional (auto-detected if not set)
 TEAM_ID=24NDRU35WD                                    # Apple Team ID
 NOTARY_PROFILE=AgentSessionsNotary                    # Keychain profile name
+NOTARY_KEY_PATH=/absolute/path/AuthKey_ABC123DEFG.p8  # Durable App Store Connect API key
+NOTARY_KEY_ID=ABC123DEFG                              # App Store Connect API key ID
+NOTARY_ISSUER=00000000-0000-0000-0000-000000000000    # App Store Connect issuer; omit only for individual API keys
 DEV_ID_APP="Developer ID Application: Alex M (24NDRU35WD)"  # Code signing identity
 
 # Optional fallback if the keychain profile cannot be read by notarytool

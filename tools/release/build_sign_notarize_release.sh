@@ -13,6 +13,12 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 cd "$REPO_ROOT"
 
+ENV_FILE="$REPO_ROOT/tools/release/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+fi
+
 APP_NAME_DEFAULT=$(sed -n 's/.*BuildableName = "\([^"]\+\)\.app".*/\1/p' AgentSessions.xcodeproj/xcshareddata/xcschemes/AgentSessions.xcscheme | head -n1)
 APP_NAME=${APP_NAME:-${APP_NAME_DEFAULT:-AgentSessions}}
 VERSION_DEFAULT=$(sed -n 's/.*MARKETING_VERSION = \([0-9.][0-9.]*\).*/\1/p' AgentSessions.xcodeproj/project.pbxproj | head -n1)
@@ -20,45 +26,12 @@ VERSION=${VERSION:-${VERSION_DEFAULT:-0.1}}
 TAG=${TAG:-v$VERSION}
 
 NOTARY_PROFILE=${NOTARY_PROFILE:-AgentSessionsNotary}
-NOTARY_APPLE_ID=${NOTARY_APPLE_ID:-}
-NOTARY_TEAM_ID=${NOTARY_TEAM_ID:-}
-NOTARY_PASSWORD=${NOTARY_PASSWORD:-}
 
 # Try to auto-detect a Developer ID Application identity if not provided
 DEV_ID_APP=${DEV_ID_APP:-}
 TEAM_ID=${TEAM_ID:-}
 
-NOTARY_AUTH_ARGS=()
-NOTARY_AUTH_LABEL=""
-
-using_explicit_notary_credentials() {
-  [[ -n "$NOTARY_APPLE_ID" || -n "$NOTARY_TEAM_ID" || -n "$NOTARY_PASSWORD" ]]
-}
-
-build_notary_auth_args() {
-  NOTARY_AUTH_ARGS=()
-
-  if using_explicit_notary_credentials; then
-    local team="${NOTARY_TEAM_ID:-${TEAM_ID:-}}"
-    local missing=()
-
-    [[ -n "$NOTARY_APPLE_ID" ]] || missing+=("NOTARY_APPLE_ID")
-    [[ -n "$team" ]] || missing+=("NOTARY_TEAM_ID or TEAM_ID")
-    [[ -n "$NOTARY_PASSWORD" ]] || missing+=("NOTARY_PASSWORD")
-
-    if [[ ${#missing[@]} -gt 0 ]]; then
-      echo "ERROR: Incomplete explicit notary credentials. Missing: ${missing[*]}" >&2
-      echo "Set NOTARY_APPLE_ID, NOTARY_PASSWORD, and NOTARY_TEAM_ID or TEAM_ID." >&2
-      return 2
-    fi
-
-    NOTARY_AUTH_ARGS=(--apple-id "$NOTARY_APPLE_ID" --team-id "$team" --password "$NOTARY_PASSWORD")
-    NOTARY_AUTH_LABEL="Apple ID credentials (${NOTARY_APPLE_ID}, team ${team})"
-  else
-    NOTARY_AUTH_ARGS=(--keychain-profile "$NOTARY_PROFILE")
-    NOTARY_AUTH_LABEL="keychain profile '${NOTARY_PROFILE}'"
-  fi
-}
+source "$REPO_ROOT/tools/release/notary-auth.sh"
 
 build_notary_auth_args || exit $?
 
