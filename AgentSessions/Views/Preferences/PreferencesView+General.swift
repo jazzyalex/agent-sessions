@@ -289,7 +289,7 @@ extension PreferencesView {
                     .pickerStyle(.segmented)
                     .help("Choose colored or monochrome styling for agent accents")
                 }
-                Text("Affects usage strips, source labels, and CLI Agent colors in Sessions.")
+                Text("Affects usage strips, source labels, and Agent column colors in Sessions.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -324,7 +324,7 @@ extension PreferencesView {
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showSourceColumn) },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.showSourceColumn) }
                     ))
-                    .help("Show or hide the CLI Agent source column in the Unified list")
+                    .help("Show or hide the Agent source column in the Unified list")
                 }
                 // Second row: remaining columns
                 HStack(spacing: 16) {

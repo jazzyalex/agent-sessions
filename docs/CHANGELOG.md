@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Codex: Local rollout sessions from Codex CLI, Codex Desktop, and the Codex VS Code extension now stay in one Codex corpus with row-level surface labels.
+- Codex: Session titles can now fall back to the local Codex `state_*.sqlite` thread metadata when `session_index.jsonl` has no rename.
 
 ## [3.6.3] - 2026-04-24
 - Preferences: Removed Droid from the Settings sidebar as part of the ongoing provider de-emphasis, while keeping legacy Droid session support available.

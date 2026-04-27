@@ -607,7 +607,7 @@ struct UnifiedSessionsView: View {
 						}
 					}
                     .onReceive(activeCodexSessions.$activeMembershipVersion) { _ in
-                        // Always refresh cached rows so CLI Agent live-state dots (active/open)
+                        // Always refresh cached rows so Agent live-state dots (active/open)
                         // update promptly even when Active-only filtering is disabled.
                         updateCachedRows()
                         ensureDefaultSelectionIfNeeded()
@@ -724,7 +724,7 @@ struct UnifiedSessionsView: View {
                        ideal: showStarColumn ? 40 : 0,
                        max: showStarColumn ? 44 : 0)
 
-            TableColumn("CLI Agent", value: \Session.sourceKey) { s in
+            TableColumn("Agent", value: \Session.sourceKey) { s in
                 cellSource(for: s)
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) {
@@ -2007,6 +2007,7 @@ struct UnifiedSessionsView: View {
             return !stripMonochrome ? sourceAccent(session) : .primary
         }()
         let liveOpacity: Double = liveState == .openIdle ? 0.60 : 1.0
+        let codexSurfaceLabel: String? = Self.codexSurfaceLabel(for: session)
         switch session.source {
         case .codex: label = "Codex"
         case .claude: label = "Claude"
@@ -2035,10 +2036,36 @@ struct UnifiedSessionsView: View {
             Text(label)
                 .font(.system(size: 12, weight: isSubagentRow ? .light : .regular, design: .monospaced))
                 .foregroundStyle(isSubagentRow ? rowTextColor.opacity(0.7) : rowTextColor)
+            if let codexSurfaceLabel {
+                Text(codexSurfaceLabel)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.12))
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.85) : Color.secondary)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .accessibilityLabel("Codex \(codexSurfaceLabel)")
+            }
             Spacer(minLength: 4)
         }
         .opacity(liveOpacity)
         .id("source-cell-\(session.id)-\(activeCodexSessions.activeMembershipVersion)")
+    }
+
+    private static func codexSurfaceLabel(for session: Session) -> String? {
+        guard session.source == .codex else { return nil }
+        switch session.codexSurface {
+        case .desktop:
+            return "desk"
+        case .vscode:
+            return "vsc"
+        case .cli:
+            return "cli"
+        case .subagent:
+            return nil
+        case .other, .unknown, .none:
+            return session.isSubagent ? nil : "cli"
+        }
     }
 
     private struct TerminalFocusAvailability {

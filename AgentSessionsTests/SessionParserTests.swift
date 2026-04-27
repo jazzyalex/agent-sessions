@@ -198,6 +198,82 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(s.repoName, repoDir.lastPathComponent)
         XCTAssertEqual(s.gitBranch, "feature/test")
         XCTAssertEqual(s.codexInternalSessionID, "019b2ea4-2a8d-76e2-9cd8-58208e1f2837")
+        XCTAssertEqual(s.codexOriginator, "codex_cli_rs")
+        XCTAssertEqual(s.codexSource, nil)
+        XCTAssertEqual(s.codexSurface, .cli)
+    }
+
+    func testCodexSurfaceClassifiesDesktopBeforeVscodeSource() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexDesktop-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-04-26T13-43-29-019dc662-1345-7301-b0da-bd28cfab7887.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-04-25T20:44:15.181Z","type":"session_meta","payload":{"id":"019dc662-1345-7301-b0da-bd28cfab7887","cwd":"/tmp","originator":"Codex Desktop","source":"vscode","cli_version":"0.125.0-alpha.3"}}"#,
+            #"{"timestamp":"2026-04-25T20:44:16.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Desktop title"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFile(at: url)
+        XCTAssertEqual(session?.codexOriginator, "Codex Desktop")
+        XCTAssertEqual(session?.codexSource, "vscode")
+        XCTAssertEqual(session?.codexSurface, .desktop)
+    }
+
+    func testCodexSurfaceClassifiesVSCodeOriginator() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexVSCode-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-04-26T17-50-52-019dcc6a-eae1-7cf1-abc6-3e89614353f1.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-04-26T17:50:52.000Z","type":"session_meta","payload":{"id":"019dcc6a-eae1-7cf1-abc6-3e89614353f1","cwd":"/tmp","originator":"codex_vscode","source":"vscode"}}"#,
+            #"{"timestamp":"2026-04-26T17:50:53.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"VS Code title"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFile(at: url)
+        XCTAssertEqual(session?.codexOriginator, "codex_vscode")
+        XCTAssertEqual(session?.codexSource, "vscode")
+        XCTAssertEqual(session?.codexSurface, .vscode)
+    }
+
+    func testCodexSurfaceClassifiesSubagentObjectAndPreservesHierarchy() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexSubagent-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-04-17T13-28-49-019d9d21-c62f-7290-aab2-809d579e782e.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-04-17T20:28:50.252Z","type":"session_meta","payload":{"id":"019d9d21-c62f-7290-aab2-809d579e782e","cwd":"/tmp","originator":"codex-tui","source":{"subagent":"review"}}}"#,
+            #"{"timestamp":"2026-04-17T20:28:51.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review this"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFile(at: url)
+        XCTAssertEqual(session?.subagentType, "review")
+        XCTAssertEqual(session?.codexSurface, .subagent)
+        XCTAssertTrue(session?.codexSource?.contains(#""subagent":"review""#) == true)
+    }
+
+    func testCodexSurfaceDefaultsUnknownWithoutMetadata() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexUnknown-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-04-26T00-00-00-unknown.jsonl")
+        try #"{"timestamp":"2026-04-26T00:00:00.000Z","type":"session_meta","payload":{"id":"unknown","cwd":"/tmp"}}"#
+            .data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFile(at: url)
+        XCTAssertNil(session?.codexOriginator)
+        XCTAssertNil(session?.codexSource)
+        XCTAssertEqual(session?.codexSurface, .unknown)
     }
 
     func testSubagentHierarchyInfersRoleOnlyCodexParentInSameWorkspace() {
@@ -843,6 +919,94 @@ final class SessionParserTests: XCTestCase {
         let found = discovery.discoverSessionFiles()
         XCTAssertEqual(found.count, 1)
         XCTAssertEqual(found.first?.lastPathComponent, sessionURL.lastPathComponent)
+    }
+
+    func testCodexDiscoveryFindsSiblingArchivedSessionsForSessionsRoot() throws {
+        let fm = FileManager.default
+        let codexHome = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Codex-Archived-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: codexHome) }
+
+        let activeDir = codexHome
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent("2026", isDirectory: true)
+            .appendingPathComponent("04", isDirectory: true)
+            .appendingPathComponent("26", isDirectory: true)
+        let archivedDir = codexHome.appendingPathComponent("archived_sessions", isDirectory: true)
+        try fm.createDirectory(at: activeDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: archivedDir, withIntermediateDirectories: true)
+
+        let activeURL = activeDir.appendingPathComponent("rollout-2026-04-26T01-00-00-active.jsonl")
+        let archivedURL = archivedDir.appendingPathComponent("rollout-2026-04-25T01-00-00-archived.jsonl")
+        try writeText(#"{"type":"session_meta"}"# + "\n", to: activeURL)
+        try writeText(#"{"type":"session_meta"}"# + "\n", to: archivedURL)
+
+        let found = CodexSessionDiscovery(customRoot: codexHome.appendingPathComponent("sessions").path).discoverSessionFiles()
+        XCTAssertEqual(Set(found.map(\.lastPathComponent)), Set([activeURL.lastPathComponent, archivedURL.lastPathComponent]))
+    }
+
+    func testCodexRecentDeltaFindsMovedArchivedSessionForSessionsRoot() throws {
+        let fm = FileManager.default
+        let codexHome = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Codex-ArchivedDelta-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: codexHome) }
+
+        let calendar = Calendar(identifier: .gregorian)
+        let oldRolloutDate = try XCTUnwrap(calendar.date(byAdding: .day, value: -10, to: Date()))
+        let comps = calendar.dateComponents([.year, .month, .day], from: oldRolloutDate)
+        let year = try XCTUnwrap(comps.year)
+        let month = try XCTUnwrap(comps.month)
+        let day = try XCTUnwrap(comps.day)
+
+        let sessionsRoot = codexHome.appendingPathComponent("sessions", isDirectory: true)
+        let activeDir = sessionsRoot
+            .appendingPathComponent(String(format: "%04d", year), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", month), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", day), isDirectory: true)
+        let archivedDir = codexHome.appendingPathComponent("archived_sessions", isDirectory: true)
+        try fm.createDirectory(at: activeDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: archivedDir, withIntermediateDirectories: true)
+
+        let filename = String(format: "rollout-%04d-%02d-%02dT01-00-00-moved.jsonl", year, month, day)
+        let activeURL = activeDir.appendingPathComponent(filename)
+        let archivedURL = archivedDir.appendingPathComponent(filename)
+        let unrelatedArchivedURL = archivedDir.appendingPathComponent(String(format: "rollout-%04d-%02d-%02dT02-00-00-unrelated.jsonl", year, month, day))
+        try writeText(#"{"type":"session_meta"}"# + "\n", to: activeURL)
+        try writeText(#"{"type":"session_meta"}"# + "\n", to: unrelatedArchivedURL)
+        let previousStat = try XCTUnwrap(SessionFileStat.from(activeURL))
+        try fm.moveItem(at: activeURL, to: archivedURL)
+
+        let delta = CodexSessionDiscovery(customRoot: sessionsRoot.path)
+            .discoverDelta(previousByPath: [activeURL.path: previousStat], scope: .recent)
+
+        let normalizedArchivedPath = archivedURL.resolvingSymlinksInPath().path
+        let normalizedActivePath = activeURL.resolvingSymlinksInPath().path
+        XCTAssertEqual(delta.changedFiles.map { $0.resolvingSymlinksInPath().path }, [normalizedArchivedPath])
+        XCTAssertEqual(delta.removedPaths.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }, [normalizedActivePath])
+        XCTAssertTrue(delta.currentByPath.keys.contains { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path == normalizedArchivedPath })
+
+        let archivedStat = try XCTUnwrap(SessionFileStat.from(archivedURL))
+        try fm.removeItem(at: archivedURL)
+        let deletionDelta = CodexSessionDiscovery(customRoot: sessionsRoot.path)
+            .discoverDelta(previousByPath: [archivedURL.path: archivedStat], scope: .recent)
+        XCTAssertEqual(deletionDelta.removedPaths.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }, [normalizedArchivedPath])
+    }
+
+    func testCodexDiscoveryCustomNonSessionsRootDoesNotScanSiblingArchivedSessions() throws {
+        let fm = FileManager.default
+        let parent = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Codex-Custom-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: parent) }
+
+        let customRoot = parent.appendingPathComponent("custom-root", isDirectory: true)
+        let archivedDir = parent.appendingPathComponent("archived_sessions", isDirectory: true)
+        try fm.createDirectory(at: customRoot, withIntermediateDirectories: true)
+        try fm.createDirectory(at: archivedDir, withIntermediateDirectories: true)
+
+        let activeURL = customRoot.appendingPathComponent("rollout-2026-04-26T01-00-00-active.jsonl")
+        let archivedURL = archivedDir.appendingPathComponent("rollout-2026-04-25T01-00-00-archived.jsonl")
+        try writeText(#"{"type":"session_meta"}"# + "\n", to: activeURL)
+        try writeText(#"{"type":"session_meta"}"# + "\n", to: archivedURL)
+
+        let found = CodexSessionDiscovery(customRoot: customRoot.path).discoverSessionFiles()
+        XCTAssertEqual(found.map(\.lastPathComponent), [activeURL.lastPathComponent])
     }
 
     func testCodexAdditionalChangedFilesIncludesMissingHydratedRecentFile() {

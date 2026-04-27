@@ -57,7 +57,10 @@ actor SessionMetaRepository {
                 codexInternalSessionIDHint: r.codexInternalSessionID,
                 parentSessionID: r.parentSessionID,
                 subagentType: r.subagentType,
-                customTitle: r.customTitle
+                customTitle: r.customTitle,
+                codexOriginator: r.codexOriginator,
+                codexSource: r.codexSource,
+                codexSurface: r.codexSurface.flatMap(CodexSessionSurface.init(rawValue:))
             )
             // Augment with commands count from DB for lightweight filtering
             var enriched = session
@@ -77,7 +80,10 @@ actor SessionMetaRepository {
                                codexInternalSessionIDHint: session.codexInternalSessionIDHint,
                                parentSessionID: session.parentSessionID,
                                subagentType: session.subagentType,
-                               customTitle: session.customTitle)
+                               customTitle: session.customTitle,
+                               codexOriginator: session.codexOriginator,
+                               codexSource: session.codexSource,
+                               codexSurface: session.codexSurface)
             // Reconstruct with lightweightCommands via Codable? Simpler: extend Session with helper? Keep minimal by using a factory below.
             out.append(Session(id: enriched.id,
                                source: enriched.source,
@@ -97,6 +103,9 @@ actor SessionMetaRepository {
                                parentSessionID: enriched.parentSessionID,
                                subagentType: enriched.subagentType,
                                customTitle: enriched.customTitle,
+                               codexOriginator: enriched.codexOriginator,
+                               codexSource: enriched.codexSource,
+                               codexSurface: enriched.codexSurface,
                                deletedAt: deletedAt(fromPath: r.path)))
         }
         return out
