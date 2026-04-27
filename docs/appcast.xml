@@ -3,18 +3,14 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.6.3</title>
-            <pubDate>Fri, 24 Apr 2026 15:39:56 -0700</pubDate>
+            <title>3.6.4</title>
+            <pubDate>Mon, 27 Apr 2026 15:55:39 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.6.3</h2>
+<h2>What&#x27;s New in 3.6.4</h2>
 <h3>Improvements</h3>
 <ul>
-<li>Preferences: Removed Droid from the Settings sidebar as part of the ongoing provider de-emphasis, while keeping legacy Droid session support available.</li>
-<li>Session list: Updated Hermes and OpenClaw accent colors to separate them more clearly from Claude in agent-name styling.</li>
-<li>Hermes: Added local Hermes session discovery, transcript browsing, analytics inclusion, and resume/copy-resume actions in Unified Sessions.</li>
-<li>Hermes: Fixed local session decoding and Unified search/filter integration so newly enabled Hermes sessions appear in Unified, search deeply by transcript text, retain meaningful titles for long prompts, and copy the correct resume ID.</li>
-<li>Hermes: Hermes sessions now preserve recorded `cwd` metadata for search/path filtering without probing the filesystem during indexing.</li>
-<li>Hermes: The Project column now shows the session origin from Hermes `platform` metadata, such as `cli`, `telegram`, or `cron`.</li>
+<li>Codex: Local rollout sessions from Codex CLI, Codex Desktop, and the Codex VS Code extension now stay in one Codex corpus with row-level surface labels.</li>
+<li>Codex: Session titles can now fall back to the local Codex `state_*.sqlite` thread metadata when `session_index.jsonl` has no rename.</li>
 </ul>
 <h3>Reminder: What You Got in 3.6</h3>
 <ul>
@@ -23,12 +19,12 @@
 <li>Onboarding: Update tour now auto-generates a slide for newly available providers, so users see what&#x27;s new without digging into preferences.</li>
 <li>Session sources: `versionIntroduced` and `featureDescription` metadata added to session source model for use in discoverability and onboarding flows.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.3</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.4">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.4</a></p>
             ]]></description>
-            <sparkle:version>39</sparkle:version>
-            <sparkle:shortVersionString>3.6.3</sparkle:shortVersionString>
+            <sparkle:version>40</sparkle:version>
+            <sparkle:shortVersionString>3.6.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.3/AgentSessions-3.6.3.dmg" length="16896635" type="application/octet-stream" sparkle:edSignature="u0iHIza5VtkX/qsTwkNxl1WKdHuX0ZVaFmzHZ9JIGbyeE8vHfe/0h7Tx/mo2evuCLnC8iJ7haHZO1J8NYWrDCg=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.4/AgentSessions-3.6.4.dmg" length="16943702" type="application/octet-stream" sparkle:edSignature="DvSQjk3EjDhZTyjZxpw3sjuZSaG96JqES365DtpBe4pNpbYoDRun6noOdq0GWulUH4guzM0ZVrTE6dwnF63pAA=="/>
         </item>
     </channel>
 </rss>
