@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [3.6.5] - 2026-04-28
 - Indexing: Launch and manual session refreshes now use the interactive indexing profile instead of the active-window capped profile, avoiding slow full catch-up scans after an index reset.
 - Codex: Subagent session pills now show provider-reported reasoning effort in their hover tooltip when Codex records `turn_context.payload.effort`.
 - Crash Reports: Improved `.ips` parsing so pretty-printed macOS diagnostic payloads include exception details, timestamps, and top frames in exported reports.
