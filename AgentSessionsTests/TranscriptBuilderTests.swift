@@ -31,6 +31,243 @@ final class TranscriptBuilderTests: XCTestCase {
         XCTAssertTrue(txt.contains("[\"a\",\"b\"]"))
     }
 
+    func testStructuredToolOutputGetsReadableHeaderAndPrettyJSON() throws {
+        let output = #"{"success":true,"query":"agent-sessions-stars","count":3,"results":[{"session_id":"cron_d2c8a0c8d33e_20260425_090025","summary":"Current total stars: 491"}]}"#
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .tool_result,
+                         role: "tool",
+                         text: nil,
+                         toolName: "session_search",
+                         toolInput: nil,
+                         toolOutput: output,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-structured-tool",
+                        source: .hermes,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/structured-tool.json",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
+        XCTAssertTrue(txt.contains("out: session_search"))
+        XCTAssertTrue(txt.contains("success: true"))
+        XCTAssertTrue(txt.contains("query: agent-sessions-stars"))
+        XCTAssertTrue(txt.contains("results: 3"))
+        XCTAssertTrue(txt.contains("[1] cron_d2c8a0c8d33e_20260425_090025"))
+        XCTAssertTrue(txt.contains("Current total stars: 491"))
+        XCTAssertFalse(txt.contains(#"{"success":true,"query":"#))
+    }
+
+    func testMemorySearchOutputSummaryMarkdownIsReadable() throws {
+        let output = #"{"success":true,"query":"google-form-response-count","results":[{"session_id":"cron_d2c8a0c8d33e_20260423_180015","when":"April 23, 2026 at 06:00 PM","source":"cron","model":"qwen3.5-9b","summary":"**Session Summary: google-form-response-count Monitoring (April 23, 2026)**\n\n**1. Objective**\nThe system executed a scheduled cron job.\n\n**2. Actions Taken and Outcomes**\n*   **Memory Search:** The Assistant initiated a `session_search` tool call.\n*   **Last Known State:** The memory search confirmed **9 responses**."}]}"#
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .tool_result,
+                         role: "tool",
+                         text: nil,
+                         toolName: "session_search",
+                         toolInput: nil,
+                         toolOutput: output,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-memory-search",
+                        source: .hermes,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/memory-search.json",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
+        XCTAssertTrue(txt.contains("out: session_search"))
+        XCTAssertTrue(txt.contains("query: google-form-response-count"))
+        XCTAssertTrue(txt.contains("results: 1"))
+        XCTAssertTrue(txt.contains("[1] cron_d2c8a0c8d33e_20260423_180015"))
+        XCTAssertTrue(txt.contains("when: April 23, 2026 at 06:00 PM"))
+        XCTAssertTrue(txt.contains("Session Summary: google-form-response-count Monitoring (April 23, 2026)"))
+        XCTAssertTrue(txt.contains("- Memory Search: The Assistant initiated a `session_search` tool call."))
+        XCTAssertTrue(txt.contains("- Last Known State: The memory search confirmed 9 responses."))
+        XCTAssertFalse(txt.contains("**"))
+        XCTAssertFalse(txt.contains("*   "))
+    }
+
+    func testStructuredMetadataDoesNotHideStdoutPayload() throws {
+        let output = #"{"success":true,"query":"x","stdout":"real output"}"#
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .tool_result,
+                         role: "tool",
+                         text: nil,
+                         toolName: "session_search",
+                         toolInput: nil,
+                         toolOutput: output,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-stdout-payload",
+                        source: .hermes,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/stdout-payload.json",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
+        XCTAssertTrue(txt.contains("real output"))
+        XCTAssertFalse(txt.contains("success: true\nquery: x"))
+    }
+
+    func testUnsupportedResultsPayloadFallsBackToPrettyJSON() throws {
+        let output = #"{"success":true,"query":"x","results":["a","b"]}"#
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .tool_result,
+                         role: "tool",
+                         text: nil,
+                         toolName: "session_search",
+                         toolInput: nil,
+                         toolOutput: output,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-array-results",
+                        source: .hermes,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/array-results.json",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
+        XCTAssertTrue(txt.contains(#""results" : ["#))
+        XCTAssertTrue(txt.contains(#""a""#))
+        XCTAssertTrue(txt.contains(#""b""#))
+        XCTAssertFalse(txt.contains("results: 2"))
+    }
+
+    func testUnsupportedResultObjectPayloadFallsBackToPrettyJSON() throws {
+        let output = #"{"success":true,"query":"x","results":[{"path":"/tmp/a","matches":3}]}"#
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .tool_result,
+                         role: "tool",
+                         text: nil,
+                         toolName: "session_search",
+                         toolInput: nil,
+                         toolOutput: output,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-object-results",
+                        source: .hermes,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/object-results.json",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
+        XCTAssertTrue(txt.contains(#""path" : "#))
+        XCTAssertTrue(txt.contains("tmp"))
+        XCTAssertTrue(txt.contains(#""matches" : 3"#))
+        XCTAssertFalse(txt.contains("[1] result"))
+    }
+
+    func testRawJSONOnlyNestedValueRemainsVisible() throws {
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .tool_result,
+                         role: "tool",
+                         text: nil,
+                         toolName: "droid",
+                         toolInput: nil,
+                         toolOutput: nil,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: #"{"payload":{"value":"ls: /nope"}}"#)
+        ]
+        let s = Session(id: "s-rawjson-value",
+                        source: .droid,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/rawjson-value.json",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
+        XCTAssertTrue(txt.contains("ls: /nope"))
+        XCTAssertFalse(txt.contains("(no output)"))
+    }
+
+    func testHermesToolOutputTranscriptIsLabeled() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-HermesTranscript-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("session_hermes_tool_output.json")
+        let json = """
+        {
+          "session_id": "20260428_hermes_tool",
+          "model": "qwen3.5-9b",
+          "platform": "cron",
+          "session_start": "2026-04-28T09:00:00.000000",
+          "last_updated": "2026-04-28T09:05:00.000000",
+          "message_count": 3,
+          "messages": [
+            { "role": "user", "content": "Check stars" },
+            { "role": "assistant", "content": "I'll check.", "tool_calls": [
+              { "id": "call_1", "type": "function", "function": { "name": "session_search", "arguments": "{\\"query\\":\\"agent-sessions-stars\\"}" } }
+            ] },
+            { "role": "tool", "tool_call_id": "call_1", "tool_name": "session_search", "content": "{\\"success\\":true,\\"query\\":\\"agent-sessions-stars\\",\\"count\\":3}" }
+          ]
+        }
+        """
+        try json.write(to: url, atomically: true, encoding: .utf8)
+
+        guard let session = HermesSessionParser.parseFileFull(at: url) else {
+            return XCTFail("Hermes full parse returned nil")
+        }
+
+        let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: .current(showTimestamps: false, showMeta: false))
+        XCTAssertTrue(txt.contains("out: session_search"))
+        XCTAssertTrue(txt.contains("query: agent-sessions-stars"))
+    }
+
     func testChunksAreCoalescedByMessageID() throws {
         let l1 = "{\"role\":\"assistant\",\"message_id\":\"m1\",\"content\":\"A\",\"timestamp\":\"2025-09-10T00:00:00Z\"}"
         let l2 = "{\"role\":\"assistant\",\"message_id\":\"m1\",\"content\":\"B\",\"timestamp\":\"2025-09-10T00:00:00Z\"}"

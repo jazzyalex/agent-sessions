@@ -92,7 +92,7 @@ enum ToolTextBlockNormalizer {
         case .toolCall:
             return [block.toolLabel] + block.lines
         case .toolOutput:
-            return block.lines
+            return ["out: \(block.toolLabel)"] + block.lines
         }
     }
 
@@ -185,12 +185,14 @@ enum ToolTextBlockNormalizer {
         let label = isShellTool(name: toolName, inputObject: nil) ? "bash" : normalizedToolLabel(from: toolName, defaultLabel: "tool")
 
         var info = OutputInfo()
+        var parsedOutputObject: Any?
         if let outputText,
            let obj = parseJSON(outputText) {
+            parsedOutputObject = obj
             if let blockText = extractTextBlocksDeep(from: obj) {
                 appendStdout(blockText, into: &info)
             }
-            extractOutputInfo(from: obj, into: &info)
+            extractOutputInfo(from: obj, into: &info, allowNestedScalarFallback: false)
         }
 
         if let obj = parseJSON(rawJSON) {
@@ -233,6 +235,17 @@ enum ToolTextBlockNormalizer {
 
         if lines.isEmpty {
             return (label, ["(no output)"])
+        }
+
+        if let parsedOutputObject,
+           let summaryLines = structuredSummaryLines(from: parsedOutputObject) {
+            return (structuredSummaryLabel(toolName: toolName, fallback: label), summaryLines)
+        }
+
+        if shouldPreferStructuredJSONDisplay(parsedOutputObject, extracted: info, rawOutput: outputText),
+           let parsedOutputObject,
+           let structured = prettyStructuredLines(from: parsedOutputObject) {
+            return (label, structured)
         }
 
         return (label, lines)
@@ -725,14 +738,17 @@ enum ToolTextBlockNormalizer {
         return emptyFallback
     }
 
-    private static func extractOutputInfo(from obj: Any, into info: inout OutputInfo, depth: Int = 0) {
+    private static func extractOutputInfo(from obj: Any,
+                                          into info: inout OutputInfo,
+                                          depth: Int = 0,
+                                          allowNestedScalarFallback: Bool = true) {
         guard depth <= 4 else { return }
 
         if let s = obj as? String {
             let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
             // Only treat a bare string as stdout when we have no stderr yet. Otherwise we risk
             // capturing non-output status strings (e.g. "error") and blocking later stdout.
-            if !trimmed.isEmpty, info.stdout == nil, info.stderr == nil {
+            if (depth == 0 || allowNestedScalarFallback), !trimmed.isEmpty, info.stdout == nil, info.stderr == nil {
                 info.stdout = trimmed
             }
             return
@@ -778,34 +794,34 @@ enum ToolTextBlockNormalizer {
             }
 
             if let toolUseResult = dict["toolUseResult"] {
-                extractOutputInfo(from: toolUseResult, into: &info, depth: depth + 1)
+                extractOutputInfo(from: toolUseResult, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
             if let message = dict["message"] {
-                extractOutputInfo(from: message, into: &info, depth: depth + 1)
+                extractOutputInfo(from: message, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
             if let details = dict["details"] {
-                extractOutputInfo(from: details, into: &info, depth: depth + 1)
+                extractOutputInfo(from: details, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
             if let data = dict["data"] {
-                extractOutputInfo(from: data, into: &info, depth: depth + 1)
+                extractOutputInfo(from: data, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
             if let payload = dict["payload"] {
-                extractOutputInfo(from: payload, into: &info, depth: depth + 1)
+                extractOutputInfo(from: payload, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
             if let result = resultValue {
-                extractOutputInfo(from: result, into: &info, depth: depth + 1)
+                extractOutputInfo(from: result, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
             if let output = outputValue {
-                extractOutputInfo(from: output, into: &info, depth: depth + 1)
+                extractOutputInfo(from: output, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
             if let content = contentValue {
-                extractOutputInfo(from: content, into: &info, depth: depth + 1)
+                extractOutputInfo(from: content, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
             if let value = dict["value"] {
-                extractOutputInfo(from: value, into: &info, depth: depth + 1)
+                extractOutputInfo(from: value, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
             if let state = dict["state"] {
-                extractOutputInfo(from: state, into: &info, depth: depth + 1)
+                extractOutputInfo(from: state, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
 
             // Fallback: if we still have no output after exploring nested structures, stringify the
@@ -824,9 +840,125 @@ enum ToolTextBlockNormalizer {
 
         if let arr = obj as? [Any] {
             for item in arr {
-                extractOutputInfo(from: item, into: &info, depth: depth + 1)
+                extractOutputInfo(from: item, into: &info, depth: depth + 1, allowNestedScalarFallback: allowNestedScalarFallback)
             }
         }
+    }
+
+    private static func shouldPreferStructuredJSONDisplay(_ obj: Any?, extracted info: OutputInfo, rawOutput: String?) -> Bool {
+        guard obj != nil else { return false }
+        guard info.stderr == nil else { return false }
+        guard let rawOutput else { return false }
+        let trimmed = rawOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{") || trimmed.hasPrefix("[") else { return false }
+
+        // When there is no explicit stdout/output/result/content field, a JSON API/tool response is
+        // more readable as pretty JSON than as a compact one-line payload or an arbitrary leaf value.
+        guard let dict = obj as? [String: Any] else {
+            return info.stdout == nil && info.exitCode == nil
+        }
+        let outputKeys = ["stdout", "stderr", "output", "result", "content", "text", "message", "toolUseResult"]
+        return !dict.keys.contains { key in
+            outputKeys.contains { $0.caseInsensitiveCompare(key) == .orderedSame }
+        }
+    }
+
+    private static func prettyStructuredLines(from obj: Any) -> [String]? {
+        guard JSONSerialization.isValidJSONObject(obj),
+              let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return splitAndTrimTrailingEmptyLines(text)
+    }
+
+    private static func structuredSummaryLabel(toolName: String?, fallback: String) -> String {
+        guard let toolName = toolName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !toolName.isEmpty else {
+            return fallback
+        }
+        return toolName
+    }
+
+    private static func structuredSummaryLines(from obj: Any) -> [String]? {
+        guard let dict = obj as? [String: Any] else {
+            return nil
+        }
+
+        var lines: [String] = []
+        appendSimpleLine(key: "success", from: dict, to: &lines)
+        appendSimpleLine(key: "query", from: dict, to: &lines)
+
+        if let rawResults = dict["results"], !(rawResults is [[String: Any]]) {
+            return nil
+        }
+
+        let results = dict["results"] as? [[String: Any]]
+        if results != nil {
+            appendSimpleLine(key: "count", label: "results", from: dict, to: &lines)
+            if dict["count"] == nil {
+                lines.append("results: \(results?.count ?? 0)")
+            }
+        } else {
+            appendSimpleLine(key: "count", from: dict, to: &lines)
+        }
+
+        guard let results, !results.isEmpty else {
+            let supportedKeys = Set(["success", "query", "count"])
+            let hasOnlySupportedSummaryKeys = dict.keys.allSatisfy { supportedKeys.contains($0) }
+            return hasOnlySupportedSummaryKeys && !lines.isEmpty ? lines : nil
+        }
+        let supportedResultKeys = Set(["session_id", "id", "title", "name", "when", "source", "model", "summary", "content", "text"])
+        guard results.allSatisfy({ result in
+            result.keys.allSatisfy { supportedResultKeys.contains($0) }
+        }) else {
+            return nil
+        }
+        for (index, result) in results.enumerated() {
+            if !lines.isEmpty { lines.append("") }
+            let identifier = firstString(for: ["session_id", "id", "title", "name"], in: result) ?? "result"
+            lines.append("[\(index + 1)] \(identifier)")
+            appendSimpleLine(key: "when", from: result, to: &lines)
+            appendSimpleLine(key: "source", from: result, to: &lines)
+            appendSimpleLine(key: "model", from: result, to: &lines)
+
+            if let summary = firstString(for: ["summary", "content", "text"], in: result),
+               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append("")
+                lines.append(contentsOf: readableMarkdownLines(summary))
+            }
+        }
+
+        return lines.isEmpty ? nil : lines
+    }
+
+    private static func appendSimpleLine(key: String,
+                                         label: String? = nil,
+                                         from dict: [String: Any],
+                                         to lines: inout [String]) {
+        guard let value = dict[key],
+              let rendered = stringifyValue(value),
+              !rendered.isEmpty,
+              !isEmptyJSONPayload(rendered) else {
+            return
+        }
+        lines.append("\(label ?? key): \(rendered)")
+    }
+
+    private static func readableMarkdownLines(_ text: String) -> [String] {
+        splitAndTrimTrailingEmptyLines(text)
+            .map(cleanReadableMarkdownLine)
+    }
+
+    private static func cleanReadableMarkdownLine(_ line: String) -> String {
+        var cleaned = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("*   ") {
+            cleaned = "- " + cleaned.dropFirst(4)
+        } else if cleaned.hasPrefix("* ") {
+            cleaned = "- " + cleaned.dropFirst(2)
+        }
+        cleaned = cleaned.replacingOccurrences(of: "**", with: "")
+        return cleaned
     }
 
     private static func extractExitCode(from value: Any?) -> Int? {
@@ -975,6 +1107,9 @@ enum ToolTextBlockNormalizer {
     }
 
     private static func stringifyValue(_ value: Any) -> String? {
+        if let b = value as? Bool {
+            return b ? "true" : "false"
+        }
         if let s = value as? String {
             return s.trimmingCharacters(in: .whitespacesAndNewlines)
         }
