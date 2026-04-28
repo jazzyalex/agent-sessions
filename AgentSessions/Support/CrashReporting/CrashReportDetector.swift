@@ -175,21 +175,9 @@ struct CrashReportDetector {
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
         guard !lines.isEmpty else { return nil }
 
-        var headerJSON: [String: Any]?
-        var payloadJSON: [String: Any]?
-
-        for line in lines {
-            guard let data = line.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                continue
-            }
-            if headerJSON == nil {
-                headerJSON = obj
-            } else {
-                payloadJSON = obj
-                break
-            }
-        }
+        let headerJSON = parseJSONObject(lines.first)
+        let payloadText = lines.dropFirst().joined(separator: "\n")
+        let payloadJSON = parseJSONObject(payloadText) ?? firstJSONObject(in: lines.dropFirst())
 
         let procName = (headerJSON?["procName"] as? String) ?? ""
         let bundleID = (headerJSON?["bundleID"] as? String) ?? (headerJSON?["bundleIdentifier"] as? String) ?? ""
@@ -282,6 +270,23 @@ struct CrashReportDetector {
             .filter { $0.trimmingCharacters(in: .whitespaces).first?.isNumber == true }
             .prefix(10)
             .map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func parseJSONObject(_ text: String?) -> [String: Any]? {
+        guard let text,
+              let data = text.data(using: .utf8) else {
+            return nil
+        }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private func firstJSONObject(in lines: ArraySlice<String>) -> [String: Any]? {
+        for line in lines {
+            if let object = parseJSONObject(line) {
+                return object
+            }
+        }
+        return nil
     }
 
     private func parseCrashTimestamp(from lines: [String]) -> Date? {

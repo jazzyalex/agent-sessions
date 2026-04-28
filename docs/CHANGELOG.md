@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Crash Reports: Improved `.ips` parsing so pretty-printed macOS diagnostic payloads include exception details, timestamps, and top frames in exported reports.
 - Codex: Fixed Resume in Terminal by keeping the launched command as plain `codex resume`; Cockpit live tracking remains handled by independent process/iTerm discovery instead of a resume-command wrapper.
 
 ## [3.6.4] - 2026-04-27

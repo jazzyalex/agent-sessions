@@ -398,6 +398,49 @@ final class CrashReportingServiceTests: XCTestCase {
         XCTAssertEqual(report.appBuild, "456")
     }
 
+    func testDetectOnLaunchParsesPrettyPrintedIPSReportPayload() async throws {
+        let tempRoot = makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let reportURL = tempRoot.appendingPathComponent("AgentSessions-2026-04-28-151242.ips")
+        try makePrettyPrintedIPSReportFile(at: reportURL)
+
+        let storeURL = tempRoot.appendingPathComponent("pending.json")
+        let store = CrashReportStore(fileManager: .default, pendingFileURL: storeURL, maxPendingCount: 1)
+        let detector = CrashReportDetector(
+            fileManager: .default,
+            reportsRootURL: tempRoot,
+            appName: "Agent Sessions",
+            bundleIdentifier: "com.triada.AgentSessions",
+            appVersion: "9.9.9",
+            appBuild: "999",
+            nowProvider: Date.init,
+            lookbackWindow: 60 * 60 * 24 * 30,
+            maxReports: 10
+        )
+
+        let defaults = testDefaults("CrashReportingServiceTests.prettyIPS")
+        let service = CrashReportingService(
+            store: store,
+            detector: detector,
+            userDefaults: defaults,
+            nowProvider: Date.init
+        )
+
+        let detectedCount = await service.detectAndQueueOnLaunch()
+        XCTAssertEqual(detectedCount, 1)
+
+        let pending = await store.pending()
+        let report = try XCTUnwrap(pending.first)
+        XCTAssertEqual(report.appVersion, "3.6.4")
+        XCTAssertEqual(report.appBuild, "40")
+        XCTAssertEqual(report.rawMetadata["procName"], "")
+        XCTAssertEqual(report.rawMetadata["bundleID"], "com.triada.AgentSessions")
+        XCTAssertEqual(report.terminationSummary, "EXC_BREAKPOINT | SIGTRAP")
+        XCTAssertEqual(report.topFrames.first, "Agent Sessions CrashReportDetector.parseIPS")
+        XCTAssertEqual(report.crashTimestamp, ISO8601DateFormatter().date(from: "2026-04-28T12:12:42Z"))
+    }
+
     func testSupportEmailDraftWithoutPendingReportsHasTemplateBody() async throws {
         let tempRoot = makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -452,6 +495,42 @@ final class CrashReportingServiceTests: XCTestCase {
         Thread 0 Crashed:
         0   libswiftCore.dylib           0x0000000100000000 swift_unknownObjectRelease + 16
         1   Agent Sessions               0x0000000100001111 closure #1 in App.start + 88
+        """
+        try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func makePrettyPrintedIPSReportFile(at url: URL) throws {
+        let text = """
+        {"bundleID":"com.triada.AgentSessions","procName":"","app_version":"3.6.4","build_version":"40","timestamp":"2026-04-28T12:12:42Z"}
+        {
+          "exception" : {
+            "type" : "EXC_BREAKPOINT",
+            "signal" : "SIGTRAP"
+          },
+          "faultingThread" : 1,
+          "threads" : [
+            {
+              "frames" : [
+                {
+                  "imageName" : "AppKit",
+                  "symbol" : "NSApplicationMain"
+                }
+              ]
+            },
+            {
+              "frames" : [
+                {
+                  "imageName" : "Agent Sessions",
+                  "symbol" : "CrashReportDetector.parseIPS"
+                },
+                {
+                  "imageName" : "libswiftCore.dylib",
+                  "symbol" : "swift_unknownObjectRelease"
+                }
+              ]
+            }
+          ]
+        }
         """
         try text.write(to: url, atomically: true, encoding: .utf8)
     }
