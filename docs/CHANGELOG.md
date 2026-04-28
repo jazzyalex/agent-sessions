@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Indexing: Launch and manual session refreshes now use the interactive indexing profile instead of the active-window capped profile, avoiding slow full catch-up scans after an index reset.
 - Codex: Subagent session pills now show provider-reported reasoning effort in their hover tooltip when Codex records `turn_context.payload.effort`.
 - Crash Reports: Improved `.ips` parsing so pretty-printed macOS diagnostic payloads include exception details, timestamps, and top frames in exported reports.
 - Codex: Fixed Resume in Terminal by keeping the launched command as plain `codex resume`; Cockpit live tracking remains handled by independent process/iTerm discovery instead of a resume-command wrapper.

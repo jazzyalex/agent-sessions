@@ -402,17 +402,6 @@ actor IndexDB {
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", codexSurfaceReindex)
         }
 
-        let codexReasoningEffortReindex = "codex_reasoning_effort_reindex_v1"
-        if !migrationApplied(db, key: codexReasoningEffortReindex) {
-            try exec(db, "DELETE FROM files WHERE source = 'codex';")
-            try exec(db, "DELETE FROM session_meta WHERE source = 'codex';")
-            try exec(db, "DELETE FROM session_search WHERE source = 'codex';")
-            try exec(db, "DELETE FROM session_tool_io WHERE source = 'codex';")
-            try exec(db, "DELETE FROM session_days WHERE source = 'codex';")
-            try exec(db, "DELETE FROM rollups_daily WHERE source = 'codex';")
-            try exec(db, "DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:codex:%';")
-            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", codexReasoningEffortReindex)
-        }
             try exec(db, "COMMIT;")
         } catch {
             try? exec(db, "ROLLBACK;")

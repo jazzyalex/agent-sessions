@@ -1789,6 +1789,9 @@ final class UnifiedSessionIndexer: ObservableObject {
         if trigger == .cleanup {
             return .interactive
         }
+        if trigger == .launch || trigger == .manual {
+            return .interactive
+        }
         if !appIsActive {
             return .lightBackground
         }
