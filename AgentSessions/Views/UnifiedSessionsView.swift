@@ -1071,7 +1071,8 @@ struct UnifiedSessionsView: View {
         case .claude:
             return true // falls back to --continue
         case .codex:
-            return session.codexInternalSessionID != nil || session.codexFilenameUUID != nil
+            return canResumeCodexInCLI(session)
+                && (session.codexInternalSessionID != nil || session.codexFilenameUUID != nil)
         case .opencode:
             return true // session.id is the SQLite session ID; falls back to --continue
         case .hermes:
@@ -2062,10 +2063,26 @@ struct UnifiedSessionsView: View {
         case .cli:
             return "cli"
         case .subagent:
-            return nil
+            return codexOriginatorSurfaceLabel(for: session)
         case .other, .unknown, .none:
             return session.isSubagent ? nil : "cli"
         }
+    }
+
+    private static func codexOriginatorSurfaceLabel(for session: Session) -> String? {
+        let originator = session.codexOriginator?.lowercased()
+        if originator == "codex desktop" ||
+            originator?.contains("desktop") == true ||
+            originator?.contains("app") == true {
+            return "desk"
+        }
+        if originator == "codex_vscode" {
+            return "vsc"
+        }
+        if originator == "codex_cli_rs" || originator == "codex-tui" {
+            return "cli"
+        }
+        return nil
     }
 
     private struct TerminalFocusAvailability {
@@ -2183,13 +2200,19 @@ struct UnifiedSessionsView: View {
 
     private func canResumeSession(_ s: Session, geminiCLISessionID: String? = nil) -> Bool {
         switch s.source {
-        case .codex, .claude, .opencode, .hermes, .copilot, .cursor:
+        case .codex:
+            return canResumeCodexInCLI(s)
+        case .claude, .opencode, .hermes, .copilot, .cursor:
             return true
         case .gemini:
             return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: s)) != nil
         default:
             return false
         }
+    }
+
+    private func canResumeCodexInCLI(_ session: Session) -> Bool {
+        session.codexSurface != .vscode
     }
 
     private func resume(_ s: Session) {
@@ -2795,7 +2818,7 @@ private struct TranscriptHostView: View {
 	                }
 
                     if showFlatSubagentMarker {
-                        Text("s")
+                        Text("sub")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)

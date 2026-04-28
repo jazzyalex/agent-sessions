@@ -141,6 +141,34 @@ final class CodexResumeTests: XCTestCase {
         XCTAssertFalse(package.shellCommand.contains("write_presence(){"))
     }
 
+    func testCommandBuilderRejectsVSCodeSurfaceForCLIResume() throws {
+        let session = Session(id: "vscode-123",
+                              startTime: nil,
+                              endTime: nil,
+                              model: nil,
+                              filePath: "/tmp/rollout-2025-09-22T10-11-12-vscode-123.jsonl",
+                              eventCount: 0,
+                              events: [],
+                              codexInternalSessionIDHint: "vscode-123",
+                              codexOriginator: "codex_vscode",
+                              codexSource: "vscode",
+                              codexSurface: .vscode)
+        let defaults = UserDefaults(suiteName: "CodexResumeTestsVSCodeSurface")!
+        defaults.removePersistentDomain(forName: "CodexResumeTestsVSCodeSurface")
+        let settings = CodexResumeSettings.makeForTesting(defaults: defaults)
+
+        XCTAssertThrowsError(try CodexResumeCommandBuilder().makeCommand(for: session,
+                                                                         settings: settings,
+                                                                         binaryURL: URL(fileURLWithPath: "/usr/local/bin/codex"),
+                                                                         fallbackPath: nil,
+                                                                         attemptResumeFirst: true)) { error in
+            guard case CodexResumeCommandBuilder.BuildError.unsupportedSurface(.vscode) = error else {
+                XCTFail("Expected unsupported VS Code surface error, got \(error)")
+                return
+            }
+        }
+    }
+
     // MARK: Helpers
 
     private func sampleSession(id: String, fileName: String, cwd: String?) -> Session {

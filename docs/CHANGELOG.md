@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 - Crash Reports: Improved `.ips` parsing so pretty-printed macOS diagnostic payloads include exception details, timestamps, and top frames in exported reports.
 - Codex: Fixed Resume in Terminal by keeping the launched command as plain `codex resume`; Cockpit live tracking remains handled by independent process/iTerm discovery instead of a resume-command wrapper.
+- Codex: VS Code-surface sessions no longer offer Codex CLI resume commands when they cannot hydrate useful CLI content.
+- Codex: Desktop-originated Codex subagent rows now keep the `desk` Agent-column badge while showing the subagent marker in the session title.
 
 ## [3.6.4] - 2026-04-27
 - Codex: Local rollout sessions from Codex CLI, Codex Desktop, and the Codex VS Code extension now stay in one Codex corpus with row-level surface labels.

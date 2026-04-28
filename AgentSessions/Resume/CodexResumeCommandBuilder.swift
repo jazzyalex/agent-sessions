@@ -10,6 +10,7 @@ struct CodexResumeCommandBuilder {
     enum BuildError: Error {
         case missingSessionID
         case missingSessionFile
+        case unsupportedSurface(CodexSessionSurface)
     }
 
     @MainActor
@@ -21,6 +22,9 @@ struct CodexResumeCommandBuilder {
         // Prefer internal session_id from JSONL when available; fallback to filename UUID
         guard let sessionID = (session.codexInternalSessionID ?? session.codexFilenameUUID) else {
             throw BuildError.missingSessionID
+        }
+        if session.codexSurface == .vscode {
+            throw BuildError.unsupportedSurface(.vscode)
         }
 
         let workingDirPath = settings.effectiveWorkingDirectory(for: session)
@@ -59,4 +63,17 @@ struct CodexResumeCommandBuilder {
     func shellQuote(_ string: String) -> String { ShellQuoting.quote(string) }
     func shellQuoteIfNeeded(_ string: String) -> String { ShellQuoting.quoteIfNeeded(string) }
 
+}
+
+extension CodexResumeCommandBuilder.BuildError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .missingSessionID:
+            return "The Codex session ID could not be found."
+        case .missingSessionFile:
+            return "The Codex session log could not be found."
+        case .unsupportedSurface(let surface):
+            return "Codex \(surface.displayName) sessions cannot be resumed in Codex CLI."
+        }
+    }
 }
