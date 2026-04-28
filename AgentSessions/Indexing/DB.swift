@@ -94,6 +94,7 @@ actor IndexDB {
               codex_originator TEXT,
               codex_source TEXT,
               codex_surface TEXT,
+              reasoning_effort TEXT,
               is_housekeeping INTEGER NOT NULL DEFAULT 0,
               messages INTEGER DEFAULT 0,
               commands INTEGER DEFAULT 0
@@ -173,6 +174,14 @@ actor IndexDB {
         if !tableHasColumn(db, table: "session_meta", column: "codex_surface") {
             do {
                 try exec(db, "ALTER TABLE session_meta ADD COLUMN codex_surface TEXT;")
+            } catch {
+                if !isDuplicateColumnError(error) { throw error }
+            }
+        }
+
+        if !tableHasColumn(db, table: "session_meta", column: "reasoning_effort") {
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN reasoning_effort TEXT;")
             } catch {
                 if !isDuplicateColumnError(error) { throw error }
             }
@@ -391,6 +400,18 @@ actor IndexDB {
             try exec(db, "DELETE FROM rollups_daily WHERE source = 'codex';")
             try exec(db, "DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:codex:%';")
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", codexSurfaceReindex)
+        }
+
+        let codexReasoningEffortReindex = "codex_reasoning_effort_reindex_v1"
+        if !migrationApplied(db, key: codexReasoningEffortReindex) {
+            try exec(db, "DELETE FROM files WHERE source = 'codex';")
+            try exec(db, "DELETE FROM session_meta WHERE source = 'codex';")
+            try exec(db, "DELETE FROM session_search WHERE source = 'codex';")
+            try exec(db, "DELETE FROM session_tool_io WHERE source = 'codex';")
+            try exec(db, "DELETE FROM session_days WHERE source = 'codex';")
+            try exec(db, "DELETE FROM rollups_daily WHERE source = 'codex';")
+            try exec(db, "DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:codex:%';")
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", codexReasoningEffortReindex)
         }
             try exec(db, "COMMIT;")
         } catch {
@@ -653,7 +674,7 @@ actor IndexDB {
     func fetchSessionMeta(for source: String) throws -> [SessionMetaRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         let sql = """
-        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface
+        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort
         FROM session_meta
         WHERE source = ?
         ORDER BY COALESCE(end_ts, mtime) DESC
@@ -688,7 +709,8 @@ actor IndexDB {
                 customTitle: sqlite3_column_type(stmt, 17) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 17)),
                 codexOriginator: sqlite3_column_type(stmt, 18) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 18)),
                 codexSource: sqlite3_column_type(stmt, 19) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 19)),
-                codexSurface: sqlite3_column_type(stmt, 20) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 20))
+                codexSurface: sqlite3_column_type(stmt, 20) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 20)),
+                reasoningEffort: sqlite3_column_type(stmt, 21) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 21))
             )
             out.append(row)
         }
@@ -1361,15 +1383,16 @@ actor IndexDB {
 
     func upsertSessionMeta(_ m: SessionMetaRow) throws {
         let sql = """
-        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
           repo=excluded.repo, title=excluded.title, codex_internal_session_id=excluded.codex_internal_session_id,
           is_housekeeping=excluded.is_housekeeping, messages=excluded.messages, commands=excluded.commands,
           parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type, custom_title=excluded.custom_title,
-          codex_originator=excluded.codex_originator, codex_source=excluded.codex_source, codex_surface=excluded.codex_surface;
+          codex_originator=excluded.codex_originator, codex_source=excluded.codex_source, codex_surface=excluded.codex_surface,
+          reasoning_effort=excluded.reasoning_effort;
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -1394,6 +1417,7 @@ actor IndexDB {
         if let originator = m.codexOriginator { sqlite3_bind_text(stmt, 19, originator, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 19) }
         if let source = m.codexSource { sqlite3_bind_text(stmt, 20, source, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 20) }
         if let surface = m.codexSurface { sqlite3_bind_text(stmt, 21, surface, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 21) }
+        if let effort = m.reasoningEffort { sqlite3_bind_text(stmt, 22, effort, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 22) }
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
@@ -1403,8 +1427,8 @@ actor IndexDB {
     /// while NULL values (from lightweight parses that missed the record) preserve existing data.
     func upsertSessionMetaCore(_ m: SessionMetaRow) throws {
         let sql = """
-        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
@@ -1413,6 +1437,7 @@ actor IndexDB {
           parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type,
           custom_title=COALESCE(excluded.custom_title, session_meta.custom_title),
           codex_originator=excluded.codex_originator, codex_source=excluded.codex_source, codex_surface=excluded.codex_surface,
+          reasoning_effort=COALESCE(excluded.reasoning_effort, session_meta.reasoning_effort),
           codex_internal_session_id=CASE WHEN session_meta.codex_internal_session_id IS NULL THEN excluded.codex_internal_session_id ELSE session_meta.codex_internal_session_id END;
         """
         let stmt = try prepare(sql)
@@ -1438,6 +1463,7 @@ actor IndexDB {
         if let originator = m.codexOriginator { sqlite3_bind_text(stmt, 19, originator, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 19) }
         if let source = m.codexSource { sqlite3_bind_text(stmt, 20, source, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 20) }
         if let surface = m.codexSurface { sqlite3_bind_text(stmt, 21, surface, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 21) }
+        if let effort = m.reasoningEffort { sqlite3_bind_text(stmt, 22, effort, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 22) }
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta core") }
     }
 
@@ -2191,6 +2217,7 @@ struct SessionMetaRow {
     let codexOriginator: String?
     let codexSource: String?
     let codexSurface: String?
+    let reasoningEffort: String?
 
     init(sessionID: String,
          source: String,
@@ -2212,7 +2239,8 @@ struct SessionMetaRow {
          customTitle: String?,
          codexOriginator: String? = nil,
          codexSource: String? = nil,
-         codexSurface: String? = nil) {
+         codexSurface: String? = nil,
+         reasoningEffort: String? = nil) {
         self.sessionID = sessionID
         self.source = source
         self.path = path
@@ -2234,6 +2262,7 @@ struct SessionMetaRow {
         self.codexOriginator = codexOriginator
         self.codexSource = codexSource
         self.codexSurface = codexSurface
+        self.reasoningEffort = reasoningEffort
     }
 }
 

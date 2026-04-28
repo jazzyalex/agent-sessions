@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Codex: Subagent session pills now show provider-reported reasoning effort in their hover tooltip when Codex records `turn_context.payload.effort`.
 - Crash Reports: Improved `.ips` parsing so pretty-printed macOS diagnostic payloads include exception details, timestamps, and top frames in exported reports.
 - Codex: Fixed Resume in Terminal by keeping the launched command as plain `codex resume`; Cockpit live tracking remains handled by independent process/iTerm discovery instead of a resume-command wrapper.
 - Codex: VS Code-surface sessions no longer offer Codex CLI resume commands when they cannot hydrate useful CLI content.

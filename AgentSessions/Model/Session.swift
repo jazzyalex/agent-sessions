@@ -45,6 +45,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let codexOriginator: String?
     public let codexSource: String?
     public let codexSurface: CodexSessionSurface?
+    public let reasoningEffort: String?
 
     // Subagent hierarchy
     public let parentSessionID: String?   // Raw ID of parent session (UUID for Claude/Codex, ses_ID for OpenCode)
@@ -76,6 +77,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 codexOriginator: String? = nil,
                 codexSource: String? = nil,
                 codexSurface: CodexSessionSurface? = nil,
+                reasoningEffort: String? = nil,
                 deletedAt: Date? = nil) {
         self.id = id
         self.source = source
@@ -95,6 +97,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.codexOriginator = codexOriginator
         self.codexSource = codexSource
         self.codexSurface = codexSurface
+        self.reasoningEffort = reasoningEffort
         self.lightweightCommands = nil
         self.parentSessionID = parentSessionID
         self.subagentType = subagentType
@@ -124,6 +127,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 codexOriginator: String? = nil,
                 codexSource: String? = nil,
                 codexSurface: CodexSessionSurface? = nil,
+                reasoningEffort: String? = nil,
                 deletedAt: Date? = nil) {
         self.id = id
         self.source = source
@@ -143,6 +147,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.codexOriginator = codexOriginator
         self.codexSource = codexSource
         self.codexSurface = codexSurface
+        self.reasoningEffort = reasoningEffort
         self.lightweightCommands = lightweightCommands
         self.parentSessionID = parentSessionID
         self.subagentType = subagentType
@@ -168,6 +173,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case codexOriginator
         case codexSource
         case codexSurface
+        case reasoningEffort
         case parentSessionID
         case subagentType
         case customTitle

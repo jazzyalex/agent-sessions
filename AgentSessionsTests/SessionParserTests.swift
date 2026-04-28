@@ -260,6 +260,46 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(session?.codexSource?.contains(#""subagent":"review""#) == true)
     }
 
+    func testCodexSubagentParsesReasoningEffortFromTurnContext() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexSubagentEffort-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-04-28T10-00-00-019e3b0c-0000-7000-8000-000000000031.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-04-28T17:00:00.000Z","type":"session_meta","payload":{"id":"019e3b0c-0000-7000-8000-000000000031","cwd":"/tmp","originator":"codex-tui","source":{"subagent":"review"}}}"#,
+            #"{"timestamp":"2026-04-28T17:00:01.000Z","type":"turn_context","payload":{"cwd":"/tmp","model":"gpt-5.5","effort":"high"}}"#,
+            #"{"timestamp":"2026-04-28T17:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review this"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFile(at: url)
+        XCTAssertEqual(session?.model, "gpt-5.5")
+        XCTAssertEqual(session?.subagentType, "review")
+        XCTAssertEqual(session?.reasoningEffort, "high")
+    }
+
+    func testCodexNormalSessionDoesNotPersistReasoningEffort() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexNormalEffort-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-04-28T10-10-00-019e3b0c-0000-7000-8000-000000000032.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-04-28T17:10:00.000Z","type":"session_meta","payload":{"id":"019e3b0c-0000-7000-8000-000000000032","cwd":"/tmp","originator":"codex-tui","source":"cli"}}"#,
+            #"{"timestamp":"2026-04-28T17:10:01.000Z","type":"turn_context","payload":{"cwd":"/tmp","model":"gpt-5.5","effort":"high"}}"#,
+            #"{"timestamp":"2026-04-28T17:10:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Normal session"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFile(at: url)
+        XCTAssertEqual(session?.model, "gpt-5.5")
+        XCTAssertFalse(session?.isSubagent == true)
+        XCTAssertNil(session?.reasoningEffort)
+    }
+
     func testCodexSurfaceDefaultsUnknownWithoutMetadata() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexUnknown-\(UUID().uuidString)", isDirectory: true)

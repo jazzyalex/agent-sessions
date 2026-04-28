@@ -60,7 +60,8 @@ actor SessionMetaRepository {
                 customTitle: r.customTitle,
                 codexOriginator: r.codexOriginator,
                 codexSource: r.codexSource,
-                codexSurface: r.codexSurface.flatMap(CodexSessionSurface.init(rawValue:))
+                codexSurface: r.codexSurface.flatMap(CodexSessionSurface.init(rawValue:)),
+                reasoningEffort: r.reasoningEffort
             )
             // Augment with commands count from DB for lightweight filtering
             var enriched = session
@@ -83,7 +84,8 @@ actor SessionMetaRepository {
                                customTitle: session.customTitle,
                                codexOriginator: session.codexOriginator,
                                codexSource: session.codexSource,
-                               codexSurface: session.codexSurface)
+                               codexSurface: session.codexSurface,
+                               reasoningEffort: session.reasoningEffort)
             // Reconstruct with lightweightCommands via Codable? Simpler: extend Session with helper? Keep minimal by using a factory below.
             out.append(Session(id: enriched.id,
                                source: enriched.source,
@@ -106,6 +108,7 @@ actor SessionMetaRepository {
                                codexOriginator: enriched.codexOriginator,
                                codexSource: enriched.codexSource,
                                codexSurface: enriched.codexSurface,
+                               reasoningEffort: enriched.reasoningEffort,
                                deletedAt: deletedAt(fromPath: r.path)))
         }
         return out

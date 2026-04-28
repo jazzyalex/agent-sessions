@@ -2826,6 +2826,7 @@ private struct TranscriptHostView: View {
                             .foregroundStyle(.secondary)
                             .clipShape(RoundedRectangle(cornerRadius: 3))
                             .accessibilityLabel("Subagent")
+                            .help(subagentPillHelp)
                     }
 
 	                // Subagent type badge (only when hierarchy nesting is active)
@@ -2838,6 +2839,7 @@ private struct TranscriptHostView: View {
                             .background(Color.purple.opacity(0.15))
                             .foregroundStyle(.purple)
                             .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .help(subagentPillHelp)
                     }
                     // Model badge
                     if let abbreviated = ModelNameAbbreviator.abbreviate(session.model) {
@@ -2882,6 +2884,14 @@ private struct TranscriptHostView: View {
 	        }
 	        .onHover { hover = $0 }
 	    }
+
+            private var subagentPillHelp: String {
+                guard let effort = session.reasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !effort.isEmpty else {
+                    return "Subagent"
+                }
+                return "Subagent\nReasoning effort: \(effort)"
+            }
 	}
 
 // Stable cell to prevent Table reuse glitches in Project column

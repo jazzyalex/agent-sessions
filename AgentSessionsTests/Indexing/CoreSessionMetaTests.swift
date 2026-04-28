@@ -60,6 +60,95 @@ final class CoreSessionMetaTests: XCTestCase {
         XCTAssertEqual(sessions.first?.codexSurface, .desktop)
     }
 
+    func testReasoningEffortRoundTripsThroughSessionMeta() async throws {
+        let row = SessionMetaRow(
+            sessionID: "codex-subagent",
+            source: "codex",
+            path: "/rollout-subagent.jsonl",
+            mtime: 100,
+            size: 200,
+            startTS: 10,
+            endTS: 20,
+            model: "gpt-5.5",
+            cwd: "/repo",
+            repo: "repo",
+            title: "Subagent title",
+            codexInternalSessionID: "thread-1",
+            isHousekeeping: false,
+            messages: 3,
+            commands: 1,
+            parentSessionID: "parent-thread",
+            subagentType: "review",
+            customTitle: nil,
+            codexOriginator: "codex-tui",
+            codexSource: #"{"subagent":"review"}"#,
+            codexSurface: CodexSessionSurface.subagent.rawValue,
+            reasoningEffort: "high"
+        )
+
+        try await db.upsertSessionMetaCore(row)
+
+        let rows = try await db.fetchSessionMeta(for: "codex")
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].reasoningEffort, "high")
+
+        let repo = SessionMetaRepository(db: db)
+        let sessions = try await repo.fetchSessions(for: .codex)
+        XCTAssertEqual(sessions.first?.reasoningEffort, "high")
+        XCTAssertEqual(sessions.first?.subagentType, "review")
+    }
+
+    func testCoreUpsertPreservesReasoningEffortWhenNil() async throws {
+        let indexedRow = SessionMetaRow(
+            sessionID: "codex-subagent",
+            source: "codex",
+            path: "/rollout-subagent.jsonl",
+            mtime: 100,
+            size: 200,
+            startTS: 10,
+            endTS: 20,
+            model: "gpt-5.5",
+            cwd: "/repo",
+            repo: "repo",
+            title: "Subagent title",
+            codexInternalSessionID: nil,
+            isHousekeeping: false,
+            messages: 3,
+            commands: 1,
+            parentSessionID: "parent-thread",
+            subagentType: "review",
+            customTitle: nil,
+            reasoningEffort: "high"
+        )
+        try await db.upsertSessionMetaCore(indexedRow)
+
+        let lightweightRefresh = SessionMetaRow(
+            sessionID: "codex-subagent",
+            source: "codex",
+            path: "/rollout-subagent.jsonl",
+            mtime: 110,
+            size: 210,
+            startTS: 10,
+            endTS: 25,
+            model: "gpt-5.5",
+            cwd: "/repo",
+            repo: "repo",
+            title: "Subagent title",
+            codexInternalSessionID: nil,
+            isHousekeeping: false,
+            messages: 4,
+            commands: 1,
+            parentSessionID: "parent-thread",
+            subagentType: "review",
+            customTitle: nil,
+            reasoningEffort: nil
+        )
+        try await db.upsertSessionMetaCore(lightweightRefresh)
+
+        let rows = try await db.fetchSessionMeta(for: "codex")
+        XCTAssertEqual(rows.first?.reasoningEffort, "high")
+    }
+
     func testCoreUpsertPreservesCustomTitle() async throws {
         // Analytics writes a row with custom_title set
         let analyticsRow = SessionMetaRow(

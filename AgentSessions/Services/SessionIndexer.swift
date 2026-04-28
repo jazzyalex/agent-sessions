@@ -466,7 +466,8 @@ final class SessionIndexer: ObservableObject {
                             customTitle: fullSession.customTitle ?? current.customTitle,
                             codexOriginator: fullSession.codexOriginator ?? current.codexOriginator,
                             codexSource: fullSession.codexSource ?? current.codexSource,
-                            codexSurface: fullSession.codexSurface ?? current.codexSurface
+                            codexSurface: fullSession.codexSurface ?? current.codexSurface,
+                            reasoningEffort: fullSession.reasoningEffort ?? current.reasoningEffort
                         )
                         var updated = self.allSessions
                         updated[idx] = merged
@@ -843,7 +844,8 @@ final class SessionIndexer: ObservableObject {
                         customTitle: session.customTitle ?? existing.customTitle,
                         codexOriginator: session.codexOriginator ?? existing.codexOriginator,
                         codexSource: session.codexSource ?? existing.codexSource,
-                        codexSurface: session.codexSurface ?? existing.codexSurface
+                        codexSurface: session.codexSurface ?? existing.codexSurface,
+                        reasoningEffort: session.reasoningEffort ?? existing.reasoningEffort
                     )
                     mergedByPath[session.filePath] = merged
                 } else {
@@ -1063,7 +1065,8 @@ final class SessionIndexer: ObservableObject {
             customTitle: s.customTitle,
             codexOriginator: s.codexOriginator,
             codexSource: s.codexSource,
-            codexSurface: s.codexSurface?.rawValue
+            codexSurface: s.codexSurface?.rawValue,
+            reasoningEffort: s.reasoningEffort
         )
     }
 
@@ -1310,7 +1313,8 @@ final class SessionIndexer: ObservableObject {
                 customTitle: session.customTitle,
                 codexOriginator: session.codexOriginator,
                 codexSource: session.codexSource,
-                codexSurface: session.codexSurface
+                codexSurface: session.codexSurface,
+                reasoningEffort: session.reasoningEffort
             )
             var enriched = rebuilt
             enriched.isFavorite = session.isFavorite
@@ -1465,7 +1469,8 @@ final class SessionIndexer: ObservableObject {
                 customTitle: sessions[i].customTitle,
                 codexOriginator: sessions[i].codexOriginator,
                 codexSource: sessions[i].codexSource,
-                codexSurface: sessions[i].codexSurface
+                codexSurface: sessions[i].codexSurface,
+                reasoningEffort: sessions[i].reasoningEffort
             )
             rebuilt.isFavorite = wasFavorite
             sessions[i] = rebuilt
@@ -1658,7 +1663,8 @@ final class SessionIndexer: ObservableObject {
                 customTitle: name,
                 codexOriginator: sessions[i].codexOriginator,
                 codexSource: sessions[i].codexSource,
-                codexSurface: sessions[i].codexSurface
+                codexSurface: sessions[i].codexSurface,
+                reasoningEffort: sessions[i].reasoningEffort
             )
             rebuilt.isFavorite = wasFavorite
             sessions[i] = rebuilt
@@ -1767,6 +1773,7 @@ final class SessionIndexer: ObservableObject {
         var parentSessionID: String? = nil
         var subagentType: String? = nil
         var codexSurfaceMetadata: CodexSurfaceMetadata? = nil
+        var reasoningEffort: String? = nil
         var idx = 0
         DBG("    📖 parseFileFull: Starting forEachLine...")
         do {
@@ -1800,9 +1807,14 @@ final class SessionIndexer: ObservableObject {
                         }
                     }
 
-                    if objType == "turn_context", let payload,
-                       let turnModel = payload["model"] as? String, !turnModel.isEmpty {
-                        modelSeen = turnModel
+                    if objType == "turn_context", let payload {
+                        if let turnModel = payload["model"] as? String, !turnModel.isEmpty {
+                            modelSeen = turnModel
+                        }
+                        if reasoningEffort == nil,
+                           let effort = payload["effort"] as? String, !effort.isEmpty {
+                            reasoningEffort = effort
+                        }
                     }
                 }
 
@@ -1827,6 +1839,7 @@ final class SessionIndexer: ObservableObject {
         let nonMetaCount = events.filter { $0.kind != .meta }.count
         let isHousekeeping = Session.computeIsHousekeeping(source: .codex, events: events)
         let internalSessionIDHint = Session.deriveCodexInternalSessionID(from: events)
+        let subagentReasoningEffort = (parentSessionID != nil || subagentType != nil) ? reasoningEffort : nil
         let session = Session(id: id,
                               source: .codex,
                               startTime: start,
@@ -1842,7 +1855,8 @@ final class SessionIndexer: ObservableObject {
                               subagentType: subagentType,
                               codexOriginator: codexSurfaceMetadata?.originator,
                               codexSource: codexSurfaceMetadata?.source,
-                              codexSurface: codexSurfaceMetadata?.surface ?? .unknown)
+                              codexSurface: codexSurfaceMetadata?.surface ?? .unknown,
+                              reasoningEffort: subagentReasoningEffort)
 
         if size > 5_000_000 {  // Log full parse of files >5MB
             DBG("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
@@ -1933,6 +1947,7 @@ final class SessionIndexer: ObservableObject {
         var parentSessionID: String? = nil
         var subagentType: String? = nil
         var codexSurfaceMetadata: CodexSurfaceMetadata? = nil
+        var reasoningEffort: String? = nil
 
         func ingest(_ raw: String) {
             let line = sanitizeCodexHugeFields(sanitizeImagePayload(raw))
@@ -1984,10 +1999,15 @@ final class SessionIndexer: ObservableObject {
                     }
                 }
 
-                // Codex turn_context: extract actual LLM model
-                if objType == "turn_context", let payload,
-                   let turnModel = payload["model"] as? String, !turnModel.isEmpty {
-                    model = turnModel
+                // Codex turn_context: extract actual LLM model and provider-reported effort.
+                if objType == "turn_context", let payload {
+                    if let turnModel = payload["model"] as? String, !turnModel.isEmpty {
+                        model = turnModel
+                    }
+                    if reasoningEffort == nil,
+                       let effort = payload["effort"] as? String, !effort.isEmpty {
+                        reasoningEffort = effort
+                    }
                 }
             } else if cwd == nil, let text = ev.text, text.contains("<cwd>") {
                 if let start = text.range(of: "<cwd>"),
@@ -2014,6 +2034,7 @@ final class SessionIndexer: ObservableObject {
         let internalSessionIDHint = Session.deriveCodexInternalSessionID(from: sampleEvents)
         // Use sample events for title/cwd extraction, then create lightweight session
         let tempIsHousekeeping = Session.computeIsHousekeeping(source: .codex, events: sampleEvents)
+        let subagentReasoningEffort = (parentSessionID != nil || subagentType != nil) ? reasoningEffort : nil
         let tempSession = Session(id: id,
                                   source: .codex,
                                   startTime: tmin,
@@ -2029,7 +2050,8 @@ final class SessionIndexer: ObservableObject {
                                   subagentType: subagentType,
                                   codexOriginator: codexSurfaceMetadata?.originator,
                                   codexSource: codexSurfaceMetadata?.source,
-                                  codexSurface: codexSurfaceMetadata?.surface ?? .unknown)
+                                  codexSurface: codexSurfaceMetadata?.surface ?? .unknown,
+                                  reasoningEffort: subagentReasoningEffort)
 
         // Extract title from sample events using existing logic
         let title = tempSession.codexPreviewTitle ?? tempSession.title
@@ -2054,7 +2076,8 @@ final class SessionIndexer: ObservableObject {
                               customTitle: tempSession.customTitle,
                               codexOriginator: codexSurfaceMetadata?.originator,
                               codexSource: codexSurfaceMetadata?.source,
-                              codexSurface: codexSurfaceMetadata?.surface ?? .unknown)
+                              codexSurface: codexSurfaceMetadata?.surface ?? .unknown,
+                              reasoningEffort: subagentReasoningEffort)
         return session
     }
 
