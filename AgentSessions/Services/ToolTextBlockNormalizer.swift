@@ -186,9 +186,12 @@ enum ToolTextBlockNormalizer {
 
         var info = OutputInfo()
         var parsedOutputObject: Any?
+        var parsedOutputTrailingText: String?
         if let outputText,
-           let obj = parseJSON(outputText) {
+           let parsed = parseJSONWithTrailingText(outputText) {
+            let obj = parsed.object
             parsedOutputObject = obj
+            parsedOutputTrailingText = parsed.trailingText
             if let blockText = extractTextBlocksDeep(from: obj) {
                 appendStdout(blockText, into: &info)
             }
@@ -239,7 +242,8 @@ enum ToolTextBlockNormalizer {
 
         if let parsedOutputObject,
            let summaryLines = structuredSummaryLines(from: parsedOutputObject) {
-            return (structuredSummaryLabel(toolName: toolName, fallback: label, object: parsedOutputObject), summaryLines)
+            return (structuredSummaryLabel(toolName: toolName, fallback: label, object: parsedOutputObject),
+                    appendTrailingText(parsedOutputTrailingText, to: summaryLines))
         }
 
         if shouldPreferStructuredJSONDisplay(parsedOutputObject, extracted: info, rawOutput: outputText),
@@ -371,14 +375,27 @@ enum ToolTextBlockNormalizer {
     }
 
     private static func parseJSON(_ text: String) -> Any? {
+        parseJSONWithTrailingText(text)?.object
+    }
+
+    private static func parseJSONWithTrailingText(_ text: String) -> (object: Any, trailingText: String?)? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
             if let obj = parseJSONObject(from: trimmed) {
-                return obj
+                return (obj, nil)
             }
             if let sanitized = sanitizeNonStrictJSON(trimmed),
                let obj = parseJSONObject(from: sanitized) {
-                return obj
+                return (obj, nil)
+            }
+            if let split = splitLeadingJSONObject(from: trimmed) {
+                if let obj = parseJSONObject(from: split.jsonText) {
+                    return (obj, split.trailingText)
+                }
+                if let sanitized = sanitizeNonStrictJSON(split.jsonText),
+                   let obj = parseJSONObject(from: sanitized) {
+                    return (obj, split.trailingText)
+                }
             }
             return nil
         }
@@ -389,12 +406,57 @@ enum ToolTextBlockNormalizer {
         let base64Like = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=_-")
         if trimmed.rangeOfCharacter(from: base64Like.inverted) != nil { return nil }
         guard let data = Data(base64Encoded: trimmed), !data.isEmpty else { return nil }
-        return try? JSONSerialization.jsonObject(with: data)
+        guard let obj = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        return (obj, nil)
     }
 
     private static func parseJSONObject(from text: String) -> Any? {
         guard let data = text.data(using: .utf8) else { return nil }
         return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    private static func splitLeadingJSONObject(from text: String) -> (jsonText: String, trailingText: String?)? {
+        guard let first = text.first,
+              first == "{" || first == "[" else {
+            return nil
+        }
+
+        var stack: [Character] = []
+        var inString = false
+        var isEscaped = false
+
+        for index in text.indices {
+            let char = text[index]
+            if inString {
+                if isEscaped {
+                    isEscaped = false
+                } else if char == "\\" {
+                    isEscaped = true
+                } else if char == "\"" {
+                    inString = false
+                }
+                continue
+            }
+
+            if char == "\"" {
+                inString = true
+            } else if char == "{" {
+                stack.append("}")
+            } else if char == "[" {
+                stack.append("]")
+            } else if char == "}" || char == "]" {
+                guard stack.last == char else { return nil }
+                stack.removeLast()
+                if stack.isEmpty {
+                    let jsonEnd = text.index(after: index)
+                    let jsonText = String(text[..<jsonEnd])
+                    let trailing = String(text[jsonEnd...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    return (jsonText, trailing.isEmpty ? nil : trailing)
+                }
+            }
+        }
+
+        return nil
     }
 
     /// Best-effort cleanup for "JSON-like" payloads that embed literal control characters (notably newlines)
@@ -926,7 +988,17 @@ enum ToolTextBlockNormalizer {
             return lines.isEmpty ? nil : lines
         }
 
-        let collectionKeys = ["matches", "files", "items", "security_concerns", "logic_errors", "suggestions"]
+        if let rawMatches = dict["matches"],
+           let matchLines = readableSearchMatchLines(value: rawMatches) {
+            appendCountLine(key: "matches", count: matchLines.count, to: &lines)
+            if !matchLines.isEmpty {
+                if !lines.isEmpty { lines.append("") }
+                lines.append(contentsOf: groupedSearchMatchLines(matchLines))
+            }
+            return lines.isEmpty ? nil : lines
+        }
+
+        let collectionKeys = ["files", "items", "security_concerns", "logic_errors", "suggestions"]
         var appendedCollection = false
         for key in collectionKeys {
             guard let value = dict[key] else { continue }
@@ -1003,6 +1075,68 @@ enum ToolTextBlockNormalizer {
         if !lines.contains(countLine) {
             lines.append(countLine)
         }
+    }
+
+    private struct SearchMatchLine {
+        let path: String
+        let line: Int?
+        let content: String
+    }
+
+    private static func readableSearchMatchLines(value: Any) -> [SearchMatchLine]? {
+        guard let array = value as? [Any] else { return nil }
+        if array.isEmpty { return [] }
+
+        var matches: [SearchMatchLine] = []
+        matches.reserveCapacity(array.count)
+
+        for item in array {
+            guard let dict = item as? [String: Any],
+                  let path = firstString(for: ["path", "file"], in: dict),
+                  dict.keys.allSatisfy({ ["path", "file", "line", "line_number", "content", "text", "match"].contains($0) }) else {
+                return nil
+            }
+
+            let content = firstString(for: ["content", "text", "match"], in: dict) ?? ""
+            matches.append(SearchMatchLine(path: path,
+                                           line: firstInt(for: ["line", "line_number"], in: dict),
+                                           content: content))
+        }
+
+        return matches
+    }
+
+    private static func groupedSearchMatchLines(_ matches: [SearchMatchLine]) -> [String] {
+        var lines: [String] = []
+        var currentPath: String?
+
+        for match in matches {
+            if currentPath != match.path {
+                if !lines.isEmpty { lines.append("") }
+                lines.append(match.path)
+                currentPath = match.path
+            }
+
+            if let line = match.line {
+                lines.append(match.content.isEmpty ? "\(line):" : "\(line): \(match.content)")
+            } else {
+                lines.append(match.content)
+            }
+        }
+
+        return lines
+    }
+
+    private static func appendTrailingText(_ trailingText: String?, to lines: [String]) -> [String] {
+        guard let trailingText,
+              !trailingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return lines
+        }
+
+        var output = lines
+        if !output.isEmpty { output.append("") }
+        output.append(contentsOf: splitAndTrimTrailingEmptyLines(trailingText))
+        return output
     }
 
     private static func readableScalarText(_ value: Any) -> String? {

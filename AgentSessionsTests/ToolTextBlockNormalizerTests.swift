@@ -175,24 +175,44 @@ final class ToolTextBlockNormalizerTests: XCTestCase {
         ])
     }
 
-    func testHermesMatchObjectsRenderAsReadableRows() {
-        let output = #"{"total_count":2,"matches":[{"path":"/tmp/a.swift","line":12,"content":"let a = 1"},{"path":"/tmp/b.swift","line":20,"content":"let b = 2"}],"truncated":false}"#
+    func testHermesMatchObjectsRenderAsGroupedGrepRows() {
+        let output = #"{"total_count":3,"matches":[{"path":"/tmp/a.swift","line":12,"content":"let a = 1"},{"path":"/tmp/a.swift","line":13,"content":""},{"path":"/tmp/b.swift","line":20,"content":"let b = 2"}],"truncated":false}"#
         let event = makeEvent(kind: .tool_result,
                               toolName: "tool",
                               toolOutput: output,
                               rawJSON: "{}")
         let block = ToolTextBlockNormalizer.normalize(event: event, source: .hermes)
         XCTAssertEqual(block?.lines, [
-            "total_count: 2",
-            "matches: 2",
+            "total_count: 3",
+            "matches: 3",
             "",
-            "[1] /tmp/a.swift",
-            "line: 12",
-            "content: let a = 1",
+            "/tmp/a.swift",
+            "12: let a = 1",
+            "13:",
             "",
-            "[2] /tmp/b.swift",
-            "line: 20",
-            "content: let b = 2"
+            "/tmp/b.swift",
+            "20: let b = 2"
+        ])
+    }
+
+    func testHermesMatchObjectsPreserveTrailingHintText() {
+        let output = """
+        {"matches":[{"path":"/tmp/a.swift","line":12,"content":"let a = 1"}]}
+
+        [Hint: Results truncated. Use offset=20 to see more, or narrow with a more specific pattern or file_glob.]
+        """
+        let event = makeEvent(kind: .tool_result,
+                              toolName: "tool",
+                              toolOutput: output,
+                              rawJSON: "{}")
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .hermes)
+        XCTAssertEqual(block?.lines, [
+            "matches: 1",
+            "",
+            "/tmp/a.swift",
+            "12: let a = 1",
+            "",
+            "[Hint: Results truncated. Use offset=20 to see more, or narrow with a more specific pattern or file_glob.]"
         ])
     }
 
