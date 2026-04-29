@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 - Onboarding: Added a Power Tips slide for update and fresh-install tours, highlighting Hide Dock icon and Agent Cockpit.
 - Session list: Archived Codex Desktop sessions now show the existing `desk` surface pill in italic.
+- Claude: Generated `ai-title` metadata now improves Sessions-list titles when no explicit `/rename` title exists.
+- Monitoring: Added Hermes session-format checks for `~/.hermes/sessions/session_*.json` and removed Droid from the active monitoring set.
+- Gemini: Added support for Gemini CLI 0.40 JSONL session files under `~/.gemini/tmp/<project>/chats/session-*.jsonl`.
+- Monitoring: Updated agent format checks for Claude 2.1.123 metadata, Gemini 0.40 JSONL sessions, Copilot 1.0.39 `system.message`, OpenCode 1.14.29, and OpenClaw 2026.4.26.
 - Session view: Added a floating top up-arrow that jumps directly to the first real user prompt.
 - Session view: User prompt blocks now use a softer gray background in light mode while preserving the previous prompt text color.
 - Transcripts: JSON-style tool outputs now render simple results, entries, files, grouped search matches, accessibility trees, error envelopes, suggestions, and trailing hints as readable transcript text instead of raw pretty-printed JSON.

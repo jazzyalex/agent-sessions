@@ -1,0 +1,73 @@
+{
+  "session_id": "20260429_hermes_large",
+  "model": "gpt-5.2",
+  "platform": "telegram",
+  "session_start": "2026-04-29T20:05:00.000Z",
+  "last_updated": "2026-04-29T20:05:12.000Z",
+  "model_config": {
+    "cwd": "~/Repository/Codex-History"
+  },
+  "message_count": 4,
+  "system_prompt": "You are Hermes.",
+  "base_url": "https://api.example.test/v1",
+  "tools": [
+    {
+      "name": "shell",
+      "type": "function",
+      "description": "Run a shell command",
+      "function": {
+        "name": "shell"
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": "Check the current directory."
+    },
+    {
+      "role": "assistant",
+      "content": "I will inspect the directory.",
+      "reasoning": "Need a shell lookup.",
+      "reasoning_content": "Need a shell lookup.",
+      "codex_reasoning_items": [
+        {
+          "type": "summary",
+          "text": "Directory inspection"
+        }
+      ],
+      "tool_calls": [
+        {
+          "id": "call_001",
+          "call_id": "call_001",
+          "response_item_id": "rs_001",
+          "type": "function",
+          "function": {
+            "name": "shell",
+            "arguments": "{\"command\":\"pwd\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "/Users/alexm/Repository/Codex-History",
+      "tool_call_id": "call_001",
+      "tool_name": "shell",
+      "finish_reason": "stop"
+    },
+    {
+      "role": "assistant",
+      "content": "The current directory is /Users/alexm/Repository/Codex-History.",
+      "finish_reason": "stop"
+    }
+  ]
+}

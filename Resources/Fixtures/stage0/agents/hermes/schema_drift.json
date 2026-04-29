@@ -1,0 +1,45 @@
+{
+  "session_id": "20260429_hermes_schema_drift",
+  "model": "gpt-5.2",
+  "platform": "cli",
+  "session_start": "2026-04-29T20:10:00",
+  "last_updated": "2026-04-29T20:10:08",
+  "cwd": "/tmp/hermes-drift",
+  "message_count": 3,
+  "conversation_tags": [
+    "format-check"
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": "Exercise additive Hermes metadata.",
+      "client_metadata": {
+        "surface": "cli"
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "Calling a tool.",
+      "tool_calls": [
+        {
+          "id": "call_drift",
+          "type": "function",
+          "function": {
+            "name": "memory",
+            "arguments": "{\"query\":\"session format\"}"
+          },
+          "extra": {
+            "latency_ms": 12
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "No results.",
+      "tool_call_id": "call_drift",
+      "tool_name": "memory",
+      "finish_reason": "error"
+    }
+  ]
+}

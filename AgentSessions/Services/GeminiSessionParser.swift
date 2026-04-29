@@ -17,8 +17,7 @@ final class GeminiSessionParser {
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
 
-        guard let data = try? Data(contentsOf: url),
-              let any = try? JSONSerialization.jsonObject(with: data) else {
+        guard let any = loadJSONOrJSONL(at: url) else {
             return nil
         }
 
@@ -78,8 +77,7 @@ final class GeminiSessionParser {
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let sid = forcedID ?? sha256(path: url.path)
 
-        guard let data = try? Data(contentsOf: url),
-              let any = try? JSONSerialization.jsonObject(with: data) else {
+        guard let any = loadJSONOrJSONL(at: url) else {
             return nil
         }
 
@@ -246,10 +244,36 @@ final class GeminiSessionParser {
         var sessionID: String? = nil
     }
 
+    private static func loadJSONOrJSONL(at url: URL) -> Any? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        if let any = try? JSONSerialization.jsonObject(with: data) {
+            return any
+        }
+
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        var items: [Any] = []
+        for line in text.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, let lineData = trimmed.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: lineData) else {
+                continue
+            }
+            items.append(obj)
+        }
+        return items.isEmpty ? nil : items
+    }
+
     private static func extractItemsAndMeta(from any: Any) -> ([Any]?, Meta) {
         var meta = Meta()
         if let arr = any as? [Any] {
-            // Flat array of messages
+            // Flat array of messages, or Gemini 0.40+ JSONL lines whose first
+            // record carries session metadata.
+            if let first = arr.first as? [String: Any] {
+                meta.model = first["model"] as? String
+                meta.startTime = first["startTime"] ?? first["start_time"]
+                meta.lastUpdated = first["lastUpdated"] ?? first["last_updated"]
+                meta.sessionID = (first["sessionId"] as? String) ?? (first["session_id"] as? String) ?? (first["id"] as? String)
+            }
             meta.firstTS = timestampOf(item: arr.first)
             meta.lastTS = timestampOf(item: arr.last)
             return (arr, meta)

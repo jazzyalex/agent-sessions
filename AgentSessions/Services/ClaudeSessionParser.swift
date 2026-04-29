@@ -42,6 +42,7 @@ final class ClaudeSessionParser {
         var tmin: Date?
         var tmax: Date?
         var customTitle: String?
+        var aiTitle: String?
         var hasExplicitCustomTitle = false
         var idx = 0
 
@@ -86,13 +87,17 @@ final class ClaudeSessionParser {
                     if tmax == nil || ts > tmax! { tmax = ts }
                 }
 
-                // Extract custom title from /rename records.
-                // custom-title always wins; agent-name is only a fallback.
+                // Extract row titles. custom-title from /rename always wins;
+                // ai-title is a generated fallback; agent-name is weakest.
                 if let t = obj["type"] as? String {
                     if t == "custom-title", let ct = obj["customTitle"] as? String, !ct.isEmpty {
                         customTitle = ct
                         hasExplicitCustomTitle = true
+                    } else if t == "ai-title", aiTitle == nil,
+                              let at = obj["aiTitle"] as? String, !at.isEmpty {
+                        aiTitle = at
                     } else if t == "agent-name", !hasExplicitCustomTitle,
+                              aiTitle == nil,
                               let an = obj["agentName"] as? String, !an.isEmpty {
                         customTitle = an
                     }
@@ -126,7 +131,7 @@ final class ClaudeSessionParser {
             events: events,
             cwd: cwd,
             repoName: nil,
-            lightweightTitle: nil,
+            lightweightTitle: hasExplicitCustomTitle ? nil : aiTitle,
             isHousekeeping: isHousekeeping,
             codexInternalSessionIDHint: sessionID,
             parentSessionID: parentSessionID,
@@ -705,6 +710,7 @@ final class ClaudeSessionParser {
             var sampleCount = 0
             var sampleEvents: [SessionEvent] = []
             var customTitle: String?
+            var aiTitle: String?
             var hasExplicitCustomTitle = false
 
             func ingest(_ rawLine: String) {
@@ -740,13 +746,17 @@ final class ClaudeSessionParser {
                     if tmax == nil || ts > tmax! { tmax = ts }
                 }
 
-                // Extract custom title from /rename records.
-                // custom-title always wins; agent-name is only a fallback.
+                // Extract row titles. custom-title from /rename always wins;
+                // ai-title is a generated fallback; agent-name is weakest.
                 if let t = obj["type"] as? String {
                     if t == "custom-title", let ct = obj["customTitle"] as? String, !ct.isEmpty {
                         customTitle = ct
                         hasExplicitCustomTitle = true
+                    } else if t == "ai-title", aiTitle == nil,
+                              let at = obj["aiTitle"] as? String, !at.isEmpty {
+                        aiTitle = at
                     } else if t == "agent-name", !hasExplicitCustomTitle,
+                              aiTitle == nil,
                               let an = obj["agentName"] as? String, !an.isEmpty {
                         customTitle = an
                     }
@@ -762,12 +772,13 @@ final class ClaudeSessionParser {
             tailLines.forEach(ingest)
 
             // If no explicit custom-title found in head/tail, do a targeted chunked scan of the gap.
-            // Only searches for explicit custom-title records (not agent-name) to avoid regressing
-            // a newer fallback title from tail with older gap data.
+            // Search for custom-title and generated ai-title records, but not agent-name, to avoid
+            // regressing a newer fallback title from tail with older gap data.
             // Capped at 8MB to bound I/O for very large sessions without custom-title records.
             let gapScanBudget = 8 * 1024 * 1024
             if !hasExplicitCustomTitle, fileSize > headBytes + tailBytes {
-                let marker = Data("\"custom-title\"".utf8)
+                let customMarker = Data("\"custom-title\"".utf8)
+                let aiMarker = Data("\"ai-title\"".utf8)
                 let newline = UInt8(0x0a)
                 if let gapFH = try? FileHandle(forReadingFrom: url) {
                     defer { try? gapFH.close() }
@@ -810,17 +821,22 @@ final class ClaudeSessionParser {
                             while let nlIdx = buffer[start...].firstIndex(of: newline) {
                                 let lineData = buffer[start..<nlIdx]
                                 start = buffer.index(after: nlIdx)
-                                // Fast byte-level check for marker before any decoding
-                                guard lineData.range(of: marker) != nil else { continue }
+                                // Fast byte-level check for markers before any decoding.
+                                let hasCustomMarker = lineData.range(of: customMarker) != nil
+                                let hasAIMarker = lineData.range(of: aiMarker) != nil
+                                guard hasCustomMarker || hasAIMarker else { continue }
                                 guard let line = String(data: lineData, encoding: .utf8),
                                       let ld = line.data(using: .utf8),
                                       let obj = try? JSONSerialization.jsonObject(with: ld) as? [String: Any],
-                                      let t = obj["type"] as? String,
-                                      t == "custom-title",
-                                      let ct = obj["customTitle"] as? String, !ct.isEmpty else { continue }
-                                customTitle = ct
-                                hasExplicitCustomTitle = true
-                                break scanLoop
+                                      let t = obj["type"] as? String else { continue }
+                                if t == "custom-title", let ct = obj["customTitle"] as? String, !ct.isEmpty {
+                                    customTitle = ct
+                                    hasExplicitCustomTitle = true
+                                    break scanLoop
+                                }
+                                if t == "ai-title", aiTitle == nil, let at = obj["aiTitle"] as? String, !at.isEmpty {
+                                    aiTitle = at
+                                }
                             }
                             if start < buffer.endIndex {
                                 remainder = Data(buffer[start...])
@@ -836,12 +852,13 @@ final class ClaudeSessionParser {
             let avgLineLen = max(256, headBytesRead / max(newlineCount, 1))
             let estEvents = max(1, min(1_000_000, fileSize / avgLineLen))
 
-            // Extract title from sample events. Pass customTitle (including agent-name fallback)
+            // Extract title from sample events. Pass customTitle, aiTitle, or agent-name fallback
             // to the temp session so it influences title computation, then capture the result
             // as lightweightTitle. Only persist explicit custom-title values on the final session
-            // to prevent agent-name fallbacks from overwriting authoritative titles in the DB.
+            // to prevent generated or agent-name fallbacks from overwriting authoritative titles in the DB.
             let effectiveModel = llmModel ?? model
             let tempIsHousekeeping = Session.computeIsHousekeeping(source: .claude, events: sampleEvents)
+            let titleFallback = hasExplicitCustomTitle ? customTitle : (aiTitle ?? customTitle)
             let tempSession = Session(id: hash(path: url.path),
                                       source: .claude,
                                       startTime: tmin,
@@ -858,7 +875,7 @@ final class ClaudeSessionParser {
                                       codexInternalSessionIDHint: sessionID,
                                       parentSessionID: parentSessionID,
                                       subagentType: subagentType,
-                                      customTitle: customTitle)
+                                      customTitle: titleFallback)
             let title = tempSession.title
             let explicitCustomTitle = hasExplicitCustomTitle ? customTitle : nil
 

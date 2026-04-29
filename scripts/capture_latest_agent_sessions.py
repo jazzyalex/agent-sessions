@@ -3,7 +3,7 @@
 Capture the most recently modified local agent session artifacts into a repo-local folder.
 
 This is intended for "auto mode" evidence collection when upstream session formats drift:
-- Gemini: copy the newest `session-*.json` from `~/.gemini/tmp/**/(chats/)?`.
+- Gemini: copy the newest `session-*.json` or `session-*.jsonl` from `~/.gemini/tmp/**/(chats/)?`.
 - OpenCode: copy the newest `ses_*.json` plus the referenced message/part trees from
   `~/.local/share/opencode/storage/**`.
 - OpenClaw: copy the newest `*.jsonl` under OpenClaw/clawdbot session roots:
@@ -71,7 +71,7 @@ def capture_gemini(dest_root: Path) -> list[CaptureResult]:
     if not gemini_root.exists():
         return []
 
-    candidates = list(gemini_root.rglob("session-*.json"))
+    candidates = list(gemini_root.rglob("session-*.json")) + list(gemini_root.rglob("session-*.jsonl"))
     if not candidates:
         return []
 

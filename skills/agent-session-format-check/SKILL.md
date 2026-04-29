@@ -91,8 +91,8 @@ env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
 and real HOME is never read. Otherwise the driver copies the declared
 credential file from real HOME into the sandbox after running three hygiene
 gates (64 KiB max, mode `0600`, ≤90-day mtime warning). v1 drivers:
-`codex_exec`, `claude_print`, `gemini_prompt`, `droid_exec`, `copilot_prompt`.
-opencode + openclaw are v2.
+`codex_exec`, `claude_print`, `gemini_prompt`, `copilot_prompt`.
+opencode + openclaw are v2. Droid is legacy-only and excluded from active checks.
 
 ---
 
@@ -203,7 +203,7 @@ Key contracts (simplified from regexes in `agent-watch-config.json`):
 | Codex    | `*/sessions/YYYY/MM/DD/rollout-*.jsonl` |
 | Claude   | `~/.claude/projects/**/*.{jsonl,ndjson}` |
 | OpenCode | `*/opencode/storage/session/*/ses_*.json` |
-| Droid    | `~/.factory/sessions/**/*.jsonl` |
+| Hermes   | `~/.hermes/sessions/session_*.json` |
 | Gemini   | `~/.gemini/tmp/<hash>/(chats/)?session-*.json` |
 | Copilot  | `~/.copilot/session-state/*.jsonl` |
 | OpenClaw | `*/agents/<id>/sessions/*.jsonl` |

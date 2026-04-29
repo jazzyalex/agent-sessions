@@ -49,6 +49,29 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertTrue(full.events.contains(where: { $0.kind == .meta }))
     }
 
+    func testClaudeAITitleIsRowTitleFallback() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-AITitle-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: dir) }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("session.jsonl")
+        try """
+        {"type":"system","sessionId":"ses_ai_title","uuid":"s1","timestamp":"2026-04-29T21:00:00.000Z","cwd":"/tmp","version":"2.1.123"}
+        {"type":"agent-name","sessionId":"ses_ai_title","agentName":"Claude Code"}
+        {"type":"ai-title","sessionId":"ses_ai_title","aiTitle":"Generated concise title"}
+        {"type":"user","sessionId":"ses_ai_title","uuid":"u1","timestamp":"2026-04-29T21:00:01.000Z","message":{"role":"user","content":"This is a much longer prompt"}}
+        {"type":"assistant","sessionId":"ses_ai_title","uuid":"a1","timestamp":"2026-04-29T21:00:02.000Z","message":{"role":"assistant","content":"Done."}}
+        """.write(to: url, atomically: true, encoding: .utf8)
+
+        guard let preview = ClaudeSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
+        XCTAssertEqual(preview.listTitle, "Generated concise title")
+        XCTAssertNil(preview.customTitle)
+
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        XCTAssertEqual(full.listTitle, "Generated concise title")
+        XCTAssertNil(full.customTitle)
+    }
+
     func testClaudeLargeAndSchemaDriftParses() throws {
         for name in ["agents/claude/large.jsonl", "agents/claude/schema_drift.jsonl"] {
             let url = FixturePaths.stage0FixtureURL(name)
@@ -156,8 +179,22 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         }
     }
 
+    func testHermesFixturesParse() throws {
+        for name in ["agents/hermes/small.json", "agents/hermes/large.json", "agents/hermes/schema_drift.json"] {
+            let url = FixturePaths.stage0FixtureURL(name)
+            guard let preview = HermesSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil: \(name)") }
+            XCTAssertEqual(preview.source, .hermes)
+            XCTAssertTrue(preview.events.isEmpty)
+            XCTAssertGreaterThan(preview.eventCount, 0)
+
+            guard let full = HermesSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil: \(name)") }
+            XCTAssertEqual(full.source, .hermes)
+            XCTAssertFalse(full.events.isEmpty)
+        }
+    }
+
     func testGeminiFixturesParse() throws {
-        for name in ["agents/gemini/small.json", "agents/gemini/schema_drift.json", "agents/gemini/large.json"] {
+        for name in ["agents/gemini/small.json", "agents/gemini/schema_drift.json", "agents/gemini/large.json", "agents/gemini/jsonl_v040.jsonl"] {
             let url = FixturePaths.stage0FixtureURL(name)
             guard let preview = GeminiSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil: \(name)") }
             XCTAssertEqual(preview.source, .gemini)

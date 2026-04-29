@@ -3,8 +3,8 @@ import Foundation
 // MARK: - Gemini Session Discovery
 
 /// Discovery for Google Gemini CLI session checkpoints (ephemeral)
-/// Expected layout: ~/.gemini/tmp/<project>/chats/session-*.json
-/// Also handle fallback: ~/.gemini/tmp/<project>/session-*.json
+/// Expected layout: ~/.gemini/tmp/<project>/chats/session-*.json or session-*.jsonl.
+/// Also handle fallback: ~/.gemini/tmp/<project>/session-*.json[l]
 final class GeminiSessionDiscovery: SessionDiscovery {
     private let customRoot: String?
 
@@ -41,10 +41,10 @@ final class GeminiSessionDiscovery: SessionDiscovery {
 
             // Prefer chats/ subdir when present.
             let chats = proj.appendingPathComponent("chats", isDirectory: true)
-            let chatFiles = sessionJSONFiles(in: chats, fileManager: fm)
+            let chatFiles = sessionFiles(in: chats, fileManager: fm)
 
             // Fallback: look directly in project dir for session-*.json
-            let rootFiles = sessionJSONFiles(in: proj, fileManager: fm)
+            let rootFiles = sessionFiles(in: proj, fileManager: fm)
 
             // Only accept directories that actually contain session files.
             if chatFiles.isEmpty && rootFiles.isEmpty {
@@ -71,7 +71,7 @@ final class GeminiSessionDiscovery: SessionDiscovery {
         return out
     }
 
-    private func sessionJSONFiles(in dir: URL, fileManager fm: FileManager) -> [URL] {
+    private func sessionFiles(in dir: URL, fileManager fm: FileManager) -> [URL] {
         guard (try? dir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
             return []
         }
@@ -85,7 +85,8 @@ final class GeminiSessionDiscovery: SessionDiscovery {
             return []
         }
         for case let f as URL in it {
-            if f.pathExtension.lowercased() == "json" && f.lastPathComponent.hasPrefix("session-") {
+            let ext = f.pathExtension.lowercased()
+            if (ext == "json" || ext == "jsonl") && f.lastPathComponent.hasPrefix("session-") {
                 found.append(f)
             }
         }

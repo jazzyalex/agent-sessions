@@ -333,14 +333,15 @@ class GeminiPromptDriver:
         newest: Path | None = None
         newest_m = -1.0
         if tmp_root.exists():
-            for p in tmp_root.rglob("session-*.json"):
-                try:
-                    m = p.stat().st_mtime
-                except OSError:
-                    continue
-                if m > newest_m:
-                    newest = p
-                    newest_m = m
+            for pattern in ("session-*.json", "session-*.jsonl"):
+                for p in tmp_root.rglob(pattern):
+                    try:
+                        m = p.stat().st_mtime
+                    except OSError:
+                        continue
+                    if m > newest_m:
+                        newest = p
+                        newest_m = m
 
         if rc != 0 or newest is None:
             return DriverResult(False, newest, stdout_file, stderr_file, rc, f"gemini_prompt_failed rc={rc}")

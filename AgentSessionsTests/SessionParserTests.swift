@@ -1327,10 +1327,12 @@ final class SessionParserTests: XCTestCase {
         try fm.createDirectory(at: noiseDir, withIntermediateDirectories: true)
 
         let chatsSession = namedWithChats.appendingPathComponent("session-1.json")
+        let chatsJSONLSession = namedWithChats.appendingPathComponent("session-1b.jsonl")
         let rootSession = namedWithoutChats.appendingPathComponent("session-2.json")
         let ignoredSession = noiseDir.appendingPathComponent("session-bin.json")
 
         try writeText("{}", to: chatsSession)
+        try writeText("{}", to: chatsJSONLSession)
         try writeText("{}", to: rootSession)
         try writeText("{}", to: ignoredSession)
 
@@ -1338,6 +1340,7 @@ final class SessionParserTests: XCTestCase {
         let found = Set(discovery.discoverSessionFiles().map(canonicalPath))
 
         XCTAssertTrue(found.contains(canonicalPath(chatsSession)))
+        XCTAssertTrue(found.contains(canonicalPath(chatsJSONLSession)))
         XCTAssertTrue(found.contains(canonicalPath(rootSession)))
         XCTAssertFalse(found.contains(canonicalPath(ignoredSession)))
     }

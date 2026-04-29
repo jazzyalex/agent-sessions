@@ -17,7 +17,7 @@ This is intentionally **non-destructive**:
 
 ## Cadence
 - Daily: `codex`, `claude`, `opencode`, `openclaw` (release watch only; quiet unless there is actionable change).
-- Weekly: all 7 active agents including `gemini`, `copilot`, and `cursor` (release watch + minimal probes + schema fingerprints).
+- Weekly: all 8 active agents including `gemini`, `copilot`, `cursor`, and `hermes` (release watch + minimal probes + schema fingerprints).
 - Weekly also enforces `discovery_path_contract` checks from config to catch storage-layout drift that can break app discovery even when parser schema still matches.
 
 ## Sources of Truth

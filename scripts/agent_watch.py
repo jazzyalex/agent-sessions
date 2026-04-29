@@ -553,16 +553,33 @@ def _gemini_session_json_schema_fingerprint(path: Path, max_messages: int) -> di
     parse_errors: int = 0
     parsed_messages: int = 0
 
+    parse_errors = 0
     try:
         root = json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except Exception:
-        return {
-            "file": str(path),
-            "type_counts": {},
-            "type_keys": {},
-            "parsed_messages": 0,
-            "parse_errors": 1,
-        }
+        root_items: list[Any] = []
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    try:
+                        root_items.append(json.loads(s))
+                    except json.JSONDecodeError:
+                        parse_errors += 1
+        except OSError:
+            parse_errors += 1
+        if root_items:
+            root = root_items
+        else:
+            return {
+                "file": str(path),
+                "type_counts": {},
+                "type_keys": {},
+                "parsed_messages": 0,
+                "parse_errors": parse_errors or 1,
+            }
 
     def _add(event_type: str, obj: dict[str, Any]) -> None:
         type_counts[event_type] = type_counts.get(event_type, 0) + 1
@@ -586,7 +603,14 @@ def _gemini_session_json_schema_fingerprint(path: Path, max_messages: int) -> di
             if not isinstance(item, dict):
                 continue
             t = item.get("type")
-            event_type = t if isinstance(t, str) and t else "<missing-type>"
+            if isinstance(t, str) and t:
+                event_type = t
+            elif any(k in item for k in ("sessionId", "projectHash", "kind", "startTime")):
+                event_type = "root"
+            elif "$set" in item:
+                event_type = "$set"
+            else:
+                event_type = "<missing-type>"
             _add(event_type, item)
             parsed_messages += 1
 
@@ -596,6 +620,91 @@ def _gemini_session_json_schema_fingerprint(path: Path, max_messages: int) -> di
         "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
         "parsed_messages": parsed_messages,
         "parse_errors": parse_errors,
+    }
+
+
+def _hermes_session_json_schema_fingerprint(path: Path, max_messages: int) -> dict[str, Any]:
+    """
+    Schema fingerprint for Hermes canonical session JSON files.
+
+    Hermes stores one JSON object per session under ~/.hermes/sessions/session_*.json.
+    The app parser consumes root metadata, message-role records, assistant tool_calls,
+    and declared root tools, so bucket those shapes separately.
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parsed_messages = 0
+    parsed_tool_calls = 0
+    parsed_tools = 0
+
+    try:
+        root = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {
+            "file": str(path),
+            "type_counts": {},
+            "type_keys": {},
+            "parsed_messages": 0,
+            "parsed_tool_calls": 0,
+            "parsed_tools": 0,
+            "parse_errors": 1,
+        }
+
+    def _add(event_type: str, obj: dict[str, Any]) -> None:
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        ks = type_keys.setdefault(event_type, set())
+        for k in obj.keys():
+            ks.add(k)
+
+    if not isinstance(root, dict):
+        return {
+            "file": str(path),
+            "type_counts": {},
+            "type_keys": {},
+            "parsed_messages": 0,
+            "parsed_tool_calls": 0,
+            "parsed_tools": 0,
+            "parse_errors": 0,
+        }
+
+    _add("root", root)
+
+    tools = root.get("tools")
+    if isinstance(tools, list):
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            _add("tool", tool)
+            parsed_tools += 1
+
+    messages = root.get("messages")
+    if isinstance(messages, list):
+        for item in messages[: max(0, int(max_messages))]:
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            event_type = f"message.{role}" if isinstance(role, str) and role else "message"
+            _add(event_type, item)
+            parsed_messages += 1
+
+            tool_calls = item.get("tool_calls")
+            if isinstance(tool_calls, list):
+                for call in tool_calls:
+                    if not isinstance(call, dict):
+                        continue
+                    call_type = call.get("type")
+                    bucket = f"tool_call.{call_type}" if isinstance(call_type, str) and call_type else "tool_call"
+                    _add(bucket, call)
+                    parsed_tool_calls += 1
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "parsed_messages": parsed_messages,
+        "parsed_tool_calls": parsed_tool_calls,
+        "parsed_tools": parsed_tools,
+        "parse_errors": 0,
     }
 
 
@@ -955,11 +1064,18 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
                 fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
     elif agent_name == "gemini":
         for p in filtered:
-            if not p.endswith(".json"):
+            if not (p.endswith(".json") or p.endswith(".jsonl")):
                 continue
             bp = Path(p)
             if bp.exists():
                 fps.append(_gemini_session_json_schema_fingerprint(bp, max_messages=5000))
+    elif agent_name == "hermes":
+        for p in filtered:
+            if not p.endswith(".json"):
+                continue
+            bp = Path(p)
+            if bp.exists():
+                fps.append(_hermes_session_json_schema_fingerprint(bp, max_messages=5000))
     elif agent_name == "opencode":
         for p in filtered:
             if not p.endswith(".json"):
@@ -1691,13 +1807,15 @@ def _run_prebump(
         if result.ok and result.session_path and result.session_path.exists():
             matrix_key = {
                 "codex": "codex_cli", "claude": "claude_code", "copilot": "copilot_cli",
-                "droid": "droid", "gemini": "gemini_cli", "opencode": "opencode",
+                "gemini": "gemini_cli", "opencode": "opencode", "hermes": "hermes",
                 "openclaw": "openclaw",
             }.get(agent_name)
             baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
             baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
             if agent_name == "gemini":
                 fp = _gemini_session_json_schema_fingerprint(result.session_path, max_messages=5000)
+            elif agent_name == "hermes":
+                fp = _hermes_session_json_schema_fingerprint(result.session_path, max_messages=5000)
             elif agent_name == "opencode":
                 fp = _opencode_storage_session_tree_schema_fingerprint(
                     result.session_path, max_messages=250, max_parts=2500
@@ -1806,7 +1924,7 @@ def main(argv: list[str]) -> int:
         "codex": matrix_versions.get("codex_cli"),
         "claude": matrix_versions.get("claude_code"),
         "opencode": matrix_versions.get("opencode"),
-        "droid": matrix_versions.get("droid"),
+        "hermes": matrix_versions.get("hermes"),
         "gemini": matrix_versions.get("gemini_cli"),
         "copilot": matrix_versions.get("copilot_cli"),
         "openclaw": matrix_versions.get("openclaw"),
@@ -1932,9 +2050,9 @@ def main(argv: list[str]) -> int:
                     "codex": "codex_cli",
                     "claude": "claude_code",
                     "copilot": "copilot_cli",
-                    "droid": "droid",
                     "gemini": "gemini_cli",
                     "opencode": "opencode",
+                    "hermes": "hermes",
                     "openclaw": "openclaw",
                     "cursor": "cursor",
                 }.get(agent_name)
@@ -1962,6 +2080,11 @@ def main(argv: list[str]) -> int:
                     newest = _newest_file(roots, glob)
                     if newest:
                         local_fp = _gemini_session_json_schema_fingerprint(newest, max_messages=max_messages)
+                elif kind == "hermes_session_json_newest":
+                    max_messages = int(local_schema_cfg.get("max_messages") or 2500)
+                    newest = _newest_file(roots, glob)
+                    if newest:
+                        local_fp = _hermes_session_json_schema_fingerprint(newest, max_messages=max_messages)
                 elif kind == "opencode_storage_latest_session":
                     max_messages = int(local_schema_cfg.get("max_messages") or 250)
                     max_parts = int(local_schema_cfg.get("max_parts") or 2500)

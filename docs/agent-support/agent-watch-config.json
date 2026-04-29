@@ -142,56 +142,26 @@
         ]
       }
     },
-    "droid": {
-      "cadence": { "daily": false, "weekly": false },
-      "installed_version_cmd": ["droid", "--version"],
-      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.droid.max_verified_version",
-      "upstream": [
-        {
-          "kind": "url_regex_semver_max",
-          "url": "https://docs.factory.ai/changelog/cli-updates",
-          "pattern": "v(0\\.\\d+\\.\\d+)"
-        }
-      ],
+    "hermes": {
+      "cadence": { "daily": false, "weekly": true },
+      "installed_version_cmd": ["hermes", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.hermes.max_verified_version",
+      "upstream": [],
       "risk_keywords": {
-        "schema": ["stream-json", "json", "jsonl", "schema", "transcript", "session", "hooks", "migration", "storage"],
+        "schema": ["session", "json", "format", "storage", "migration", "messages", "tools"],
         "usage": ["usage", "token", "tokens", "limit", "quota"]
       },
       "weekly": {
         "local_schema": {
-          "kind": "jsonl_newest",
-          "roots": ["~/.factory/sessions"],
-          "glob": "**/*.jsonl",
-          "required_types": ["message"],
-          "max_lines": 2500
+          "kind": "hermes_session_json_newest",
+          "roots": ["~/.hermes/sessions"],
+          "glob": "session_*.json",
+          "max_messages": 2500
         },
         "freshness_window_days": 30,
         "discovery_path_contract": {
-          "description": "Droid interactive sessions should be under ~/.factory/sessions.",
-          "patterns": ["/\\.factory/sessions/.+\\.jsonl$"]
-        },
-        "probes": [
-          {
-            "kind": "script",
-            "label": "droid_stream_probe",
-            "argv": ["./scripts/droid_stream_schema_probe.py", "--out"],
-            "timeout_seconds": 120,
-            "parse": "droid_schema_report"
-          }
-        ]
-      },
-      "prebump": {
-        "driver": "droid_exec",
-        "sandbox": {"mode": "home_override", "subdir": "droid_sandbox"},
-        "prompt": "Briefly describe this directory.",
-        "timeout_seconds": 180,
-        "env_vars": ["FACTORY_API_KEY"],
-        "credential_files": ["~/.factory/auth.json"],
-        "discover_session": {
-          "kind": "jsonl_newest",
-          "roots": [".factory/sessions"],
-          "globs": ["**/*.jsonl"],
-          "required_types": ["message"]
+          "description": "Hermes sessions should be canonical JSON files under ~/.hermes/sessions.",
+          "patterns": ["/\\.hermes/sessions/session_[^/]+\\.json$"]
         }
       }
     },
@@ -210,13 +180,13 @@
         "local_schema": {
           "kind": "gemini_session_json_newest",
           "roots": ["~/.gemini/tmp"],
-          "glob": "**/session-*.json",
+          "glob": "**/session-*.*",
           "max_messages": 2500
         },
         "freshness_window_days": 30,
         "discovery_path_contract": {
-          "description": "Gemini sessions should be under ~/.gemini/tmp/<project>/(chats/)?session-*.json.",
-          "patterns": ["/\\.gemini/tmp/[^/]+/(chats/)?session-[^/]+\\.json$"]
+          "description": "Gemini sessions should be under ~/.gemini/tmp/<project>/(chats/)?session-*.json or session-*.jsonl.",
+          "patterns": ["/\\.gemini/tmp/[^/]+/(chats/)?session-[^/]+\\.(json|jsonl)$"]
         },
         "probes": [
           {
@@ -239,7 +209,7 @@
         "discover_session": {
           "kind": "gemini_session_json_newest",
           "roots": [".gemini/tmp"],
-          "globs": ["**/session-*.json"],
+          "globs": ["**/session-*.json", "**/session-*.jsonl"],
           "required_types": []
         }
       }

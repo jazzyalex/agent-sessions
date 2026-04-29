@@ -1,0 +1,20 @@
+{
+  "session_id": "20260429_hermes_small",
+  "model": "claude-sonnet-4-6",
+  "platform": "cli",
+  "session_start": "2026-04-29T20:00:00Z",
+  "last_updated": "2026-04-29T20:00:04Z",
+  "cwd": "/tmp/hermes-small",
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Summarize this directory."
+    },
+    {
+      "role": "assistant",
+      "content": "This directory contains a small Hermes fixture.",
+      "finish_reason": "stop"
+    }
+  ]
+}
