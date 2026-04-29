@@ -5,7 +5,23 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ## [3.6.7] - 2026-04-29
-- Menu bar: The Preferences toggle now updates the status item immediately without requiring relaunch, and the menu switches Agent Cockpit/Agent Sessions commands between Open and Hide based on window visibility.
+### Bug Fixes
+- Menu bar: Preferences changes now update the status item immediately without requiring relaunch.
+- Session view: Reduced first-click transcript loading stalls by avoiding duplicate selected-session parses, deferring nonessential transcript cache/inline-image/probe work, and cutting synchronous terminal linkification work during first paint.
+
+### Features
+- Transcripts: JSON-style tool outputs now render simple results, entries, files, grouped search matches, accessibility trees, error envelopes, suggestions, and trailing hints as readable transcript text instead of raw pretty-printed JSON.
+- Onboarding: Update tours now start with a random pair of Power Tips, fresh-install onboarding keeps the two highest-value tips with a full-tour link, and Help includes a Power Tips item for reopening the multi-slide tips tour.
+- Gemini: Added support for Gemini CLI 0.40 JSONL session files under `~/.gemini/tmp/<project>/chats/session-*.jsonl`.
+- Session view: Added a floating top up-arrow that jumps directly to the first real user prompt.
+
+### Improvements
+- Menu bar: Agent Cockpit and Agent Sessions commands now switch between Open and Hide based on window visibility.
+- Session view: User prompt blocks now use a softer gray background in light mode while preserving the previous prompt text color.
+- Session list: Archived Codex Desktop sessions now show the existing `desk` surface pill in italic.
+- Claude: Generated `ai-title` metadata now improves Sessions-list titles when no explicit `/rename` title exists.
+- Monitoring: Added Hermes session-format checks for `~/.hermes/sessions/session_*.json` and removed Droid from the active monitoring set.
+- Monitoring: Updated agent format checks for Claude 2.1.123 metadata, Gemini 0.40 JSONL sessions, Copilot 1.0.39 `system.message`, OpenCode 1.14.29, and OpenClaw 2026.4.26.
 
 ## [3.6.6] - 2026-04-29
 - Onboarding: Update tours now start with a random pair of Power Tips, fresh-install onboarding keeps the two highest-value tips with a full-tour link, and Help includes a Power Tips item for reopening the multi-slide tips tour.

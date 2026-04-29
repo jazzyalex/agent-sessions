@@ -334,6 +334,10 @@ def _render_list(items: List[str]) -> str:
 def render_html(bundle: NotesBundle) -> str:
     parts: List[str] = [f"<h2>{html.escape(bundle.title)}</h2>"]
 
+    if bundle.bug_fixes:
+        parts.append("<h3>Bug Fixes</h3>")
+        parts.append(_render_list(bundle.bug_fixes))
+
     if bundle.features:
         parts.append("<h3>Features</h3>")
         parts.append(_render_list(bundle.features))
@@ -341,10 +345,6 @@ def render_html(bundle: NotesBundle) -> str:
     if bundle.improvements:
         parts.append("<h3>Improvements</h3>")
         parts.append(_render_list(bundle.improvements))
-
-    if bundle.bug_fixes:
-        parts.append("<h3>Bug Fixes</h3>")
-        parts.append(_render_list(bundle.bug_fixes))
 
     if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.highlights:
         parts.append("<h3>Highlights</h3>")
@@ -367,6 +367,11 @@ def render_html(bundle: NotesBundle) -> str:
 def render_plaintext(bundle: NotesBundle) -> str:
     out: List[str] = [bundle.title, ""]
 
+    if bundle.bug_fixes:
+        out.append("Bug Fixes:")
+        out.extend([f"- {x}" for x in bundle.bug_fixes])
+        out.append("")
+
     if bundle.features:
         out.append("Features:")
         out.extend([f"- {x}" for x in bundle.features])
@@ -375,11 +380,6 @@ def render_plaintext(bundle: NotesBundle) -> str:
     if bundle.improvements:
         out.append("Improvements:")
         out.extend([f"- {x}" for x in bundle.improvements])
-        out.append("")
-
-    if bundle.bug_fixes:
-        out.append("Bug Fixes:")
-        out.extend([f"- {x}" for x in bundle.bug_fixes])
         out.append("")
 
     if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.highlights:
